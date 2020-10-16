@@ -1,0 +1,4 @@
+build/DOOM1.WAD*
+build/vm
+*.o
+*.o.d

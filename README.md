@@ -1,6 +1,6 @@
 # RISC-V RV32I[MA] emulator with ELF support
 
-`rv32emu` is an instruction set emulator implementing the 32 bit RISCV-V processor model.
+`rv32emu` is an instruction set architecture (ISA) emulator implementing the 32 bit RISC-V processor model.
 
 ## Build and Verify
 
@@ -27,6 +27,17 @@ make demo
 
 The build script will then download data file for Doom automatically. SDL2 based window
 should appear when Doom is loaded and executed.
+
+## Customization
+
+`rv32emu` is configurable, and you can modify `Makefile` to fit your expectations:
+* `ENABLE_RV32M`: Standard Extension for Integer Multiplication and Division
+* `ENABLE_RV32A`: Standard Extension for Atomic Instructions
+* `Zicsr`: Control and Status Register (CSR)
+* `Zifencei`: Instruction-Fetch Fence
+
+Add `-D` to enable and `-U` to disable the specific ISA extensions.
+
 
 ## License
 `rv32emu` is released under the MIT License.

@@ -20,7 +20,7 @@ Run sample RV32I[MA] programs:
 make check
 ```
 
-Run Doom, the classical video game, via `rv32emu`:
+Run [Doom](https://en.wikipedia.org/wiki/Doom_(1993_video_game)), the classical video game, via `rv32emu`:
 ```shell
 make demo
 ```

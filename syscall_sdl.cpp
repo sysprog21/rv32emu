@@ -1,5 +1,5 @@
 #ifndef ENABLE_SDL
-#error Do not include this file unless you enable SDL support.
+#error "Do not manage to build this file unless you enable SDL support."
 #endif
 
 #include <cstdint>

@@ -21,7 +21,8 @@ else
     VECHO = @printf
 endif
 
-BIN = build/vm
+OUT ?= build
+BIN = $(OUT)/rv32emu
 
 all: $(BIN)
 
@@ -41,30 +42,30 @@ deps := $(OBJS:%.o=%.o.d)
 	$(VECHO) "  CXX\t$@\n"
 	$(Q)$(CXX) -o $@ $(CXXFLAGS) -c -MMD -MF $@.d $<
 
-build/vm: $(OBJS)
+$(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CXX) -o $@ $^ $(LDFLAGS)
 
 # https://tipsmake.com/how-to-run-doom-on-raspberry-pi-without-emulator
 DOOM_WAD_DL = http://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip
-build/DOOM1.WAD:
+$(OUT)/DOOM1.WAD:
 	$(VECHO) "  Downloading $@ ...\n"
 	wget $(DOOM_WAD_DL)
-	unzip -d build shareware_doom_iwad.zip
+	unzip -d $(OUT) shareware_doom_iwad.zip
 	echo "5b2e249b9c5133ec987b3ea77596381dc0d6bc1d  $@" > $@.sha1
 	shasum -a 1 -c $@.sha1
 	$(RM) shareware_doom_iwad.zip
 
 check: $(BIN)
-	(cd build; ./vm hello.elf)
-	(cd build; ./vm puzzle.elf)
+	(cd $(OUT); ../$(BIN) hello.elf)
+	(cd $(OUT); ../$(BIN) puzzle.elf)
 
-demo: $(BIN) build/DOOM1.WAD
-	(cd build; ./vm doom.elf)
+demo: $(BIN) $(OUT)/DOOM1.WAD
+	(cd $(OUT); ../$(BIN) doom.elf)
 
 clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
 distclean: clean
-	$(RM) build/DOOM1.WAD build/DOOM1.WAD.sha1
+	$(RM) $(OUT)/DOOM1.WAD $(OUT)/DOOM1.WAD.sha1
 
 -include $(deps)

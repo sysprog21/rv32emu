@@ -1,4 +1,4 @@
 build/DOOM1.WAD*
-build/vm
+build/rv32emu
 *.o
 *.o.d

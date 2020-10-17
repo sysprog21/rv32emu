@@ -2,6 +2,8 @@
 
 `rv32emu` is an instruction set architecture (ISA) emulator implementing the 32 bit RISC-V processor model.
 
+This repository is intended to replace [sysprog21/rv32emu](https://github.com/sysprog21/rv32emu), which is used in [Computer Architecture course](http://wiki.csie.ncku.edu.tw/arch/schedule). At the moment, the suffix `-next` is used to distinguish between the two repositories.
+
 ## Build and Verify
 
 `rv32emu` relies on some 3rd party packages to be fully usable and to provide you full

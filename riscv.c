@@ -72,12 +72,13 @@ static void rv_except_store_misaligned(struct riscv_t *rv, uint32_t addr)
     rv->csr_mcause = code;
 }
 
-static void rv_except_illegal_inst(struct riscv_t *rv)
+static void rv_except_illegal_inst(struct riscv_t *rv UNUSED)
 {
+    /* TODO: dump more information */
     assert(!"illegal instruction");
 }
 
-static bool op_load(struct riscv_t *rv, uint32_t inst)
+static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
 {
     // itype format
     const int32_t imm = dec_itype_imm(inst);
@@ -130,7 +131,7 @@ static bool op_load(struct riscv_t *rv, uint32_t inst)
 }
 
 #ifdef ENABLE_Zifencei
-static bool op_misc_mem(struct riscv_t *rv, uint32_t inst)
+static bool op_misc_mem(struct riscv_t *rv, uint32_t inst UNUSED)
 {
     // FIXME: fill real implementations
     rv->PC += 4;

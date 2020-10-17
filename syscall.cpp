@@ -64,7 +64,7 @@ static int find_free_fd(struct state_t *s)
     }
 }
 
-static const char *get_mode_str(uint32_t flags, uint32_t mode)
+static const char *get_mode_str(uint32_t flags, uint32_t mode UNUSED)
 {
     switch (flags & O_ACCMODE) {
     case O_RDONLY:
@@ -235,7 +235,7 @@ static void syscall_read(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, uint32_t(read));
 }
 
-static void syscall_fstat(struct riscv_t *rv)
+static void syscall_fstat(struct riscv_t *rv UNUSED)
 {
     // FIXME: fill real implementation
 }

@@ -1,11 +1,7 @@
 #include <cstring>
-#include <ctime>
 #include <memory>
 
 #include "elf.h"
-#include "io.h"
-
-#include "riscv.h"
 #include "state.h"
 
 // enable program trace mode
@@ -74,7 +70,7 @@ static void imp_on_ebreak(struct riscv_t *rv)
 }
 
 // run the core - printing out an instruction trace
-static void run_and_trace(riscv_t *rv, state_t *state, elf_t &elf)
+static void run_and_trace(riscv_t *rv, elf_t &elf)
 {
     const uint32_t cycles_per_step = 1;
 
@@ -91,7 +87,7 @@ static void run_and_trace(riscv_t *rv, state_t *state, elf_t &elf)
 }
 
 // run the core
-static void run(riscv_t *rv, state_t *state, elf_t &elf)
+static void run(riscv_t *rv)
 {
     const uint32_t cycles_per_step = 100;
     // run until we see the flag that we are done
@@ -183,9 +179,9 @@ int main(int argc, char **args)
 
     // run based on the specified mode
     if (g_arg_trace) {
-        run_and_trace(rv, state.get(), elf);
+        run_and_trace(rv, elf);
     } else {
-        run(rv, state.get(), elf);
+        run(rv);
     }
 
     // delete the VM

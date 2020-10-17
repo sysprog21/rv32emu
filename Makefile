@@ -1,4 +1,4 @@
-CFLAGS = -O2 -Wall
+CFLAGS = -O2 -Wall -Wextra
 
 CFLAGS += -D ENABLE_RV32M
 CFLAGS += -D ENABLE_Zicsr

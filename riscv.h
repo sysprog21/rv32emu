@@ -1,8 +1,15 @@
 #pragma once
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define UNUSED __attribute__((unused))
+#else
+#define UNUSED
 #endif
 
 // riscv register file enums

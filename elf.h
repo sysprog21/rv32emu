@@ -1,6 +1,6 @@
 #pragma once
 
-// a minimal ELF parser
+/* A minimal ELF parser */
 
 #include <stdint.h>
 
@@ -41,14 +41,14 @@ typedef struct elf_internal elf_t;
 elf_t *elf_new();
 void elf_delete(elf_t *e);
 
-// Open an ELF file from disk
+/* Open an ELF file from specified path */
 bool elf_open(elf_t *e, const char *path);
 
-// find a symbol entry
+/* Find a symbol entry */
 const struct Elf32_Sym *elf_get_symbol(elf_t *e, const char *name);
 
-// find symbole from given ELF
+/* Find symbole from a specified ELF file */
 const char *elf_find_symbol(elf_t *e, uint32_t addr);
 
-// load the ELF file into a memory abstraction
+/* Load the ELF file into a memory abstraction */
 bool elf_load(elf_t *e, struct riscv_t *rv, memory_t *mem);

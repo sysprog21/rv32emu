@@ -100,12 +100,11 @@ static void run(struct riscv_t *rv)
 
 static void print_usage(const char *filename)
 {
-    fprintf(stderr, R"(
-RV32I[MA] Emulator which loads an ELF file to execute.
-Usage: %s [options] [filename]
-Options:
-  --trace : print executable trace
-)",
+    fprintf(stderr,
+            "RV32I[MA] Emulator which loads an ELF file to execute.\n"
+            "Usage: %s [options] [filename]\n"
+            "Options:\n"
+            "  --trace : print executable trace\n",
             filename);
 }
 

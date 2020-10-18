@@ -9,31 +9,30 @@
 
 #include "state.h"
 
-static SDL_Window *sdlWindow = NULL;
-static SDL_Renderer *sdlRenderer;
+static SDL_Window *window = NULL;
+static SDL_Renderer *renderer;
 static SDL_Texture *texture;
 
 static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
 {
     // check if video has been setup
-    if (!sdlWindow) {
+    if (!window) {
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
             fprintf(stderr, "Failed to call SDL_Init()\n");
             exit(1);
         }
 
-        sdlWindow = SDL_CreateWindow("rv32emu", SDL_WINDOWPOS_UNDEFINED,
-                                     SDL_WINDOWPOS_UNDEFINED, width, height,
-                                     0 /* flags */);
-        if (!sdlWindow) {
+        window = SDL_CreateWindow("rv32emu", SDL_WINDOWPOS_UNDEFINED,
+                                  SDL_WINDOWPOS_UNDEFINED, width, height,
+                                  0 /* flags */);
+        if (!window) {
             fprintf(stderr, "Window could not be created! SDL_Error: %s\n",
                     SDL_GetError());
             exit(1);
         }
 
-        sdlRenderer =
-            SDL_CreateRenderer(sdlWindow, -1, SDL_RENDERER_ACCELERATED);
-        texture = SDL_CreateTexture(sdlRenderer, SDL_PIXELFORMAT_ARGB8888,
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                     SDL_TEXTUREACCESS_STREAMING, width, height);
     }
 
@@ -77,8 +76,8 @@ void syscall_draw_frame(struct riscv_t *rv)
     SDL_UnlockTexture(texture);
 
     SDL_Rect r = {0, 0, width, height};
-    SDL_RenderCopy(sdlRenderer, texture, NULL, &r);
-    SDL_RenderPresent(sdlRenderer);
+    SDL_RenderCopy(renderer, texture, NULL, &r);
+    SDL_RenderPresent(renderer);
 }
 
 void syscall_draw_frame_pal(struct riscv_t *rv)
@@ -120,8 +119,8 @@ void syscall_draw_frame_pal(struct riscv_t *rv)
     SDL_UnlockTexture(texture);
 
     SDL_Rect r = {0, 0, width, height};
-    SDL_RenderCopy(sdlRenderer, texture, NULL, &r);
-    SDL_RenderPresent(sdlRenderer);
+    SDL_RenderCopy(renderer, texture, NULL, &r);
+    SDL_RenderPresent(renderer);
 
     free(i);
     free(j);

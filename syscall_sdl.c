@@ -13,10 +13,10 @@ static SDL_Window *window = NULL;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
 
+/* check if we need to setup SDL and run event loop */
 static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
 {
-    // check if video has been setup
-    if (!window) {
+    if (!window) { /* check if video has been initialized. */
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
             fprintf(stderr, "Failed to call SDL_Init()\n");
             exit(1);
@@ -36,9 +36,8 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
                                     SDL_TEXTUREACCESS_STREAMING, width, height);
     }
 
-    // run a simple event handler
     SDL_Event event;
-    while (SDL_PollEvent(&event)) {
+    while (SDL_PollEvent(&event)) { /* Run event handler */
         switch (event.type) {
         case SDL_QUIT:
             rv_halt(rv);
@@ -55,58 +54,53 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
 
 void syscall_draw_frame(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // draw(screen, width, height);
+    /* draw(screen, width, height) */
     const uint32_t screen = rv_get_reg(rv, rv_reg_a0);
     const uint32_t width = rv_get_reg(rv, rv_reg_a1);
     const uint32_t height = rv_get_reg(rv, rv_reg_a2);
 
-    // check if we need to setup SDL
     if (!check_sdl(rv, width, height))
         return;
 
-    // read directly into video memory
+    /* read directly into video memory */
     int pitch = 0;
-    void *pixelsPtr;
-    if (SDL_LockTexture(texture, NULL, &pixelsPtr, &pitch))
+    void *pixels_ptr;
+    if (SDL_LockTexture(texture, NULL, &pixels_ptr, &pitch))
         exit(-1);
-    memory_read(s->mem, (uint8_t *) pixelsPtr, screen, width * height * 4);
+    memory_read(s->mem, pixels_ptr, screen, width * height * 4);
     SDL_UnlockTexture(texture);
 
-    SDL_Rect r = {0, 0, width, height};
-    SDL_RenderCopy(renderer, texture, NULL, &r);
+    SDL_RenderCopy(renderer, texture, NULL, &(SDL_Rect){0, 0, width, height});
     SDL_RenderPresent(renderer);
 }
 
 void syscall_draw_frame_pal(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // draw(screen, width, height);
+    /* draw(screen, width, height) */
     const uint32_t buf = rv_get_reg(rv, rv_reg_a0);
     const uint32_t pal = rv_get_reg(rv, rv_reg_a1);
     const uint32_t width = rv_get_reg(rv, rv_reg_a2);
     const uint32_t height = rv_get_reg(rv, rv_reg_a3);
 
-    // check if we need to setup SDL
     if (!check_sdl(rv, width, height))
         return;
 
-    // read directly into video memory
-    uint8_t *i = (uint8_t *) malloc(width * height);
-    uint8_t *j = (uint8_t *) malloc(256 * 3);
+    /* read directly into video memory */
+    uint8_t *i = malloc(width * height);
+    uint8_t *j = malloc(256 * 3);
 
     memory_read(s->mem, i, buf, width * height);
     memory_read(s->mem, j, pal, 256 * 3);
 
     int pitch = 0;
-    void *pixelsPtr;
-    if (SDL_LockTexture(texture, NULL, &pixelsPtr, &pitch))
+    void *pixels_ptr;
+    if (SDL_LockTexture(texture, NULL, &pixels_ptr, &pitch))
         exit(-1);
-    uint32_t *d = (uint32_t *) pixelsPtr;
+    uint32_t *d = pixels_ptr;
     const uint8_t *p = i;
     for (size_t y = 0; y < height; ++y) {
         for (size_t x = 0; x < height; ++x) {
@@ -118,8 +112,7 @@ void syscall_draw_frame_pal(struct riscv_t *rv)
     }
     SDL_UnlockTexture(texture);
 
-    SDL_Rect r = {0, 0, width, height};
-    SDL_RenderCopy(renderer, texture, NULL, &r);
+    SDL_RenderCopy(renderer, texture, NULL, &(SDL_Rect){0, 0, width, height});
     SDL_RenderPresent(renderer);
 
     free(i);

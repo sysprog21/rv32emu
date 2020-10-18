@@ -86,21 +86,6 @@ enum {
     //             ........xxxxxxxx........xxxxxxxx
 };
 
-// a translated basic block
-struct block_t {
-    // number of instructions encompased
-    uint32_t instructions;
-
-    // address range of the basic block
-    uint32_t pc_start, pc_end;
-
-    // next block prediction
-    struct block_t *predict;
-
-    // start of this blocks code
-    uint8_t code[];
-};
-
 struct riscv_t {
     bool halt;
 

@@ -1,8 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
-
-#include <memory>
 
 #include "c_map.h"
 
@@ -167,6 +166,7 @@ struct memory_t;
 // a minimal ELF parser
 struct elf_t {
     elf_t();
+    ~elf_t() { free(raw_data); }
 
     // Open an ELF file from disk
     bool open(const char *path);
@@ -174,7 +174,8 @@ struct elf_t {
     // release a loaded ELF file
     void release()
     {
-        raw_data.reset();
+        free(raw_data);
+        raw_data = NULL;
         raw_size = 0;
         hdr = nullptr;
     }
@@ -275,7 +276,7 @@ struct elf_t {
     // load the ELF file into a memory abstraction
     bool load(struct riscv_t *rv, memory_t &mem) const;
 
-    const uint8_t *data() const { return raw_data.get(); }
+    const uint8_t *data() const { return raw_data; }
 
     uint32_t size() const { return raw_size; }
 
@@ -294,7 +295,7 @@ protected:
 
     const ELF::Elf32_Ehdr *hdr;
     uint32_t raw_size;
-    std::unique_ptr<uint8_t[]> raw_data;
+    uint8_t *raw_data;
 
     // symbol table map: uint32_t -> const char *
     c_map_t symbols;

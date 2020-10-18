@@ -2,8 +2,8 @@
 
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
-#include <memory>
 
 struct memory_t {
     struct chunk_t {
@@ -152,6 +152,8 @@ protected:
 };
 
 struct file_t {
+    file_t() { mem = (uint8_t *) malloc(1); }
+    ~file_t() { free(mem); }
     bool load(const char *path)
     {
         if (mem)
@@ -169,9 +171,10 @@ struct file_t {
             fclose(fd);
             return false;
         }
-        mem.reset(new uint8_t[mem_size]);
+        free(mem);
+        mem = (uint8_t *) malloc(mem_size);
 
-        const size_t read = fread(mem.get(), 1, mem_size, fd);
+        const size_t read = fread(mem, 1, mem_size, fd);
 
         fclose(fd);
         if (read != mem_size) {
@@ -184,16 +187,18 @@ struct file_t {
 
     void unload()
     {
-        if (mem)
-            mem.reset();
+        if (mem) {
+            free(mem);
+            mem = NULL;
+        }
         mem_size = 0;
     }
 
-    uint8_t *data() const { return mem.get(); }
+    uint8_t *data() const { return mem; }
 
     size_t size() const { return mem_size; }
 
 protected:
-    std::unique_ptr<uint8_t[]> mem;
+    uint8_t *mem;
     size_t mem_size;
 };

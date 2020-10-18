@@ -1,5 +1,4 @@
 #include <cstring>
-//#include <memory>
 
 #include "elf.h"
 #include "state.h"

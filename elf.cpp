@@ -9,6 +9,7 @@
 elf_t::elf_t() : hdr(nullptr), raw_size(0)
 {
     symbols = c_map_init(int, char *, cn_cmp_uint);
+    raw_data = (uint8_t *) malloc(1);
 }
 
 bool elf_t::load(struct riscv_t *rv, memory_t &mem) const
@@ -61,10 +62,11 @@ bool elf_t::open(const char *path)
     }
 
     // allocate memory
-    raw_data.reset(new uint8_t[raw_size]);
+    free(raw_data);
+    raw_data = (uint8_t *) malloc(raw_size);
 
     // read data into memory
-    const size_t read = fread(raw_data.get(), 1, raw_size, fd);
+    const size_t read = fread(raw_data, 1, raw_size, fd);
 
     // close file handle
     fclose(fd);

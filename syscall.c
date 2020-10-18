@@ -59,7 +59,7 @@ enum {
 static int find_free_fd(state_t *s)
 {
     for (int i = 3;; ++i) {
-        c_map_iterator_t it;
+        c_map_iter_t it;
         c_map_find(s->fd_map, &it, &i);
         if (c_map_at_end(s->fd_map, &it))
             return i;
@@ -95,12 +95,11 @@ static void syscall_write(struct riscv_t *rv)
     memory_read(s->mem, (uint8_t *) temp, buffer, count);
 
     // lookup the file descriptor
-    c_map_iterator_t it;
+    c_map_iter_t it;
     c_map_find(s->fd_map, &it, &handle);
     if (!c_map_at_end(s->fd_map, &it)) {
         // write out the data
-        size_t written =
-            fwrite(temp, 1, count, c_map_iterator_value(&it, FILE *));
+        size_t written = fwrite(temp, 1, count, c_map_iter_value(&it, FILE *));
 
         // return number of bytes written
         rv_set_reg(rv, rv_reg_a0, (riscv_word_t) written);
@@ -169,10 +168,10 @@ static void syscall_close(struct riscv_t *rv)
 
     // lookup the file descriptor in question
     if (fd >= 3) {
-        c_map_iterator_t it;
+        c_map_iter_t it;
         c_map_find(s->fd_map, &it, &fd);
         if (!c_map_at_end(s->fd_map, &it)) {
-            fclose(c_map_iterator_value(&it, FILE *));
+            fclose(c_map_iter_value(&it, FILE *));
             c_map_erase(s->fd_map, &it);
             // success
             rv_set_reg(rv, rv_reg_a0, 0);
@@ -193,7 +192,7 @@ static void syscall_lseek(struct riscv_t *rv)
     uint32_t whence = rv_get_reg(rv, rv_reg_a2);
 
     // find the file descriptor
-    c_map_iterator_t it;
+    c_map_iter_t it;
     c_map_find(s->fd_map, &it, &fd);
     if (c_map_at_end(s->fd_map, &it)) {
         // error
@@ -201,7 +200,7 @@ static void syscall_lseek(struct riscv_t *rv)
         return;
     }
 
-    FILE *handle = c_map_iterator_value(&it, FILE *);
+    FILE *handle = c_map_iter_value(&it, FILE *);
     if (fseek(handle, offset, whence)) {
         // error
         rv_set_reg(rv, rv_reg_a0, -1);
@@ -222,7 +221,7 @@ static void syscall_read(struct riscv_t *rv)
     uint32_t count = rv_get_reg(rv, rv_reg_a2);
 
     // lookup the file
-    c_map_iterator_t it;
+    c_map_iter_t it;
     c_map_find(s->fd_map, &it, &fd);
     if (c_map_at_end(s->fd_map, &it)) {
         // error
@@ -230,7 +229,7 @@ static void syscall_read(struct riscv_t *rv)
         return;
     }
 
-    FILE *handle = c_map_iterator_value(&it, FILE *);
+    FILE *handle = c_map_iter_value(&it, FILE *);
 
     // read the file into runtime memory
     uint8_t *temp = (uint8_t *) malloc(count);

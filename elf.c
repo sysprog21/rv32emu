@@ -98,7 +98,7 @@ elf_t *elf_new()
     elf_t *e = malloc(sizeof(elf_t));
     e->hdr = NULL;
     e->raw_size = 0;
-    e->symbols = c_map_init(int, char *, cn_cmp_uint);
+    e->symbols = c_map_init(int, char *, c_map_cmp_uint);
     e->raw_data = malloc(1);
     return e;
 }
@@ -250,10 +250,9 @@ const char *elf_find_symbol(elf_t *e, uint32_t addr)
 {
     if (c_map_empty(e->symbols))
         fill_symbols(e);
-    c_map_iterator_t it;
+    c_map_iter_t it;
     c_map_find(e->symbols, &it, &addr);
-    return c_map_at_end(e->symbols, &it) ? NULL
-                                         : c_map_iterator_value(&it, char *);
+    return c_map_at_end(e->symbols, &it) ? NULL : c_map_iter_value(&it, char *);
 }
 
 bool elf_load(elf_t *e, struct riscv_t *rv, memory_t *mem)

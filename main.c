@@ -157,7 +157,7 @@ int main(int argc, char **args)
     state_t *state = (state_t *) malloc(sizeof(state_t));
     state->mem = memory_new();
     state->break_addr = 0;
-    state->fd_map = c_map_init(int, FILE *, cn_cmp_int);
+    state->fd_map = c_map_init(int, FILE *, c_map_cmp_int);
     {
         FILE *files[] = {stdin, stdout, stderr};
         for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)

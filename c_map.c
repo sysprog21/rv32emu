@@ -6,35 +6,33 @@
 #include "c_map.h"
 
 struct c_map_internal {
-    struct cmap_node *head;
+    struct c_map_node *head;
 
     /* Properties */
-    size_t key_size, elem_size, size;
+    size_t key_size, element_size, size;
 
-    c_map_iterator_t it_end, it_most, it_least;
+    c_map_iter_t it_end, it_most, it_least;
 
     int (*comparator)(void *, void *);
     void (*destructor)(c_map_node_t *);
 };
 
-/*
- * Create a node to be attached in the c_map internal tree structure.
- */
+/* Create a node to be attached in the c_map internal tree structure */
 static c_map_node_t *c_map_create_node(void *key,
                                        void *value,
                                        size_t ksize,
                                        size_t vsize)
 {
-    c_map_node_t *node = malloc(sizeof(struct cmap_node));
+    c_map_node_t *node = malloc(sizeof(struct c_map_node));
 
-    // Allocate memory for the keys and values.
+    /* Allocate memory for the keys and values */
     node->key = malloc(ksize);
     node->data = malloc(vsize);
 
-    // Setup the pointers
+    /* Setup the pointers */
     node->left = node->right = node->up = NULL;
 
-    // Set the color to black by default
+    /* Set the color to black by default */
     node->color = C_MAP_RED;
 
     /*
@@ -82,7 +80,7 @@ static c_map_node_t *c_map_rotate_left(c_map_t obj, c_map_node_t *node)
 {
     c_map_node_t *r = node->right, *rl = r->left, *up = node->up;
 
-    // Adjust
+    /* Adjust */
     r->up = up;
     r->left = node;
 
@@ -150,10 +148,10 @@ static void c_map_l_l(c_map_t obj,
                       c_map_node_t *grandparent,
                       c_map_node_t *uncle UNUSED)
 {
-    // Rotate to the right according to grandparent
+    /* Rotate to the right according to grandparent */
     grandparent = c_map_rotate_right(obj, grandparent);
 
-    // Swap grandparent and uncle's colors
+    /* Swap grandparent and uncle's colors */
     c_map_color_t c1 = grandparent->color, c2 = grandparent->right->color;
 
     grandparent->color = c2;
@@ -166,10 +164,10 @@ static void c_map_l_r(c_map_t obj,
                       c_map_node_t *grandparent,
                       c_map_node_t *uncle)
 {
-    // Rotate to the left according to parent
+    /* Rotate to the left according to parent */
     parent = c_map_rotate_left(obj, parent);
 
-    // Refigure out the identity
+    /* Refigure out the identity */
     node = parent->left;
     grandparent = parent->up;
     uncle =
@@ -185,10 +183,10 @@ static void c_map_r_r(c_map_t obj,
                       c_map_node_t *grandparent,
                       c_map_node_t *uncle UNUSED)
 {
-    // Rotate to the left according to grandparent
+    /* Rotate to the left according to grandparent */
     grandparent = c_map_rotate_left(obj, grandparent);
 
-    // Swap grandparent and uncle's colors
+    /* Swap grandparent and uncle's colors */
     c_map_color_t c1 = grandparent->color, c2 = grandparent->left->color;
 
     grandparent->color = c2;
@@ -201,58 +199,55 @@ static void c_map_r_l(c_map_t obj,
                       c_map_node_t *grandparent,
                       c_map_node_t *uncle)
 {
-    // Rotate to the right according to parent
+    /* Rotate to the right according to parent */
     parent = c_map_rotate_right(obj, parent);
 
-    // Refigure out who is who
+    /* Refigure out the identity */
     node = parent->right;
     grandparent = parent->up;
     uncle =
         (grandparent->left == parent) ? grandparent->right : grandparent->left;
 
-    // Apply right-right case
+    /* Apply right-right case */
     c_map_r_r(obj, node, parent, grandparent, uncle);
 }
 
 static void c_map_fix_colors(c_map_t obj, c_map_node_t *node)
 {
-    // If root, set the color to black
+    /* If root, set the color to black */
     if (node == obj->head) {
         node->color = C_MAP_BLACK;
         return;
     }
 
-    // If node's parent is black or node is root, back out.
+    /* If node's parent is black or node is root, back out. */
     if (node->up->color == C_MAP_BLACK && node->up != obj->head)
         return;
 
-    // Find out who is who
-    c_map_node_t *parent = node->up;
-    c_map_node_t *grandparent = parent->up;
-    c_map_node_t *uncle;
+    /* Find out the identity */
+    c_map_node_t *parent = node->up, *grandparent = parent->up, *uncle;
 
     if (!parent->up)
         return;
 
-    // Find out the uncle
+    /* Find out the uncle */
     if (grandparent->left == parent)
         uncle = grandparent->right;
     else
         uncle = grandparent->left;
 
     if (uncle && uncle->color == C_MAP_RED) {
-        // If the uncle is red...
-        // Change color of parent and uncle to black
+        /* If the uncle is red, change color of parent and uncle to black */
         uncle->color = C_MAP_BLACK;
         parent->color = C_MAP_BLACK;
 
-        // Change color of grandparent to red.
+        /* Change color of grandparent to red. */
         grandparent->color = C_MAP_RED;
 
-        // Call this on the grandparent
+        /* Call this on the grandparent */
         c_map_fix_colors(obj, grandparent);
     } else if (!uncle || uncle->color == C_MAP_BLACK) {
-        // If the uncle is black...
+        /* If the uncle is black. */
         if (parent == grandparent->left && node == parent->left)
             c_map_l_l(obj, node, parent, grandparent, uncle);
         else if (parent == grandparent->left && node == parent->right)
@@ -286,8 +281,7 @@ static void c_map_delete_fixup(c_map_t obj,
         return;
 
     while (node != obj->head && node->color == C_MAP_BLACK) {
-        // If left child
-        if (y_is_left) {
+        if (y_is_left) { /* if left child */
             w = p->right;
 
             if (w->color == C_MAP_RED) {
@@ -375,13 +369,13 @@ static void c_map_delete_fixup(c_map_t obj,
  */
 static void c_map_clear_nested(c_map_t obj, c_map_node_t *node)
 {
-    // Free children
+    /* Free children */
     if (node->left)
         c_map_clear_nested(obj, node->left);
     if (node->right)
         c_map_clear_nested(obj, node->right);
 
-    // Free self
+    /* Free self */
     c_map_delete_node(obj, node);
 }
 
@@ -426,7 +420,7 @@ c_map_t c_map_new(size_t s1, size_t s2, int (*cmp)(void *, void *))
 
     // Set up all default properties
     obj->key_size = s1;
-    obj->elem_size = s2;
+    obj->element_size = s2;
     obj->size = 0;
 
     // Function pointers
@@ -445,34 +439,32 @@ c_map_t c_map_new(size_t s1, size_t s2, int (*cmp)(void *, void *))
  * Insert a key/value pair into the c_map. The value can be blank. If so,
  * it is filled with 0's, as defined in "c_map_create_node".
  */
-size_t c_map_insert(c_map_t obj, void *key, void *value)
+bool c_map_insert(c_map_t obj, void *key, void *value)
 {
-    // Copy the key and value into a new node and prepare it to put into tree.
+    /* Copy the key and value into new node and prepare it to put into tree. */
     c_map_node_t *new_node =
-        c_map_create_node(key, value, obj->key_size, obj->elem_size);
+        c_map_create_node(key, value, obj->key_size, obj->element_size);
 
     obj->size++;
 
     if (!obj->head) {
-        // Just insert the node in as the new head.
+        /* Just insert the node in as the new head. */
         obj->head = new_node;
         obj->head->color = C_MAP_BLACK;
 
-        // Calibrate the tree to properly assign pointers.
+        /* Calibrate the tree to properly assign pointers. */
         c_map_calibrate(obj);
-        return 1;
+        return true;
     }
 
-    // Traverse the tree until we hit the end or find a side that is NULL
+    /* Traverse the tree until we hit the end or find a side that is NULL */
     c_map_node_t *cur = obj->head;
 
     while (1) {
         int res = obj->comparator(new_node->key, cur->key);
-
-        // If the key matches something else, we can't insert
-        if (res == 0) {
+        if (res == 0) { /* If the key matches something else, don't insert */
             c_map_delete_node(obj, new_node);
-            return 0;
+            return false;
         }
 
         if (res < 0) {
@@ -495,31 +487,26 @@ size_t c_map_insert(c_map_t obj, void *key, void *value)
     }
 
     c_map_calibrate(obj);
-
-    // Insertion complete.
-    return 1;
+    return true;
 }
 
-static void c_map_prev(c_map_t obj, c_map_iterator_t *it)
+static void c_map_prev(c_map_t obj, c_map_iter_t *it)
 {
     if (!it->node) {
         it->prev = NULL;
         return;
     }
 
-    if (it->node == obj->it_least.node) {
-        // We have hit the end.
-        it->prev = NULL;  // it->node;
-        it->node = NULL;
+    if (it->node == obj->it_least.node) { /* We have hit the end. */
+        it->prev = it->node = NULL;
     } else {
-        // To the left, and then as far right as possible.
-        if (it->node->left) {
+        if (it->node->left) { /* To the left, as far right as possible */
             it->node = it->node->left;
 
             while (it->node->right)
                 it->node = it->node->right;
         } else {
-            // Keep going up until there is a left child
+            /* Keep going up until there is a left child */
             it->prev = it->node;
             it->node = it->node->up;
 
@@ -535,25 +522,22 @@ static void c_map_prev(c_map_t obj, c_map_iterator_t *it)
     }
 }
 
-
-void c_map_find(c_map_t obj, c_map_iterator_t *it, void *key)
+void c_map_find(c_map_t obj, c_map_iter_t *it, void *key)
 {
-    // End the search instantly if there's nothing.
-    if (!obj->head) {
+    if (!obj->head) { /* End the search instantly if nothing is found. */
         it->node = it->prev = NULL;
         return;
     }
 
-    // Basically a repeat of insert
+    /* Basically a repeat of insert */
     c_map_node_t *cur = obj->head;
 
-    // binary search
+    /* binary search */
     while (1) {
         int res = obj->comparator(key, cur->key);
-
-        // If the key matches, we hit our target
-        if (res == 0)
+        if (res == 0) /* If the key matches, we hit the target */
             break;
+
         if (res < 0) {
             if (!cur->left) {
                 cur = NULL;
@@ -572,8 +556,8 @@ void c_map_find(c_map_t obj, c_map_iterator_t *it, void *key)
     if (cur) {
         it->node = cur;
 
-        // Generate a "prev" too
-        c_map_iterator_t tmp = *it;
+        /* Generate a "prev" as well */
+        c_map_iter_t tmp = *it;
         c_map_prev(obj, &tmp);
         it->prev = tmp.node;
     } else
@@ -585,10 +569,8 @@ bool c_map_empty(c_map_t obj)
     return (obj->size == 0);
 }
 
-/*
- * Return true if at the the rend of the c_map
- */
-bool c_map_at_end(c_map_t obj UNUSED, c_map_iterator_t *it)
+/* Return true if at the the rend of the c_map */
+bool c_map_at_end(c_map_t obj UNUSED, c_map_iter_t *it)
 {
     return (it->node == NULL);
 }
@@ -597,7 +579,7 @@ bool c_map_at_end(c_map_t obj UNUSED, c_map_iterator_t *it)
  * Remove a node from the c_map. It performs a BST delete, and then reorders
  * the tree so that it remains balanced.
  */
-void c_map_erase(c_map_t obj, c_map_iterator_t *it)
+void c_map_erase(c_map_t obj, c_map_iter_t *it)
 {
     c_map_node_t *x, *y;
     c_map_node_t *node = it->node, *target, *double_blk, *x_parent;
@@ -610,38 +592,32 @@ void c_map_erase(c_map_t obj, c_map_iterator_t *it)
         return;
     }
 
-    // Determine what the target is
+    /* Determine what the target is */
     uint8_t c = 0;
     c |= (node->left != NULL) << 0x0;
     c |= (node->right != NULL) << 0x1;
 
-    // Determine the case
     switch (c) {
-    case 0x0:
-        // Leaf node (this should be impossible)
+    case 0x0: /* Leaf node (this should be impossible) */
         target = node;
         break;
 
-    case 0x1:
-        // Has left child
+    case 0x1: /* Has left child */
         target = node->left;
         break;
 
-    case 0x2:
-        // Has right child
+    case 0x2: /* Has right child */
         target = node->right;
         break;
 
-    case 0x3:
-        // Has 2 children
-        target = node->left;
-        while (target->right)
-            target = target->right;
+    case 0x3: /* Has 2 children */
+        for (target = node->left; target->right; target = target->right)
+            ;
         break;
     }
     assert(target);
 
-    // Initially there is no Double Black
+    /* Initially there is no Double Black */
     double_blk = NULL;
 
     if (!node->left || !node->right)
@@ -671,7 +647,6 @@ void c_map_erase(c_map_t obj, c_map_iterator_t *it)
     }
 
     if (y != node) {
-        // Move pointers over
         if (obj->destructor)
             obj->destructor(node);
 
@@ -685,10 +660,9 @@ void c_map_erase(c_map_t obj, c_map_iterator_t *it)
     }
 
     if (y->color == C_MAP_BLACK) {
-        // Make a blank node if null
-        if (!x) {
+        if (!x) { /* Make a blank node if null */
             double_blk =
-                c_map_create_node(NULL, NULL, obj->key_size, obj->elem_size);
+                c_map_create_node(NULL, NULL, obj->key_size, obj->element_size);
 
             x = double_blk;
 
@@ -701,10 +675,10 @@ void c_map_erase(c_map_t obj, c_map_iterator_t *it)
             x->color = C_MAP_BLACK;
         }
 
-        // fix the tree up
+        /* fix the tree up */
         c_map_delete_fixup(obj, x, x_parent, y_is_left, y);
 
-        // Clean up Double Black
+        /* Clean up Double Black */
         if (double_blk) {
             if (double_blk->up) {
                 if (double_blk->up->left == double_blk)
@@ -725,28 +699,23 @@ void c_map_erase(c_map_t obj, c_map_iterator_t *it)
 
 /*
  * Delete all nodes in the graph. This is done by calling erase on the head
- * node until the tree is emptied.
+ * node until the tree is empty.
  */
 void c_map_clear(c_map_t obj)
 {
-    // Aggressively delete by recursion.
-    if (obj->head)
+    if (obj->head) /* Aggressively delete by recursion */
         c_map_clear_nested(obj, obj->head);
 
-    // Reset stats
     obj->size = 0;
     obj->head = NULL;
 }
 
-/*
- * Free the c_map from memory. Deletes all nodes. Call this when you are done
- * using the data structure.
- */
+/* Free the c_map from memory and delete all nodes. */
 void c_map_delete(c_map_t obj)
 {
-    // Free all nodes
+    /* Free all nodes */
     c_map_clear(obj);
 
-    // Free the map itself
+    /* Free the map itself */
     free(obj);
 }

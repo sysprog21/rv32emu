@@ -1,4 +1,5 @@
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
+CFLAGS += -include common.h
 
 CFLAGS += -D ENABLE_RV32M
 CFLAGS += -D ENABLE_Zicsr

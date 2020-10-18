@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -144,10 +145,10 @@ static c_map_node_t *c_map_rotate_right(c_map_t obj, c_map_node_t *node)
 }
 
 static void c_map_l_l(c_map_t obj,
-                      c_map_node_t *node,
-                      c_map_node_t *parent,
+                      c_map_node_t *node UNUSED,
+                      c_map_node_t *parent UNUSED,
                       c_map_node_t *grandparent,
-                      c_map_node_t *uncle)
+                      c_map_node_t *uncle UNUSED)
 {
     // Rotate to the right according to grandparent
     grandparent = c_map_rotate_right(obj, grandparent);
@@ -179,10 +180,10 @@ static void c_map_l_r(c_map_t obj,
 }
 
 static void c_map_r_r(c_map_t obj,
-                      c_map_node_t *node,
-                      c_map_node_t *parent,
+                      c_map_node_t *node UNUSED,
+                      c_map_node_t *parent UNUSED,
                       c_map_node_t *grandparent,
-                      c_map_node_t *uncle)
+                      c_map_node_t *uncle UNUSED)
 {
     // Rotate to the left according to grandparent
     grandparent = c_map_rotate_left(obj, grandparent);
@@ -276,7 +277,7 @@ static void c_map_delete_fixup(c_map_t obj,
                                c_map_node_t *node,
                                c_map_node_t *p,
                                bool y_is_left,
-                               c_map_node_t *y)
+                               c_map_node_t *y UNUSED)
 {
     c_map_node_t *w;
     c_map_color_t lc, rc;
@@ -587,9 +588,8 @@ bool c_map_empty(c_map_t obj)
 /*
  * Return true if at the the rend of the CN_Map
  */
-bool c_map_at_end(c_map_t obj, c_map_iterator_t *it)
+bool c_map_at_end(c_map_t obj UNUSED, c_map_iterator_t *it)
 {
-    obj = obj; /* suppress compiler warning */
     return (it->node == NULL);
 }
 
@@ -639,6 +639,7 @@ void c_map_erase(c_map_t obj, c_map_iterator_t *it)
             target = target->right;
         break;
     }
+    assert(target);
 
     // Initially there is no Double Black
     double_blk = NULL;

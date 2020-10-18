@@ -7,14 +7,14 @@
  * require a comparison function to sort the tree.
  */
 
-#ifndef __c_map_t__
-#define __c_map_t__
+#pragma once
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include <stdbool.h>
+#include <stddef.h>
 
 enum { _CMP_LESS = -1, _CMP_EQUAL = 0, _CMP_GREATER = 1 };
 
@@ -83,6 +83,4 @@ void c_map_free(c_map_t);
 
 #ifdef __cplusplus
 };  // ifdef __cplusplus
-#endif
-
 #endif

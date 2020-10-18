@@ -1,9 +1,5 @@
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "c_map.h"
 #include "io.h"
 #include "riscv.h"
@@ -21,7 +17,3 @@ typedef struct {
 
 // main syscall handler
 void syscall_handler(struct riscv_t *);
-
-#ifdef __cplusplus
-};  // ifdef __cplusplus
-#endif

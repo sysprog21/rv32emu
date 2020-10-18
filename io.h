@@ -1,9 +1,5 @@
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <stdint.h>
 
 typedef struct {
@@ -31,7 +27,3 @@ void memory_write(memory_t *m,
                   const uint8_t *src,
                   uint32_t size);
 void memory_fill(memory_t *m, uint32_t addr, uint32_t size, uint8_t val);
-
-#ifdef __cplusplus
-};  // ifdef __cplusplus
-#endif

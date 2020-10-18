@@ -6,12 +6,6 @@
 extern "C" {
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
-#define UNUSED __attribute__((unused))
-#else
-#define UNUSED
-#endif
-
 // RISC-V register files
 enum {
     rv_reg_zero = 0,

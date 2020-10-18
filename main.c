@@ -59,6 +59,7 @@ static void on_mem_write_b(struct riscv_t *rv,
     memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
 }
 
+extern void syscall_handler(struct riscv_t *);
 static void on_on_ecall(struct riscv_t *rv)
 {
     syscall_handler(rv);

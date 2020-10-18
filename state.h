@@ -38,6 +38,3 @@ static inline void state_delete(state_t *s)
     memory_delete(s->mem);
     free(s);
 }
-
-/* main syscall handler */
-void syscall_handler(struct riscv_t *);

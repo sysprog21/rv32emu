@@ -210,7 +210,7 @@ static void fill_symbols(elf_t *e)
 {
     /* initialize the symbol table */
     c_map_clear(e->symbols);
-    c_map_insert(e->symbols, &(int) {0}, &(char *) {NULL});
+    c_map_insert(e->symbols, &(int){0}, &(char *){NULL});
 
     /* get the string table */
     const char *strtab = get_strtab(e);

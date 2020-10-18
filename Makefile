@@ -42,7 +42,7 @@ deps := $(OBJS:%.o=%.o.d)
 
 $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
-	$(Q)$(CXX) -o $@ $^ $(LDFLAGS)
+	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
 # https://tipsmake.com/how-to-run-doom-on-raspberry-pi-without-emulator
 DOOM_WAD_DL = http://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip

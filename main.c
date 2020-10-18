@@ -147,7 +147,7 @@ int main(int argc, char **args)
         return 1;
     }
 
-    // setup the IO handlers for the VM
+    // setup the IO handlers for the runtime
     const struct riscv_io_t io = {
         imp_mem_ifetch,  imp_mem_read_w,  imp_mem_read_s,
         imp_mem_read_b,  imp_mem_write_w, imp_mem_write_s,
@@ -169,7 +169,7 @@ int main(int argc, char **args)
     if ((end = elf_get_symbol(elf, "_end")))
         state->break_addr = end->st_value;
 
-    // create the VM
+    // create the runtime
     struct riscv_t *rv = rv_create(&io, state);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
@@ -189,7 +189,7 @@ int main(int argc, char **args)
         run(rv);
     }
 
-    // delete the VM
+    // delete the runtime
     elf_delete(elf);
     rv_delete(rv);
     c_map_free(state->fd_map);

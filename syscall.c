@@ -232,7 +232,7 @@ static void syscall_read(struct riscv_t *rv)
 
     FILE *handle = c_map_iterator_value(&it, FILE *);
 
-    // read the file into VM memory
+    // read the file into runtime memory
     uint8_t *temp = (uint8_t *) malloc(count);
     size_t r = fread(temp, 1, count, handle);
     memory_write(s->mem, buf, temp, r);
@@ -257,7 +257,7 @@ static void syscall_open(struct riscv_t *rv)
     uint32_t flags = rv_get_reg(rv, rv_reg_a1);
     uint32_t mode = rv_get_reg(rv, rv_reg_a2);
 
-    // read name from VM memory
+    // read name from runtime memory
     char name_str[256] = {'\0'};
     uint32_t read =
         memory_read_str(s->mem, (uint8_t *) name_str, name, sizeof(name_str));

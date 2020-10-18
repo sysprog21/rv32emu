@@ -4,7 +4,7 @@
 #include "io.h"
 #include "riscv.h"
 
-// state structure passed to the VM
+// state structure passed to the runtime
 typedef struct {
     memory_t *mem;
 

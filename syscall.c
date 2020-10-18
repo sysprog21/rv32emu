@@ -82,68 +82,65 @@ static const char *get_mode_str(uint32_t flags, uint32_t mode UNUSED)
 
 static void syscall_write(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // _write(handle, buffer, count)
-    riscv_word_t handle = rv_get_reg(rv, rv_reg_a0);
+    /* _write(fde, buffer, count) */
+    riscv_word_t fd = rv_get_reg(rv, rv_reg_a0);
     riscv_word_t buffer = rv_get_reg(rv, rv_reg_a1);
     riscv_word_t count = rv_get_reg(rv, rv_reg_a2);
 
-    // read the string that we are printing
-    uint8_t *temp = (uint8_t *) malloc(count);
-    memory_read(s->mem, (uint8_t *) temp, buffer, count);
+    /* read the string that we are printing */
+    uint8_t *tmp = malloc(count);
+    memory_read(s->mem, tmp, buffer, count);
 
-    // lookup the file descriptor
+    /* lookup the file descriptor */
     c_map_iter_t it;
-    c_map_find(s->fd_map, &it, &handle);
+    c_map_find(s->fd_map, &it, &fd);
     if (!c_map_at_end(s->fd_map, &it)) {
-        // write out the data
-        size_t written = fwrite(temp, 1, count, c_map_iter_value(&it, FILE *));
+        /* write out the data */
+        size_t written = fwrite(tmp, 1, count, c_map_iter_value(&it, FILE *));
 
-        // return number of bytes written
-        rv_set_reg(rv, rv_reg_a0, (riscv_word_t) written);
+        /* return number of bytes written */
+        rv_set_reg(rv, rv_reg_a0, written);
     } else {
-        // error
+        /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
     }
 
-    free(temp);
+    free(tmp);
 }
 
 static void syscall_exit(struct riscv_t *rv)
 {
     rv_halt(rv);
 
-    // _exit(code);
+    /* _exit(code); */
     riscv_word_t code = rv_get_reg(rv, rv_reg_a0);
     fprintf(stdout, "inferior exit code %d\n", (int) code);
 }
 
 static void syscall_brk(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // get the increment parameter
+    /* get the increment parameter */
     riscv_word_t increment = rv_get_reg(rv, rv_reg_a0);
     if (increment)
         s->break_addr = increment;
 
-    // return new break address
+    /* return new break address */
     rv_set_reg(rv, rv_reg_a0, s->break_addr);
 }
 
 static void syscall_gettimeofday(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // get the parameters
+    /* get the parameters */
     riscv_word_t tv = rv_get_reg(rv, rv_reg_a0);
     riscv_word_t tz = rv_get_reg(rv, rv_reg_a1);
 
-    // return the clock time
+    /* return the clock time */
     if (tv) {
         clock_t t = clock();
         int32_t tv_sec = t / CLOCKS_PER_SEC;
@@ -160,103 +157,101 @@ static void syscall_gettimeofday(struct riscv_t *rv)
 
 static void syscall_close(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // _close(fd);
+    /* _close(fd); */
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
 
-    // lookup the file descriptor in question
-    if (fd >= 3) {
+    if (fd >= 3) { /* lookup the file descriptor */
         c_map_iter_t it;
         c_map_find(s->fd_map, &it, &fd);
         if (!c_map_at_end(s->fd_map, &it)) {
             fclose(c_map_iter_value(&it, FILE *));
             c_map_erase(s->fd_map, &it);
-            // success
+
+            /* success */
             rv_set_reg(rv, rv_reg_a0, 0);
         }
     }
-    // success
+
+    /* success */
     rv_set_reg(rv, rv_reg_a0, 0);
 }
 
 static void syscall_lseek(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // _lseek(fd, offset, whence);
+    /* _lseek(fd, offset, whence); */
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
     uint32_t offset = rv_get_reg(rv, rv_reg_a1);
     uint32_t whence = rv_get_reg(rv, rv_reg_a2);
 
-    // find the file descriptor
+    /* find the file descriptor */
     c_map_iter_t it;
     c_map_find(s->fd_map, &it, &fd);
     if (c_map_at_end(s->fd_map, &it)) {
-        // error
+        /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
     FILE *handle = c_map_iter_value(&it, FILE *);
     if (fseek(handle, offset, whence)) {
-        // error
+        /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
-    // success
+
+    /* success */
     rv_set_reg(rv, rv_reg_a0, 0);
 }
 
 static void syscall_read(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // _read(fd, buf, count);
+    /* _read(fd, buf, count); */
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
     uint32_t buf = rv_get_reg(rv, rv_reg_a1);
     uint32_t count = rv_get_reg(rv, rv_reg_a2);
 
-    // lookup the file
+    /* lookup the file */
     c_map_iter_t it;
     c_map_find(s->fd_map, &it, &fd);
     if (c_map_at_end(s->fd_map, &it)) {
-        // error
+        /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
     FILE *handle = c_map_iter_value(&it, FILE *);
 
-    // read the file into runtime memory
-    uint8_t *temp = (uint8_t *) malloc(count);
-    size_t r = fread(temp, 1, count, handle);
-    memory_write(s->mem, buf, temp, r);
-    free(temp);
+    /* read the file into runtime memory */
+    uint8_t *tmp = malloc(count);
+    size_t r = fread(tmp, 1, count, handle);
+    memory_write(s->mem, buf, tmp, r);
+    free(tmp);
 
-    // success
+    /* success */
     rv_set_reg(rv, rv_reg_a0, r);
 }
 
 static void syscall_fstat(struct riscv_t *rv UNUSED)
 {
-    // FIXME: fill real implementation
+    /* FIXME: fill real implementation */
 }
 
 static void syscall_open(struct riscv_t *rv)
 {
-    // access userdata
-    state_t *s = rv_userdata(rv);
+    state_t *s = rv_userdata(rv); /* access userdata */
 
-    // _open(name, flags, mode);
+    /* _open(name, flags, mode); */
     uint32_t name = rv_get_reg(rv, rv_reg_a0);
     uint32_t flags = rv_get_reg(rv, rv_reg_a1);
     uint32_t mode = rv_get_reg(rv, rv_reg_a2);
 
-    // read name from runtime memory
+    /* read name from runtime memory */
     char name_str[256] = {'\0'};
     uint32_t read =
         memory_read_str(s->mem, (uint8_t *) name_str, name, sizeof(name_str));
@@ -265,26 +260,25 @@ static void syscall_open(struct riscv_t *rv)
         return;
     }
 
-    // open the file
+    /* open the file */
     const char *mode_str = get_mode_str(flags, mode);
     if (!mode_str) {
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
-    FILE *handle = fopen((const char *) name_str, mode_str);
+    FILE *handle = fopen(name_str, mode_str);
     if (!handle) {
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
-    // find a free file descriptor
-    const int fd = find_free_fd(s);
+    const int fd = find_free_fd(s); /* find a free file descriptor */
 
-    // insert into the file descriptor map
+    /* insert into the file descriptor map */
     c_map_insert(s->fd_map, (void *) &fd, &handle);
 
-    // return the file descriptor
+    /* return the file descriptor */
     rv_set_reg(rv, rv_reg_a0, fd);
 }
 
@@ -295,11 +289,10 @@ extern void syscall_draw_frame_pal(struct riscv_t *rv);
 
 void syscall_handler(struct riscv_t *rv)
 {
-    // get the syscall number
+    /* get the syscall number */
     riscv_word_t syscall = rv_get_reg(rv, rv_reg_a7);
 
-    // dispatch call type
-    switch (syscall) {
+    switch (syscall) { /* dispatch system call */
     case SYS_close:
         syscall_close(rv);
         break;
@@ -336,7 +329,7 @@ void syscall_handler(struct riscv_t *rv)
         break;
 #endif
     default:
-        fprintf(stderr, "unknown syscall %d\n", (int) syscall);
+        fprintf(stderr, "unknown syscall %d\n", syscall);
         rv_halt(rv);
         break;
     }

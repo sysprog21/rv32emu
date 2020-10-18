@@ -149,15 +149,7 @@ int main(int argc, char **args)
         on_mem_write_b, on_on_ecall,    on_on_ebreak,
     };
 
-    state_t *state = (state_t *) malloc(sizeof(state_t));
-    state->mem = memory_new();
-    state->break_addr = 0;
-    state->fd_map = c_map_init(int, FILE *, c_map_cmp_int);
-    {
-        FILE *files[] = {stdin, stdout, stderr};
-        for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
-            c_map_insert(state->fd_map, &i, &files[i]);
-    }
+    state_t *state = state_new();
 
     /* find the start of the heap */
     const struct Elf32_Sym *end;
@@ -187,9 +179,7 @@ int main(int argc, char **args)
     /* finalize the RISC-V runtime */
     elf_delete(elf);
     rv_delete(rv);
-    c_map_delete(state->fd_map);
-    memory_delete(state->mem);
-    free(state);
+    state_delete(state);
 
     return 0;
 }

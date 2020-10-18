@@ -29,23 +29,22 @@ void memory_delete(memory_t *m)
     free(m);
 }
 
-// read a length of data from memory
 void memory_read(memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size)
 {
-    // if this read is entirely within one chunk
+    /* test if this read is entirely within one chunk */
     if ((addr & mask_hi) == ((addr + size) & mask_hi)) {
-        // get the chunk
         chunk_t *c;
         if ((c = m->chunks[addr >> 16])) {
-            // get the subchunk pointer
+            /* get the subchunk pointer */
             const uint32_t p = (addr & mask_lo);
-            // copy over the data
+
+            /* copy over the data */
             memcpy(dst, c->data + p, size);
         } else {
             memset(dst, 0, size);
         }
     } else {
-        // naive copy
+        /* naive copy */
         for (uint32_t i = 0; i < size; ++i) {
             uint32_t p = addr + i;
             chunk_t *c = m->chunks[p >> 16];
@@ -54,7 +53,6 @@ void memory_read(memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size)
     }
 }
 
-// read a c-string from memory
 uint32_t memory_read_str(memory_t *m, uint8_t *dst, uint32_t addr, uint32_t max)
 {
     uint32_t len = 0;
@@ -70,23 +68,20 @@ uint32_t memory_read_str(memory_t *m, uint8_t *dst, uint32_t addr, uint32_t max)
     return len + 1;
 }
 
-// read an instruction from memory
 uint32_t memory_read_ifetch(memory_t *m, uint32_t addr)
 {
     const uint32_t addr_lo = addr & mask_lo;
     assert((addr_lo & 3) == 0);
+
     chunk_t *c = m->chunks[addr >> 16];
     assert(c);
     return *(const uint32_t *) (c->data + addr_lo);
 }
 
-// read a word from memory
 uint32_t memory_read_w(memory_t *m, uint32_t addr)
 {
     const uint32_t addr_lo = addr & mask_lo;
-    // test if this is within one chunk
-    if (addr_lo <= 0xfffc) {
-        // get the chunk
+    if (addr_lo <= 0xfffc) { /* test if this is within one chunk */
         chunk_t *c;
         if ((c = m->chunks[addr >> 16]))
             return *(const uint32_t *) (c->data + addr_lo);
@@ -97,13 +92,10 @@ uint32_t memory_read_w(memory_t *m, uint32_t addr)
     return dst;
 }
 
-// read a short from memory
 uint16_t memory_read_s(memory_t *m, uint32_t addr)
 {
     const uint32_t addr_lo = addr & mask_lo;
-    // test if this is within one chunk
-    if (addr_lo <= 0xfffe) {
-        // get the chunk
+    if (addr_lo <= 0xfffe) { /* test if this is within one chunk */
         chunk_t *c;
         if ((c = m->chunks[addr >> 16]))
             return *(const uint16_t *) (c->data + addr_lo);
@@ -114,10 +106,8 @@ uint16_t memory_read_s(memory_t *m, uint32_t addr)
     return dst;
 }
 
-// read a byte from memory
 uint8_t memory_read_b(memory_t *m, uint32_t addr)
 {
-    // get the chunk
     chunk_t *c;
     if ((c = m->chunks[addr >> 16]))
         return *(c->data + (addr & 0xffff));

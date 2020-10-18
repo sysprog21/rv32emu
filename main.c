@@ -192,7 +192,7 @@ int main(int argc, char **args)
     // delete the runtime
     elf_delete(elf);
     rv_delete(rv);
-    c_map_free(state->fd_map);
+    c_map_delete(state->fd_map);
     memory_delete(state->mem);
     free(state);
 

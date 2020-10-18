@@ -108,7 +108,7 @@ void elf_delete(elf_t *e)
     if (!e)
         return;
 
-    c_map_free(e->symbols);
+    c_map_delete(e->symbols);
     free(e->raw_data);
 }
 

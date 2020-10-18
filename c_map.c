@@ -56,7 +56,7 @@ static c_map_node_t *c_map_create_node(void *key,
     return node;
 }
 
-static void c_map_free_node(c_map_t obj, c_map_node_t *node)
+static void c_map_delete_node(c_map_t obj, c_map_node_t *node)
 {
     if (obj->destructor)
         obj->destructor(node);
@@ -382,7 +382,7 @@ static void c_map_clear_nested(c_map_t obj, c_map_node_t *node)
         c_map_clear_nested(obj, node->right);
 
     // Free self
-    c_map_free_node(obj, node);
+    c_map_delete_node(obj, node);
 }
 
 /*
@@ -417,7 +417,7 @@ static void c_map_calibrate(c_map_t obj)
  * required to be passed in. A destruct function is optional and must be
  * added in through another function.
  */
-c_map_t new_c_map(size_t s1, size_t s2, int (*cmp)(void *, void *))
+c_map_t c_map_new(size_t s1, size_t s2, int (*cmp)(void *, void *))
 {
     c_map_t obj = malloc(sizeof(struct c_map_internal));
 
@@ -471,7 +471,7 @@ size_t c_map_insert(c_map_t obj, void *key, void *value)
 
         // If the key matches something else, we can't insert
         if (res == 0) {
-            c_map_free_node(obj, new_node);
+            c_map_delete_node(obj, new_node);
             return 0;
         }
 
@@ -604,7 +604,7 @@ void c_map_erase(c_map_t obj, c_map_iterator_t *it)
 
     // If it is the head, and the size is 1, just delete it.
     if (obj->size == 1 && node == obj->head) {
-        c_map_free_node(obj, node);
+        c_map_delete_node(obj, node);
         obj->head = NULL;
         obj->size--;
         return;
@@ -713,13 +713,13 @@ void c_map_erase(c_map_t obj, c_map_iterator_t *it)
                     double_blk->up->right = NULL;
             }
 
-            c_map_free_node(obj, double_blk);
+            c_map_delete_node(obj, double_blk);
         }
     }
 
     obj->size--;
 
-    c_map_free_node(obj, y);
+    c_map_delete_node(obj, y);
     c_map_calibrate(obj);
 }
 
@@ -742,7 +742,7 @@ void c_map_clear(c_map_t obj)
  * Free the c_map from memory. Deletes all nodes. Call this when you are done
  * using the data structure.
  */
-void c_map_free(c_map_t obj)
+void c_map_delete(c_map_t obj)
 {
     // Free all nodes
     c_map_clear(obj);

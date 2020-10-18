@@ -58,7 +58,7 @@ typedef struct cnm_iterator {
 typedef struct c_map_internal *c_map_t;
 
 // Constructor
-c_map_t new_c_map(size_t, size_t, int (*)(void *, void *));
+c_map_t c_map_new(size_t, size_t, int (*)(void *, void *));
 
 // Add Functions
 size_t c_map_insert(c_map_t, void *, void *);
@@ -75,10 +75,10 @@ void c_map_erase(c_map_t, c_map_iterator_t *);
 void c_map_clear(c_map_t);
 
 // /Destructor
-void c_map_free(c_map_t);
+void c_map_delete(c_map_t);
 
 #define c_map_init(key_type, element_type, __func) \
-    new_c_map(sizeof(key_type), sizeof(element_type), __func)
+    c_map_new(sizeof(key_type), sizeof(element_type), __func)
 
 #define c_map_iterator_value(it, type) (*(type *) (it)->node->data)
 

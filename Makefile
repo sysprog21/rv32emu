@@ -1,4 +1,4 @@
-CFLAGS = -Og -Wall -Wextra -g
+CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 
 CFLAGS += -D ENABLE_RV32M
 CFLAGS += -D ENABLE_Zicsr
@@ -9,8 +9,6 @@ CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 CFLAGS += -D ENABLE_SDL
 CFLAGS += `sdl2-config --cflags`
 LDFLAGS += `sdl2-config --libs`
-
-CXXFLAGS = $(CFLAGS) -std=c++14
 
 # Control the build verbosity
 ifeq ("$(VERBOSE)","1")
@@ -40,9 +38,6 @@ deps := $(OBJS:%.o=%.o.d)
 %.o: %.c
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
-%.o: %.cpp
-	$(VECHO) "  CXX\t$@\n"
-	$(Q)$(CXX) -o $@ $(CXXFLAGS) -c -MMD -MF $@.d $<
 
 $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"

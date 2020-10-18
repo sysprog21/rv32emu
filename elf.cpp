@@ -1,13 +1,15 @@
 #include <stdio.h>
 #include <algorithm>
-#include <memory>
 
 #include "elf.h"
 #include "io.h"
 
 #include "riscv.h"
 
-elf_t::elf_t() : hdr(nullptr), raw_size(0) {}
+elf_t::elf_t() : hdr(nullptr), raw_size(0)
+{
+    symbols = c_map_init(int, char *, cn_cmp_uint);
+}
 
 bool elf_t::load(struct riscv_t *rv, memory_t &mem) const
 {
@@ -86,8 +88,12 @@ bool elf_t::open(const char *path)
 void elf_t::fill_symbols()
 {
     // init the symbol table
-    symbols.clear();
-    symbols[0] = "NULL";
+    c_map_clear(symbols);
+    {
+        int key = 0;
+        char *value = NULL;
+        c_map_insert(symbols, &key, &value);
+    }
 
     // get the string table
     const char *strtab = get_strtab();
@@ -113,7 +119,7 @@ void elf_t::fill_symbols()
         case ELF::STT_NOTYPE:
         case ELF::STT_OBJECT:
         case ELF::STT_FUNC:
-            symbols[uint32_t(sym->st_value)] = sym_name;
+            c_map_insert(symbols, (void *) &(sym->st_value), &sym_name);
         }
     }
 }

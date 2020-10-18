@@ -58,8 +58,9 @@ enum {
 static int find_free_fd(struct state_t *s)
 {
     for (int i = 3;; ++i) {
-        auto itt = s->fd_map.find(i);
-        if (s->fd_map.end() == itt)
+        c_map_iterator_t it;
+        c_map_find(s->fd_map, &it, &i);
+        if (c_map_at_end(s->fd_map, &it))
             return i;
     }
 }
@@ -93,10 +94,12 @@ static void syscall_write(struct riscv_t *rv)
     s->mem.read((uint8_t *) temp, buffer, count);
 
     // lookup the file descriptor
-    auto itt = s->fd_map.find(int(handle));
-    if (itt != s->fd_map.end()) {
+    c_map_iterator_t it;
+    c_map_find(s->fd_map, &it, &handle);
+    if (!c_map_at_end(s->fd_map, &it)) {
         // write out the data
-        size_t written = fwrite(temp, 1, count, itt->second);
+        size_t written =
+            fwrite(temp, 1, count, c_map_iterator_value(&it, FILE *));
 
         // return number of bytes written
         rv_set_reg(rv, rv_reg_a0, (riscv_word_t) written);
@@ -165,10 +168,11 @@ static void syscall_close(struct riscv_t *rv)
 
     // lookup the file descriptor in question
     if (fd >= 3) {
-        auto itt = s->fd_map.find(int(fd));
-        if (itt != s->fd_map.end()) {
-            fclose(itt->second);
-            s->fd_map.erase(itt);
+        c_map_iterator_t it;
+        c_map_find(s->fd_map, &it, &fd);
+        if (!c_map_at_end(s->fd_map, &it)) {
+            fclose(c_map_iterator_value(&it, FILE *));
+            c_map_erase(s->fd_map, &it);
             // success
             rv_set_reg(rv, rv_reg_a0, 0);
         }
@@ -188,14 +192,15 @@ static void syscall_lseek(struct riscv_t *rv)
     uint32_t whence = rv_get_reg(rv, rv_reg_a2);
 
     // find the file descriptor
-    auto itt = s->fd_map.find(int(fd));
-    if (itt == s->fd_map.end()) {
+    c_map_iterator_t it;
+    c_map_find(s->fd_map, &it, &fd);
+    if (c_map_at_end(s->fd_map, &it)) {
         // error
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
-    FILE *handle = itt->second;
+    FILE *handle = c_map_iterator_value(&it, FILE *);
     if (fseek(handle, offset, whence)) {
         // error
         rv_set_reg(rv, rv_reg_a0, -1);
@@ -216,14 +221,15 @@ static void syscall_read(struct riscv_t *rv)
     uint32_t count = rv_get_reg(rv, rv_reg_a2);
 
     // lookup the file
-    auto itt = s->fd_map.find(int(fd));
-    if (itt == s->fd_map.end()) {
+    c_map_iterator_t it;
+    c_map_find(s->fd_map, &it, &fd);
+    if (c_map_at_end(s->fd_map, &it)) {
         // error
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
-    FILE *handle = itt->second;
+    FILE *handle = c_map_iterator_value(&it, FILE *);
 
     // read the file into VM memory
     uint8_t *temp = (uint8_t *) malloc(count);
@@ -276,7 +282,7 @@ static void syscall_open(struct riscv_t *rv)
     const int fd = find_free_fd(s);
 
     // insert into the file descriptor map
-    s->fd_map[fd] = handle;
+    c_map_insert(s->fd_map, (void *) &fd, &handle);
 
     // return the file descriptor
     rv_set_reg(rv, rv_reg_a0, fd);

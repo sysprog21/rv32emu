@@ -2,8 +2,9 @@
 #include <cstdint>
 #include <cstring>
 
-#include <map>
 #include <memory>
+
+#include "c_map.h"
 
 namespace ELF
 {
@@ -280,10 +281,12 @@ struct elf_t {
 
     const char *find_symbol(uint32_t addr)
     {
-        if (symbols.empty())
+        if (c_map_empty(symbols))
             fill_symbols();
-        auto itt = symbols.find(addr);
-        return (itt == symbols.end()) ? nullptr : itt->second;
+        c_map_iterator_t it;
+        c_map_find(symbols, &it, &addr);
+        return c_map_at_end(symbols, &it) ? nullptr
+                                          : c_map_iterator_value(&it, char *);
     }
 
 protected:
@@ -293,6 +296,6 @@ protected:
     uint32_t raw_size;
     std::unique_ptr<uint8_t[]> raw_data;
 
-    // symbol table map
-    std::map<uint32_t, const char *> symbols;
+    // symbol table map: uint32_t -> const char *
+    c_map_t symbols;
 };

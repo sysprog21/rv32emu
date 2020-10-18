@@ -1,5 +1,5 @@
 #include <cstring>
-#include <memory>
+//#include <memory>
 
 #include "elf.h"
 #include "state.h"
@@ -154,18 +154,21 @@ int main(int argc, char **args)
         imp_mem_write_b, imp_on_ecall,    imp_on_ebreak,
     };
 
-    auto state = std::make_unique<state_t>();
+    state_t *state = new state_t;
     state->break_addr = 0;
-    state->fd_map[0] = stdin;
-    state->fd_map[1] = stdout;
-    state->fd_map[2] = stderr;
+    state->fd_map = c_map_init(int, FILE *, cn_cmp_int);
+    {
+        FILE *files[] = {stdin, stdout, stderr};
+        for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
+            c_map_insert(state->fd_map, &i, &files[i]);
+    }
 
     // find the start of the heap
     if (const ELF::Elf32_Sym *end = elf.get_symbol("_end"))
         state->break_addr = end->st_value;
 
     // create the VM
-    riscv_t *rv = rv_create(&io, state.get());
+    riscv_t *rv = rv_create(&io, state);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
         return 1;
@@ -186,5 +189,8 @@ int main(int argc, char **args)
 
     // delete the VM
     rv_delete(rv);
+    c_map_free(state->fd_map);
+    delete state;
+
     return 0;
 }

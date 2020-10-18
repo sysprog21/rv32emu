@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <cstring>
 
 #include "elf.h"
@@ -12,25 +13,25 @@ static const char *g_arg_program = "a.out";
 static riscv_word_t imp_mem_ifetch(struct riscv_t *rv, riscv_word_t addr)
 {
     state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
-    return s->mem.read_ifetch(addr);
+    return memory_read_ifetch(s->mem, addr);
 }
 
 static riscv_word_t imp_mem_read_w(struct riscv_t *rv, riscv_word_t addr)
 {
     state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
-    return s->mem.read_w(addr);
+    return memory_read_w(s->mem, addr);
 }
 
 static riscv_half_t imp_mem_read_s(struct riscv_t *rv, riscv_word_t addr)
 {
     state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
-    return s->mem.read_s(addr);
+    return memory_read_s(s->mem, addr);
 }
 
 static riscv_byte_t imp_mem_read_b(struct riscv_t *rv, riscv_word_t addr)
 {
     state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
-    return s->mem.read_b(addr);
+    return memory_read_b(s->mem, addr);
 }
 
 static void imp_mem_write_w(struct riscv_t *rv,
@@ -38,7 +39,7 @@ static void imp_mem_write_w(struct riscv_t *rv,
                             riscv_word_t data)
 {
     state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
-    s->mem.write(addr, (uint8_t *) &data, sizeof(data));
+    memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
 }
 
 static void imp_mem_write_s(struct riscv_t *rv,
@@ -46,7 +47,7 @@ static void imp_mem_write_s(struct riscv_t *rv,
                             riscv_half_t data)
 {
     state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
-    s->mem.write(addr, (uint8_t *) &data, sizeof(data));
+    memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
 }
 
 static void imp_mem_write_b(struct riscv_t *rv,
@@ -54,7 +55,7 @@ static void imp_mem_write_b(struct riscv_t *rv,
                             riscv_byte_t data)
 {
     state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
-    s->mem.write(addr, (uint8_t *) &data, sizeof(data));
+    memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
 }
 
 static void imp_on_ecall(struct riscv_t *rv)
@@ -153,7 +154,8 @@ int main(int argc, char **args)
         imp_mem_write_b, imp_on_ecall,    imp_on_ebreak,
     };
 
-    state_t *state = new state_t;
+    state_t *state = (state_t *) malloc(sizeof(state_t));
+    state->mem = memory_new();
     state->break_addr = 0;
     state->fd_map = c_map_init(int, FILE *, cn_cmp_int);
     {
@@ -189,7 +191,8 @@ int main(int argc, char **args)
     // delete the VM
     rv_delete(rv);
     c_map_free(state->fd_map);
-    delete state;
+    memory_delete(state->mem);
+    free(state);
 
     return 0;
 }

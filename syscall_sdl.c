@@ -2,15 +2,14 @@
 #error "Do not manage to build this file unless you enable SDL support."
 #endif
 
-#include <cstdint>
-#include <cstdio>
-#include <ctime>
+#include <stdint.h>
+#include <stdio.h>
 
 #include <SDL.h>
 
 #include "state.h"
 
-static SDL_Window *sdlWindow = nullptr;
+static SDL_Window *sdlWindow = NULL;
 static SDL_Renderer *sdlRenderer;
 static SDL_Texture *texture;
 
@@ -58,7 +57,7 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
 void syscall_draw_frame(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // draw(screen, width, height);
     const uint32_t screen = rv_get_reg(rv, rv_reg_a0);
@@ -74,10 +73,10 @@ void syscall_draw_frame(struct riscv_t *rv)
     void *pixelsPtr;
     if (SDL_LockTexture(texture, NULL, &pixelsPtr, &pitch))
         exit(-1);
-    s->mem.read((uint8_t *) pixelsPtr, screen, width * height * 4);
+    memory_read(s->mem, (uint8_t *) pixelsPtr, screen, width * height * 4);
     SDL_UnlockTexture(texture);
 
-    SDL_Rect r = {0, 0, static_cast<int>(width), static_cast<int>(height)};
+    SDL_Rect r = {0, 0, width, height};
     SDL_RenderCopy(sdlRenderer, texture, NULL, &r);
     SDL_RenderPresent(sdlRenderer);
 }
@@ -85,7 +84,7 @@ void syscall_draw_frame(struct riscv_t *rv)
 void syscall_draw_frame_pal(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // draw(screen, width, height);
     const uint32_t buf = rv_get_reg(rv, rv_reg_a0);
@@ -101,8 +100,8 @@ void syscall_draw_frame_pal(struct riscv_t *rv)
     uint8_t *i = (uint8_t *) malloc(width * height);
     uint8_t *j = (uint8_t *) malloc(256 * 3);
 
-    s->mem.read(i, buf, width * height);
-    s->mem.read(j, pal, 256 * 3);
+    memory_read(s->mem, i, buf, width * height);
+    memory_read(s->mem, j, pal, 256 * 3);
 
     int pitch = 0;
     void *pixelsPtr;
@@ -120,7 +119,7 @@ void syscall_draw_frame_pal(struct riscv_t *rv)
     }
     SDL_UnlockTexture(texture);
 
-    SDL_Rect r = {0, 0, static_cast<int>(width), static_cast<int>(height)};
+    SDL_Rect r = {0, 0, width, height};
     SDL_RenderCopy(sdlRenderer, texture, NULL, &r);
     SDL_RenderPresent(sdlRenderer);
 

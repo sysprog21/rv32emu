@@ -1,6 +1,7 @@
-#include <cstdint>
-#include <cstdio>
-#include <ctime>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 #include "state.h"
 
@@ -55,7 +56,7 @@ enum {
     O_ACCMODE = 3,
 };
 
-static int find_free_fd(struct state_t *s)
+static int find_free_fd(state_t *s)
 {
     for (int i = 3;; ++i) {
         c_map_iterator_t it;
@@ -75,14 +76,14 @@ static const char *get_mode_str(uint32_t flags, uint32_t mode UNUSED)
     case O_RDWR:
         return "a+";
     default:
-        return nullptr;
+        return NULL;
     }
 }
 
 static void syscall_write(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // _write(handle, buffer, count)
     riscv_word_t handle = rv_get_reg(rv, rv_reg_a0);
@@ -91,7 +92,7 @@ static void syscall_write(struct riscv_t *rv)
 
     // read the string that we are printing
     uint8_t *temp = (uint8_t *) malloc(count);
-    s->mem.read((uint8_t *) temp, buffer, count);
+    memory_read(s->mem, (uint8_t *) temp, buffer, count);
 
     // lookup the file descriptor
     c_map_iterator_t it;
@@ -123,7 +124,7 @@ static void syscall_exit(struct riscv_t *rv)
 static void syscall_brk(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // get the increment parameter
     riscv_word_t increment = rv_get_reg(rv, rv_reg_a0);
@@ -137,7 +138,7 @@ static void syscall_brk(struct riscv_t *rv)
 static void syscall_gettimeofday(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // get the parameters
     riscv_word_t tv = rv_get_reg(rv, rv_reg_a0);
@@ -148,8 +149,8 @@ static void syscall_gettimeofday(struct riscv_t *rv)
         clock_t t = clock();
         int32_t tv_sec = t / CLOCKS_PER_SEC;
         int32_t tv_usec = (t % CLOCKS_PER_SEC) * (1000000 / CLOCKS_PER_SEC);
-        s->mem.write(tv + 0, (const uint8_t *) &tv_sec, 4);
-        s->mem.write(tv + 8, (const uint8_t *) &tv_usec, 4);
+        memory_write(s->mem, tv + 0, (const uint8_t *) &tv_sec, 4);
+        memory_write(s->mem, tv + 8, (const uint8_t *) &tv_usec, 4);
     }
     if (tz) {
         // FIXME: This parameter is ignored by the syscall handler in newlib.
@@ -161,7 +162,7 @@ static void syscall_gettimeofday(struct riscv_t *rv)
 static void syscall_close(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // _close(fd);
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
@@ -184,7 +185,7 @@ static void syscall_close(struct riscv_t *rv)
 static void syscall_lseek(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // _lseek(fd, offset, whence);
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
@@ -213,7 +214,7 @@ static void syscall_lseek(struct riscv_t *rv)
 static void syscall_read(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // _read(fd, buf, count);
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
@@ -233,12 +234,12 @@ static void syscall_read(struct riscv_t *rv)
 
     // read the file into VM memory
     uint8_t *temp = (uint8_t *) malloc(count);
-    size_t read = fread(temp, 1, count, handle);
-    s->mem.write(buf, temp, uint32_t(read));
+    size_t r = fread(temp, 1, count, handle);
+    memory_write(s->mem, buf, temp, r);
     free(temp);
 
     // success
-    rv_set_reg(rv, rv_reg_a0, uint32_t(read));
+    rv_set_reg(rv, rv_reg_a0, r);
 }
 
 static void syscall_fstat(struct riscv_t *rv UNUSED)
@@ -249,7 +250,7 @@ static void syscall_fstat(struct riscv_t *rv UNUSED)
 static void syscall_open(struct riscv_t *rv)
 {
     // access userdata
-    state_t *s = reinterpret_cast<state_t *>(rv_userdata(rv));
+    state_t *s = rv_userdata(rv);
 
     // _open(name, flags, mode);
     uint32_t name = rv_get_reg(rv, rv_reg_a0);
@@ -259,7 +260,7 @@ static void syscall_open(struct riscv_t *rv)
     // read name from VM memory
     char name_str[256] = {'\0'};
     uint32_t read =
-        s->mem.read_str((uint8_t *) name_str, name, uint32_t(sizeof(name_str)));
+        memory_read_str(s->mem, (uint8_t *) name_str, name, sizeof(name_str));
     if (read > sizeof(name_str)) {
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
@@ -336,7 +337,7 @@ void syscall_handler(struct riscv_t *rv)
         break;
 #endif
     default:
-        fprintf(stderr, "unknown syscall %d\n", int(syscall));
+        fprintf(stderr, "unknown syscall %d\n", (int) syscall);
         rv_halt(rv);
         break;
     }

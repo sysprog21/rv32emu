@@ -1,16 +1,16 @@
-CFLAGS = -O2 -Wall -Wextra
+CFLAGS = -Og -Wall -Wextra -g
 
 CFLAGS += -D ENABLE_RV32M
 CFLAGS += -D ENABLE_Zicsr
 CFLAGS += -D ENABLE_Zifencei
 CFLAGS += -D ENABLE_RV32A
-CFLAGS += -D ENABLE_SDL
 CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 
-CXXFLAGS = $(CFLAGS) -std=c++14
-
-CXXFLAGS += `sdl2-config --cflags`
+CFLAGS += -D ENABLE_SDL
+CFLAGS += `sdl2-config --cflags`
 LDFLAGS += `sdl2-config --libs`
+
+CXXFLAGS = $(CFLAGS) -std=c++14
 
 # Control the build verbosity
 ifeq ("$(VERBOSE)","1")
@@ -29,6 +29,7 @@ all: $(BIN)
 OBJS = \
 	c_map.o \
 	riscv.o \
+	io.o \
 	elf.o \
 	main.o \
 	syscall.o \

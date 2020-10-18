@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "c_map.h"
+#include "io.h"
 
 namespace ELF
 {
@@ -161,8 +162,6 @@ struct Elf32_Sym {
 
 }  // namespace ELF
 
-struct memory_t;
-
 // a minimal ELF parser
 struct elf_t {
     elf_t();
@@ -274,7 +273,7 @@ struct elf_t {
     }
 
     // load the ELF file into a memory abstraction
-    bool load(struct riscv_t *rv, memory_t &mem) const;
+    bool load(struct riscv_t *rv, memory_t *mem) const;
 
     const uint8_t *data() const { return raw_data; }
 

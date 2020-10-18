@@ -12,7 +12,7 @@ elf_t::elf_t() : hdr(nullptr), raw_size(0)
     raw_data = (uint8_t *) malloc(1);
 }
 
-bool elf_t::load(struct riscv_t *rv, memory_t &mem) const
+bool elf_t::load(struct riscv_t *rv, memory_t *mem) const
 {
     // set the entry point
     rv_set_pc(rv, hdr->e_entry);
@@ -30,12 +30,12 @@ bool elf_t::load(struct riscv_t *rv, memory_t &mem) const
         // memcpy required range
         const int to_copy = std::min(phdr->p_memsz, phdr->p_filesz);
         if (to_copy)
-            mem.write(phdr->p_vaddr, data() + phdr->p_offset, to_copy);
+            memory_write(mem, phdr->p_vaddr, data() + phdr->p_offset, to_copy);
 
         // zero fill required range
         const int to_zero = std::max(phdr->p_memsz, phdr->p_filesz) - to_copy;
         if (to_zero)
-            mem.fill(phdr->p_vaddr + to_copy, to_zero, 0);
+            memory_fill(mem, phdr->p_vaddr + to_copy, to_zero, 0);
     }
 
     return true;

@@ -14,7 +14,6 @@ struct c_map_internal {
     c_map_iter_t it_end, it_most, it_least;
 
     int (*comparator)(void *, void *);
-    void (*destructor)(c_map_node_t *);
 };
 
 /* Create a node to be attached in the c_map internal tree structure */
@@ -54,11 +53,8 @@ static c_map_node_t *c_map_create_node(void *key,
     return node;
 }
 
-static void c_map_delete_node(c_map_t obj, c_map_node_t *node)
+static void c_map_delete_node(c_map_t obj UNUSED, c_map_node_t *node)
 {
-    if (obj->destructor)
-        obj->destructor(node);
-
     free(node->key);
     free(node->data);
     free(node);
@@ -425,7 +421,6 @@ c_map_t c_map_new(size_t s1, size_t s2, int (*cmp)(void *, void *))
 
     // Function pointers
     obj->comparator = cmp;
-    obj->destructor = NULL;
 
     obj->it_end.prev = obj->it_end.node = NULL;
     obj->it_least.prev = obj->it_least.node = NULL;
@@ -647,9 +642,6 @@ void c_map_erase(c_map_t obj, c_map_iter_t *it)
     }
 
     if (y != node) {
-        if (obj->destructor)
-            obj->destructor(node);
-
         free(node->key);
         free(node->data);
 

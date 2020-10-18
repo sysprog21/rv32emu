@@ -1,12 +1,14 @@
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -include common.h
 
+# Base configurations for RISC-V extensions
 CFLAGS += -D ENABLE_RV32M
 CFLAGS += -D ENABLE_Zicsr
 CFLAGS += -D ENABLE_Zifencei
 CFLAGS += -D ENABLE_RV32A
 CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 
+# Experimental SDL oriented system calls
 CFLAGS += -D ENABLE_SDL
 CFLAGS += `sdl2-config --cflags`
 LDFLAGS += `sdl2-config --libs`

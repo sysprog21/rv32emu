@@ -1,10 +1,11 @@
 /*
  * C Implementation for C++ std::map using red-black tree.
  *
- * Any data type can be stored in a C_Map, just like std::map.
- * A C_Map instance require specification of two file types. One for the key,
- * and another for what data type the tree node will store. It will also
- * require a comparison function to sort the tree.
+ * Any data type can be stored in a c_map, just like std::map.
+ * A c_map instance requires the specification of two file types.
+ *   1. the key;
+ *   2. what data type the tree node will store;
+ * It will also require a comparison function to sort the tree.
  */
 
 #pragma once
@@ -51,7 +52,7 @@ typedef struct cnm_iterator {
 
 /*
  * Store access to the head node, as well as the first and last nodes.
- * Keep track of all aspects of the tree. All C_Map functions require a pointer
+ * Keep track of all aspects of the tree. All c_map functions require a pointer
  * to this struct.
  */
 typedef struct c_map_internal *c_map_t;

@@ -18,7 +18,7 @@ struct c_map_internal {
 };
 
 /*
- * Create a node to be attached in the CN_Map internal tree structure.
+ * Create a node to be attached in the c_map internal tree structure.
  */
 static c_map_node_t *c_map_create_node(void *key,
                                        void *value,
@@ -408,7 +408,7 @@ static void c_map_calibrate(c_map_t obj)
 }
 
 /*
- * Sets up a brand new, blank CN_Map for use. The size of the node elements
+ * Sets up a brand new, blank c_map for use. The size of the node elements
  * is determined by what types are thrown in. "s1" is the size of the key
  * elements in bytes, while "s2" is the size of the value elements in
  * bytes.
@@ -442,7 +442,7 @@ c_map_t new_c_map(size_t s1, size_t s2, int (*cmp)(void *, void *))
 }
 
 /*
- * Insert a key/value pair into the CN_Map. The value can be blank. If so,
+ * Insert a key/value pair into the c_map. The value can be blank. If so,
  * it is filled with 0's, as defined in "c_map_create_node".
  */
 size_t c_map_insert(c_map_t obj, void *key, void *value)
@@ -586,7 +586,7 @@ bool c_map_empty(c_map_t obj)
 }
 
 /*
- * Return true if at the the rend of the CN_Map
+ * Return true if at the the rend of the c_map
  */
 bool c_map_at_end(c_map_t obj UNUSED, c_map_iterator_t *it)
 {
@@ -594,7 +594,7 @@ bool c_map_at_end(c_map_t obj UNUSED, c_map_iterator_t *it)
 }
 
 /*
- * Remove a node from the CN_Map. It performs a BST delete, and then reorders
+ * Remove a node from the c_map. It performs a BST delete, and then reorders
  * the tree so that it remains balanced.
  */
 void c_map_erase(c_map_t obj, c_map_iterator_t *it)
@@ -739,7 +739,7 @@ void c_map_clear(c_map_t obj)
 }
 
 /*
- * Free the CN_Map from memory. Deletes all nodes. Call this when you are done
+ * Free the c_map from memory. Deletes all nodes. Call this when you are done
  * using the data structure.
  */
 void c_map_free(c_map_t obj)

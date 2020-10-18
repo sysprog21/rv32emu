@@ -11,60 +11,60 @@ static bool opt_trace = false;
 /* target executable */
 static const char *opt_prog_name = "a.out";
 
-static riscv_word_t imp_mem_ifetch(struct riscv_t *rv, riscv_word_t addr)
+static riscv_word_t on_mem_ifetch(struct riscv_t *rv, riscv_word_t addr)
 {
     state_t *s = rv_userdata(rv);
     return memory_read_ifetch(s->mem, addr);
 }
 
-static riscv_word_t imp_mem_read_w(struct riscv_t *rv, riscv_word_t addr)
+static riscv_word_t on_mem_read_w(struct riscv_t *rv, riscv_word_t addr)
 {
     state_t *s = rv_userdata(rv);
     return memory_read_w(s->mem, addr);
 }
 
-static riscv_half_t imp_mem_read_s(struct riscv_t *rv, riscv_word_t addr)
+static riscv_half_t on_mem_read_s(struct riscv_t *rv, riscv_word_t addr)
 {
     state_t *s = rv_userdata(rv);
     return memory_read_s(s->mem, addr);
 }
 
-static riscv_byte_t imp_mem_read_b(struct riscv_t *rv, riscv_word_t addr)
+static riscv_byte_t on_mem_read_b(struct riscv_t *rv, riscv_word_t addr)
 {
     state_t *s = rv_userdata(rv);
     return memory_read_b(s->mem, addr);
 }
 
-static void imp_mem_write_w(struct riscv_t *rv,
-                            riscv_word_t addr,
-                            riscv_word_t data)
+static void on_mem_write_w(struct riscv_t *rv,
+                           riscv_word_t addr,
+                           riscv_word_t data)
 {
     state_t *s = rv_userdata(rv);
     memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
 }
 
-static void imp_mem_write_s(struct riscv_t *rv,
-                            riscv_word_t addr,
-                            riscv_half_t data)
+static void on_mem_write_s(struct riscv_t *rv,
+                           riscv_word_t addr,
+                           riscv_half_t data)
 {
     state_t *s = rv_userdata(rv);
     memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
 }
 
-static void imp_mem_write_b(struct riscv_t *rv,
-                            riscv_word_t addr,
-                            riscv_byte_t data)
+static void on_mem_write_b(struct riscv_t *rv,
+                           riscv_word_t addr,
+                           riscv_byte_t data)
 {
     state_t *s = rv_userdata(rv);
     memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
 }
 
-static void imp_on_ecall(struct riscv_t *rv)
+static void on_on_ecall(struct riscv_t *rv)
 {
     syscall_handler(rv);
 }
 
-static void imp_on_ebreak(struct riscv_t *rv)
+static void on_on_ebreak(struct riscv_t *rv)
 {
     rv_halt(rv);
 }
@@ -144,9 +144,9 @@ int main(int argc, char **args)
 
     /* install the I/O handlers for the RISC-V runtime */
     const struct riscv_io_t io = {
-        imp_mem_ifetch,  imp_mem_read_w,  imp_mem_read_s,
-        imp_mem_read_b,  imp_mem_write_w, imp_mem_write_s,
-        imp_mem_write_b, imp_on_ecall,    imp_on_ebreak,
+        on_mem_ifetch,  on_mem_read_w,  on_mem_read_s,
+        on_mem_read_b,  on_mem_write_w, on_mem_write_s,
+        on_mem_write_b, on_on_ecall,    on_on_ebreak,
     };
 
     state_t *state = (state_t *) malloc(sizeof(state_t));

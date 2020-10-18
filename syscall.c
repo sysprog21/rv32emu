@@ -329,7 +329,7 @@ void syscall_handler(struct riscv_t *rv)
         break;
 #endif
     default:
-        fprintf(stderr, "unknown syscall %d\n", syscall);
+        fprintf(stderr, "unknown syscall %d\n", (int) syscall);
         rv_halt(rv);
         break;
     }

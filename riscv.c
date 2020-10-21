@@ -792,16 +792,23 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         // fetch the next instruction
         const uint32_t inst = rv->io.mem_ifetch(rv, rv->PC);
-        const uint32_t index = (inst & INST_6_2) >> 2;
 
-        // dispatch this opcode
-        const opcode_t op = opcodes[index];
-        assert(op);
-        if (!op(rv, inst))
-            break;
+        // standard uncompressed instruction
+        if ((inst & 3) == 3) {
+            const uint32_t index = (inst & INST_6_2) >> 2;
 
-        // increment the cycles csr
-        rv->csr_cycle++;
+	    // dispatch this opcode
+            const opcode_t op = opcodes[index];
+            assert(op);
+            if (!op(rv, inst))
+                break;
+
+            // increment the cycles csr
+            rv->csr_cycle++;
+        } else {
+            // TODO: compressed instruction
+            assert(!"Unreachable");
+        }
     }
 }
 

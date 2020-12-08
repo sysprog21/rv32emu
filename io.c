@@ -20,8 +20,7 @@ void memory_delete(memory_t *m)
     if (!m)
         return;
 
-    /* FIXME: assign the correct range */
-    for (int i = 0; sizeof(m->chunks) / sizeof(chunk_t) >> 16; i++) {
+    for (uint32_t i = 0; i < (sizeof(m->chunks) / sizeof(chunk_t *)); i++) {
         chunk_t *c = m->chunks[i];
         if (c)
             free(c);

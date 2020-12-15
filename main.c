@@ -8,6 +8,10 @@
 /* enable program trace mode */
 static bool opt_trace = false;
 
+/* RISCV compliance test mode */
+static bool opt_compliance = false;
+static char *signature_out_file;
+
 /* target executable */
 static const char *opt_prog_name = "a.out";
 
@@ -101,7 +105,8 @@ static void print_usage(const char *filename)
             "RV32I[MA] Emulator which loads an ELF file to execute.\n"
             "Usage: %s [options] [filename]\n"
             "Options:\n"
-            "  --trace : print executable trace\n",
+            "  --trace : print executable trace\n"
+            "  --compliance [signature filename] : dump signature to the given file for compliance test\n",
             filename);
 }
 
@@ -118,6 +123,16 @@ static bool parse_args(int argc, char **args)
                 opt_trace = true;
                 continue;
             }
+            if (!strcmp(arg, "--compliance")) {
+                opt_compliance = true;
+                if (i + 1 >= argc) {
+                    fprintf(stderr,
+                            "Filename for signature output required in compliance mode.\n");
+                    return false;
+                }
+                signature_out_file = args[++i];
+                continue;
+            }
             /* otherwise, error */
             fprintf(stderr, "Unknown argument '%s'\n", arg);
             return false;
@@ -128,6 +143,35 @@ static bool parse_args(int argc, char **args)
 
     return true;
 }
+
+void dump_test_signature(struct riscv_t *rv, elf_t *elf)
+{
+    uint32_t start = 0, end = 0;
+    const struct Elf32_Sym *sym;
+    FILE *f = fopen(signature_out_file, "w");
+    if (!f) {
+        fprintf(stderr, "Cannot open signature output file.\n");
+        return;
+    }
+
+    /* use the entire .data section as a fallback */
+    elf_get_data_section_range(elf, &start, &end);
+    /* try and access the exact signature range */
+    if ((sym = elf_get_symbol(elf, "begin_signature")))
+        start = sym->st_value;
+    if ((sym = elf_get_symbol(elf, "end_signature")))
+        end = sym->st_value;
+
+    state_t *s = rv_userdata(rv);
+
+    /* dump it word by word */
+    for (uint32_t addr = start; addr < end; addr += 4) {
+        fprintf(f, "%08x\n", memory_read_w(s->mem, addr));
+    }
+
+    fclose(f);
+}
+
 
 int main(int argc, char **args)
 {
@@ -175,6 +219,11 @@ int main(int argc, char **args)
         run_and_trace(rv, elf);
     } else {
         run(rv);
+    }
+
+    /* dump test result in test mode */
+    if (opt_compliance) {
+        dump_test_signature(rv, elf);
     }
 
     /* finalize the RISC-V runtime */

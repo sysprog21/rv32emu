@@ -30,6 +30,17 @@ make demo
 The build script will then download data file for Doom automatically. SDL2 based window
 should appear when Doom is loaded and executed.
 
+### Run riscv-compliance test
+Once the submodule `riscv-compliance` is pulled, run all the available compliance test via command:
+```shell
+make compliance
+```
++ To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `Zifencei`, `privilege`. 
++ To run a specific test case, set both `RISCV_DEVICE` and `RISCV_TEST`. For example:
+    ```shell
+    make compliance RISCV_DEVICE=M RISCV_TEST=div-01
+    ```
+
 ## Customization
 
 `rv32emu` is configurable, and you can modify `Makefile` to fit your expectations:

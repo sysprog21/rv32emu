@@ -77,6 +77,9 @@ enum {
     FR4_FMT      = 0b00000110000000000000000000000000, // r4-type
     FR4_RS3      = 0b11111000000000000000000000000000,
     //               ....xxxx....xxxx....xxxx....xxxx
+    FR_C_1_0   = 0b00000000000000000000000000000011, // C-instuction
+    FR_C_15_13 = 0b00000000000000001110000000000000,
+    //               ....xxxx....xxxx....xxxx....xxxx
 };
 // clang-format off
 
@@ -104,6 +107,13 @@ struct riscv_t {
     uint32_t csr_mepc;
     uint32_t csr_mip;
     uint32_t csr_mbadaddr;
+
+    // current instruction length
+    enum {
+        INST_UNKNOWN = 0,
+        INST_16 = 0x02,
+        INST_32 = 0x04,
+    }inst_len;
 };
 
 // decode rd field

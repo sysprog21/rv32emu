@@ -21,7 +21,7 @@ static void rv_except_inst_misaligned(struct riscv_t *rv, uint32_t old_pc)
         rv->PC = base;
         break;
     case 1:  // VECTORED
-        rv->PC = base + 4 * code;
+        rv->PC = base + rv->inst_len * code;
         break;
     }
 
@@ -43,7 +43,7 @@ static void rv_except_load_misaligned(struct riscv_t *rv, uint32_t addr)
         rv->PC = base;
         break;
     case 1:  // VECTORED
-        rv->PC = base + 4 * code;
+        rv->PC = base + rv->inst_len * code;
         break;
     }
 
@@ -65,7 +65,7 @@ static void rv_except_store_misaligned(struct riscv_t *rv, uint32_t addr)
         rv->PC = base;
         break;
     case 1:  // VECTORED
-        rv->PC = base + 4 * code;
+        rv->PC = base + rv->inst_len * code;
         break;
     }
 
@@ -123,7 +123,7 @@ static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
         return false;
     }
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->inst_len;
     // enforce zero register
     if (rd == rv_reg_zero)
         rv->X[rv_reg_zero] = 0;
@@ -187,7 +187,7 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->inst_len;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -204,7 +204,7 @@ static bool op_auipc(struct riscv_t *rv, uint32_t inst)
     rv->X[rd] = val;
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->inst_len;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -249,7 +249,7 @@ static bool op_store(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->inst_len;
     return true;
 }
 
@@ -380,7 +380,7 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
         return false;
     }
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->inst_len;
     // enforce zero register
     if (rd == rv_reg_zero)
         rv->X[rv_reg_zero] = 0;
@@ -395,7 +395,7 @@ static bool op_lui(struct riscv_t *rv, uint32_t inst)
     rv->X[rd] = val;
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->inst_len;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -446,7 +446,7 @@ static bool op_branch(struct riscv_t *rv, uint32_t inst)
             rv_except_inst_misaligned(rv, pc);
     } else {
         // step over instruction
-        rv->PC += 4;
+        rv->PC += rv->inst_len;
     }
     // can branch
     return false;
@@ -462,7 +462,7 @@ static bool op_jalr(struct riscv_t *rv, uint32_t inst)
     const int32_t imm = dec_itype_imm(inst);
 
     // compute return address
-    const uint32_t ra = rv->PC + 4;
+    const uint32_t ra = rv->PC + rv->inst_len;
 
     // jump
     rv->PC = (rv->X[rs1] + imm) & ~1u;
@@ -488,7 +488,7 @@ static bool op_jal(struct riscv_t *rv, uint32_t inst)
     const int32_t rel = dec_jtype_imm(inst);
 
     // compute return address
-    const uint32_t ra = rv->PC + 4;
+    const uint32_t ra = rv->PC + rv->inst_len;
     rv->PC += rel;
 
     // link
@@ -654,7 +654,7 @@ static bool op_system(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->inst_len;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -770,8 +770,34 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
 #define op_nmsub NULL
 #define op_nmadd NULL
 
+/* TODO: function implemetation */
+#define c_op_addi4spn NULL
+#define c_op_addi NULL
+#define c_op_slli NULL
+#define c_op_fld NULL
+#define c_op_jal NULL
+#define c_op_fldsp NULL
+#define c_op_lw NULL
+#define c_op_li NULL
+#define c_op_lwsp NULL
+#define c_op_flw NULL
+#define c_op_lui NULL
+#define c_op_flwsp NULL
+#define c_op_misc_alu NULL
+#define c_op_jalr NULL
+#define c_op_fsd NULL
+#define c_op_j NULL
+#define c_op_fsdsp NULL
+#define c_op_sw NULL
+#define c_op_beqz NULL
+#define c_op_swsp NULL
+#define c_op_fsw NULL
+#define c_op_bnez NULL
+#define c_op_fswsp NULL
+
 // opcode handler type
 typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);
+typedef bool (*c_opcode_t)(struct riscv_t *rv, uint16_t inst);
 
 // clang-format off
 // opcode dispatch table
@@ -781,6 +807,18 @@ static const opcode_t opcodes[] = {
     op_store,  op_store_fp, NULL,     op_amo,      op_op,     op_lui,   NULL, NULL, // 01
     op_madd,   op_msub,     op_nmsub, op_nmadd,    op_fp,     NULL,     NULL, NULL, // 10
     op_branch, op_jalr,     NULL,     op_jal,      op_system, NULL,     NULL, NULL, // 11
+};
+
+static const c_opcode_t c_opcodes[] = {
+//  00              01              10          11         
+    c_op_addi4spn,  c_op_addi,      c_op_slli,  NULL, // 000
+    c_op_fld,       c_op_jal,       c_op_fldsp, NULL, // 001
+    c_op_lw,        c_op_li,        c_op_lwsp,  NULL, // 010
+    c_op_flw,       c_op_lui,       c_op_flwsp, NULL, // 011
+    NULL,           c_op_misc_alu,  c_op_jalr,  NULL, // 100
+    c_op_fsd,       c_op_j,         c_op_fsdsp, NULL, // 101
+    c_op_sw,        c_op_beqz,      c_op_swsp,  NULL, // 110
+    c_op_fsw,       c_op_bnez,      c_op_fswsp, NULL, // 111
 };
 // clang-format on
 
@@ -800,6 +838,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 	    // dispatch this opcode
             const opcode_t op = opcodes[index];
             assert(op);
+            rv->inst_len = INST_32;
             if (!op(rv, inst))
                 break;
 
@@ -807,7 +846,16 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             rv->csr_cycle++;
         } else {
             // TODO: compressed instruction
-            assert(!"Unreachable");
+            const uint16_t c_index = (inst & FR_C_15_13 >> 11) | (inst & FR_C_1_0);
+            // TODO: table implement
+            const c_opcode_t op = c_opcodes[c_index];
+            assert(op);
+            rv->inst_len = INST_16;
+            if (!op(rv, inst))
+                break;
+            
+            // increment the cycles csr
+            rv->csr_cycle++;
         }
     }
 }
@@ -891,6 +939,7 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
 
     // set the reset address
     rv->PC = pc;
+    rv->inst_len = INST_UNKNOWN;
 
     // set the default stack pointer
     rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;

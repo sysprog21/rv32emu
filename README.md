@@ -40,6 +40,9 @@ should appear when Doom is loaded and executed.
 
 Add `-D` to enable and `-U` to disable the specific ISA extensions.
 
+## Reference
+
+* [libriscv: RISC-V userspace emulator library](https://github.com/fwsGonzo/libriscv)
 
 ## License
 `rv32emu` is released under the MIT License.

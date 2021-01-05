@@ -77,8 +77,27 @@ enum {
     FR4_FMT      = 0b00000110000000000000000000000000, // r4-type
     FR4_RS3      = 0b11111000000000000000000000000000,
     //               ....xxxx....xxxx....xxxx....xxxx
-    FR_C_1_0   = 0b00000000000000000000000000000011, // C-instuction
-    FR_C_15_13 = 0b00000000000000001110000000000000,
+    FC_OPCODE    = 0b00000000000000000000000000000011, // compressed-instuction
+    FC_FUNC3     = 0b00000000000000001110000000000000,
+    FCR_FUNCT4   = 0b00000000000000001111000000000000,
+    //               ....xxxx....xxxx....xxxx....xxxx
+    FC_RS1C      = 0b00000000000000000000001110000000,
+    FC_RS2C      = 0b00000000000000000000000000011100,
+    FC_RS1       = 0b00000000000000000000111110000000,
+    FC_RS2       = 0b00000000000000000000000001111100,
+    //               ....xxxx....xxxx....xxxx....xxxx
+    FC_RDC       = 0b00000000000000000000000000011100,
+    FC_RD        = 0b00000000000000000000111110000000,
+    //               ....xxxx....xxxx....xxxx....xxxx
+    FC_IMM_12_10 = 0b00000000000000000001110000000000, // CL,CS,CB
+    FC_IMM_6_5   = 0b00000000000000000000000001100000,
+    //               ....xxxx....xxxx....xxxx....xxxx
+    FCI_IMM_12   = 0b00000000000000000001000000000000, 
+    FCI_IMM_6_2  = 0b00000000000000000000000001111100,
+    //               ....xxxx....xxxx....xxxx....xxxx
+    FCSS_IMM     = 0b00000000000000000001111110000000,
+    //               ....xxxx....xxxx....xxxx....xxxx
+    FCJ_IMM      = 0b00000000000000000001111111111100,
     //               ....xxxx....xxxx....xxxx....xxxx
 };
 // clang-format off
@@ -219,4 +238,34 @@ static inline uint32_t sign_extend_h(uint32_t x)
 static inline uint32_t sign_extend_b(uint32_t x)
 {
     return (int32_t)((int8_t) x);
+}
+
+// decode rs1 field
+static inline uint16_t c_dec_rs1(uint16_t x){
+    return (uint16_t)((x & FC_RS1) >> 7U);
+}
+
+// decode rs2 field
+static inline uint16_t c_dec_rs2(uint16_t x){
+    return (uint16_t)((x & FC_RS2) >> 2U);
+}
+
+// decode rd field
+static inline uint16_t c_dec_rd(uint16_t x){
+    return (uint16_t)((x & FC_RD) >> 7U);
+}
+
+// decode rs1' field
+static inline uint16_t c_dec_rs1c(uint16_t x){
+    return (uint16_t)((x & FC_RS1C) >> 7U);
+}
+
+// decode rs2' field
+static inline uint16_t c_dec_rs2c(uint16_t x){
+    return (uint16_t)((x & FC_RS2C) >> 2U);
+}
+
+// decode rd' field
+static inline uint16_t c_dec_rdc(uint16_t x){
+    return (uint16_t)((x & FC_RDC) >> 2U);
 }

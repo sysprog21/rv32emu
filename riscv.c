@@ -794,6 +794,8 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
 #ifdef ENABLE_RV32C
 static bool c_op_addi(struct riscv_t *rv, uint16_t inst)
 {
+    debug_print("Entered c.addi");
+
     uint16_t tmp =
         (uint16_t)(((inst & FCI_IMM_12) >> 5) | (inst & FCI_IMM_6_2)) >> 2;
     const int16_t imm = (0x20 & tmp) ? 0xffc0 | tmp : tmp;
@@ -828,48 +830,19 @@ static bool c_op_sw(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool c_op_swsp(struct riscv_t *rv, uint16_t inst)
-{
-    const uint16_t imm = (inst & 0x1e00) >> 7 | (inst & 0x180) >> 1;
-    const uint16_t rs2 = c_dec_rs2(inst);
-    const uint32_t addr = rv->X[2] + imm;
-    const uint32_t data = rv->X[rs2];
-
-    if (addr & 3) {
-        rv_except_store_misaligned(rv, addr);
-        return false;
-    }
-    rv->io.mem_write_w(rv, addr, data);
-
-    rv->PC += rv->inst_len;
-    return true;
-}
-
 static bool c_op_addi4spn(struct riscv_t *rv, uint16_t inst)
 {
-    const uint16_t imm = (inst & 0x1800) >> 7 | (inst & 0x780) >> 1 |
-                         (inst & 0x40) >> 4 | (inst & 0x20) >> 2;
+    debug_print("Entered c.addi4spn");
+    uint16_t temp = 0;
+    temp |= (inst & 0x1800) >> 7;
+    temp |= (inst & 0x780) >> 1;
+    temp |= (inst & 0x40) >> 4;
+    temp |= (inst & 0x20) >> 2;
+
+    const uint16_t imm = temp;
     const uint16_t rd = c_dec_rdc(inst) | 0x08;
     rv->X[rd] = rv->X[2] + imm;
 
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_fld(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_lw(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_flw(struct riscv_t *rv, uint16_t inst)
-{
     rv->PC += rv->inst_len;
     return true;
 }
@@ -894,6 +867,8 @@ static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
 
 static bool c_op_li(struct riscv_t *rv, uint16_t inst)
 {
+    debug_print("Entered c.li");
+
     uint16_t tmp = (uint16_t)((inst & 0x1000) >> 7 | (inst & 0x7c) >> 2);
     const int16_t imm = (0x20 & tmp) ? 0xffc0 | tmp : tmp;
     const uint16_t rd = c_dec_rd(inst);
@@ -939,31 +914,77 @@ static bool c_op_slli(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
+static bool c_op_jalr(struct riscv_t *rv, uint16_t inst)
+{
+    rv->PC += rv->inst_len;
+    return true;
+}
+
+// CI-type
 static bool c_op_lwsp(struct riscv_t *rv, uint16_t inst)
 {
-    debug_print("Entered c.lwsp\n");
+    debug_print("Entered c.lwsp");
     
     uint16_t temp = 0;
-    temp |= ((inst & FCI_IMM_6_2 | 0b1110000) >> 2);
-    temp |= ((inst & FCI_IMM_12) >> 7);
-    temp |= ((inst & FCI_IMM_6_2 | 0b0001100) << 4);
+    temp |= ((inst & FCI_IMM_6_2) | 0b1110000) >> 2;
+    temp |= (inst & FCI_IMM_12) >> 7;
+    temp |= ((inst & FCI_IMM_6_2) | 0b0001100) << 4;
 
     const uint16_t imm = temp;
-    const uint16_t rd = (inst & FC_RD) >> 7;
+    const uint16_t rd = c_dec_rd(inst);
+    const uint16_t addr = rv->X[2] + imm;
 
-    // Get imm*4 + sp from memory
-    rv->X[rd] = rv->io.mem_read_w(rv, (rv->X[2] + imm));
-
-    if(rd == 0){
-        assert(!"In c.lwsp: rd = 0 invalid.\n");
+    if(addr & 3){
+        rv_except_load_misaligned(rv, addr);
+        return false;
     }
+    rv->X[rd] = rv->io.mem_read_w(rv, addr);
 
     rv->PC += rv->inst_len;
     return true;
 }
 
-static bool c_op_jalr(struct riscv_t *rv, uint16_t inst)
+// CSS-type
+static bool c_op_swsp(struct riscv_t *rv, uint16_t inst)
 {
+    debug_print("Entered c.swsp");
+
+    const uint16_t imm = (inst & 0x1e00) >> 7 | (inst & 0x180) >> 1;
+    const uint16_t rs2 = c_dec_rs2(inst);
+    const uint32_t addr = rv->X[2] + imm;
+    const uint32_t data = rv->X[rs2];
+
+    if (addr & 3) {
+        rv_except_store_misaligned(rv, addr);
+        return false;
+    }
+    rv->io.mem_write_w(rv, addr, data);
+
+    rv->PC += rv->inst_len;
+    return true;
+}
+
+// CL-type
+static bool c_op_lw(struct riscv_t *rv, uint16_t inst)
+{   
+    debug_print("Entered c.lw");
+
+    uint16_t temp = 0;
+    temp |= (inst & 0b0000000001000000) >> 4;
+    temp |= (inst & FC_IMM_12_10) >> 7;
+    temp |= (inst & 0b0000000000100000) << 1;
+
+    const uint16_t imm = temp;
+    const uint16_t rd = c_dec_rdc(inst) | 0x08;
+    const uint16_t rs1 = c_dec_rs1c(inst) | 0x08;
+    const uint32_t addr = rv->X[rs1] + imm;
+    
+    if(addr & 3){
+        rv_except_load_misaligned(rv, addr);
+        return false;
+    }
+    rv->X[rd] = rv->io.mem_read_w(rv, addr);
+
     rv->PC += rv->inst_len;
     return true;
 }
@@ -992,34 +1013,47 @@ static bool c_op_fswsp(struct riscv_t *rv, uint16_t inst)
     rv->PC += rv->inst_len;
     return true;
 }
+
+static bool c_op_fld(struct riscv_t *rv, uint16_t inst)
+{
+    rv->PC += rv->inst_len;
+    return true;
+}
+
+static bool c_op_flw(struct riscv_t *rv, uint16_t inst)
+{
+    rv->PC += rv->inst_len;
+    return true;
+}
 #else
 #define c_op_fldsp NULL
 #define c_op_flwsp NULL
 #define c_op_fswsp NULL
 #define c_op_fsdsp NULL
+#define c_op_fld NULL
+#define c_op_flw NULL
 #endif  // ENABLE_RV32F
 #endif  // ENABLE_RV32C
 
 
 /* TODO: function implemetation */
-// #define c_op_addi4spn NULL - done / tested
-// #define c_op_addi NULL - done / tested
-// #define c_op_swsp NULL - done / tested
-// #define c_op_li NULL - done / tested
-// #define c_op_slli NULL
-// #define c_op_fld NULL
-// #define c_op_jal NULL
-// #define c_op_lw NULL
-// #define c_op_lwsp NULL
-// #define c_op_flw NULL
-// #define c_op_lui NULL
-// #define c_op_misc_alu NULL
-// #define c_op_jalr NULL
-// #define c_op_fsd NULL
-// #define c_op_j NULL
-// #define c_op_beqz NULL
-// #define c_op_fsw NULL
-// #define c_op_bnez NULL
+// c_op_addi4spn    - done / tested
+// c_op_addi        - done / tested
+// c_op_swsp        - done / tested
+// c_op_li          - done / tested
+// c_op_slli NULL   
+// c_op_jal NULL
+// c_op_lw NULL     - done / not tested
+// c_op_lwsp NULL   - done / not tested
+// c_op_lui NULL
+// c_op_misc_alu NULL
+// c_op_jalr NULL
+// c_op_fsd NULL
+// c_op_j NULL
+// c_op_beqz NULL
+// c_op_fsw NULL
+// c_op_bnez NULL
+// c_op_sw 
 
 // opcode handler type
 typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);

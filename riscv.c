@@ -7,13 +7,25 @@
 #include "riscv.h"
 #include "riscv_private.h"
 
-inline static void print_register(struct riscv_t *rv)
+#ifdef DEBUG
+#define print_register(rv) __print_register((rv))
+inline static void __print_register(struct riscv_t *rv)
 {
     for (int i = 0; i < 32; ++i) {
-        printf("X[%02d] = %X\t", i, rv->X[i]);
+        printf("X[%02d] = %08X\t", i, rv->X[i]);
+        if(!(i % 5)){
+            putchar('\n');
+        }
     }
     putchar('\n');
 }
+#define debug_print(str) printf("DEBUG: " #str "\n")
+#define debug_print_val(var) printf("DEBUG: " #var " = %08X(hex)\n", var)
+#else
+#define print_register(rv) (void)0
+#define debug_print(str) (void)0
+#define debug_print_val(var) (void)0
+#endif
 
 static void rv_except_inst_misaligned(struct riscv_t *rv, uint32_t old_pc)
 {
@@ -779,7 +791,6 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
 #define op_nmsub NULL
 #define op_nmadd NULL
 
-#define ENABLE_RV32C 1
 #ifdef ENABLE_RV32C
 static bool c_op_addi(struct riscv_t *rv, uint16_t inst)
 {
@@ -928,27 +939,43 @@ static bool c_op_slli(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
+static bool c_op_lwsp(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.lwsp\n");
+    
+    uint16_t temp = 0;
+    temp |= ((inst & FCI_IMM_6_2 | 0b1110000) >> 2);
+    temp |= ((inst & FCI_IMM_12) >> 7);
+    temp |= ((inst & FCI_IMM_6_2 | 0b0001100) << 4);
+
+    const uint16_t imm = temp;
+    const uint16_t rd = (inst & FC_RD) >> 7;
+
+    // Get imm*4 + sp from memory
+    rv->X[rd] = rv->io.mem_read_w(rv, (rv->X[2] + imm));
+
+    if(rd == 0){
+        assert(!"In c.lwsp: rd = 0 invalid.\n");
+    }
+
+    rv->PC += rv->inst_len;
+    return true;
+}
+
+static bool c_op_jalr(struct riscv_t *rv, uint16_t inst)
+{
+    rv->PC += rv->inst_len;
+    return true;
+}
+
+#ifdef ENABLE_RV32F
 static bool c_op_fldsp(struct riscv_t *rv, uint16_t inst)
 {
     rv->PC += rv->inst_len;
     return true;
 }
 
-static bool c_op_lwsp(struct riscv_t *rv, uint16_t inst)
-{
-    /* TODO CURRENT FUNCTION */
-    assert(0);
-    rv->PC += rv->inst_len;
-    return true;
-}
-
 static bool c_op_flwsp(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_jalr(struct riscv_t *rv, uint16_t inst)
 {
     rv->PC += rv->inst_len;
     return true;
@@ -965,31 +992,34 @@ static bool c_op_fswsp(struct riscv_t *rv, uint16_t inst)
     rv->PC += rv->inst_len;
     return true;
 }
-
-
+#else
+#define c_op_fldsp NULL
+#define c_op_flwsp NULL
+#define c_op_fswsp NULL
+#define c_op_fsdsp NULL
+#endif  // ENABLE_RV32F
 #endif  // ENABLE_RV32C
 
 
 /* TODO: function implemetation */
-// #define c_op_addi4spn NULL
+// #define c_op_addi4spn NULL - done / tested
+// #define c_op_addi NULL - done / tested
+// #define c_op_swsp NULL - done / tested
+// #define c_op_li NULL - done / tested
 // #define c_op_slli NULL
 // #define c_op_fld NULL
 // #define c_op_jal NULL
-// #define c_op_fldsp NULL
 // #define c_op_lw NULL
 // #define c_op_lwsp NULL
 // #define c_op_flw NULL
 // #define c_op_lui NULL
-// #define c_op_flwsp NULL
 // #define c_op_misc_alu NULL
 // #define c_op_jalr NULL
 // #define c_op_fsd NULL
 // #define c_op_j NULL
-// #define c_op_fsdsp NULL
 // #define c_op_beqz NULL
 // #define c_op_fsw NULL
 // #define c_op_bnez NULL
-// #define c_op_fswsp NULL
 
 // opcode handler type
 typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);
@@ -1028,6 +1058,9 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         // fetch the next instruction
         const uint32_t inst = rv->io.mem_ifetch(rv, rv->PC);
 
+        // Illegal instruction if inst[15:0] == 0
+        assert(inst & 0xFFFF && "inst[15:0] must not be all 0.\n");
+
         // standard uncompressed instruction
         if ((inst & 3) == 3) {
             const uint32_t index = (inst & INST_6_2) >> 2;
@@ -1042,12 +1075,14 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             // increment the cycles csr
             rv->csr_cycle++;
         } else {
-            // TODO: compressed instruction
             const uint16_t c_index =
                 (inst & FC_FUNC3) >> 11 | (inst & FC_OPCODE);
-            // TODO: table implement
             const c_opcode_t op = c_opcodes[c_index];
-            printf("c_index: %d, inst: %x\n", c_index, inst);
+
+            // DEBUG: Print accepted c-instruction
+            debug_print_val(c_index);
+            debug_print_val(inst);
+            // printf("c_index: %d, inst: %x\n", c_index, inst);
             assert(op);
             rv->inst_len = INST_16;
             if (!op(rv, inst))
@@ -1055,6 +1090,9 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 
             // increment the cycles csr
             rv->csr_cycle++;
+
+            // DEBUG: print register state
+            print_register(rv);
         }
     }
 }

@@ -1,5 +1,5 @@
 build/DOOM1.WAD*
 build/rv32emu
+build/compliance
 *.o
 *.o.d
-test-rv32emu/work

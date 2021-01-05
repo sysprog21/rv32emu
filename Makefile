@@ -67,7 +67,7 @@ export RISCV_TARGET = test-rv32emu
 export TARGETDIR = $(shell pwd)
 export XLEN = 32
 export JOBS ?= -j
-export WORK = $(TARGETDIR)/$(RISCV_TARGET)/work
+export WORK = $(TARGETDIR)/build/compliance
 
 compliance: $(BIN)
 	$(Q)$(MAKE) --quiet -C $(COMPLIANCE_DIR) clean;

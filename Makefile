@@ -7,6 +7,7 @@ CFLAGS += -D ENABLE_Zicsr
 CFLAGS += -D ENABLE_Zifencei
 CFLAGS += -D ENABLE_RV32A
 CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
+CFLAGS += -D ENABLE_RV32C
 
 # Experimental SDL oriented system calls
 CFLAGS += -D ENABLE_SDL
@@ -67,5 +68,9 @@ clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
 distclean: clean
 	$(RM) $(OUT)/DOOM1.WAD $(OUT)/DOOM1.WAD.sha1
+
+debug: debug_setting 
+debug_setting: CFLAGS += -D DEBUG
+debug_setting: all
 
 -include $(deps)

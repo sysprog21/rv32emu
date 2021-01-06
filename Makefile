@@ -69,7 +69,7 @@ clean:
 distclean: clean
 	$(RM) $(OUT)/DOOM1.WAD $(OUT)/DOOM1.WAD.sha1
 
-debug: debug_setting 
+debug: clean debug_setting 
 debug_setting: CFLAGS += -D DEBUG
 debug_setting: all
 

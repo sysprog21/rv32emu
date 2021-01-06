@@ -859,12 +859,6 @@ static bool c_op_fsw(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
 static bool c_op_li(struct riscv_t *rv, uint16_t inst)
 {
     debug_print("Entered c.li");
@@ -885,12 +879,6 @@ static bool c_op_lui(struct riscv_t *rv, uint16_t inst)
 }
 
 static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_j(struct riscv_t *rv, uint16_t inst)
 {
     rv->PC += rv->inst_len;
     return true;
@@ -989,6 +977,53 @@ static bool c_op_lw(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
+// CJ-type
+static bool c_op_j(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.j");
+
+    uint32_t temp = 0;
+    //                ....xxxx....xxxx
+    temp |= (inst & 0b0000000000111000) >> 2;
+    temp |= (inst & 0b0000100000000000) >> 7;
+    temp |= (inst & 0b0000000000000100) << 3;
+    temp |= (inst & 0b0000000010000000) >> 1;
+    temp |= (inst & 0b0000000001000000) << 1;
+    temp |= (inst & 0b0000011000000000) >> 1;
+    temp |= (inst & 0b0000000100000000) << 2;
+    temp |= (inst & 0b0001000000000000) >> 1;
+    
+    const uint32_t imm = sign_extend_h(temp);
+
+    rv->PC += imm;
+    return true;
+}
+
+static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.jal");
+
+    uint32_t temp = 0;
+    //                ....xxxx....xxxx
+    temp |= (inst & 0b0000000000111000) >> 2;
+    temp |= (inst & 0b0000100000000000) >> 7;
+    temp |= (inst & 0b0000000000000100) << 3;
+    temp |= (inst & 0b0000000010000000) >> 1;
+    temp |= (inst & 0b0000000001000000) << 1;
+    temp |= (inst & 0b0000011000000000) >> 1;
+    temp |= (inst & 0b0000000100000000) << 2;
+    temp |= (inst & 0b0001000000000000) >> 1;
+
+    const uint32_t imm = sign_extend_h(temp);
+
+    rv->X[1] = rv->PC + 2;
+    rv->PC += imm;
+
+    return true;
+}
+
+// CR-type
+
 #ifdef ENABLE_RV32F
 static bool c_op_fldsp(struct riscv_t *rv, uint16_t inst)
 {
@@ -1036,20 +1071,20 @@ static bool c_op_flw(struct riscv_t *rv, uint16_t inst)
 #endif  // ENABLE_RV32C
 
 
-/* TODO: function implemetation */
-// c_op_addi4spn    - done / tested
-// c_op_addi        - done / tested
-// c_op_swsp        - done / tested
-// c_op_li          - done / tested
+/* TODO: function implemetation and Test Correctness*/
+// c_op_addi4spn    - done 
+// c_op_addi        - done
+// c_op_swsp        - done
+// c_op_li          - done
 // c_op_slli NULL   
-// c_op_jal NULL
-// c_op_lw NULL     - done / not tested
-// c_op_lwsp NULL   - done / not tested
+// c_op_jal         - done
+// c_op_lw          - done 
+// c_op_lwsp        - done
 // c_op_lui NULL
 // c_op_misc_alu NULL
 // c_op_jalr NULL
 // c_op_fsd NULL
-// c_op_j NULL
+// c_op_j           - done
 // c_op_beqz NULL
 // c_op_fsw NULL
 // c_op_bnez NULL

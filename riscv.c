@@ -902,12 +902,6 @@ static bool c_op_slli(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool c_op_jalr(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
 // CI-type
 static bool c_op_lwsp(struct riscv_t *rv, uint16_t inst)
 {
@@ -1023,6 +1017,32 @@ static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
 }
 
 // CR-type
+static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
+{
+    const rs1 = c_dec_rs1(inst);
+
+    switch((inst & 0x1000) >> 12){
+    case 0: // c.jr
+        debug_print("Entered c.jr");
+        rv->PC = rv->X[rs1];
+        break;
+    case 1: // c.jalr
+        debug_print("Entered c.jalr");
+        rv->X[1] = rv->PC + 2;
+        rv->PC = rv->X[rs1];
+        break;
+    default:
+        assert(!"Should be unreachbale.");
+        break;
+    }
+
+    if(rv->PC & 1){
+        rv_except_inst_misaligned(rv, rv->PC);
+        return false;
+    }
+
+    return true;
+}
 
 #ifdef ENABLE_RV32F
 static bool c_op_fldsp(struct riscv_t *rv, uint16_t inst)
@@ -1111,7 +1131,7 @@ static const c_opcode_t c_opcodes[] = {
     c_op_fld,       c_op_jal,       c_op_fldsp, NULL, // 001
     c_op_lw,        c_op_li,        c_op_lwsp,  NULL, // 010
     c_op_flw,       c_op_lui,       c_op_flwsp, NULL, // 011
-    NULL,           c_op_misc_alu,  c_op_jalr,  NULL, // 100
+    NULL,           c_op_misc_alu,  c_op_cr,    NULL, // 100
     c_op_fsd,       c_op_j,         c_op_fsdsp, NULL, // 101
     c_op_sw,        c_op_beqz,      c_op_swsp,  NULL, // 110
     c_op_fsw,       c_op_bnez,      c_op_fswsp, NULL, // 111
@@ -1151,7 +1171,6 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             // DEBUG: Print accepted c-instruction
             debug_print_val(c_index);
             debug_print_val(inst);
-            // printf("c_index: %d, inst: %x\n", c_index, inst);
             assert(op);
             rv->inst_len = INST_16;
             if (!op(rv, inst))

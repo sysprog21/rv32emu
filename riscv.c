@@ -1089,6 +1089,24 @@ static bool c_op_flw(struct riscv_t *rv, uint16_t inst)
 #define c_op_fld NULL
 #define c_op_flw NULL
 #endif  // ENABLE_RV32F
+#else
+#define c_op_addi4spn NULL
+#define c_op_addi NULL
+#define c_op_swsp NULL
+#define c_op_li NULL
+#define c_op_slli NULL
+#define c_op_jal NULL
+#define c_op_lw NULL
+#define c_op_lwsp NULL
+#define c_op_lui NULL
+#define c_op_misc_alu NULL
+#define c_op_jalr NULL
+#define c_op_fsd NULL
+#define c_op_j NULL
+#define c_op_beqz NULL
+#define c_op_fsw NULL
+#define c_op_bnez NULL
+#define c_op_sw NULL
 #endif  // ENABLE_RV32C
 
 

@@ -798,7 +798,7 @@ static bool c_op_addi(struct riscv_t *rv, uint16_t inst)
 
     uint16_t tmp =
         (uint16_t)(((inst & FCI_IMM_12) >> 5) | (inst & FCI_IMM_6_2)) >> 2;
-    const int16_t imm = (0x20 & tmp) ? 0xffc0 | tmp : tmp;
+    const int32_t imm = (0x20 & tmp) ? 0xffffffc0 | tmp : tmp;
     const uint16_t rd = c_dec_rd(inst);
 
     // dispatch operation type
@@ -864,7 +864,7 @@ static bool c_op_li(struct riscv_t *rv, uint16_t inst)
     debug_print("Entered c.li");
 
     uint16_t tmp = (uint16_t)((inst & 0x1000) >> 7 | (inst & 0x7c) >> 2);
-    const int16_t imm = (0x20 & tmp) ? 0xffc0 | tmp : tmp;
+    const int32_t imm = (tmp & 0x20) ? 0xffffffc0 | tmp : tmp;
     const uint16_t rd = c_dec_rd(inst);
     rv->X[rd] = imm;
 
@@ -879,14 +879,25 @@ static bool c_op_lui(struct riscv_t *rv, uint16_t inst)
     /* TODO */
     if (rd == 2) {
         // C.ADDI16SP
-
+        uint32_t tmp = (inst & 0x1000) >> 3;
+        tmp |= (inst & 0x40);
+        tmp |= (inst & 0x20) << 1;
+        tmp |= (inst & 0x18) << 4;
+        tmp |= (inst & 0x4) << 3;
+        const int32_t imm = (tmp & 0x200) ? 0xfffffc | tmp : tmp;
+        if (imm == 0)
+            assert(!"Should not be zero.");
+        rv->X[rd] += imm;
     } else if (rd != 0) {
         // C.LUI
-
+        uint32_t tmp = (inst & 0x1000) << 5 | (inst & 0x7c) << 12;
+        const int32_t imm = (tmp & 0x20000) ? 0xfffc0000 | tmp : tmp;
+        if (imm == 0)
+            assert(!"Should not be zero.");
+        rv->X[rd] = imm;
     } else {
         assert(!"Should be unreachbale.");
     }
-
 
     rv->PC += rv->inst_len;
     return true;

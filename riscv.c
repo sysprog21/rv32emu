@@ -794,7 +794,7 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
 #ifdef ENABLE_RV32C
 static bool c_op_addi(struct riscv_t *rv, uint16_t inst)
 {
-    debug_print("Entered c.addi");
+    debug_print("Entered c.addi/nop");
 
     uint16_t tmp =
         (uint16_t)(((inst & FCI_IMM_12) >> 5) | (inst & FCI_IMM_6_2)) >> 2;
@@ -874,6 +874,20 @@ static bool c_op_li(struct riscv_t *rv, uint16_t inst)
 
 static bool c_op_lui(struct riscv_t *rv, uint16_t inst)
 {
+    debug_print("Entered c.lui/addi16sp");
+    const uint16_t rd = c_dec_rd(inst);
+    /* TODO */
+    if (rd == 2) {
+        // C.ADDI16SP
+
+    } else if (rd != 0) {
+        // C.LUI
+
+    } else {
+        assert(!"Should be unreachbale.");
+    }
+
+
     rv->PC += rv->inst_len;
     return true;
 }
@@ -1043,52 +1057,6 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
 
     return true;
 }
-
-/* No RV32C.F support */
-#ifdef ENABLE_RV32F
-static bool c_op_fldsp(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_flwsp(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_fsdsp(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_fswsp(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_fld(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_flw(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-#else
-#define c_op_fldsp NULL
-#define c_op_flwsp NULL
-#define c_op_fswsp NULL
-#define c_op_fsdsp NULL
-#define c_op_fld NULL
-#define c_op_flw NULL
-#endif  // ENABLE_RV32F
 #else
 #define c_op_addi4spn NULL
 #define c_op_addi NULL
@@ -1109,6 +1077,13 @@ static bool c_op_flw(struct riscv_t *rv, uint16_t inst)
 #define c_op_sw NULL
 #endif  // ENABLE_RV32C
 
+/* No RV32C.F support */
+#define c_op_fldsp NULL
+#define c_op_flwsp NULL
+#define c_op_fswsp NULL
+#define c_op_fsdsp NULL
+#define c_op_fld NULL
+#define c_op_flw NULL
 
 /* TODO: function implemetation and Test Correctness*/
 // c_op_addi4spn    - done

@@ -8,23 +8,23 @@
 #include "riscv_private.h"
 
 #ifdef DEBUG
-#define print_register(rv) __print_register((rv))
-inline static void __print_register(struct riscv_t *rv)
-{
-    for (int i = 0; i < 32; ++i) {
-        printf("X[%02d] = %08X\t", i, rv->X[i]);
-        if(!(i % 5)){
-            putchar('\n');
-        }
-    }
-    putchar('\n');
-}
+#define print_register(rv)                           \
+    do {                                             \
+        for (int i = 0; i < 32; ++i) {               \
+            printf("X[%02d] = %08X\t", i, rv->X[i]); \
+            if (!(i % 5)) {                          \
+                putchar('\n');                       \
+            }                                        \
+        }                                            \
+        putchar('\n');                               \
+    } while (0)
+
 #define debug_print(str) printf("DEBUG: " #str "\n")
-#define debug_print_val(var) printf("DEBUG: " #var " = %08X(hex)\n", var)
+#define debug_print_hexval(var) printf("DEBUG: " #var " = %08X(hex)\n", var)
 #else
-#define print_register(rv) (void)0
-#define debug_print(str) (void)0
-#define debug_print_val(var) (void)0
+#define print_register(rv) (void) 0
+#define debug_print(str) (void) 0
+#define debug_print_hexval(var) (void) 0
 #endif
 
 static void rv_except_inst_misaligned(struct riscv_t *rv, uint32_t old_pc)
@@ -906,7 +906,7 @@ static bool c_op_slli(struct riscv_t *rv, uint16_t inst)
 static bool c_op_lwsp(struct riscv_t *rv, uint16_t inst)
 {
     debug_print("Entered c.lwsp");
-    
+
     uint16_t temp = 0;
     temp |= ((inst & FCI_IMM_6_2) | 0b1110000) >> 2;
     temp |= (inst & FCI_IMM_12) >> 7;
@@ -916,7 +916,7 @@ static bool c_op_lwsp(struct riscv_t *rv, uint16_t inst)
     const uint16_t rd = c_dec_rd(inst);
     const uint16_t addr = rv->X[2] + imm;
 
-    if(addr & 3){
+    if (addr & 3) {
         rv_except_load_misaligned(rv, addr);
         return false;
     }
@@ -948,7 +948,7 @@ static bool c_op_swsp(struct riscv_t *rv, uint16_t inst)
 
 // CL-type
 static bool c_op_lw(struct riscv_t *rv, uint16_t inst)
-{   
+{
     debug_print("Entered c.lw");
 
     uint16_t temp = 0;
@@ -960,8 +960,8 @@ static bool c_op_lw(struct riscv_t *rv, uint16_t inst)
     const uint16_t rd = c_dec_rdc(inst) | 0x08;
     const uint16_t rs1 = c_dec_rs1c(inst) | 0x08;
     const uint32_t addr = rv->X[rs1] + imm;
-    
-    if(addr & 3){
+
+    if (addr & 3) {
         rv_except_load_misaligned(rv, addr);
         return false;
     }
@@ -986,7 +986,7 @@ static bool c_op_j(struct riscv_t *rv, uint16_t inst)
     temp |= (inst & 0b0000011000000000) >> 1;
     temp |= (inst & 0b0000000100000000) << 2;
     temp |= (inst & 0b0001000000000000) >> 1;
-    
+
     const uint32_t imm = sign_extend_h(temp);
 
     rv->PC += imm;
@@ -1021,12 +1021,12 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
 {
     const rs1 = c_dec_rs1(inst);
 
-    switch((inst & 0x1000) >> 12){
-    case 0: // c.jr
+    switch ((inst & 0x1000) >> 12) {
+    case 0:  // c.jr
         debug_print("Entered c.jr");
         rv->PC = rv->X[rs1];
         break;
-    case 1: // c.jalr
+    case 1:  // c.jalr
         debug_print("Entered c.jalr");
         rv->X[1] = rv->PC + 2;
         rv->PC = rv->X[rs1];
@@ -1036,7 +1036,7 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
         break;
     }
 
-    if(rv->PC & 1){
+    if (rv->PC & 1) {
         rv_except_inst_misaligned(rv, rv->PC);
         return false;
     }
@@ -1044,6 +1044,7 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
+/* No RV32C.F support */
 #ifdef ENABLE_RV32F
 static bool c_op_fldsp(struct riscv_t *rv, uint16_t inst)
 {
@@ -1092,13 +1093,13 @@ static bool c_op_flw(struct riscv_t *rv, uint16_t inst)
 
 
 /* TODO: function implemetation and Test Correctness*/
-// c_op_addi4spn    - done 
+// c_op_addi4spn    - done
 // c_op_addi        - done
 // c_op_swsp        - done
 // c_op_li          - done
-// c_op_slli NULL   
+// c_op_slli NULL
 // c_op_jal         - done
-// c_op_lw          - done 
+// c_op_lw          - done
 // c_op_lwsp        - done
 // c_op_lui NULL
 // c_op_misc_alu NULL
@@ -1108,7 +1109,7 @@ static bool c_op_flw(struct riscv_t *rv, uint16_t inst)
 // c_op_beqz NULL
 // c_op_fsw NULL
 // c_op_bnez NULL
-// c_op_sw 
+// c_op_sw
 
 // opcode handler type
 typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);
@@ -1169,8 +1170,8 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             const c_opcode_t op = c_opcodes[c_index];
 
             // DEBUG: Print accepted c-instruction
-            debug_print_val(c_index);
-            debug_print_val(inst);
+            debug_print_hexval(c_index);
+            debug_print_hexval(inst);
             assert(op);
             rv->inst_len = INST_16;
             if (!op(rv, inst))

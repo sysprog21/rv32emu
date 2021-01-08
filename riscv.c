@@ -962,7 +962,47 @@ static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
     case 2: // C.ANDI
         exec_result = c_op_andi(rv, inst);
         break;
-    case 3: // Arithmistic
+    case 3:; // Arithmistic
+        uint32_t temp = 0;
+        temp |= (inst & 0x1000) >> 10;
+        temp |= (inst & 0x0060) >> 5;
+
+        const uint32_t funct = temp;
+        const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+        const uint32_t rs2 = c_dec_rs2c(inst) | 0x08;
+        const uint32_t rd = rs1;
+
+        switch(funct){
+        case 0: // SUB
+            debug_print("Entered c.sub");
+            rv->X[rd] = rv->X[rs1] - rv->X[rs2];
+            break;
+        case 1: // XOR
+            debug_print("Entered c.xor");
+            rv->X[rd] = rv->X[rs1] ^ rv->X[rs2];
+            break;
+        case 2: // OR
+            debug_print("Entered c.or");
+            rv->X[rd] = rv->X[rs1] | rv->X[rs2];
+            break;
+        case 3: // AND
+            debug_print("Entered c.and");
+            rv->X[rd] = rv->X[rs1] & rv->X[rs2];
+            break;
+        case 4:
+            assert(!"RV32F instructions");
+            break;
+        case 5:
+            assert(!"RV32F instructions");
+            break;
+        case 6:
+        case 7:
+            assert(!"Instruction preserved");
+            break;
+        default:
+            assert(!"Should not be reachable");
+            break;
+        }
         break;
     default:
         assert(!"Should not be reachable");

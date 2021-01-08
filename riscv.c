@@ -817,19 +817,6 @@ static bool c_op_addi(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool c_op_sw(struct riscv_t *rv, uint16_t inst)
-{
-    // const uint16_t imm =
-    //     (inst & FC_IMM_12_10) >> 7 | (inst & 0x20) >> 4 | (inst & 0x10) << 1;
-    // const uint16_t rs1 = c_dec_rs1c(inst);
-    // const uint16_t rs2 = c_dec_rs2c(inst);
-    // printf("%x, %x, %x\n", imm, rs1, rs2);
-
-
-    rv->PC += rv->inst_len;
-    return true;
-}
-
 static bool c_op_addi4spn(struct riscv_t *rv, uint16_t inst)
 {
     debug_print("Entered c.addi4spn");
@@ -984,6 +971,33 @@ static bool c_op_lw(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
+// CS-type
+static bool c_op_sw(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.sw");
+
+    uint32_t temp = 0;
+    //                ....xxxx....xxxx
+    temp |= (inst & 0b0000000001000000) >> 4;
+    temp |= (inst & FC_IMM_12_10) >> 7;
+    temp |= (inst & 0b0000000000100000) << 1;
+
+    const uint32_t imm = temp;
+    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+    const uint32_t rs2 = c_dec_rs2c(inst) | 0x08;
+    const uint32_t addr = rv->X[rs1] + imm;
+    const uint32_t data = rv->X[rs2];
+
+    if (addr & 3) {
+        rv_except_store_misaligned(rv, addr);
+        return false;
+    }
+    rv->io.mem_write_w(rv, addr, data);
+
+    rv->PC += rv->inst_len;
+    return true;
+}
+
 // CJ-type
 static bool c_op_j(struct riscv_t *rv, uint16_t inst)
 {
@@ -1099,11 +1113,11 @@ static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
 // c_op_addi        - done
 // c_op_swsp        - done
 // c_op_li          - done
-// c_op_slli NULL
+// c_op_slli NULL   
 // c_op_jal         - done
 // c_op_lw          - done
 // c_op_lwsp        - done
-// c_op_lui NULL
+// c_op_lui         - done
 // c_op_misc_alu NULL
 // c_op_jalr NULL
 // c_op_fsd NULL

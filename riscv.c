@@ -794,8 +794,6 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
 #ifdef ENABLE_RV32C
 static bool c_op_addi(struct riscv_t *rv, uint16_t inst)
 {
-    debug_print("Entered c.addi/nop");
-
     uint16_t tmp =
         (uint16_t)(((inst & FCI_IMM_12) >> 5) | (inst & FCI_IMM_6_2)) >> 2;
     const int32_t imm = (0x20 & tmp) ? 0xffffffc0 | tmp : tmp;
@@ -804,8 +802,10 @@ static bool c_op_addi(struct riscv_t *rv, uint16_t inst)
     // dispatch operation type
     if (rd != 0) {
         // C.ADDI
+        debug_print("Entered c.addi");
         rv->X[rd] += imm;
     } else {
+        debug_print("Entered c.nop");
         // C.NOP
     }
 
@@ -849,11 +849,11 @@ static bool c_op_li(struct riscv_t *rv, uint16_t inst)
 
 static bool c_op_lui(struct riscv_t *rv, uint16_t inst)
 {
-    debug_print("Entered c.lui/addi16sp");
     const uint16_t rd = c_dec_rd(inst);
     /* TODO */
     if (rd == 2) {
         // C.ADDI16SP
+        debug_print("Entered addi16sp");
         uint32_t tmp = (inst & 0x1000) >> 3;
         tmp |= (inst & 0x40);
         tmp |= (inst & 0x20) << 1;
@@ -865,6 +865,7 @@ static bool c_op_lui(struct riscv_t *rv, uint16_t inst)
         rv->X[rd] += imm;
     } else if (rd != 0) {
         // C.LUI
+        debug_print("Entered c.lui");
         uint32_t tmp = (inst & 0x1000) << 5 | (inst & 0x7c) << 12;
         const int32_t imm = (tmp & 0x20000) ? 0xfffc0000 | tmp : tmp;
         if (imm == 0)
@@ -878,7 +879,6 @@ static bool c_op_lui(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-// static bool c_op_XX(struct riscv_t *rv, uint16_t inst)
 static bool c_op_srli(struct riscv_t *rv, uint16_t inst)
 {
     debug_print("Entered c.srli");
@@ -946,6 +946,7 @@ static bool c_op_andi(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
+// static bool c_op_XX(struct riscv_t *rv, uint16_t inst)
 static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
 {
     bool exec_result;

@@ -909,18 +909,6 @@ static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool c_op_beqz(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
 static bool c_op_slli(struct riscv_t *rv, uint16_t inst)
 {
     rv->PC += rv->inst_len;
@@ -1001,19 +989,7 @@ static bool c_op_j(struct riscv_t *rv, uint16_t inst)
 {
     debug_print("Entered c.j");
 
-    uint32_t temp = 0;
-    //                ....xxxx....xxxx
-    temp |= (inst & 0b0000000000111000) >> 2;
-    temp |= (inst & 0b0000100000000000) >> 7;
-    temp |= (inst & 0b0000000000000100) << 3;
-    temp |= (inst & 0b0000000010000000) >> 1;
-    temp |= (inst & 0b0000000001000000) << 1;
-    temp |= (inst & 0b0000011000000000) >> 1;
-    temp |= (inst & 0b0000000100000000) << 2;
-    temp |= (inst & 0b0001000000000000) >> 1;
-
-    const uint32_t imm = sign_extend_h(temp);
-
+    const uint32_t imm = sign_extend_h(c_dec_cjtype_imm(inst));
     rv->PC += imm;
     return true;
 }
@@ -1022,22 +998,9 @@ static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
 {
     debug_print("Entered c.jal");
 
-    uint32_t temp = 0;
-    //                ....xxxx....xxxx
-    temp |= (inst & 0b0000000000111000) >> 2;
-    temp |= (inst & 0b0000100000000000) >> 7;
-    temp |= (inst & 0b0000000000000100) << 3;
-    temp |= (inst & 0b0000000010000000) >> 1;
-    temp |= (inst & 0b0000000001000000) << 1;
-    temp |= (inst & 0b0000011000000000) >> 1;
-    temp |= (inst & 0b0000000100000000) << 2;
-    temp |= (inst & 0b0001000000000000) >> 1;
-
-    const uint32_t imm = sign_extend_h(temp);
-
+    const uint32_t imm = sign_extend_h(c_dec_cjtype_imm(inst));
     rv->X[1] = rv->PC + 2;
     rv->PC += imm;
-
     return true;
 }
 
@@ -1064,6 +1027,41 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
     if (rv->PC & 1) {
         rv_except_inst_misaligned(rv, rv->PC);
         return false;
+    }
+
+    return true;
+}
+
+// CB-type
+static bool c_op_beqz(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.beqz");
+
+    const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(inst));
+    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+
+    if(!rv->X[rs1]){
+        rv->PC += imm;
+    }
+    else{
+        rv->PC += rv->inst_len;
+    }
+
+    return true;
+}
+
+static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.bnez");
+
+    const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(inst));
+    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+
+    if(rv->X[rs1]){
+        rv->PC += imm;
+    }
+    else{
+        rv->PC += rv->inst_len;
     }
 
     return true;
@@ -1174,6 +1172,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             const c_opcode_t op = c_opcodes[c_index];
 
             // DEBUG: Print accepted c-instruction
+            debug_print_hexval(rv->PC);
             debug_print_hexval(c_index);
             debug_print_hexval(inst);
             assert(op);

@@ -878,8 +878,100 @@ static bool c_op_lui(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
+// static bool c_op_XX(struct riscv_t *rv, uint16_t inst)
+static bool c_op_srli(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.srli");
+
+    uint32_t temp = 0;
+    temp |= (inst & 0x1000) >> 7;
+    temp |= (inst & 0x007C) >> 2;
+    
+    const uint32_t shamt = temp;
+    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+
+    if(shamt & 0x10){
+        assert(!"shamt[5]=1 Reserved");
+        return false;
+    }
+
+    rv->X[rs1] >>= shamt;
+
+    return true;
+}
+
+static bool c_op_srai(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.srai");
+
+    uint32_t temp = 0;
+    temp |= (inst & 0x1000) >> 7;
+    temp |= (inst & 0x007C) >> 2;
+    
+    const uint32_t shamt = temp;
+    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+
+    if(shamt & 0x10){
+        assert(!"shamt[5]=1 Reserved");
+        return false;
+    }
+
+    const uint32_t mask = 0x80000000 | rv->X[rs1];
+    rv->X[rs1] >>= shamt;
+    
+    for(unsigned int i = 0; i < shamt; ++i){
+        rv->X[rs1] |= mask >> i;
+    }
+
+    return true;
+}
+
+static bool c_op_andi(struct riscv_t *rv, uint16_t inst)
+{
+    debug_print("Entered c.andi");
+
+    const uint16_t mask = (0x1000 & inst) << 3;    
+    
+    uint16_t temp = 0;
+    for(int i = 0; i < 10; ++i){
+        temp |= (mask >> i);
+    }
+    temp |= (inst & 0x007C) >> 2;
+    
+    const uint32_t imm = sign_extend_h(temp);
+    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+
+    rv->X[rs1] &= imm;
+
+    return true;
+}
+
 static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
 {
+    bool exec_result;
+
+    // Find actual instruction
+    switch((inst & 0x0C00) >> 10){
+    case 0: // C.SRLI
+        exec_result = c_op_srli(rv, inst);
+        break;
+    case 1: // C.SRAI
+        exec_result = c_op_srai(rv, inst);
+        break;
+    case 2: // C.ANDI
+        exec_result = c_op_andi(rv, inst);
+        break;
+    case 3: // Arithmistic
+        break;
+    default:
+        assert(!"Should not be reachable");
+        break;
+    }
+
+    if(!exec_result){
+        return false;
+    }
+
     rv->PC += rv->inst_len;
     return true;
 }

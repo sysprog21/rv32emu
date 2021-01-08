@@ -990,10 +990,10 @@ static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
             rv->X[rd] = rv->X[rs1] & rv->X[rs2];
             break;
         case 4:
-            assert(!"RV32F instructions");
+            assert(!"RV64/128C instructions");
             break;
         case 5:
-            assert(!"RV32F instructions");
+            assert(!"RV64/128C instructions");
             break;
         case 6:
         case 7:
@@ -1139,7 +1139,7 @@ static bool c_op_j(struct riscv_t *rv, uint16_t inst)
 
     const uint32_t imm = sign_extend_h(c_dec_cjtype_imm(inst));
     rv->PC += imm;
-    return true;
+    return false;
 }
 
 static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
@@ -1149,32 +1149,57 @@ static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
     const uint32_t imm = sign_extend_h(c_dec_cjtype_imm(inst));
     rv->X[1] = rv->PC + 2;
     rv->PC += imm;
-    return true;
+    return false;
 }
 
 // CR-type
 static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
 {
     const uint32_t rs1 = c_dec_rs1(inst);
+    const uint32_t rs2 = c_dec_rs2(inst);
+    const uint32_t rd = rs1;
 
     switch ((inst & 0x1000) >> 12) {
-    case 0:  // c.jr
-        debug_print("Entered c.jr");
-        rv->PC = rv->X[rs1];
+    case 0:  
+        if(rs2){
+            debug_print("Entered c.mv");
+            rv->X[rd] = rv->X[rs2];
+            rv->PC += rv->inst_len;
+        }
+        else{
+            debug_print("Entered c.jr");
+            rv->PC = rv->X[rs1];
+
+            return false;
+        }
         break;
-    case 1:  // c.jalr
-        debug_print("Entered c.jalr");
-        rv->X[1] = rv->PC + 2;
-        rv->PC = rv->X[rs1];
+    case 1:
+        if(rs1){
+            if(rs2){
+                debug_print("Entered c.add");
+                rv->X[rd] = rv->X[rs1] + rv->X[rs2];
+                rv->PC += rv->inst_len;
+            }
+            else{
+                debug_print("Entered c.jalr");
+                rv->X[1] = rv->PC + 2;
+                rv->PC = rv->X[rs1];
+
+                if (rv->PC & 1) {
+                    rv_except_inst_misaligned(rv, rv->PC);
+                    return false;
+                }
+
+                return false;
+            }
+        }
+        else{
+            debug_print("Entered c.ebreak");
+        }
         break;
     default:
         assert(!"Should be unreachbale.");
         break;
-    }
-
-    if (rv->PC & 1) {
-        rv_except_inst_misaligned(rv, rv->PC);
-        return false;
     }
 
     return true;
@@ -1195,7 +1220,7 @@ static bool c_op_beqz(struct riscv_t *rv, uint16_t inst)
         rv->PC += rv->inst_len;
     }
 
-    return true;
+    return false;
 }
 
 static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
@@ -1212,7 +1237,7 @@ static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
         rv->PC += rv->inst_len;
     }
 
-    return true;
+    return false;
 }
 #else
 #define c_op_addi4spn NULL

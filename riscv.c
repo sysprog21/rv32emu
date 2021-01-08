@@ -834,18 +834,6 @@ static bool c_op_addi4spn(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool c_op_fsd(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
-static bool c_op_fsw(struct riscv_t *rv, uint16_t inst)
-{
-    rv->PC += rv->inst_len;
-    return true;
-}
-
 static bool c_op_li(struct riscv_t *rv, uint16_t inst)
 {
     debug_print("Entered c.li");
@@ -898,6 +886,19 @@ static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
 
 static bool c_op_slli(struct riscv_t *rv, uint16_t inst)
 {
+    debug_print("Entered c.slli");
+
+    uint32_t temp = 0;
+    temp |= (inst & FCI_IMM_12) >> 7;
+    temp |= (inst & FCI_IMM_6_2) >> 2;
+
+    const uint32_t shamt = temp;
+    const uint32_t rd = c_dec_rd(inst);
+
+    if(rd){
+        rv->X[rd] <<= shamt;
+    }
+
     rv->PC += rv->inst_len;
     return true;
 }
@@ -1021,7 +1022,7 @@ static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
 // CR-type
 static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
 {
-    const rs1 = c_dec_rs1(inst);
+    const uint32_t rs1 = c_dec_rs1(inst);
 
     switch ((inst & 0x1000) >> 12) {
     case 0:  // c.jr
@@ -1092,10 +1093,8 @@ static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
 #define c_op_lui NULL
 #define c_op_misc_alu NULL
 #define c_op_jalr NULL
-#define c_op_fsd NULL
 #define c_op_j NULL
 #define c_op_beqz NULL
-#define c_op_fsw NULL
 #define c_op_bnez NULL
 #define c_op_sw NULL
 #endif  // ENABLE_RV32C
@@ -1107,6 +1106,8 @@ static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
 #define c_op_fsdsp NULL
 #define c_op_fld NULL
 #define c_op_flw NULL
+#define c_op_fsw NULL
+#define c_op_fsd NULL
 
 /* TODO: function implemetation and Test Correctness*/
 // c_op_addi4spn    - done
@@ -1119,13 +1120,11 @@ static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
 // c_op_lwsp        - done
 // c_op_lui         - done
 // c_op_misc_alu NULL
-// c_op_jalr NULL
-// c_op_fsd NULL
+// c_op_jalr NULL   - done
 // c_op_j           - done
-// c_op_beqz NULL
-// c_op_fsw NULL
-// c_op_bnez NULL
-// c_op_sw
+// c_op_beqz        - done
+// c_op_bnez        - done
+// c_op_sw          - done
 
 // opcode handler type
 typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);

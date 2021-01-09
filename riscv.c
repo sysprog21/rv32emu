@@ -785,16 +785,17 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     assert(rv);
     const uint64_t cycles_target = rv->csr_cycle + cycles;
     uint32_t inst, index;
-// clang-format off
+
 #define OP_UNIMP op_unimp
 #ifdef ENABLE_COMPUTED_GOTO
-    #define OP(instr) &&op_##instr
-    #define TABLE_TYPE const void *
-#else
-    #define OP(instr) op_##instr
-    #define TABLE_TYPE const opcode_t
+#define OP(instr) &&op_##instr
+#define TABLE_TYPE const void *
+#else  // ENABLE_COMPUTED_GOTO = false
+#define OP(instr) op_##instr
+#define TABLE_TYPE const opcode_t
 #endif
 
+    // clang-format off
     TABLE_TYPE jump_table[] = {
     //  000         001           010        011           100         101        110   111
         OP(load),   OP(load_fp),  OP(unimp), OP(misc_mem), OP(op_imm), OP(auipc), OP(unimp), OP(unimp), // 00
@@ -829,12 +830,10 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         /* increment the cycles csr*/ \
         rv->csr_cycle++;              \
     }
-// clang-format off
+
 #define TARGET(instr)         \
-op_##instr :                  \
-    EXEC(instr);              \
+    op_##instr : EXEC(instr); \
     DISPATCH();
-    // clang-format on
 
     DISPATCH();
 

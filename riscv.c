@@ -1195,6 +1195,7 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
         }
         else{
             debug_print("Entered c.ebreak");
+            rv->io.on_ebreak(rv);
         }
         break;
     default:

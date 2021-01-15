@@ -850,7 +850,6 @@ static bool c_op_li(struct riscv_t *rv, uint16_t inst)
 static bool c_op_lui(struct riscv_t *rv, uint16_t inst)
 {
     const uint16_t rd = c_dec_rd(inst);
-    /* TODO */
     if (rd == 2) {
         // C.ADDI16SP
         debug_print("Entered addi16sp");
@@ -1267,23 +1266,6 @@ static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
 #define c_op_flw NULL
 #define c_op_fsw NULL
 #define c_op_fsd NULL
-
-/* TODO: function implemetation and Test Correctness*/
-// c_op_addi4spn    - done
-// c_op_addi        - done
-// c_op_swsp        - done
-// c_op_li          - done
-// c_op_slli NULL   
-// c_op_jal         - done
-// c_op_lw          - done
-// c_op_lwsp        - done
-// c_op_lui         - done
-// c_op_misc_alu NULL
-// c_op_jalr NULL   - done
-// c_op_j           - done
-// c_op_beqz        - done
-// c_op_bnez        - done
-// c_op_sw          - done
 
 // opcode handler type
 typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);

@@ -1,4 +1,5 @@
 build/DOOM1.WAD*
 build/rv32emu
+build/test
 *.o
 *.o.d

@@ -6,6 +6,10 @@
 #include "riscv.h"
 #include "riscv_private.h"
 
+#ifdef ENABLE_RV32C
+#include "rvc.h"
+#endif  // ENABLE_RV32C
+
 static void rv_except_inst_misaligned(struct riscv_t *rv, uint32_t old_pc)
 {
     const uint32_t base = rv->csr_mtvec & ~0x3;
@@ -123,7 +127,7 @@ static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
         return false;
     }
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->step_size;
     // enforce zero register
     if (rd == rv_reg_zero)
         rv->X[rv_reg_zero] = 0;
@@ -134,7 +138,7 @@ static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
 static bool op_misc_mem(struct riscv_t *rv, uint32_t inst UNUSED)
 {
     // FIXME: fill real implementations
-    rv->PC += 4;
+    rv->PC += rv->step_size;
     return true;
 }
 #else
@@ -187,7 +191,7 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->step_size;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -204,7 +208,7 @@ static bool op_auipc(struct riscv_t *rv, uint32_t inst)
     rv->X[rd] = val;
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->step_size;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -249,7 +253,7 @@ static bool op_store(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->step_size;
     return true;
 }
 
@@ -380,7 +384,7 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
         return false;
     }
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->step_size;
     // enforce zero register
     if (rd == rv_reg_zero)
         rv->X[rv_reg_zero] = 0;
@@ -395,7 +399,7 @@ static bool op_lui(struct riscv_t *rv, uint32_t inst)
     rv->X[rd] = val;
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->step_size;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -446,7 +450,7 @@ static bool op_branch(struct riscv_t *rv, uint32_t inst)
             rv_except_inst_misaligned(rv, pc);
     } else {
         // step over instruction
-        rv->PC += 4;
+        rv->PC += rv->step_size;
     }
     // can branch
     return false;
@@ -654,7 +658,7 @@ static bool op_system(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->step_size;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -750,7 +754,7 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += 4;
+    rv->PC += rv->step_size;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -788,27 +792,75 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     assert(rv);
     const uint64_t cycles_target = rv->csr_cycle + cycles;
+    static uint32_t inst_buffer = 0;
 
     while (rv->csr_cycle < cycles_target && !rv->halt) {
-        // fetch the next instruction
-        const uint32_t inst = rv->io.mem_ifetch(rv, rv->PC);
-
-        // standard uncompressed instruction
-        if ((inst & 3) == 3) {
-            const uint32_t index = (inst & INST_6_2) >> 2;
-
-	    // dispatch this opcode
-            const opcode_t op = opcodes[index];
-            assert(op);
-            if (!op(rv, inst))
-                break;
-
-            // increment the cycles csr
-            rv->csr_cycle++;
-        } else {
-            // TODO: compressed instruction
-            assert(!"Unreachable");
+        uint32_t inst = 0;
+#ifdef ENABLE_RV32C
+        bool halfway = (rv->PC & 3) != 0;
+        if (!halfway) {
+            // fetch the next instruction
+            inst_buffer = rv->io.mem_ifetch(rv, rv->PC);
         }
+
+        if ((inst_buffer & 3) != 3) {
+            // cut 16 bit instruction from buffer
+            inst = inst_buffer & 0x0000FFFF;
+            inst_buffer >>= 16;
+
+            // TODO: filter illegal instruction
+            if (inst == 0) {
+                rv->halt = true;
+                break;
+            }
+
+            // decompress it
+            const uint8_t funct3 = (inst & 0xE000) >> 13,
+                          opcode = inst & 0x0003;
+            if (opcode == 0b00) {
+                switch (funct3) {
+                // C.ADDI4SPN -> ADDI
+                case 0b000:
+                    inst = addi4spn_to_addi(inst);
+                    break;
+                // C.LW -> LW
+                case 0b010:
+                    inst = clw_to_lw(inst);
+                    break;
+                // C.SW -> SW
+                case 0b110:
+                    inst = csw_to_sw(inst);
+                    break;
+                default:
+                    break;
+                }
+            }
+            rv->step_size = 2;
+        } else {
+            if (halfway) {
+                inst = inst_buffer;
+                rv->csr_cycle++;
+                inst_buffer = rv->io.mem_ifetch(rv, rv->PC + 2);
+                inst |= inst_buffer << 16;
+                inst_buffer >>= 16;
+            } else {
+                inst = inst_buffer;
+            }
+            rv->step_size = 4;
+        }
+#else
+        inst_buffer = rv->io.mem_ifetch(rv, rv->PC);
+        inst = inst_buffer;
+#endif
+        const uint32_t index = (inst & INST_6_2) >> 2;
+
+        // dispatch this opcode
+        const opcode_t op = opcodes[index];
+        assert(op);
+        if (!op(rv, inst))
+            break;
+
+        rv->csr_cycle++;
     }
 }
 
@@ -891,6 +943,9 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
 
     // set the reset address
     rv->PC = pc;
+
+    // set the step size
+    rv->step_size = 4;
 
     // set the default stack pointer
     rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;

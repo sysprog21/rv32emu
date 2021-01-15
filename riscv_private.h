@@ -82,6 +82,8 @@ enum {
 
 struct riscv_t {
     bool halt;
+    // step size for PC
+    uint8_t step_size;
 
     // io interface
     struct riscv_io_t io;

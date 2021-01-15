@@ -6,6 +6,7 @@ CFLAGS += -D ENABLE_RV32M
 CFLAGS += -D ENABLE_Zicsr
 CFLAGS += -D ENABLE_Zifencei
 CFLAGS += -D ENABLE_RV32A
+CFLAGS += -D ENABLE_RV32C
 CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 
 # Experimental SDL oriented system calls
@@ -34,7 +35,8 @@ OBJS = \
 	elf.o \
 	main.o \
 	syscall.o \
-	syscall_sdl.o
+	syscall_sdl.o\
+	rvc.o
 
 deps := $(OBJS:%.o=%.o.d)
 

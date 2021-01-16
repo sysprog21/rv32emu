@@ -885,11 +885,11 @@ static bool c_op_srli(struct riscv_t *rv, uint16_t inst)
     uint32_t temp = 0;
     temp |= (inst & 0x1000) >> 7;
     temp |= (inst & 0x007C) >> 2;
-    
+
     const uint32_t shamt = temp;
     const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
 
-    if(shamt & 0x10){
+    if (shamt & 0x10) {
         assert(!"shamt[5]=1 Reserved");
         return false;
     }
@@ -906,19 +906,19 @@ static bool c_op_srai(struct riscv_t *rv, uint16_t inst)
     uint32_t temp = 0;
     temp |= (inst & 0x1000) >> 7;
     temp |= (inst & 0x007C) >> 2;
-    
+
     const uint32_t shamt = temp;
     const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
 
-    if(shamt & 0x10){
+    if (shamt & 0x10) {
         assert(!"shamt[5]=1 Reserved");
         return false;
     }
 
     const uint32_t mask = 0x80000000 | rv->X[rs1];
     rv->X[rs1] >>= shamt;
-    
-    for(unsigned int i = 0; i < shamt; ++i){
+
+    for (unsigned int i = 0; i < shamt; ++i) {
         rv->X[rs1] |= mask >> i;
     }
 
@@ -929,14 +929,14 @@ static bool c_op_andi(struct riscv_t *rv, uint16_t inst)
 {
     debug_print("Entered c.andi");
 
-    const uint16_t mask = (0x1000 & inst) << 3;    
-    
+    const uint16_t mask = (0x1000 & inst) << 3;
+
     uint16_t temp = 0;
-    for(int i = 0; i < 10; ++i){
+    for (int i = 0; i < 10; ++i) {
         temp |= (mask >> i);
     }
     temp |= (inst & 0x007C) >> 2;
-    
+
     const uint32_t imm = sign_extend_h(temp);
     const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
 
@@ -951,17 +951,17 @@ static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
     bool exec_result;
 
     // Find actual instruction
-    switch((inst & 0x0C00) >> 10){
-    case 0: // C.SRLI
+    switch ((inst & 0x0C00) >> 10) {
+    case 0:  // C.SRLI
         exec_result = c_op_srli(rv, inst);
         break;
-    case 1: // C.SRAI
+    case 1:  // C.SRAI
         exec_result = c_op_srai(rv, inst);
         break;
-    case 2: // C.ANDI
+    case 2:  // C.ANDI
         exec_result = c_op_andi(rv, inst);
         break;
-    case 3:; // Arithmistic
+    case 3:;  // Arithmistic
         uint32_t temp = 0;
         temp |= (inst & 0x1000) >> 10;
         temp |= (inst & 0x0060) >> 5;
@@ -971,20 +971,20 @@ static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
         const uint32_t rs2 = c_dec_rs2c(inst) | 0x08;
         const uint32_t rd = rs1;
 
-        switch(funct){
-        case 0: // SUB
+        switch (funct) {
+        case 0:  // SUB
             debug_print("Entered c.sub");
             rv->X[rd] = rv->X[rs1] - rv->X[rs2];
             break;
-        case 1: // XOR
+        case 1:  // XOR
             debug_print("Entered c.xor");
             rv->X[rd] = rv->X[rs1] ^ rv->X[rs2];
             break;
-        case 2: // OR
+        case 2:  // OR
             debug_print("Entered c.or");
             rv->X[rd] = rv->X[rs1] | rv->X[rs2];
             break;
-        case 3: // AND
+        case 3:  // AND
             debug_print("Entered c.and");
             rv->X[rd] = rv->X[rs1] & rv->X[rs2];
             break;
@@ -1008,7 +1008,7 @@ static bool c_op_misc_alu(struct riscv_t *rv, uint16_t inst)
         break;
     }
 
-    if(!exec_result){
+    if (!exec_result) {
         return false;
     }
 
@@ -1027,7 +1027,7 @@ static bool c_op_slli(struct riscv_t *rv, uint16_t inst)
     const uint32_t shamt = temp;
     const uint32_t rd = c_dec_rd(inst);
 
-    if(rd){
+    if (rd) {
         rv->X[rd] <<= shamt;
     }
 
@@ -1159,13 +1159,12 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
     const uint32_t rd = rs1;
 
     switch ((inst & 0x1000) >> 12) {
-    case 0:  
-        if(rs2){
+    case 0:
+        if (rs2) {
             debug_print("Entered c.mv");
             rv->X[rd] = rv->X[rs2];
             rv->PC += rv->inst_len;
-        }
-        else{
+        } else {
             debug_print("Entered c.jr");
             rv->PC = rv->X[rs1];
 
@@ -1173,13 +1172,12 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
         }
         break;
     case 1:
-        if(rs1){
-            if(rs2){
+        if (rs1) {
+            if (rs2) {
                 debug_print("Entered c.add");
                 rv->X[rd] = rv->X[rs1] + rv->X[rs2];
                 rv->PC += rv->inst_len;
-            }
-            else{
+            } else {
                 debug_print("Entered c.jalr");
                 rv->X[1] = rv->PC + 2;
                 rv->PC = rv->X[rs1];
@@ -1191,8 +1189,7 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
 
                 return false;
             }
-        }
-        else{
+        } else {
             debug_print("Entered c.ebreak");
             rv->io.on_ebreak(rv);
         }
@@ -1213,10 +1210,9 @@ static bool c_op_beqz(struct riscv_t *rv, uint16_t inst)
     const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(inst));
     const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
 
-    if(!rv->X[rs1]){
+    if (!rv->X[rs1]) {
         rv->PC += imm;
-    }
-    else{
+    } else {
         rv->PC += rv->inst_len;
     }
 
@@ -1230,10 +1226,9 @@ static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
     const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(inst));
     const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
 
-    if(rv->X[rs1]){
+    if (rv->X[rs1]) {
         rv->PC += imm;
-    }
-    else{
+    } else {
         rv->PC += rv->inst_len;
     }
 

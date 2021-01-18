@@ -70,7 +70,11 @@ uint32_t memory_read_str(memory_t *m, uint8_t *dst, uint32_t addr, uint32_t max)
 uint32_t memory_read_ifetch(memory_t *m, uint32_t addr)
 {
     const uint32_t addr_lo = addr & mask_lo;
+#ifdef ENABLE_RV32C
+    assert((addr_lo & 1) == 0);
+#else
     assert((addr_lo & 3) == 0);
+#endif
 
     chunk_t *c = m->chunks[addr >> 16];
     assert(c);

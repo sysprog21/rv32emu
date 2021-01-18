@@ -10,6 +10,8 @@ static bool opt_trace = false;
 
 /* target executable */
 static const char *opt_prog_name = "a.out";
+/* signature file name for RISCV-compliance test */
+static const char *signature_name = NULL;
 
 static riscv_word_t on_mem_ifetch(struct riscv_t *rv, riscv_word_t addr)
 {
@@ -110,8 +112,12 @@ static bool parse_args(int argc, char **args)
     /* parse each argument in turn */
     for (int i = 1; i < argc; ++i) {
         const char *arg = args[i];
+        /* get signature file name */
+        if (arg == strstr(arg, "+signature=")) {
+            signature_name = arg + 11;
+        }
         /* parse flags */
-        if (arg[0] == '-') {
+        else if (arg[0] == '-') {
             if (!strcmp(arg, "--help"))
                 return false;
             if (!strcmp(arg, "--trace")) {
@@ -175,6 +181,25 @@ int main(int argc, char **args)
         run_and_trace(rv, elf);
     } else {
         run(rv);
+    }
+
+    if (signature_name) {
+        FILE *sf = fopen(signature_name, "w");
+        const struct Elf32_Sym *begin_signature, *end_signature;
+        uint32_t begin_address = 0, end_address = 0;
+        if ((begin_signature = elf_get_symbol(elf, "begin_signature")))
+            begin_address = begin_signature->st_value;
+        if ((end_signature = elf_get_symbol(elf, "end_signature")))
+            end_address = end_signature->st_value;
+
+        int size = end_address - begin_address;
+        for (int i = 0; i < size; i += 4) {
+            for (int j = 3; j >= 0; j--) {
+                fprintf(sf, "%02x", on_mem_read_b(rv, begin_address + i + j));
+            }
+            fprintf(sf, "\n");
+        }
+        fclose(sf);
     }
 
     /* finalize the RISC-V runtime */

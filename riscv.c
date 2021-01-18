@@ -446,7 +446,12 @@ static bool op_branch(struct riscv_t *rv, uint32_t inst)
     // perform branch action
     if (taken) {
         rv->PC += imm;
+#ifdef ENABLE_RV32C
+        rv->inst_buffer = 0;
+        if (rv->PC & 0x1)
+#else
         if (rv->PC & 0x3)
+#endif
             rv_except_inst_misaligned(rv, pc);
     } else {
         // step over instruction
@@ -466,7 +471,7 @@ static bool op_jalr(struct riscv_t *rv, uint32_t inst)
     const int32_t imm = dec_itype_imm(inst);
 
     // compute return address
-    const uint32_t ra = rv->PC + 4;
+    const uint32_t ra = rv->PC + rv->step_size;
 
     // jump
     rv->PC = (rv->X[rs1] + imm) & ~1u;
@@ -475,8 +480,13 @@ static bool op_jalr(struct riscv_t *rv, uint32_t inst)
     if (rd != rv_reg_zero)
         rv->X[rd] = ra;
 
-    // check for exception
+// check for exception
+#ifdef ENABLE_RV32C
+    rv->inst_buffer = 0;
+    if (rv->PC & 0x1) {
+#else
     if (rv->PC & 0x3) {
+#endif
         rv_except_inst_misaligned(rv, pc);
         return false;
     }
@@ -492,15 +502,20 @@ static bool op_jal(struct riscv_t *rv, uint32_t inst)
     const int32_t rel = dec_jtype_imm(inst);
 
     // compute return address
-    const uint32_t ra = rv->PC + 4;
+    const uint32_t ra = rv->PC + rv->step_size;
     rv->PC += rel;
 
     // link
     if (rd != rv_reg_zero)
         rv->X[rd] = ra;
 
-    // check alignment of PC
+// check alignment of PC
+#ifdef ENABLE_RV32C
+    rv->inst_buffer = 0;
+    if (rv->PC & 0x1) {
+#else
     if (rv->PC & 0x3) {
+#endif
         rv_except_inst_misaligned(rv, pc);
         return false;
     }
@@ -792,21 +807,18 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     assert(rv);
     const uint64_t cycles_target = rv->csr_cycle + cycles;
-    static uint32_t inst_buffer = 0;
 
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         uint32_t inst = 0;
 #ifdef ENABLE_RV32C
-        bool halfway = (rv->PC & 3) != 0;
-        if (!halfway) {
+        if (rv->inst_buffer == 0) {
             // fetch the next instruction
-            inst_buffer = rv->io.mem_ifetch(rv, rv->PC);
+            rv->inst_buffer = rv->io.mem_ifetch(rv, rv->PC);
         }
-
-        if ((inst_buffer & 3) != 3) {
+        if ((rv->inst_buffer & 3) != 3) {
             // cut 16 bit instruction from buffer
-            inst = inst_buffer & 0x0000FFFF;
-            inst_buffer >>= 16;
+            inst = rv->inst_buffer & 0x0000FFFF;
+            rv->inst_buffer >>= 16;
 
             // TODO: filter illegal instruction
             if (inst == 0) {
@@ -819,38 +831,98 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
                           opcode = inst & 0x0003;
             if (opcode == 0b00) {
                 switch (funct3) {
-                // C.ADDI4SPN -> ADDI
+                // C.ADDI4SPN
                 case 0b000:
-                    inst = addi4spn_to_addi(inst);
+                    inst = caddi4spn_to_addi(inst);
                     break;
-                // C.LW -> LW
+                // C.LW
                 case 0b010:
                     inst = clw_to_lw(inst);
                     break;
-                // C.SW -> SW
+                // C.SW
                 case 0b110:
                     inst = csw_to_sw(inst);
                     break;
                 default:
+                    rv_except_illegal_inst(rv);
+                    break;
+                }
+            } else if (opcode == 0b01) {
+                switch (funct3) {
+                // C.NOP / C.ADDI
+                case 0b000:
+                    inst = caddi_to_addi(inst);
+                    break;
+                // C.JAL
+                case 0b001:
+                    inst = cjal_to_jal(inst);
+                    break;
+                // C.LI
+                case 0b010:
+                    inst = cli_to_addi(inst);
+                    break;
+                // C.LUI / C.ADDI16SP
+                case 0b011:
+                    inst = clui_to_lui(inst);
+                    break;
+                // CR / CB format
+                case 0b100:
+                    inst = parse_cb_cs(inst);
+                    break;
+                // C.J
+                case 0b101:
+                    inst = cj_to_jal(inst);
+                    break;
+                // C.BEQZ
+                case 0b110:
+                    inst = cbeqz_to_beq(inst);
+                    break;
+                // C.BENZ
+                case 0b111:
+                    inst = cbenz_to_bne(inst);
+                    break;
+                default:
+                    rv_except_illegal_inst(rv);
+                    break;
+                }
+            } else if (opcode == 0b10) {
+                switch (funct3) {
+                // C.SLLI
+                case 0b000:
+                    inst = cslli_to_slli(inst);
+                    break;
+                // C.LWSP
+                case 0b010:
+                    inst = clwsp_to_lw(inst);
+                    break;
+                // CR format
+                case 0b100:
+                    inst = parse_cr(inst);
+                    break;
+                // C.SWSP
+                case 0b110:
+                    inst = cswsp_to_sw(inst);
+                    break;
+                default:
+                    rv_except_illegal_inst(rv);
                     break;
                 }
             }
             rv->step_size = 2;
         } else {
-            if (halfway) {
-                inst = inst_buffer;
-                rv->csr_cycle++;
-                inst_buffer = rv->io.mem_ifetch(rv, rv->PC + 2);
-                inst |= inst_buffer << 16;
-                inst_buffer >>= 16;
+            if (rv->inst_buffer != 0) {
+                inst = rv->inst_buffer;
+                rv->inst_buffer = rv->io.mem_ifetch(rv, rv->PC + 2);
+                inst |= rv->inst_buffer << 16;
+                rv->inst_buffer >>= 16;
             } else {
-                inst = inst_buffer;
+                inst = rv->inst_buffer;
+                rv->inst_buffer = 0;
             }
             rv->step_size = 4;
         }
 #else
-        inst_buffer = rv->io.mem_ifetch(rv, rv->PC);
-        inst = inst_buffer;
+        inst = rv->io.mem_ifetch(rv, rv->PC);
 #endif
         const uint32_t index = (inst & INST_6_2) >> 2;
 
@@ -946,6 +1018,9 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
 
     // set the step size
     rv->step_size = 4;
+
+    // clear instruction buffer
+    rv->inst_buffer = 0;
 
     // set the default stack pointer
     rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;

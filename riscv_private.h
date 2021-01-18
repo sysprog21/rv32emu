@@ -84,6 +84,8 @@ struct riscv_t {
     bool halt;
     // step size for PC
     uint8_t step_size;
+    // instruction buffer
+    uint32_t inst_buffer;
 
     // io interface
     struct riscv_io_t io;

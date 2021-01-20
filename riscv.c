@@ -801,6 +801,19 @@ static const opcode_t opcodes[] = {
     op_madd,   op_msub,     op_nmsub, op_nmadd,    op_fp,     NULL,     NULL, NULL, // 10
     op_branch, op_jalr,     NULL,     op_jal,      op_system, NULL,     NULL, NULL, // 11
 };
+
+#ifdef ENABLE_RV32C
+// decompressor type
+typedef uint32_t (*decompressor_t)(uint32_t inst);
+
+// decompressor table. Row for funct3, column for opcode.
+decompressor_t decompressors[] = {
+//  000                001          010          011           100           101        110           111
+    caddi4spn_to_addi, NULL,        clw_to_lw,   NULL,         NULL,         NULL,      csw_to_sw,    NULL,         // 00
+    caddi_to_addi,     cjal_to_jal, cli_to_addi, parse_011_01, parse_100_01, cj_to_jal, cbeqz_to_beq, cbenz_to_bne, // 01
+    cslli_to_slli,     NULL,        clwsp_to_lw, NULL,         parse_100_10, NULL,      cswsp_to_sw,  NULL,         // 10
+};
+#endif // ENABLE_RV32C
 // clang-format on
 
 void rv_step(struct riscv_t *rv, int32_t cycles)
@@ -827,87 +840,12 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             }
 
             // decompress it
-            const uint8_t funct3 = (inst & 0xE000) >> 13,
-                          opcode = inst & 0x0003;
-            if (opcode == 0b00) {
-                switch (funct3) {
-                // C.ADDI4SPN
-                case 0b000:
-                    inst = caddi4spn_to_addi(inst);
-                    break;
-                // C.LW
-                case 0b010:
-                    inst = clw_to_lw(inst);
-                    break;
-                // C.SW
-                case 0b110:
-                    inst = csw_to_sw(inst);
-                    break;
-                default:
-                    rv_except_illegal_inst(rv);
-                    break;
-                }
-            } else if (opcode == 0b01) {
-                switch (funct3) {
-                // C.NOP / C.ADDI
-                case 0b000:
-                    inst = caddi_to_addi(inst);
-                    break;
-                // C.JAL
-                case 0b001:
-                    inst = cjal_to_jal(inst);
-                    break;
-                // C.LI
-                case 0b010:
-                    inst = cli_to_addi(inst);
-                    break;
-                // C.LUI / C.ADDI16SP
-                case 0b011:
-                    inst = clui_to_lui(inst);
-                    break;
-                // CR / CB format
-                case 0b100:
-                    inst = parse_cb_cs(inst);
-                    break;
-                // C.J
-                case 0b101:
-                    inst = cj_to_jal(inst);
-                    break;
-                // C.BEQZ
-                case 0b110:
-                    inst = cbeqz_to_beq(inst);
-                    break;
-                // C.BENZ
-                case 0b111:
-                    inst = cbenz_to_bne(inst);
-                    break;
-                default:
-                    rv_except_illegal_inst(rv);
-                    break;
-                }
-            } else if (opcode == 0b10) {
-                switch (funct3) {
-                // C.SLLI
-                case 0b000:
-                    inst = cslli_to_slli(inst);
-                    break;
-                // C.LWSP
-                case 0b010:
-                    inst = clwsp_to_lw(inst);
-                    break;
-                // CR format
-                case 0b100:
-                    inst = parse_cr(inst);
-                    break;
-                // C.SWSP
-                case 0b110:
-                    inst = cswsp_to_sw(inst);
-                    break;
-                default:
-                    rv_except_illegal_inst(rv);
-                    break;
-                }
-            }
+            const uint8_t index =
+                ((inst & 0x0003) << 3) | ((inst & 0xE000) >> 13);
+            const decompressor_t decompressor = decompressors[index];
+            assert(decompressor);
+            inst = decompressor(inst);
+
             rv->step_size = 2;
         } else {
             if (rv->inst_buffer != 0) {

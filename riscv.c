@@ -1089,6 +1089,7 @@ static bool c_op_j(struct riscv_t *rv, uint16_t inst)
 {
     const uint32_t imm = sign_extend_h(c_dec_cjtype_imm(inst));
     rv->PC += imm;
+    // can branch
     return false;
 }
 
@@ -1097,6 +1098,7 @@ static bool c_op_jal(struct riscv_t *rv, uint16_t inst)
     const uint32_t imm = sign_extend_h(c_dec_cjtype_imm(inst));
     rv->X[1] = rv->PC + 2;
     rv->PC += imm;
+    // can branch
     return false;
 }
 
@@ -1110,31 +1112,34 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
     switch ((inst & 0x1000) >> 12) {
     case 0:
         if (rs2) {
+            // C.MV
             rv->X[rd] = rv->X[rs2];
             rv->PC += rv->inst_len;
         } else {
+            // C.JR
             rv->PC = rv->X[rs1];
-
             return false;
         }
         break;
     case 1:
         if (rs1) {
             if (rs2) {
+                // C.ADD
                 rv->X[rd] = rv->X[rs1] + rv->X[rs2];
                 rv->PC += rv->inst_len;
             } else {
+                // C.JALR
                 rv->X[1] = rv->PC + 2;
                 rv->PC = rv->X[rs1];
-
                 if (rv->PC & 1) {
                     rv_except_inst_misaligned(rv, rv->PC);
                     return false;
                 }
-
+                // can branch
                 return false;
             }
         } else {
+            // C.EBREAK
             rv->io.on_ebreak(rv);
         }
         break;
@@ -1142,7 +1147,6 @@ static bool c_op_cr(struct riscv_t *rv, uint16_t inst)
         assert(!"Should be unreachbale.");
         break;
     }
-
     return true;
 }
 
@@ -1151,13 +1155,8 @@ static bool c_op_beqz(struct riscv_t *rv, uint16_t inst)
 {
     const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(inst));
     const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
-
-    if (!rv->X[rs1]) {
-        rv->PC += imm;
-    } else {
-        rv->PC += rv->inst_len;
-    }
-
+    rv->PC += (!rv->X[rs1]) ? imm : rv->inst_len;
+    // can branch
     return false;
 }
 
@@ -1165,13 +1164,8 @@ static bool c_op_bnez(struct riscv_t *rv, uint16_t inst)
 {
     const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(inst));
     const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
-
-    if (rv->X[rs1]) {
-        rv->PC += imm;
-    } else {
-        rv->PC += rv->inst_len;
-    }
-
+    rv->PC += (rv->X[rs1]) ? imm : rv->inst_len;
+    // can branch
     return false;
 }
 #else

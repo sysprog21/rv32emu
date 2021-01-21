@@ -127,7 +127,7 @@ static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
         return false;
     }
     // step over instruction
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
     // enforce zero register
     if (rd == rv_reg_zero)
         rv->X[rv_reg_zero] = 0;
@@ -138,7 +138,7 @@ static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
 static bool op_misc_mem(struct riscv_t *rv, uint32_t inst UNUSED)
 {
     // FIXME: fill real implementations
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
     return true;
 }
 #else
@@ -191,7 +191,7 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -208,7 +208,7 @@ static bool op_auipc(struct riscv_t *rv, uint32_t inst)
     rv->X[rd] = val;
 
     // step over instruction
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -253,7 +253,7 @@ static bool op_store(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
     return true;
 }
 
@@ -384,7 +384,7 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
         return false;
     }
     // step over instruction
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
     // enforce zero register
     if (rd == rv_reg_zero)
         rv->X[rv_reg_zero] = 0;
@@ -399,7 +399,7 @@ static bool op_lui(struct riscv_t *rv, uint32_t inst)
     rv->X[rd] = val;
 
     // step over instruction
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -455,7 +455,7 @@ static bool op_branch(struct riscv_t *rv, uint32_t inst)
             rv_except_inst_misaligned(rv, pc);
     } else {
         // step over instruction
-        rv->PC += rv->step_size;
+        rv->PC += rv->inst_length;
     }
     // can branch
     return false;
@@ -471,7 +471,7 @@ static bool op_jalr(struct riscv_t *rv, uint32_t inst)
     const int32_t imm = dec_itype_imm(inst);
 
     // compute return address
-    const uint32_t ra = rv->PC + rv->step_size;
+    const uint32_t ra = rv->PC + rv->inst_length;
 
     // jump
     rv->PC = (rv->X[rs1] + imm) & ~1u;
@@ -502,7 +502,7 @@ static bool op_jal(struct riscv_t *rv, uint32_t inst)
     const int32_t rel = dec_jtype_imm(inst);
 
     // compute return address
-    const uint32_t ra = rv->PC + rv->step_size;
+    const uint32_t ra = rv->PC + rv->inst_length;
     rv->PC += rel;
 
     // link
@@ -673,7 +673,7 @@ static bool op_system(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -769,7 +769,7 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
     }
 
     // step over instruction
-    rv->PC += rv->step_size;
+    rv->PC += rv->inst_length;
 
     // enforce zero register
     if (rd == rv_reg_zero)
@@ -846,7 +846,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             assert(decompressor);
             inst = decompressor(inst);
 
-            rv->step_size = 2;
+            rv->inst_length = 2;
         } else {
             if (rv->inst_buffer != 0) {
                 inst = rv->inst_buffer;
@@ -857,7 +857,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
                 inst = rv->inst_buffer;
                 rv->inst_buffer = 0;
             }
-            rv->step_size = 4;
+            rv->inst_length = 4;
         }
 #else
         inst = rv->io.mem_ifetch(rv, rv->PC);
@@ -955,7 +955,7 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
     rv->PC = pc;
 
     // set the step size
-    rv->step_size = 4;
+    rv->inst_length = 4;
 
     // clear instruction buffer
     rv->inst_buffer = 0;

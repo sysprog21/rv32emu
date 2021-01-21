@@ -3,7 +3,7 @@
 
 #include <assert.h>
 
-// C.ADDI4SPN, opcode = 00, funct = 000
+// C.ADDI4SPN, funct3 = 000, opcode = 00
 uint32_t caddi4spn_to_addi(uint32_t inst)
 {
     // decode imm and rd
@@ -14,7 +14,7 @@ uint32_t caddi4spn_to_addi(uint32_t inst)
     return enc_itype(nzuimm, 2, 0b000, rd, 0b0010011);
 }
 
-// C.LW, opcode = 010, funct = 00
+// C.LW, funct3 = 010, opcode = 00
 uint32_t clw_to_lw(uint32_t inst)
 {
     // decode imm, rs1 and rd
@@ -26,7 +26,7 @@ uint32_t clw_to_lw(uint32_t inst)
     return enc_itype(imm, rs1, 0b010, rd, 0b0000011);
 }
 
-// C.SW, opcode = 110, funct = 00
+// C.SW, funct3 = 110, opcode = 00
 uint32_t csw_to_sw(uint32_t inst)
 {
     // decode imm, rs1 and rs2
@@ -44,7 +44,7 @@ uint32_t cnop_to_addi()
     return enc_itype(0, 0, 0b000, 0, 0b0010011);
 }
 
-// C.ADDI, opcode = 000, funct = 01
+// C.ADDI, funct3 = 000, opcode = 01
 uint32_t caddi_to_addi(uint32_t inst)
 {
     // decode nzimm and rd
@@ -62,7 +62,7 @@ uint32_t caddi_to_addi(uint32_t inst)
     return enc_itype(nzimm, rd, 0b000, rd, 0b0010011);
 }
 
-// C.JAL, opcode = 001, funct = 01
+// C.JAL, funct3 = 001, opcode = 01
 uint32_t cjal_to_jal(uint32_t inst)
 {
     // decode imm
@@ -72,7 +72,7 @@ uint32_t cjal_to_jal(uint32_t inst)
     return enc_jtype(imm, 1, 0b1101111);
 }
 
-// C.LI, opcode = 010, funct = 01
+// C.LI, funct3 = 010, opcode = 01
 uint32_t cli_to_addi(uint32_t inst)
 {
     // decode imm and rd
@@ -90,7 +90,7 @@ uint32_t cli_to_addi(uint32_t inst)
     return enc_itype(imm, 0, 0b000, rd, 0b0010011);
 }
 
-// C.ADDI16SP, opcode = 011, funct = 01
+// C.ADDI16SP, funct3 = 011, opcode = 01
 uint32_t caddi16sp_to_addi(uint32_t inst)
 {
     // decode nzimm
@@ -109,7 +109,7 @@ uint32_t caddi16sp_to_addi(uint32_t inst)
     return enc_itype(nzimm, 2, 0b000, 2, 0b0010011);
 }
 
-// C.LUI, opcode = 011, funct = 01
+// C.LUI, funct3 = 011, opcode = 01
 uint32_t clui_to_lui(uint32_t inst)
 {
     // decode nzimm and rd
@@ -217,7 +217,7 @@ uint32_t cand_to_and(uint32_t inst)
     return enc_rtype(0b0000000, rs2, rd, 0b111, rd, 0b0110011);
 }
 
-// C.J, opcode = 101, funct = 01
+// C.J, funct3 = 101, opcode = 01
 uint32_t cj_to_jal(uint32_t inst)
 {
     // decode imm
@@ -227,7 +227,7 @@ uint32_t cj_to_jal(uint32_t inst)
     return enc_jtype(imm, 0, 0b1101111);
 }
 
-// C.BEQZ, opcode = 110, funct = 01
+// C.BEQZ, funct3 = 110, opcode = 01
 uint32_t cbeqz_to_beq(uint32_t inst)
 {
     // decode offset and rs1
@@ -238,7 +238,7 @@ uint32_t cbeqz_to_beq(uint32_t inst)
     return enc_btype(offset, 0, rs1, 0b000, 0b1100011);
 }
 
-// C.BENZ, opcode = 111, funct = 01
+// C.BENZ, funct3 = 111, opcode = 01
 uint32_t cbenz_to_bne(uint32_t inst)
 {
     // decode offset and rs1
@@ -249,7 +249,7 @@ uint32_t cbenz_to_bne(uint32_t inst)
     return enc_btype(offset, 0, rs1, 0b001, 0b1100011);
 }
 
-// C.SLLI, opcode = 000, funct = 10
+// C.SLLI, funct3 = 000, opcode = 10
 uint32_t cslli_to_slli(uint32_t inst)
 {
     // decode shamt and rd
@@ -270,7 +270,7 @@ uint32_t cslli_to_slli(uint32_t inst)
     return enc_rtype(0b0000000, shamt, rd, 0b001, rd, 0b0010011);
 }
 
-// C.LWSP, opcode = 010, funct = 10
+// C.LWSP, funct3 = 010, opcode = 10
 uint32_t clwsp_to_lw(uint32_t inst)
 {
     // decode offset and rd
@@ -347,7 +347,7 @@ uint32_t cadd_to_add(uint32_t inst)
     return enc_rtype(0b0000000, rs2, rd, 0b000, rd, 0b0110011);
 }
 
-// C.SWSP, opcode = 110, funct = 10
+// C.SWSP, funct3 = 110, opcode = 10
 uint32_t cswsp_to_sw(uint32_t inst)
 {
     // decode imm and rs2
@@ -358,7 +358,7 @@ uint32_t cswsp_to_sw(uint32_t inst)
     return enc_stype(offset, rs2, 2, 0b010, 0b0100011);
 }
 
-// opcode = 011, funct = 01
+// funct3 = 011, opcode = 01
 uint32_t parse_011_01(uint32_t inst)
 {
     const uint32_t rd = dec_rd(inst);
@@ -369,7 +369,7 @@ uint32_t parse_011_01(uint32_t inst)
         return clui_to_lui(inst);
 }
 
-// opcode = 100, funct = 01
+// funct3 = 100, opcode = 01
 uint32_t parse_100_01(uint32_t inst)
 {
     const uint32_t cb_funct2 = dec_cb_funct2(inst);
@@ -398,7 +398,7 @@ uint32_t parse_100_01(uint32_t inst)
     }
 }
 
-// opcode = 100, funct = 10
+// funct3 = 100, opcode = 10
 uint32_t parse_100_10(uint32_t inst)
 {
     const uint32_t cr_funct4 = dec_cr_funct4(inst);

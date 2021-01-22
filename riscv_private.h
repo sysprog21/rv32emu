@@ -82,7 +82,7 @@ enum {
 
 struct riscv_t {
     bool halt;
-    // step size for PC
+    // length in byte of current instruction
     uint8_t inst_length;
     // instruction buffer
     uint32_t inst_buffer;

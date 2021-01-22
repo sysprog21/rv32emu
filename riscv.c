@@ -954,7 +954,7 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
     // set the reset address
     rv->PC = pc;
 
-    // set the step size
+    // set default instruction length to 4 bytes
     rv->inst_length = 4;
 
     // clear instruction buffer

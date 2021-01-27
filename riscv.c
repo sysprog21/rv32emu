@@ -7,7 +7,7 @@
 #include "riscv_private.h"
 
 #ifdef ENABLE_RV32C
-#include "rvc.h"
+#include "compressed.h"
 #endif  // ENABLE_RV32C
 
 static void rv_except_inst_misaligned(struct riscv_t *rv, uint32_t old_pc)

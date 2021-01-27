@@ -36,7 +36,7 @@ OBJS = \
 	main.o \
 	syscall.o \
 	syscall_sdl.o\
-	rvc.o
+	compressed.o
 
 deps := $(OBJS:%.o=%.o.d)
 

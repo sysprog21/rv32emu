@@ -1,5 +1,5 @@
-#include "rvc.h"
-#include "rvc_private.h"
+#include "compressed.h"
+#include "compressed_private.h"
 
 #include <assert.h>
 

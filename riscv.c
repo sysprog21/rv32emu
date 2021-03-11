@@ -138,7 +138,7 @@ static bool op_misc_mem(struct riscv_t *rv, uint32_t inst UNUSED)
     return true;
 }
 #else
-#define op_misc_mem NULL
+#define op_misc_mem OP_UNIMP
 #endif  // ENABLE_Zifencei
 
 static bool op_op_imm(struct riscv_t *rv, uint32_t inst)
@@ -758,47 +758,121 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
     return true;
 }
 #else
-#define op_amo NULL
+#define op_amo OP_UNIMP
 #endif  // ENABLE_RV32A
 
 /* No RV32F support */
-#define op_load_fp NULL
-#define op_store_fp NULL
-#define op_fp NULL
-#define op_madd NULL
-#define op_msub NULL
-#define op_nmsub NULL
-#define op_nmadd NULL
+#define op_load_fp OP_UNIMP
+#define op_store_fp OP_UNIMP
+#define op_fp OP_UNIMP
+#define op_madd OP_UNIMP
+#define op_msub OP_UNIMP
+#define op_nmsub OP_UNIMP
+#define op_nmadd OP_UNIMP
+
+// handler for all unimplemented opcodes
+static bool op_unimp(struct riscv_t *rv, uint32_t inst UNUSED)
+{
+    rv_except_illegal_inst(rv);
+    return false;
+}
 
 // opcode handler type
 typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);
-
-// clang-format off
-// opcode dispatch table
-static const opcode_t opcodes[] = {
-//  000        001          010       011          100        101       110   111
-    op_load,   op_load_fp,  NULL,     op_misc_mem, op_op_imm, op_auipc, NULL, NULL, // 00
-    op_store,  op_store_fp, NULL,     op_amo,      op_op,     op_lui,   NULL, NULL, // 01
-    op_madd,   op_msub,     op_nmsub, op_nmadd,    op_fp,     NULL,     NULL, NULL, // 10
-    op_branch, op_jalr,     NULL,     op_jal,      op_system, NULL,     NULL, NULL, // 11
-};
-// clang-format on
 
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     assert(rv);
     const uint64_t cycles_target = rv->csr_cycle + cycles;
+    uint32_t inst, index;
 
+#define OP_UNIMP op_unimp
+#ifdef ENABLE_COMPUTED_GOTO
+#define OP(instr) &&op_##instr
+#define TABLE_TYPE const void *
+#else  // ENABLE_COMPUTED_GOTO = false
+#define OP(instr) op_##instr
+#define TABLE_TYPE const opcode_t
+#endif
+
+    // clang-format off
+    TABLE_TYPE jump_table[] = {
+    //  000         001           010        011           100         101        110   111
+        OP(load),   OP(load_fp),  OP(unimp), OP(misc_mem), OP(op_imm), OP(auipc), OP(unimp), OP(unimp), // 00
+        OP(store),  OP(store_fp), OP(unimp), OP(amo),      OP(op),     OP(lui),   OP(unimp), OP(unimp), // 01
+        OP(madd),   OP(msub),     OP(nmsub), OP(nmadd),    OP(fp),     OP(unimp), OP(unimp), OP(unimp), // 10
+        OP(branch), OP(jalr),     OP(unimp), OP(jal),      OP(system), OP(unimp), OP(unimp), OP(unimp), // 11
+    };
+// clang-format on
+
+#ifdef ENABLE_COMPUTED_GOTO
+#define DISPATCH()                                      \
+    {                                                   \
+        if (rv->csr_cycle >= cycles_target || rv->halt) \
+            goto quit;                                  \
+        /* fetch the next instruction */                \
+        inst = rv->io.mem_ifetch(rv, rv->PC);           \
+        /* standard uncompressed instruction */         \
+        if ((inst & 3) == 3) {                          \
+            index = (inst & INST_6_2) >> 2;             \
+            goto *jump_table[index];                    \
+        } else {                                        \
+            /* TODO: compressed instruction*/           \
+            assert(!"Unreachable");                     \
+        }                                               \
+    }
+
+#define EXEC(instr)                   \
+    {                                 \
+        /* dispatch this opcode */    \
+        if (!op_##instr(rv, inst))    \
+            goto quit;                \
+        /* increment the cycles csr*/ \
+        rv->csr_cycle++;              \
+    }
+
+#define TARGET(instr)         \
+    op_##instr : EXEC(instr); \
+    DISPATCH();
+
+    DISPATCH();
+
+    // main loop
+    TARGET(load)
+    TARGET(op_imm)
+    TARGET(auipc)
+    TARGET(store)
+    TARGET(op)
+    TARGET(lui)
+    TARGET(branch)
+    TARGET(jalr)
+    TARGET(jal)
+    TARGET(system)
+#ifdef ENABLE_Zifencei
+    TARGET(misc_mem)
+#endif
+#ifdef ENABLE_RV32A
+    TARGET(amo)
+#endif
+    TARGET(unimp)
+
+quit:
+    return;
+
+#undef DISPATCH
+#undef EXEC
+#undef TARGET
+#else   // ENABLE_COMPUTED_GOTO = 0
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         // fetch the next instruction
-        const uint32_t inst = rv->io.mem_ifetch(rv, rv->PC);
+        inst = rv->io.mem_ifetch(rv, rv->PC);
 
         // standard uncompressed instruction
         if ((inst & 3) == 3) {
-            const uint32_t index = (inst & INST_6_2) >> 2;
+            index = (inst & INST_6_2) >> 2;
 
-	    // dispatch this opcode
-            const opcode_t op = opcodes[index];
+            // dispatch this opcode
+            TABLE_TYPE op = jump_table[index];
             assert(op);
             if (!op(rv, inst))
                 break;
@@ -810,6 +884,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             assert(!"Unreachable");
         }
     }
+#endif  // ENABLE_COMPUTED_GOTO
 }
 
 riscv_user_t rv_userdata(struct riscv_t *rv)

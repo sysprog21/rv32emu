@@ -1,4 +1,8 @@
-CFLAGS = -std=gnu99 -O2 -Wall -Wextra
+ifeq ("$(origin CC)", "default")
+	CC = gcc
+endif
+
+CFLAGS = -std=gnu99 -Wall -Wextra
 CFLAGS += -include common.h
 
 # Base configurations for RISC-V extensions
@@ -13,6 +17,17 @@ CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 CFLAGS += -D ENABLE_SDL
 CFLAGS += `sdl2-config --cflags`
 LDFLAGS += `sdl2-config --libs`
+
+# Whether to enable computed goto in riscv.c
+ENABLE_COMPUTED_GOTO ?= 1
+ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
+ifneq ($(filter $(CC), gcc clang),)
+riscv.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
+	ifeq ("$(CC)", "gcc")
+riscv.o: CFLAGS += -fno-gcse -fno-crossjumping 
+	endif
+endif
+endif
 
 # Control the build verbosity
 ifeq ("$(VERBOSE)","1")

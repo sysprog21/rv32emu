@@ -799,16 +799,6 @@ static bool op_unimp(struct riscv_t *rv, uint32_t inst UNUSED)
 // opcode handler type
 typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);
 
-// clang-format off
-// opcode dispatch table
-// static const opcode_t opcodes[] = {
-// //  000        001          010       011          100        101       110   111
-//     op_load,   op_load_fp,  NULL,     op_misc_mem, op_op_imm, op_auipc, NULL, NULL, // 00
-//     op_store,  op_store_fp, NULL,     op_amo,      op_op,     op_lui,   NULL, NULL, // 01
-//     op_madd,   op_msub,     op_nmsub, op_nmadd,    op_fp,     NULL,     NULL, NULL, // 10
-//     op_branch, op_jalr,     NULL,     op_jal,      op_system, NULL,     NULL, NULL, // 11
-// };
-
 #ifdef ENABLE_RV32C
 // decompressor type
 typedef uint32_t (*decompressor_t)(uint32_t inst);
@@ -821,7 +811,6 @@ decompressor_t decompressors[] = {
     cslli_to_slli,     NULL,        clwsp_to_lw, NULL,         parse_100_10, NULL,      cswsp_to_sw,  NULL,         // 10
 };
 #endif // ENABLE_RV32C
-// clang-format on
 
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {
@@ -917,9 +906,8 @@ quit:
             inst = rv->inst_buffer & 0x0000FFFF;
             rv->inst_buffer >>= 16;
 
-            // TODO: filter illegal instruction
             if (inst == 0) {
-                rv->halt = true;
+                rv_except_illegal_inst(rv);
                 break;
             }
 

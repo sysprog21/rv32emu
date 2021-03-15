@@ -3,7 +3,6 @@ RUN_TARGET= $(TARGETDIR)/build/rv32emu $(<) \
     --compliance $(*).signature.output \
     1>$(@) 2>&1
 
-RISCV_PREFIX   ?= riscv32-unknown-elf-
 RISCV_GCC      ?= $(RISCV_PREFIX)gcc
 RISCV_GCC_OPTS ?= \
     -march=rv32g \

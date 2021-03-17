@@ -106,7 +106,7 @@ static void print_usage(const char *filename)
             "Usage: %s [options] [filename]\n"
             "Options:\n"
             "  --trace : print executable trace\n"
-            "  --compliance [signature filename] : dump signature to the given file for compliance test\n",
+            "  --compliance [filename] : dump signature to the given file, required by compliance test\n",
             filename);
 }
 

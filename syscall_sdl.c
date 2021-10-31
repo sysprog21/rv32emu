@@ -103,7 +103,7 @@ void syscall_draw_frame_pal(struct riscv_t *rv)
     uint32_t *d = pixels_ptr;
     const uint8_t *p = i;
     for (size_t y = 0; y < height; ++y) {
-        for (size_t x = 0; x < height; ++x) {
+        for (size_t x = 0; x < width; ++x) {
             const uint8_t c = p[x];
             const uint8_t *lut = j + (c * 3);
             d[x] = (lut[0] << 16) | (lut[1] << 8) | lut[2];

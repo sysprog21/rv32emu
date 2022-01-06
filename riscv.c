@@ -633,7 +633,7 @@ static bool op_system(struct riscv_t *rv, uint32_t inst)
         break;
     }
     case 5: {  // CSRRWI
-        uint32_t tmp = csr_csrrc(rv, csr, rv->X[rs1]);
+        uint32_t tmp = csr_csrrw(rv, csr, rs1);
         rv->X[rd] = rd ? tmp : rv->X[rd];
         break;
     }

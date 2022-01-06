@@ -1,5 +1,10 @@
+UNAME_S := $(shell uname -s)
 ifeq ("$(origin CC)", "default")
-	CC = gcc
+    ifeq ($(UNAME_S),Darwin)
+        CC = clang
+    else
+        CC = gcc
+    endif
 endif
 
 CFLAGS = -std=gnu99 -Wall -Wextra

@@ -73,7 +73,7 @@ $(OUT)/DOOM1.WAD:
 	wget $(DOOM_WAD_DL)
 	unzip -d $(OUT) shareware_doom_iwad.zip
 	echo "5b2e249b9c5133ec987b3ea77596381dc0d6bc1d  $@" > $@.sha1
-	shasum -a 1 -c $@.sha1
+	sha1sum -c $@.sha1
 	$(RM) shareware_doom_iwad.zip
 
 check: $(BIN)

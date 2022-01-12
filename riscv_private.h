@@ -101,6 +101,12 @@ enum {
 };
 // clang-format off
 
+enum {
+    INST_UNKNOWN = 0,
+    INST_16 = 2,
+    INST_32 = 4,
+};
+
 struct riscv_t {
     bool halt;
 
@@ -127,11 +133,7 @@ struct riscv_t {
     uint32_t csr_mbadaddr;
     
     // current instruction length
-    enum {
-        INST_UNKNOWN = 0,
-        INST_16 = 0x02,
-        INST_32 = 0x04,
-    }inst_len;
+    uint8_t inst_len;
 };
 
 // decode rd field
@@ -239,56 +241,78 @@ static inline uint32_t sign_extend_b(uint32_t x)
     return (int32_t)((int8_t) x);
 }
 
+#ifdef ENABLE_RV32C
+enum {
+    //             ....xxxx....xxxx
+    CJ_IMM_11  = 0b0001000000000000,
+    CJ_IMM_4   = 0b0000100000000000,
+    CJ_IMM_9_8 = 0b0000011000000000,
+    CJ_IMM_10  = 0b0000000100000000,
+    CJ_IMM_6   = 0b0000000010000000,
+    CJ_IMM_7   = 0b0000000001000000,
+    CJ_IMM_3_1 = 0b0000000000111000,
+    CJ_IMM_5   = 0b0000000000000100,
+};
+
 // decode rs1 field
-static inline uint16_t c_dec_rs1(uint16_t x){
+static inline uint16_t c_dec_rs1(uint16_t x)
+{
     return (uint16_t)((x & FC_RS1) >> 7U);
 }
 
 // decode rs2 field
-static inline uint16_t c_dec_rs2(uint16_t x){
+static inline uint16_t c_dec_rs2(uint16_t x)
+{
     return (uint16_t)((x & FC_RS2) >> 2U);
 }
 
 // decode rd field
-static inline uint16_t c_dec_rd(uint16_t x){
+static inline uint16_t c_dec_rd(uint16_t x)
+{
     return (uint16_t)((x & FC_RD) >> 7U);
 }
 
 // decode rs1' field
-static inline uint16_t c_dec_rs1c(uint16_t x){
+static inline uint16_t c_dec_rs1c(uint16_t x)
+{
     return (uint16_t)((x & FC_RS1C) >> 7U);
 }
 
 // decode rs2' field
-static inline uint16_t c_dec_rs2c(uint16_t x){
+static inline uint16_t c_dec_rs2c(uint16_t x)
+{
     return (uint16_t)((x & FC_RS2C) >> 2U);
 }
 
 // decode rd' field
-static inline uint16_t c_dec_rdc(uint16_t x){
+static inline uint16_t c_dec_rdc(uint16_t x)
+{
     return (uint16_t)((x & FC_RDC) >> 2U);
 }
 
-static inline uint16_t c_dec_cjtype_imm(uint16_t x){
+static inline int32_t c_dec_cjtype_imm(uint16_t x)
+{
     uint16_t temp = 0;
-    //                ....xxxx....xxxx
-    temp |= (x & 0b0000000000111000) >> 2;
-    temp |= (x & 0b0000100000000000) >> 7;
-    temp |= (x & 0b0000000000000100) << 3;
-    temp |= (x & 0b0000000010000000) >> 1;
-    temp |= (x & 0b0000000001000000) << 1;
-    temp |= (x & 0b0000011000000000) >> 1;
-    temp |= (x & 0b0000000100000000) << 2;
-    temp |= (x & 0b0001000000000000) >> 1;
-    // extend to 16 bit
-    for(int i = 1; i < 4; ++i){
+
+    temp |= (x & CJ_IMM_3_1) >> 2;
+    temp |= (x & CJ_IMM_4)   >> 7;
+    temp |= (x & CJ_IMM_5)   << 3;
+    temp |= (x & CJ_IMM_6)   >> 1;
+    temp |= (x & CJ_IMM_7)   << 1;
+    temp |= (x & CJ_IMM_9_8) >> 1;
+    temp |= (x & CJ_IMM_10)  << 2;
+    temp |= (x & CJ_IMM_11)  >> 1;
+
+    for (int i = 1; i <= 4; ++i) {
         temp |= (0x0800 & temp) << i;
     }
 
-    return temp;
+    // extend to 16 bit
+    return (int32_t)(int16_t) temp;
 }
 
-static inline uint16_t c_dec_cbtype_imm(uint16_t x){
+static inline uint16_t c_dec_cbtype_imm(uint16_t x)
+{
     uint16_t temp = 0;
     //             ....xxxx....xxxx
     temp |= (x & 0b0000000000011000) >> 2;
@@ -297,8 +321,9 @@ static inline uint16_t c_dec_cbtype_imm(uint16_t x){
     temp |= (x & 0b0000000001100000) << 1;
     temp |= (x & 0b0001000000000000) >> 4;
     // extend to 16 bit
-    for(int i = 1; i < 8; ++i){
+    for (int i = 1; i <= 8; ++i) {
         temp |= (0x0100 & temp) << i;
     }
     return temp;
 }
+#endif

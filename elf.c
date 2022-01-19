@@ -34,6 +34,26 @@ enum {
     STT_TLS = 6,
 };
 
+enum {
+    SHT_NULL = 0,
+    SHT_PROGBITS = 1,
+    SHT_SYMTAB = 2,
+    SHT_STRTAB = 3,
+    SHT_RELA = 4,
+    SHT_HASH = 5,
+    SHT_DYNAMIC = 6,
+    SHT_NOTE = 7,
+    SHT_NOBITS = 8,
+    SHT_REL = 9,
+    SHT_SHLIB = 10,
+    SHT_DYNSYM = 11,
+    SHT_NUM = 12,
+    SHT_LOPROC = 0x70000000,
+    SHT_HIPROC = 0x7fffffff,
+    SHT_LOUSER = 0x80000000,
+    SHT_HIUSER = 0xffffffff
+};
+
 #define ELF_ST_TYPE(x) (((unsigned int) x) & 0xf)
 
 struct Elf32_Ehdr {
@@ -248,6 +268,15 @@ const char *elf_find_symbol(elf_t *e, uint32_t addr)
     c_map_find(e->symbols, &it, &addr);
     return c_map_at_end(e->symbols, &it) ? NULL : c_map_iter_value(&it, char *);
 }
+
+bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end) {                                
+    const struct Elf32_Shdr *shdr = get_section_header(e, ".data");
+    if (!shdr) return false;
+    if (shdr->sh_type == SHT_NOBITS) return false;
+    *start = shdr->sh_addr;
+    *end = *start + shdr->sh_size;
+    return true;
+ }
 
 bool elf_load(elf_t *e, struct riscv_t *rv, memory_t *mem)
 {

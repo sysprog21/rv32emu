@@ -156,6 +156,7 @@ void dump_test_signature(struct riscv_t *rv, elf_t *elf)
 
     /* use the entire .data section as a fallback */
     elf_get_data_section_range(elf, &start, &end);
+
     /* try and access the exact signature range */
     if ((sym = elf_get_symbol(elf, "begin_signature")))
         start = sym->st_value;

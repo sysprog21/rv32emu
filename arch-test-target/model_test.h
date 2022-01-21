@@ -14,7 +14,6 @@
 #define RVMODEL_DATA_END \
         .align 4; .global end_signature; end_signature:
 
-
 #define RVMODEL_IO_INIT
 #define RVMODEL_IO_WRITE_STR(_SP, _STR)
 #define RVMODEL_IO_CHECK()

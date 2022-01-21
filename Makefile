@@ -81,20 +81,20 @@ check: $(BIN)
 	(cd $(OUT); ../$(BIN) hello.elf)
 	(cd $(OUT); ../$(BIN) puzzle.elf)
 
-COMPLIANCE_DIR ?= ./riscv-arch-test 
-export RISCV_TARGET = compliance-target
-export RISCV_PREFIX = riscv-none-embed-
+ARCH_TEST_DIR ?= ./riscv-arch-test 
+export RISCV_TARGET = arch-test-target
+export RISCV_PREFIX ?= riscv-none-embed-
 export TARGETDIR = $(shell pwd)
 export XLEN = 32
 export JOBS ?= -j
-export WORK = $(TARGETDIR)/build/compliance
+export WORK = $(TARGETDIR)/build/arch-test
 
-$(COMPLIANCE_DIR):
+$(ARCH_TEST__DIR):
 	git submodule update --init
 
-compliance: $(BIN) $(COMPLIANCE_DIR)
-	$(Q)$(MAKE) --quiet -C $(COMPLIANCE_DIR) clean;
-	$(Q)$(MAKE) --quiet -C $(COMPLIANCE_DIR);
+arch-test: $(BIN) $(ARCH_TEST__DIR)
+	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR) clean
+	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR)
 
 demo: $(BIN) $(OUT)/DOOM1.WAD
 	(cd $(OUT); ../$(BIN) doom.elf)

@@ -30,21 +30,31 @@ make demo
 The build script will then download data file for Doom automatically. SDL2 based window
 should appear when Doom is loaded and executed.
 
-## Run riscv-arch-test
+## riscv-arch-test
 
-Once the submodule `riscv-arch-test` is pulled, run all the available compliance test via command:
+The RISC-V Architectural Tests, [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test) is basic set of tests that ensure software implemented can be match important aspects of the RISC-V specification.(not a **substitute for rigorous design verification**)
+
+There has the **reference signatures** and the test signatures, specific memory location can be written. Once the test be executed, the **test signatures** will be written by testing-model(rv32emu-next)during the test, and it will be compared to **reference signature**.The test will pass if both signatures exactly match.
+
+[riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test) is integrated with submodule, and the setup was done.Once the submodule `riscv-arch-test` is pulled, run all the available riscv-arch-test via command:
 ```shell
-make compliance
+make arch-test
 ```
 
 * To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`,`M`,`C`,`Zifencei`,`privilege`.
 ```shell
-make compliance RISCV_DEVICE=I
+make arch-test RISCV_DEVICE=I
 ```
 * To run a specific test case,set both `RISCV_DEVICE` and `RISCV_TEST`.For example:
 ```shell
-make compliance RISCV_DEVICE=M RISCV_TEST=div-01
+make arch-test RISCV_DEVICE=M RISCV_TEST=div-01
 ```
+The detail in setup enviroment variables is in [RISC-V Architectural Testing Framework](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/doc/README.adoc) **5.1 Setup environment variables**.
+
+Detail in riscv-arch-test:
+* [riscv-arch-test repository](https://github.com/riscv-non-isa/riscv-arch-test)
+* [RISC-V Architectural Testing Framework](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/doc/README.adoc)
+* [RISC-V Architecture Test Format Specification](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/spec/TestFormatSpec.adoc)
 
 ## Customization
 

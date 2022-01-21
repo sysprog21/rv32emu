@@ -1,6 +1,6 @@
 build/DOOM1.WAD*
 shareware_doom_iwad.zip*
 build/rv32emu
-build/compliance
+build/arch-test
 *.o
 *.o.d

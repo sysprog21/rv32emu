@@ -9,7 +9,7 @@
 static bool opt_trace = false;
 
 /* RISCV compliance test mode */
-static bool opt_compliance = false;
+static bool opt_arch_test = false;
 static char *signature_out_file;
 
 /* target executable */
@@ -106,7 +106,7 @@ static void print_usage(const char *filename)
             "Usage: %s [options] [filename]\n"
             "Options:\n"
             "  --trace : print executable trace\n"
-            "  --compliance [filename] : dump signature to the given file, required by compliance test\n",
+            "  --arch-test [filename] : dump signature to the given file, required by arch-test test\n",
             filename);
 }
 

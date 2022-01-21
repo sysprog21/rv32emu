@@ -1,6 +1,6 @@
 RUN_TARGET= $(TARGETDIR)/build/rv32emu $(<) \
     $(RISCV_TARGET_FLAGS) \
-    --compliance $(*).signature.output \
+    --arch-test $(*).signature.output \
     1>$(@) 2>&1
 
 RISCV_GCC      ?= $(RISCV_PREFIX)gcc
@@ -14,7 +14,7 @@ RISCV_GCC_OPTS ?= \
     -nostdlib \
     -nostartfiles
 
-COMPILE_TARGET=\
+COMPILE_TARGET = \
     $$(RISCV_GCC) $(1) $$(RISCV_GCC_OPTS) \
         -I$(ROOTDIR)/riscv-test-suite/env/ \
         -I$(TARGETDIR)/$(RISCV_TARGET)/ \

@@ -8,7 +8,7 @@
 /* enable program trace mode */
 static bool opt_trace = false;
 
-/* RISCV compliance test mode */
+/* RISCV arch-test*/
 static bool opt_arch_test = false;
 static char *signature_out_file;
 
@@ -123,11 +123,11 @@ static bool parse_args(int argc, char **args)
                 opt_trace = true;
                 continue;
             }
-            if (!strcmp(arg, "--compliance")) {
-                opt_compliance = true;
+            if (!strcmp(arg, "--arch-test")) {
+                opt_arch_test = true;
                 if (i + 1 >= argc) {
                     fprintf(stderr,
-                            "Filename for signature output required in compliance mode.\n");
+                            "Filename for signature output required by arch-test.\n");
                     return false;
                 }
                 signature_out_file = args[++i];
@@ -221,7 +221,7 @@ int main(int argc, char **args)
     }
 
     /* dump test result in test mode */
-    if (opt_compliance) {
+    if (opt_arch_test) {
         dump_test_signature(rv, elf);
     }
 

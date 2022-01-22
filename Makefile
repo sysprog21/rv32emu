@@ -15,8 +15,10 @@ CFLAGS += -D ENABLE_RV32M
 CFLAGS += -D ENABLE_Zicsr
 CFLAGS += -D ENABLE_Zifencei
 CFLAGS += -D ENABLE_RV32A
-CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 CFLAGS += -D ENABLE_RV32C
+
+# Set the default stack pointer
+CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 
 # Experimental SDL oriented system calls
 CFLAGS += -D ENABLE_SDL

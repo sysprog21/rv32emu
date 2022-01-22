@@ -82,6 +82,8 @@ $(OUT)/id1/pak0.pak:
 	$(VECHO) " Downloading $@ ...\n"
 	wget $(Quake_shareware)
 	unzip -d $(OUT) quakesw-1.0.6.zip
+	echo "36b42dc7b6313fd9cabc0be8b9e9864840929735  $@" > $@.sha1
+	sha1sum -c $@.sha1
 	$(RM) quakesw-1.0.6.zip	
 
 check: $(BIN)
@@ -98,6 +100,6 @@ clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
 distclean: clean
 	$(RM) $(OUT)/DOOM1.WAD $(OUT)/DOOM1.WAD.sha1
-	rm -r $(OUT)/id1
+	$(RM) -r $(OUT)/id1
 
 -include $(deps)

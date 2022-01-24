@@ -196,13 +196,13 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t inst)
     // dispatch operation type
     switch (funct3) {
     case 0:  // ADDI
-        rv->X[rd] = (int32_t)(rv->X[rs1]) + imm;
+        rv->X[rd] = (int32_t) (rv->X[rs1]) + imm;
         break;
     case 1:  // SLLI
         rv->X[rd] = rv->X[rs1] << (imm & 0x1f);
         break;
     case 2:  // SLTI
-        rv->X[rd] = ((int32_t)(rv->X[rs1]) < imm) ? 1 : 0;
+        rv->X[rd] = ((int32_t) (rv->X[rs1]) < imm) ? 1 : 0;
         break;
     case 3:  // SLTIU
         rv->X[rd] = (rv->X[rs1] < (uint32_t) imm) ? 1 : 0;
@@ -312,13 +312,14 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
     case 0b0000000:
         switch (funct3) {
         case 0b000:  // ADD
-            rv->X[rd] = (int32_t)(rv->X[rs1]) + (int32_t)(rv->X[rs2]);
+            rv->X[rd] = (int32_t) (rv->X[rs1]) + (int32_t) (rv->X[rs2]);
             break;
         case 0b001:  // SLL
             rv->X[rd] = rv->X[rs1] << (rv->X[rs2] & 0x1f);
             break;
         case 0b010:  // SLT
-            rv->X[rd] = ((int32_t)(rv->X[rs1]) < (int32_t)(rv->X[rs2])) ? 1 : 0;
+            rv->X[rd] =
+                ((int32_t) (rv->X[rs1]) < (int32_t) (rv->X[rs2])) ? 1 : 0;
             break;
         case 0b011:  // SLTU
             rv->X[rd] = (rv->X[rs1] < rv->X[rs2]) ? 1 : 0;
@@ -350,12 +351,12 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
         case 0b001: {  // MULH
             const int64_t a = (int32_t) rv->X[rs1];
             const int64_t b = (int32_t) rv->X[rs2];
-            rv->X[rd] = ((uint64_t)(a * b)) >> 32;
+            rv->X[rd] = ((uint64_t) (a * b)) >> 32;
         } break;
         case 0b010: {  // MULHSU
             const int64_t a = (int32_t) rv->X[rs1];
             const uint64_t b = rv->X[rs2];
-            rv->X[rd] = ((uint64_t)(a * b)) >> 32;
+            rv->X[rd] = ((uint64_t) (a * b)) >> 32;
         } break;
         case 0b011:  // MULHU
             rv->X[rd] = ((uint64_t) rv->X[rs1] * (uint64_t) rv->X[rs2]) >> 32;
@@ -409,7 +410,7 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
     case 0b0100000:
         switch (funct3) {
         case 0b000:  // SUB
-            rv->X[rd] = (int32_t)(rv->X[rs1]) - (int32_t)(rv->X[rs2]);
+            rv->X[rd] = (int32_t) (rv->X[rs1]) - (int32_t) (rv->X[rs2]);
             break;
         case 0b101:  // SRA
             rv->X[rd] = ((int32_t) rv->X[rs1]) >> (rv->X[rs2] & 0x1f);
@@ -826,7 +827,7 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
 static bool op_caddi(struct riscv_t *rv, uint16_t inst)
 {
     uint16_t tmp =
-        (uint16_t)(((inst & FCI_IMM_12) >> 5) | (inst & FCI_IMM_6_2)) >> 2;
+        (uint16_t) (((inst & FCI_IMM_12) >> 5) | (inst & FCI_IMM_6_2)) >> 2;
     const int32_t imm = (0x20 & tmp) ? 0xffffffc0 | tmp : tmp;
     const uint16_t rd = c_dec_rd(inst);
 
@@ -864,7 +865,7 @@ static bool op_caddi4spn(struct riscv_t *rv, uint16_t inst)
 
 static bool op_cli(struct riscv_t *rv, uint16_t inst)
 {
-    uint16_t tmp = (uint16_t)((inst & 0x1000) >> 7 | (inst & 0x7c) >> 2);
+    uint16_t tmp = (uint16_t) ((inst & 0x1000) >> 7 | (inst & 0x7c) >> 2);
     const int32_t imm = (tmp & 0x20) ? 0xffffffc0 | tmp : tmp;
     const uint16_t rd = c_dec_rd(inst);
     rv->X[rd] = imm;
@@ -1304,6 +1305,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         OP(madd),   OP(msub),     OP(nmsub), OP(nmadd),    OP(fp),     OP(unimp), OP(unimp), OP(unimp), // 10
         OP(branch), OP(jalr),     OP(unimp), OP(jal),      OP(system), OP(unimp), OP(unimp), OP(unimp), // 11
     };
+#ifdef ENABLE_RV32C
     TABLE_TYPE_RVC jump_table_rvc[] = {
     //  00             01             10          11
         OP(caddi4spn), OP(caddi),     OP(cslli),  OP(unimp),  // 000
@@ -1315,36 +1317,44 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         OP(csw),       OP(cbeqz),     OP(cswsp),  OP(unimp),  // 110
         OP(cfsw),      OP(cbnez),     OP(cfswsp), OP(unimp),  // 111
     };
+#endif
     // clang-format on
 
 #ifdef ENABLE_COMPUTED_GOTO
-#define DISPATCH()                                                          \
-    {                                                                       \
-        if (rv->csr_cycle >= cycles_target || rv->halt)                     \
-            goto quit;                                                      \
-        /* fetch the next instruction */                                    \
-        inst = rv->io.mem_ifetch(rv, rv->PC);                               \
-        /* standard uncompressed instruction */                             \
-        if ((inst & 3) == 3) {                                              \
-            uint32_t index = (inst & INST_6_2) >> 2;                        \
-            rv->inst_len = INST_32;                                         \
-            goto *jump_table[index];                                        \
-        } else {                                                            \
-            /* Compressed Extension Instruction */                          \
-            inst &= 0x0000FFFF;                                             \
-            int16_t c_index = (inst & FC_FUNC3) >> 11 | (inst & FC_OPCODE); \
-            rv->inst_len = INST_16;                                         \
-            goto *jump_table_rvc[c_index];                                  \
-        }                                                                   \
+#ifdef ENABLE_RV32C
+#define DISPATCH_RV32C()                                            \
+    inst &= 0x0000FFFF;                                             \
+    int16_t c_index = (inst & FC_FUNC3) >> 11 | (inst & FC_OPCODE); \
+    rv->inst_len = INST_16;                                         \
+    goto *jump_table_rvc[c_index];
+#else
+#define DISPATCH_RV32C()
+#endif
+
+#define DISPATCH()                                      \
+    {                                                   \
+        if (rv->csr_cycle >= cycles_target || rv->halt) \
+            goto quit;                                  \
+        /* fetch the next instruction */                \
+        inst = rv->io.mem_ifetch(rv, rv->PC);           \
+        /* standard uncompressed instruction */         \
+        if ((inst & 3) == 3) {                          \
+            uint32_t index = (inst & INST_6_2) >> 2;    \
+            rv->inst_len = INST_32;                     \
+            goto *jump_table[index];                    \
+        } else {                                        \
+            /* Compressed Extension Instruction */      \
+            DISPATCH_RV32C()                            \
+        }                                               \
     }
 
-#define EXEC(instr)                   \
-    {                                 \
-        /* dispatch this opcode */    \
-        if (!op_##instr(rv, inst))    \
-            goto quit;                \
-        /* increment the cycles csr*/ \
-        rv->csr_cycle++;              \
+#define EXEC(instr)                    \
+    {                                  \
+        /* dispatch this opcode */     \
+        if (!op_##instr(rv, inst))     \
+            goto quit;                 \
+        /* increment the cycles csr */ \
+        rv->csr_cycle++;               \
     }
 
 #define TARGET(instr)         \
@@ -1392,6 +1402,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 quit:
     return;
 
+#undef DISPATCH_RV32C
 #undef DISPATCH
 #undef EXEC
 #undef TARGET

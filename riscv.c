@@ -487,7 +487,11 @@ static bool op_branch(struct riscv_t *rv, uint32_t inst)
     // perform branch action
     if (taken) {
         rv->PC += imm;
+#ifdef ENABLE_RV32C
+        if (rv->PC & 0x1)
+#else
         if (rv->PC & 0x3)
+#endif
             rv_except_inst_misaligned(rv, pc);
     } else {
         // step over instruction

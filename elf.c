@@ -269,14 +269,17 @@ const char *elf_find_symbol(elf_t *e, uint32_t addr)
     return c_map_at_end(e->symbols, &it) ? NULL : c_map_iter_value(&it, char *);
 }
 
-bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end) {                                
+bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)
+{
     const struct Elf32_Shdr *shdr = get_section_header(e, ".data");
-    if (!shdr) return false;
-    if (shdr->sh_type == SHT_NOBITS) return false;
+    if (!shdr)
+        return false;
+    if (shdr->sh_type == SHT_NOBITS)
+        return false;
     *start = shdr->sh_addr;
     *end = *start + shdr->sh_size;
     return true;
- }
+}
 
 bool elf_load(elf_t *e, struct riscv_t *rv, memory_t *mem)
 {

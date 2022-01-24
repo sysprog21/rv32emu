@@ -106,7 +106,8 @@ static void print_usage(const char *filename)
             "Usage: %s [options] [filename]\n"
             "Options:\n"
             "  --trace : print executable trace\n"
-            "  --arch-test [filename] : dump signature to the given file, required by arch-test test\n",
+            "  --arch-test [filename] : dump signature to the given file, "
+            "required by arch-test test\n",
             filename);
 }
 
@@ -127,7 +128,8 @@ static bool parse_args(int argc, char **args)
                 opt_arch_test = true;
                 if (i + 1 >= argc) {
                     fprintf(stderr,
-                            "Filename for signature output required by arch-test.\n");
+                            "Filename for signature output required by "
+                            "arch-test.\n");
                     return false;
                 }
                 signature_out_file = args[++i];

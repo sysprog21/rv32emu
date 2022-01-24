@@ -92,6 +92,21 @@ check: $(BIN)
 	(cd $(OUT); ../$(BIN) hello.elf)
 	(cd $(OUT); ../$(BIN) puzzle.elf)
 
+ARCH_TEST_DIR ?= ./riscv-arch-test 
+export RISCV_TARGET = arch-test-target
+export RISCV_PREFIX ?= riscv-none-embed-
+export TARGETDIR = $(shell pwd)
+export XLEN = 32
+export JOBS ?= -j
+export WORK = $(TARGETDIR)/build/arch-test
+
+$(ARCH_TEST__DIR):
+	git submodule update --init
+
+arch-test: $(BIN) $(ARCH_TEST__DIR)
+	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR) clean
+	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR)
+
 demo: $(BIN) $(OUT)/DOOM1.WAD
 	(cd $(OUT); ../$(BIN) doom.elf)
 

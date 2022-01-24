@@ -1,0 +1,22 @@
+RUN_TARGET= $(TARGETDIR)/build/rv32emu $(<) \
+    $(RISCV_TARGET_FLAGS) \
+    --arch-test $(*).signature.output \
+    1>$(@) 2>&1
+
+RISCV_GCC      ?= $(RISCV_PREFIX)gcc
+RISCV_GCC_OPTS ?= \
+    -march=rv32gc \
+    -mabi=ilp32 \
+    -static \
+    -mcmodel=medany \
+    -fvisibility=hidden \
+    $(RVTEST_DEFINES) \
+    -nostdlib \
+    -nostartfiles
+
+COMPILE_TARGET = \
+    $$(RISCV_GCC) $(1) $$(RISCV_GCC_OPTS) \
+        -I$(ROOTDIR)/riscv-test-suite/env/ \
+        -I$(TARGETDIR)/$(RISCV_TARGET)/ \
+        -T$(TARGETDIR)/$(RISCV_TARGET)/link.ld \
+        $$(<) -o $$(@);

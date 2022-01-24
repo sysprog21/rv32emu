@@ -1283,7 +1283,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     assert(rv);
     const uint64_t cycles_target = rv->csr_cycle + cycles;
-    uint32_t inst, index;
+    uint32_t inst;
 
 #define OP_UNIMP op_unimp
 #ifdef ENABLE_COMPUTED_GOTO

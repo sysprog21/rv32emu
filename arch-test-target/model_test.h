@@ -1,18 +1,22 @@
 
-#define RVMODEL_HALT    \
-    add a7, x0, 93;     \
-    add a0, x0, 0;      \
+#define RVMODEL_HALT \
+    add a7, x0, 93;  \
+    add a0, x0, 0;   \
     ecall
 
 #define RVMODEL_BOOT
 
-#define RVTEST_RV32M       
-        
-#define RVMODEL_DATA_BEGIN \
-        .align 4; .global begin_signature; begin_signature:
+#define RVTEST_RV32M
 
-#define RVMODEL_DATA_END \
-        .align 4; .global end_signature; end_signature:
+#define RVMODEL_DATA_BEGIN   \
+    .align 4;                \
+    .global begin_signature; \
+    begin_signature:
+
+#define RVMODEL_DATA_END   \
+    .align 4;              \
+    .global end_signature; \
+    end_signature:
 
 #define RVMODEL_IO_INIT
 #define RVMODEL_IO_WRITE_STR(_SP, _STR)

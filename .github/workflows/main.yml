@@ -1,0 +1,27 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  rv32emu:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2.4.0
+    - name: install-dependencies
+      run: | 
+            sudo apt-get update
+            sudo apt-get install libsdl2-dev
+    - name: make
+      run: make
+    - name: make check
+      run: make check
+
+  coding_style:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2.4.0
+    - name: coding convention
+      run: |
+            sudo apt-get install -q -y clang-format-12
+            sh .ci/check-format.sh
+      shell: bash

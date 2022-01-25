@@ -92,7 +92,8 @@ check: $(BIN)
 	(cd $(OUT); ../$(BIN) hello.elf)
 	(cd $(OUT); ../$(BIN) puzzle.elf)
 
-ARCH_TEST_DIR ?= ./riscv-arch-test 
+ARCH_TEST_DIR ?= riscv-arch-test
+ARCH_TEST_BUILD = $(ARCH_TEST_DIR)/Makefile
 export RISCV_TARGET = arch-test-target
 export RISCV_PREFIX ?= riscv-none-embed-
 export TARGETDIR = $(shell pwd)
@@ -100,10 +101,10 @@ export XLEN = 32
 export JOBS ?= -j
 export WORK = $(TARGETDIR)/build/arch-test
 
-$(ARCH_TEST__DIR):
+$(ARCH_TEST_BUILD):
 	git submodule update --init
 
-arch-test: $(BIN) $(ARCH_TEST__DIR)
+arch-test: $(BIN) $(ARCH_TEST_BUILD)
 	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR) clean
 	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR)
 

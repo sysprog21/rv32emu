@@ -92,9 +92,9 @@ check: $(BIN)
 	(cd $(OUT); ../$(BIN) hello.elf)
 	(cd $(OUT); ../$(BIN) puzzle.elf)
 
-ARCH_TEST_DIR ?= riscv-arch-test
+ARCH_TEST_DIR ?= tests/riscv-arch-test
 ARCH_TEST_BUILD = $(ARCH_TEST_DIR)/Makefile
-export RISCV_TARGET = arch-test-target
+export RISCV_TARGET = tests/arch-test-target
 export RISCV_PREFIX ?= riscv-none-embed-
 export TARGETDIR = $(shell pwd)
 export XLEN = 32

@@ -69,6 +69,16 @@ $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
+SHA1SUM = sha1sum
+SHA1SUM := $(shell which $(SHA1SUM))
+ifndef SHA1SUM
+    SHA1SUM = shasum
+    SHA1SUM := $(shell which $(SHA1SUM))
+    ifndef SHA1SUM
+        SHA1SUM := @echo
+    endif
+endif
+
 # https://tipsmake.com/how-to-run-doom-on-raspberry-pi-without-emulator
 DOOM_WAD_DL = http://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip
 $(OUT)/DOOM1.WAD:
@@ -76,7 +86,7 @@ $(OUT)/DOOM1.WAD:
 	wget $(DOOM_WAD_DL)
 	unzip -d $(OUT) shareware_doom_iwad.zip
 	echo "5b2e249b9c5133ec987b3ea77596381dc0d6bc1d  $@" > $@.sha1
-	sha1sum -c $@.sha1
+	$(SHA1SUM) -c $@.sha1
 	$(RM) shareware_doom_iwad.zip
 
 Quake_shareware = https://www.libsdl.org/projects/quake/data/quakesw-1.0.6.zip
@@ -85,7 +95,7 @@ $(OUT)/id1/pak0.pak:
 	wget $(Quake_shareware)
 	unzip -d $(OUT) quakesw-1.0.6.zip
 	echo "36b42dc7b6313fd9cabc0be8b9e9864840929735  $@" > $@.sha1
-	sha1sum -c $@.sha1
+	$(SHA1SUM) -c $@.sha1
 	$(RM) quakesw-1.0.6.zip	
 
 check: $(BIN)

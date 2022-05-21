@@ -129,5 +129,6 @@ clean:
 distclean: clean
 	$(RM) $(OUT)/DOOM1.WAD $(OUT)/DOOM1.WAD.sha1
 	$(RM) -r $(OUT)/id1
+	$(RM) *.zip
 
 -include $(deps)

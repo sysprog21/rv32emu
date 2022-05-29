@@ -1423,11 +1423,7 @@ quit:
             TABLE_TYPE op = jump_table[index];
             assert(op);
             rv->inst_len = INST_32;
-            if (!op(rv, inst))
-                break;
 
-            // increment the cycles csr
-            rv->csr_cycle++;
         } else {
             // standard compressed instruction
             const uint16_t c_index =
@@ -1437,12 +1433,12 @@ quit:
             TABLE_TYPE_RVC op = jump_tablec[c_index];
             assert(op);
             rv->inst_len = INST_16;
-            if (!op(rv, inst))
-                break;
-
-            // increment the cycles csr
-            rv->csr_cycle++;
         }
+        
+        if (!op(rv, inst))
+            break;
+        // increment the cycles csr
+        rv->csr_cycle++;
 #endif  // ENABLE_COMPUTED_GOTO
 }
 

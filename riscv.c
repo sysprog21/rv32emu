@@ -1338,7 +1338,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 #define DISPATCH()                                      \
     {                                                   \
         if (rv->csr_cycle >= cycles_target || rv->halt) \
-            goto quit;                                  \
+            return;                                  \
         /* fetch the next instruction */                \
         inst = rv->io.mem_ifetch(rv, rv->PC);           \
         /* standard uncompressed instruction */         \
@@ -1356,7 +1356,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     {                                  \
         /* dispatch this opcode */     \
         if (!op_##instr(rv, inst))     \
-            goto quit;                 \
+            return;                 \
         /* increment the cycles csr */ \
         rv->csr_cycle++;               \
     }
@@ -1402,9 +1402,6 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     TARGET(amo)
 #endif
     TARGET(unimp)
-
-quit:
-    return;
 
 #undef DISPATCH_RV32C
 #undef DISPATCH

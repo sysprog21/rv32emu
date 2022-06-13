@@ -588,9 +588,7 @@ void map_erase(map_t obj, map_iter_t *it)
     }
 
     /* Determine what the target is */
-    uint8_t c = 0;
-    c |= (node->left != NULL) << 0x0;
-    c |= (node->right != NULL) << 0x1;
+    uint8_t c = (!!node->left << 0x0) | (!!node->right << 0x1);
 
     switch (c) {
     case 0x0: /* Leaf node (this should be impossible) */

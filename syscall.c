@@ -59,9 +59,9 @@ enum {
 static int find_free_fd(state_t *s)
 {
     for (int i = 3;; ++i) {
-        c_map_iter_t it;
-        c_map_find(s->fd_map, &it, &i);
-        if (c_map_at_end(s->fd_map, &it))
+        map_iter_t it;
+        map_find(s->fd_map, &it, &i);
+        if (map_at_end(s->fd_map, &it))
             return i;
     }
 }
@@ -94,11 +94,11 @@ static void syscall_write(struct riscv_t *rv)
     memory_read(s->mem, tmp, buffer, count);
 
     /* lookup the file descriptor */
-    c_map_iter_t it;
-    c_map_find(s->fd_map, &it, &fd);
-    if (!c_map_at_end(s->fd_map, &it)) {
+    map_iter_t it;
+    map_find(s->fd_map, &it, &fd);
+    if (!map_at_end(s->fd_map, &it)) {
         /* write out the data */
-        size_t written = fwrite(tmp, 1, count, c_map_iter_value(&it, FILE *));
+        size_t written = fwrite(tmp, 1, count, map_iter_value(&it, FILE *));
 
         /* return number of bytes written */
         rv_set_reg(rv, rv_reg_a0, written);
@@ -163,11 +163,11 @@ static void syscall_close(struct riscv_t *rv)
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
 
     if (fd >= 3) { /* lookup the file descriptor */
-        c_map_iter_t it;
-        c_map_find(s->fd_map, &it, &fd);
-        if (!c_map_at_end(s->fd_map, &it)) {
-            fclose(c_map_iter_value(&it, FILE *));
-            c_map_erase(s->fd_map, &it);
+        map_iter_t it;
+        map_find(s->fd_map, &it, &fd);
+        if (!map_at_end(s->fd_map, &it)) {
+            fclose(map_iter_value(&it, FILE *));
+            map_erase(s->fd_map, &it);
 
             /* success */
             rv_set_reg(rv, rv_reg_a0, 0);
@@ -188,15 +188,15 @@ static void syscall_lseek(struct riscv_t *rv)
     uint32_t whence = rv_get_reg(rv, rv_reg_a2);
 
     /* find the file descriptor */
-    c_map_iter_t it;
-    c_map_find(s->fd_map, &it, &fd);
-    if (c_map_at_end(s->fd_map, &it)) {
+    map_iter_t it;
+    map_find(s->fd_map, &it, &fd);
+    if (map_at_end(s->fd_map, &it)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
-    FILE *handle = c_map_iter_value(&it, FILE *);
+    FILE *handle = map_iter_value(&it, FILE *);
     if (fseek(handle, offset, whence)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
@@ -217,15 +217,15 @@ static void syscall_read(struct riscv_t *rv)
     uint32_t count = rv_get_reg(rv, rv_reg_a2);
 
     /* lookup the file */
-    c_map_iter_t it;
-    c_map_find(s->fd_map, &it, &fd);
-    if (c_map_at_end(s->fd_map, &it)) {
+    map_iter_t it;
+    map_find(s->fd_map, &it, &fd);
+    if (map_at_end(s->fd_map, &it)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
-    FILE *handle = c_map_iter_value(&it, FILE *);
+    FILE *handle = map_iter_value(&it, FILE *);
 
     /* read the file into runtime memory */
     uint8_t *tmp = malloc(count);
@@ -276,7 +276,7 @@ static void syscall_open(struct riscv_t *rv)
     const int fd = find_free_fd(s); /* find a free file descriptor */
 
     /* insert into the file descriptor map */
-    c_map_insert(s->fd_map, (void *) &fd, &handle);
+    map_insert(s->fd_map, (void *) &fd, &handle);
 
     /* return the file descriptor */
     rv_set_reg(rv, rv_reg_a0, fd);

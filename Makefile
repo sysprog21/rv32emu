@@ -51,7 +51,7 @@ BIN = $(OUT)/rv32emu
 all: $(BIN)
 
 OBJS = \
-	c_map.o \
+	map.o \
 	riscv.o \
 	io.o \
 	elf.o \

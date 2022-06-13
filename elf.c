@@ -103,7 +103,7 @@ struct elf_internal {
     uint8_t *raw_data;
 
     /* symbol table map: uint32_t -> (const char *) */
-    c_map_t symbols;
+    map_t symbols;
 };
 
 #ifndef max
@@ -118,7 +118,7 @@ elf_t *elf_new()
     elf_t *e = malloc(sizeof(elf_t));
     e->hdr = NULL;
     e->raw_size = 0;
-    e->symbols = c_map_init(int, char *, c_map_cmp_uint);
+    e->symbols = map_init(int, char *, map_cmp_uint);
     e->raw_data = malloc(1);
     return e;
 }
@@ -128,7 +128,7 @@ void elf_delete(elf_t *e)
     if (!e)
         return;
 
-    c_map_delete(e->symbols);
+    map_delete(e->symbols);
     free(e->raw_data);
 
     free(e);
@@ -229,8 +229,8 @@ const struct Elf32_Sym *elf_get_symbol(elf_t *e, const char *name)
 static void fill_symbols(elf_t *e)
 {
     /* initialize the symbol table */
-    c_map_clear(e->symbols);
-    c_map_insert(e->symbols, &(int){0}, &(char *){NULL});
+    map_clear(e->symbols);
+    map_insert(e->symbols, &(int){0}, &(char *){NULL});
 
     /* get the string table */
     const char *strtab = get_strtab(e);
@@ -255,18 +255,18 @@ static void fill_symbols(elf_t *e)
         case STT_NOTYPE:
         case STT_OBJECT:
         case STT_FUNC:
-            c_map_insert(e->symbols, (void *) &(sym->st_value), &sym_name);
+            map_insert(e->symbols, (void *) &(sym->st_value), &sym_name);
         }
     }
 }
 
 const char *elf_find_symbol(elf_t *e, uint32_t addr)
 {
-    if (c_map_empty(e->symbols))
+    if (map_empty(e->symbols))
         fill_symbols(e);
-    c_map_iter_t it;
-    c_map_find(e->symbols, &it, &addr);
-    return c_map_at_end(e->symbols, &it) ? NULL : c_map_iter_value(&it, char *);
+    map_iter_t it;
+    map_find(e->symbols, &it, &addr);
+    return map_at_end(e->symbols, &it) ? NULL : map_iter_value(&it, char *);
 }
 
 bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)

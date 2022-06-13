@@ -4,8 +4,8 @@
 
 #include <stdint.h>
 
-#include "c_map.h"
 #include "io.h"
+#include "map.h"
 #include "riscv.h"
 
 typedef uint32_t Elf32_Addr;

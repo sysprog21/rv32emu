@@ -10,10 +10,6 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -81,7 +77,3 @@ void c_map_delete(c_map_t);
     c_map_new(sizeof(key_type), sizeof(element_type), __func)
 
 #define c_map_iter_value(it, type) (*(type *) (it)->node->data)
-
-#ifdef __cplusplus
-};  // ifdef __cplusplus
-#endif

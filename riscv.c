@@ -1414,28 +1414,32 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 
         // standard uncompressed instruction
         if ((inst & 3) == 3) {
-            index = (inst & INST_6_2) >> 2;
+            uint32_t index = (inst & INST_6_2) >> 2;
 
             // dispatch this opcode
             TABLE_TYPE op = jump_table[index];
             assert(op);
+            if (!op(rv, inst))
+                break;
             rv->inst_len = INST_32;
 
         } else {
             // standard compressed instruction
+            inst &= 0x0000FFFF;
             const uint16_t c_index =
-                (inst & FR_C_15_13 >> 11) | (inst & FR_C_1_0);
+                (inst & FC_FUNC3 >> 11) | (inst & FC_OPCODE);
 
             // dispactch c_opcode (compressed instructions)
-            TABLE_TYPE_RVC op = jump_tablec[c_index];
+            TABLE_TYPE_RVC op = jump_table_rvc[c_index];
             assert(op);
+            if (!op(rv, inst))
+                break;
             rv->inst_len = INST_16;
         }
-
-        if (!op(rv, inst))
-            break;
+        
         // increment the cycles csr
         rv->csr_cycle++;
+    }
 #endif  // ENABLE_COMPUTED_GOTO
 }
 

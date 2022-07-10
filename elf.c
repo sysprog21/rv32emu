@@ -147,8 +147,8 @@ static void release(elf_t *e)
 static bool is_valid(elf_t *e)
 {
     /* check for ELF magic */
-    if (e->hdr->e_ident[0] != 0x7f && e->hdr->e_ident[1] != 'E' &&
-        e->hdr->e_ident[2] != 'L' && e->hdr->e_ident[3] != 'F') {
+    if (e->hdr->e_ident[EI_MAG0] != 0x7f || e->hdr->e_ident[EI_MAG1] != 'E' ||
+        e->hdr->e_ident[EI_MAG2] != 'L' || e->hdr->e_ident[EI_MAG3] != 'F') {
         return false;
     }
 

@@ -1436,7 +1436,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
                 break;
             rv->inst_len = INST_16;
         }
-        
+
         // increment the cycles csr
         rv->csr_cycle++;
     }

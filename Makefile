@@ -1,9 +1,9 @@
 UNAME_S := $(shell uname -s)
 ifeq ("$(origin CC)", "default")
     ifeq ($(UNAME_S),Darwin)
-        CC = clang
+	CC := clang
     else
-        CC = gcc
+	CC := gcc
     endif
 endif
 
@@ -46,11 +46,11 @@ else
 endif
 
 OUT ?= build
-BIN = $(OUT)/rv32emu
+BIN := $(OUT)/rv32emu
 
 all: $(BIN)
 
-OBJS = \
+OBJS := \
 	map.o \
 	riscv.o \
 	io.o \
@@ -103,13 +103,13 @@ check: $(BIN)
 	(cd $(OUT); ../$(BIN) puzzle.elf)
 
 ARCH_TEST_DIR ?= tests/riscv-arch-test
-ARCH_TEST_BUILD = $(ARCH_TEST_DIR)/Makefile
-export RISCV_TARGET = tests/arch-test-target
+ARCH_TEST_BUILD := $(ARCH_TEST_DIR)/Makefile
+export RISCV_TARGET := tests/arch-test-target
 export RISCV_PREFIX ?= riscv-none-embed-
-export TARGETDIR = $(shell pwd)
-export XLEN = 32
+export TARGETDIR := $(shell pwd)
+export XLEN := 32
 export JOBS ?= -j
-export WORK = $(TARGETDIR)/build/arch-test
+export WORK := $(TARGETDIR)/build/arch-test
 
 $(ARCH_TEST_BUILD):
 	git submodule update --init

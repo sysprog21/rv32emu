@@ -8,6 +8,6 @@ judgment, and feel free to propose changes to this document in a pull request.
 
 ## Coding Convention
 
-Software requirement: `clang-format-12`
+Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 12 or later.
 
 Use the command `$ clang-format -i *.[ch]` to enforce a consistent coding style.

@@ -102,10 +102,25 @@ check: $(BIN)
 	(cd $(OUT); ../$(BIN) hello.elf)
 	(cd $(OUT); ../$(BIN) puzzle.elf)
 
+# Validate GNU Toolchain for RISC-V
+CROSS_COMPILE ?= riscv32-unknown-elf-
+RV32_CC = $(CROSS_COMPILE)gcc
+RV32_CC := $(shell which $(RV32_CC))
+ifndef RV32_CC
+  # Try Debian/Ubuntu package
+  CROSS_COMPILE = riscv-none-embed-
+  RV32_CC = $(CROSS_COMPILE)gcc
+  RV32_CC := $(shell which $(RV32_CC))
+  ifndef RV32_CC
+  $(warning "no $(CROSS_COMPILE)gcc found. Check GNU Toolchain for RISC-V installation.")
+  CROSS_COMPILE :=
+  endif
+endif
+
 ARCH_TEST_DIR ?= tests/riscv-arch-test
 ARCH_TEST_BUILD := $(ARCH_TEST_DIR)/Makefile
 export RISCV_TARGET := tests/arch-test-target
-export RISCV_PREFIX ?= riscv-none-embed-
+export RISCV_PREFIX ?= $(CROSS_COMPILE)
 export TARGETDIR := $(shell pwd)
 export XLEN := 32
 export JOBS ?= -j

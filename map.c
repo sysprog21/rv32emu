@@ -115,7 +115,7 @@ static map_node_t *map_rotate_right(map_t obj, map_node_t *node)
 {
     map_node_t *l = node->left, *lr = l->right, *up = node->up;
 
-    // Adjust
+    /* Adjust */
     l->up = up;
     l->right = node;
 
@@ -169,7 +169,7 @@ static void map_l_r(map_t obj,
     uncle =
         (grandparent->left == parent) ? grandparent->right : grandparent->left;
 
-    // Apply left-left case
+    /* Apply left-left case */
     map_l_l(obj, node, parent, grandparent, uncle);
 }
 
@@ -387,7 +387,7 @@ static void map_calibrate(map_t obj)
         return;
     }
 
-    // Recompute it_least and it_most
+    /* Recompute it_least and it_most */
     obj->it_least.node = obj->it_most.node = obj->head;
 
     while (obj->it_least.node->left)
@@ -411,15 +411,15 @@ map_t map_new(size_t s1, size_t s2, int (*cmp)(void *, void *))
 {
     map_t obj = malloc(sizeof(struct map_internal));
 
-    // Set all pointers to NULL
+    /* Set all pointers to NULL */
     obj->head = NULL;
 
-    // Set up all default properties
+    /* Set up all default properties */
     obj->key_size = s1;
     obj->element_size = s2;
     obj->size = 0;
 
-    // Function pointers
+    /* Function pointers */
     obj->comparator = cmp;
 
     obj->it_end.prev = obj->it_end.node = NULL;
@@ -579,7 +579,7 @@ void map_erase(map_t obj, map_iter_t *it)
     map_node_t *x, *y;
     map_node_t *node = it->node, *target, *double_blk, *x_parent;
 
-    // If it is the head, and the size is 1, just delete it.
+    /* If it is the head, and the size is 1, just delete it. */
     if (obj->size == 1 && node == obj->head) {
         map_delete_node(obj, node);
         obj->head = NULL;

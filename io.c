@@ -84,7 +84,7 @@ uint32_t memory_read_w(memory_t *m, uint32_t addr)
         chunk_t *c;
         if ((c = m->chunks[addr >> 16]))
             return *(const uint32_t *) (c->data + addr_lo);
-        return 0u;
+        return 0U;
     }
     uint32_t dst = 0;
     memory_read(m, (uint8_t *) &dst, addr, 4);
@@ -98,7 +98,7 @@ uint16_t memory_read_s(memory_t *m, uint32_t addr)
         chunk_t *c;
         if ((c = m->chunks[addr >> 16]))
             return *(const uint16_t *) (c->data + addr_lo);
-        return 0u;
+        return 0U;
     }
     uint16_t dst = 0;
     memory_read(m, (uint8_t *) &dst, addr, 2);
@@ -110,7 +110,7 @@ uint8_t memory_read_b(memory_t *m, uint32_t addr)
     chunk_t *c;
     if ((c = m->chunks[addr >> 16]))
         return *(c->data + (addr & 0xffff));
-    return 0u;
+    return 0U;
 }
 
 void memory_write(memory_t *m, uint32_t addr, const uint8_t *src, uint32_t size)

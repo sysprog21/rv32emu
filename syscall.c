@@ -149,9 +149,10 @@ static void syscall_gettimeofday(struct riscv_t *rv)
         memory_write(s->mem, tv + 8, (const uint8_t *) &tv_usec, 4);
     }
     if (tz) {
-        // FIXME: This parameter is ignored by the syscall handler in newlib.
+        /* FIXME: This parameter is ignored by the syscall handler in newlib. */
     }
-    // success
+
+    /* success */
     rv_set_reg(rv, rv_reg_a0, 0);
 }
 

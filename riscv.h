@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-// RISC-V register files
+/* RISC-V register files */
 enum {
     rv_reg_zero = 0,
     rv_reg_ra,
@@ -51,13 +51,13 @@ typedef uint8_t riscv_byte_t;
 typedef uint32_t riscv_exception_t;
 typedef float riscv_float_t;
 
-// memory read handlers
+/* memory read handlers */
 typedef riscv_word_t (*riscv_mem_ifetch)(struct riscv_t *rv, riscv_word_t addr);
 typedef riscv_word_t (*riscv_mem_read_w)(struct riscv_t *rv, riscv_word_t addr);
 typedef riscv_half_t (*riscv_mem_read_s)(struct riscv_t *rv, riscv_word_t addr);
 typedef riscv_byte_t (*riscv_mem_read_b)(struct riscv_t *rv, riscv_word_t addr);
 
-// memory write handlers
+/* memory write handlers */
 typedef void (*riscv_mem_write_w)(struct riscv_t *rv,
                                   riscv_word_t addr,
                                   riscv_word_t data);
@@ -68,61 +68,61 @@ typedef void (*riscv_mem_write_b)(struct riscv_t *rv,
                                   riscv_word_t addr,
                                   riscv_byte_t data);
 
-// system instruction handlers
+/* system instruction handlers */
 typedef void (*riscv_on_ecall)(struct riscv_t *rv);
 typedef void (*riscv_on_ebreak)(struct riscv_t *rv);
 
-// RISC-V emulator I/O interface
+/* RISC-V emulator I/O interface */
 struct riscv_io_t {
-    // memory read interface
+    /* memory read interface */
     riscv_mem_ifetch mem_ifetch;
     riscv_mem_read_w mem_read_w;
     riscv_mem_read_s mem_read_s;
     riscv_mem_read_b mem_read_b;
 
-    // memory write interface
+    /* memory write interface */
     riscv_mem_write_w mem_write_w;
     riscv_mem_write_s mem_write_s;
     riscv_mem_write_b mem_write_b;
 
-    // system commands
+    /* system commands */
     riscv_on_ecall on_ecall;
     riscv_on_ebreak on_ebreak;
 };
 
-// create a RISC-V emulator
+/* create a RISC-V emulator */
 struct riscv_t *rv_create(const struct riscv_io_t *io, riscv_user_t user_data);
 
-// delete a RISC-V emulator
+/* delete a RISC-V emulator */
 void rv_delete(struct riscv_t *);
 
-// reset the RISC-V processor
+/* reset the RISC-V processor */
 void rv_reset(struct riscv_t *, riscv_word_t pc);
 
-// step the RISC-V emulator
+/* step the RISC-V emulator */
 void rv_step(struct riscv_t *, int32_t cycles);
 
-// get RISC-V user data bound to an emulator
+/* get RISC-V user data bound to an emulator */
 riscv_user_t rv_userdata(struct riscv_t *);
 
-// set the program counter of a RISC-V emulator
+/* set the program counter of a RISC-V emulator */
 bool rv_set_pc(struct riscv_t *rv, riscv_word_t pc);
 
-// get the program counter of a RISC-V emulator
+/* get the program counter of a RISC-V emulator */
 riscv_word_t rv_get_pc(struct riscv_t *rv);
 
-// set a register of the RISC-V emulator
+/* set a register of the RISC-V emulator */
 void rv_set_reg(struct riscv_t *, uint32_t reg, riscv_word_t in);
 
-// get a register of the RISC-V emulator
+/* get a register of the RISC-V emulator */
 riscv_word_t rv_get_reg(struct riscv_t *, uint32_t reg);
 
-// halt the core
+/* halt the core */
 void rv_halt(struct riscv_t *);
 
-// return the halt state
+/* return the halt state */
 bool rv_has_halted(struct riscv_t *);
 
 #ifdef __cplusplus
-};  // ifdef __cplusplus
+};
 #endif

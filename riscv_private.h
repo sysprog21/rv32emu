@@ -48,7 +48,7 @@ enum {
 /* instruction decode masks */
 enum {
     //               ....xxxx....xxxx....xxxx....xxxx
-    INST_6_2     = 0b00000000000000000000000001111100,
+    INSN_6_2     = 0b00000000000000000000000001111100,
     //               ....xxxx....xxxx....xxxx....xxxx
     FR_OPCODE    = 0b00000000000000000000000001111111, // R-type
     FR_RD        = 0b00000000000000000000111110000000,
@@ -102,9 +102,9 @@ enum {
 /* clang-format off */
 
 enum {
-    INST_UNKNOWN = 0,
-    INST_16 = 2,
-    INST_32 = 4,
+    INSN_UNKNOWN = 0,
+    INSN_16 = 2,
+    INSN_32 = 4,
 };
 
 struct riscv_t {
@@ -133,99 +133,99 @@ struct riscv_t {
     uint32_t csr_mbadaddr;
     
     /* current instruction length */
-    uint8_t inst_len;
+    uint8_t insn_len;
 };
 
 /* decode rd field */
-static inline uint32_t dec_rd(const uint32_t inst)
+static inline uint32_t dec_rd(const uint32_t insn)
 {
-    return (inst & FR_RD) >> 7;
+    return (insn & FR_RD) >> 7;
 }
 
 /* decode rs1 field */
-static inline uint32_t dec_rs1(const uint32_t inst)
+static inline uint32_t dec_rs1(const uint32_t insn)
 {
-    return (inst & FR_RS1) >> 15;
+    return (insn & FR_RS1) >> 15;
 }
 
 /* decode rs2 field */
-static inline uint32_t dec_rs2(const uint32_t inst)
+static inline uint32_t dec_rs2(const uint32_t insn)
 {
-    return (inst & FR_RS2) >> 20;
+    return (insn & FR_RS2) >> 20;
 }
 
 /* decoded funct3 field */
-static inline uint32_t dec_funct3(const uint32_t inst)
+static inline uint32_t dec_funct3(const uint32_t insn)
 {
-    return (inst & FR_FUNCT3) >> 12;
+    return (insn & FR_FUNCT3) >> 12;
 }
 
 /* decode funct7 field */
-static inline uint32_t dec_funct7(const uint32_t inst)
+static inline uint32_t dec_funct7(const uint32_t insn)
 {
-    return (inst & FR_FUNCT7) >> 25;
+    return (insn & FR_FUNCT7) >> 25;
 }
 
 /* decode U-type instruction immediate */
-static inline uint32_t dec_utype_imm(const uint32_t inst)
+static inline uint32_t dec_utype_imm(const uint32_t insn)
 {
-    return inst & FU_IMM_31_12;
+    return insn & FU_IMM_31_12;
 }
 
 /* decode J-type instruction immediate */
-static inline int32_t dec_jtype_imm(const uint32_t inst)
+static inline int32_t dec_jtype_imm(const uint32_t insn)
 {
     uint32_t dst = 0;
-    dst |= (inst & FJ_IMM_20);
-    dst |= (inst & FJ_IMM_19_12) << 11;
-    dst |= (inst & FJ_IMM_11) << 2;
-    dst |= (inst & FJ_IMM_10_1) >> 9;
+    dst |= (insn & FJ_IMM_20);
+    dst |= (insn & FJ_IMM_19_12) << 11;
+    dst |= (insn & FJ_IMM_11) << 2;
+    dst |= (insn & FJ_IMM_10_1) >> 9;
     /* NOTE: shifted to 2nd least significant bit */
     return ((int32_t) dst) >> 11;
 }
 
 /* decode I-type instruction immediate */
-static inline int32_t dec_itype_imm(const uint32_t inst)
+static inline int32_t dec_itype_imm(const uint32_t insn)
 {
-    return ((int32_t)(inst & FI_IMM_11_0)) >> 20;
+    return ((int32_t)(insn & FI_IMM_11_0)) >> 20;
 }
 
 /* decode R4-type format field */
-static inline uint32_t dec_r4type_fmt(const uint32_t inst)
+static inline uint32_t dec_r4type_fmt(const uint32_t insn)
 {
-    return (inst & FR4_FMT) >> 25;
+    return (insn & FR4_FMT) >> 25;
 }
 
 /* decode R4-type rs3 field */
-static inline uint32_t dec_r4type_rs3(const uint32_t inst)
+static inline uint32_t dec_r4type_rs3(const uint32_t insn)
 {
-    return (inst & FR4_RS3) >> 27;
+    return (insn & FR4_RS3) >> 27;
 }
 
 /* decode csr instruction immediate (same as itype, zero extend) */
-static inline uint32_t dec_csr(const uint32_t inst)
+static inline uint32_t dec_csr(const uint32_t insn)
 {
-    return ((uint32_t)(inst & FI_IMM_11_0)) >> 20;
+    return ((uint32_t)(insn & FI_IMM_11_0)) >> 20;
 }
 
 /* decode B-type instruction immediate */
-static inline int32_t dec_btype_imm(const uint32_t inst)
+static inline int32_t dec_btype_imm(const uint32_t insn)
 {
     uint32_t dst = 0;
-    dst |= (inst & FB_IMM_12);
-    dst |= (inst & FB_IMM_11) << 23;
-    dst |= (inst & FB_IMM_10_5) >> 1;
-    dst |= (inst & FB_IMM_4_1) << 12;
+    dst |= (insn & FB_IMM_12);
+    dst |= (insn & FB_IMM_11) << 23;
+    dst |= (insn & FB_IMM_10_5) >> 1;
+    dst |= (insn & FB_IMM_4_1) << 12;
     /* NOTE: shifted to 2nd least significant bit */
     return ((int32_t) dst) >> 19;
 }
 
 /* decode S-type instruction immediate */
-static inline int32_t dec_stype_imm(const uint32_t inst)
+static inline int32_t dec_stype_imm(const uint32_t insn)
 {
     uint32_t dst = 0;
-    dst |= (inst & FS_IMM_11_5);
-    dst |= (inst & FS_IMM_4_0) << 13;
+    dst |= (insn & FS_IMM_11_5);
+    dst |= (insn & FS_IMM_4_0) << 13;
     return ((int32_t) dst) >> 20;
 }
 

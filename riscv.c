@@ -6,7 +6,7 @@
 #include "riscv.h"
 #include "riscv_private.h"
 
-static void rv_except_inst_misaligned(struct riscv_t *rv, uint32_t old_pc)
+static void rv_except_insn_misaligned(struct riscv_t *rv, uint32_t old_pc)
 {
     /* mtvec (Machine Trap-Vector Base Address Register)
      * mtvec[MXLEN-1:2]: vector base address
@@ -99,7 +99,7 @@ static void rv_except_store_misaligned(struct riscv_t *rv, uint32_t addr)
     rv->csr_mcause = code;
 }
 
-static void rv_except_illegal_inst(struct riscv_t *rv, uint32_t inst)
+static void rv_except_illegal_insn(struct riscv_t *rv, uint32_t insn)
 {
     /* mtvec (Machine Trap-Vector Base Address Register)
      * mtvec[MXLEN-1:2]: vector base address
@@ -115,7 +115,7 @@ static void rv_except_illegal_inst(struct riscv_t *rv, uint32_t inst)
      * mtval(Machine Trap Value Register) : Illegal Instruction
      */
     rv->csr_mepc = rv->PC;
-    rv->csr_mtval = inst;
+    rv->csr_mtval = insn;
 
     switch (mode) {
     case 0: /* DIRECT: All exceptions set PC to base */
@@ -130,13 +130,13 @@ static void rv_except_illegal_inst(struct riscv_t *rv, uint32_t inst)
     rv->csr_mcause = code;
 }
 
-static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
+static bool op_load(struct riscv_t *rv, uint32_t insn UNUSED)
 {
     /* I-type format */
-    const int32_t imm = dec_itype_imm(inst);
-    const uint32_t rs1 = dec_rs1(inst);
-    const uint32_t funct3 = dec_funct3(inst);
-    const uint32_t rd = dec_rd(inst);
+    const int32_t imm = dec_itype_imm(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const uint32_t funct3 = dec_funct3(insn);
+    const uint32_t rd = dec_rd(insn);
 
     /* load address */
     const uint32_t addr = rv->X[rs1] + imm;
@@ -171,12 +171,12 @@ static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
         rv->X[rd] = rv->io.mem_read_s(rv, addr);
         break;
     default:
-        rv_except_illegal_inst(rv, inst);
+        rv_except_illegal_insn(rv, insn);
         return false;
     }
 
     /* step over instruction */
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
 
     /* enforce zero register */
     if (rd == rv_reg_zero)
@@ -185,7 +185,7 @@ static bool op_load(struct riscv_t *rv, uint32_t inst UNUSED)
 }
 
 #ifdef ENABLE_Zifencei
-static bool op_misc_mem(struct riscv_t *rv, uint32_t inst UNUSED)
+static bool op_misc_mem(struct riscv_t *rv, uint32_t insn UNUSED)
 {
     /* FIXME: fill real implementations */
     rv->PC += 4;
@@ -195,13 +195,13 @@ static bool op_misc_mem(struct riscv_t *rv, uint32_t inst UNUSED)
 #define op_misc_mem OP_UNIMP
 #endif /* ENABLE_Zifencei */
 
-static bool op_op_imm(struct riscv_t *rv, uint32_t inst)
+static bool op_op_imm(struct riscv_t *rv, uint32_t insn)
 {
     /* I-type decode */
-    const int32_t imm = dec_itype_imm(inst);
-    const uint32_t rd = dec_rd(inst);
-    const uint32_t rs1 = dec_rs1(inst);
-    const uint32_t funct3 = dec_funct3(inst);
+    const int32_t imm = dec_itype_imm(insn);
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const uint32_t funct3 = dec_funct3(insn);
 
     /* dispatch operation type */
     switch (funct3) {
@@ -234,12 +234,12 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t inst)
         rv->X[rd] = rv->X[rs1] & imm;
         break;
     default:
-        rv_except_illegal_inst(rv, inst);
+        rv_except_illegal_insn(rv, insn);
         return false;
     }
 
     /* step over instruction */
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
 
     /* enforce zero register */
     if (rd == rv_reg_zero)
@@ -248,15 +248,15 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t inst)
 }
 
 /* add upper immediate to pc */
-static bool op_auipc(struct riscv_t *rv, uint32_t inst)
+static bool op_auipc(struct riscv_t *rv, uint32_t insn)
 {
     /* U-type decode */
-    const uint32_t rd = dec_rd(inst);
-    const uint32_t val = dec_utype_imm(inst) + rv->PC;
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t val = dec_utype_imm(insn) + rv->PC;
     rv->X[rd] = val;
 
     /* step over instruction */
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
 
     /* enforce zero register */
     if (rd == rv_reg_zero)
@@ -264,12 +264,12 @@ static bool op_auipc(struct riscv_t *rv, uint32_t inst)
     return true;
 }
 
-static bool op_store(struct riscv_t *rv, uint32_t inst)
+static bool op_store(struct riscv_t *rv, uint32_t insn)
 {
     /* S-type format */
-    const int32_t imm = dec_stype_imm(inst);
-    const uint32_t rs1 = dec_rs1(inst), rs2 = dec_rs2(inst);
-    const uint32_t funct3 = dec_funct3(inst);
+    const int32_t imm = dec_stype_imm(insn);
+    const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
+    const uint32_t funct3 = dec_funct3(insn);
 
     /* store address */
     const uint32_t addr = rv->X[rs1] + imm;
@@ -295,7 +295,7 @@ static bool op_store(struct riscv_t *rv, uint32_t inst)
         rv->io.mem_write_w(rv, addr, data);
         break;
     default:
-        rv_except_illegal_inst(rv, inst);
+        rv_except_illegal_insn(rv, insn);
         return false;
     }
 
@@ -304,13 +304,13 @@ static bool op_store(struct riscv_t *rv, uint32_t inst)
     return true;
 }
 
-static bool op_op(struct riscv_t *rv, uint32_t inst)
+static bool op_op(struct riscv_t *rv, uint32_t insn)
 {
     /* R-type decode */
-    const uint32_t rd = dec_rd(inst);
-    const uint32_t funct3 = dec_funct3(inst);
-    const uint32_t rs1 = dec_rs1(inst), rs2 = dec_rs2(inst);
-    const uint32_t funct7 = dec_funct7(inst);
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t funct3 = dec_funct3(insn);
+    const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
+    const uint32_t funct7 = dec_funct7(insn);
 
     /* TODO: skip zero register here */
 
@@ -343,7 +343,7 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
             rv->X[rd] = rv->X[rs1] & rv->X[rs2];
             break;
         default:
-            rv_except_illegal_inst(rv, inst);
+            rv_except_illegal_insn(rv, insn);
             return false;
         }
         break;
@@ -407,7 +407,7 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
             break;
         }
         default:
-            rv_except_illegal_inst(rv, inst);
+            rv_except_illegal_insn(rv, insn);
             return false;
         }
         break;
@@ -421,17 +421,17 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
             rv->X[rd] = ((int32_t) rv->X[rs1]) >> (rv->X[rs2] & 0x1f);
             break;
         default:
-            rv_except_illegal_inst(rv, inst);
+            rv_except_illegal_insn(rv, insn);
             return false;
         }
         break;
     default:
-        rv_except_illegal_inst(rv, inst);
+        rv_except_illegal_insn(rv, insn);
         return false;
     }
 
     /* step over instruction */
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
 
     /* enforce zero register */
     if (rd == rv_reg_zero)
@@ -439,15 +439,15 @@ static bool op_op(struct riscv_t *rv, uint32_t inst)
     return true;
 }
 
-static bool op_lui(struct riscv_t *rv, uint32_t inst)
+static bool op_lui(struct riscv_t *rv, uint32_t insn)
 {
     /* U-type decode */
-    const uint32_t rd = dec_rd(inst);
-    const uint32_t val = dec_utype_imm(inst);
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t val = dec_utype_imm(insn);
     rv->X[rd] = val;
 
     /* step over instruction */
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
 
     /* enforce zero register */
     if (rd == rv_reg_zero)
@@ -455,14 +455,14 @@ static bool op_lui(struct riscv_t *rv, uint32_t inst)
     return true;
 }
 
-static bool op_branch(struct riscv_t *rv, uint32_t inst)
+static bool op_branch(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
 
     /* B-type decode */
-    const uint32_t func3 = dec_funct3(inst);
-    const int32_t imm = dec_btype_imm(inst);
-    const uint32_t rs1 = dec_rs1(inst), rs2 = dec_rs2(inst);
+    const uint32_t func3 = dec_funct3(insn);
+    const int32_t imm = dec_btype_imm(insn);
+    const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
 
     /* track if branch is taken or not */
     bool taken = false;
@@ -488,7 +488,7 @@ static bool op_branch(struct riscv_t *rv, uint32_t inst)
         taken = (rv->X[rs1] >= rv->X[rs2]);
         break;
     default:
-        rv_except_illegal_inst(rv, inst);
+        rv_except_illegal_insn(rv, insn);
         return false;
     }
 
@@ -502,27 +502,27 @@ static bool op_branch(struct riscv_t *rv, uint32_t inst)
             0x3
 #endif
         )
-            rv_except_inst_misaligned(rv, pc);
+            rv_except_insn_misaligned(rv, pc);
     } else {
         /* step over instruction */
-        rv->PC += rv->inst_len;
+        rv->PC += rv->insn_len;
     }
 
     /* can branch */
     return false;
 }
 
-static bool op_jalr(struct riscv_t *rv, uint32_t inst)
+static bool op_jalr(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
 
     /* I-type decode */
-    const uint32_t rd = dec_rd(inst);
-    const uint32_t rs1 = dec_rs1(inst);
-    const int32_t imm = dec_itype_imm(inst);
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const int32_t imm = dec_itype_imm(insn);
 
     /* compute return address */
-    const uint32_t ra = rv->PC + rv->inst_len;
+    const uint32_t ra = rv->PC + rv->insn_len;
 
     /* jump */
     rv->PC = (rv->X[rs1] + imm) & ~1u;
@@ -539,7 +539,7 @@ static bool op_jalr(struct riscv_t *rv, uint32_t inst)
         0x3
 #endif
     ) {
-        rv_except_inst_misaligned(rv, pc);
+        rv_except_insn_misaligned(rv, pc);
         return false;
     }
 
@@ -547,16 +547,16 @@ static bool op_jalr(struct riscv_t *rv, uint32_t inst)
     return false;
 }
 
-static bool op_jal(struct riscv_t *rv, uint32_t inst)
+static bool op_jal(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
 
     /* j-type decode */
-    const uint32_t rd = dec_rd(inst);
-    const int32_t rel = dec_jtype_imm(inst);
+    const uint32_t rd = dec_rd(insn);
+    const int32_t rel = dec_jtype_imm(insn);
 
     /* compute return address */
-    const uint32_t ra = rv->PC + rv->inst_len;
+    const uint32_t ra = rv->PC + rv->insn_len;
     rv->PC += rel;
 
     /* link */
@@ -570,7 +570,7 @@ static bool op_jal(struct riscv_t *rv, uint32_t inst)
         0x3
 #endif
     ) {
-        rv_except_inst_misaligned(rv, pc);
+        rv_except_insn_misaligned(rv, pc);
         return false;
     }
 
@@ -653,14 +653,14 @@ static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
     return out;
 }
 
-static bool op_system(struct riscv_t *rv, uint32_t inst)
+static bool op_system(struct riscv_t *rv, uint32_t insn)
 {
     /* I-type decode */
-    const int32_t imm = dec_itype_imm(inst);
-    const int32_t csr = dec_csr(inst);
-    const uint32_t funct3 = dec_funct3(inst);
-    const uint32_t rs1 = dec_rs1(inst);
-    const uint32_t rd = dec_rd(inst);
+    const int32_t imm = dec_itype_imm(insn);
+    const int32_t csr = dec_csr(insn);
+    const uint32_t funct3 = dec_funct3(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const uint32_t rd = dec_rd(insn);
 
     /* dispatch by func3 field */
     switch (funct3) {
@@ -676,14 +676,14 @@ static bool op_system(struct riscv_t *rv, uint32_t inst)
         case 0x102: /* SRET */
         case 0x202: /* HRET */
         case 0x105: /* WFI */
-            rv_except_illegal_inst(rv, inst);
+            rv_except_illegal_insn(rv, insn);
             return false;
         case 0x302: /* MRET */
             rv->PC = rv->csr_mepc;
             /* this is a branch */
             return false;
         default:
-            rv_except_illegal_inst(rv, inst);
+            rv_except_illegal_insn(rv, insn);
             return false;
         }
         break;
@@ -722,12 +722,12 @@ static bool op_system(struct riscv_t *rv, uint32_t inst)
     }
 #endif /* ENABLE_Zicsr */
     default:
-        rv_except_illegal_inst(rv, inst);
+        rv_except_illegal_insn(rv, insn);
         return false;
     }
 
     /* step over instruction */
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
 
     /* enforce zero register */
     if (rd == rv_reg_zero)
@@ -736,11 +736,11 @@ static bool op_system(struct riscv_t *rv, uint32_t inst)
 }
 
 #ifdef ENABLE_RV32A
-static bool op_amo(struct riscv_t *rv, uint32_t inst)
+static bool op_amo(struct riscv_t *rv, uint32_t insn)
 {
-    const uint32_t rd = dec_rd(inst);
-    const uint32_t rs1 = dec_rs1(inst), rs2 = dec_rs2(inst);
-    const uint32_t f7 = dec_funct7(inst);
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
+    const uint32_t f7 = dec_funct7(insn);
     const uint32_t funct5 = (f7 >> 2) & 0x1f;
 
     switch (funct5) {
@@ -815,7 +815,7 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
         break;
     }
     default:
-        rv_except_illegal_inst(rv, inst);
+        rv_except_illegal_insn(rv, insn);
         return false;
     }
 
@@ -841,12 +841,12 @@ static bool op_amo(struct riscv_t *rv, uint32_t inst)
 #define op_nmadd OP_UNIMP
 
 #ifdef ENABLE_RV32C
-static bool op_caddi(struct riscv_t *rv, uint16_t inst)
+static bool op_caddi(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp =
-        (uint16_t) (((inst & FCI_IMM_12) >> 5) | (inst & FCI_IMM_6_2)) >> 2;
+        (uint16_t) (((insn & FCI_IMM_12) >> 5) | (insn & FCI_IMM_6_2)) >> 2;
     const int32_t imm = (0x20 & tmp) ? 0xffffffc0 | tmp : tmp;
-    const uint16_t rd = c_dec_rd(inst);
+    const uint16_t rd = c_dec_rd(insn);
 
     /* dispatch operation type */
     if (rd != 0) { /* C.ADDI */
@@ -856,7 +856,7 @@ static bool op_caddi(struct riscv_t *rv, uint16_t inst)
     }
 
     /* step over instruction */
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
 
     /* enforce zero register */
     if (rd == rv_reg_zero)
@@ -864,42 +864,42 @@ static bool op_caddi(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool op_caddi4spn(struct riscv_t *rv, uint16_t inst)
+static bool op_caddi4spn(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = 0;
-    tmp |= (inst & 0x1800) >> 7;
-    tmp |= (inst & 0x780) >> 1;
-    tmp |= (inst & 0x40) >> 4;
-    tmp |= (inst & 0x20) >> 2;
+    tmp |= (insn & 0x1800) >> 7;
+    tmp |= (insn & 0x780) >> 1;
+    tmp |= (insn & 0x40) >> 4;
+    tmp |= (insn & 0x20) >> 2;
 
     const uint16_t imm = tmp;
-    const uint16_t rd = c_dec_rdc(inst) | 0x08;
+    const uint16_t rd = c_dec_rdc(insn) | 0x08;
     rv->X[rd] = rv->X[2] + imm;
 
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
-static bool op_cli(struct riscv_t *rv, uint16_t inst)
+static bool op_cli(struct riscv_t *rv, uint16_t insn)
 {
-    uint16_t tmp = (uint16_t) ((inst & 0x1000) >> 7 | (inst & 0x7c) >> 2);
+    uint16_t tmp = (uint16_t) ((insn & 0x1000) >> 7 | (insn & 0x7c) >> 2);
     const int32_t imm = (tmp & 0x20) ? 0xffffffc0 | tmp : tmp;
-    const uint16_t rd = c_dec_rd(inst);
+    const uint16_t rd = c_dec_rd(insn);
     rv->X[rd] = imm;
 
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
-static bool op_clui(struct riscv_t *rv, uint16_t inst)
+static bool op_clui(struct riscv_t *rv, uint16_t insn)
 {
-    const uint16_t rd = c_dec_rd(inst);
+    const uint16_t rd = c_dec_rd(insn);
     if (rd == 2) { /* C.ADDI16SP */
-        uint32_t tmp = (inst & 0x1000) >> 3;
-        tmp |= (inst & 0x40) >> 2;
-        tmp |= (inst & 0x20) << 1;
-        tmp |= (inst & 0x18) << 4;
-        tmp |= (inst & 0x4) << 3;
+        uint32_t tmp = (insn & 0x1000) >> 3;
+        tmp |= (insn & 0x40) >> 2;
+        tmp |= (insn & 0x20) << 1;
+        tmp |= (insn & 0x18) << 4;
+        tmp |= (insn & 0x4) << 3;
         const uint32_t imm = (tmp & 0x200) ? (0xfffffc00 | tmp) : tmp;
 
         if (imm != 0)
@@ -908,7 +908,7 @@ static bool op_clui(struct riscv_t *rv, uint16_t inst)
             /* Code point: nzimm == 0 is reserved */
         }
     } else if (rd != 0) { /* C.LUI */
-        uint32_t tmp = (inst & 0x1000) << 5 | (inst & 0x7c) << 10;
+        uint32_t tmp = (insn & 0x1000) << 5 | (insn & 0x7c) << 10;
         const int32_t imm = (tmp & 0x20000) ? (0xfffc0000 | tmp) : tmp;
         if (imm != 0)
             rv->X[rd] = imm;
@@ -919,18 +919,18 @@ static bool op_clui(struct riscv_t *rv, uint16_t inst)
         /* Code point 2: rd==x0 is HINTS */
     }
 
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
-static bool op_csrli(struct riscv_t *rv, uint16_t inst)
+static bool op_csrli(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
-    tmp |= (inst & 0x1000) >> 7;
-    tmp |= (inst & 0x007C) >> 2;
+    tmp |= (insn & 0x1000) >> 7;
+    tmp |= (insn & 0x007C) >> 2;
 
     const uint32_t shamt = tmp;
-    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+    const uint32_t rs1 = c_dec_rs1c(insn) | 0x08;
 
     /* Code point 1: shamt[t]==1 are reserved */
     if (shamt & 0x20)
@@ -947,14 +947,14 @@ static bool op_csrli(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool op_csrai(struct riscv_t *rv, uint16_t inst)
+static bool op_csrai(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
-    tmp |= (inst & 0x1000) >> 7;
-    tmp |= (inst & 0x007C) >> 2;
+    tmp |= (insn & 0x1000) >> 7;
+    tmp |= (insn & 0x007C) >> 2;
 
     const uint32_t shamt = tmp;
-    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+    const uint32_t rs1 = c_dec_rs1c(insn) | 0x08;
 
     /* Code point 1: shamt[5] == 1 is reserved */
     if (shamt & 0x20)
@@ -975,44 +975,44 @@ static bool op_csrai(struct riscv_t *rv, uint16_t inst)
     return true;
 }
 
-static bool op_candi(struct riscv_t *rv, uint16_t inst)
+static bool op_candi(struct riscv_t *rv, uint16_t insn)
 {
-    const uint16_t mask = (0x1000 & inst) << 3;
+    const uint16_t mask = (0x1000 & insn) << 3;
 
     uint16_t tmp = 0;
     for (int i = 0; i <= 10; ++i)
         tmp |= (mask >> i);
-    tmp |= (inst & 0x007C) >> 2;
+    tmp |= (insn & 0x007C) >> 2;
 
     const uint32_t imm = sign_extend_h(tmp);
-    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
+    const uint32_t rs1 = c_dec_rs1c(insn) | 0x08;
 
     rv->X[rs1] &= imm;
 
     return true;
 }
 
-static bool op_cmisc_alu(struct riscv_t *rv, uint16_t inst)
+static bool op_cmisc_alu(struct riscv_t *rv, uint16_t insn)
 {
     /* Find actual instruction */
-    switch ((inst & 0x0C00) >> 10) {
+    switch ((insn & 0x0C00) >> 10) {
     case 0: /* C.SRLI */
-        op_csrli(rv, inst);
+        op_csrli(rv, insn);
         break;
     case 1: /* C.SRAI */
-        op_csrai(rv, inst);
+        op_csrai(rv, insn);
         break;
     case 2: /* C.ANDI */
-        op_candi(rv, inst);
+        op_candi(rv, insn);
         break;
     case 3:; /* Arithmistic */
         uint32_t tmp = 0;
-        tmp |= (inst & 0x1000) >> 10;
-        tmp |= (inst & 0x0060) >> 5;
+        tmp |= (insn & 0x1000) >> 10;
+        tmp |= (insn & 0x0060) >> 5;
 
         const uint32_t funct = tmp;
-        const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
-        const uint32_t rs2 = c_dec_rs2c(inst) | 0x08;
+        const uint32_t rs1 = c_dec_rs1c(insn) | 0x08;
+        const uint32_t rs2 = c_dec_rs2c(insn) | 0x08;
         const uint32_t rd = rs1;
 
         switch (funct) {
@@ -1046,36 +1046,36 @@ static bool op_cmisc_alu(struct riscv_t *rv, uint16_t inst)
         break;
     }
 
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
-static bool op_cslli(struct riscv_t *rv, uint16_t inst)
+static bool op_cslli(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
-    tmp |= (inst & FCI_IMM_12) >> 7;
-    tmp |= (inst & FCI_IMM_6_2) >> 2;
+    tmp |= (insn & FCI_IMM_12) >> 7;
+    tmp |= (insn & FCI_IMM_6_2) >> 2;
 
     const uint32_t shamt = tmp;
-    const uint32_t rd = c_dec_rd(inst);
+    const uint32_t rd = c_dec_rd(insn);
 
     if (rd)
         rv->X[rd] <<= shamt;
 
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
 /* CI-type */
-static bool op_clwsp(struct riscv_t *rv, uint16_t inst)
+static bool op_clwsp(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = 0;
-    tmp |= (inst & 0x70) >> 2;
-    tmp |= (inst & 0x0c) << 4;
-    tmp |= (inst & 0x1000) >> 7;
+    tmp |= (insn & 0x70) >> 2;
+    tmp |= (insn & 0x0c) << 4;
+    tmp |= (insn & 0x1000) >> 7;
 
     const uint16_t imm = tmp;
-    const uint16_t rd = c_dec_rd(inst);
+    const uint16_t rd = c_dec_rd(insn);
     const uint32_t addr = rv->X[rv_reg_sp] + imm;
 
     /* reserved for rd == 0 */
@@ -1088,15 +1088,15 @@ static bool op_clwsp(struct riscv_t *rv, uint16_t inst)
     }
 
     rv->X[rd] = rv->io.mem_read_w(rv, addr);
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
 /* CSS-type */
-static bool op_cswsp(struct riscv_t *rv, uint16_t inst)
+static bool op_cswsp(struct riscv_t *rv, uint16_t insn)
 {
-    const uint16_t imm = (inst & 0x1e00) >> 7 | (inst & 0x180) >> 1;
-    const uint16_t rs2 = c_dec_rs2(inst);
+    const uint16_t imm = (insn & 0x1e00) >> 7 | (insn & 0x180) >> 1;
+    const uint16_t rs2 = c_dec_rs2(insn);
     const uint32_t addr = rv->X[2] + imm;
     const uint32_t data = rv->X[rs2];
 
@@ -1106,21 +1106,21 @@ static bool op_cswsp(struct riscv_t *rv, uint16_t inst)
     }
     rv->io.mem_write_w(rv, addr, data);
 
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
 /* CL-type */
-static bool op_clw(struct riscv_t *rv, uint16_t inst)
+static bool op_clw(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = 0;
-    tmp |= (inst & 0b0000000001000000) >> 4;
-    tmp |= (inst & FC_IMM_12_10) >> 7;
-    tmp |= (inst & 0b0000000000100000) << 1;
+    tmp |= (insn & 0b0000000001000000) >> 4;
+    tmp |= (insn & FC_IMM_12_10) >> 7;
+    tmp |= (insn & 0b0000000000100000) << 1;
 
     const uint16_t imm = tmp;
-    const uint16_t rd = c_dec_rdc(inst) | 0x08;
-    const uint16_t rs1 = c_dec_rs1c(inst) | 0x08;
+    const uint16_t rd = c_dec_rdc(insn) | 0x08;
+    const uint16_t rs1 = c_dec_rs1c(insn) | 0x08;
     const uint32_t addr = rv->X[rs1] + imm;
 
     if (addr & 3) {
@@ -1129,22 +1129,22 @@ static bool op_clw(struct riscv_t *rv, uint16_t inst)
     }
     rv->X[rd] = rv->io.mem_read_w(rv, addr);
 
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
 /* CS-type */
-static bool op_csw(struct riscv_t *rv, uint16_t inst)
+static bool op_csw(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
     /*               ....xxxx....xxxx     */
-    tmp |= (inst & 0b0000000001000000) >> 4;
-    tmp |= (inst & FC_IMM_12_10) >> 7;
-    tmp |= (inst & 0b0000000000100000) << 1;
+    tmp |= (insn & 0b0000000001000000) >> 4;
+    tmp |= (insn & FC_IMM_12_10) >> 7;
+    tmp |= (insn & 0b0000000000100000) << 1;
 
     const uint32_t imm = tmp;
-    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
-    const uint32_t rs2 = c_dec_rs2c(inst) | 0x08;
+    const uint32_t rs1 = c_dec_rs1c(insn) | 0x08;
+    const uint32_t rs2 = c_dec_rs2c(insn) | 0x08;
     const uint32_t addr = rv->X[rs1] + imm;
     const uint32_t data = rv->X[rs2];
 
@@ -1154,17 +1154,17 @@ static bool op_csw(struct riscv_t *rv, uint16_t inst)
     }
     rv->io.mem_write_w(rv, addr, data);
 
-    rv->PC += rv->inst_len;
+    rv->PC += rv->insn_len;
     return true;
 }
 
 /* CJ-type */
-static bool op_cj(struct riscv_t *rv, uint16_t inst)
+static bool op_cj(struct riscv_t *rv, uint16_t insn)
 {
-    const int32_t imm = (c_dec_cjtype_imm(inst));
+    const int32_t imm = (c_dec_cjtype_imm(insn));
     rv->PC += imm;
     if (rv->PC & 0x1) {
-        rv_except_inst_misaligned(rv, rv->PC);
+        rv_except_insn_misaligned(rv, rv->PC);
         return false;
     }
 
@@ -1172,13 +1172,13 @@ static bool op_cj(struct riscv_t *rv, uint16_t inst)
     return false;
 }
 
-static bool op_cjal(struct riscv_t *rv, uint16_t inst)
+static bool op_cjal(struct riscv_t *rv, uint16_t insn)
 {
-    const int32_t imm = sign_extend_h(c_dec_cjtype_imm(inst));
+    const int32_t imm = sign_extend_h(c_dec_cjtype_imm(insn));
     rv->X[1] = rv->PC + 2;
     rv->PC += imm;
     if (rv->PC & 0x1) {
-        rv_except_inst_misaligned(rv, rv->PC);
+        rv_except_insn_misaligned(rv, rv->PC);
         return false;
     }
 
@@ -1187,16 +1187,16 @@ static bool op_cjal(struct riscv_t *rv, uint16_t inst)
 }
 
 /* CR-type */
-static bool op_ccr(struct riscv_t *rv, uint16_t inst)
+static bool op_ccr(struct riscv_t *rv, uint16_t insn)
 {
-    const uint32_t rs1 = c_dec_rs1(inst), rs2 = c_dec_rs2(inst);
+    const uint32_t rs1 = c_dec_rs1(insn), rs2 = c_dec_rs2(insn);
     const uint32_t rd = rs1;
 
-    switch ((inst & 0x1000) >> 12) {
+    switch ((insn & 0x1000) >> 12) {
     case 0:
         if (rs2) { /* C.MV */
             rv->X[rd] = rv->X[rs2];
-            rv->PC += rv->inst_len;
+            rv->PC += rv->insn_len;
             if (rd == rv_reg_zero)
                 rv->X[rv_reg_zero] = 0;
         } else { /* C.JR */
@@ -1209,23 +1209,23 @@ static bool op_ccr(struct riscv_t *rv, uint16_t inst)
             rv->io.on_ebreak(rv);
         else if (rs1 && rs2) { /* C.ADD */
             rv->X[rd] = rv->X[rs1] + rv->X[rs2];
-            rv->PC += rv->inst_len;
+            rv->PC += rv->insn_len;
             if (rd == rv_reg_zero)
                 rv->X[rv_reg_zero] = 0;
         } else if (rs1 && rs2 == 0) { /* C.JALR */
             /* Unconditional jump and store PC+2 to ra */
             const int32_t jump_to = rv->X[rs1];
-            rv->X[rv_reg_ra] = rv->PC + rv->inst_len;
+            rv->X[rv_reg_ra] = rv->PC + rv->insn_len;
             rv->PC = jump_to;
             if (rv->PC & 0x1) {
-                rv_except_inst_misaligned(rv, rv->PC);
+                rv_except_insn_misaligned(rv, rv->PC);
                 return false;
             }
 
             /* can branch */
             return false;
         } else {                    /* rs2 !=zero AND rd == zero */
-            rv->PC += rv->inst_len; /* Hint */
+            rv->PC += rv->insn_len; /* Hint */
         }
         break;
     default:
@@ -1237,21 +1237,21 @@ static bool op_ccr(struct riscv_t *rv, uint16_t inst)
 }
 
 /* CB-type */
-static bool op_cbeqz(struct riscv_t *rv, uint16_t inst)
+static bool op_cbeqz(struct riscv_t *rv, uint16_t insn)
 {
-    const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(inst));
-    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
-    rv->PC += (!rv->X[rs1]) ? imm : rv->inst_len;
+    const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(insn));
+    const uint32_t rs1 = c_dec_rs1c(insn) | 0x08;
+    rv->PC += (!rv->X[rs1]) ? imm : rv->insn_len;
 
     /* can branch */
     return false;
 }
 
-static bool op_cbnez(struct riscv_t *rv, uint16_t inst)
+static bool op_cbnez(struct riscv_t *rv, uint16_t insn)
 {
-    const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(inst));
-    const uint32_t rs1 = c_dec_rs1c(inst) | 0x08;
-    rv->PC += (rv->X[rs1]) ? imm : rv->inst_len;
+    const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(insn));
+    const uint32_t rs1 = c_dec_rs1c(insn) | 0x08;
+    rv->PC += (rv->X[rs1]) ? imm : rv->insn_len;
 
     /* can branch */
     return false;
@@ -1285,14 +1285,14 @@ static bool op_cbnez(struct riscv_t *rv, uint16_t inst)
 #define op_cfsd OP_UNIMP
 
 /* RV32 opcode handler type */
-typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t inst);
+typedef bool (*opcode_t)(struct riscv_t *rv, uint32_t insn);
 /* RV32C opcode handler type */
-typedef bool (*c_opcode_t)(struct riscv_t *rv, uint16_t inst);
+typedef bool (*c_opcode_t)(struct riscv_t *rv, uint16_t insn);
 
 /* handler for all unimplemented opcodes */
-static bool op_unimp(struct riscv_t *rv, uint32_t inst UNUSED)
+static bool op_unimp(struct riscv_t *rv, uint32_t insn UNUSED)
 {
-    rv_except_illegal_inst(rv, inst);
+    rv_except_illegal_insn(rv, insn);
     return false;
 }
 
@@ -1300,15 +1300,15 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     assert(rv);
     const uint64_t cycles_target = rv->csr_cycle + cycles;
-    uint32_t inst;
+    uint32_t insn;
 
 #define OP_UNIMP op_unimp
 #ifdef ENABLE_COMPUTED_GOTO
-#define OP(instr) &&op_##instr
+#define OP(insn) &&op_##insn
 #define TABLE_TYPE const void *
 #define TABLE_TYPE_RVC const void *
 #else /* !ENABLE_COMPUTED_GOTO */
-#define OP(instr) op_##instr
+#define OP(insn) op_##insn
 #define TABLE_TYPE const opcode_t
 #define TABLE_TYPE_RVC const c_opcode_t
 #endif
@@ -1339,9 +1339,9 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 #ifdef ENABLE_COMPUTED_GOTO
 #ifdef ENABLE_RV32C
 #define DISPATCH_RV32C()                                            \
-    inst &= 0x0000FFFF;                                             \
-    int16_t c_index = (inst & FC_FUNC3) >> 11 | (inst & FC_OPCODE); \
-    rv->inst_len = INST_16;                                         \
+    insn &= 0x0000FFFF;                                             \
+    int16_t c_index = (insn & FC_FUNC3) >> 11 | (insn & FC_OPCODE); \
+    rv->insn_len = INSN_16;                                         \
     goto *jump_table_rvc[c_index];
 #else
 #define DISPATCH_RV32C()
@@ -1352,11 +1352,11 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         if (rv->csr_cycle >= cycles_target || rv->halt) \
             return;                                     \
         /* fetch the next instruction */                \
-        inst = rv->io.mem_ifetch(rv, rv->PC);           \
+        insn = rv->io.mem_ifetch(rv, rv->PC);           \
         /* standard uncompressed instruction */         \
-        if ((inst & 3) == 3) {                          \
-            uint32_t index = (inst & INST_6_2) >> 2;    \
-            rv->inst_len = INST_32;                     \
+        if ((insn & 3) == 3) {                          \
+            uint32_t index = (insn & INSN_6_2) >> 2;    \
+            rv->insn_len = INSN_32;                     \
             goto *jump_table[index];                    \
         } else {                                        \
             /* Compressed Extension Instruction */      \
@@ -1367,7 +1367,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 #define EXEC(instr)                    \
     {                                  \
         /* dispatch this opcode */     \
-        if (!op_##instr(rv, inst))     \
+        if (!op_##instr(rv, insn))     \
             return;                    \
         /* increment the cycles csr */ \
         rv->csr_cycle++;               \
@@ -1422,28 +1422,28 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 #else  /* !ENABLE_COMPUTED_GOTO */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         /* fetch the next instruction */
-        inst = rv->io.mem_ifetch(rv, rv->PC);
+        insn = rv->io.mem_ifetch(rv, rv->PC);
 
-        if ((inst & 3) == 3) { /* standard uncompressed instruction */
-            uint32_t index = (inst & INST_6_2) >> 2;
+        if ((insn & 3) == 3) { /* standard uncompressed instruction */
+            uint32_t index = (insn & INSN_6_2) >> 2;
 
             /* dispatch this opcode */
             TABLE_TYPE op = jump_table[index];
             assert(op);
-            if (!op(rv, inst))
+            if (!op(rv, insn))
                 break;
-            rv->inst_len = INST_32;
+            rv->insn_len = INSN_32;
         } else { /* standard compressed instruction */
-            inst &= 0x0000FFFF;
+            insn &= 0x0000FFFF;
             const uint16_t c_index =
-                (inst & FC_FUNC3 >> 11) | (inst & FC_OPCODE);
+                (insn & FC_FUNC3 >> 11) | (insn & FC_OPCODE);
 
             /* dispactch c_opcode (compressed instructions) */
             TABLE_TYPE_RVC op = jump_table_rvc[c_index];
             assert(op);
-            if (!op(rv, inst))
+            if (!op(rv, insn))
                 break;
-            rv->inst_len = INST_16;
+            rv->insn_len = INSN_16;
         }
 
         /* increment the cycles csr */
@@ -1531,7 +1531,7 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
 
     /* set the reset address */
     rv->PC = pc;
-    rv->inst_len = INST_UNKNOWN;
+    rv->insn_len = INSN_UNKNOWN;
 
     /* set the default stack pointer */
     rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;

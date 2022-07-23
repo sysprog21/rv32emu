@@ -529,7 +529,7 @@ static bool op_jalr(struct riscv_t *rv, uint32_t insn)
     const uint32_t ra = rv->PC + rv->insn_len;
 
     /* jump */
-    rv->PC = (rv->X[rs1] + imm) & ~1u;
+    rv->PC = (rv->X[rs1] + imm) & ~1U;
 
     /* link */
     if (rd != rv_reg_zero)

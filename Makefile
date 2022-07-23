@@ -20,10 +20,19 @@ CFLAGS += -D ENABLE_RV32C
 # Set the default stack pointer
 CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 
+OBJS_EXT :=
+
 # Experimental SDL oriented system calls
+ENABLE_SDL ?= 1
+ifeq ("$(ENABLE_SDL)", "1")
+ifeq (, $(shell which sdl2-config))
+$(error "No sdl2-config in $(PATH). Check SDL2 installation in advance")
+endif
 CFLAGS += -D ENABLE_SDL
-CFLAGS += `sdl2-config --cflags`
-LDFLAGS += `sdl2-config --libs`
+OBJS_EXT += syscall_sdl.o
+syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
+LDFLAGS += $(shell sdl2-config --libs)
+endif
 
 # Whether to enable computed goto in riscv.c
 ENABLE_COMPUTED_GOTO ?= 1
@@ -57,7 +66,7 @@ OBJS := \
 	elf.o \
 	main.o \
 	syscall.o \
-	syscall_sdl.o
+	$(OBJS_EXT)
 
 deps := $(OBJS:%.o=%.o.d)
 

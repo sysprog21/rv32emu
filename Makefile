@@ -142,11 +142,12 @@ arch-test: $(BIN) $(ARCH_TEST_BUILD)
 	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR) clean
 	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR)
 
+ifeq ("$(ENABLE_SDL)", "1")
 demo: $(BIN) $(OUT)/DOOM1.WAD
 	(cd $(OUT); ../$(BIN) doom.elf)
-
 quake: $(BIN) $(OUT)/id1/pak0.pak
 	(cd $(OUT); ../$(BIN) quake.elf)
+endif
 
 clean:
 	$(RM) $(BIN) $(OBJS) $(deps)

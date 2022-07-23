@@ -7,7 +7,7 @@ ifeq ("$(origin CC)", "default")
     endif
 endif
 
-CFLAGS = -std=gnu99 -Wall -Wextra
+CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -include common.h
 
 # Base configurations for RISC-V extensions

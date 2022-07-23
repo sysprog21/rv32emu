@@ -439,6 +439,7 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
     return true;
 }
 
+/* Place sign-extended upper imm into register rd (lower 12 bits are zero) */
 static bool op_lui(struct riscv_t *rv, uint32_t insn)
 {
     /* U-type decode */
@@ -513,7 +514,7 @@ static bool op_branch(struct riscv_t *rv, uint32_t insn)
 }
 
 /* store successor instruction address into rd.
- * add sext I imm to rs1 and set lsd of the result to zero.
+ * Jump to rs1 + offset (offset is signed).
  */
 static bool op_jalr(struct riscv_t *rv, uint32_t insn)
 {
@@ -849,6 +850,7 @@ static bool op_amo(struct riscv_t *rv, uint32_t insn)
 #ifdef ENABLE_RV32C
 static bool op_caddi(struct riscv_t *rv, uint16_t insn)
 {
+    /* Add 6-bit signed immediate to rds, serving as NOP for X0 register. */
     uint16_t tmp =
         (uint16_t) (((insn & FCI_IMM_12) >> 5) | (insn & FCI_IMM_6_2)) >> 2;
     const int32_t imm = (0x20 & tmp) ? 0xffffffc0 | tmp : tmp;

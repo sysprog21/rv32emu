@@ -142,37 +142,49 @@ static inline uint32_t dec_rd(const uint32_t insn)
     return (insn & FR_RD) >> 7;
 }
 
-/* decode rs1 field */
+/* decode rs1 field.
+ * rs1 in bits 19..15
+ */
 static inline uint32_t dec_rs1(const uint32_t insn)
 {
     return (insn & FR_RS1) >> 15;
 }
 
-/* decode rs2 field */
+/* decode rs2 field.
+ * rs2 in bits 24..20
+ */
 static inline uint32_t dec_rs2(const uint32_t insn)
 {
     return (insn & FR_RS2) >> 20;
 }
 
-/* decoded funct3 field */
+/* decoded funct3 field.
+ * funct3 in bits 14..12
+  */
 static inline uint32_t dec_funct3(const uint32_t insn)
 {
     return (insn & FR_FUNCT3) >> 12;
 }
 
-/* decode funct7 field */
+/* decode funct7 field.
+ * funct7 in bits 31..25
+ */
 static inline uint32_t dec_funct7(const uint32_t insn)
 {
     return (insn & FR_FUNCT7) >> 25;
 }
 
-/* decode U-type instruction immediate */
+/* decode U-type instruction immediate.
+ * imm[31:12] = insn[31:12]
+ */
 static inline uint32_t dec_utype_imm(const uint32_t insn)
 {
     return insn & FU_IMM_31_12;
 }
 
-/* decode J-type instruction immediate */
+/* decode J-type instruction immediate.
+ * imm[20|10:1|11|19:12] = insn[31|30:21|20|19:12]
+ */
 static inline int32_t dec_jtype_imm(const uint32_t insn)
 {
     uint32_t dst = 0;
@@ -184,7 +196,9 @@ static inline int32_t dec_jtype_imm(const uint32_t insn)
     return ((int32_t) dst) >> 11;
 }
 
-/* decode I-type instruction immediate */
+/* decode I-type instruction immediate.
+ * imm[11:0] = insn[31:20]
+ */
 static inline int32_t dec_itype_imm(const uint32_t insn)
 {
     return ((int32_t)(insn & FI_IMM_11_0)) >> 20;
@@ -208,7 +222,9 @@ static inline uint32_t dec_csr(const uint32_t insn)
     return ((uint32_t)(insn & FI_IMM_11_0)) >> 20;
 }
 
-/* decode B-type instruction immediate */
+/* decode B-type instruction immediate.
+ * imm[12|10:5|4:1|11] = insn[31|30:25|11:8|7]
+ */
 static inline int32_t dec_btype_imm(const uint32_t insn)
 {
     uint32_t dst = 0;
@@ -220,7 +236,10 @@ static inline int32_t dec_btype_imm(const uint32_t insn)
     return ((int32_t) dst) >> 19;
 }
 
-/* decode S-type instruction immediate */
+/* decode S-type instruction immediate.
+ * imm[11:5] = insn[31:25]
+ * imm[4:0] = insn[11:7]
+ */
 static inline int32_t dec_stype_imm(const uint32_t insn)
 {
     uint32_t dst = 0;

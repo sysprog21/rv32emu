@@ -512,6 +512,9 @@ static bool op_branch(struct riscv_t *rv, uint32_t insn)
     return false;
 }
 
+/* store successor instruction address into rd.
+ * add sext I imm to rs1 and set lsd of the result to zero.
+ */
 static bool op_jalr(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
@@ -547,6 +550,9 @@ static bool op_jalr(struct riscv_t *rv, uint32_t insn)
     return false;
 }
 
+/* store successor instruction address into rd.
+ * add sext J imm (offset) to pc.
+ */
 static bool op_jal(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;

@@ -1427,31 +1427,33 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 #undef DISPATCH
 #undef EXEC
 #undef TARGET
-#else  /* !ENABLE_COMPUTED_GOTO */
+#else /* !ENABLE_COMPUTED_GOTO */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         /* fetch the next instruction */
         insn = rv->io.mem_ifetch(rv, rv->PC);
 
         if ((insn & 3) == 3) { /* standard uncompressed instruction */
             uint32_t index = (insn & INSN_6_2) >> 2;
+            rv->insn_len = INSN_32;
 
             /* dispatch this opcode */
             TABLE_TYPE op = jump_table[index];
             assert(op);
             if (!op(rv, insn))
                 break;
-            rv->insn_len = INSN_32;
-        } else { /* standard compressed instruction */
+        } else { /* Compressed Extension Instruction */
+#ifdef ENABLE_RV32C
             insn &= 0x0000FFFF;
             const uint16_t c_index =
                 (insn & FC_FUNC3 >> 11) | (insn & FC_OPCODE);
+            rv->insn_len = INSN_16;
 
             /* dispactch c_opcode (compressed instructions) */
             TABLE_TYPE_RVC op = jump_table_rvc[c_index];
             assert(op);
             if (!op(rv, insn))
                 break;
-            rv->insn_len = INSN_16;
+#endif
         }
 
         /* increment the cycles csr */

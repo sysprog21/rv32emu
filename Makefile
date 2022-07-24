@@ -15,12 +15,17 @@ CFLAGS += -D ENABLE_RV32M
 CFLAGS += -D ENABLE_Zicsr
 CFLAGS += -D ENABLE_Zifencei
 CFLAGS += -D ENABLE_RV32A
-CFLAGS += -D ENABLE_RV32C
 
 # Set the default stack pointer
 CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 
 OBJS_EXT :=
+
+# Compressed extension instructions
+ENABLE_RV32C ?= 1
+ifeq ("$(ENABLE_RV32C)", "1")
+CFLAGS += -D ENABLE_RV32C
+endif
 
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1

@@ -1,9 +1,10 @@
-UNAME_S := $(shell uname -s)
-ifeq ("$(origin CC)", "default")
-    ifeq ($(UNAME_S),Darwin)
-	CC := clang
-    else
-	CC := gcc
+CC_IS_CLANG :=
+CC_IS_GCC :=
+ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
+    CC_IS_CLANG := 1
+else
+    ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)
+        CC_IS_GCC := 1
     endif
 endif
 
@@ -42,11 +43,12 @@ endif
 # Whether to enable computed goto in riscv.c
 ENABLE_COMPUTED_GOTO ?= 1
 ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
-ifneq ($(filter $(CC), gcc clang),)
+ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
+$(error "Computed goto is only supported in clang and gcc.")
+endif
 riscv.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
-	ifeq ("$(CC)", "gcc")
+ifeq ("$(CC_IS_GCC)", "1")
 riscv.o: CFLAGS += -fno-gcse -fno-crossjumping 
-	endif
 endif
 endif
 

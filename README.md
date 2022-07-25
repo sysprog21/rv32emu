@@ -1,6 +1,6 @@
 # RISC-V RV32I[MAC] emulator with ELF support
 
-`rv32emu` is an instruction set architecture (ISA) emulator implementing the 32 bit RISC-V processor model.
+`rv32emu` is an instruction set architecture (ISA) emulator implementing the 32 bit [RISC-V processor model](https://riscv.org/technical/specifications/).
 
 ## Build and Verify
 

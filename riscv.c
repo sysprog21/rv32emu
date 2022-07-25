@@ -221,6 +221,9 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t insn)
         rv->X[rd] = rv->X[rs1] ^ imm;
         break;
     case 5:
+        /* SLL, SRL, and SRA perform logical left, logical right, and
+         * arithmetic right shifts on the value in register rs1.
+         */
         if (imm & ~0x1f) { /* SRAI */
             rv->X[rd] = ((int32_t) rv->X[rs1]) >> (imm & 0x1f);
         } else { /* SRLI */
@@ -743,6 +746,10 @@ static bool op_system(struct riscv_t *rv, uint32_t insn)
 }
 
 #ifdef ENABLE_RV32A
+/* At present, AMO is not implemented atomically because the emulated RISC-V
+ * core just runs on single thread, and no out-of-order execution happens.
+ * In addition, rl/aq are not handled.
+ */
 static bool op_amo(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t rd = dec_rd(insn);
@@ -1443,6 +1450,9 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
                 break;
         } else { /* Compressed Extension Instruction */
 #ifdef ENABLE_RV32C
+            /* If the last 2-bit is one of 0b00, 0b01, and 0b10, it is
+             * a 16-bit instruction.
+             */
             insn &= 0x0000FFFF;
             const uint16_t c_index =
                 (insn & FC_FUNC3 >> 11) | (insn & FC_OPCODE);

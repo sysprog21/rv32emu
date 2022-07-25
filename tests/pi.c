@@ -135,7 +135,7 @@ int32_t inv_mod(int32_t a, int32_t m)
 }
 
 /*  Increment n until it is prime */
-int next_prime(int32_t n)
+int32_t next_prime(int32_t n)
 {
     n++;
 

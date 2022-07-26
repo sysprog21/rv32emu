@@ -17,7 +17,7 @@ QUAKE_DATA_SHA1 = 36b42dc7b6313fd9cabc0be8b9e9864840929735
 define download-n-extract
 $($(T)_DATA):
 	$(VECHO) "  GET\t$$@\n"
-	curl --progress-meter -O -L -C - "$(strip $($(T)_DATA_URL))"
+	curl --progress-bar -O -L -C - "$(strip $($(T)_DATA_URL))"
 	unzip -d $(OUT) $(notdir $($(T)_DATA_URL))
 	echo "$(strip $$($(T)_DATA_SHA1))  $$@" > $$@.sha1
 	$(SHA1SUM) -c $$@.sha1

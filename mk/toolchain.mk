@@ -1,0 +1,26 @@
+CC_IS_CLANG :=
+CC_IS_GCC :=
+ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
+    CC_IS_CLANG := 1
+else
+    ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)
+        CC_IS_GCC := 1
+    endif
+endif
+
+# Validate GNU Toolchain for RISC-V
+CROSS_COMPILE ?= riscv32-unknown-elf-x
+RV32_CC = $(CROSS_COMPILE)gcc
+RV32_CC := $(shell which $(RV32_CC))
+ifndef RV32_CC
+    # Try Debian/Ubuntu package
+    CROSS_COMPILE = riscv-none-embed-
+    RV32_CC = $(CROSS_COMPILE)gcc
+    RV32_CC := $(shell which $(RV32_CC))
+    ifndef RV32_CC
+    $(warning "No GNU Toolchain for RISC-V found.")
+    CROSS_COMPILE :=
+    endif
+endif
+
+export CROSS_COMPILE

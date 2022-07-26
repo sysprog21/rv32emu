@@ -1,12 +1,5 @@
-CC_IS_CLANG :=
-CC_IS_GCC :=
-ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
-    CC_IS_CLANG := 1
-else
-    ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)
-        CC_IS_GCC := 1
-    endif
-endif
+include mk/common.mk
+include mk/toolchain.mk
 
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -include common.h
@@ -85,15 +78,17 @@ $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
-SHA1SUM = sha1sum
-SHA1SUM := $(shell which $(SHA1SUM))
-ifndef SHA1SUM
-    SHA1SUM = shasum
-    SHA1SUM := $(shell which $(SHA1SUM))
-    ifndef SHA1SUM
-        SHA1SUM := @echo
-    endif
-endif
+# RISC-V Architecture Tests
+include mk/riscv-arch-test.mk
+
+CHECK_ELF_FILES := \
+	hello \
+	puzzle \
+	pi
+check: $(BIN)
+	$(Q)for e in $(CHECK_ELF_FILES); do \
+	    (cd $(OUT); ../$(BIN) $$e.elf) && $(call pass,$$e); \
+	done
 
 # https://tipsmake.com/how-to-run-doom-on-raspberry-pi-without-emulator
 DOOM_WAD_DL = http://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip
@@ -112,43 +107,9 @@ $(OUT)/id1/pak0.pak:
 	unzip -d $(OUT) quakesw-1.0.6.zip
 	echo "36b42dc7b6313fd9cabc0be8b9e9864840929735  $@" > $@.sha1
 	$(SHA1SUM) -c $@.sha1
-	$(RM) quakesw-1.0.6.zip	
+	$(RM) quakesw-1.0.6.zip
 
-check: $(BIN)
-	(cd $(OUT); ../$(BIN) hello.elf)
-	(cd $(OUT); ../$(BIN) puzzle.elf)
-
-# Validate GNU Toolchain for RISC-V
-CROSS_COMPILE ?= riscv32-unknown-elf-
-RV32_CC = $(CROSS_COMPILE)gcc
-RV32_CC := $(shell which $(RV32_CC))
-ifndef RV32_CC
-  # Try Debian/Ubuntu package
-  CROSS_COMPILE = riscv-none-embed-
-  RV32_CC = $(CROSS_COMPILE)gcc
-  RV32_CC := $(shell which $(RV32_CC))
-  ifndef RV32_CC
-  $(warning "no $(CROSS_COMPILE)gcc found. Check GNU Toolchain for RISC-V installation.")
-  CROSS_COMPILE :=
-  endif
-endif
-
-ARCH_TEST_DIR ?= tests/riscv-arch-test
-ARCH_TEST_BUILD := $(ARCH_TEST_DIR)/Makefile
-export RISCV_TARGET := tests/arch-test-target
-export RISCV_PREFIX ?= $(CROSS_COMPILE)
-export TARGETDIR := $(shell pwd)
-export XLEN := 32
-export JOBS ?= -j
-export WORK := $(TARGETDIR)/build/arch-test
-
-$(ARCH_TEST_BUILD):
-	git submodule update --init
-
-arch-test: $(BIN) $(ARCH_TEST_BUILD)
-	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR) clean
-	$(Q)$(MAKE) --quiet -C $(ARCH_TEST_DIR)
-
+# Non-trivial demonstration programs
 ifeq ("$(ENABLE_SDL)", "1")
 demo: $(BIN) $(OUT)/DOOM1.WAD
 	(cd $(OUT); ../$(BIN) doom.elf)

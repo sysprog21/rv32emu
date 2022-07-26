@@ -17,11 +17,11 @@ QUAKE_DATA_SHA1 = 36b42dc7b6313fd9cabc0be8b9e9864840929735
 define download-n-extract
 $($(T)_DATA):
 	$(VECHO) "  GET\t$$@\n"
-	curl --progress-bar -O -L -C - "$(strip $($(T)_DATA_URL))"
-	unzip -d $(OUT) $(notdir $($(T)_DATA_URL))
-	echo "$(strip $$($(T)_DATA_SHA1))  $$@" > $$@.sha1
-	$(SHA1SUM) -c $$@.sha1
-	$(RM) $(notdir $($(T)_DATA_URL))
+	$(Q)curl --progress-bar -O -L -C - "$(strip $($(T)_DATA_URL))"
+	$(Q)unzip -d $(OUT) $(notdir $($(T)_DATA_URL))
+	$(Q)echo "$(strip $$($(T)_DATA_SHA1))  $$@" > $$@.sha1
+	$(Q)$(SHA1SUM) -c $$@.sha1
+	$(Q)$(RM) $(notdir $($(T)_DATA_URL))
 endef
 
 EXTERNAL_DATA = DOOM QUAKE

@@ -30,6 +30,6 @@ ifndef SHA1SUM
     SHA1SUM := $(shell which $(SHA1SUM))
     ifndef SHA1SUM
         $(warning No shasum found. Disable checksums)
-        SHA1SUM := @echo
+        SHA1SUM := echo
     endif
 endif

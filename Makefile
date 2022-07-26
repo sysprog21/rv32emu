@@ -103,7 +103,7 @@ endif
 clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
 distclean: clean
-	-$(RM) $(DOOM_DATA) $(DOM_DATA).sha1 $(QUAKE_DATA) $(QUAKE_DATA).sha1
+	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1
 	$(RM) *.zip
 

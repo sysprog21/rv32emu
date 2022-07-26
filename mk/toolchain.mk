@@ -18,7 +18,7 @@ ifndef RV32_CC
     RV32_CC = $(CROSS_COMPILE)gcc
     RV32_CC := $(shell which $(RV32_CC))
     ifndef RV32_CC
-    $(warning "No GNU Toolchain for RISC-V found.")
+    $(warning No GNU Toolchain for RISC-V found.)
     CROSS_COMPILE :=
     endif
 endif

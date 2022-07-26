@@ -90,37 +90,20 @@ check: $(BIN)
 	    (cd $(OUT); ../$(BIN) $$e.elf) && $(call pass,$$e); \
 	done
 
-# https://tipsmake.com/how-to-run-doom-on-raspberry-pi-without-emulator
-DOOM_WAD_DL = http://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip
-$(OUT)/DOOM1.WAD:
-	$(VECHO) "  Downloading $@ ...\n"
-	wget $(DOOM_WAD_DL)
-	unzip -d $(OUT) shareware_doom_iwad.zip
-	echo "5b2e249b9c5133ec987b3ea77596381dc0d6bc1d  $@" > $@.sha1
-	$(SHA1SUM) -c $@.sha1
-	$(RM) shareware_doom_iwad.zip
-
-Quake_shareware = https://www.libsdl.org/projects/quake/data/quakesw-1.0.6.zip
-$(OUT)/id1/pak0.pak:
-	$(VECHO) " Downloading $@ ...\n"
-	wget $(Quake_shareware)
-	unzip -d $(OUT) quakesw-1.0.6.zip
-	echo "36b42dc7b6313fd9cabc0be8b9e9864840929735  $@" > $@.sha1
-	$(SHA1SUM) -c $@.sha1
-	$(RM) quakesw-1.0.6.zip
+include mk/external.mk
 
 # Non-trivial demonstration programs
 ifeq ("$(ENABLE_SDL)", "1")
-demo: $(BIN) $(OUT)/DOOM1.WAD
+demo: $(BIN) $(DOOM_DATA)
 	(cd $(OUT); ../$(BIN) doom.elf)
-quake: $(BIN) $(OUT)/id1/pak0.pak
+quake: $(BIN) $(QUAKE_DATA)
 	(cd $(OUT); ../$(BIN) quake.elf)
 endif
 
 clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
 distclean: clean
-	$(RM) $(OUT)/DOOM1.WAD $(OUT)/DOOM1.WAD.sha1
+	-$(RM) $(DOOM_DATA) $(DOM_DATA).sha1 $(QUAKE_DATA) $(QUAKE_DATA).sha1
 	$(RM) -r $(OUT)/id1
 	$(RM) *.zip
 

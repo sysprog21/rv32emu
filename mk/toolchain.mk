@@ -9,7 +9,7 @@ else
 endif
 
 # Validate GNU Toolchain for RISC-V
-CROSS_COMPILE ?= riscv32-unknown-elf-x
+CROSS_COMPILE ?= riscv32-unknown-elf-
 RV32_CC = $(CROSS_COMPILE)gcc
 RV32_CC := $(shell which $(RV32_CC))
 ifndef RV32_CC

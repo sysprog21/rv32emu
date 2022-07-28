@@ -142,12 +142,27 @@ static void syscall_gettimeofday(struct riscv_t *rv)
 
     /* return the clock time */
     if (tv) {
+#if defined(CLOCK_REALTIME) || defined(CLOCK_MONOTONIC)
+        struct timespec t;
+        clock_gettime(
+#ifdef CLOCK_MONOTONIC
+            CLOCK_MONOTONIC,
+#else
+            CLOCK_REALTIME,
+#endif
+            &t);
+        int32_t tv_sec = t.tv_sec;
+        int32_t tv_usec = t.tv_nsec / 1000;
+#else /* low resolution timer */
         clock_t t = clock();
         int32_t tv_sec = t / CLOCKS_PER_SEC;
         int32_t tv_usec = (t % CLOCKS_PER_SEC) * (1000000 / CLOCKS_PER_SEC);
+#endif
+
         memory_write(s->mem, tv + 0, (const uint8_t *) &tv_sec, 4);
         memory_write(s->mem, tv + 8, (const uint8_t *) &tv_usec, 4);
     }
+
     if (tz) {
         /* FIXME: This parameter is ignored by the syscall handler in newlib. */
     }

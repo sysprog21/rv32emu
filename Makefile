@@ -21,6 +21,13 @@ ifeq ("$(ENABLE_RV32C)", "1")
 CFLAGS += -D ENABLE_RV32C
 endif
 
+# Single-precision floating point
+ENABLE_RV32F ?= 1
+ifeq ("$(ENABLE_RV32F)", "1")
+CFLAGS += -D ENABLE_RV32F
+LDFLAGS += -lm
+endif
+
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
 ifeq ("$(ENABLE_SDL)", "1")

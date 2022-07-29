@@ -99,6 +99,15 @@ enum {
     FCJ_IMM      = 0b00000000000000000001111111111100,
     //               ....xxxx....xxxx....xxxx....xxxx
 };
+
+#ifdef ENABLE_RV32F
+enum {
+    //             ....xxxx....xxxx....xxxx....xxxx
+    FMASK_SIGN = 0b10000000000000000000000000000000,
+    FMASK_EXPN = 0b01111111100000000000000000000000,
+    FMASK_FRAC = 0b00000000011111111111111111111111,
+};
+#endif
 /* clang-format off */
 
 enum {
@@ -119,6 +128,12 @@ struct riscv_t {
 
     /* user provided data */
     riscv_user_t userdata;
+
+#ifdef ENABLE_RV32F
+    /* float registers */
+    riscv_float_t F[RV_NUM_REGS];
+    uint32_t csr_fcsr;
+#endif
 
     /* csr registers */
     uint64_t csr_cycle;
@@ -259,6 +274,41 @@ static inline uint32_t sign_extend_b(const uint32_t x)
 {
     return (int32_t)((int8_t) x);
 }
+
+#ifdef ENABLE_RV32F
+/* compute the fclass result */
+static inline uint32_t calc_fclass(uint32_t f) {
+  const uint32_t sign = f & FMASK_SIGN;
+  const uint32_t expn = f & FMASK_EXPN;
+  const uint32_t frac = f & FMASK_FRAC;
+
+  /* TODO: optimize with a binary decision tree */
+
+  uint32_t out = 0;
+  /* 0x001    rs1 is -INF */
+  out |= (f == 0xff800000) ? 0x001 : 0;
+  /* 0x002    rs1 is negative normal */
+  out |= (expn && expn < 0x78000000 && sign) ? 0x002 : 0;
+  /* 0x004    rs1 is negative subnormal */
+  out |= (!expn && frac && sign) ? 0x004 : 0;
+  /* 0x008    rs1 is -0 */
+  out |= (f == 0x80000000) ? 0x008 : 0;
+  /* 0x010    rs1 is +0 */
+  out |= (f == 0x00000000) ? 0x010 : 0;
+  /* 0x020    rs1 is positive subnormal */
+  out |= (!expn && frac && !sign) ? 0x020 : 0;
+  /* 0x040    rs1 is positive normal */
+  out |= (expn && expn < 0x78000000 && !sign) ? 0x040 : 0;
+  /* 0x080    rs1 is +INF */
+  out |= (f == 0x7f800000) ? 0x080 : 0;
+  /* 0x100    rs1 is a signaling NaN */
+  out |= (expn == FMASK_EXPN && (frac <= 0x7ff) && frac) ? 0x100 : 0;
+  /* 0x200    rs1 is a quiet NaN */
+  out |= (expn == FMASK_EXPN && (frac >= 0x800)) ? 0x200 : 0;
+
+  return out;
+}
+#endif
 
 #ifdef ENABLE_RV32C
 enum {

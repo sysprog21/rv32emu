@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef ENABLE_RV32F
+#include <math.h>
+#endif
+
 #include "riscv.h"
 #include "riscv_private.h"
 
@@ -612,6 +616,10 @@ static uint32_t *csr_get_ptr(struct riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_mtval);
     case CSR_MIP:
         return (uint32_t *) (&rv->csr_mip);
+#ifdef ENABLE_RV32F
+    case CSR_FCSR:
+        return (uint32_t *) (&rv->csr_fcsr);
+#endif
     default:
         return NULL;
     }
@@ -845,7 +853,235 @@ static bool op_amo(struct riscv_t *rv, uint32_t insn)
 #define op_amo OP_UNIMP
 #endif /* ENABLE_RV32A */
 
-/* No RV32F support */
+#ifdef ENABLE_RV32F
+static bool op_load_fp(struct riscv_t *rv, uint32_t insn)
+{
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const int32_t imm = dec_itype_imm(insn);
+
+    /* calculate load address */
+    const uint32_t addr = rv->X[rs1] + imm;
+
+    /* copy into the float register */
+    const uint32_t data = rv->io.mem_read_w(rv, addr);
+    memcpy(rv->F + rd, &data, 4);
+
+    /* step over instruction */
+    rv->PC += 4;
+    return true;
+}
+
+static bool op_store_fp(struct riscv_t *rv, uint32_t insn)
+{
+    const uint32_t rs1 = dec_rs1(insn);
+    const uint32_t rs2 = dec_rs2(insn);
+    const int32_t imm = dec_stype_imm(insn);
+
+    /* calculate store address */
+    const uint32_t addr = rv->X[rs1] + imm;
+
+    /* copy from float registers */
+    uint32_t data;
+    memcpy(&data, (const void *) (rv->F + rs2), 4);
+    rv->io.mem_write_w(rv, addr, data);
+
+    /* step over instruction */
+    rv->PC += 4;
+    return true;
+}
+
+static bool op_fp(struct riscv_t *rv, uint32_t insn)
+{
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
+    const uint32_t rm = dec_funct3(insn);  /* FIXME: rounding */
+    const uint32_t funct7 = dec_funct7(insn);
+
+    /* dispatch based on func7 (low 2 bits are width) */
+    switch (funct7) {
+    case 0b0000000:  /* FADD */
+        rv->F[rd] = rv->F[rs1] + rv->F[rs2];
+        break;
+    case 0b0000100:  /* FSUB */
+        rv->F[rd] = rv->F[rs1] - rv->F[rs2];
+        break;
+    case 0b0001000:  /* FMUL */
+        rv->F[rd] = rv->F[rs1] * rv->F[rs2];
+        break;
+    case 0b0001100:  /* FDIV */
+        rv->F[rd] = rv->F[rs1] / rv->F[rs2];
+        break;
+    case 0b0101100:  /* FSQRT */
+        rv->F[rd] = sqrtf(rv->F[rs1]);
+        break;
+    case 0b0010000: {
+        uint32_t f1, f2, res;
+        memcpy(&f1, rv->F + rs1, 4);
+        memcpy(&f2, rv->F + rs2, 4);
+
+        switch (rm) {
+        case 0b000:  /* FSGNJ.S */
+            res = (f1 & ~FMASK_SIGN) | (f2 & FMASK_SIGN);
+            break;
+        case 0b001:  /* FSGNJN.S */
+            res = (f1 & ~FMASK_SIGN) | (~f2 & FMASK_SIGN);
+            break;
+        case 0b010:  /* FSGNJX.S */
+            res = f1 ^ (f2 & FMASK_SIGN);
+            break;
+        default:
+            rv_except_illegal_insn(rv, insn);
+            return false;
+        }
+
+        memcpy(rv->F + rd, &res, 4);
+        break;
+    }
+    case 0b0010100:
+        switch (rm) {
+        case 0b000:  /* FMIN */
+            rv->F[rd] = fminf(rv->F[rs1], rv->F[rs2]);
+            break;
+        case 0b001:  /* FMAX */
+            rv->F[rd] = fmaxf(rv->F[rs1], rv->F[rs2]);
+            break;
+        default:
+            rv_except_illegal_insn(rv, insn);
+            return false;
+        }
+        break;
+    case 0b1100000:
+        switch (rs2) {
+        case 0b00000:  /* FCVT.W.S */
+            rv->X[rd] = (int32_t) rv->F[rs1];
+            break;
+        case 0b00001:  /* FCVT.WU.S */
+            rv->X[rd] = (uint32_t) rv->F[rs1];
+            break;
+        default:
+            rv_except_illegal_insn(rv, insn);
+            return false;
+        }
+        break;
+    case 0b1110000:
+        switch (rm) {
+        case 0b000:  /* FMV.X.W */
+            memcpy(rv->X + rd, rv->F + rs1, 4);
+            break;
+        case 0b001: { /* FCLASS.S */
+            uint32_t bits;
+            memcpy(&bits, rv->F + rs1, 4);
+            rv->X[rd] = calc_fclass(bits);
+            break;
+        }
+        default:
+            rv_except_illegal_insn(rv, insn);
+            return false;
+        }
+        break;
+    case 0b1010000:
+        switch (rm) {
+        case 0b010:  /* FEQ.S */
+            rv->X[rd] = (rv->F[rs1] == rv->F[rs2]) ? 1 : 0;
+            break;
+        case 0b001:  /* FLT.S */
+            rv->X[rd] = (rv->F[rs1] < rv->F[rs2]) ? 1 : 0;
+            break;
+        case 0b000:  /* FLE.S */
+            rv->X[rd] = (rv->F[rs1] <= rv->F[rs2]) ? 1 : 0;
+            break;
+        default:
+            rv_except_illegal_insn(rv, insn);
+            return false;
+        }
+        break;
+    case 0b1101000:
+        switch (rs2) {
+        case 0b00000:  /* FCVT.S.W */
+            rv->F[rd] = (float) (int32_t) rv->X[rs1];
+            break;
+        case 0b00001:  /* FCVT.S.WU */
+            rv->F[rd] = (float) (uint32_t) rv->X[rs1];
+            break;
+        default:
+            rv_except_illegal_insn(rv, insn);
+            return false;
+        }
+        break;
+    case 0b1111000:  /* FMV.W.X */
+        memcpy(rv->F + rd, rv->X + rs1, 4);
+        break;
+    default:
+        rv_except_illegal_insn(rv, insn);
+        return false;
+    }
+
+    /* step over instruction */
+    rv->PC += 4;
+    return true;
+}
+
+static bool op_madd(struct riscv_t *rv, uint32_t insn)
+{
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const uint32_t rs2 = dec_rs2(insn);
+    const uint32_t rs3 = dec_r4type_rs3(insn);
+
+    /* compute */
+    rv->F[rd] = rv->F[rs1] * rv->F[rs2] + rv->F[rs3];
+
+    /* step over instruction */
+    rv->PC += 4;
+    return true;
+}
+
+static bool op_msub(struct riscv_t *rv, uint32_t insn)
+{
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const uint32_t rs2 = dec_rs2(insn);
+    const uint32_t rs3 = dec_r4type_rs3(insn);
+
+    /* compute */
+    rv->F[rd] = rv->F[rs1] * rv->F[rs2] - rv->F[rs3];
+
+    /* step over instruction */
+    rv->PC += 4;
+    return true;
+}
+
+static bool op_nmsub(struct riscv_t *rv, uint32_t insn)
+{
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const uint32_t rs2 = dec_rs2(insn);
+    const uint32_t rs3 = dec_r4type_rs3(insn);
+
+    /* compute */
+    rv->F[rd] = rv->F[rs3] - (rv->F[rs1] * rv->F[rs2]);
+
+    /* step over instruction */
+    rv->PC += 4;
+    return true;
+}
+
+static bool op_nmadd(struct riscv_t *rv, uint32_t insn)
+{
+    const uint32_t rd = dec_rd(insn);
+    const uint32_t rs1 = dec_rs1(insn);
+    const uint32_t rs2 = dec_rs2(insn);
+    const uint32_t rs3 = dec_r4type_rs3(insn);
+
+    /* compute */
+    rv->F[rd] = -(rv->F[rs1] * rv->F[rs2]) - rv->F[rs3];
+
+    /* step over instruction */
+    rv->PC += 4;
+    return true;
+}
+#else /* No RV32F support */
 #define op_load_fp OP_UNIMP
 #define op_store_fp OP_UNIMP
 #define op_fp OP_UNIMP
@@ -853,6 +1089,7 @@ static bool op_amo(struct riscv_t *rv, uint32_t insn)
 #define op_msub OP_UNIMP
 #define op_nmsub OP_UNIMP
 #define op_nmadd OP_UNIMP
+#endif
 
 #ifdef ENABLE_RV32C
 static bool op_caddi(struct riscv_t *rv, uint16_t insn)
@@ -1428,6 +1665,15 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 #ifdef ENABLE_RV32A
     TARGET(amo)
 #endif
+#ifdef ENABLE_RV32F
+    TARGET(load_fp)
+    TARGET(store_fp)
+    TARGET(fp)
+    TARGET(madd)
+    TARGET(msub)
+    TARGET(nmadd)
+    TARGET(nmsub)
+#endif
     TARGET(unimp)
 
 #undef DISPATCH_RV32C
@@ -1559,5 +1805,12 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
     /* reset the csrs */
     rv->csr_cycle = 0;
     rv->csr_mstatus = 0;
+
+#ifdef ENABLE_RV32F
+    /* reset float registers */
+    memset(rv->F, 0, sizeof(float) * RV_NUM_REGS);
+    rv->csr_fcsr = 0;
+#endif
+
     rv->halt = false;
 }

@@ -33,15 +33,15 @@ syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs)
 endif
 
-# Whether to enable computed goto in riscv.c
+# Whether to enable computed goto
 ENABLE_COMPUTED_GOTO ?= 1
 ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
 ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
 $(error "Computed goto is only supported in clang and gcc.")
 endif
-riscv.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
+emulate.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
 ifeq ("$(CC_IS_GCC)", "1")
-riscv.o: CFLAGS += -fno-gcse -fno-crossjumping 
+emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
 endif
 endif
 
@@ -61,7 +61,7 @@ all: $(BIN)
 
 OBJS := \
 	map.o \
-	riscv.o \
+	emulate.o \
 	io.o \
 	elf.o \
 	main.o \

@@ -2,12 +2,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef ENABLE_JIT
+#include "jit.h"
+struct jit_config_t *jit_config;
+#endif
+
 #include "elf.h"
 #include "state.h"
 
+
 /* enable program trace mode */
 static bool opt_trace = false;
-
 /* RISCV arch-test*/
 static bool opt_arch_test = false;
 static char *signature_out_file;
@@ -84,7 +89,6 @@ static void run_and_trace(struct riscv_t *rv, elf_t *elf)
         uint32_t pc = rv_get_pc(rv);
         const char *sym = elf_find_symbol(elf, pc);
         printf("%08x  %s\n", pc, (sym ? sym : ""));
-
         /* step instructions */
         rv_step(rv, cycles_per_step);
     }
@@ -135,6 +139,17 @@ static bool parse_args(int argc, char **args)
                 signature_out_file = args[++i];
                 continue;
             }
+#ifdef ENABLE_JIT
+            if (!strcmp(arg, "--jit-cache")) {
+                jit_config->cache = true;
+                continue;
+            }
+
+            if (!strcmp(arg, "--jit-report")) {
+                jit_config->report = true;
+                continue;
+            }
+#endif
             /* otherwise, error */
             fprintf(stderr, "Unknown argument '%s'\n", arg);
             return false;
@@ -142,7 +157,9 @@ static bool parse_args(int argc, char **args)
         /* set the executable */
         opt_prog_name = arg;
     }
-
+#ifdef ENABLE_JIT
+    jit_set_file_name(jit_config, opt_prog_name);
+#endif
     return true;
 }
 
@@ -177,11 +194,14 @@ void dump_test_signature(struct riscv_t *rv, elf_t *elf)
 
 int main(int argc, char **args)
 {
+#ifdef ENABLE_JIT
+    jit_config = jit_config_init();
+    signal(SIGUSR1, jit_handler);
+#endif
     if (!parse_args(argc, args)) {
         print_usage(args[0]);
         return 1;
     }
-
     /* open the ELF file from the file system */
     elf_t *elf = elf_new();
     if (!elf_open(elf, opt_prog_name)) {
@@ -223,11 +243,11 @@ int main(int argc, char **args)
         run(rv);
     }
 
+
     /* dump test result in test mode */
     if (opt_arch_test) {
         dump_test_signature(rv, elf);
     }
-
     /* finalize the RISC-V runtime */
     elf_delete(elf);
     rv_delete(rv);

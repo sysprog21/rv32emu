@@ -13,3 +13,6 @@ UseTab: Never
 IndentWidth: 4
 BreakBeforeBraces: Linux
 AccessModifierOffset: -4
+ForEachMacros:
+  - DLIST_ITEM_FOREACH
+  - DLIST_MODULE_FOREACH

@@ -7,6 +7,10 @@
 #include <math.h>
 #endif
 
+#ifdef ENABLE_JIT
+#include "jit.h"
+#endif
+
 #include "riscv.h"
 #include "riscv_private.h"
 
@@ -1547,7 +1551,86 @@ static bool op_unimp(struct riscv_t *rv, uint32_t insn UNUSED)
     rv_except_illegal_insn(rv, insn);
     return false;
 }
+#ifdef ENABLE_JIT
+rv_func import_funcs[] = {
+    {"dec_rd", dec_rd},
+    {"dec_rs1", dec_rs1},
+    {"dec_rs2", dec_rs2},
+    {"dec_funct3", dec_funct3},
+    {"dec_funct7", dec_funct7},
+    {"dec_utype_imm", dec_utype_imm},
+    {"dec_itype_imm", dec_itype_imm},
+    {"dec_jtype_imm", dec_jtype_imm},
+    {"dec_r4type_fmt", dec_r4type_fmt},
+    {"dec_r4type_rs3", dec_r4type_rs3},
+    {"dec_btype_imm", dec_btype_imm},
+    {"dec_csr", dec_csr},
 
+    {"dec_stype_imm", dec_stype_imm},
+    {"sign_extend_h", sign_extend_h},
+    {"sign_extend_b", sign_extend_b},
+    {"rv_except_insn_misaligned", rv_except_insn_misaligned},
+    {"rv_except_load_misaligned", rv_except_load_misaligned},
+    {"rv_except_store_misaligned", rv_except_store_misaligned},
+    {"rv_except_illegal_insn", rv_except_illegal_insn},
+    {"csr_csrrc", csr_csrrc},
+    {"csr_csrrs", csr_csrrs},
+    {"csr_csrrw", csr_csrrw},
+#ifdef ENABLE_RV32C
+    {"c_dec_rs1", c_dec_rs1},
+    {"c_dec_rs2", c_dec_rs2},
+    {"c_dec_rd", c_dec_rd},
+    {"c_dec_rs1c", c_dec_rs1c},
+    {"c_dec_rs2c", c_dec_rs2c},
+    {"c_dec_rdc", c_dec_rdc},
+    {"c_dec_cjtype_imm", c_dec_cjtype_imm},
+    {"c_dec_cbtype_imm", c_dec_cbtype_imm},
+#endif
+    {NULL, NULL},
+};
+
+
+void rv_step(struct riscv_t *rv, int32_t cycles)
+{
+    /* find or translate a block for our starting PC */
+    struct block_t *block = block_find_or_translate(rv, NULL);
+    assert(block);
+
+    const uint64_t cycles_start = rv->csr_cycle;
+    const uint64_t cycles_target = rv->csr_cycle + cycles;
+
+    /* loop until we hit out cycle target */
+    while (rv->csr_cycle < cycles_target && !rv->halt) {
+        const uint32_t pc = rv->PC;
+
+        /* try to predict the next block */
+        if (block->predict && block->predict->pc_start == pc) {
+            block = block->predict;
+        } else {
+            /* lookup the next block in block map or translate a new block */
+            struct block_t *next = block_find_or_translate(rv, block);
+            /* move onto the next block */
+            block = next;
+        }
+        /* we should have a block by now */
+        assert(block);
+
+        /* call the translated block */
+        call_block_t c = (call_block_t) block->func;
+        c(rv);
+
+        /* increment the cycles csr */
+        rv->csr_cycle += block->instructions;
+
+        /* if this block has no instructions we cant make forward progress so
+         * must fallback to instruction emulation
+         */
+        if (!block->instructions) {
+            assert(!"unable to execute empty block");
+        }
+    }
+}
+#else
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     assert(rv);
@@ -1717,6 +1800,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     }
 #endif /* ENABLE_COMPUTED_GOTO */
 }
+#endif /* ENABLE_JIT */
 
 riscv_user_t rv_userdata(struct riscv_t *rv)
 {
@@ -1771,6 +1855,11 @@ struct riscv_t *rv_create(const struct riscv_io_t *io, riscv_user_t userdata)
     /* reset */
     rv_reset(rv, 0U);
 
+#ifdef ENABLE_JIT
+    rv->jit = rv_jit_init(9);
+    rv->jit->optimize_level = 3;
+#endif
+
     return rv;
 }
 
@@ -1787,6 +1876,11 @@ bool rv_has_halted(struct riscv_t *rv)
 void rv_delete(struct riscv_t *rv)
 {
     assert(rv);
+
+#ifdef ENABLE_JIT
+    rv_jit_free(rv->jit);
+#endif
+
     free(rv);
 }
 

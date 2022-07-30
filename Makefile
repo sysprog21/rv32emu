@@ -52,6 +52,24 @@ emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
 endif
 endif
 
+ENABLE_JIT ?= 1
+ifeq ("$(ENABLE_JIT)", "1")
+mir/GNUmakefile:
+	git submodule update --init
+MIR = mir/libmir.a
+$(MIR): mir/GNUmakefile
+	$(MAKE) --quiet -C mir
+OBJS_EXT += jit.o
+jit.o: $(MIR)
+CFLAGS += -I./mir
+CFLAGS += -D ENABLE_JIT
+LDFLAGS += $(MIR) -lpthread
+endif
+
+# Clear the .DEFAULT_GOAL special variable, so that the following turns
+# to the first target after .DEFAULT_GOAL is not set.
+.DEFAULT_GOAL :=
+
 OUT ?= build
 BIN := $(OUT)/rv32emu
 
@@ -65,12 +83,12 @@ OBJS := \
 	main.o \
 	syscall.o \
 	$(OBJS_EXT)
-
+	
 deps := $(OBJS:%.o=%.o.d)
 
 %.o: %.c
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $< -g
 
 $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
@@ -103,6 +121,7 @@ endif
 clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
 distclean: clean
+	-$(MAKE) --quiet -C mir clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1
 	$(RM) *.zip

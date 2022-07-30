@@ -10,3 +10,6 @@ build/rv32emu
 build/arch-test
 *.o
 *.o.d
+
+# MIR
+build/*.mirb

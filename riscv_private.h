@@ -2,7 +2,9 @@
 #include <stdbool.h>
 
 #include "riscv.h"
-
+#ifdef ENABLE_JIT
+#include "jit.h"
+#endif
 #define RV_NUM_REGS 32
 
 /* csrs */
@@ -149,6 +151,9 @@ struct riscv_t {
     
     /* current instruction length */
     uint8_t insn_len;
+#ifdef ENABLE_JIT
+    struct riscv_jit_t *jit;
+#endif 
 };
 
 /* decode rd field */

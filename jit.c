@@ -1195,7 +1195,7 @@ static void blocks_save(struct riscv_jit_t *jit)
     fclose(jit->cache);
 }
 
-struct riscv_jit_t *rv_jit_init(uint32_t bits UNUSED)
+struct riscv_jit_t *rv_jit_init(uint32_t bits)
 {
     struct riscv_jit_t *jit =
         (struct riscv_jit_t *) malloc(sizeof(struct riscv_jit_t));
@@ -1203,7 +1203,7 @@ struct riscv_jit_t *rv_jit_init(uint32_t bits UNUSED)
     jit->options = malloc(sizeof(struct c2mir_options));
     memset(jit->options, 0, sizeof(struct c2mir_options));
     jit->ctx = MIR_init();
-    jit->block_map = block_map_alloc(11);
+    jit->block_map = block_map_alloc(bits);
     size_t len = strlen(jit_config->program);
     char cache[len + 5];
     snprintf(cache, 30, "%s.mirb", jit_config->program);

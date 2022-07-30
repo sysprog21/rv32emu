@@ -158,7 +158,7 @@ static inline uint32_t dec_rd(const uint32_t insn)
 }
 
 /* decode rs1 field.
- * rs1 in bits 19..15
+ * rs1 = insn[19:15]
  */
 static inline uint32_t dec_rs1(const uint32_t insn)
 {
@@ -166,7 +166,7 @@ static inline uint32_t dec_rs1(const uint32_t insn)
 }
 
 /* decode rs2 field.
- * rs2 in bits 24..20
+ * rs2 = insn[24:20]
  */
 static inline uint32_t dec_rs2(const uint32_t insn)
 {
@@ -174,15 +174,15 @@ static inline uint32_t dec_rs2(const uint32_t insn)
 }
 
 /* decoded funct3 field.
- * funct3 in bits 14..12
-  */
+ * funct3 = insn[14:12]
+ */
 static inline uint32_t dec_funct3(const uint32_t insn)
 {
     return (insn & FR_FUNCT3) >> 12;
 }
 
 /* decode funct7 field.
- * funct7 in bits 31..25
+ * funct7 = insn[31:25]
  */
 static inline uint32_t dec_funct7(const uint32_t insn)
 {

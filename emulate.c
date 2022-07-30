@@ -895,24 +895,24 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t rd = dec_rd(insn);
     const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
-    const uint32_t rm = dec_funct3(insn);  /* FIXME: rounding */
+    const uint32_t rm = dec_funct3(insn); /* FIXME: rounding */
     const uint32_t funct7 = dec_funct7(insn);
 
     /* dispatch based on func7 (low 2 bits are width) */
     switch (funct7) {
-    case 0b0000000:  /* FADD */
+    case 0b0000000: /* FADD */
         rv->F[rd] = rv->F[rs1] + rv->F[rs2];
         break;
-    case 0b0000100:  /* FSUB */
+    case 0b0000100: /* FSUB */
         rv->F[rd] = rv->F[rs1] - rv->F[rs2];
         break;
-    case 0b0001000:  /* FMUL */
+    case 0b0001000: /* FMUL */
         rv->F[rd] = rv->F[rs1] * rv->F[rs2];
         break;
-    case 0b0001100:  /* FDIV */
+    case 0b0001100: /* FDIV */
         rv->F[rd] = rv->F[rs1] / rv->F[rs2];
         break;
-    case 0b0101100:  /* FSQRT */
+    case 0b0101100: /* FSQRT */
         rv->F[rd] = sqrtf(rv->F[rs1]);
         break;
     case 0b0010000: {
@@ -921,13 +921,13 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
         memcpy(&f2, rv->F + rs2, 4);
 
         switch (rm) {
-        case 0b000:  /* FSGNJ.S */
+        case 0b000: /* FSGNJ.S */
             res = (f1 & ~FMASK_SIGN) | (f2 & FMASK_SIGN);
             break;
-        case 0b001:  /* FSGNJN.S */
+        case 0b001: /* FSGNJN.S */
             res = (f1 & ~FMASK_SIGN) | (~f2 & FMASK_SIGN);
             break;
-        case 0b010:  /* FSGNJX.S */
+        case 0b010: /* FSGNJX.S */
             res = f1 ^ (f2 & FMASK_SIGN);
             break;
         default:
@@ -940,10 +940,10 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
     }
     case 0b0010100:
         switch (rm) {
-        case 0b000:  /* FMIN */
+        case 0b000: /* FMIN */
             rv->F[rd] = fminf(rv->F[rs1], rv->F[rs2]);
             break;
-        case 0b001:  /* FMAX */
+        case 0b001: /* FMAX */
             rv->F[rd] = fmaxf(rv->F[rs1], rv->F[rs2]);
             break;
         default:
@@ -953,10 +953,10 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
         break;
     case 0b1100000:
         switch (rs2) {
-        case 0b00000:  /* FCVT.W.S */
+        case 0b00000: /* FCVT.W.S */
             rv->X[rd] = (int32_t) rv->F[rs1];
             break;
-        case 0b00001:  /* FCVT.WU.S */
+        case 0b00001: /* FCVT.WU.S */
             rv->X[rd] = (uint32_t) rv->F[rs1];
             break;
         default:
@@ -966,7 +966,7 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
         break;
     case 0b1110000:
         switch (rm) {
-        case 0b000:  /* FMV.X.W */
+        case 0b000: /* FMV.X.W */
             memcpy(rv->X + rd, rv->F + rs1, 4);
             break;
         case 0b001: { /* FCLASS.S */
@@ -982,13 +982,13 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
         break;
     case 0b1010000:
         switch (rm) {
-        case 0b010:  /* FEQ.S */
+        case 0b010: /* FEQ.S */
             rv->X[rd] = (rv->F[rs1] == rv->F[rs2]) ? 1 : 0;
             break;
-        case 0b001:  /* FLT.S */
+        case 0b001: /* FLT.S */
             rv->X[rd] = (rv->F[rs1] < rv->F[rs2]) ? 1 : 0;
             break;
-        case 0b000:  /* FLE.S */
+        case 0b000: /* FLE.S */
             rv->X[rd] = (rv->F[rs1] <= rv->F[rs2]) ? 1 : 0;
             break;
         default:
@@ -998,10 +998,10 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
         break;
     case 0b1101000:
         switch (rs2) {
-        case 0b00000:  /* FCVT.S.W */
+        case 0b00000: /* FCVT.S.W */
             rv->F[rd] = (float) (int32_t) rv->X[rs1];
             break;
-        case 0b00001:  /* FCVT.S.WU */
+        case 0b00001: /* FCVT.S.WU */
             rv->F[rd] = (float) (uint32_t) rv->X[rs1];
             break;
         default:
@@ -1009,7 +1009,7 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
             return false;
         }
         break;
-    case 0b1111000:  /* FMV.W.X */
+    case 0b1111000: /* FMV.W.X */
         memcpy(rv->F + rd, rv->X + rs1, 4);
         break;
     default:

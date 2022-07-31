@@ -55,12 +55,12 @@ endif
 ENABLE_JIT ?= 1
 ifeq ("$(ENABLE_JIT)", "1")
 mir/GNUmakefile:
-	git submodule update --init
+	git submodule update --init $(dir $@)
 MIR = mir/libmir.a
 $(MIR): mir/GNUmakefile
 	$(MAKE) --quiet -C mir
 OBJS_EXT += jit.o
-jit.o: $(MIR)
+emulate.o: $(MIR)
 CFLAGS += -I./mir
 CFLAGS += -D ENABLE_JIT
 LDFLAGS += $(MIR) -lpthread

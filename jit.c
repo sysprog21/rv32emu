@@ -895,8 +895,7 @@ struct block_map_t *block_map_alloc(uint32_t bits)
 {
     struct block_map_t *map = malloc(sizeof(struct block_map_t));
     const uint32_t capacity = (1 << bits);
-    void *ptr = malloc(capacity * sizeof(struct block_t *));
-    memset(ptr, 0, capacity);
+    void *ptr = calloc(capacity, sizeof(struct block_t *));
     map->bits = bits;
     map->map = (struct block_t **) ptr;
     map->capacity = capacity;
@@ -1178,8 +1177,9 @@ void jit_set_file_name(struct jit_config_t *config, const char *opt_prog_name)
             break;
     }
 
-    config->program = malloc(len);
+    config->program = malloc(len + 1);
     strncpy(config->program, opt_prog_name, len);
+    config->program[len] = 0;
 }
 
 static void blocks_save(struct riscv_jit_t *jit)

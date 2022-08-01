@@ -13,3 +13,7 @@ build/arch-test
 
 # MIR
 build/*.mirb
+
+# JIT
+build/c2str
+jit_template.h

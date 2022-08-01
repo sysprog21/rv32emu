@@ -61,6 +61,12 @@ $(MIR): mir/GNUmakefile
 	$(MAKE) --quiet -C mir
 OBJS_EXT += jit.o
 emulate.o: $(MIR)
+# FIXME:
+build/c2str: tools/c2str.c
+	$(CC) -o $@ $<
+jit_template.h: jit_template.inc build/c2str
+	build/c2str $< $@
+jit.c: jit_template.h
 CFLAGS += -I./mir
 CFLAGS += -D ENABLE_JIT
 LDFLAGS += $(MIR) -lpthread
@@ -120,6 +126,7 @@ endif
 
 clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
+	$(RM) build/c2str
 distclean: clean
 	-$(MAKE) --quiet -C mir clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)

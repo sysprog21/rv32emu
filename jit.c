@@ -4,7 +4,12 @@
 #include <string.h>
 
 #include "jit.h"
+
+#if !defined(__LP64__) && !defined(_LP64)
+#error "JIT templete assumes LP64 data model."
+#endif
 #include "jit_template.h"
+
 #include "mir-gen.h"
 
 /* hash function is used when mapping addresses to indexes in the block map */

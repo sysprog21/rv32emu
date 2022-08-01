@@ -776,7 +776,7 @@ static void jit_codegen(rv_buffer *buff,
                         struct block_t *block,
                         struct riscv_t *rv)
 {
-    size_t tem_len = strlen(template);
+    size_t tem_len = sizeof(template) - 1;
     strncpy(buff->src, template, tem_len);
     buff->size += tem_len;
     uint32_t *insns = block->code;
@@ -1032,7 +1032,7 @@ static void block_finish(struct riscv_t *rv, struct block_t *block)
     snprintf(func_name, 25, "jit_func_%d_%d", block->pc_start,
              block->instructions);
 
-    size_t tem_size = sizeof(template);
+    size_t tem_size = sizeof(template) - 1;
     const size_t n = tem_size + 4096;
     rv_buffer *buffer = malloc(sizeof(rv_buffer));
     buffer->src = (char *) malloc(n);

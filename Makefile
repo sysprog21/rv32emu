@@ -61,7 +61,7 @@ $(MIR): mir/GNUmakefile
 	$(MAKE) --quiet -C mir
 OBJS_EXT += jit.o
 emulate.o: $(MIR)
-# FIXME:
+# FIXME: Avoid hardcoded path
 build/c2str: tools/c2str.c
 	$(CC) -o $@ $<
 jit_template.h: jit_template.inc build/c2str
@@ -126,11 +126,12 @@ endif
 
 clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
-	$(RM) build/c2str
+	$(RM) jit_template.h
 distclean: clean
 	-$(MAKE) --quiet -C mir clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1
 	$(RM) *.zip
+	$(RM) build/c2str
 
 -include $(deps)

@@ -126,7 +126,7 @@ endif
 
 clean:
 	$(RM) $(BIN) $(OBJS) $(deps)
-	$(RM) jit_template.h
+	$(RM) jit_template.h build/*.mirb build/*.log
 distclean: clean
 	-$(MAKE) --quiet -C mir clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)

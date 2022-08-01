@@ -13,6 +13,7 @@ build/arch-test
 
 # MIR
 build/*.mirb
+build/*.log
 
 # JIT
 build/c2str

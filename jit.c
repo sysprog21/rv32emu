@@ -30,8 +30,8 @@ static void str2buffer(rv_buffer *buffer, const char *fmt, ...)
     char code[1024];
     va_start(args, fmt);
     int n = vsnprintf(code, sizeof(code), fmt, args);
-
     va_end(args);
+
     if (n < 0)
         abort();
 
@@ -112,15 +112,15 @@ static void emit_load(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     const uint32_t funct3 = dec_funct3(insn);
     const uint32_t rd = dec_rd(insn);
 
-    // load address
+    /* load address */
     LOAD_ADDR;
     bool end = true;
     switch (funct3) {
-    case 0:  // LB
+    case 0: /* LB */
         COMMENT("LB");
         CODE("rv->X[%u] = sign_extend_b(rv->io.mem_read_b(rv, addr));\n", rd);
         goto update;
-    case 1:  // LH
+    case 1: /* LH */
         COMMENT("LH");
         load_misaligned(1);
         CODE(
@@ -128,17 +128,17 @@ static void emit_load(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
             rd);
         end = false;
         goto update;
-    case 2:  // LW
+    case 2: /* LW */
         COMMENT("LW");
         load_misaligned(3);
         CODE("else {\nrv->X[%u] = rv->io.mem_read_w(rv, addr);\n", rd);
         end = false;
         goto update;
-    case 4:  // LBU
+    case 4: /* LBU */
         COMMENT("LBU");
         CODE("rv->X[%u] = rv->io.mem_read_b(rv, addr);\n", rd);
         goto update;
-    case 5:  // LHU
+    case 5: /* LHU */
         COMMENT("LHU");
         load_misaligned(1);
         CODE("else {\nrv->X[%u] = rv->io.mem_read_s(rv, addr);\n", rd);
@@ -159,53 +159,51 @@ update:
 
 static void emit_op_imm(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 {
-    // i-type decode
+    /* I-type decoding */
     const int32_t imm = dec_itype_imm(insn);
     const uint32_t rd = dec_rd(insn);
     const uint32_t rs1 = dec_rs1(insn);
     const uint32_t funct3 = dec_funct3(insn);
 
-    // dispatch operation type
+    /* dispatch operation type */
     switch (funct3) {
-    case 0:  // ADDI
+    case 0: /* ADDI */
         COMMENT("ADDI");
         CODE("rv->X[%u] = (int32_t) (rv->X[%u]) + %d;\n", rd, rs1, imm);
         goto update;
-    case 1:  // SLLI
+    case 1: /* SLLI */
         COMMENT("SLLI");
         CODE("rv->X[%u] = rv->X[%u] << (%d & 0x1f);\n", rd, rs1, imm);
         goto update;
-    case 2:  // SLTI
+    case 2: /* SLTI */
         COMMENT("SLTI");
         CODE("rv->X[%u] = ((int32_t) (rv->X[%u]) < %d) ? 1 : 0;\n", rd, rs1,
              imm);
         goto update;
-    case 3:  // SLTIU
+    case 3: /* SLTIU */
         COMMENT("SLTIU");
         CODE("rv->X[%u] = (rv->X[%u] < (uint32_t) %d) ? 1 : 0;\n", rd, rs1,
              imm);
         goto update;
-    case 4:  // XORI
+    case 4: /* XORI */
         COMMENT("XORI");
         CODE("rv->X[%u] = rv->X[%u] ^ %d;\n", rd, rs1, imm);
         goto update;
     case 5:
-        if (imm & ~0x1f) {
-            // SRAI
+        if (imm & ~0x1f) { /* SRAI */
             COMMENT("SRAI");
             CODE("rv->X[%u] = ((int32_t) rv->X[%u]) >> (%d & 0x1f);\n", rd, rs1,
                  imm);
-        } else {
-            // SRLI
+        } else { /* SRLI */
             COMMENT("SRLI");
             CODE("rv->X[%u] = rv->X[%u] >> (%d & 0x1f);\n", rd, rs1, imm);
         }
         goto update;
-    case 6:  // ORI
+    case 6: /* ORI */
         COMMENT("ORI");
         CODE("rv->X[%u] = rv->X[%u] | %d;\n", rd, rs1, imm);
         goto update;
-    case 7:  // ANDI
+    case 7: /* ANDI */
         COMMENT("ANDI");
         CODE("rv->X[%u] = rv->X[%u] & %d;\n", rd, rs1, imm);
         goto update;
@@ -221,7 +219,7 @@ update:
 
 static void emit_auipc(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 {
-    // u-type decode
+    /* U-type decoding */
     const uint32_t rd = dec_rd(insn);
     const uint32_t imm = dec_utype_imm(insn);
     COMMENT("AUIPC");
@@ -233,30 +231,30 @@ static void emit_auipc(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 
 static void emit_store(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 {
-    // s-type format
+    /* S-type format */
     const int32_t imm = dec_stype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn);
     const uint32_t rs2 = dec_rs2(insn);
     const uint32_t funct3 = dec_funct3(insn);
 
-    // store address
+    /* store address */
     LOAD_ADDR;
     CODE("data = rv->X[%u];\n", rs2);
     bool end = true;
 
-    // dispatch by write size
+    /* dispatch by write size */
     switch (funct3) {
-    case 0:  // SB
+    case 0: /* SB */
         COMMENT("SB");
         CODE("rv->io.mem_write_b(rv, addr, data);\n");
         goto update;
-    case 1:  // SH
+    case 1: /* SH */
         COMMENT("SH");
         store_misaligned(1);
         CODE(" else {\nrv->io.mem_write_s(rv, addr, data);\n");
         end = false;
         goto update;
-    case 2:  // SW
+    case 2: /* SW */
         COMMENT("SW");
         store_misaligned(3);
         CODE(" else {\nrv->io.mem_write_w(rv, addr, data);\n");
@@ -284,50 +282,50 @@ static void emit_amo(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     const uint32_t funct5 = (f7 >> 2) & 0x1f;
 
     switch (funct5) {
-    case 0b00010:  // LR.W
+    case 0b00010: /* LR.W */
         COMMENT("LR.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, rv->X[%u]);\n", rd, rs1);
         goto update;
-    case 0b00011:  // SC.W
+    case 0b00011: /* SC.W */
         COMMENT("SC.W");
         CODE("rv->io.mem_write_w(rv, rv->X[%u], rv->X[%u]);\n", rs1, rs2);
         CODE("rv->X[%u] = 0;\n", rd);
         goto update;
-    case 0b00001: {  // AMOSWAP.W
+    case 0b00001: { /* AMOSWAP.W */
         COMMENT("AMOSWAP.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("rv->io.mem_write_s(rv, %u, rv->X[%u]);\n", rs1, rs2);
         goto update;
     }
-    case 0b00000: {  // AMOADD.W
+    case 0b00000: { /* AMOADD.W */
         COMMENT("AMOADD.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("res = (int32_t) rv->X[%u] + (int32_t) rv->X[%u];\n", rd, rs2);
         CODE("rv->io.mem_write_s(rv, %u, res);\n", rs1);
         goto update;
     }
-    case 0b00100: {  // AMOXOR.W
+    case 0b00100: { /* AMOXOR.W */
         COMMENT("AMOXOR.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("res = rv->X[%u] ^ rv->X[%u];\n", rd, rs2);
         CODE("rv->io.mem_write_s(rv, %u, res);\n", rs1);
         goto update;
     }
-    case 0b01100: {  // AMOAND.W
+    case 0b01100: { /* AMOAND.W */
         COMMENT("AMOAND.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("res = rv->X[%u] & rv->X[%u];\n", rd, rs2);
         CODE("rv->io.mem_write_s(rv, %u, res);\n", rs1);
         goto update;
     }
-    case 0b01000: {  // AMOOR.W
+    case 0b01000: { /* AMOOR.W */
         COMMENT("AMOOR.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("res = rv->X[%u] | rv->X[%u];\n", rd, rs2);
         CODE("rv->io.mem_write_s(rv, %u, res);\n", rs1);
         goto update;
     }
-    case 0b10000: {  // AMOMIN.W
+    case 0b10000: { /* AMOMIN.W */
         COMMENT("AMOMIN.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("a = rv->X[%u];\n", rd);
@@ -336,7 +334,7 @@ static void emit_amo(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         CODE("rv->io.mem_write_s(rv, %u, res);\n", rs1);
         goto update;
     }
-    case 0b10100: {  // AMOMAX.W
+    case 0b10100: { /* AMOMAX.W */
         COMMENT("AMOMAX.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("a = rv->X[%u];\n", rd);
@@ -345,7 +343,7 @@ static void emit_amo(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         CODE("rv->io.mem_write_s(rv, %u, res);\n", rs1);
         goto update;
     }
-    case 0b11000: {  // AMOMINU.W
+    case 0b11000: { /* AMOMINU.W */
         COMMENT("AMOMINU.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("a_u32 = rv->X[%u];\n", rd);
@@ -354,7 +352,7 @@ static void emit_amo(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         CODE("rv->io.mem_write_s(rv, %u, res_u32);\n", rs1);
         goto update;
     }
-    case 0b11100: {  // AMOMAXU.W
+    case 0b11100: { /* AMOMAXU.W */
         COMMENT("AMOMAXU.W");
         CODE("rv->X[%u] = rv->io.mem_read_w(rv, %u);\n", rd, rs1);
         CODE("a_u32 = rv->X[%u];\n", rd);
@@ -385,39 +383,39 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     switch (funct7) {
     case 0b0000000:
         switch (funct3) {
-        case 0b000:  // ADD
+        case 0b000: /* ADD */
             COMMENT("ADD");
             CODE("rv->X[%u] = (int32_t) (rv->X[%u]) + (int32_t) (rv->X[%u]);",
                  rd, rs1, rs2);
             goto update;
-        case 0b001:  // SLL
+        case 0b001: /* SLL */
             COMMENT("SLL");
             CODE("rv->X[%u] = rv->X[%u] << (rv->X[%u] & 0x1f);", rd, rs1, rs2);
             goto update;
-        case 0b010:  // SLT
+        case 0b010: /* SLT */
             COMMENT("SLT");
             CODE(
                 "rv->X[%u] = ((int32_t) (rv->X[%u]) < (int32_t) (rv->X[%u])) ? "
                 "1 : 0;",
                 rd, rs1, rs2);
             goto update;
-        case 0b011:  // SLTU
+        case 0b011: /* SLTU */
             COMMENT("SLTU");
             CODE("rv->X[%u] = (rv->X[%u] < rv->X[%u]) ? 1 : 0;", rd, rs1, rs2);
             goto update;
-        case 0b100:  // XOR
+        case 0b100: /* XOR */
             COMMENT("XOR");
             CODE("rv->X[%u] = rv->X[%u] ^ rv->X[%u];", rd, rs1, rs2);
             goto update;
-        case 0b101:  // SRL
+        case 0b101: /* SRL */
             COMMENT("SRL");
             CODE("rv->X[%u] = rv->X[%u] >> (rv->X[%u] & 0x1f);", rd, rs1, rs2);
             goto update;
-        case 0b110:  // OR
+        case 0b110: /* OR */
             COMMENT("OR");
             CODE("rv->X[%u] = rv->X[%u] | rv->X[%u];", rd, rs1, rs2);
             goto update;
-        case 0b111:  // AND
+        case 0b111: /* AND */
             COMMENT("AND");
             CODE("rv->X[%u] = rv->X[%u] & rv->X[%u];", rd, rs1, rs2);
             goto update;
@@ -427,36 +425,33 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         }
         break;
 #ifdef ENABLE_RV32M
-    case 0b0000001:
-        // RV32M instructions
+    case 0b0000001: /* RV32M instructions */
         switch (funct3) {
-        case 0b000:  // MUL
+        case 0b000: /* MUL */
             COMMENT("MUL");
             CODE("rv->X[%u] = (int32_t) rv->X[%u] * (int32_t) rv->X[%u];", rd,
                  rs1, rs2);
             goto update;
-        case 0b001: {  // MULH
+        case 0b001: /* MULH */
             COMMENT("MULH");
             CODE("a64 = (int32_t) rv->X[%u];", rs1);
             CODE("b64 = (int32_t) rv->X[%u];", rs2);
             CODE("rv->X[%u] = ((uint64_t) (a64 * b64)) >> 32;", rd);
-        }
             goto update;
-        case 0b010: {  // MULHSU
+        case 0b010: /* MULHSU */
             COMMENT("MULHSU");
             CODE("a64 = (int32_t) rv->X[%u];", rs1);
             CODE("b_u64 = rv->X[%u];", rs2);
             CODE("rv->X[%u] = ((uint64_t) (a64 * b_u64)) >> 32;", rd);
-        }
             goto update;
-        case 0b011:  // MULHU
+        case 0b011: /* MULHU */
             COMMENT("MULHU");
             CODE(
                 "rv->X[%u] = ((uint64_t) rv->X[%u] * (uint64_t) rv->X[%u]) "
                 ">> 32;",
                 rd, rs1, rs2);
             goto update;
-        case 0b100: {  // DIV
+        case 0b100: /* DIV */
             COMMENT("DIV");
             CODE("dividend = (int32_t) rv->X[%u];", rs1);
             CODE("divisor = (int32_t) rv->X[%u];", rs2);
@@ -469,9 +464,8 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
                 "rv->X[%u] = dividend / divisor;\n"
                 "}\n",
                 rd, rs1, rd, rs1, rd);
-        }
             goto update;
-        case 0b101: {  // DIVU
+        case 0b101: /* DIVU */
             COMMENT("DIVU");
             CODE("dividend_u32 = rv->X[%u];", rs1);
             CODE("divisor_u32 = rv->X[%u];", rs2);
@@ -482,9 +476,8 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
                 "rv->X[%u] = dividend_u32 / divisor_u32;\n"
                 "}\n",
                 rd, rd);
-        }
             goto update;
-        case 0b110: {  // REM
+        case 0b110: /* REM */
             COMMENT("REM");
             CODE("dividend = rv->X[%u];", rs1);
             CODE("divisor = rv->X[%u];", rs2);
@@ -497,9 +490,8 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
                 "rv->X[%u] = dividend %% divisor;"
                 "}",
                 rd, rs1, rd, rd);
-        }
             goto update;
-        case 0b111: {  // REMU
+        case 0b111: /* REMU */
             COMMENT("REMU");
             CODE("dividend_u32 = rv->X[%u];", rs1);
             CODE("divisor_u32 = rv->X[%u];", rs2);
@@ -510,22 +502,23 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
                 "    rv->X[%u] = dividend_u32 %% divisor_u32;"
                 "}",
                 rd, rd);
-        }
             goto update;
         default:
             illegal_insn;
             return;
         }
         break;
-#endif  // ENABLE_RV32M
+#endif /* ENABLE_RV32M */
     case 0b0100000:
         switch (funct3) {
-        case 0b000:  // SUB
+        case 0b000: /* SUB */
             COMMENT("SUB");
-            CODE("rv->X[%u] = (int32_t) (rv->X[%u]) - (int32_t) (rv->X[%u]);",
-                 rd, rs1, rs2);
+            CODE(
+                "rv->X[%u] = (int32_t) (rv->X[%u]) - (int32_t) "
+                "(rv->X[%u]);",
+                rd, rs1, rs2);
             goto update;
-        case 0b101:  // SRA
+        case 0b101: /* SRA */
             COMMENT("SRA");
             CODE("rv->X[%u] = ((int32_t) rv->X[%u]) >> (rv->X[%u] & 0x1f);", rd,
                  rs1, rs2);
@@ -548,7 +541,7 @@ update:
 static void emit_lui(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 {
     COMMENT("LUI");
-    // u-type decode
+    /* U-type decoding */
     const uint32_t rd = dec_rd(insn);
     const uint32_t val = dec_utype_imm(insn);
     CODE("rv->X[%u] = %u;\n", rd, val);
@@ -559,48 +552,49 @@ static void emit_lui(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 
 static void emit_branch(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 {
-    // b-type decode
+    /* B-type decoding */
     const uint32_t func3 = dec_funct3(insn);
     const int32_t imm = dec_btype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn);
     const uint32_t rs2 = dec_rs2(insn);
 
-    // track if branch is taken or not
+    /* track if branch is taken or not */
     CODE("taken = false;\n");
     CODE("pc = rv->PC;\n");
 
-    // dispatch by branch type
+    /* dispatch by branch type */
     switch (func3) {
-    case 0:  // BEQ
+    case 0: /* BEQ */
         COMMENT("BEQ");
         CODE("taken = (rv->X[%u] == rv->X[%u]);\n", rs1, rs2);
         break;
-    case 1:  // BNE
+    case 1: /* BNE */
         COMMENT("BNE");
         CODE("taken = (rv->X[%u] != rv->X[%u]);\n", rs1, rs2);
         break;
-    case 4:  // BLT
+    case 4: /* BLT */
         COMMENT("BLT");
         CODE("taken = ((int32_t) rv->X[%u] < (int32_t) rv->X[%u]);\n", rs1,
              rs2);
         break;
-    case 5:  // BGE
+    case 5: /* BGE */
         COMMENT("BGE");
         CODE("taken = ((int32_t) rv->X[%u] >= (int32_t) rv->X[%u]);\n", rs1,
              rs2);
         break;
-    case 6:  // BLTU
+    case 6: /* BLTU */
         COMMENT("BLTU");
         CODE("taken = (rv->X[%u] < rv->X[%u]);\n", rs1, rs2);
         break;
-    case 7:  // BGEU
+    case 7: /* BGEU */
         COMMENT("BGEU");
         CODE("taken = (rv->X[%u] >= rv->X[%u]);\n", rs1, rs2);
         break;
     default:
         CODE("rv_except_illegal_insn(rv, %u);\n", insn);
     }
-    // perform branch action
+
+    /* perform branch action */
     CODE(
         "if (taken) {\n"
         "rv->PC += %u;\n"
@@ -618,7 +612,7 @@ static void emit_branch(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 
 static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 {
-    // i-type decode
+    /* I-type decoding */
     const uint32_t rd = dec_rd(insn);
     const uint32_t rs1 = dec_rs1(insn);
     const int32_t imm = dec_itype_imm(insn);
@@ -627,15 +621,15 @@ static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     CODE(
         "ra = rv->PC + rv->insn_len;\n"
         "pc = rv->PC;\n");
-    // jump
+    /* jump */
     CODE("rv->PC = (rv->X[%u] + %d) & ~1u;\n", rs1, imm);
-    // link
+    /* link */
     CODE(
         "if (%u != rv_reg_zero)\n"
         "rv->X[%u] = ra;\n",
         rd, rd);
 
-    // check for exception
+    /* check for exception */
     CODE(
 #ifdef ENABLE_RV32C
         "if (rv->PC & 0x1) {\n"
@@ -649,23 +643,23 @@ static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 
 static void emit_jal(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 {
-    // j-type decode
+    /* J-type decoding */
     const uint32_t rd = dec_rd(insn);
     const int32_t rel = dec_jtype_imm(insn);
+
     COMMENT("JAL");
-    // compute return address
+    /* compute return address */
     CODE("ra = rv->PC + rv->insn_len;\n");
     CODE("pc = rv->PC;\n");
     CODE("rv->PC += %u;\n", rel);
 
-    // link
+    /* link */
     CODE(
         "if (%u != rv_reg_zero)\n"
         "\trv->X[%u] = ra;\n",
         rd, rd);
 
     CODE(
-        ""
 #ifdef ENABLE_RV32C
         "if (rv->PC & 0x1) {"
 #else
@@ -677,36 +671,36 @@ static void emit_jal(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 
 static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
 {
-    // i-type decode
+    /* I-type decoding */
     const int32_t imm = dec_itype_imm(insn);
     const int32_t csr = dec_csr(insn);
     const uint32_t funct3 = dec_funct3(insn);
     const uint32_t rs1 = dec_rs1(insn);
     const uint32_t rd = dec_rd(insn);
 
-    // dispatch by func3 field
+    /* dispatch by func3 field */
     switch (funct3) {
     case 0:
-        // dispatch from imm field
+        /* dispatch from imm field */
         switch (imm) {
-        case 0:  // ECALL
+        case 0: /* ECALL */
             COMMENT("ECALL");
             CODE("rv->io.on_ecall(rv);\n");
             goto update;
-        case 1:  // EBREAK
+        case 1: /* EBREAK */
             COMMENT("EBREAK");
             CODE("rv->io.on_ebreak(rv);\n");
             goto update;
-        case 0x002:  // URET
-        case 0x102:  // SRET
-        case 0x202:  // HRET
-        case 0x105:  // WFI
+        case 0x002: /* URET */
+        case 0x102: /* SRET */
+        case 0x202: /* HRET */
+        case 0x105: /* WFI */
             illegal_insn;
             return;
-        case 0x302:  // MRET
+        case 0x302: /* MRET */
             COMMENT("MRET");
             UPDATE_PC(rv->csr_mepc);
-            // this is a branch
+            /* this is a branch */
             return;
         default:
             illegal_insn;
@@ -714,13 +708,13 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         }
         break;
 #ifdef ENABLE_Zicsr
-    case 1: {  // CSRRW    (Atomic Read/Write CSR)
+    case 1: { /* CSRRW    (Atomic Read/Write CSR) */
         COMMENT("CSRRW");
         CODE("tmp_u32 = csr_csrrw(rv, %d, rv->X[%u]);\n", csr, rs1);
         CODE("rv->X[%u] = rd ? tmp_u32 : rv->X[%u];\n", rd, rd);
         goto update;
     }
-    case 2: {  // CSRRS    (Atomic Read and Set Bits in CSR)
+    case 2: { /* CSRRS    (Atomic Read and Set Bits in CSR) */
         COMMENT("CSRRS");
         CODE(
             "tmp_u32 = csr_csrrs(rv, %d, (%u == rv_reg_zero) ? 0u : "
@@ -729,7 +723,7 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }
-    case 3: {  // CSRRC    (Atomic Read and Clear Bits in CSR)
+    case 3: { /* CSRRC    (Atomic Read and Clear Bits in CSR) */
         COMMENT("CSRRC");
         CODE(
             "tmp_u32 = csr_csrrc(rv, %d, (%u == rv_reg_zero) ? ~0u : "
@@ -738,25 +732,25 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }
-    case 5: {  // CSRRWI
+    case 5: { /* CSRRWI */
         COMMENT("CSRRWI");
         CODE("tmp_u32 = csr_csrrw(rv, %d, %u);\n", csr, rs1);
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }
-    case 6: {  // CSRRSI
+    case 6: { /* CSRRSI */
         COMMENT("CSRRSI");
         CODE("tmp_u32 = csr_csrrs(rv, %d, %u);\n", csr, rs1);
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }
-    case 7: {  // CSRRCI
+    case 7: { /* CSRRCI */
         COMMENT("CSRRCI");
         CODE("tmp_u32 = csr_csrrc(rv, %d, rs1);\n", csr, rs1);
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }
-#endif  // ENABLE_Zicsr
+#endif /* ENABLE_Zicsr */
     default:
         illegal_insn;
         return;
@@ -921,9 +915,8 @@ static void rv_jit_clear(struct riscv_t *rv)
 static void block_map_free(struct block_map_t *map)
 {
     assert(map->map);
-    for (uint32_t i = 0; i < map->size; i++) {
+    for (uint32_t i = 0; i < map->size; i++)
         free(map->map[i]);
-    }
 }
 
 /* clear all entries in the block map
@@ -1072,7 +1065,7 @@ static void block_finish(struct riscv_t *rv, struct block_t *block)
     MIR_gen_finish(jit->ctx);
     c2mir_finish(jit->ctx);
 
-    // insert new block into block map
+    /* insert new block into block map */
     block_map_insert(jit->block_map, block);
 }
 

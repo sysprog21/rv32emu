@@ -83,10 +83,20 @@ CHECK_ELF_FILES := \
 	hello \
 	puzzle \
 	pi
+
+EXPECTED_hello = Hello World!
+EXPECTED_puzzle = success in 2005 trials
+EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
+
 check: $(BIN)
-	$(Q)for e in $(CHECK_ELF_FILES); do \
-	    (cd $(OUT); ../$(BIN) $$e.elf) && $(call pass,$$e); \
-	done
+	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
+	    $(PRINTF) "Testing $(e) ... "; \
+	    if [ "$(shell $(BIN) $(OUT)/$(e).elf)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
+	    $(call notice, [OK]); \
+	    else \
+	    $(PRINTF) "Fail. Re-run '$(e)' later.\n"; \
+	    fi; \
+	)
 
 include mk/external.mk
 

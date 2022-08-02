@@ -20,7 +20,7 @@ endif
 PASS_COLOR = \e[32;01m
 NO_COLOR = \e[0m
 
-pass = $(PRINTF) "$(PASS_COLOR)$1 Passed$(NO_COLOR)\n"
+notice = $(PRINTF) "$(PASS_COLOR)$(strip $1)$(NO_COLOR)\n"
 
 # File utilities
 SHA1SUM = sha1sum

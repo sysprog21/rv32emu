@@ -105,7 +105,7 @@ enum {
     _op_system = 0b11100,
 };
 
-static void emit_load(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_load(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 {
     const int32_t imm = dec_itype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn);
@@ -157,7 +157,9 @@ update:
         END;
 }
 
-static void emit_op_imm(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_op_imm(rv_buffer *buff,
+                        uint32_t insn,
+                        struct riscv_t *rv UNUSED)
 {
     /* I-type decoding */
     const int32_t imm = dec_itype_imm(insn);
@@ -217,7 +219,9 @@ update:
     UPDATE_INSN32_LEN;
 }
 
-static void emit_auipc(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_auipc(rv_buffer *buff,
+                       uint32_t insn,
+                       struct riscv_t *rv UNUSED)
 {
     /* U-type decoding */
     const uint32_t rd = dec_rd(insn);
@@ -229,7 +233,9 @@ static void emit_auipc(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     UPDATE_INSN32_LEN;
 }
 
-static void emit_store(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_store(rv_buffer *buff,
+                       uint32_t insn,
+                       struct riscv_t *rv UNUSED)
 {
     /* S-type format */
     const int32_t imm = dec_stype_imm(insn);
@@ -272,7 +278,7 @@ update:
         END;
 }
 
-static void emit_amo(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_amo(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 {
 #ifdef ENABLE_RV32A
     const uint32_t rd = dec_rd(insn);
@@ -372,7 +378,7 @@ update:
 #endif
 }
 
-static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 {
     const uint32_t rd = dec_rd(insn);
     const uint32_t funct3 = dec_funct3(insn);
@@ -538,7 +544,7 @@ update:
     UPDATE_INSN32_LEN;
 }
 
-static void emit_lui(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_lui(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 {
     COMMENT("LUI");
     /* U-type decoding */
@@ -550,7 +556,9 @@ static void emit_lui(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     UPDATE_INSN32_LEN;
 }
 
-static void emit_branch(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_branch(rv_buffer *buff,
+                        uint32_t insn,
+                        struct riscv_t *rv UNUSED)
 {
     /* B-type decoding */
     const uint32_t func3 = dec_funct3(insn);
@@ -610,7 +618,7 @@ static void emit_branch(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         imm);
 }
 
-static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 {
     /* I-type decoding */
     const uint32_t rd = dec_rd(insn);
@@ -641,7 +649,7 @@ static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     return;
 }
 
-static void emit_jal(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+static void emit_jal(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 {
     /* J-type decoding */
     const uint32_t rd = dec_rd(insn);
@@ -761,7 +769,7 @@ update:
     UPDATE_INSN32_LEN;
 }
 
-void emit_misc_mem(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
+void emit_misc_mem(rv_buffer *buff, uint32_t insn UNUSED, struct riscv_t *rv)
 {
 #ifdef ENABLE_Zifencei
     UPDATE_PC(4);
@@ -791,7 +799,7 @@ static void jit_codegen(rv_buffer *buff,
         [op_branch] = emit(branch), [op_jalr] = emit(jalr),
         [op_jal] = emit(jal),       [_op_system] = emit(op_system),
     };
-    int i = 0;
+    uint32_t i = 0;
     uint32_t insn, index;
 
 #define DISPATCH()                          \
@@ -850,7 +858,7 @@ static void *import_solver(const char *name)
     for (module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx)); module; \
          module = DLIST_NEXT(MIR_module_t, module))
 
-void decode(struct riscv_t *rv,
+void decode(struct riscv_t *rv UNUSED,
             const uint32_t insn,
             const uint32_t insn_len,
             uint32_t *pc)
@@ -1019,7 +1027,6 @@ static void block_finish(struct riscv_t *rv, struct block_t *block)
     c2mir_init(jit->ctx);
     size_t gen_num = 0;
     MIR_gen_init(jit->ctx, gen_num);
-    uint8_t level = block->instructions < 5 ? 0 : 3;
     MIR_gen_set_optimize_level(jit->ctx, gen_num, 3);
     if (jit_config->report) {
         MIR_gen_set_debug_level(jit->ctx, 0, 1);
@@ -1130,7 +1137,6 @@ static void rv_jit_load_cache(struct riscv_jit_t *jit, const char *cache)
         DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
     size_t module_size = DLIST_LENGTH(MIR_module_t, all_modules);
     struct block_map_t *map = jit->block_map;
-    size_t i = 0;
     if (!module_size)
         return;
 
@@ -1146,7 +1152,6 @@ static void rv_jit_load_cache(struct riscv_jit_t *jit, const char *cache)
                 struct block_t *block = block_alloc();
 
                 char *op_name = mir_func->u.func->name;
-                uint32_t op_len = strlen(op_name);
                 op_name = op_name + 9;
                 char *val = strtok(op_name, delim);
                 block->pc_start = atoi(val);
@@ -1190,7 +1195,7 @@ static void blocks_save(struct riscv_jit_t *jit)
     fclose(jit->cache);
 }
 
-struct riscv_jit_t *rv_jit_init(uint32_t bits)
+struct riscv_jit_t *rv_jit_init(uint32_t bits UNUSED)
 {
     struct riscv_jit_t *jit =
         (struct riscv_jit_t *) malloc(sizeof(struct riscv_jit_t));
@@ -1238,7 +1243,7 @@ void rv_jit_free(struct riscv_jit_t *jit)
     free(jit);
 }
 
-void jit_handler(int sig)
+void jit_handler(int sig UNUSED)
 {
     struct riscv_jit_t *jit = jit_config->jit;
     if (jit_config->cache)

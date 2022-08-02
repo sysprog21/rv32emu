@@ -617,6 +617,8 @@ static uint32_t *csr_get_ptr(struct riscv_t *rv, uint32_t csr)
     case CSR_MIP:
         return (uint32_t *) (&rv->csr_mip);
 #ifdef ENABLE_RV32F
+    case CSR_FFLAGS:
+        return (uint32_t *) (&rv->csr_fcsr);
     case CSR_FCSR:
         return (uint32_t *) (&rv->csr_fcsr);
 #endif
@@ -637,7 +639,11 @@ static uint32_t csr_csrrw(struct riscv_t *rv, uint32_t csr, uint32_t val)
     if (!c)
         return 0;
 
-    const uint32_t out = *c;
+    uint32_t out = *c;
+#ifdef ENABLE_RV32F
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
     if (csr_is_writable(csr))
         *c = val;
 
@@ -651,7 +657,11 @@ static uint32_t csr_csrrs(struct riscv_t *rv, uint32_t csr, uint32_t val)
     if (!c)
         return 0;
 
-    const uint32_t out = *c;
+    uint32_t out = *c;
+#ifdef ENABLE_RV32F
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
     if (csr_is_writable(csr))
         *c |= val;
 
@@ -665,7 +675,11 @@ static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
     if (!c)
         return 0;
 
-    const uint32_t out = *c;
+    uint32_t out = *c;
+#ifdef ENABLE_RV32F
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
     if (csr_is_writable(csr))
         *c &= ~val;
     return out;
@@ -901,10 +915,25 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
     /* dispatch based on func7 (low 2 bits are width) */
     switch (funct7) {
     case 0b0000000: /* FADD */
-        rv->F[rd] = rv->F[rs1] + rv->F[rs2];
+        if (isnan(rv->F[rs1]) || isnan(rv->F[rs2]) ||
+            isnan(rv->F[rs1] + rv->F[rs2])) {
+            /* raise invalid operation */
+            *((uint32_t *) &rv->F[rd]) = RV_NAN;
+            rv->csr_fcsr |= FFLAG_INVALID_OP;
+        } else {
+            rv->F[rd] = rv->F[rs1] + rv->F[rs2];
+        }
+        if (isinff(rv->F[rd])) {
+            rv->csr_fcsr |= FFLAG_OVERFLOW;
+            rv->csr_fcsr |= FFLAG_INEXACT;
+        }
         break;
     case 0b0000100: /* FSUB */
-        rv->F[rd] = rv->F[rs1] - rv->F[rs2];
+        if (isnan(rv->F[rs1]) || isnan(rv->F[rs2])) {
+            *((uint32_t *) &rv->F[rd]) = RV_NAN;
+        } else {
+            rv->F[rd] = rv->F[rs1] - rv->F[rs2];
+        }
         break;
     case 0b0001000: /* FMUL */
         rv->F[rd] = rv->F[rs1] * rv->F[rs2];

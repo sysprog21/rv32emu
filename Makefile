@@ -1,6 +1,9 @@
 include mk/common.mk
 include mk/toolchain.mk
 
+OUT ?= build
+BIN := $(OUT)/rv32emu
+
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -include common.h
 
@@ -36,7 +39,7 @@ $(error "No sdl2-config in $(PATH). Check SDL2 installation in advance")
 endif
 CFLAGS += -D ENABLE_SDL
 OBJS_EXT += syscall_sdl.o
-syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
+$(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs)
 endif
 
@@ -46,14 +49,11 @@ ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
 ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
 $(error "Computed goto is only supported in clang and gcc.")
 endif
-emulate.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
+$(OUT)/emulate.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
 ifeq ("$(CC_IS_GCC)", "1")
-emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
+$(OUT)/emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
 endif
 endif
-
-OUT ?= build
-BIN := $(OUT)/rv32emu
 
 all: $(BIN)
 
@@ -66,9 +66,10 @@ OBJS := \
 	syscall.o \
 	$(OBJS_EXT)
 
+OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)
 
-%.o: %.c
+$(OUT)/%.o: %.c
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 

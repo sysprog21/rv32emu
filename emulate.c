@@ -1730,7 +1730,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
              */
             insn &= 0x0000FFFF;
             const uint16_t c_index =
-                (insn & FC_FUNC3 >> 11) | (insn & FC_OPCODE);
+                (insn & FC_FUNC3) >> 11 | (insn & FC_OPCODE);
             rv->insn_len = INSN_16;
 
             /* dispactch c_opcode (compressed instructions) */

@@ -140,7 +140,10 @@ struct riscv_t {
 
 #ifdef ENABLE_RV32F
     /* float registers */
-    riscv_float_t F[RV_NUM_REGS];
+    union {
+        riscv_float_t F[RV_NUM_REGS];
+        uint32_t F_int[RV_NUM_REGS]; /* integer shortcut */
+    };
     uint32_t csr_fcsr;
 #endif
 

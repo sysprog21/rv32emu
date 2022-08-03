@@ -921,7 +921,7 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
         if (isnan(rv->F[rs1]) || isnan(rv->F[rs2]) ||
             isnan(rv->F[rs1] + rv->F[rs2])) {
             /* raise invalid operation */
-            *((uint32_t *) &rv->F[rd]) = RV_NAN;
+            rv->F_int[rd] = RV_NAN; /* F_int is the integer shortcut of F */
             rv->csr_fcsr |= FFLAG_INVALID_OP;
         } else {
             rv->F[rd] = rv->F[rs1] + rv->F[rs2];
@@ -933,7 +933,7 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
         break;
     case 0b0000100: /* FSUB */
         if (isnan(rv->F[rs1]) || isnan(rv->F[rs2])) {
-            *((uint32_t *) &rv->F[rd]) = RV_NAN;
+            rv->F_int[rd] = RV_NAN;
         } else {
             rv->F[rd] = rv->F[rs1] - rv->F[rs2];
         }

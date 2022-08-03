@@ -1593,8 +1593,7 @@ rv_func import_funcs[] = {
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     /* find or translate a block for our starting PC */
-    struct block_t *block = block_find_or_translate(rv, NULL);
-    assert(block);
+    struct block_t *prev = NULL;
 
     const uint64_t cycles_start = rv->csr_cycle;
     const uint64_t cycles_target = rv->csr_cycle + cycles;
@@ -1602,25 +1601,17 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     /* loop until we hit out cycle target */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         const uint32_t pc = rv->PC;
-
+        struct block_t *block;
         /* try to predict the next block */
-        if (block->predict && block->predict->pc_start == pc) {
+        if (prev && prev->predict && prev->predict->pc_start == pc) {
             block = block->predict;
         } else {
-            /* lookup the next block in block map or translate a new block */
-            struct block_t *next = block_find_or_translate(rv, block);
-            /* move onto the next block */
-            block = next;
+            /* lookup the next block in block map or translate a new block,
+             * and move onto the next block */
+            block = block_find_or_translate(rv, prev);
         }
         /* we should have a block by now */
         assert(block);
-
-        /* call the translated block */
-        call_block_t c = (call_block_t) block->func;
-        c(rv);
-
-        /* increment the cycles csr */
-        rv->csr_cycle += block->instructions;
 
         /* if this block has no instructions we cant make forward progress so
          * must fallback to instruction emulation
@@ -1628,6 +1619,14 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         if (!block->instructions) {
             assert(!"unable to execute empty block");
         }
+
+        /* call the translated block */
+        call_block_t c = (call_block_t) block->func;
+        c(rv);
+
+        /* increment the cycles csr */
+        rv->csr_cycle += block->instructions;
+        prev = block;
     }
 }
 #else

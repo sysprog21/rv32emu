@@ -92,6 +92,8 @@ Add `-D` to enable and `-U` to disable the specific ISA extensions.
 
 ## Reference
 
+* [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)
+* [Writing a RISC-V Emulator in Rust](https://book.rvemu.app/)
 * [libriscv: RISC-V userspace emulator library](https://github.com/fwsGonzo/libriscv)
 * [Threaded Code](https://www.complang.tuwien.ac.at/forth/threaded-code.html)
 

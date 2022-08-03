@@ -5,6 +5,9 @@
 
 #ifdef ENABLE_RV32F
 #include <math.h>
+#if defined(__APPLE__)
+#define isinff __inline_isinff
+#endif
 #endif
 
 #include "riscv.h"

@@ -1,7 +1,7 @@
 # Sources
 *.c	text diff=c
 *.h	text diff=c
-c_map.h	text diff=c
+riscv.h	text diff=c
 
 # Executables
 *.elf	binary

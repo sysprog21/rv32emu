@@ -93,9 +93,10 @@ Add `-D` to enable and `-U` to disable the specific ISA extensions.
 ## External sources
 
 In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
-* `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
 * `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark)
+* `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
 * `pi.elf` : See [tests/pi.c](tests/pi.c)
+* `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
 
 ## Reference
 

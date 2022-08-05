@@ -540,7 +540,10 @@ static bool op_branch(struct riscv_t *rv, uint32_t insn)
 }
 
 /* Jump and Link Register (JALR): store successor instruction address into rd.
- * Jump to rs1 + offset (offset is signed).
+ *
+ * The target of JALR address is obtained by adding the sign-extended 12-bit
+ * I-immediate to the register rs1, then setting the least-significant bit of
+ * the result to zero.
  */
 static bool op_jalr(struct riscv_t *rv, uint32_t insn)
 {
@@ -743,6 +746,7 @@ static bool op_system(struct riscv_t *rv, uint32_t insn)
         }
         break;
 #ifdef ENABLE_Zicsr
+    /* All CSR instructions atomically read-modify-write a single CSR. */
     case 1: { /* CSRRW: Atomic Read/Write CSR */
         uint32_t tmp = csr_csrrw(rv, csr, rv->X[rs1]);
         rv->X[rd] = rd ? tmp : rv->X[rd];

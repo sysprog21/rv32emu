@@ -42,3 +42,6 @@
 |   0000000    |     rs2     |     rs1     | 110 |     rd      | 0110011 | OR
 |   0000000    |     rs2     |     rs1     | 111 |     rd      | 0110011 | AND
 ```
+
+## Reference
+* [RISC-V Opcodes](https://github.com/riscv/riscv-opcodes)

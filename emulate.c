@@ -370,23 +370,24 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
 #ifdef ENABLE_RV32M
     case 0b0000001: /* RV32M instructions */
         switch (funct3) {
-        case 0b000: /* MUL */
+        case 0b000: /* MUL: Multiply */
             rv->X[rd] = (int32_t) rv->X[rs1] * (int32_t) rv->X[rs2];
             break;
-        case 0b001: { /* MULH */
+        case 0b001: { /* MULH: Multiply High Signed Signed */
             const int64_t a = (int32_t) rv->X[rs1], b = (int32_t) rv->X[rs2];
             rv->X[rd] = ((uint64_t) (a * b)) >> 32;
-        } break;
-        case 0b010: { /* MULHSU */
+            break;
+        }
+        case 0b010: { /* MULHSU: Multiply High Signed Unsigned */
             const int64_t a = (int32_t) rv->X[rs1];
             const uint64_t b = rv->X[rs2];
             rv->X[rd] = ((uint64_t) (a * b)) >> 32;
             break;
         }
-        case 0b011:  // MULHU
+        case 0b011: /* MULHU: Multiply High Unsigned Unsigned */
             rv->X[rd] = ((uint64_t) rv->X[rs1] * (uint64_t) rv->X[rs2]) >> 32;
             break;
-        case 0b100: { /* DIV */
+        case 0b100: { /* DIV: Divide Signed */
             const int32_t dividend = (int32_t) rv->X[rs1];
             const int32_t divisor = (int32_t) rv->X[rs2];
             if (divisor == 0) {
@@ -398,15 +399,16 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
             }
             break;
         }
-        case 0b101: { /* DIVU */
+        case 0b101: { /* DIVU: Divide Unsigned */
             const uint32_t dividend = rv->X[rs1], divisor = rv->X[rs2];
             if (divisor == 0) {
                 rv->X[rd] = ~0U;
             } else {
                 rv->X[rd] = dividend / divisor;
             }
-        } break;
-        case 0b110: { /* REM */
+            break;
+        }
+        case 0b110: { /* REM: Remainder Signed */
             const int32_t dividend = rv->X[rs1], divisor = rv->X[rs2];
             if (divisor == 0) {
                 rv->X[rd] = dividend;
@@ -417,7 +419,7 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
             }
             break;
         }
-        case 0b111: { /* REMU */
+        case 0b111: { /* REMU: Remainder Unsigned */
             const uint32_t dividend = rv->X[rs1], divisor = rv->X[rs2];
             if (divisor == 0) {
                 rv->X[rd] = dividend;
@@ -434,7 +436,7 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
 #endif /* ENABLE_RV32M */
     case 0b0100000:
         switch (funct3) {
-        case 0b000: /* SUB */
+        case 0b000: /* SUB: Substract */
             rv->X[rd] = (int32_t) (rv->X[rs1]) - (int32_t) (rv->X[rs2]);
             break;
         case 0b101: /* SRA: Shift Right Arithmetic */
@@ -537,7 +539,7 @@ static bool op_branch(struct riscv_t *rv, uint32_t insn)
     return false;
 }
 
-/* Jump and Link Register: store successor instruction address into rd.
+/* Jump and Link Register (JALR): store successor instruction address into rd.
  * Jump to rs1 + offset (offset is signed).
  */
 static bool op_jalr(struct riscv_t *rv, uint32_t insn)
@@ -577,7 +579,7 @@ static bool op_jalr(struct riscv_t *rv, uint32_t insn)
     return false;
 }
 
-/* Jump and Link: store successor instruction address into rd.
+/* Jump and Link (JAL): store successor instruction address into rd.
  * add sext J imm (offset) to pc.
  */
 static bool op_jal(struct riscv_t *rv, uint32_t insn)
@@ -719,10 +721,10 @@ static bool op_system(struct riscv_t *rv, uint32_t insn)
     switch (funct3) {
     case 0:
         switch (imm) { /* dispatch from imm field */
-        case 0:        /* ECALL */
+        case 0:        /* ECALL: Environment Call */
             rv->io.on_ecall(rv);
             break;
-        case 1: /* EBREAK */
+        case 1: /* EBREAK: Environment Break */
             rv->io.on_ebreak(rv);
             break;
         case 0x002: /* URET */
@@ -741,18 +743,18 @@ static bool op_system(struct riscv_t *rv, uint32_t insn)
         }
         break;
 #ifdef ENABLE_Zicsr
-    case 1: { /* CSRRW    (Atomic Read/Write CSR) */
+    case 1: { /* CSRRW: Atomic Read/Write CSR */
         uint32_t tmp = csr_csrrw(rv, csr, rv->X[rs1]);
         rv->X[rd] = rd ? tmp : rv->X[rd];
         break;
     }
-    case 2: { /* CSRRS    (Atomic Read and Set Bits in CSR) */
+    case 2: { /* CSRRS: Atomic Read and Set Bits in CSR */
         uint32_t tmp =
             csr_csrrs(rv, csr, (rs1 == rv_reg_zero) ? 0U : rv->X[rs1]);
         rv->X[rd] = rd ? tmp : rv->X[rd];
         break;
     }
-    case 3: { /* CSRRC    (Atomic Read and Clear Bits in CSR) */
+    case 3: { /* CSRRC: Atomic Read and Clear Bits in CSR */
         uint32_t tmp =
             csr_csrrc(rv, csr, (rs1 == rv_reg_zero) ? ~0U : rv->X[rs1]);
         rv->X[rd] = rd ? tmp : rv->X[rd];
@@ -801,56 +803,56 @@ static bool op_amo(struct riscv_t *rv, uint32_t insn)
     const uint32_t funct5 = (f7 >> 2) & 0x1f;
 
     switch (funct5) {
-    case 0b00010: /* LR.W */
+    case 0b00010: /* LR.W: Load Reserved */
         rv->X[rd] = rv->io.mem_read_w(rv, rv->X[rs1]);
         /* skip registration of the 'reservation set'
          * FIXME: uimplemented
          */
         break;
-    case 0b00011: /* SC.W */
+    case 0b00011: /* SC.W: Store Conditional */
         /* assume the 'reservation set' is valid
          * FIXME: unimplemented
          */
         rv->io.mem_write_w(rv, rv->X[rs1], rv->X[rs2]);
         rv->X[rd] = 0;
         break;
-    case 0b00001: { /* AMOSWAP.W */
+    case 0b00001: { /* AMOSWAP.W: Atomic Swap */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         rv->io.mem_write_s(rv, rs1, rv->X[rs2]);
         break;
     }
-    case 0b00000: { /* AMOADD.W */
+    case 0b00000: { /* AMOADD.W: Atomic ADD */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t res = (int32_t) rv->X[rd] + (int32_t) rv->X[rs2];
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b00100: { /* AMOXOR.W */
+    case 0b00100: { /* AMOXOR.W: Atomix XOR */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t res = rv->X[rd] ^ rv->X[rs2];
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b01100: { /* AMOAND.W */
+    case 0b01100: { /* AMOAND.W: Atomic AND */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t res = rv->X[rd] & rv->X[rs2];
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b01000: { /* AMOOR.W */
+    case 0b01000: { /* AMOOR.W: Atomic OR */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t res = rv->X[rd] | rv->X[rs2];
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b10000: { /* AMOMIN.W */
+    case 0b10000: { /* AMOMIN.W: Atomic MIN */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t a = rv->X[rd], b = rv->X[rs2];
         const int32_t res = a < b ? a : b;
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b10100: { /* AMOMAX.W */
+    case 0b10100: { /* AMOMAX.W: Atomic MAX */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t a = rv->X[rd], b = rv->X[rs2];
         const int32_t res = a > b ? a : b;

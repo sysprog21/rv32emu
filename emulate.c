@@ -1551,8 +1551,9 @@ static bool op_unimp(struct riscv_t *rv, uint32_t insn UNUSED)
     rv_except_illegal_insn(rv, insn);
     return false;
 }
+
 #ifdef ENABLE_JIT
-rv_func import_funcs[] = {
+const rv_func imported_funcs[] = {
     {"dec_rd", dec_rd},
     {"dec_rs1", dec_rs1},
     {"dec_rs2", dec_rs2},
@@ -1588,7 +1589,6 @@ rv_func import_funcs[] = {
 #endif
     {NULL, NULL},
 };
-
 
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {
@@ -1629,7 +1629,8 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         prev = block;
     }
 }
-#else
+
+#else /* pure interpreter */
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     assert(rv);

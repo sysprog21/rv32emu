@@ -73,7 +73,7 @@ typedef struct {
     size_t capacity;
 } rv_buffer;
 
-extern rv_func import_funcs[];
+extern const rv_func imported_funcs[];
 
 struct jit_config_t *jit_config_init();
 

@@ -843,9 +843,9 @@ static int getc_func(void *data)
 
 static void *import_solver(const char *name)
 {
-    for (int i = 0; import_funcs[i].name; i++) {
-        if (!strcmp(name, import_funcs[i].name))
-            return import_funcs[i].func;
+    for (int i = 0; imported_funcs[i].name; i++) {
+        if (!strcmp(name, imported_funcs[i].name))
+            return imported_funcs[i].func;
     }
     return NULL;
 }

@@ -85,7 +85,7 @@ struct riscv_io_t {
     riscv_mem_write_s mem_write_s;
     riscv_mem_write_b mem_write_b;
 
-    /* system commands */
+    /* system */
     riscv_on_ecall on_ecall;
     riscv_on_ebreak on_ebreak;
 };
@@ -116,6 +116,9 @@ void rv_set_reg(struct riscv_t *, uint32_t reg, riscv_word_t in);
 
 /* get a register of the RISC-V emulator */
 riscv_word_t rv_get_reg(struct riscv_t *, uint32_t reg);
+
+/* system call handler */
+void syscall_handler(struct riscv_t *rv);
 
 /* halt the core */
 void rv_halt(struct riscv_t *);

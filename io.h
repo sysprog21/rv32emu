@@ -20,7 +20,7 @@ uint32_t memory_read_str(memory_t *m,
                          uint32_t max);
 
 /* read an instruction from memory */
-uint32_t memory_read_ifetch(memory_t *m, uint32_t addr);
+uint32_t memory_ifetch(memory_t *m, uint32_t addr);
 
 /* read a word from memory */
 uint32_t memory_read_w(memory_t *m, uint32_t addr);

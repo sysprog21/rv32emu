@@ -17,48 +17,37 @@
 #endif
 #endif
 
+/* newlib is a portable (not RISC-V specific) C library, which implements
+ * printf(3) and other functions described in C standards. Some system calls
+ * should be provided in conjunction with newlib.
+ *
+ * system call: name, number
+ */
+#define __SYSCALL_LIST_BASE \
+    _(close, 57)            \
+    _(lseek, 62)            \
+    _(read, 63)             \
+    _(write, 64)            \
+    _(fstat, 80)            \
+    _(exit, 93)             \
+    _(gettimeofday, 169)    \
+    _(brk, 214)             \
+    _(open, 1024)
+
+#ifdef ENABLE_SDL
+#define __SYSCALL_LIST_EXT \
+    _(draw_frame, 0xBEEF)  \
+    _(draw_frame_pal, 0xBABE)
+#else
+#define __SYSCALL_LIST_EXT
+#endif
+
+#define SUPPORTED_SYSCALLS __SYSCALL_LIST_BASE __SYSCALL_LIST_EXT
+
 enum {
-    SYS_getcwd = 17,
-    SYS_dup = 23,
-    SYS_fcntl = 25,
-    SYS_faccessat = 48,
-    SYS_chdir = 49,
-    SYS_openat = 56,
-    SYS_close = 57,
-    SYS_getdents = 61,
-    SYS_lseek = 62,
-    SYS_read = 63,
-    SYS_write = 64,
-    SYS_writev = 66,
-    SYS_pread = 67,
-    SYS_pwrite = 68,
-    SYS_fstatat = 79,
-    SYS_fstat = 80,
-    SYS_exit = 93,
-    SYS_exit_group = 94,
-    SYS_kill = 129,
-    SYS_rt_sigaction = 134,
-    SYS_times = 153,
-    SYS_uname = 160,
-    SYS_gettimeofday = 169,
-    SYS_getpid = 172,
-    SYS_getuid = 174,
-    SYS_geteuid = 175,
-    SYS_getgid = 176,
-    SYS_getegid = 177,
-    SYS_brk = 214,
-    SYS_munmap = 215,
-    SYS_mremap = 216,
-    SYS_mmap = 222,
-    SYS_open = 1024,
-    SYS_link = 1025,
-    SYS_unlink = 1026,
-    SYS_mkdir = 1030,
-    SYS_access = 1033,
-    SYS_stat = 1038,
-    SYS_lstat = 1039,
-    SYS_time = 1062,
-    SYS_getmainvars = 2011,
+#define _(name, number) SYS_##name = number,
+    SUPPORTED_SYSCALLS
+#undef _
 };
 
 enum {
@@ -327,41 +316,12 @@ void syscall_handler(struct riscv_t *rv)
     riscv_word_t syscall = rv_get_reg(rv, rv_reg_a7);
 
     switch (syscall) { /* dispatch system call */
-    case SYS_close:
-        syscall_close(rv);
+#define _(name, number)     \
+    case SYS_##name:        \
+        syscall_##name(rv); \
         break;
-    case SYS_lseek:
-        syscall_lseek(rv);
-        break;
-    case SYS_read:
-        syscall_read(rv);
-        break;
-    case SYS_write:
-        syscall_write(rv);
-        break;
-    case SYS_fstat:
-        syscall_fstat(rv);
-        break;
-    case SYS_brk:
-        syscall_brk(rv);
-        break;
-    case SYS_exit:
-        syscall_exit(rv);
-        break;
-    case SYS_gettimeofday:
-        syscall_gettimeofday(rv);
-        break;
-    case SYS_open:
-        syscall_open(rv);
-        break;
-#ifdef ENABLE_SDL
-    case 0xbeef:
-        syscall_draw_frame(rv);
-        break;
-    case 0xbabe:
-        syscall_draw_frame_pal(rv);
-        break;
-#endif
+        SUPPORTED_SYSCALLS
+#undef _
     default:
         fprintf(stderr, "unknown syscall %d\n", (int) syscall);
         rv_halt(rv);

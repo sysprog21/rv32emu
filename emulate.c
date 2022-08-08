@@ -221,6 +221,17 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t insn)
     const uint32_t rs1 = dec_rs1(insn);
     const uint32_t funct3 = dec_funct3(insn);
 
+    /* imm[11:0]     rs1 000 rd 0010011 I ADDI
+     * 0000000 shamt rs1 001 rd 0010011 I SLLI
+     * imm[11:0]     rs1 010 rd 0010011 I SLTI
+     * imm[11:0]     rs1 011 rd 0010011 I SLTIU
+     * imm[11:0]     rs1 100 rd 0010011 I XORI
+     * 0000000 shamt rs1 101 rd 0010011 I SLRI
+     * 0100000 shamt rs1 101 rd 0010011 I SRAI
+     * imm[11:0]     rs1 110 rd 0010011 I ORI
+     * imm[11:0]     rs1 111 rd 0010011 I ANDI
+     */
+
     /* dispatch operation type */
     switch (funct3) {
     case 0: /* ADDI: Add Immediate */
@@ -341,6 +352,18 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
 
     /* TODO: skip zero register here */
 
+    /* 0000000 rs2 rs1 000 rd 0110011 R ADD
+     * 0100000 rs2 rs1 000 rd 0110011 R SUB
+     * 0000000 rs2 rs1 001 rd 0110011 R SLL
+     * 0000000 rs2 rs1 010 rd 0110011 R SLT
+     * 0000000 rs2 rs1 011 rd 0110011 R SLTU
+     * 0000000 rs2 rs1 100 rd 0110011 R XOR
+     * 0000000 rs2 rs1 101 rd 0110011 R SRL
+     * 0100000 rs2 rs1 101 rd 0110011 R SRA
+     * 0000000 rs2 rs1 110 rd 0110011 R OR
+     * 0000000 rs2 rs1 111 rd 0110011 R AND
+     */
+
     switch (funct7) {
     case 0b0000000:
         switch (funct3) {
@@ -400,6 +423,7 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
             if (divisor == 0) {
                 rv->X[rd] = ~0U;
             } else if (divisor == -1 && rv->X[rs1] == 0x80000000U) {
+                /* overflow */
                 rv->X[rd] = rv->X[rs1];
             } else {
                 rv->X[rd] = dividend / divisor;
@@ -420,6 +444,7 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
             if (divisor == 0) {
                 rv->X[rd] = dividend;
             } else if (divisor == -1 && rv->X[rs1] == 0x80000000U) {
+                /* overflow */
                 rv->X[rd] = 0;
             } else {
                 rv->X[rd] = dividend % divisor;

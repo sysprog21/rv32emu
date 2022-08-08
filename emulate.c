@@ -137,6 +137,13 @@ static void rv_except_illegal_insn(struct riscv_t *rv, uint32_t insn)
     rv->csr_mcause = code;
 }
 
+/* RV32I Base Instruction Set
+ *
+ * bits  0-6:  opcode
+ * bits  7-10: func3
+ * bit  11: bit 5 of func7
+ */
+
 static bool op_load(struct riscv_t *rv, uint32_t insn UNUSED)
 {
     /* I-type
@@ -730,7 +737,7 @@ static bool op_system(struct riscv_t *rv, uint32_t insn)
         case 1: /* EBREAK: Environment Break */
             rv->io.on_ebreak(rv);
             break;
-        case 0x002: /* URET */
+        case 0x002: /* URET: Return from handling an interrupt or exception */
         case 0x102: /* SRET */
         case 0x202: /* HRET */
         case 0x105: /* WFI */
@@ -1625,7 +1632,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 
     /* clang-format off */
     TABLE_TYPE jump_table[] = {
-    //  000         001           010        011           100         101        110   111
+    //  000         001           010        011           100         101        110        111
         OP(load),   OP(load_fp),  OP(unimp), OP(misc_mem), OP(op_imm), OP(auipc), OP(unimp), OP(unimp), // 00
         OP(store),  OP(store_fp), OP(unimp), OP(amo),      OP(op),     OP(lui),   OP(unimp), OP(unimp), // 01
         OP(madd),   OP(msub),     OP(nmsub), OP(nmadd),    OP(fp),     OP(unimp), OP(unimp), OP(unimp), // 10

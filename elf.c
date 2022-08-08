@@ -1,9 +1,20 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "elf.h"
 #include "io.h"
+
+#if defined(_WIN32)
+/* fallback to standard I/O text stream */
+#include <stdio.h>
+#else
+/* Assume POSIX-compatible runtime */
+#define USE_MMAP 1
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 enum {
     EM_RISCV = 243,
@@ -129,15 +140,22 @@ void elf_delete(elf_t *e)
         return;
 
     map_delete(e->symbols);
+#if !defined(USE_MMAP)
     free(e->raw_data);
-
+#endif
     free(e);
 }
 
 /* release a loaded ELF file */
 static void release(elf_t *e)
 {
+#if defined(USE_MMAP)
+    if (e->raw_data)
+        munmap(e->raw_data, e->raw_size);
+#else
     free(e->raw_data);
+#endif
+
     e->raw_data = NULL;
     e->raw_size = 0;
     e->hdr = NULL;
@@ -272,10 +290,9 @@ const char *elf_find_symbol(elf_t *e, uint32_t addr)
 bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)
 {
     const struct Elf32_Shdr *shdr = get_section_header(e, ".data");
-    if (!shdr)
+    if (!shdr || shdr->sh_type == SHT_NOBITS)
         return false;
-    if (shdr->sh_type == SHT_NOBITS)
-        return false;
+
     *start = shdr->sh_addr;
     *end = *start + shdr->sh_size;
     return true;
@@ -317,6 +334,26 @@ bool elf_open(elf_t *e, const char *path)
     if (e->raw_data)
         release(e);
 
+#if defined(USE_MMAP)
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return false;
+
+    /* get file size */
+    struct stat st;
+    fstat(fd, &st);
+    e->raw_size = st.st_size;
+
+    /* map or unmap files or devices into memory.
+     * The beginning of the file is ELF header.
+     */
+    e->raw_data = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (e->raw_data == MAP_FAILED) {
+        release(e);
+        return false;
+    }
+
+#else  /* fallback to standard I/O text stream */
     FILE *f = fopen(path, "rb");
     if (!f)
         return false;
@@ -336,12 +373,12 @@ bool elf_open(elf_t *e, const char *path)
 
     /* read data into memory */
     const size_t r = fread(e->raw_data, 1, e->raw_size, f);
-
     fclose(f);
     if (r != e->raw_size) {
         release(e);
         return false;
     }
+#endif /* USE_MMAP */
 
     /* point to the header */
     e->hdr = (const struct Elf32_Ehdr *) e->raw_data;

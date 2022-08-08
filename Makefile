@@ -1,6 +1,9 @@
 include mk/common.mk
 include mk/toolchain.mk
 
+OUT ?= build
+BIN := $(OUT)/rv32emu
+
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -include common.h
 
@@ -36,7 +39,7 @@ $(error "No sdl2-config in $(PATH). Check SDL2 installation in advance")
 endif
 CFLAGS += -D ENABLE_SDL
 OBJS_EXT += syscall_sdl.o
-syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
+$(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs)
 endif
 
@@ -46,9 +49,9 @@ ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
 ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
 $(error "Computed goto is only supported in clang and gcc.")
 endif
-emulate.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
+$(OUT)/emulate.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
 ifeq ("$(CC_IS_GCC)", "1")
-emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
+$(OUT)/emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
 endif
 endif
 
@@ -60,7 +63,7 @@ MIR = mir/libmir.a
 $(MIR): mir/GNUmakefile
 	$(MAKE) --quiet -C mir
 OBJS_EXT += jit.o
-emulate.o: $(MIR)
+$(OUT)/emulate.o: $(MIR)
 # FIXME: Avoid hardcoded path
 build/c2str: tools/c2str.c
 	$(CC) -o $@ $<
@@ -76,9 +79,6 @@ endif
 # to the first target after .DEFAULT_GOAL is not set.
 .DEFAULT_GOAL :=
 
-OUT ?= build
-BIN := $(OUT)/rv32emu
-
 all: $(BIN)
 
 OBJS := \
@@ -89,12 +89,13 @@ OBJS := \
 	main.o \
 	syscall.o \
 	$(OBJS_EXT)
-	
+
+OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)
 
-%.o: %.c
+$(OUT)/%.o: %.c
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $< -g
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 
 $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
@@ -107,10 +108,20 @@ CHECK_ELF_FILES := \
 	hello \
 	puzzle \
 	pi
+
+EXPECTED_hello = Hello World!
+EXPECTED_puzzle = success in 2005 trials
+EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
+
 check: $(BIN)
-	$(Q)for e in $(CHECK_ELF_FILES); do \
-	    (cd $(OUT); ../$(BIN) $$e.elf) && $(call pass,$$e); \
-	done
+	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
+	    $(PRINTF) "Testing $(e) ... "; \
+	    if [ "$(shell $(BIN) $(OUT)/$(e).elf)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
+	    $(call notice, [OK]); \
+	    else \
+	    $(PRINTF) "Fail. Re-run '$(e)' later.\n"; \
+	    fi; \
+	)
 
 include mk/external.mk
 

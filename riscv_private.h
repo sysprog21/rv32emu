@@ -104,10 +104,19 @@ enum {
 
 #ifdef ENABLE_RV32F
 enum {
-    //             ....xxxx....xxxx....xxxx....xxxx
-    FMASK_SIGN = 0b10000000000000000000000000000000,
-    FMASK_EXPN = 0b01111111100000000000000000000000,
-    FMASK_FRAC = 0b00000000011111111111111111111111,
+    //                    ....xxxx....xxxx....xxxx....xxxx
+    FMASK_SIGN        = 0b10000000000000000000000000000000,
+    FMASK_EXPN        = 0b01111111100000000000000000000000,
+    FMASK_FRAC        = 0b00000000011111111111111111111111,
+    //                    ....xxxx....xxxx....xxxx....xxxx
+    FFLAG_MASK        = 0b00000000000000000000000000011111,
+    FFLAG_INVALID_OP  = 0b00000000000000000000000000010000,
+    FFLAG_DIV_BY_ZERO = 0b00000000000000000000000000001000,
+    FFLAG_OVERFLOW    = 0b00000000000000000000000000000100,
+    FFLAG_UNDERFLOW   = 0b00000000000000000000000000000010,
+    FFLAG_INEXACT     = 0b00000000000000000000000000000001,
+    //                    ....xxxx....xxxx....xxxx....xxxx
+    RV_NAN            = 0b01111111110000000000000000000000
 };
 #endif
 /* clang-format off */
@@ -133,7 +142,10 @@ struct riscv_t {
 
 #ifdef ENABLE_RV32F
     /* float registers */
-    riscv_float_t F[RV_NUM_REGS];
+    union {
+        riscv_float_t F[RV_NUM_REGS];
+        uint32_t F_int[RV_NUM_REGS]; /* integer shortcut */
+    };
     uint32_t csr_fcsr;
 #endif
 

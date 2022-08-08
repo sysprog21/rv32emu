@@ -10,74 +10,44 @@ struct jit_config_t *jit_config;
 #include "elf.h"
 #include "state.h"
 
-
 /* enable program trace mode */
 static bool opt_trace = false;
-/* RISCV arch-test*/
+
+/* RISCV arch-test */
 static bool opt_arch_test = false;
 static char *signature_out_file;
 
 /* target executable */
 static const char *opt_prog_name = "a.out";
 
-static riscv_word_t on_mem_ifetch(struct riscv_t *rv, riscv_word_t addr)
-{
-    state_t *s = rv_userdata(rv);
-    return memory_read_ifetch(s->mem, addr);
-}
+#define MEMIO(op) on_mem_##op
+#define IO_HANDLER_IMPL(type, op, RW)                                  \
+    static IIF(RW)(                                                    \
+        /* W */ void MEMIO(op)(struct riscv_t * rv, riscv_word_t addr, \
+                               riscv_##type##_t data),                 \
+        /* R */ riscv_##type##_t MEMIO(op)(struct riscv_t * rv,        \
+                                           riscv_word_t addr))         \
+    {                                                                  \
+        state_t *s = rv_userdata(rv);                                  \
+        IIF(RW)                                                        \
+        (memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data)),  \
+         return memory_##op(s->mem, addr));                            \
+    }
 
-static riscv_word_t on_mem_read_w(struct riscv_t *rv, riscv_word_t addr)
-{
-    state_t *s = rv_userdata(rv);
-    return memory_read_w(s->mem, addr);
-}
+#define R 0
+#define W 1
 
-static riscv_half_t on_mem_read_s(struct riscv_t *rv, riscv_word_t addr)
-{
-    state_t *s = rv_userdata(rv);
-    return memory_read_s(s->mem, addr);
-}
+IO_HANDLER_IMPL(word, ifetch, R)
+IO_HANDLER_IMPL(word, read_w, R)
+IO_HANDLER_IMPL(half, read_s, R)
+IO_HANDLER_IMPL(byte, read_b, R)
 
-static riscv_byte_t on_mem_read_b(struct riscv_t *rv, riscv_word_t addr)
-{
-    state_t *s = rv_userdata(rv);
-    return memory_read_b(s->mem, addr);
-}
+IO_HANDLER_IMPL(word, write_w, W)
+IO_HANDLER_IMPL(half, write_s, W)
+IO_HANDLER_IMPL(byte, write_b, W)
 
-static void on_mem_write_w(struct riscv_t *rv,
-                           riscv_word_t addr,
-                           riscv_word_t data)
-{
-    state_t *s = rv_userdata(rv);
-    memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
-}
-
-static void on_mem_write_s(struct riscv_t *rv,
-                           riscv_word_t addr,
-                           riscv_half_t data)
-{
-    state_t *s = rv_userdata(rv);
-    memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
-}
-
-static void on_mem_write_b(struct riscv_t *rv,
-                           riscv_word_t addr,
-                           riscv_byte_t data)
-{
-    state_t *s = rv_userdata(rv);
-    memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data));
-}
-
-extern void syscall_handler(struct riscv_t *);
-static void on_on_ecall(struct riscv_t *rv)
-{
-    syscall_handler(rv);
-}
-
-static void on_on_ebreak(struct riscv_t *rv)
-{
-    rv_halt(rv);
-}
+#undef R
+#undef W
 
 /* run: printing out an instruction trace */
 static void run_and_trace(struct riscv_t *rv, elf_t *elf)
@@ -163,7 +133,7 @@ static bool parse_args(int argc, char **args)
     return true;
 }
 
-void dump_test_signature(struct riscv_t *rv, elf_t *elf)
+static void dump_test_signature(struct riscv_t *rv, elf_t *elf)
 {
     uint32_t start = 0, end = 0;
     const struct Elf32_Sym *sym;
@@ -185,9 +155,8 @@ void dump_test_signature(struct riscv_t *rv, elf_t *elf)
     state_t *s = rv_userdata(rv);
 
     /* dump it word by word */
-    for (uint32_t addr = start; addr < end; addr += 4) {
+    for (uint32_t addr = start; addr < end; addr += 4)
         fprintf(f, "%08x\n", memory_read_w(s->mem, addr));
-    }
 
     fclose(f);
 }
@@ -211,9 +180,20 @@ int main(int argc, char **args)
 
     /* install the I/O handlers for the RISC-V runtime */
     const struct riscv_io_t io = {
-        on_mem_ifetch,  on_mem_read_w,  on_mem_read_s,
-        on_mem_read_b,  on_mem_write_w, on_mem_write_s,
-        on_mem_write_b, on_on_ecall,    on_on_ebreak,
+        /* memory read interface */
+        .mem_ifetch = MEMIO(ifetch),
+        .mem_read_w = MEMIO(read_w),
+        .mem_read_s = MEMIO(read_s),
+        .mem_read_b = MEMIO(read_b),
+
+        /* memory write interface */
+        .mem_write_w = MEMIO(write_w),
+        .mem_write_s = MEMIO(write_s),
+        .mem_write_b = MEMIO(write_b),
+
+        /* system */
+        .on_ecall = syscall_handler,
+        .on_ebreak = rv_halt,
     };
 
     state_t *state = state_new();
@@ -243,11 +223,10 @@ int main(int argc, char **args)
         run(rv);
     }
 
-
     /* dump test result in test mode */
-    if (opt_arch_test) {
+    if (opt_arch_test)
         dump_test_signature(rv, elf);
-    }
+
     /* finalize the RISC-V runtime */
     elf_delete(elf);
     rv_delete(rv);

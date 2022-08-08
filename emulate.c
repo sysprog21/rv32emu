@@ -5,6 +5,9 @@
 
 #ifdef ENABLE_RV32F
 #include <math.h>
+#if defined(__APPLE__)
+#define isinff __inline_isinff
+#endif
 #endif
 
 #ifdef ENABLE_JIT
@@ -140,7 +143,9 @@ static void rv_except_illegal_insn(struct riscv_t *rv, uint32_t insn)
 
 static bool op_load(struct riscv_t *rv, uint32_t insn UNUSED)
 {
-    /* I-type format */
+    /* I-type
+     * |    imm[11:0]       | rs1 | funct3      | rd | opcode |
+     */
     const int32_t imm = dec_itype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn);
     const uint32_t funct3 = dec_funct3(insn);
@@ -151,27 +156,27 @@ static bool op_load(struct riscv_t *rv, uint32_t insn UNUSED)
 
     /* dispatch by read size */
     switch (funct3) {
-    case 0: /* LB */
+    case 0: /* LB: Load Byte */
         rv->X[rd] = sign_extend_b(rv->io.mem_read_b(rv, addr));
         break;
-    case 1: /* LH */
+    case 1: /* LH: Load Halfword */
         if (addr & 1) {
             rv_except_load_misaligned(rv, addr);
             return false;
         }
         rv->X[rd] = sign_extend_h(rv->io.mem_read_s(rv, addr));
         break;
-    case 2: /* LW */
+    case 2: /* LW: Load Word */
         if (addr & 3) {
             rv_except_load_misaligned(rv, addr);
             return false;
         }
         rv->X[rd] = rv->io.mem_read_w(rv, addr);
         break;
-    case 4: /* LBU */
+    case 4: /* LBU: Load Byte Unsigned */
         rv->X[rd] = rv->io.mem_read_b(rv, addr);
         break;
-    case 5: /* LHU */
+    case 5: /* LHU: Load Halfword Unsigned */
         if (addr & 1) {
             rv_except_load_misaligned(rv, addr);
             return false;
@@ -205,7 +210,9 @@ static bool op_misc_mem(struct riscv_t *rv, uint32_t insn UNUSED)
 
 static bool op_op_imm(struct riscv_t *rv, uint32_t insn)
 {
-    /* I-type decode */
+    /* I-type
+     * |    imm[11:0]       | rs1 | funct3      | rd | opcode |
+     */
     const int32_t imm = dec_itype_imm(insn);
     const uint32_t rd = dec_rd(insn);
     const uint32_t rs1 = dec_rs1(insn);
@@ -213,35 +220,35 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t insn)
 
     /* dispatch operation type */
     switch (funct3) {
-    case 0: /* ADDI */
+    case 0: /* ADDI: Add Immediate */
         rv->X[rd] = (int32_t) (rv->X[rs1]) + imm;
         break;
-    case 1: /* SLLI */
+    case 1: /* SLLI: Shift Left Logical */
         rv->X[rd] = rv->X[rs1] << (imm & 0x1f);
         break;
-    case 2: /* SLTI */
+    case 2: /* SLTI: Set on Less Than Immediate */
         rv->X[rd] = ((int32_t) (rv->X[rs1]) < imm) ? 1 : 0;
         break;
-    case 3: /* SLTIU */
+    case 3: /* SLTIU: Set on Less Than Immediate Unsigned */
         rv->X[rd] = (rv->X[rs1] < (uint32_t) imm) ? 1 : 0;
         break;
-    case 4: /* XORI */
+    case 4: /* XORI: Exclusive OR Immediate */
         rv->X[rd] = rv->X[rs1] ^ imm;
         break;
     case 5:
         /* SLL, SRL, and SRA perform logical left, logical right, and
          * arithmetic right shifts on the value in register rs1.
          */
-        if (imm & ~0x1f) { /* SRAI */
+        if (imm & ~0x1f) { /* SRAI: Shift Right Arithmetic */
             rv->X[rd] = ((int32_t) rv->X[rs1]) >> (imm & 0x1f);
-        } else { /* SRLI */
+        } else { /* SRLI: Shift Right Logical */
             rv->X[rd] = rv->X[rs1] >> (imm & 0x1f);
         }
         break;
-    case 6: /* ORI */
+    case 6: /* ORI: OR Immediate */
         rv->X[rd] = rv->X[rs1] | imm;
         break;
-    case 7: /* ANDI */
+    case 7: /* ANDI: AND Immediate */
         rv->X[rd] = rv->X[rs1] & imm;
         break;
     default:
@@ -258,10 +265,12 @@ static bool op_op_imm(struct riscv_t *rv, uint32_t insn)
     return true;
 }
 
-/* add upper immediate to pc */
+/* Add upper immediate to pc */
 static bool op_auipc(struct riscv_t *rv, uint32_t insn)
 {
-    /* U-type decode */
+    /* U-type
+     * |               imm[31:12]               | rd | opcode |
+     */
     const uint32_t rd = dec_rd(insn);
     const uint32_t val = dec_utype_imm(insn) + rv->PC;
     rv->X[rd] = val;
@@ -277,7 +286,9 @@ static bool op_auipc(struct riscv_t *rv, uint32_t insn)
 
 static bool op_store(struct riscv_t *rv, uint32_t insn)
 {
-    /* S-type format */
+    /* S-type
+     * | imm[11:5]    | rs2 | rs1 | imm[4:0]    | rd | opcode |
+     */
     const int32_t imm = dec_stype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
     const uint32_t funct3 = dec_funct3(insn);
@@ -288,17 +299,17 @@ static bool op_store(struct riscv_t *rv, uint32_t insn)
 
     /* dispatch by write size */
     switch (funct3) {
-    case 0: /* SB */
+    case 0: /* SB: Store Byte */
         rv->io.mem_write_b(rv, addr, data);
         break;
-    case 1: /* SH */
+    case 1: /* SH: Store Halfword */
         if (addr & 1) {
             rv_except_store_misaligned(rv, addr);
             return false;
         }
         rv->io.mem_write_s(rv, addr, data);
         break;
-    case 2: /* SW */
+    case 2: /* SW: Store Word */
         if (addr & 3) {
             rv_except_store_misaligned(rv, addr);
             return false;
@@ -317,7 +328,9 @@ static bool op_store(struct riscv_t *rv, uint32_t insn)
 
 static bool op_op(struct riscv_t *rv, uint32_t insn)
 {
-    /* R-type decode */
+    /* R-type
+     * | funct7       | rs2 | rs1 | funct3      | rd | opcode |
+     */
     const uint32_t rd = dec_rd(insn);
     const uint32_t funct3 = dec_funct3(insn);
     const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
@@ -331,20 +344,20 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
         case 0b000: /* ADD */
             rv->X[rd] = (int32_t) (rv->X[rs1]) + (int32_t) (rv->X[rs2]);
             break;
-        case 0b001: /* SLL */
+        case 0b001: /* SLL: Shift Left Logical */
             rv->X[rd] = rv->X[rs1] << (rv->X[rs2] & 0x1f);
             break;
-        case 0b010: /* SLT */
+        case 0b010: /* SLT: Set on Less Than */
             rv->X[rd] =
                 ((int32_t) (rv->X[rs1]) < (int32_t) (rv->X[rs2])) ? 1 : 0;
             break;
-        case 0b011: /* SLTU */
+        case 0b011: /* SLTU: Set on Less Than Unsigned */
             rv->X[rd] = (rv->X[rs1] < rv->X[rs2]) ? 1 : 0;
             break;
-        case 0b100: /* XOR */
+        case 0b100: /* XOR: Exclusive OR */
             rv->X[rd] = rv->X[rs1] ^ rv->X[rs2];
             break;
-        case 0b101: /* SRL */
+        case 0b101: /* SRL: Shift Right Logical */
             rv->X[rd] = rv->X[rs1] >> (rv->X[rs2] & 0x1f);
             break;
         case 0b110: /* OR */
@@ -361,23 +374,24 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
 #ifdef ENABLE_RV32M
     case 0b0000001: /* RV32M instructions */
         switch (funct3) {
-        case 0b000: /* MUL */
+        case 0b000: /* MUL: Multiply */
             rv->X[rd] = (int32_t) rv->X[rs1] * (int32_t) rv->X[rs2];
             break;
-        case 0b001: { /* MULH */
+        case 0b001: { /* MULH: Multiply High Signed Signed */
             const int64_t a = (int32_t) rv->X[rs1], b = (int32_t) rv->X[rs2];
             rv->X[rd] = ((uint64_t) (a * b)) >> 32;
-        } break;
-        case 0b010: { /* MULHSU */
+            break;
+        }
+        case 0b010: { /* MULHSU: Multiply High Signed Unsigned */
             const int64_t a = (int32_t) rv->X[rs1];
             const uint64_t b = rv->X[rs2];
             rv->X[rd] = ((uint64_t) (a * b)) >> 32;
             break;
         }
-        case 0b011:  // MULHU
+        case 0b011: /* MULHU: Multiply High Unsigned Unsigned */
             rv->X[rd] = ((uint64_t) rv->X[rs1] * (uint64_t) rv->X[rs2]) >> 32;
             break;
-        case 0b100: { /* DIV */
+        case 0b100: { /* DIV: Divide Signed */
             const int32_t dividend = (int32_t) rv->X[rs1];
             const int32_t divisor = (int32_t) rv->X[rs2];
             if (divisor == 0) {
@@ -389,15 +403,16 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
             }
             break;
         }
-        case 0b101: { /* DIVU */
+        case 0b101: { /* DIVU: Divide Unsigned */
             const uint32_t dividend = rv->X[rs1], divisor = rv->X[rs2];
             if (divisor == 0) {
                 rv->X[rd] = ~0U;
             } else {
                 rv->X[rd] = dividend / divisor;
             }
-        } break;
-        case 0b110: { /* REM */
+            break;
+        }
+        case 0b110: { /* REM: Remainder Signed */
             const int32_t dividend = rv->X[rs1], divisor = rv->X[rs2];
             if (divisor == 0) {
                 rv->X[rd] = dividend;
@@ -408,7 +423,7 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
             }
             break;
         }
-        case 0b111: { /* REMU */
+        case 0b111: { /* REMU: Remainder Unsigned */
             const uint32_t dividend = rv->X[rs1], divisor = rv->X[rs2];
             if (divisor == 0) {
                 rv->X[rd] = dividend;
@@ -425,10 +440,10 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
 #endif /* ENABLE_RV32M */
     case 0b0100000:
         switch (funct3) {
-        case 0b000: /* SUB */
+        case 0b000: /* SUB: Substract */
             rv->X[rd] = (int32_t) (rv->X[rs1]) - (int32_t) (rv->X[rs2]);
             break;
-        case 0b101: /* SRA */
+        case 0b101: /* SRA: Shift Right Arithmetic */
             rv->X[rd] = ((int32_t) rv->X[rs1]) >> (rv->X[rs2] & 0x1f);
             break;
         default:
@@ -450,10 +465,14 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
     return true;
 }
 
-/* Place sign-extended upper imm into register rd (lower 12 bits are zero) */
+/* Load Upper Immediate
+ * Place sign-extended upper imm into register rd (lower 12 bits are zero).
+ */
 static bool op_lui(struct riscv_t *rv, uint32_t insn)
 {
-    /* U-type decode */
+    /* U-type
+     * |               imm[31:12]               | rd | opcode |
+     */
     const uint32_t rd = dec_rd(insn);
     const uint32_t val = dec_utype_imm(insn);
     rv->X[rd] = val;
@@ -471,7 +490,7 @@ static bool op_branch(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
 
-    /* B-type decode */
+    /* B-type */
     const uint32_t func3 = dec_funct3(insn);
     const int32_t imm = dec_btype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
@@ -481,22 +500,22 @@ static bool op_branch(struct riscv_t *rv, uint32_t insn)
 
     /* dispatch by branch type */
     switch (func3) {
-    case 0: /* BEQ */
+    case 0: /* BEQ: Branch if Equal */
         taken = (rv->X[rs1] == rv->X[rs2]);
         break;
-    case 1: /* BNE */
+    case 1: /* BNE: Branch if Not Equal */
         taken = (rv->X[rs1] != rv->X[rs2]);
         break;
-    case 4: /* BLT */
+    case 4: /* BLT: Branch if Less Than */
         taken = ((int32_t) rv->X[rs1] < (int32_t) rv->X[rs2]);
         break;
-    case 5: /* BGE */
+    case 5: /* BGE: Branch if Greater Than */
         taken = ((int32_t) rv->X[rs1] >= (int32_t) rv->X[rs2]);
         break;
-    case 6: /* BLTU */
+    case 6: /* BLTU: Branch if Less Than Unsigned */
         taken = (rv->X[rs1] < rv->X[rs2]);
         break;
-    case 7: /* BGEU */
+    case 7: /* BGEU: Branch if Greater Than Unsigned */
         taken = (rv->X[rs1] >= rv->X[rs2]);
         break;
     default:
@@ -524,14 +543,19 @@ static bool op_branch(struct riscv_t *rv, uint32_t insn)
     return false;
 }
 
-/* store successor instruction address into rd.
- * Jump to rs1 + offset (offset is signed).
+/* Jump and Link Register (JALR): store successor instruction address into rd.
+ *
+ * The target of JALR address is obtained by adding the sign-extended 12-bit
+ * I-immediate to the register rs1, then setting the least-significant bit of
+ * the result to zero.
  */
 static bool op_jalr(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
 
-    /* I-type decode */
+    /* I-type
+     * |    imm[11:0]       | rs1 | funct3      | rd | opcode |
+     */
     const uint32_t rd = dec_rd(insn);
     const uint32_t rs1 = dec_rs1(insn);
     const int32_t imm = dec_itype_imm(insn);
@@ -562,14 +586,14 @@ static bool op_jalr(struct riscv_t *rv, uint32_t insn)
     return false;
 }
 
-/* store successor instruction address into rd.
+/* Jump and Link (JAL): store successor instruction address into rd.
  * add sext J imm (offset) to pc.
  */
 static bool op_jal(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
 
-    /* j-type decode */
+    /* J-type */
     const uint32_t rd = dec_rd(insn);
     const int32_t rel = dec_jtype_imm(insn);
 
@@ -621,6 +645,8 @@ static uint32_t *csr_get_ptr(struct riscv_t *rv, uint32_t csr)
     case CSR_MIP:
         return (uint32_t *) (&rv->csr_mip);
 #ifdef ENABLE_RV32F
+    case CSR_FFLAGS:
+        return (uint32_t *) (&rv->csr_fcsr);
     case CSR_FCSR:
         return (uint32_t *) (&rv->csr_fcsr);
 #endif
@@ -641,7 +667,11 @@ static uint32_t csr_csrrw(struct riscv_t *rv, uint32_t csr, uint32_t val)
     if (!c)
         return 0;
 
-    const uint32_t out = *c;
+    uint32_t out = *c;
+#ifdef ENABLE_RV32F
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
     if (csr_is_writable(csr))
         *c = val;
 
@@ -655,7 +685,11 @@ static uint32_t csr_csrrs(struct riscv_t *rv, uint32_t csr, uint32_t val)
     if (!c)
         return 0;
 
-    const uint32_t out = *c;
+    uint32_t out = *c;
+#ifdef ENABLE_RV32F
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
     if (csr_is_writable(csr))
         *c |= val;
 
@@ -669,7 +703,11 @@ static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
     if (!c)
         return 0;
 
-    const uint32_t out = *c;
+    uint32_t out = *c;
+#ifdef ENABLE_RV32F
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
     if (csr_is_writable(csr))
         *c &= ~val;
     return out;
@@ -677,7 +715,9 @@ static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
 
 static bool op_system(struct riscv_t *rv, uint32_t insn)
 {
-    /* I-type decode */
+    /* I-type
+     * |    imm[11:0]       | rs1 | funct3      | rd | opcode |
+     */
     const int32_t imm = dec_itype_imm(insn);
     const int32_t csr = dec_csr(insn);
     const uint32_t funct3 = dec_funct3(insn);
@@ -688,10 +728,10 @@ static bool op_system(struct riscv_t *rv, uint32_t insn)
     switch (funct3) {
     case 0:
         switch (imm) { /* dispatch from imm field */
-        case 0:        /* ECALL */
+        case 0:        /* ECALL: Environment Call */
             rv->io.on_ecall(rv);
             break;
-        case 1: /* EBREAK */
+        case 1: /* EBREAK: Environment Break */
             rv->io.on_ebreak(rv);
             break;
         case 0x002: /* URET */
@@ -710,18 +750,19 @@ static bool op_system(struct riscv_t *rv, uint32_t insn)
         }
         break;
 #ifdef ENABLE_Zicsr
-    case 1: { /* CSRRW    (Atomic Read/Write CSR) */
+    /* All CSR instructions atomically read-modify-write a single CSR. */
+    case 1: { /* CSRRW: Atomic Read/Write CSR */
         uint32_t tmp = csr_csrrw(rv, csr, rv->X[rs1]);
         rv->X[rd] = rd ? tmp : rv->X[rd];
         break;
     }
-    case 2: { /* CSRRS    (Atomic Read and Set Bits in CSR) */
+    case 2: { /* CSRRS: Atomic Read and Set Bits in CSR */
         uint32_t tmp =
             csr_csrrs(rv, csr, (rs1 == rv_reg_zero) ? 0U : rv->X[rs1]);
         rv->X[rd] = rd ? tmp : rv->X[rd];
         break;
     }
-    case 3: { /* CSRRC    (Atomic Read and Clear Bits in CSR) */
+    case 3: { /* CSRRC: Atomic Read and Clear Bits in CSR */
         uint32_t tmp =
             csr_csrrc(rv, csr, (rs1 == rv_reg_zero) ? ~0U : rv->X[rs1]);
         rv->X[rd] = rd ? tmp : rv->X[rd];
@@ -770,56 +811,56 @@ static bool op_amo(struct riscv_t *rv, uint32_t insn)
     const uint32_t funct5 = (f7 >> 2) & 0x1f;
 
     switch (funct5) {
-    case 0b00010: /* LR.W */
+    case 0b00010: /* LR.W: Load Reserved */
         rv->X[rd] = rv->io.mem_read_w(rv, rv->X[rs1]);
         /* skip registration of the 'reservation set'
          * FIXME: uimplemented
          */
         break;
-    case 0b00011: /* SC.W */
+    case 0b00011: /* SC.W: Store Conditional */
         /* assume the 'reservation set' is valid
          * FIXME: unimplemented
          */
         rv->io.mem_write_w(rv, rv->X[rs1], rv->X[rs2]);
         rv->X[rd] = 0;
         break;
-    case 0b00001: { /* AMOSWAP.W */
+    case 0b00001: { /* AMOSWAP.W: Atomic Swap */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         rv->io.mem_write_s(rv, rs1, rv->X[rs2]);
         break;
     }
-    case 0b00000: { /* AMOADD.W */
+    case 0b00000: { /* AMOADD.W: Atomic ADD */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t res = (int32_t) rv->X[rd] + (int32_t) rv->X[rs2];
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b00100: { /* AMOXOR.W */
+    case 0b00100: { /* AMOXOR.W: Atomix XOR */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t res = rv->X[rd] ^ rv->X[rs2];
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b01100: { /* AMOAND.W */
+    case 0b01100: { /* AMOAND.W: Atomic AND */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t res = rv->X[rd] & rv->X[rs2];
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b01000: { /* AMOOR.W */
+    case 0b01000: { /* AMOOR.W: Atomic OR */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t res = rv->X[rd] | rv->X[rs2];
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b10000: { /* AMOMIN.W */
+    case 0b10000: { /* AMOMIN.W: Atomic MIN */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t a = rv->X[rd], b = rv->X[rs2];
         const int32_t res = a < b ? a : b;
         rv->io.mem_write_s(rv, rs1, res);
         break;
     }
-    case 0b10100: { /* AMOMAX.W */
+    case 0b10100: { /* AMOMAX.W: Atomic MAX */
         rv->X[rd] = rv->io.mem_read_w(rv, rs1);
         const int32_t a = rv->X[rd], b = rv->X[rs2];
         const int32_t res = a > b ? a : b;
@@ -905,10 +946,25 @@ static bool op_fp(struct riscv_t *rv, uint32_t insn)
     /* dispatch based on func7 (low 2 bits are width) */
     switch (funct7) {
     case 0b0000000: /* FADD */
-        rv->F[rd] = rv->F[rs1] + rv->F[rs2];
+        if (isnan(rv->F[rs1]) || isnan(rv->F[rs2]) ||
+            isnan(rv->F[rs1] + rv->F[rs2])) {
+            /* raise invalid operation */
+            rv->F_int[rd] = RV_NAN; /* F_int is the integer shortcut of F */
+            rv->csr_fcsr |= FFLAG_INVALID_OP;
+        } else {
+            rv->F[rd] = rv->F[rs1] + rv->F[rs2];
+        }
+        if (isinff(rv->F[rd])) {
+            rv->csr_fcsr |= FFLAG_OVERFLOW;
+            rv->csr_fcsr |= FFLAG_INEXACT;
+        }
         break;
     case 0b0000100: /* FSUB */
-        rv->F[rd] = rv->F[rs1] - rv->F[rs2];
+        if (isnan(rv->F[rs1]) || isnan(rv->F[rs2])) {
+            rv->F_int[rd] = RV_NAN;
+        } else {
+            rv->F[rd] = rv->F[rs1] - rv->F[rs2];
+        }
         break;
     case 0b0001000: /* FMUL */
         rv->F[rd] = rv->F[rs1] * rv->F[rs2];
@@ -1120,6 +1176,7 @@ static bool op_caddi(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
+/* C.ADDI4SPN */
 static bool op_caddi4spn(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = 0;
@@ -1136,6 +1193,7 @@ static bool op_caddi4spn(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
+/* C.LI */
 static bool op_cli(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = (uint16_t) ((insn & 0x1000) >> 7 | (insn & 0x7c) >> 2);
@@ -1366,7 +1424,7 @@ static bool op_cswsp(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
-/* CL-type */
+/* C.LW: CL-type */
 static bool op_clw(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = 0;
@@ -1389,7 +1447,7 @@ static bool op_clw(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
-/* CS-type */
+/* C.SD: CS-type */
 static bool op_csw(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
@@ -1784,7 +1842,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
              */
             insn &= 0x0000FFFF;
             const uint16_t c_index =
-                (insn & FC_FUNC3 >> 11) | (insn & FC_OPCODE);
+                (insn & FC_FUNC3) >> 11 | (insn & FC_OPCODE);
             rv->insn_len = INSN_16;
 
             /* dispactch c_opcode (compressed instructions) */

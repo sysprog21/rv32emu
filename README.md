@@ -90,8 +90,18 @@ Detail in riscv-arch-test:
 
 Add `-D` to enable and `-U` to disable the specific ISA extensions.
 
+## External sources
+
+In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
+* `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark)
+* `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `pi.elf` : See [tests/pi.c](tests/pi.c)
+* `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
+
 ## Reference
 
+* [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)
+* [Writing a RISC-V Emulator in Rust](https://book.rvemu.app/)
 * [libriscv: RISC-V userspace emulator library](https://github.com/fwsGonzo/libriscv)
 * [Threaded Code](https://www.complang.tuwien.ac.at/forth/threaded-code.html)
 

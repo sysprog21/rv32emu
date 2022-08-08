@@ -18,10 +18,6 @@ enum {
     INSN_32 = 4,
 };
 
-enum {
-    rv_reg_zero = 0,
-};
-
 typedef void *riscv_user_t;
 typedef uint32_t riscv_word_t;
 typedef uint16_t riscv_half_t;

@@ -35,6 +35,18 @@ static void str2buffer(rv_buffer *buffer, const char *fmt, ...)
     if (n < 0)
         abort();
 
+    /* x0 is always zero */
+    /* FIXME: make it less ugly */
+    char *p = strstr(code, "(int32_t) (rv->X[0])");
+    if (p)
+        memcpy(p, "0                   ", 20);
+    p = strstr(code, "(int32_t) rv->X[0]");
+    if (p)
+        memcpy(p, "0                 ", 18);
+    p = strstr(code, "rv->X[0]");
+    if (p)
+        memcpy(p, "0       ", 8);
+
     size_t len = strlen(code);
     size_t new_size = buffer->size + len;
     if (new_size > buffer->capacity) {
@@ -65,8 +77,6 @@ static void str2buffer(rv_buffer *buffer, const char *fmt, ...)
 #define UPDATE_INSN16_LEN CODE("rv->insn_len = %u;\n", INSN_16)
 #define UPDATE_INSN32_LEN CODE("rv->insn_len = %u;\n", INSN_32)
 #define LOAD_ADDR CODE("addr = rv->X[%u] + %d;", rs1, imm)
-#define ENFORCE_ZERO \
-    CODE("if (%d == rv_reg_zero) rv->X[rv_reg_zero] = 0;\n", rd)
 
 #define insn_misaligned CODE("rv_except_insn_misaligned(rv, %u);\n", pc);
 
@@ -150,7 +160,6 @@ static void emit_load(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
     }
 update:
     CODE("rv->PC += rv->insn_len;\n");
-    ENFORCE_ZERO;
     UPDATE_INSN32_LEN;
 
     if (!end)
@@ -215,7 +224,6 @@ static void emit_op_imm(rv_buffer *buff,
     }
 update:
     CODE("rv->PC += rv->insn_len;\n");
-    ENFORCE_ZERO;
     UPDATE_INSN32_LEN;
 }
 
@@ -229,7 +237,6 @@ static void emit_auipc(rv_buffer *buff,
     COMMENT("AUIPC");
     CODE("rv->X[%u] = %u + rv->PC;\n", rd, imm);
     CODE("rv->PC += rv->insn_len;\n");
-    ENFORCE_ZERO;
     UPDATE_INSN32_LEN;
 }
 
@@ -373,7 +380,6 @@ static void emit_amo(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
     }
 update:
     UPDATE_PC(4);
-    ENFORCE_ZERO;
     UPDATE_INSN32_LEN;
 #endif
 }
@@ -540,7 +546,6 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
     }
 update:
     CODE("rv->PC += rv->insn_len;\n");
-    ENFORCE_ZERO;
     UPDATE_INSN32_LEN;
 }
 
@@ -552,7 +557,6 @@ static void emit_lui(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
     const uint32_t val = dec_utype_imm(insn);
     CODE("rv->X[%u] = %u;\n", rd, val);
     CODE("rv->PC += rv->insn_len;\n");
-    ENFORCE_ZERO;
     UPDATE_INSN32_LEN;
 }
 
@@ -632,10 +636,8 @@ static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
     /* jump */
     CODE("rv->PC = (rv->X[%u] + %d) & ~1u;\n", rs1, imm);
     /* link */
-    CODE(
-        "if (%u != rv_reg_zero)\n"
-        "rv->X[%u] = ra;\n",
-        rd, rd);
+    if (rd != rv_reg_zero)
+        CODE("rv->X[%u] = ra;\n", rd, rd);
 
     /* check for exception */
     CODE(
@@ -662,10 +664,8 @@ static void emit_jal(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
     CODE("rv->PC += %u;\n", rel);
 
     /* link */
-    CODE(
-        "if (%u != rv_reg_zero)\n"
-        "\trv->X[%u] = ra;\n",
-        rd, rd);
+    if (rd != rv_reg_zero)
+        CODE("\trv->X[%u] = ra;\n", rd, rd);
 
     CODE(
 #ifdef ENABLE_RV32C
@@ -724,19 +724,19 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     }
     case 2: { /* CSRRS    (Atomic Read and Set Bits in CSR) */
         COMMENT("CSRRS");
-        CODE(
-            "tmp_u32 = csr_csrrs(rv, %d, (%u == rv_reg_zero) ? 0u : "
-            "rv->X[%u]);\n",
-            csr, rs1, rs1);
+        if (rs1 == rv_reg_zero)
+            CODE("tmp_u32 = csr_csrrs(rv, %d, 0u);\n", csr);
+        else
+            CODE("tmp_u32 = csr_csrrs(rv, %d, rv->X[%u]);\n", csr, rs1);
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }
     case 3: { /* CSRRC    (Atomic Read and Clear Bits in CSR) */
         COMMENT("CSRRC");
-        CODE(
-            "tmp_u32 = csr_csrrc(rv, %d, (%u == rv_reg_zero) ? ~0u : "
-            "rv->X[%u])\n",
-            csr, rs1, rs1);
+        if (rs1 == rv_reg_zero)
+            CODE("tmp_u32 = csr_csrrc(rv, %d, ~0u);\n", csr);
+        else
+            CODE("tmp_u32 = csr_csrrc(rv, %d, rv->X[%u]);\n", csr, rs1);
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }
@@ -765,7 +765,6 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     }
 update:
     CODE("rv->PC += rv->insn_len;\n");
-    ENFORCE_ZERO;
     UPDATE_INSN32_LEN;
 }
 

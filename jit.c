@@ -28,6 +28,7 @@ static void str2buffer(rv_buffer *buffer, const char *fmt, ...)
 {
     va_list args;
     char code[1024];
+
     va_start(args, fmt);
     int n = vsnprintf(code, sizeof(code), fmt, args);
     va_end(args);
@@ -37,10 +38,7 @@ static void str2buffer(rv_buffer *buffer, const char *fmt, ...)
 
     /* x0 is always zero */
     /* FIXME: make it less ugly */
-    char *p = strstr(code, "(int32_t) (rv->X[0])");
-    if (p)
-        memcpy(p, "0                   ", 20);
-    p = strstr(code, "(int32_t) rv->X[0]");
+    char *p = strstr(code, "(int32_t) rv->X[0]");
     if (p)
         memcpy(p, "0                 ", 18);
     p = strstr(code, "rv->X[0]");
@@ -180,7 +178,10 @@ static void emit_op_imm(rv_buffer *buff,
     switch (funct3) {
     case 0: /* ADDI */
         COMMENT("ADDI");
-        CODE("rv->X[%u] = (int32_t) (rv->X[%u]) + %d;\n", rd, rs1, imm);
+        if (rs1 == rv_reg_zero)
+            CODE("rv->X[%u] = %d;\n", rd, imm);
+        else
+            CODE("rv->X[%u] = (int32_t) (rv->X[%u]) + %d;\n", rd, rs1, imm);
         goto update;
     case 1: /* SLLI */
         COMMENT("SLLI");
@@ -397,8 +398,13 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
         switch (funct3) {
         case 0b000: /* ADD */
             COMMENT("ADD");
-            CODE("rv->X[%u] = (int32_t) (rv->X[%u]) + (int32_t) (rv->X[%u]);",
-                 rd, rs1, rs2);
+            if (rs1 == rv_reg_zero || rs2 == rv_reg_zero)
+                CODE("rv->X[%u] = (int32_t) (rv->X[%u]);\n", rd, rs1 | rs2);
+            else
+                CODE(
+                    "rv->X[%u] = (int32_t) (rv->X[%u]) + (int32_t) "
+                    "(rv->X[%u]);",
+                    rd, rs1, rs2);
             goto update;
         case 0b001: /* SLL */
             COMMENT("SLL");
@@ -407,7 +413,8 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
         case 0b010: /* SLT */
             COMMENT("SLT");
             CODE(
-                "rv->X[%u] = ((int32_t) (rv->X[%u]) < (int32_t) (rv->X[%u])) ? "
+                "rv->X[%u] = ((int32_t) (rv->X[%u]) < (int32_t) "
+                "(rv->X[%u])) ? "
                 "1 : 0;",
                 rd, rs1, rs2);
             goto update;
@@ -525,10 +532,13 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
         switch (funct3) {
         case 0b000: /* SUB */
             COMMENT("SUB");
-            CODE(
-                "rv->X[%u] = (int32_t) (rv->X[%u]) - (int32_t) "
-                "(rv->X[%u]);",
-                rd, rs1, rs2);
+            if (rs1 == rv_reg_zero)
+                CODE("rv->X[%u] = - (int32_t) (rv->X[%u]);\n", rd, rs2);
+            else
+                CODE(
+                    "rv->X[%u] = (int32_t) (rv->X[%u]) - "
+                    "(int32_t) (rv->X[%u]);",
+                    rd, rs1, rs2);
             goto update;
         case 0b101: /* SRA */
             COMMENT("SRA");

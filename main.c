@@ -81,7 +81,11 @@ static void print_usage(const char *filename)
             "Options:\n"
             "  --trace : print executable trace\n"
             "  --arch-test [filename] : dump signature to the given file, "
-            "required by arch-test test\n",
+            "required by arch-test test\n"
+#ifdef ENABLE_JIT
+            "  --jit-cache : save MIR binary cache\n"
+            "  --jit-report : report MIR compilation info add codegen dump\n",
+#endif
             filename);
 }
 

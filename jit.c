@@ -647,7 +647,7 @@ static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
     CODE("rv->PC = (rv->X[%u] + %d) & ~1u;\n", rs1, imm);
     /* link */
     if (rd != rv_reg_zero)
-        CODE("rv->X[%u] = ra;\n", rd, rd);
+        CODE("rv->X[%u] = ra;\n", rd);
 
     /* check for exception */
     CODE(
@@ -675,7 +675,7 @@ static void emit_jal(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 
     /* link */
     if (rd != rv_reg_zero)
-        CODE("\trv->X[%u] = ra;\n", rd, rd);
+        CODE("\trv->X[%u] = ra;\n", rd);
 
     CODE(
 #ifdef ENABLE_RV32C
@@ -727,9 +727,11 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         break;
 #ifdef ENABLE_Zicsr
     case 1: { /* CSRRW    (Atomic Read/Write CSR) */
-        COMMENT("CSRRW");
-        CODE("tmp_u32 = csr_csrrw(rv, %d, rv->X[%u]);\n", csr, rs1);
-        CODE("rv->X[%u] = rd ? tmp_u32 : rv->X[%u];\n", rd, rd);
+        if (rd != rv_reg_zero) {
+            COMMENT("CSRRW");
+            CODE("tmp_u32 = csr_csrrw(rv, %d, rv->X[%u]);\n", csr, rs1);
+            CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
+        }
         goto update;
     }
     case 2: { /* CSRRS    (Atomic Read and Set Bits in CSR) */
@@ -764,7 +766,7 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
     }
     case 7: { /* CSRRCI */
         COMMENT("CSRRCI");
-        CODE("tmp_u32 = csr_csrrc(rv, %d, rs1);\n", csr, rs1);
+        CODE("tmp_u32 = csr_csrrc(rv, %d, %u);\n", csr, rs1);
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }

@@ -929,22 +929,25 @@ static void rv_jit_clear(struct riscv_t *rv)
     }
 }
 
+/* free block map but not clear all entries */
 static void block_map_free(struct block_map_t *map)
 {
     assert(map->map);
-    for (uint32_t i = 0; i < map->size; i++)
-        free(map->map[i]);
+    free(map->map);
+    map->map = NULL;
 }
 
-/* clear all entries in the block map
- * NOTE: will not clear the code buffer
- */
+/* clear all entries in the block map */
 static void block_map_clear(struct block_map_t *map)
 {
     assert(map->map);
-    for (uint32_t i = 0; i < map->size; i++) {
-        free(map->map[i]);
-        map->map[i] = NULL;
+    for (uint32_t i = 0; i < map->capacity; i++) {
+        struct block_t *block = map->map[i];
+        if (block) {
+            free(block->code);
+            free(block);
+            map->map[i] = NULL;
+        }
     }
     map->size = 0;
 }
@@ -982,12 +985,20 @@ static struct block_t *block_find(struct block_map_t *map, uint32_t addr)
     return NULL;
 }
 
+/* expand block_map capacity 2 times and reinsert entries */
 static void block_map_enlarge(struct riscv_jit_t *jit)
 {
-    struct block_map_t *map = jit->block_map;
-    map->bits++;
-    map->capacity = (1 << map->bits);
-    map = realloc(map, sizeof(struct block_t *) * map->capacity);
+    struct block_map_t *old_map = jit->block_map;
+    struct block_map_t *new_map = block_map_alloc(old_map->bits + 1);
+
+    for (size_t i = 0; i < old_map->capacity; i++) {
+        struct block_t *block = old_map->map[i];
+        if (block)
+            block_map_insert(new_map, block);
+    }
+
+    block_map_free(old_map);
+    jit->block_map = new_map;
 }
 
 static void rv_translate_block(struct riscv_t *rv, struct block_t *block)
@@ -1231,8 +1242,8 @@ struct riscv_jit_t *rv_jit_init(uint32_t bits)
 void rv_jit_free(struct riscv_jit_t *jit)
 {
     if (jit->block_map) {
+        block_map_clear(jit->block_map);
         block_map_free(jit->block_map);
-        jit->block_map->map = NULL;
     }
 
     MIR_context_t ctx = jit->ctx;

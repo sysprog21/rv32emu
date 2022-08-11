@@ -103,7 +103,7 @@ include mk/external.mk
 
 # Non-trivial demonstration programs
 ifeq ("$(ENABLE_SDL)", "1")
-demo: $(BIN) $(DOOM_DATA)
+doom: $(BIN) $(DOOM_DATA)
 	(cd $(OUT); ../$(BIN) doom.elf)
 ifeq ("$(ENABLE_RV32F)", "1")
 quake: $(BIN) $(QUAKE_DATA)

@@ -22,11 +22,17 @@ make check
 
 Run [Doom](https://en.wikipedia.org/wiki/Doom_(1993_video_game)), the classical video game, via `rv32emu`:
 ```shell
-make demo
+make doom
 ```
 
-The build script will then download data file for Doom automatically. SDL2 based window
-should appear when Doom is loaded and executed.
+The build script will then download data file for Doom automatically. SDL2 based window should appear when Doom is loaded and executed. 
+
+If RV32F support is enabled (turned on by default), [Quake](https://en.wikipedia.org/wiki/Quake_(series)) demo program can be launched via:
+```shell
+make quake
+```
+
+The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](docs/demo.md).
 
 ## riscv-arch-test
 

@@ -34,6 +34,16 @@ make quake
 
 The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](docs/demo.md).
 
+RUN in Docker
+```shell
+docker build --pull --no-cache -t rv32emu .
+docker run --name rv32emu --rm -it rv32emu
+```
+or you can directly make
+```shell
+docker run --name rv32emu --rm rv32emu make
+```
+
 ## riscv-arch-test
 
 The RISC-V Architectural Tests, [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test), is the basic set of tests that can ensure the risc-v model's behavior that matches RISC-V specifications while implementing specific software.(not a **substitute for rigorous design verification**)

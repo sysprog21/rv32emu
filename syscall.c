@@ -121,6 +121,15 @@ static void syscall_exit(struct riscv_t *rv)
     fprintf(stdout, "inferior exit code %d\n", (int) code);
 }
 
+/* brk(prev, inc)
+ * Note:
+ *   - 8 byte alignment for malloc chunks
+ *   - 4k aligned for sbrk blocks
+ *   - parameters:
+ *     a0 - previous heap, 0 = reset to end of data
+ *     a1 - increment size, ignored if a0 == 0
+ *   - 4k align end of data (or 8/16 byte align?)
+ */
 static void syscall_brk(struct riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
@@ -202,6 +211,10 @@ static void syscall_close(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, 0);
 }
 
+/* lseek() repositions the file offset of the open file description associated
+ * with the file descriptor fd to the argument offset according to the
+ * directive whence.
+ */
 static void syscall_lseek(struct riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */

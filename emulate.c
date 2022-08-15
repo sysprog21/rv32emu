@@ -353,15 +353,15 @@ static bool op_op(struct riscv_t *rv, uint32_t insn)
     /* TODO: skip zero register here */
 
     /* 0000000 rs2 rs1 000 rd 0110011 R ADD
-     * 0100000 rs2 rs1 000 rd 0110011 R SUB
      * 0000000 rs2 rs1 001 rd 0110011 R SLL
      * 0000000 rs2 rs1 010 rd 0110011 R SLT
      * 0000000 rs2 rs1 011 rd 0110011 R SLTU
      * 0000000 rs2 rs1 100 rd 0110011 R XOR
      * 0000000 rs2 rs1 101 rd 0110011 R SRL
-     * 0100000 rs2 rs1 101 rd 0110011 R SRA
      * 0000000 rs2 rs1 110 rd 0110011 R OR
      * 0000000 rs2 rs1 111 rd 0110011 R AND
+     * 0100000 rs2 rs1 000 rd 0110011 R SUB
+     * 0100000 rs2 rs1 101 rd 0110011 R SRA
      */
 
     switch (funct7) {
@@ -518,7 +518,9 @@ static bool op_branch(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
 
-    /* B-type */
+    /* B-type
+     * Immediate {[12],[10:5]}@25, {[4:1],[11]}@7
+     */
     const uint32_t func3 = dec_funct3(insn);
     const int32_t imm = dec_btype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
@@ -778,7 +780,25 @@ static bool op_system(struct riscv_t *rv, uint32_t insn)
         }
         break;
 #ifdef ENABLE_Zicsr
-    /* All CSR instructions atomically read-modify-write a single CSR. */
+    /* All CSR instructions atomically read-modify-write a single CSR.
+     *    Register operand
+     *    ---------------------------------------------------------
+     *    Instruction         rd          rs1        Read    Write
+     *    ---------------------------------------------------------
+     *    CSRRW               x0          -          no      yes
+     *    CSRRW               !x0         -          yes     yes
+     *    CSRRS/C             -           x0         yes     no
+     *    CSRRS/C             -           !x0        yes     yes
+     *
+     *    Immediate operand
+     *    --------------------------------------------------------
+     *    Instruction         rd          uimm       Read    Write
+     *    ---------------------------------------------------------
+     *    CSRRWI              x0          -          no      yes
+     *    CSRRWI              !x0         -          yes     yes
+     *    CSRRS/CI            -           0          yes     no
+     *    CSRRS/CI            -           !0         yes     yes
+     */
     case 1: { /* CSRRW: Atomic Read/Write CSR */
         uint32_t tmp = csr_csrrw(rv, csr, rv->X[rs1]);
         rv->X[rd] = rd ? tmp : rv->X[rd];

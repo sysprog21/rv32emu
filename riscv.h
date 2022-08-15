@@ -8,25 +8,25 @@ extern "C" {
 
 /* RISC-V register files */
 enum {
-    rv_reg_zero = 0,
-    rv_reg_ra,
-    rv_reg_sp,
-    rv_reg_gp,
-    rv_reg_tp,
-    rv_reg_t0,
+    rv_reg_zero = 0, /* constant 0 */
+    rv_reg_ra,       /* return address */
+    rv_reg_sp,       /* stack pointer */
+    rv_reg_gp,       /* global pointer */
+    rv_reg_tp,       /* thread pointer */
+    rv_reg_t0,       /* temporary register */
     rv_reg_t1,
     rv_reg_t2,
-    rv_reg_s0,
+    rv_reg_s0, /* saved / frame pointer */
     rv_reg_s1,
-    rv_reg_a0,
+    rv_reg_a0, /* function arguments / return values */
     rv_reg_a1,
-    rv_reg_a2,
+    rv_reg_a2, /* function arguments */
     rv_reg_a3,
     rv_reg_a4,
     rv_reg_a5,
     rv_reg_a6,
     rv_reg_a7,
-    rv_reg_s2,
+    rv_reg_s2, /* saved register */
     rv_reg_s3,
     rv_reg_s4,
     rv_reg_s5,
@@ -36,7 +36,7 @@ enum {
     rv_reg_s9,
     rv_reg_s10,
     rv_reg_s11,
-    rv_reg_t3,
+    rv_reg_t3, /* temporary register */
     rv_reg_t4,
     rv_reg_t5,
     rv_reg_t6,

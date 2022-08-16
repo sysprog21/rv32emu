@@ -140,7 +140,10 @@ void elf_delete(elf_t *e)
         return;
 
     map_delete(e->symbols);
-#if !defined(USE_MMAP)
+#if defined(USE_MMAP)
+    if (e->raw_data)
+        munmap(e->raw_data, e->raw_size);
+#else
     free(e->raw_data);
 #endif
     free(e);
@@ -149,10 +152,7 @@ void elf_delete(elf_t *e)
 /* release a loaded ELF file */
 static void release(elf_t *e)
 {
-#if defined(USE_MMAP)
-    if (e->raw_data)
-        munmap(e->raw_data, e->raw_size);
-#else
+#if !defined(USE_MMAP)
     free(e->raw_data);
 #endif
 

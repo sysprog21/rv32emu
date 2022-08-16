@@ -2,8 +2,10 @@
 
 #if defined(__GNUC__) || defined(__clang__)
 #define UNUSED __attribute__((unused))
+#define unlikely(x) __builtin_expect(!!(x), 0)
 #else
 #define UNUSED
+#define unlikely(x) x
 #endif
 
 /* Pattern Matching for C macros.

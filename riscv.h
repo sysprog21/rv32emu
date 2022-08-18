@@ -99,6 +99,11 @@ void rv_delete(struct riscv_t *);
 /* reset the RISC-V processor */
 void rv_reset(struct riscv_t *, riscv_word_t pc);
 
+#ifdef ENABLE_GDBSTUB
+/* Run the RISCV-emulator as gdbstub */
+void rv_debug(struct riscv_t *rv);
+#endif
+
 /* step the RISC-V emulator */
 void rv_step(struct riscv_t *, int32_t cycles);
 

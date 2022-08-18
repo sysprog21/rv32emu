@@ -1,6 +1,9 @@
 #pragma once
 #include <stdbool.h>
 
+#ifdef ENABLE_GDBSTUB
+#include "mini-gdbstub/include/gdbstub.h"
+#endif
 #include "riscv.h"
 
 #define RV_NUM_REGS 32
@@ -137,6 +140,15 @@ struct riscv_t {
 
     /* user provided data */
     riscv_user_t userdata;
+
+#ifdef ENABLE_GDBSTUB
+    /* gdbstub instance */
+    gdbstub_t gdbstub;
+
+    /* GDB instruction breakpoint */
+    bool breakpoint_specified;
+    riscv_word_t breakpoint_addr;
+#endif
 
 #ifdef ENABLE_RV32F
     /* float registers */

@@ -112,6 +112,45 @@ Detail in riscv-arch-test:
 
 Add `-D` to enable and `-U` to disable the specific ISA extensions.
 
+## Debugging mode with GDB remote serial protocal
+
+By supporting a small set of
+[GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html)
+(GDBRSP), `rv32emu` is allowed to be run as gdbstub experimentally. To enable this feature,
+you should first configure the `ENABLE_GDBSTUB` to 1 in the Makefile and build the emulator.
+After that, you could run it with the following command.
+
+```
+./build/rv32emu --gdbstub <binary>
+```
+
+The `<binary>` should be the ELF file in riscv32 format. You are also recommended to compile
+your program with `-g` option to generate debug information in your ELF file.
+
+If the emulator starts correctly without exit, you can then execute the riscv-gdb. Two GDB
+commands are required first to provide the supported architecture of the emulator to GDB (also
+provide debugging symbol if there's any) and then connect to the emulator.
+
+```
+$ riscv32-unknown-elf-gdb
+(gdb) file <binary>
+(gdb) target remote :1234
+```
+
+If there's no error message from the riscv-gdb, congratulate! You can now interact with
+the emulator from the GDB command line now!
+
+### Limitation
+The support of GDB Remote Serial Protocol(GDBRSP) in `rv32emu` is still in the
+development phase. There are some known restriction of this functionality due to the
+incomplete design now.
+* Since the 'G' packet is not supported yet, writing emulator registers with GDB is
+not permitted.
+* Consequently, the packets for binary download (the "X" packet) and memory writing
+(the "M" packet) specified in GDBRSP are not allowed. It is forbidden to use GDB commands
+such as "load" that aim to modify the emulator's internal memory.
+* Due to the poor design of breakpoints handling, you can only set single breakpoint
+during debugging
 ## External sources
 
 In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.

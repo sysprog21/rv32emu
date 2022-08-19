@@ -121,14 +121,10 @@ static void syscall_exit(struct riscv_t *rv)
     fprintf(stdout, "inferior exit code %d\n", (int) code);
 }
 
-/* brk(prev, inc)
+/* brk(increment)
  * Note:
  *   - 8 byte alignment for malloc chunks
- *   - 4k aligned for sbrk blocks
- *   - parameters:
- *     a0 - previous heap, 0 = reset to end of data
- *     a1 - increment size, ignored if a0 == 0
- *   - 4k align end of data (or 8/16 byte align?)
+ *   - 4 KiB aligned for sbrk blocks
  */
 static void syscall_brk(struct riscv_t *rv)
 {

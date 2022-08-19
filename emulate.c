@@ -147,7 +147,8 @@ static void rv_except_illegal_insn(struct riscv_t *rv, uint32_t insn)
 static inline bool op_load(struct riscv_t *rv, uint32_t insn UNUSED)
 {
     /* I-type
-     * |    imm[11:0]       | rs1 | funct3      | rd | opcode |
+     * 31        26        21        16        11   9     6           0
+     * [ rd    5][ rs1   5][ immhi 5][ immlo     7][fun3][ opcode    7]
      */
     const int32_t imm = dec_itype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn);
@@ -214,7 +215,8 @@ static inline bool op_misc_mem(struct riscv_t *rv, uint32_t insn UNUSED)
 static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
 {
     /* I-type
-     * |    imm[11:0]       | rs1 | funct3      | rd | opcode |
+     * 31        26        21        16        11   9     6           0
+     * [ rd    5][ rs1   5][ immhi 5][ immlo     7][fun3][ opcode    7]
      */
     const int32_t imm = dec_itype_imm(insn);
     const uint32_t rd = dec_rd(insn);
@@ -283,7 +285,8 @@ static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
 static inline bool op_auipc(struct riscv_t *rv, uint32_t insn)
 {
     /* U-type
-     * |               imm[31:12]               | rd | opcode |
+     * 31        26        21        16        11   9     6           0
+     * [ rd    5][ upper immediate                    19][ opcode    7]
      */
     const uint32_t rd = dec_rd(insn);
     const uint32_t val = dec_utype_imm(insn) + rv->PC;
@@ -343,7 +346,8 @@ static inline bool op_store(struct riscv_t *rv, uint32_t insn)
 static inline bool op_op(struct riscv_t *rv, uint32_t insn)
 {
     /* R-type
-     * | funct7       | rs2 | rs1 | funct3      | rd | opcode |
+     * 31        26        21        16        11   9     6           0
+     * [ rd    5][ rs1   5][ rs2   5][ funct          10][ opcode    7]
      */
     const uint32_t rd = dec_rd(insn);
     const uint32_t funct3 = dec_funct3(insn);
@@ -499,7 +503,8 @@ static inline bool op_op(struct riscv_t *rv, uint32_t insn)
 static inline bool op_lui(struct riscv_t *rv, uint32_t insn)
 {
     /* U-type
-     * |               imm[31:12]               | rd | opcode |
+     * 31        26        21        16        11   9     6           0
+     * [ rd    5][ upper immediate                    19][ opcode    7]
      */
     const uint32_t rd = dec_rd(insn);
     const uint32_t val = dec_utype_imm(insn);
@@ -519,7 +524,8 @@ static inline bool op_branch(struct riscv_t *rv, uint32_t insn)
     const uint32_t pc = rv->PC;
 
     /* B-type
-     * Immediate {[12],[10:5]}@25, {[4:1],[11]}@7
+     * 31        26        21        16        11   9     6           0
+     * [ immhi 5][ rs1   5][ rs2   5][ immlo     7][fun3][ opcode    7]
      */
     const uint32_t func3 = dec_funct3(insn);
     const int32_t imm = dec_btype_imm(insn);
@@ -584,7 +590,8 @@ static inline bool op_jalr(struct riscv_t *rv, uint32_t insn)
     const uint32_t pc = rv->PC;
 
     /* I-type
-     * |    imm[11:0]       | rs1 | funct3      | rd | opcode |
+     * 31        26        21        16        11   9     6           0
+     * [ rd    5][ rs1   5][ immhi 5][ immlo     7][fun3][ opcode    7]
      */
     const uint32_t rd = dec_rd(insn);
     const uint32_t rs1 = dec_rs1(insn);
@@ -623,7 +630,10 @@ static inline bool op_jal(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t pc = rv->PC;
 
-    /* J-type */
+    /* J-type
+     * 31        26        21        16        11   9     6           0
+     * [ jump target                                  25][ opcode    7]
+     */
     const uint32_t rd = dec_rd(insn);
     const int32_t rel = dec_jtype_imm(insn);
 
@@ -746,7 +756,8 @@ static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
 static inline bool op_system(struct riscv_t *rv, uint32_t insn)
 {
     /* I-type
-     * |    imm[11:0]       | rs1 | funct3      | rd | opcode |
+     * 31        26        21        16        11   9     6           0
+     * [ rd    5][ rs1   5][ immhi 5][ immlo     7][fun3][ opcode    7]
      */
     const int32_t imm = dec_itype_imm(insn);
     const int32_t csr = dec_csr(insn);

@@ -9,8 +9,14 @@
 
 ![Doom Gameplay](https://imgur.com/bLc5LG8.gif)
 
-### Limitations
-* The input system is not supported yet
+### Main Key Bindings (All key bindings are listed in the "READ THIS!" menu)
+* Move Forward/Backward: Up Arrow Key/Down Arrow Key
+* Move Left/Right: Comma(,) Key/Period(.) Key
+* Turn Left/Right: Left Arrow Key/Right Arrow Key
+* Shoot: Left Mouse Button or CTRL Key
+* Sprint: Shift Key
+* 1: Fist
+* 3: Shotgun
 
 ## Quake
 **source**: [quake-embedded](https://github.com/sysprog21/quake-embedded/)

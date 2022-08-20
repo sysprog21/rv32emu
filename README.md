@@ -103,6 +103,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
 * `pi.elf` : See [tests/pi.c](tests/pi.c)
 * `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
+* `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv)
 
 ## Reference
 

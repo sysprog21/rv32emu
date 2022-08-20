@@ -193,48 +193,6 @@ void syscall_draw_frame(struct riscv_t *rv)
     SDL_RenderPresent(renderer);
 }
 
-void syscall_draw_frame_pal(struct riscv_t *rv)
-{
-    state_t *s = rv_userdata(rv); /* access userdata */
-
-    /* draw_frame_pal(screen, pal, width, height) */
-    const uint32_t screen = rv_get_reg(rv, rv_reg_a0);
-    const uint32_t pal = rv_get_reg(rv, rv_reg_a1);
-    const uint32_t width = rv_get_reg(rv, rv_reg_a2);
-    const uint32_t height = rv_get_reg(rv, rv_reg_a3);
-
-    if (!check_sdl(rv, width, height))
-        return;
-
-    uint8_t *i = malloc(width * height);
-    uint8_t *j = malloc(256 * 3);
-
-    memory_read(s->mem, i, screen, width * height);
-    memory_read(s->mem, j, pal, 256 * 3);
-
-    int pitch = 0;
-    void *pixels_ptr;
-    if (SDL_LockTexture(texture, NULL, &pixels_ptr, &pitch))
-        exit(-1);
-    uint32_t *d = pixels_ptr;
-    const uint8_t *p = i;
-    for (size_t y = 0; y < height; ++y) {
-        for (size_t x = 0; x < width; ++x) {
-            const uint8_t c = p[x];
-            const uint8_t *lut = j + (c * 3);
-            d[x] = (lut[0] << 16) | (lut[1] << 8) | lut[2];
-        }
-        p += width, d += width;
-    }
-    SDL_UnlockTexture(texture);
-
-    SDL_RenderCopy(renderer, texture, NULL, &(SDL_Rect){0, 0, width, height});
-    SDL_RenderPresent(renderer);
-
-    free(i);
-    free(j);
-}
-
 void syscall_poll_event(struct riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */

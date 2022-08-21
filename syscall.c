@@ -35,9 +35,10 @@
     _(open, 1024)
 
 #ifdef ENABLE_SDL
-#define __SYSCALL_LIST_EXT    \
-    _(draw_frame, 0xBEEF)     \
-    _(poll_event, 0xC0DE)
+#define __SYSCALL_LIST_EXT \
+    _(draw_frame, 0xBEEF)  \
+    _(poll_event, 0xC0DE)  \
+    _(set_relative_mode, 0xFEED)
 #else
 #define __SYSCALL_LIST_EXT
 #endif
@@ -317,6 +318,7 @@ static void syscall_open(struct riscv_t *rv)
 #ifdef ENABLE_SDL
 extern void syscall_draw_frame(struct riscv_t *rv);
 extern void syscall_poll_event(struct riscv_t *rv);
+extern void syscall_set_relative_mode(struct riscv_t *rv);
 #endif
 
 void syscall_handler(struct riscv_t *rv)

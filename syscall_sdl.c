@@ -111,12 +111,6 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
             rv_halt(rv);
             return false;
         case SDL_KEYDOWN:
-            if (event.key.keysym.sym == SDLK_ESCAPE &&
-                SDL_GetRelativeMouseMode() == SDL_TRUE) {
-                SDL_SetRelativeMouseMode(SDL_FALSE);
-                break;
-            }
-            /* fall through */
         case SDL_KEYUP: {
             if (event.key.repeat)
                 break;
@@ -145,12 +139,6 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
             break;
         }
         case SDL_MOUSEBUTTONDOWN:
-            if (event.button.button == SDL_BUTTON_LEFT &&
-                SDL_GetRelativeMouseMode() == SDL_FALSE) {
-                SDL_SetRelativeMouseMode(SDL_TRUE);
-                break;
-            }
-            /* fall through */
         case SDL_MOUSEBUTTONUP: {
             event_t new_event = {
                 .type = MOUSE_BUTTON_EVENT,
@@ -223,4 +211,15 @@ void syscall_poll_event(struct riscv_t *rv)
     }
 
     rv_set_reg(rv, rv_reg_a0, 1);
+}
+
+void syscall_set_relative_mode(struct riscv_t *rv)
+{
+    /* set_relative_mode(enabled) */
+    const uint32_t enabled = rv_get_reg(rv, rv_reg_a0);
+
+    SDL_SetRelativeMouseMode(enabled);
+
+    if (enabled)
+        SDL_RaiseWindow(window);
 }

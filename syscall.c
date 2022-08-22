@@ -35,8 +35,8 @@
     _(open, 1024)
 
 #ifdef ENABLE_SDL
-#define __SYSCALL_LIST_EXT    \
-    _(draw_frame, 0xBEEF)     \
+#define __SYSCALL_LIST_EXT \
+    _(draw_frame, 0xBEEF)  \
     _(poll_event, 0xC0DE)
 #else
 #define __SYSCALL_LIST_EXT

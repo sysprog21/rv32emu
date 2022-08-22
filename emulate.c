@@ -6,7 +6,10 @@
 #ifdef ENABLE_RV32F
 #include <math.h>
 #if defined(__APPLE__)
-#define isinff __inline_isinff
+static inline int isinff(float x)
+{
+    return __builtin_fabsf(x) == __builtin_inff();
+}
 #endif
 #endif
 

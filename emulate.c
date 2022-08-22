@@ -1851,7 +1851,11 @@ riscv_user_t rv_userdata(struct riscv_t *rv)
 bool rv_set_pc(struct riscv_t *rv, riscv_word_t pc)
 {
     assert(rv);
+#ifdef ENABLE_RV32C
+    if (pc & 1)
+#else
     if (pc & 3)
+#endif
         return false;
 
     rv->PC = pc;

@@ -37,7 +37,7 @@
 #ifdef ENABLE_SDL
 #define __SYSCALL_LIST_EXT \
     _(draw_frame, 0xBEEF)  \
-    _(draw_frame_pal, 0xBABE)
+    _(poll_event, 0xC0DE)
 #else
 #define __SYSCALL_LIST_EXT
 #endif
@@ -120,6 +120,11 @@ static void syscall_exit(struct riscv_t *rv)
     fprintf(stdout, "inferior exit code %d\n", (int) code);
 }
 
+/* brk(increment)
+ * Note:
+ *   - 8 byte alignment for malloc chunks
+ *   - 4 KiB aligned for sbrk blocks
+ */
 static void syscall_brk(struct riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
@@ -201,6 +206,10 @@ static void syscall_close(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, 0);
 }
 
+/* lseek() repositions the file offset of the open file description associated
+ * with the file descriptor fd to the argument offset according to the
+ * directive whence.
+ */
 static void syscall_lseek(struct riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
@@ -307,7 +316,7 @@ static void syscall_open(struct riscv_t *rv)
 
 #ifdef ENABLE_SDL
 extern void syscall_draw_frame(struct riscv_t *rv);
-extern void syscall_draw_frame_pal(struct riscv_t *rv);
+extern void syscall_poll_event(struct riscv_t *rv);
 #endif
 
 void syscall_handler(struct riscv_t *rv)

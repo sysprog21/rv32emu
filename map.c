@@ -13,8 +13,78 @@ struct map_internal {
 
     map_iter_t it_end, it_most, it_least;
 
-    int (*comparator)(void *, void *);
+    int (*comparator)(const void *, const void *);
 };
+
+typedef enum { RB_RED = 0, RB_BLACK } map_color_t;
+
+/**
+ * Get parent of node
+ * @node: pointer to the rb node
+ *
+ * Return: rb parent node of @node
+ */
+static inline map_node_t *rb_parent(const map_node_t *node)
+{
+    return (map_node_t *) (node->parent_color & ~1LU);
+}
+
+/**
+ * Get color of node
+ * @node: pointer to the rb node
+ *
+ * Return: color of @node
+ */
+static inline map_color_t rb_color(const map_node_t *node)
+{
+    return (map_color_t) (node->parent_color & 1LU);
+}
+
+/**
+ * Set parent of node
+ * @node: pointer to the rb node
+ * @parent: pointer to the new parent node
+ */
+static inline void rb_set_parent(map_node_t *node, map_node_t *parent)
+{
+    node->parent_color = (unsigned long) parent | (node->parent_color & 1LU);
+}
+
+/**
+ * Set color of node
+ * @node: pointer to the rb node
+ * @color: new color of the node
+ */
+static inline void rb_set_color(map_node_t *node, map_color_t color)
+{
+    node->parent_color = (node->parent_color & ~1LU) | color;
+}
+
+/**
+ * Set parent and color of node
+ * @node: pointer to the rb node
+ * @parent: pointer to the new parent node
+ * @color: new color of the node
+ */
+static inline void rb_set_parent_color(map_node_t *node,
+                                       map_node_t *parent,
+                                       map_color_t color)
+{
+    node->parent_color = (unsigned long) parent | color;
+}
+
+/**
+ * Check if node is red
+ * @node: Node to check
+ *
+ * Return: false when @node is NULL or not red, true if @node is red
+ */
+static inline bool rb_is_red(map_node_t *node)
+{
+    if (node && (rb_color(node) == RB_RED))
+        return true;
+    return false;
+}
 
 /* Create a node to be attached in the map internal tree structure */
 static map_node_t *map_create_node(void *key,
@@ -29,10 +99,10 @@ static map_node_t *map_create_node(void *key,
     node->data = malloc(vsize);
 
     /* Setup the pointers */
-    node->left = node->right = node->up = NULL;
+    node->left = node->right = NULL;
 
-    /* Set the color to black by default */
-    node->color = C_MAP_RED;
+    /* Set the color to read by default */
+    rb_set_parent_color(node, NULL, RB_RED);
 
     /*
      * Copy over the key and values
@@ -74,23 +144,23 @@ static void map_delete_node(map_t obj UNUSED, map_node_t *node)
  */
 static map_node_t *map_rotate_left(map_t obj, map_node_t *node)
 {
-    map_node_t *r = node->right, *rl = r->left, *up = node->up;
+    map_node_t *r = node->right, *rl = r->left, *parent = rb_parent(node);
 
     /* Adjust */
-    r->up = up;
+    rb_set_parent(r, parent);
     r->left = node;
 
     node->right = rl;
-    node->up = r;
+    rb_set_parent(node, r);
 
     if (node->right)
-        node->right->up = node;
+        rb_set_parent(node->right, node);
 
-    if (up) {
-        if (up->right == node)
-            up->right = r;
+    if (parent) {
+        if (parent->right == node)
+            parent->right = r;
         else
-            up->left = r;
+            parent->left = r;
     }
 
     if (node == obj->head)
@@ -113,23 +183,23 @@ static map_node_t *map_rotate_left(map_t obj, map_node_t *node)
  */
 static map_node_t *map_rotate_right(map_t obj, map_node_t *node)
 {
-    map_node_t *l = node->left, *lr = l->right, *up = node->up;
+    map_node_t *l = node->left, *lr = l->right, *parent = rb_parent(node);
 
     /* Adjust */
-    l->up = up;
+    rb_set_parent(l, parent);
     l->right = node;
 
     node->left = lr;
-    node->up = l;
+    rb_set_parent(node, l);
 
     if (node->left)
-        node->left->up = node;
+        rb_set_parent(node->left, node);
 
-    if (up) {
-        if (up->right == node)
-            up->right = l;
+    if (parent) {
+        if (parent->right == node)
+            parent->right = l;
         else
-            up->left = l;
+            parent->left = l;
     }
 
     if (node == obj->head)
@@ -148,10 +218,10 @@ static void map_l_l(map_t obj,
     grandparent = map_rotate_right(obj, grandparent);
 
     /* Swap grandparent and uncle's colors */
-    map_color_t c1 = grandparent->color, c2 = grandparent->right->color;
+    map_color_t c1 = rb_color(grandparent), c2 = rb_color(grandparent->right);
 
-    grandparent->color = c2;
-    grandparent->right->color = c1;
+    rb_set_color(grandparent, c2);
+    rb_set_color(grandparent->right, c1);
 }
 
 static void map_l_r(map_t obj,
@@ -165,7 +235,7 @@ static void map_l_r(map_t obj,
 
     /* Refigure out the identity */
     node = parent->left;
-    grandparent = parent->up;
+    grandparent = rb_parent(parent);
     uncle =
         (grandparent->left == parent) ? grandparent->right : grandparent->left;
 
@@ -183,10 +253,10 @@ static void map_r_r(map_t obj,
     grandparent = map_rotate_left(obj, grandparent);
 
     /* Swap grandparent and uncle's colors */
-    map_color_t c1 = grandparent->color, c2 = grandparent->left->color;
+    map_color_t c1 = rb_color(grandparent), c2 = rb_color(grandparent->left);
 
-    grandparent->color = c2;
-    grandparent->left->color = c1;
+    rb_set_color(grandparent, c2);
+    rb_set_color(grandparent->left, c1);
 }
 
 static void map_r_l(map_t obj,
@@ -200,7 +270,7 @@ static void map_r_l(map_t obj,
 
     /* Refigure out the identity */
     node = parent->right;
-    grandparent = parent->up;
+    grandparent = rb_parent(parent);
     uncle =
         (grandparent->left == parent) ? grandparent->right : grandparent->left;
 
@@ -212,18 +282,19 @@ static void map_fix_colors(map_t obj, map_node_t *node)
 {
     /* If root, set the color to black */
     if (node == obj->head) {
-        node->color = C_MAP_BLACK;
+        rb_set_color(node, RB_BLACK);
         return;
     }
 
     /* If node's parent is black or node is root, back out. */
-    if (node->up->color == C_MAP_BLACK && node->up != obj->head)
+    if (rb_color(rb_parent(node)) == RB_BLACK && rb_parent(node) != obj->head)
         return;
 
     /* Find out the identity */
-    map_node_t *parent = node->up, *grandparent = parent->up, *uncle;
+    map_node_t *parent = rb_parent(node), *grandparent = rb_parent(parent),
+               *uncle;
 
-    if (!parent->up)
+    if (!rb_parent(parent))
         return;
 
     /* Find out the uncle */
@@ -232,17 +303,17 @@ static void map_fix_colors(map_t obj, map_node_t *node)
     else
         uncle = grandparent->left;
 
-    if (uncle && uncle->color == C_MAP_RED) {
+    if (rb_is_red(uncle)) {
         /* If the uncle is red, change color of parent and uncle to black */
-        uncle->color = C_MAP_BLACK;
-        parent->color = C_MAP_BLACK;
+        rb_set_color(uncle, RB_BLACK);
+        rb_set_color(parent, RB_BLACK);
 
         /* Change color of grandparent to red. */
-        grandparent->color = C_MAP_RED;
+        rb_set_color(grandparent, RB_RED);
 
         /* Call this on the grandparent */
         map_fix_colors(obj, grandparent);
-    } else if (!uncle || uncle->color == C_MAP_BLACK) {
+    } else {
         /* If the uncle is black. */
         if (parent == grandparent->left && node == parent->left)
             map_l_l(obj, node, parent, grandparent, uncle);
@@ -276,40 +347,40 @@ static void map_delete_fixup(map_t obj,
     if (!node)
         return;
 
-    while (node != obj->head && node->color == C_MAP_BLACK) {
+    while (node != obj->head && rb_color(node) == RB_BLACK) {
         if (y_is_left) { /* if left child */
             w = p->right;
 
-            if (w->color == C_MAP_RED) {
-                w->color = C_MAP_BLACK;
-                p->color = C_MAP_RED;
+            if (rb_is_red(w)) {
+                rb_set_color(w, RB_BLACK);
+                rb_set_color(p, RB_RED);
                 p = map_rotate_left(obj, p)->left;
                 w = p->right;
             }
 
-            lc = !w->left ? C_MAP_BLACK : w->left->color;
-            rc = !w->right ? C_MAP_BLACK : w->right->color;
+            lc = !w->left ? RB_BLACK : rb_color(w->left);
+            rc = !w->right ? RB_BLACK : rb_color(w->right);
 
-            if (lc == C_MAP_BLACK && rc == C_MAP_BLACK) {
-                w->color = C_MAP_RED;
-                node = node->up;
-                p = node->up;
+            if (lc == RB_BLACK && rc == RB_BLACK) {
+                rb_set_color(w, RB_RED);
+                node = rb_parent(node);
+                p = rb_parent(node);
 
                 if (p)
                     y_is_left = (node == p->left);
             } else {
-                if (rc == C_MAP_BLACK) {
-                    w->left->color = C_MAP_BLACK;
-                    w->color = C_MAP_RED;
+                if (rc == RB_BLACK) {
+                    rb_set_color(w->left, RB_BLACK);
+                    rb_set_color(w, RB_RED);
                     w = map_rotate_right(obj, w);
                     w = p->right;
                 }
 
-                w->color = p->color;
-                p->color = C_MAP_BLACK;
+                rb_set_color(w, rb_color(p));
+                rb_set_color(p, RB_BLACK);
 
                 if (w->right)
-                    w->right->color = C_MAP_BLACK;
+                    rb_set_color(w->right, RB_BLACK);
 
                 p = map_rotate_left(obj, p);
                 node = obj->head;
@@ -319,35 +390,35 @@ static void map_delete_fixup(map_t obj,
             /* Same except flipped "left" and "right" */
             w = p->left;
 
-            if (w->color == C_MAP_RED) {
-                w->color = C_MAP_BLACK;
-                p->color = C_MAP_RED;
+            if (rb_is_red(w)) {
+                rb_set_color(w, RB_BLACK);
+                rb_set_color(p, RB_RED);
                 p = map_rotate_right(obj, p)->right;
                 w = p->left;
             }
 
-            lc = !w->left ? C_MAP_BLACK : w->left->color;
-            rc = !w->right ? C_MAP_BLACK : w->right->color;
+            lc = !w->left ? RB_BLACK : rb_color(w->left);
+            rc = !w->right ? RB_BLACK : rb_color(w->right);
 
-            if (lc == C_MAP_BLACK && rc == C_MAP_BLACK) {
-                w->color = C_MAP_RED;
-                node = node->up;
-                p = node->up;
+            if (lc == RB_BLACK && rc == RB_BLACK) {
+                rb_set_color(w, RB_RED);
+                node = rb_parent(node);
+                p = rb_parent(node);
                 if (p)
                     y_is_left = (node == p->left);
             } else {
-                if (lc == C_MAP_BLACK) {
-                    w->right->color = C_MAP_BLACK;
-                    w->color = C_MAP_RED;
+                if (lc == RB_BLACK) {
+                    rb_set_color(w->right, RB_BLACK);
+                    rb_set_color(w, RB_RED);
                     w = map_rotate_left(obj, w);
                     w = p->left;
                 }
 
-                w->color = p->color;
-                p->color = C_MAP_BLACK;
+                rb_set_color(w, rb_color(p));
+                rb_set_color(p, RB_BLACK);
 
                 if (w->left)
-                    w->left->color = C_MAP_BLACK;
+                    rb_set_color(w->left, RB_BLACK);
 
                 p = map_rotate_right(obj, p);
                 node = obj->head;
@@ -356,7 +427,7 @@ static void map_delete_fixup(map_t obj,
         }
     }
 
-    node->color = C_MAP_BLACK;
+    rb_set_color(node, RB_BLACK);
 }
 
 /*
@@ -407,7 +478,7 @@ static void map_calibrate(map_t obj)
  * required to be passed in. A destruct function is optional and must be
  * added in through another function.
  */
-map_t map_new(size_t s1, size_t s2, int (*cmp)(void *, void *))
+map_t map_new(size_t s1, size_t s2, int (*cmp)(const void *, const void *))
 {
     map_t obj = malloc(sizeof(struct map_internal));
 
@@ -445,7 +516,7 @@ bool map_insert(map_t obj, void *key, void *value)
     if (!obj->head) {
         /* Just insert the node in as the new head. */
         obj->head = new_node;
-        obj->head->color = C_MAP_BLACK;
+        rb_set_color(obj->head, RB_BLACK);
 
         /* Calibrate the tree to properly assign pointers. */
         map_calibrate(obj);
@@ -465,7 +536,7 @@ bool map_insert(map_t obj, void *key, void *value)
         if (res < 0) {
             if (!cur->left) {
                 cur->left = new_node;
-                new_node->up = cur;
+                rb_set_parent(new_node, cur);
                 map_fix_colors(obj, new_node);
                 break;
             }
@@ -473,7 +544,7 @@ bool map_insert(map_t obj, void *key, void *value)
         } else {
             if (!cur->right) {
                 cur->right = new_node;
-                new_node->up = cur;
+                rb_set_parent(new_node, cur);
                 map_fix_colors(obj, new_node);
                 break;
             }
@@ -503,15 +574,15 @@ static void map_prev(map_t obj, map_iter_t *it)
         } else {
             /* Keep going up until there is a left child */
             it->prev = it->node;
-            it->node = it->node->up;
+            it->node = rb_parent(it->node);
 
             if (!it->node)
                 return;
 
-            while (it->node->up && it->node->left &&
+            while (rb_parent(it->node) && it->node->left &&
                    (it->node->left == it->prev)) {
                 it->prev = it->node;
-                it->node = it->node->up;
+                it->node = rb_parent(it->node);
             }
         }
     }
@@ -624,19 +695,19 @@ void map_erase(map_t obj, map_iter_t *it)
         x = y->right;
 
     if (x)
-        x->up = y->up;
+        rb_set_parent(x, rb_parent(y));
 
-    x_parent = y->up;
+    x_parent = rb_parent(y);
 
     bool y_is_left = false;
-    if (!y->up) {
+    if (!rb_parent(y)) {
         obj->head = x;
     } else {
-        if (y == y->up->left) {
-            y->up->left = x;
+        if (y == rb_parent(y)->left) {
+            rb_parent(y)->left = x;
             y_is_left = true;
         } else
-            y->up->right = x;
+            rb_parent(y)->right = x;
     }
 
     if (y != node) {
@@ -649,20 +720,19 @@ void map_erase(map_t obj, map_iter_t *it)
         y->key = y->data = NULL;
     }
 
-    if (y->color == C_MAP_BLACK) {
+    if (rb_color(y) == RB_BLACK) {
         if (!x) { /* Make a blank node if null */
             double_blk =
                 map_create_node(NULL, NULL, obj->key_size, obj->element_size);
 
             x = double_blk;
 
-            if (!target->up->left)
-                target->up->left = x;
+            if (!rb_parent(target)->left)
+                rb_parent(target)->left = x;
             else
-                target->up->right = x;
+                rb_parent(target)->right = x;
 
-            x->up = target->up;
-            x->color = C_MAP_BLACK;
+            rb_set_parent_color(x, rb_parent(target), RB_BLACK);
         }
 
         /* fix the tree up */
@@ -670,11 +740,11 @@ void map_erase(map_t obj, map_iter_t *it)
 
         /* Clean up Double Black */
         if (double_blk) {
-            if (double_blk->up) {
-                if (double_blk->up->left == double_blk)
-                    double_blk->up->left = NULL;
+            if (rb_parent(double_blk)) {
+                if (rb_parent(double_blk)->left == double_blk)
+                    rb_parent(double_blk)->left = NULL;
                 else
-                    double_blk->up->right = NULL;
+                    rb_parent(double_blk)->right = NULL;
             }
 
             map_delete_node(obj, double_blk);

@@ -8,6 +8,15 @@
 #define unlikely(x) x
 #endif
 
+/* Alignment macro */
+#if defined(__GNUC__) || defined(__clang__)
+#define __ALIGNED(x) __attribute__((aligned(x)))
+#elif defined(_MSC_VER)
+#define __ALIGNED(x) __declspec(align(x))
+#else /* unspported compilers */
+#define __ALIGNED(x)
+#endif
+
 /* Pattern Matching for C macros.
  * https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
  */

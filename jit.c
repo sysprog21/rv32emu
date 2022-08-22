@@ -1049,7 +1049,7 @@ static void block_finish(struct riscv_t *rv, struct block_t *block)
     map_iter_t it;
     map_find(jit->funcs, &it, &block->pc_start);
     if (!map_at_end(jit->funcs, &it)) {
-        call_block_t func = map_iter_value(&it, call_block_t *);
+        call_block_t func = map_iter_value(&it, call_block_t);
         block->func = func;
         block_map_insert(jit->block_map, block);
         return;
@@ -1184,7 +1184,7 @@ static void rv_jit_load_cache(struct riscv_jit_t *jit, const char *cache)
                 MIR_link(ctx, MIR_set_gen_interface, import_solver);
                 struct block_t *block = block_alloc();
 
-                char *op_name = mir_func->u.func->name;
+                char *op_name = (char *) mir_func->u.func->name;
                 op_name = op_name + 9;
                 char *val = strtok(op_name, delim);
                 block->pc_start = atoi(val);

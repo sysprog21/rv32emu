@@ -1046,6 +1046,15 @@ static inline void dump_code(rv_buffer *buffer,
 static void block_finish(struct riscv_t *rv, struct block_t *block)
 {
     struct riscv_jit_t *jit = rv->jit;
+    map_iter_t it;
+    map_find(jit->funcs, &it, &block->pc_start);
+    if (!map_at_end(jit->funcs, &it)) {
+        call_block_t func = map_iter_value(&it, call_block_t *);
+        block->func = func;
+        block_map_insert(jit->block_map, block);
+        return;
+    }
+
     c2mir_init(jit->ctx);
     size_t gen_num = 0;
     MIR_gen_init(jit->ctx, gen_num);
@@ -1090,6 +1099,7 @@ static void block_finish(struct riscv_t *rv, struct block_t *block)
     }
     assert(mir_func);
     block->func = MIR_gen(jit->ctx, gen_num, mir_func);
+    map_insert(jit->funcs, &block->pc_start, &block->func);
 
     MIR_gen_finish(jit->ctx);
     c2mir_finish(jit->ctx);
@@ -1150,17 +1160,18 @@ static void rv_jit_load_cache(struct riscv_jit_t *jit, const char *cache)
         return;
     MIR_read(ctx, file);
     fclose(file);
+    size_t module_size = DLIST_MIR_module_t_length(MIR_get_module_list(ctx));
+    if (!module_size)
+        return;
+
+    while (jit->block_map->capacity < module_size) {
+        block_map_enlarge(jit);
+    }
+    struct block_map_t *map = jit->block_map;
 
     c2mir_init(ctx);
     MIR_gen_init(ctx, 5);
     MIR_gen_set_optimize_level(ctx, 0, 3);
-
-    MIR_module_t all_modules =
-        DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
-    size_t module_size = DLIST_LENGTH(MIR_module_t, all_modules);
-    struct block_map_t *map = jit->block_map;
-    if (!module_size)
-        return;
 
     MIR_module_t modules;
     MIR_item_t mir_func;
@@ -1226,11 +1237,11 @@ struct riscv_jit_t *rv_jit_init(uint32_t bits)
     memset(jit->options, 0, sizeof(struct c2mir_options));
     jit->ctx = MIR_init();
     jit->block_map = block_map_alloc(bits);
+    jit->funcs = map_init(uint32_t, call_block_t *, map_cmp_uint);
     size_t len = strlen(jit_config->program);
     char cache[len + 5];
     snprintf(cache, 30, "%s.mirb", jit_config->program);
     rv_jit_load_cache(jit, cache);
-
     if (jit_config->report) {
         char report[len + 4];
         snprintf(report, 30, "%s.log", jit_config->program);
@@ -1257,7 +1268,7 @@ void rv_jit_free(struct riscv_jit_t *jit)
         fclose(jit->codegen_log);
         fclose(jit->code_log);
     }
-
+    map_delete(jit->funcs);
     MIR_finish(ctx);
     free(jit_config->program);
     free(jit_config);

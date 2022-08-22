@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "c2mir/c2mir.h"
+#include "map.h"
 #include "mir.h"
 #include "riscv_private.h"
 
@@ -46,6 +47,8 @@ struct riscv_jit_t {
     uint8_t optimize_level;
     uint32_t insn_len;
     struct block_map_t *block_map;
+    /* cache of compiled functions */
+    map_t funcs;
     FILE *codegen_log;
     FILE *code_log;
     FILE *cache;

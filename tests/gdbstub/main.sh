@@ -10,11 +10,12 @@ PID=$!
 # We should confirm rv32emu is still executing before running GDB
 if ps -p $PID > /dev/null
 then
-    riscv32-unknown-elf-gdb -q -x tests/gdbstub/remote-commands.gdb > /tmp/gdbstub-test.txt
+    tmpfile=/tmp/rv32emu-gdbstub.$PID
+    riscv32-unknown-elf-gdb --batch -x tests/gdbstub/remote-commands.gdb > ${tmpfile}
 
     # check if we stop at the breakpoint
-    expected=$(grep -rw "Breakpoint 1 at" /tmp/gdbstub-test.txt | awk {'print $4'})
-    ans=$(grep -r "$1 =" /tmp/gdbstub-test.txt | awk {'print $5'})
+    expected=$(grep -rw "Breakpoint 1 at" ${tmpfile} | awk {'print $4'})
+    ans=$(grep -r "$1 =" ${tmpfile} | awk {'print $5'})
     if [ "$expected" != "$ans" ]; then
         echo -e "${r}$expected != $ans... ${RED}pass${NC}"
         exit 1

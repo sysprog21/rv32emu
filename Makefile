@@ -61,7 +61,7 @@ MINI_GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
 LIB_GDBSTUB += $(MINI_GDBSTUB_OUT)/libgdbstub.a
 gdbstub-test: $(BIN)
-	./tests/gdbstub-test/main.sh
+	tests/gdbstub/main.sh
 
 $(LIB_GDBSTUB):
 	git submodule update --init mini-gdbstub

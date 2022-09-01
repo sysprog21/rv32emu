@@ -7,7 +7,16 @@ PID=$!
 if ps -p $PID > /dev/null
 then
     tmpfile=/tmp/rv32emu-gdbstub.$PID
-    riscv32-unknown-elf-gdb --batch -x tests/gdbstub/remote-commands.gdb > ${tmpfile}
+    riscv32-unknown-elf-gdb --batch \
+        -ex "file build/puzzle.elf" \
+        -ex "target remote :1234" \
+        -ex "break *0x10700" \
+        -ex "continue" \
+        -ex "print \$pc" \
+        -ex "del 1" \
+        -ex "stepi" \
+        -ex "stepi" \
+        -ex "continue" > ${tmpfile}
 
     # check if we stop at the breakpoint
     expected=$(grep -rw "Breakpoint 1 at" ${tmpfile} | awk {'print $4'})

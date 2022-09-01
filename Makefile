@@ -69,7 +69,7 @@ OBJS_EXT += gdbstub.o
 CFLAGS += -D ENABLE_GDBSTUB -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB)
 gdbstub-test: $(BIN)
-	tests/gdbstub/main.sh
+	$(Q)tests/gdbstub/main.sh && $(call notice, [OK])
 endif
 
 # Clear the .DEFAULT_GOAL special variable, so that the following turns

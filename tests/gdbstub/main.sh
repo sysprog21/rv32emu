@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 
-r=$'\r'
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-NC='\033[0m'
-
 build/rv32emu --gdbstub build/puzzle.elf &
 PID=$!
-# We should confirm rv32emu is still executing before running GDB
+
+# Before starting GDB, we should ensure rv32emu is still running.
 if ps -p $PID > /dev/null
 then
     tmpfile=/tmp/rv32emu-gdbstub.$PID
@@ -17,10 +13,10 @@ then
     expected=$(grep -rw "Breakpoint 1 at" ${tmpfile} | awk {'print $4'})
     ans=$(grep -r "$1 =" ${tmpfile} | awk {'print $5'})
     if [ "$expected" != "$ans" ]; then
-        echo -e "${r}$expected != $ans... ${RED}pass${NC}"
+        # Fail
         exit 1
     fi
-    echo -e "${r}$expected == $ans... ${GREEN}pass${NC}"
+    # Pass and wait
     exit 0
     wait $PID
 fi

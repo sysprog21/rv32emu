@@ -138,5 +138,6 @@ distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1
 	$(RM) *.zip
+	$(RM) -r $(OUT)/mini-gdbstub
 
 -include $(deps)

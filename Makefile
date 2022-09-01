@@ -59,17 +59,17 @@ ENABLE_GDBSTUB ?= 1
 ifeq ("$(ENABLE_GDBSTUB)", "1")
 MINI_GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
-LIB_GDBSTUB += $(MINI_GDBSTUB_OUT)/libgdbstub.a
-gdbstub-test: $(BIN)
-	tests/gdbstub/main.sh
-
-$(LIB_GDBSTUB):
-	git submodule update --init mini-gdbstub
+mini-gdbstub/Makefile:
+	git submodule update --init $(dir $@)
+GDBSTUB_LIB := $(MINI_GDBSTUB_OUT)/libgdbstub.a
+$(GDBSTUB_LIB): mini-gdbstub/Makefile
 	$(MAKE) -C mini-gdbstub O=$(MINI_GDBSTUB_OUT)
-$(OUT)/emulate.o: $(LIB_GDBSTUB)
+$(OUT)/emulate.o: $(GDBSTUB_LIB)
 OBJS_EXT += gdbstub.o
 CFLAGS += -D ENABLE_GDBSTUB -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
-LDFLAGS += $(LIB_GDBSTUB)
+LDFLAGS += $(GDBSTUB_LIB)
+gdbstub-test: $(BIN)
+	tests/gdbstub/main.sh
 endif
 
 # Clear the .DEFAULT_GOAL special variable, so that the following turns

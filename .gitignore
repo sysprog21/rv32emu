@@ -8,5 +8,6 @@ build/gfx.wad
 # built objects
 build/rv32emu
 build/arch-test
+build/mini-gdbstub
 *.o
 *.o.d

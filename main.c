@@ -7,6 +7,10 @@
 
 /* enable program trace mode */
 static bool opt_trace = false;
+#ifdef ENABLE_GDBSTUB
+/* enable program gdbstub mode */
+static bool opt_gdbstub = false;
+#endif
 
 /* RISCV arch-test */
 static bool opt_arch_test = false;
@@ -76,6 +80,9 @@ static void print_usage(const char *filename)
             "Usage: %s [options] [filename]\n"
             "Options:\n"
             "  --trace : print executable trace\n"
+#ifdef ENABLE_GDBSTUB
+            "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
+#endif
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n",
             filename);
@@ -94,6 +101,12 @@ static bool parse_args(int argc, char **args)
                 opt_trace = true;
                 continue;
             }
+#ifdef ENABLE_GDBSTUB
+            if (!strcmp(arg, "--gdbstub")) {
+                opt_gdbstub = true;
+                continue;
+            }
+#endif
             if (!strcmp(arg, "--arch-test")) {
                 opt_arch_test = true;
                 if (i + 1 >= argc) {
@@ -199,7 +212,13 @@ int main(int argc, char **args)
     /* run based on the specified mode */
     if (opt_trace) {
         run_and_trace(rv, elf);
-    } else {
+    }
+#ifdef ENABLE_GDBSTUB
+    else if (opt_gdbstub) {
+        rv_debug(rv);
+    }
+#endif
+    else {
         run(rv);
     }
 

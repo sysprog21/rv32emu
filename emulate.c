@@ -13,6 +13,10 @@ static inline int isinff(float x)
 #endif
 #endif
 
+#ifdef ENABLE_GDBSTUB
+extern struct target_ops rv_ops;
+#endif
+
 #include "riscv.h"
 #include "riscv_private.h"
 
@@ -1671,6 +1675,27 @@ static inline bool op_unimp(struct riscv_t *rv, uint32_t insn UNUSED)
     rv_except_illegal_insn(rv, insn);
     return false;
 }
+
+#ifdef ENABLE_GDBSTUB
+void rv_debug(struct riscv_t *rv)
+{
+    if (!gdbstub_init(&rv->gdbstub, &rv_ops,
+                      (arch_info_t){
+                          .reg_num = 33,
+                          .reg_byte = 4,
+                          .target_desc = TARGET_RV32,
+                      },
+                      GDBSTUB_COMM)) {
+        return;
+    }
+
+    if (!gdbstub_run(&rv->gdbstub, (void *) rv)) {
+        return;
+    }
+    gdbstub_close(&rv->gdbstub);
+}
+
+#endif /* ENABLE_GDBSTUB */
 
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {

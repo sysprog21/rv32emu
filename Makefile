@@ -55,6 +55,27 @@ $(OUT)/emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
 endif
 endif
 
+ENABLE_GDBSTUB ?= 1
+ifeq ("$(ENABLE_GDBSTUB)", "1")
+MINI_GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
+GDBSTUB_COMM = 127.0.0.1:1234
+LIB_GDBSTUB += $(MINI_GDBSTUB_OUT)/libgdbstub.a
+gdbstub-test: $(BIN)
+	./tests/gdbstub-test/main.sh
+
+$(LIB_GDBSTUB):
+	git submodule update --init mini-gdbstub
+	$(MAKE) -C mini-gdbstub O=$(MINI_GDBSTUB_OUT)
+$(OUT)/emulate.o: $(LIB_GDBSTUB)
+OBJS_EXT += gdbstub.o
+CFLAGS += -D ENABLE_GDBSTUB -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
+LDFLAGS += $(LIB_GDBSTUB)
+endif
+
+# Clear the .DEFAULT_GOAL special variable, so that the following turns
+# to the first target after .DEFAULT_GOAL is not set.
+.DEFAULT_GOAL :=
+
 all: $(BIN)
 
 OBJS := \

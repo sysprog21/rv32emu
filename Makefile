@@ -57,13 +57,13 @@ endif
 
 ENABLE_GDBSTUB ?= 1
 ifeq ("$(ENABLE_GDBSTUB)", "1")
-MINI_GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
+GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
 mini-gdbstub/Makefile:
 	git submodule update --init $(dir $@)
-GDBSTUB_LIB := $(MINI_GDBSTUB_OUT)/libgdbstub.a
+GDBSTUB_LIB := $(GDBSTUB_OUT)/libgdbstub.a
 $(GDBSTUB_LIB): mini-gdbstub/Makefile
-	$(MAKE) -C mini-gdbstub O=$(MINI_GDBSTUB_OUT)
+	$(MAKE) -C $(dir $<) O=$(dir $@)
 $(OUT)/emulate.o: $(GDBSTUB_LIB)
 OBJS_EXT += gdbstub.o
 CFLAGS += -D ENABLE_GDBSTUB -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'

@@ -1,6 +1,7 @@
 #include <assert.h>
 #include "mini-gdbstub/include/gdbstub.h"
 #include "riscv_private.h"
+#include "breakpoint.h"
 
 static size_t rv_read_reg(void *args, int regno)
 {
@@ -31,7 +32,7 @@ static gdb_action_t rv_cont(void *args)
     const uint32_t cycles_per_step = 1;
 
     for (; !rv_has_halted(rv);) {
-        if (rv->breakpoint_specified && (rv_get_pc(rv) == rv->breakpoint_addr)) {
+        if (breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv)) != NULL) {
             break;
         }
         rv_step(rv, cycles_per_step);
@@ -50,12 +51,10 @@ static gdb_action_t rv_stepi(void *args)
 static bool rv_set_bp(void *args, size_t addr, bp_type_t type)
 {
     struct riscv_t *rv = (struct riscv_t *) args;
-    if (type != BP_SOFTWARE || rv->breakpoint_specified)
+    if (type != BP_SOFTWARE)
         return false;
 
-    rv->breakpoint_specified = true;
-    rv->breakpoint_addr = addr;
-    return true;;
+    return breakpoint_map_insert(rv->breakpoint_map, addr);
 }
 
 static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
@@ -64,11 +63,7 @@ static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
     if (type != BP_SOFTWARE)
         return false;
     /* When there is no matched breakpoint, no further action is taken */
-    if (!rv->breakpoint_specified || addr != rv->breakpoint_addr)
-        return true;
-
-    rv->breakpoint_specified = false;
-    rv->breakpoint_addr = 0;
+    breakpoint_map_del(rv->breakpoint_map, addr);
     return true;
 }
 

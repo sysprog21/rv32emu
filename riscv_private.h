@@ -2,6 +2,7 @@
 #include <stdbool.h>
 
 #ifdef ENABLE_GDBSTUB
+#include "breakpoint.h"
 #include "mini-gdbstub/include/gdbstub.h"
 #endif
 #include "riscv.h"
@@ -146,8 +147,7 @@ struct riscv_t {
     gdbstub_t gdbstub;
 
     /* GDB instruction breakpoint */
-    bool breakpoint_specified;
-    riscv_word_t breakpoint_addr;
+    breakpoint_map_t breakpoint_map;
 #endif
 
 #ifdef ENABLE_RV32F

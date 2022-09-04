@@ -109,6 +109,7 @@ enum {
     FMASK_SIGN        = 0b10000000000000000000000000000000,
     FMASK_EXPN        = 0b01111111100000000000000000000000,
     FMASK_FRAC        = 0b00000000011111111111111111111111,
+    FMASK_QNAN        = 0b00000000010000000000000000000000,
     //                    ....xxxx....xxxx....xxxx....xxxx
     FFLAG_MASK        = 0b00000000000000000000000000011111,
     FFLAG_INVALID_OP  = 0b00000000000000000000000000010000,
@@ -312,7 +313,7 @@ static inline uint32_t calc_fclass(uint32_t f) {
   /* 0x001    rs1 is -INF */
   out |= (f == 0xff800000) ? 0x001 : 0;
   /* 0x002    rs1 is negative normal */
-  out |= (expn && expn < 0x78000000 && sign) ? 0x002 : 0;
+  out |= (expn && (expn != FMASK_EXPN) && sign) ? 0x002 : 0;
   /* 0x004    rs1 is negative subnormal */
   out |= (!expn && frac && sign) ? 0x004 : 0;
   /* 0x008    rs1 is -0 */
@@ -322,13 +323,13 @@ static inline uint32_t calc_fclass(uint32_t f) {
   /* 0x020    rs1 is positive subnormal */
   out |= (!expn && frac && !sign) ? 0x020 : 0;
   /* 0x040    rs1 is positive normal */
-  out |= (expn && expn < 0x78000000 && !sign) ? 0x040 : 0;
+  out |= (expn && (expn != FMASK_EXPN) && !sign) ? 0x040 : 0;
   /* 0x080    rs1 is +INF */
-  out |= (f == 0x7f800000) ? 0x080 : 0;
+  out |= (expn == FMASK_EXPN && !frac && !sign) ? 0x080 : 0;
   /* 0x100    rs1 is a signaling NaN */
-  out |= (expn == FMASK_EXPN && (frac <= 0x7ff) && frac) ? 0x100 : 0;
+  out |= (expn == FMASK_EXPN && frac && !(frac & FMASK_QNAN)) ? 0x100 : 0;
   /* 0x200    rs1 is a quiet NaN */
-  out |= (expn == FMASK_EXPN && (frac >= 0x800)) ? 0x200 : 0;
+  out |= (expn == FMASK_EXPN && (frac & FMASK_QNAN))? 0x200 : 0;
 
   return out;
 }

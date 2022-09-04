@@ -1688,10 +1688,13 @@ void rv_debug(struct riscv_t *rv)
                       GDBSTUB_COMM)) {
         return;
     }
+    rv->breakpoint_map = breakpoint_map_new();
 
     if (!gdbstub_run(&rv->gdbstub, (void *) rv)) {
         return;
     }
+
+    breakpoint_map_destroy(rv->breakpoint_map);
     gdbstub_close(&rv->gdbstub);
 }
 

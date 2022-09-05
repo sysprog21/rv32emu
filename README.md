@@ -63,7 +63,7 @@ known as test signatures. The test signatures will be written after it has been 
 and they will be compared to the reference signature. When both signatures exactly match,
 the test is successful.
 
-[RISC-V GNU Compiler Toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) should be prepared in advance. You can obtain prebuilt GNU toolchain for `riscv32-elf` via [Automated Nightly Release](https://github.com/riscv-collab/riscv-gnu-toolchain/releases). Then, run the following command:
+[RISC-V GNU Compiler Toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) or [xPack GNU RISC-V Embedded GCC](https://xpack.github.io/riscv-none-elf-gcc/) should be prepared in advance. You can obtain prebuilt GNU toolchain for `riscv32-elf` via [Automated Nightly Release](https://github.com/riscv-collab/riscv-gnu-toolchain/releases). Then, run the following command:
 ```shell
 make arch-test
 ```

@@ -160,11 +160,13 @@ such as "load" that aim to modify the emulator's internal memory.
 ## External sources
 
 In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
-* `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark)
+* `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark) [RV32M]
 * `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
-* `pi.elf` : See [tests/pi.c](tests/pi.c)
-* `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
-* `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv)
+* `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
+* `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
+* `mandelbrot.elf` : See [tests/mandelbrot.c](tests/mandelbrot.c)
+* `pi.elf` : See [tests/pi.c](tests/pi.c) [RV32M]
+* `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
 
 ## Reference
 

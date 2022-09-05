@@ -111,10 +111,8 @@ static void float_h(void)
 
     printf("FLT_MAX = %g = %a\n", (double) FLT_MAX, (double) FLT_MAX);
     printf("DBL_MAX = %g = %a\n", (double) DBL_MAX, (double) DBL_MAX);
-#if 0 /* FIXME: make it work */
     printf("LDBL_MAX = %Lg = %La\n\n", (long double) LDBL_MAX,
            (long double) LDBL_MAX);
-#endif
 }
 
 #define TSIZEOF(T) printf("sizeof(" #T ") = %d\n", (int) sizeof(T))

@@ -1143,6 +1143,10 @@ static inline bool op_fp(struct riscv_t *rv, uint32_t insn)
         return false;
     }
 
+    /* enforce zero register */
+    if (rd == rv_reg_zero)
+        rv->X[rv_reg_zero] = 0;
+
     /* step over instruction */
     rv->PC += 4;
     return true;

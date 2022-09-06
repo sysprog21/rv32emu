@@ -23,7 +23,7 @@ static void rv_read_mem(void *args, size_t addr, size_t len, void *val)
     struct riscv_t *rv = (struct riscv_t *) args;
 
     for (size_t i = 0; i < len; i++)
-        *((uint8_t *) val + i) = rv->io.mem_read_b(rv, addr);
+        *((uint8_t *) val + i) = rv->io.mem_read_b(rv, addr + i);
 }
 
 static gdb_action_t rv_cont(void *args)

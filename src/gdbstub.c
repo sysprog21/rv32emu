@@ -18,12 +18,32 @@ static size_t rv_read_reg(void *args, int regno)
     return -1;
 }
 
+static void rv_write_reg(void *args, int regno, size_t data)
+{
+    if (unlikely(regno > 32))
+        return;
+
+    struct riscv_t *rv = (struct riscv_t *) args;
+    if (regno == 32)
+        rv_set_pc(rv, data);
+    else
+        rv_set_reg(rv, regno, data);
+}
+
 static void rv_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     struct riscv_t *rv = (struct riscv_t *) args;
 
     for (size_t i = 0; i < len; i++)
         *((uint8_t *) val + i) = rv->io.mem_read_b(rv, addr + i);
+}
+
+static void rv_write_mem(void *args, size_t addr, size_t len, void *val)
+{
+    struct riscv_t *rv = (struct riscv_t *) args;
+
+    for (size_t i = 0; i < len; i++)
+        rv->io.mem_write_b(rv, addr + i, *((uint8_t *) val + i));
 }
 
 static gdb_action_t rv_cont(void *args)
@@ -69,7 +89,9 @@ static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
 
 const struct target_ops gdbstub_ops = {
     .read_reg = rv_read_reg,
+    .write_reg = rv_write_reg,
     .read_mem = rv_read_mem,
+    .write_mem = rv_write_mem,
     .cont = rv_cont,
     .stepi = rv_stepi,
     .set_bp = rv_set_bp,

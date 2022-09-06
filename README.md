@@ -149,17 +149,6 @@ $ riscv32-unknown-elf-gdb
 Congratulate yourself if `riscv-gdb` does not produce an error message. Now that the GDB
 command line is available, you can communicate with `rv32emu`.
 
-### Limitation
-
-The development of `rv32emu`'s GDBRSP functionality is still ongoing. Due to the current
-unfinished design, various restrictions on this feature are known.
-* Since the 'G' packet is not supported yet, writing emulator registers with GDB is
-not permitted.
-* Consequently, the packets for binary download (the "X" packet) and memory writing
-(the "M" packet) specified in GDBRSP are not allowed. It is forbidden to use GDB commands
-such as "load" that aim to modify the emulator's internal memory.
-* You can only set one breakpoint when debugging due to the inadequate breakpoint handling design.
-
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 

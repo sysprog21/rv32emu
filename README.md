@@ -1,4 +1,4 @@
-# RISC-V RV32I[MAC] emulator with ELF support
+# RISC-V RV32I[MACF] emulator with ELF support
 
 ```
                        /--===============------\
@@ -100,7 +100,7 @@ Current progress of this emulator in riscv-arch-test(RV32):
             * `misalign-lw`
         + 1 misaligned CS-type instructions
             * `misalign-sw`
-* Unsupported tests
+* Unsupported tests (runnable but incomplete)
     - `F` Standard Extension for Single-Precision Floating-Point
 
 Detail in riscv-arch-test:
@@ -114,6 +114,7 @@ Detail in riscv-arch-test:
 * `ENABLE_RV32M`: Standard Extension for Integer Multiplication and Division
 * `ENABLE_RV32A`: Standard Extension for Atomic Instructions
 * `ENABLE_RV32C`: Standard Extension for Compressed Instructions (RV32C.F excluded)
+* `ENABLE_RV32F`: Standard Extension for Single-Precision Floating Point Instructions
 * `Zicsr`: Control and Status Register (CSR)
 * `Zifencei`: Instruction-Fetch Fence
 

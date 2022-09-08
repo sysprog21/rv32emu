@@ -1,7 +1,7 @@
-#include <assert.h>
 #include "mini-gdbstub/include/gdbstub.h"
-#include "riscv_private.h"
+#include <assert.h>
 #include "breakpoint.h"
+#include "riscv_private.h"
 
 static size_t rv_read_reg(void *args, int regno)
 {

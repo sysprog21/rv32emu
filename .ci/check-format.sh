@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-SOURCES=$(find $(git rev-parse --show-toplevel) | egrep "\.(cpp|h)\$")
+SOURCES=$(find $(git rev-parse --show-toplevel) | egrep "\.(c|cxx|cpp|h|hpp)\$")
 
 set -x
 

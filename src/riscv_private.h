@@ -302,7 +302,8 @@ static inline uint32_t sign_extend_b(const uint32_t x)
 
 #ifdef ENABLE_RV32F
 /* compute the fclass result */
-static inline uint32_t calc_fclass(uint32_t f) {
+static inline uint32_t calc_fclass(uint32_t f) 
+{
   const uint32_t sign = f & FMASK_SIGN;
   const uint32_t expn = f & FMASK_EXPN;
   const uint32_t frac = f & FMASK_FRAC;
@@ -332,6 +333,20 @@ static inline uint32_t calc_fclass(uint32_t f) {
   out |= (expn == FMASK_EXPN && (frac & FMASK_QNAN))? 0x200 : 0;
 
   return out;
+}
+
+static inline bool is_nan(uint32_t f)
+{
+  const uint32_t expn = f & FMASK_EXPN;
+  const uint32_t frac = f & FMASK_FRAC;
+  return (expn == FMASK_EXPN && frac);
+}
+
+static inline bool is_snan(uint32_t f)
+{
+  const uint32_t expn = f & FMASK_EXPN;
+  const uint32_t frac = f & FMASK_FRAC;
+  return (expn == FMASK_EXPN && frac && !(frac & FMASK_QNAN));
 }
 #endif
 

@@ -1065,8 +1065,8 @@ static inline bool op_fp(struct riscv_t *rv, uint32_t insn)
     /* dispatch based on func7 (low 2 bits are width) */
     switch (funct7) {
     case 0b0000000: /* FADD */
-        if (isnan(rv->F[rs1]) || isnan(rv->F[rs2]) ||
-            isnan(rv->F[rs1] + rv->F[rs2])) {
+        if (isnanf(rv->F[rs1]) || isnanf(rv->F[rs2]) ||
+            isnanf(rv->F[rs1] + rv->F[rs2])) {
             /* raise invalid operation */
             rv->F_int[rd] = RV_NAN; /* F_int is the integer shortcut of F */
             rv->csr_fcsr |= FFLAG_INVALID_OP;
@@ -1079,7 +1079,7 @@ static inline bool op_fp(struct riscv_t *rv, uint32_t insn)
         }
         break;
     case 0b0000100: /* FSUB */
-        if (isnan(rv->F[rs1]) || isnan(rv->F[rs2])) {
+        if (isnanf(rv->F[rs1]) || isnanf(rv->F[rs2])) {
             rv->F_int[rd] = RV_NAN;
         } else {
             rv->F[rd] = rv->F[rs1] - rv->F[rs2];
@@ -1119,12 +1119,84 @@ static inline bool op_fp(struct riscv_t *rv, uint32_t insn)
     }
     case 0b0010100:
         switch (rm) {
-        case 0b000: /* FMIN */
-            rv->F[rd] = fminf(rv->F[rs1], rv->F[rs2]);
+        case 0b000: { /* FMIN */
+            /*
+            In IEEE754-201x, fmin(x, y) return
+                - min(x,y) if both numbers are not NaN
+                - if one is NaN and another is a number, return the number
+                - if both are NaN, return NaN
+
+            When input is signaling NaN, raise invalid operation
+            */
+            uint32_t x, y;
+            memcpy(&x, rv->F + rs1, 4);
+            memcpy(&y, rv->F + rs2, 4);
+            if (is_nan(x) || is_nan(y)) {
+                if (is_snan(x) || is_snan(y))
+                    rv->csr_fcsr |= FFLAG_INVALID_OP;
+                if (is_nan(x) && !is_nan(y)) {
+                    rv->F[rd] = rv->F[rs2];
+                } else if (!is_nan(x) && is_nan(y)) {
+                    rv->F[rd] = rv->F[rs1];
+                } else {
+                    rv->F_int[rd] = RV_NAN;
+                }
+            } else {
+                uint32_t a_sign, b_sign;
+                a_sign = x & FMASK_SIGN;
+                b_sign = y & FMASK_SIGN;
+                if (a_sign != b_sign) {
+                    if (a_sign) {
+                        rv->F[rd] = rv->F[rs1];
+                    } else {
+                        rv->F[rd] = rv->F[rs2];
+                    }
+                } else {
+                    if ((rv->F[rs1] < rv->F[rs2])) {
+                        rv->F[rd] = rv->F[rs1];
+                    } else {
+                        rv->F[rd] = rv->F[rs2];
+                    }
+                }
+            }
             break;
-        case 0b001: /* FMAX */
-            rv->F[rd] = fmaxf(rv->F[rs1], rv->F[rs2]);
+        }
+        case 0b001: { /* FMAX */
+            uint32_t x, y;
+            memcpy(&x, rv->F + rs1, 4);
+            memcpy(&y, rv->F + rs2, 4);
+            if (is_nan(x) || is_nan(y)) {
+                if (is_snan(x) || is_snan(y))
+                    rv->csr_fcsr |= FFLAG_INVALID_OP;
+                if (is_nan(x) && !is_nan(y)) {
+                    rv->F[rd] = rv->F[rs2];
+                } else if (!is_nan(x) && is_nan(y)) {
+                    rv->F[rd] = rv->F[rs1];
+                } else {
+                    rv->F_int[rd] = RV_NAN;
+                }
+            } else {
+                uint32_t a_sign, b_sign;
+                a_sign = x & FMASK_SIGN;
+                b_sign = y & FMASK_SIGN;
+                if (a_sign != b_sign) {
+                    if (a_sign) {
+                        rv->F[rd] = rv->F[rs2];
+                    } else {
+                        rv->F[rd] = rv->F[rs1];
+                    }
+                } else {
+                    if ((rv->F[rs1] > rv->F[rs2])) {
+                        rv->F[rd] = rv->F[rs1];
+                    } else {
+                        rv->F[rd] = rv->F[rs2];
+                    }
+                }
+            }
+
+
             break;
+        }
         default:
             rv_except_illegal_insn(rv, insn);
             return false;

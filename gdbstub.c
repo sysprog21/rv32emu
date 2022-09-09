@@ -67,7 +67,7 @@ static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
     return true;
 }
 
-struct target_ops rv_ops = {
+const struct target_ops gdbstub_ops = {
     .read_reg = rv_read_reg,
     .read_mem = rv_read_mem,
     .cont = rv_cont,

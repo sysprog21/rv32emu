@@ -165,7 +165,16 @@ static inline bool op_load(struct riscv_t *rv, uint32_t insn UNUSED)
     /* load address */
     const uint32_t addr = rv->X[rs1] + imm;
 
-    /* dispatch by read size */
+    /* dispatch by read size
+     *
+     * imm[11:0] rs1 000 rd 0000011 LB
+     * imm[11:0] rs1 001 rd 0000011 LH
+     * imm[11:0] rs1 010 rd 0000011 LW
+     * imm[11:0] rs1 011 rd 0000011 LD
+     * imm[11:0] rs1 100 rd 0000011 LBU
+     * imm[11:0] rs1 101 rd 0000011 LHU
+     * imm[11:0] rs1 110 rd 0000011 LWU
+     */
     switch (funct3) {
     case 0: /* LB: Load Byte */
         rv->X[rd] = sign_extend_b(rv->io.mem_read_b(rv, addr));
@@ -244,15 +253,31 @@ static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
     /* dispatch operation type */
     switch (funct3) {
     case 0: /* ADDI: Add Immediate */
+        /* Adds the sign-extended 12-bit immediate to register rs1. Arithmetic
+         * overflow is ignored and the result is simply the low XLEN bits of the
+         * result. ADDI rd, rs1, 0 is used to implement the MV rd, rs1 assembler
+         * pseudo-instruction.
+         */
         rv->X[rd] = (int32_t) (rv->X[rs1]) + imm;
         break;
     case 1: /* SLLI: Shift Left Logical */
+        /* Performs logical left shift on the value in register rs1 by the shift
+         * amount held in the lower 5 bits of the immediate.
+         */
         rv->X[rd] = rv->X[rs1] << (imm & 0x1f);
         break;
     case 2: /* SLTI: Set on Less Than Immediate */
+        /* Place the value 1 in register rd if register rs1 is less than the
+         * signextended immediate when both are treated as signed numbers, else
+         * 0 is written to rd.
+         */
         rv->X[rd] = ((int32_t) (rv->X[rs1]) < imm) ? 1 : 0;
         break;
     case 3: /* SLTIU: Set on Less Than Immediate Unsigned */
+        /* Place the value 1 in register rd if register rs1 is less than the
+         * immediate when both are treated as unsigned numbers, else 0 is
+         * written to rd.
+         */
         rv->X[rd] = (rv->X[rs1] < (uint32_t) imm) ? 1 : 0;
         break;
     case 4: /* XORI: Exclusive OR Immediate */
@@ -263,8 +288,14 @@ static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
          * arithmetic right shifts on the value in register rs1.
          */
         if (imm & ~0x1f) { /* SRAI: Shift Right Arithmetic */
+            /* Performs arithmetic right shift on the value in register rs1 by
+             * the shift amount held in the lower 5 bits of the immediate.
+             */
             rv->X[rd] = ((int32_t) rv->X[rs1]) >> (imm & 0x1f);
         } else { /* SRLI: Shift Right Logical */
+            /* Performs logical right shift on the value in register rs1 by the
+             * shift amount held in the lower 5 bits of the immediate.
+             */
             rv->X[rd] = rv->X[rs1] >> (imm & 0x1f);
         }
         break;
@@ -272,6 +303,9 @@ static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
         rv->X[rd] = rv->X[rs1] | imm;
         break;
     case 7: /* ANDI: AND Immediate */
+        /* Performs bitwise AND on register rs1 and the sign-extended 12-bit
+         * immediate and place the result in rd.
+         */
         rv->X[rd] = rv->X[rs1] & imm;
         break;
     default:
@@ -288,7 +322,13 @@ static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
     return true;
 }
 
-/* Add upper immediate to pc */
+/* Add upper immediate to pc
+ *
+ * AUIPC is used to build pc-relative addresses and uses the U-type format.
+ * AUIPC forms a 32-bit offset from the 20-bit U-immediate, filling in the
+ * lowest 12 bits with zeros, adds this offset to the address of the AUIPC
+ * instruction, then places the result in register rd.
+ */
 static inline bool op_auipc(struct riscv_t *rv, uint32_t insn)
 {
     /* U-type
@@ -321,7 +361,13 @@ static inline bool op_store(struct riscv_t *rv, uint32_t insn)
     const uint32_t addr = rv->X[rs1] + imm;
     const uint32_t data = rv->X[rs2];
 
-    /* dispatch by write size */
+    /* dispatch by write size
+     *
+     * imm[11:5] rs2 rs1 000 imm[4:0] 0100011 SB
+     * imm[11:5] rs2 rs1 001 imm[4:0] 0100011 SH
+     * imm[11:5] rs2 rs1 010 imm[4:0] 0100011 SW
+     * imm[11:5] rs2 rs1 011 imm[4:0] 0100011 SD
+     */
     switch (funct3) {
     case 0: /* SB: Store Byte */
         rv->io.mem_write_b(rv, addr, data);
@@ -505,7 +551,11 @@ static inline bool op_op(struct riscv_t *rv, uint32_t insn)
 }
 
 /* Load Upper Immediate
- * Place sign-extended upper imm into register rd (lower 12 bits are zero).
+ *
+ * LUI is used to build 32-bit constants and uses the U-type format. LUI places
+ * the U-immediate value in the top 20 bits of the destination register rd,
+ * filling in the lowest 12 bits with zeros. The 32-bit result is sign-extended
+ * to 64 bits.
  */
 static inline bool op_lui(struct riscv_t *rv, uint32_t insn)
 {
@@ -588,9 +638,12 @@ static inline bool op_branch(struct riscv_t *rv, uint32_t insn)
 
 /* Jump and Link Register (JALR): store successor instruction address into rd.
  *
- * The target of JALR address is obtained by adding the sign-extended 12-bit
- * I-immediate to the register rs1, then setting the least-significant bit of
- * the result to zero.
+ * The indirect jump instruction JALR uses the I-type encoding. The target
+ * address is obtained by adding the sign-extended 12-bit I-immediate to the
+ * register rs1, then setting the least-significant bit of the result to zero.
+ * The address of the instruction following the jump (pc+4) is written to
+ * register rd. Register x0 can be used as the destination if the result is not
+ * required.
  */
 static inline bool op_jalr(struct riscv_t *rv, uint32_t insn)
 {
@@ -1222,6 +1275,13 @@ static inline bool op_nmadd(struct riscv_t *rv, uint32_t insn)
 #endif
 
 #ifdef ENABLE_RV32C
+/* C.ADDI adds the non-zero sign-extended 6-bit immediate to the value in
+ * register rd then writes the result to rd.
+ * C.ADDI expands into addi rd, rd, nzimm[5:0].
+ * C.ADDI is only valid when rd̸=x0. The code point with both rd=x0 and
+ * nzimm=0 encodes the C.NOP instruction; the remaining code points with
+ * either rd=x0 or nzimm=0 encode HINTs.
+ */
 static inline bool op_caddi(struct riscv_t *rv, uint16_t insn)
 {
     /* Add 6-bit signed immediate to rds, serving as NOP for X0 register. */
@@ -1246,7 +1306,14 @@ static inline bool op_caddi(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
-/* C.ADDI4SPN */
+/* C.ADDI4SPN
+ *
+ * C.ADDI4SPN is a CIW-format instruction that adds a zero-extended non-zero
+ * immediate, scaledby 4, to the stack pointer, x2, and writes the result to
+ * rd'.
+ * This instruction is used to generate pointers to stack-allocated variables,
+ * and expands to addi rd', x2, nzuimm[9:2].
+ */
 static inline bool op_caddi4spn(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = 0;
@@ -1263,7 +1330,12 @@ static inline bool op_caddi4spn(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
-/* C.LI */
+/* C.LI
+ *
+ * C.LI loads the sign-extended 6-bit immediate, imm, into register rd.
+ * C.LI expands into addi rd, x0, imm[5:0].
+ * C.LI is only valid when rd=x0; the code points with rd=x0 encode HINTs.
+ */
 static inline bool op_cli(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = (uint16_t) ((insn & 0x1000) >> 7 | (insn & 0x7c) >> 2);
@@ -1275,10 +1347,25 @@ static inline bool op_cli(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
+/* C.LUI loads the non-zero 6-bit immediate field into bits 17–12 of the
+ * destination register, clears the bottom 12 bits, and sign-extends bit
+ * 17 into all higher bits of the destination.
+ * C.LUI expands into lui rd, nzimm[17:12].
+ * C.LUI is only valid when rd̸={x0, x2}, and when the immediate is not equal
+ * to zero.
+ *
+ * C.LUI nzimm[17] dest̸={0, 2} nzimm[16:12] C1
+ */
 static inline bool op_clui(struct riscv_t *rv, uint16_t insn)
 {
     const uint16_t rd = c_dec_rd(insn);
     if (rd == 2) { /* C.ADDI16SP */
+        /* C.ADDI16SP is used to adjust the stack pointer in procedure
+         * prologues and epilogues.
+         * It expands into addi x2, x2, nzimm[9:4].
+         * C.ADDI16SP is only valid when nzimm̸=0; the code point with nzimm=0
+         * is reserved.
+         */
         uint32_t tmp = (insn & 0x1000) >> 3;
         tmp |= (insn & 0x40) >> 2;
         tmp |= (insn & 0x20) << 1;
@@ -1307,6 +1394,11 @@ static inline bool op_clui(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
+/* C.SRLI is a CB-format instruction that performs a logical right shift of
+ * the value in register rd' then writes the result to rd'. The shift amount
+ * is encoded in the shamt field.
+ * C.SRLI expands into srli rd', rd', shamt[5:0].
+ */
 static inline bool op_csrli(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
@@ -1331,6 +1423,10 @@ static inline bool op_csrli(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
+/* C.SRAI is defined analogously to C.SRLI, but instead performs an arithmetic
+ * right shift.
+ * C.SRAI expands to srai rd', rd', shamt[5:0].
+ */
 static inline bool op_csrai(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
@@ -1359,6 +1455,11 @@ static inline bool op_csrai(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
+/* C.ANDI is a CB-format instruction that computes the bitwise AND of the value
+ * in register rd' and the sign-extended 6-bit immediate, then writes the
+ * result to rd'.
+ * C.ANDI expands to andi rd', rd', imm[5:0].
+ */
 static inline bool op_candi(struct riscv_t *rv, uint16_t insn)
 {
     const uint16_t mask = (0x1000 & insn) << 3;
@@ -1434,6 +1535,11 @@ static inline bool op_cmisc_alu(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
+/* C.SLLI is a CI-format instruction that performs a logical left shift of the
+ * value in register rd then writes the result to rd. The shift amount is
+ * encoded in the shamt field.
+ * C.SLLI expands into slli rd, rd, shamt[5:0].
+ */
 static inline bool op_cslli(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
@@ -1494,7 +1600,13 @@ static inline bool op_cswsp(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
-/* C.LW: CL-type */
+/* C.LW: CL-type
+ *
+ * C.LW loads a 32-bit value from memory into register rd'. It computes an
+ * ffective address by adding the zero-extended offset, scaled by 4, to the
+ * base address in register rs1'.
+ * It expands to  # lw rd', offset[6:2](rs1').
+ */
 static inline bool op_clw(struct riscv_t *rv, uint16_t insn)
 {
     uint16_t tmp = 0;
@@ -1517,7 +1629,13 @@ static inline bool op_clw(struct riscv_t *rv, uint16_t insn)
     return true;
 }
 
-/* C.SD: CS-type */
+/* C.SD: CS-type
+ *
+ * C.SW stores a 32-bit value in register rs2' to memory. It computes an
+ * effective address by adding the zero-extended offset, scaled by 4, to
+ * the base address in register rs1'.
+ * It expands to sw rs2', offset[6:2](rs1')
+ */
 static inline bool op_csw(struct riscv_t *rv, uint16_t insn)
 {
     uint32_t tmp = 0;
@@ -1570,7 +1688,13 @@ static inline bool op_cjal(struct riscv_t *rv, uint16_t insn)
     return false;
 }
 
-/* CR-type */
+/* CR-type
+ *
+ * C.J performs an unconditional control transfer. The offset is
+ * sign-extended and added to the pc to form the jump target address.
+ * C.J can therefore target a ±2 KiB range.
+ * C.J expands to jal x0, offset[11:1].
+ */
 static inline bool op_ccr(struct riscv_t *rv, uint16_t insn)
 {
     const uint32_t rs1 = c_dec_rs1(insn), rs2 = c_dec_rs2(insn);
@@ -1579,6 +1703,9 @@ static inline bool op_ccr(struct riscv_t *rv, uint16_t insn)
     switch ((insn & 0x1000) >> 12) {
     case 0:
         if (rs2) { /* C.MV */
+                   /* C.MV copies the value in register rs2 into register rd.
+                    * C.MV expands into add rd, x0, rs2.
+                    */
             rv->X[rd] = rv->X[rs2];
             rv->PC += rv->insn_len;
             if (rd == rv_reg_zero)
@@ -1592,6 +1719,13 @@ static inline bool op_ccr(struct riscv_t *rv, uint16_t insn)
         if (rs1 == 0 && rs2 == 0) /* C.EBREAK */
             rv->io.on_ebreak(rv);
         else if (rs1 && rs2) { /* C.ADD */
+            /* C.ADD adds the values in registers rd and rs2 and writes the
+             * result to register rd.
+             * C.ADD expands into add rd, rd, rs2.
+             * C.ADD is only valid when rs2=x0; the code points with rs2=x0
+             * correspond to the C.JALR and C.EBREAK instructions. The code
+             * points with rs2=x0 and rd=x0 are HINTs.
+             */
             rv->X[rd] = rv->X[rs1] + rv->X[rs2];
             rv->PC += rv->insn_len;
             if (rd == rv_reg_zero)
@@ -1631,6 +1765,12 @@ static inline bool op_cbeqz(struct riscv_t *rv, uint16_t insn)
     return false;
 }
 
+/* BEQZ performs conditional control transfers. The offset is sign-extended
+ * and added to the pc to form the branch target address.
+ * It can therefore target a ±256 B range. C.BEQZ takes the branch if the value
+ * in register rs1' is zero.
+ * It expands to beq rs1', x0, offset[8:1].
+ */
 static inline bool op_cbnez(struct riscv_t *rv, uint16_t insn)
 {
     const uint32_t imm = sign_extend_h(c_dec_cbtype_imm(insn));

@@ -1,5 +1,16 @@
 # System Calls
 
+## System Call Calling Protocol
+
+RISC-V
+```
+ecall	a7	a0	a1
+```
+
+meaning that the syscall number is in register x17 (i.e., a7) and, optionally,
+the first and second parameters to the syscall are in registers x10 (i.e., a0)
+and x11 (i.e., a1), respectively.
+
 ## Newlib integration
 
 The [newlib](https://sourceware.org/newlib/) implements a whole C standard library, minus threads. C functions such as `malloc`, `printf`, `memcpy`, and many more are implemented. `rv32emu` provides the essential subset of system calls required by [newlib](https://sourceware.org/newlib/), so that it allows cross-compiled binary files running on `rv32emu`.

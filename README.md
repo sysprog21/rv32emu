@@ -158,6 +158,9 @@ not permitted.
 such as "load" that aim to modify the emulator's internal memory.
 * You can only set one breakpoint when debugging due to the inadequate breakpoint handling design.
 
+## Contributing
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
 ## External sources
 
 In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.

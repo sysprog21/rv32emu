@@ -5,7 +5,7 @@ OUT ?= build
 BIN := $(OUT)/rv32emu
 
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
-CFLAGS += -include common.h
+CFLAGS += -include src/common.h
 
 # Base configurations for RISC-V extensions
 CFLAGS += -D ENABLE_RV32M
@@ -59,10 +59,10 @@ ENABLE_GDBSTUB ?= 1
 ifeq ("$(ENABLE_GDBSTUB)", "1")
 GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
-mini-gdbstub/Makefile:
+src/mini-gdbstub/Makefile:
 	git submodule update --init $(dir $@)
 GDBSTUB_LIB := $(GDBSTUB_OUT)/libgdbstub.a
-$(GDBSTUB_LIB): mini-gdbstub/Makefile
+$(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 	$(MAKE) -C $(dir $<) O=$(dir $@)
 $(OUT)/emulate.o: $(GDBSTUB_LIB)
 OBJS_EXT += gdbstub.o breakpoint.o
@@ -90,7 +90,7 @@ OBJS := \
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)
 
-$(OUT)/%.o: %.c
+$(OUT)/%.o: src/%.c
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 

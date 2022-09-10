@@ -28,7 +28,7 @@ Build the emulator.
 make
 ```
 
-Run sample RV32I[MA] programs:
+Run sample RV32I[M] programs:
 ```shell
 make check
 ```
@@ -115,8 +115,8 @@ Detail in riscv-arch-test:
 * `ENABLE_RV32A`: Standard Extension for Atomic Instructions
 * `ENABLE_RV32C`: Standard Extension for Compressed Instructions (RV32C.F excluded)
 * `ENABLE_RV32F`: Standard Extension for Single-Precision Floating Point Instructions
-* `Zicsr`: Control and Status Register (CSR)
-* `Zifencei`: Instruction-Fetch Fence
+* `ENABLE_Zicsr`: Control and Status Register (CSR)
+* `ENABLE_Zifencei`: Instruction-Fetch Fence
 
 Add `-D` to enable and `-U` to disable the specific ISA extensions.
 

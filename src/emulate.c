@@ -10,6 +10,10 @@ static inline int isinff(float x)
 {
     return __builtin_fabsf(x) == __builtin_inff();
 }
+static inline int isnanf(float x)
+{
+    return x != x;
+}
 #endif
 #endif
 

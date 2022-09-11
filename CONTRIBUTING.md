@@ -6,6 +6,12 @@ The following is a set of guidelines for contributing to [rv32emu](https://githu
 hosted on GitHub. These are mostly guidelines, not rules. Use your best
 judgment, and feel free to propose changes to this document in a pull request.
 
+## Issues
+
+This project uses GitHub Issues to track ongoing development, discuss project plans, and keep track of bugs. Be sure to search for existing issues before you create another one.
+
+Visit our [Issues page on GitHub](https://github.com/sysprog21/rv32emu/issues) to search and submit.
+
 ## Coding Convention
 
 Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 12 or later.

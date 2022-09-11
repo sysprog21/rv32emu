@@ -14,6 +14,10 @@ Visit our [Issues page on GitHub](https://github.com/sysprog21/rv32emu/issues) t
 
 ## Coding Convention
 
+We welcome all contributions from corporate, acaddemic and individual developers. However, there are a number of fundamental ground rules that you must adhere to in order to participate. These rules are outlined as follows:
+* All code must adhere to the existing C coding style (see below). While we are somewhat flexible in basic style, you will adhere to what is currently in place. Uncommented, complicated algorithmic constructs will be rejected.
+* All external pull requests must contain sufficient documentation in the pull request comments in order to be accepted.
+
 Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 12 or later.
 
 Use the command `$ clang-format -i *.[ch]` to enforce a consistent coding style.

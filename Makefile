@@ -44,7 +44,7 @@ ENABLE_SDL ?= 1
 ifeq ($(call has, SDL), 1)
 ifeq (, $(shell which sdl2-config))
 $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
-ENABLE_SDL := 0
+override ENABLE_SDL := 0
 endif
 endif
 $(call set-feature, SDL)
@@ -59,7 +59,7 @@ ENABLE_COMPUTED_GOTO ?= 1
 ifeq ($(call has, COMPUTED_GOTO), 1)
 ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
 $(warning Computed goto is only supported in clang and gcc.)
-ENABLE_COMPUTED_GOTO := 0
+override ENABLE_COMPUTED_GOTO := 0
 endif
 endif
 $(call set-feature, COMPUTED_GOTO)

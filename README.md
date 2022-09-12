@@ -110,15 +110,17 @@ Detail in riscv-arch-test:
 
 ## Customization
 
-`rv32emu` is configurable, and you can modify `Makefile` to fit your expectations:
-* `ENABLE_RV32M`: Standard Extension for Integer Multiplication and Division
-* `ENABLE_RV32A`: Standard Extension for Atomic Instructions
-* `ENABLE_RV32C`: Standard Extension for Compressed Instructions (RV32C.F excluded)
-* `ENABLE_RV32F`: Standard Extension for Single-Precision Floating Point Instructions
+`rv32emu` is configurable, and you can override the below variable(s) to fit your expectations:
+* `ENABLE_EXT_M`: Standard Extension for Integer Multiplication and Division
+* `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
+* `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.F excluded)
+* `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
+* `ENABLE_GDBSTUB` : GDB remote debugging support
+* `ENABLE_SDL` : Experimental Display and Event System Calls
 
-Add `-D` to enable and `-U` to disable the specific ISA extensions.
+e.g., run `make ENABLE_EXT_F=0` for the build without floating-point support.
 
 ## GDB Remote Debugging
 

@@ -1,4 +1,4 @@
-#ifndef ENABLE_SDL
+#if !RV32_HAS(SDL)
 #error "Do not manage to build this file unless you enable SDL support."
 #endif
 

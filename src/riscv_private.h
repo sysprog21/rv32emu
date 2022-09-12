@@ -1,7 +1,7 @@
 #pragma once
 #include <stdbool.h>
 
-#ifdef ENABLE_GDBSTUB
+#if RV32_HAS(GDBSTUB)
 #include "breakpoint.h"
 #include "mini-gdbstub/include/gdbstub.h"
 #endif
@@ -104,7 +104,7 @@ enum {
     //               ....xxxx....xxxx....xxxx....xxxx
 };
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
 enum {
     //                    ....xxxx....xxxx....xxxx....xxxx
     FMASK_SIGN        = 0b10000000000000000000000000000000,
@@ -143,7 +143,7 @@ struct riscv_t {
     /* user provided data */
     riscv_user_t userdata;
 
-#ifdef ENABLE_GDBSTUB
+#if RV32_HAS(GDBSTUB)
     /* gdbstub instance */
     gdbstub_t gdbstub;
 
@@ -151,7 +151,7 @@ struct riscv_t {
     breakpoint_map_t breakpoint_map;
 #endif
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
     /* float registers */
     union {
         riscv_float_t F[RV_NUM_REGS];
@@ -300,7 +300,7 @@ static inline uint32_t sign_extend_b(const uint32_t x)
     return (int32_t)((int8_t) x);
 }
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
 /* compute the fclass result */
 static inline uint32_t calc_fclass(uint32_t f) 
 {
@@ -350,7 +350,7 @@ static inline bool is_snan(uint32_t f)
 }
 #endif
 
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
 enum {
     /*             ....xxxx....xxxx */
     CJ_IMM_11  = 0b0001000000000000,

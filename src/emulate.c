@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
 #include <math.h>
 #if defined(__APPLE__)
 static inline int isinff(float x)
@@ -17,7 +17,7 @@ static inline int isnanf(float x)
 #endif
 #endif
 
-#ifdef ENABLE_GDBSTUB
+#if RV32_HAS(GDBSTUB)
 extern struct target_ops gdbstub_ops;
 #endif
 
@@ -221,7 +221,7 @@ static inline bool op_load(struct riscv_t *rv, uint32_t insn UNUSED)
     return true;
 }
 
-#ifdef ENABLE_Zifencei
+#if RV32_HAS(Zifencei)
 static inline bool op_misc_mem(struct riscv_t *rv, uint32_t insn UNUSED)
 {
     /* FIXME: fill real implementations */
@@ -230,7 +230,7 @@ static inline bool op_misc_mem(struct riscv_t *rv, uint32_t insn UNUSED)
 }
 #else
 #define op_misc_mem OP_UNIMP
-#endif /* ENABLE_Zifencei */
+#endif /* RV32_HAS(Zifencei) */
 
 static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
 {
@@ -458,7 +458,7 @@ static inline bool op_op(struct riscv_t *rv, uint32_t insn)
             return false;
         }
         break;
-#ifdef ENABLE_RV32M
+#if RV32_HAS(EXT_M)
     case 0b0000001: /* RV32M instructions */
         switch (funct3) {
         case 0b000: /* MUL: Multiply */
@@ -526,7 +526,7 @@ static inline bool op_op(struct riscv_t *rv, uint32_t insn)
             return false;
         }
         break;
-#endif /* ENABLE_RV32M */
+#endif /* RV32_HAS(EXT_M) */
     case 0b0100000:
         switch (funct3) {
         case 0b000: /* SUB: Substract */
@@ -624,7 +624,7 @@ static inline bool op_branch(struct riscv_t *rv, uint32_t insn)
     if (taken) {
         rv->PC += imm;
         if (rv->PC &
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
             0x1
 #else
             0x3
@@ -673,7 +673,7 @@ static inline bool op_jalr(struct riscv_t *rv, uint32_t insn)
 
     /* check for exception */
     if (rv->PC &
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
         0x1
 #else
         0x3
@@ -710,7 +710,7 @@ static inline bool op_jal(struct riscv_t *rv, uint32_t insn)
         rv->X[rd] = ra;
 
     if (rv->PC &
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
         0x1
 #else
         0x3
@@ -748,7 +748,7 @@ static uint32_t *csr_get_ptr(struct riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_mtval);
     case CSR_MIP:
         return (uint32_t *) (&rv->csr_mip);
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
     case CSR_FFLAGS:
         return (uint32_t *) (&rv->csr_fcsr);
     case CSR_FCSR:
@@ -772,7 +772,7 @@ static uint32_t csr_csrrw(struct riscv_t *rv, uint32_t csr, uint32_t val)
         return 0;
 
     uint32_t out = *c;
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
     if (csr == CSR_FFLAGS)
         out &= FFLAG_MASK;
 #endif
@@ -790,7 +790,7 @@ static uint32_t csr_csrrs(struct riscv_t *rv, uint32_t csr, uint32_t val)
         return 0;
 
     uint32_t out = *c;
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
     if (csr == CSR_FFLAGS)
         out &= FFLAG_MASK;
 #endif
@@ -808,7 +808,7 @@ static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
         return 0;
 
     uint32_t out = *c;
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
     if (csr == CSR_FFLAGS)
         out &= FFLAG_MASK;
 #endif
@@ -854,7 +854,7 @@ static inline bool op_system(struct riscv_t *rv, uint32_t insn)
             return false;
         }
         break;
-#ifdef ENABLE_Zicsr
+#if RV32_HAS(Zicsr)
     /* All CSR instructions atomically read-modify-write a single CSR.
      *    Register operand
      *    ---------------------------------------------------------
@@ -906,7 +906,7 @@ static inline bool op_system(struct riscv_t *rv, uint32_t insn)
         rv->X[rd] = rd ? tmp : rv->X[rd];
         break;
     }
-#endif /* ENABLE_Zicsr */
+#endif /* RV32_HAS(Zicsr) */
     default:
         rv_except_illegal_insn(rv, insn);
         return false;
@@ -921,7 +921,7 @@ static inline bool op_system(struct riscv_t *rv, uint32_t insn)
     return true;
 }
 
-#ifdef ENABLE_RV32A
+#if RV32_HAS(EXT_A)
 /* At present, AMO is not implemented atomically because the emulated RISC-V
  * core just runs on single thread, and no out-of-order execution happens.
  * In addition, rl/aq are not handled.
@@ -1019,9 +1019,9 @@ static inline bool op_amo(struct riscv_t *rv, uint32_t insn)
 }
 #else
 #define op_amo OP_UNIMP
-#endif /* ENABLE_RV32A */
+#endif /* RV32_HAS(EXT_A) */
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
 static inline bool op_load_fp(struct riscv_t *rv, uint32_t insn)
 {
     const uint32_t rd = dec_rd(insn);
@@ -1350,7 +1350,7 @@ static inline bool op_nmadd(struct riscv_t *rv, uint32_t insn)
 #define op_nmadd OP_UNIMP
 #endif
 
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
 /* C.ADDI adds the non-zero sign-extended 6-bit immediate to the value in
  * register rd then writes the result to rd.
  * C.ADDI expands into addi rd, rd, nzimm[5:0].
@@ -1872,7 +1872,7 @@ static inline bool op_cbnez(struct riscv_t *rv, uint16_t insn)
 #define op_cbeqz OP_UNIMP
 #define op_cbnez OP_UNIMP
 #define op_csw OP_UNIMP
-#endif /* ENABLE_RV32C */
+#endif /* RV32_HAS(EXT_C) */
 
 /* No RV32C.F support */
 #define op_cfldsp OP_UNIMP
@@ -1896,7 +1896,7 @@ static inline bool op_unimp(struct riscv_t *rv, uint32_t insn UNUSED)
     return false;
 }
 
-#ifdef ENABLE_GDBSTUB
+#if RV32_HAS(GDBSTUB)
 void rv_debug(struct riscv_t *rv)
 {
     if (!gdbstub_init(&rv->gdbstub, &gdbstub_ops,
@@ -1917,7 +1917,7 @@ void rv_debug(struct riscv_t *rv)
     breakpoint_map_destroy(rv->breakpoint_map);
     gdbstub_close(&rv->gdbstub);
 }
-#endif /* ENABLE_GDBSTUB */
+#endif /* RV32_HAS(GDBSTUB) */
 
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {
@@ -1926,11 +1926,11 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     uint32_t insn;
 
 #define OP_UNIMP op_unimp
-#ifdef ENABLE_COMPUTED_GOTO
+#if RV32_HAS(COMPUTED_GOTO)
 #define OP(insn) &&op_##insn
 #define TABLE_TYPE const void *
 #define TABLE_TYPE_RVC const void *
-#else /* !ENABLE_COMPUTED_GOTO */
+#else /* !RV32_HAS(COMPUTED_GOTO) */
 #define OP(insn) op_##insn
 #define TABLE_TYPE const opcode_t
 #define TABLE_TYPE_RVC const c_opcode_t
@@ -1944,7 +1944,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         OP(madd),   OP(msub),     OP(nmsub), OP(nmadd),    OP(fp),     OP(unimp), OP(unimp), OP(unimp), // 10
         OP(branch), OP(jalr),     OP(unimp), OP(jal),      OP(system), OP(unimp), OP(unimp), OP(unimp), // 11
     };
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
     static TABLE_TYPE_RVC jump_table_rvc[] = {
     //  00             01             10          11
         OP(caddi4spn), OP(caddi),     OP(cslli),  OP(unimp),  // 000
@@ -1959,8 +1959,8 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 #endif
     /* clang-format on */
 
-#ifdef ENABLE_COMPUTED_GOTO
-#ifdef ENABLE_RV32C
+#if RV32_HAS(COMPUTED_GOTO)
+#if RV32_HAS(EXT_C)
 #define DISPATCH_RV32C()                                            \
     insn &= 0x0000FFFF;                                             \
     int16_t c_index = (insn & FC_FUNC3) >> 11 | (insn & FC_OPCODE); \
@@ -2013,7 +2013,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     TARGET(jalr)
     TARGET(jal)
     TARGET(system)
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
     TARGET(caddi4spn)
     TARGET(caddi)
     TARGET(cslli)
@@ -2030,13 +2030,13 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     TARGET(cswsp)
     TARGET(cbnez)
 #endif
-#ifdef ENABLE_Zifencei
+#if RV32_HAS(Zifencei)
     TARGET(misc_mem)
 #endif
-#ifdef ENABLE_RV32A
+#if RV32_HAS(EXT_A)
     TARGET(amo)
 #endif
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
     TARGET(load_fp)
     TARGET(store_fp)
     TARGET(fp)
@@ -2051,7 +2051,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
 #undef DISPATCH
 #undef EXEC
 #undef TARGET
-#else /* !ENABLE_COMPUTED_GOTO */
+#else /* !RV32_HAS(COMPUTED_GOTO) */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         /* fetch the next instruction */
         insn = rv->io.mem_ifetch(rv, rv->PC);
@@ -2066,7 +2066,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             if (!op(rv, insn))
                 break;
         } else { /* Compressed Extension Instruction */
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
             /* If the last 2-bit is one of 0b00, 0b01, and 0b10, it is
              * a 16-bit instruction.
              */
@@ -2086,7 +2086,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
         /* increment the cycles csr */
         rv->csr_cycle++;
     }
-#endif /* ENABLE_COMPUTED_GOTO */
+#endif /* RV32_HAS(COMPUTED_GOTO) */
 }
 
 riscv_user_t rv_userdata(struct riscv_t *rv)
@@ -2098,7 +2098,7 @@ riscv_user_t rv_userdata(struct riscv_t *rv)
 bool rv_set_pc(struct riscv_t *rv, riscv_word_t pc)
 {
     assert(rv);
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
     if (pc & 1)
 #else
     if (pc & 3)
@@ -2181,7 +2181,7 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
     rv->csr_cycle = 0;
     rv->csr_mstatus = 0;
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
     /* reset float registers */
     memset(rv->F, 0, sizeof(float) * RV_NUM_REGS);
     rv->csr_fcsr = 0;

@@ -7,27 +7,35 @@ BIN := $(OUT)/rv32emu
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -include src/common.h
 
-# Base configurations for RISC-V extensions
-CFLAGS += -D ENABLE_RV32M
-CFLAGS += -D ENABLE_Zicsr
-CFLAGS += -D ENABLE_Zifencei
-CFLAGS += -D ENABLE_RV32A
-
 # Set the default stack pointer
 CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFF000
 
 OBJS_EXT :=
 
-# Compressed extension instructions
-ENABLE_RV32C ?= 1
-ifeq ("$(ENABLE_RV32C)", "1")
-CFLAGS += -D ENABLE_RV32C
-endif
+# Control and Status Register (CSR)
+ENABLE_Zicsr ?= 1
+$(call set-feature, Zicsr)
 
-# Single-precision floating point
-ENABLE_RV32F ?= 1
-ifeq ("$(ENABLE_RV32F)", "1")
-CFLAGS += -D ENABLE_RV32F
+# Instruction-Fetch Fence
+ENABLE_Zifencei ?= 1
+$(call set-feature, Zifencei)
+
+# Integer Multiplication and Division instructions
+ENABLE_EXT_M ?= 1
+$(call set-feature, EXT_M)
+
+# Atomic Instructions
+ENABLE_EXT_A ?= 1
+$(call set-feature, EXT_A)
+
+# Compressed extension instructions
+ENABLE_EXT_C ?= 1
+$(call set-feature, EXT_C)
+
+# Single-precision floating point instructions
+ENABLE_EXT_F ?= 1
+$(call set-feature, EXT_F)
+ifeq ("$(ENABLE_EXT_F)", "1")
 LDFLAGS += -lm
 endif
 
@@ -35,9 +43,12 @@ endif
 ENABLE_SDL ?= 1
 ifeq ("$(ENABLE_SDL)", "1")
 ifeq (, $(shell which sdl2-config))
-$(error "No sdl2-config in $(PATH). Check SDL2 installation in advance")
+$(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
+ENABLE_SDL := 0
 endif
-CFLAGS += -D ENABLE_SDL
+endif
+$(call set-feature, SDL)
+ifeq ("$(ENABLE_SDL)", "1")
 OBJS_EXT += syscall_sdl.o
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs)
@@ -47,15 +58,19 @@ endif
 ENABLE_COMPUTED_GOTO ?= 1
 ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
 ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
-$(error "Computed goto is only supported in clang and gcc.")
+$(warning Computed goto is only supported in clang and gcc.)
+ENABLE_COMPUTED_GOTO := 0
 endif
-$(OUT)/emulate.o: CFLAGS += -D ENABLE_COMPUTED_GOTO
+endif
+$(call set-feature, COMPUTED_GOTO)
+ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
 ifeq ("$(CC_IS_GCC)", "1")
 $(OUT)/emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
 endif
 endif
 
 ENABLE_GDBSTUB ?= 1
+$(call set-feature, GDBSTUB)
 ifeq ("$(ENABLE_GDBSTUB)", "1")
 GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
@@ -66,7 +81,7 @@ $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 	$(MAKE) -C $(dir $<) O=$(dir $@)
 $(OUT)/emulate.o: $(GDBSTUB_LIB)
 OBJS_EXT += gdbstub.o breakpoint.o
-CFLAGS += -D ENABLE_GDBSTUB -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
+CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB)
 gdbstub-test: $(BIN)
 	$(Q)tests/gdbstub.sh && $(call notice, [OK])
@@ -126,7 +141,7 @@ include mk/external.mk
 ifeq ("$(ENABLE_SDL)", "1")
 doom: $(BIN) $(DOOM_DATA)
 	(cd $(OUT); ../$(BIN) doom.elf)
-ifeq ("$(ENABLE_RV32F)", "1")
+ifeq ("$(ENABLE_EXT_F)", "1")
 quake: $(BIN) $(QUAKE_DATA)
 	(cd $(OUT); ../$(BIN) quake.elf)
 endif

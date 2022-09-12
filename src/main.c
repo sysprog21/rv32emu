@@ -7,7 +7,7 @@
 
 /* enable program trace mode */
 static bool opt_trace = false;
-#ifdef ENABLE_GDBSTUB
+#if RV32_HAS(GDBSTUB)
 /* enable program gdbstub mode */
 static bool opt_gdbstub = false;
 #endif
@@ -80,7 +80,7 @@ static void print_usage(const char *filename)
             "Usage: %s [options] [filename]\n"
             "Options:\n"
             "  --trace : print executable trace\n"
-#ifdef ENABLE_GDBSTUB
+#if RV32_HAS(GDBSTUB)
             "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
 #endif
             "  --arch-test [filename] : dump signature to the given file, "
@@ -101,7 +101,7 @@ static bool parse_args(int argc, char **args)
                 opt_trace = true;
                 continue;
             }
-#ifdef ENABLE_GDBSTUB
+#if RV32_HAS(GDBSTUB)
             if (!strcmp(arg, "--gdbstub")) {
                 opt_gdbstub = true;
                 continue;
@@ -213,7 +213,7 @@ int main(int argc, char **args)
     if (opt_trace) {
         run_and_trace(rv, elf);
     }
-#ifdef ENABLE_GDBSTUB
+#if RV32_HAS(GDBSTUB)
     else if (opt_gdbstub) {
         rv_debug(rv);
     }

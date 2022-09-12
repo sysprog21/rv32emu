@@ -16,17 +16,15 @@ else
     REDIR = >/dev/null
 endif
 
-check_defined = \
-    $(strip $(foreach 1,$1, \
-        $(call __check_defined,$1,$(strip $(value 2)))))
-__check_defined = \
-    $(if $(value $1),, \
-      $(error Undefined $1$(if $2, ($2))))
+# Get specified feature
+POSITIVE_WORDS = 1 true yes
+define has
+$(if $(filter $(firstword $(ENABLE_$(strip $1))), $(POSITIVE_WORDS)),1,0)
+endef
 
 # Set specified feature
-# TODO: validate values (boolean) before setting
 define set-feature
-$(eval CFLAGS += -D RV32_FEATURE_$(strip $1)=$(ENABLE_$(strip $1)))
+$(eval CFLAGS += -D RV32_FEATURE_$(strip $1)=$(call has, $1))
 endef
 
 # Test suite

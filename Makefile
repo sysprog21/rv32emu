@@ -35,20 +35,20 @@ $(call set-feature, EXT_C)
 # Single-precision floating point instructions
 ENABLE_EXT_F ?= 1
 $(call set-feature, EXT_F)
-ifeq ("$(ENABLE_EXT_F)", "1")
+ifeq ($(call has, EXT_F), 1)
 LDFLAGS += -lm
 endif
 
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
-ifeq ("$(ENABLE_SDL)", "1")
+ifeq ($(call has, SDL), 1)
 ifeq (, $(shell which sdl2-config))
 $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
 ENABLE_SDL := 0
 endif
 endif
 $(call set-feature, SDL)
-ifeq ("$(ENABLE_SDL)", "1")
+ifeq ($(call has, SDL), 1)
 OBJS_EXT += syscall_sdl.o
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs)
@@ -56,14 +56,14 @@ endif
 
 # Whether to enable computed goto
 ENABLE_COMPUTED_GOTO ?= 1
-ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
+ifeq ($(call has, COMPUTED_GOTO), 1)
 ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
 $(warning Computed goto is only supported in clang and gcc.)
 ENABLE_COMPUTED_GOTO := 0
 endif
 endif
 $(call set-feature, COMPUTED_GOTO)
-ifeq ("$(ENABLE_COMPUTED_GOTO)", "1")
+ifeq ($(call has, COMPUTED_GOTO), 1)
 ifeq ("$(CC_IS_GCC)", "1")
 $(OUT)/emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
 endif
@@ -71,7 +71,7 @@ endif
 
 ENABLE_GDBSTUB ?= 1
 $(call set-feature, GDBSTUB)
-ifeq ("$(ENABLE_GDBSTUB)", "1")
+ifeq ($(call has, GDBSTUB), 1)
 GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
 src/mini-gdbstub/Makefile:
@@ -138,10 +138,10 @@ check: $(BIN)
 include mk/external.mk
 
 # Non-trivial demonstration programs
-ifeq ("$(ENABLE_SDL)", "1")
+ifeq ($(call has, SDL), 1)
 doom: $(BIN) $(DOOM_DATA)
 	(cd $(OUT); ../$(BIN) doom.elf)
-ifeq ("$(ENABLE_EXT_F)", "1")
+ifeq ($(call has, EXT_F), 1)
 quake: $(BIN) $(QUAKE_DATA)
 	(cd $(OUT); ../$(BIN) quake.elf)
 endif

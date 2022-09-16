@@ -127,11 +127,12 @@ EXPECTED_pi = 3.1415926535897932384626433832795028841971693993751058209749445923
 
 check: $(BIN)
 	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
-	    $(PRINTF) "Testing $(e) ... "; \
+	    $(PRINTF) "Running $(e).elf ... "; \
 	    if [ "$(shell $(BIN) $(OUT)/$(e).elf)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
 	    $(call notice, [OK]); \
 	    else \
-	    $(PRINTF) "Fail. Re-run '$(e)' later.\n"; \
+	    $(PRINTF) "Failed.\n"; \
+	    exit 1; \
 	    fi; \
 	)
 

@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef ENABLE_JIT
+#if RV32_HAS(JIT)
 #include "jit.h"
 struct jit_config_t *jit_config;
 #endif
@@ -12,6 +12,10 @@ struct jit_config_t *jit_config;
 
 /* enable program trace mode */
 static bool opt_trace = false;
+#if RV32_HAS(GDBSTUB)
+/* enable program gdbstub mode */
+static bool opt_gdbstub = false;
+#endif
 
 /* RISCV arch-test */
 static bool opt_arch_test = false;
@@ -80,9 +84,12 @@ static void print_usage(const char *filename)
             "Usage: %s [options] [filename]\n"
             "Options:\n"
             "  --trace : print executable trace\n"
+#if RV32_HAS(GDBSTUB)
+            "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
+#endif
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n"
-#ifdef ENABLE_JIT
+#if RV32_HAS(JIT)
             "  --jit-cache : save MIR binary cache\n"
             "  --jit-report : report MIR compilation info add codegen dump\n",
 #endif
@@ -102,6 +109,12 @@ static bool parse_args(int argc, char **args)
                 opt_trace = true;
                 continue;
             }
+#if RV32_HAS(GDBSTUB)
+            if (!strcmp(arg, "--gdbstub")) {
+                opt_gdbstub = true;
+                continue;
+            }
+#endif
             if (!strcmp(arg, "--arch-test")) {
                 opt_arch_test = true;
                 if (i + 1 >= argc) {
@@ -113,7 +126,7 @@ static bool parse_args(int argc, char **args)
                 signature_out_file = args[++i];
                 continue;
             }
-#ifdef ENABLE_JIT
+#if RV32_HAS(JIT)
             if (!strcmp(arg, "--jit-cache")) {
                 jit_config->cache = true;
                 continue;
@@ -131,7 +144,7 @@ static bool parse_args(int argc, char **args)
         /* set the executable */
         opt_prog_name = arg;
     }
-#ifdef ENABLE_JIT
+#if RV32_HAS(JIT)
     jit_set_file_name(jit_config, opt_prog_name);
 #endif
     return true;
@@ -167,7 +180,7 @@ static void dump_test_signature(struct riscv_t *rv, elf_t *elf)
 
 int main(int argc, char **args)
 {
-#ifdef ENABLE_JIT
+#if RV32_HAS(JIT)
     jit_config = jit_config_init();
     signal(SIGUSR1, jit_handler);
 #endif
@@ -223,7 +236,13 @@ int main(int argc, char **args)
     /* run based on the specified mode */
     if (opt_trace) {
         run_and_trace(rv, elf);
-    } else {
+    }
+#if RV32_HAS(GDBSTUB)
+    else if (opt_gdbstub) {
+        rv_debug(rv);
+    }
+#endif
+    else {
         run(rv);
     }
 

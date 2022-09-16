@@ -6,17 +6,17 @@
 extern "C" {
 #endif
 
-/* RISC-V register files */
+/* RISC-V registers (mnemonics, ABI names) */
 enum {
-    rv_reg_zero = 0, /* constant 0 */
+    rv_reg_zero = 0, /* hard-wired zero */
     rv_reg_ra,       /* return address */
     rv_reg_sp,       /* stack pointer */
     rv_reg_gp,       /* global pointer */
     rv_reg_tp,       /* thread pointer */
-    rv_reg_t0,       /* temporary register */
-    rv_reg_t1,
+    rv_reg_t0,       /* temporary/alternate link register */
+    rv_reg_t1,       /* temporaries */
     rv_reg_t2,
-    rv_reg_s0, /* saved / frame pointer */
+    rv_reg_s0, /* saved register/frame pointer */
     rv_reg_s1,
     rv_reg_a0, /* function arguments / return values */
     rv_reg_a1,
@@ -98,6 +98,11 @@ void rv_delete(struct riscv_t *);
 
 /* reset the RISC-V processor */
 void rv_reset(struct riscv_t *, riscv_word_t pc);
+
+#if RV32_HAS(GDBSTUB)
+/* Run the RISCV-emulator as gdbstub */
+void rv_debug(struct riscv_t *rv);
+#endif
 
 /* step the RISC-V emulator */
 void rv_step(struct riscv_t *, int32_t cycles);

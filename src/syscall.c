@@ -34,7 +34,7 @@
     _(brk, 214)             \
     _(open, 1024)
 
-#ifdef ENABLE_SDL
+#if RV32_HAS(SDL)
 #define __SYSCALL_LIST_EXT \
     _(draw_frame, 0xBEEF)  \
     _(poll_event, 0xC0DE)
@@ -314,7 +314,7 @@ static void syscall_open(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, fd);
 }
 
-#ifdef ENABLE_SDL
+#if RV32_HAS(SDL)
 extern void syscall_draw_frame(struct riscv_t *rv);
 extern void syscall_poll_event(struct riscv_t *rv);
 #endif

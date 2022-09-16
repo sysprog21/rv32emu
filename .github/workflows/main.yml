@@ -4,20 +4,29 @@ on: [push, pull_request]
 
 jobs:
   rv32emu:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3.0.2
     - name: install-dependencies
       run: | 
             sudo apt-get update
             sudo apt-get install libsdl2-dev
-    - name: make
+    - name: default build
       run: make
-    - name: make check
+    - name: check
       run: make check
+    - name: diverse configurations
+      run: |
+            make distclean ENABLE_COMPUTED_GOTO=0
+            make distclean ENABLE_EXT_C=0
+            make distclean ENABLE_EXT_F=0
+            make distclean ENABLE_COMPUTED_GOTO=0 ENABLE_EXT_C=0
+            make distclean ENABLE_COMPUTED_GOTO=0 ENABLE_EXT_C=1
+            make distclean ENABLE_GDBSTUB=0
+            make distclean ENABLE_SDL=0
 
   coding_style:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3.0.2
     - name: coding convention

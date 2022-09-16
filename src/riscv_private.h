@@ -1,8 +1,12 @@
 #pragma once
 #include <stdbool.h>
 
+#if RV32_HAS(GDBSTUB)
+#include "breakpoint.h"
+#include "mini-gdbstub/include/gdbstub.h"
+#endif
 #include "riscv.h"
-#ifdef ENABLE_JIT
+#if RV32_HAS(JIT)
 #include "jit.h"
 #endif
 #define RV_NUM_REGS 32
@@ -102,12 +106,13 @@ enum {
     //               ....xxxx....xxxx....xxxx....xxxx
 };
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
 enum {
     //                    ....xxxx....xxxx....xxxx....xxxx
     FMASK_SIGN        = 0b10000000000000000000000000000000,
     FMASK_EXPN        = 0b01111111100000000000000000000000,
     FMASK_FRAC        = 0b00000000011111111111111111111111,
+    FMASK_QNAN        = 0b00000000010000000000000000000000,
     //                    ....xxxx....xxxx....xxxx....xxxx
     FFLAG_MASK        = 0b00000000000000000000000000011111,
     FFLAG_INVALID_OP  = 0b00000000000000000000000000010000,
@@ -140,7 +145,15 @@ struct riscv_t {
     /* user provided data */
     riscv_user_t userdata;
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(GDBSTUB)
+    /* gdbstub instance */
+    gdbstub_t gdbstub;
+
+    /* GDB instruction breakpoint */
+    breakpoint_map_t breakpoint_map;
+#endif
+
+#if RV32_HAS(EXT_F)
     /* float registers */
     union {
         riscv_float_t F[RV_NUM_REGS];
@@ -163,7 +176,7 @@ struct riscv_t {
     
     /* current instruction length */
     uint8_t insn_len;
-#ifdef ENABLE_JIT
+#if RV32_HAS(JIT)
     struct riscv_jit_t *jit;
 #endif 
 };
@@ -292,9 +305,10 @@ static inline uint32_t sign_extend_b(const uint32_t x)
     return (int32_t)((int8_t) x);
 }
 
-#ifdef ENABLE_RV32F
+#if RV32_HAS(EXT_F)
 /* compute the fclass result */
-static inline uint32_t calc_fclass(uint32_t f) {
+static inline uint32_t calc_fclass(uint32_t f) 
+{
   const uint32_t sign = f & FMASK_SIGN;
   const uint32_t expn = f & FMASK_EXPN;
   const uint32_t frac = f & FMASK_FRAC;
@@ -305,7 +319,7 @@ static inline uint32_t calc_fclass(uint32_t f) {
   /* 0x001    rs1 is -INF */
   out |= (f == 0xff800000) ? 0x001 : 0;
   /* 0x002    rs1 is negative normal */
-  out |= (expn && expn < 0x78000000 && sign) ? 0x002 : 0;
+  out |= (expn && (expn != FMASK_EXPN) && sign) ? 0x002 : 0;
   /* 0x004    rs1 is negative subnormal */
   out |= (!expn && frac && sign) ? 0x004 : 0;
   /* 0x008    rs1 is -0 */
@@ -315,19 +329,33 @@ static inline uint32_t calc_fclass(uint32_t f) {
   /* 0x020    rs1 is positive subnormal */
   out |= (!expn && frac && !sign) ? 0x020 : 0;
   /* 0x040    rs1 is positive normal */
-  out |= (expn && expn < 0x78000000 && !sign) ? 0x040 : 0;
+  out |= (expn && (expn != FMASK_EXPN) && !sign) ? 0x040 : 0;
   /* 0x080    rs1 is +INF */
-  out |= (f == 0x7f800000) ? 0x080 : 0;
+  out |= (expn == FMASK_EXPN && !frac && !sign) ? 0x080 : 0;
   /* 0x100    rs1 is a signaling NaN */
-  out |= (expn == FMASK_EXPN && (frac <= 0x7ff) && frac) ? 0x100 : 0;
+  out |= (expn == FMASK_EXPN && frac && !(frac & FMASK_QNAN)) ? 0x100 : 0;
   /* 0x200    rs1 is a quiet NaN */
-  out |= (expn == FMASK_EXPN && (frac >= 0x800)) ? 0x200 : 0;
+  out |= (expn == FMASK_EXPN && (frac & FMASK_QNAN))? 0x200 : 0;
 
   return out;
 }
+
+static inline bool is_nan(uint32_t f)
+{
+  const uint32_t expn = f & FMASK_EXPN;
+  const uint32_t frac = f & FMASK_FRAC;
+  return (expn == FMASK_EXPN && frac);
+}
+
+static inline bool is_snan(uint32_t f)
+{
+  const uint32_t expn = f & FMASK_EXPN;
+  const uint32_t frac = f & FMASK_FRAC;
+  return (expn == FMASK_EXPN && frac && !(frac & FMASK_QNAN));
+}
 #endif
 
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
 enum {
     /*             ....xxxx....xxxx */
     CJ_IMM_11  = 0b0001000000000000,

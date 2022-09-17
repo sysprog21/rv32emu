@@ -67,6 +67,7 @@ enum {
 
 #define ELF_ST_TYPE(x) (((unsigned int) x) & 0xf)
 
+/* Elf32 header */
 struct Elf32_Ehdr {
     uint8_t e_ident[EI_NIDENT];
     Elf32_Half e_type;
@@ -84,6 +85,7 @@ struct Elf32_Ehdr {
     Elf32_Half e_shstrndx;
 };
 
+/* Elf32 program header table */
 struct Elf32_Phdr {
     Elf32_Word p_type;
     Elf32_Off p_offset;
@@ -95,6 +97,7 @@ struct Elf32_Phdr {
     Elf32_Word p_align;
 };
 
+/* Elf32 section header table */
 struct Elf32_Shdr {
     Elf32_Word sh_name;
     Elf32_Word sh_type;

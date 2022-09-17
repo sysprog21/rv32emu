@@ -18,7 +18,7 @@ struct map_internal {
 
 typedef enum { RB_RED = 0, RB_BLACK } map_color_t;
 
-/**
+/*
  * Get parent of node
  * @node: pointer to the rb node
  *
@@ -29,7 +29,7 @@ static inline map_node_t *rb_parent(const map_node_t *node)
     return (map_node_t *) (node->parent_color & ~1LU);
 }
 
-/**
+/*
  * Get color of node
  * @node: pointer to the rb node
  *
@@ -40,7 +40,7 @@ static inline map_color_t rb_color(const map_node_t *node)
     return (map_color_t) (node->parent_color & 1LU);
 }
 
-/**
+/*
  * Set parent of node
  * @node: pointer to the rb node
  * @parent: pointer to the new parent node
@@ -50,7 +50,7 @@ static inline void rb_set_parent(map_node_t *node, map_node_t *parent)
     node->parent_color = (unsigned long) parent | (node->parent_color & 1LU);
 }
 
-/**
+/*
  * Set color of node
  * @node: pointer to the rb node
  * @color: new color of the node
@@ -60,7 +60,7 @@ static inline void rb_set_color(map_node_t *node, map_color_t color)
     node->parent_color = (node->parent_color & ~1LU) | color;
 }
 
-/**
+/*
  * Set parent and color of node
  * @node: pointer to the rb node
  * @parent: pointer to the new parent node
@@ -73,7 +73,7 @@ static inline void rb_set_parent_color(map_node_t *node,
     node->parent_color = (unsigned long) parent | color;
 }
 
-/**
+/*
  * Check if node is red
  * @node: Node to check
  *

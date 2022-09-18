@@ -1,5 +1,11 @@
-#include "mini-gdbstub/include/gdbstub.h"
+#if !RV32_HAS(GDBSTUB)
+#error "Do not manage to build this file unless you enable gdbstub support."
+#endif
+
 #include <assert.h>
+
+#include "mini-gdbstub/include/gdbstub.h"
+
 #include "breakpoint.h"
 #include "riscv_private.h"
 
@@ -7,15 +13,13 @@ static size_t rv_read_reg(void *args, int regno)
 {
     struct riscv_t *rv = (struct riscv_t *) args;
 
-    if (regno < 32) {
-        return rv_get_reg(rv, regno);
-    }
+    if (unlikely(regno > 32))
+        return -1;
 
-    if (regno == 32) {
+    if (regno == 32)
         return rv_get_pc(rv);
-    }
 
-    return -1;
+    return rv_get_reg(rv, regno);
 }
 
 static void rv_write_reg(void *args, int regno, size_t data)
@@ -52,9 +56,9 @@ static gdb_action_t rv_cont(void *args)
     const uint32_t cycles_per_step = 1;
 
     for (; !rv_has_halted(rv);) {
-        if (breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv)) != NULL) {
+        if (breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv)))
             break;
-        }
+
         rv_step(rv, cycles_per_step);
     }
 
@@ -82,6 +86,7 @@ static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
     struct riscv_t *rv = (struct riscv_t *) args;
     if (type != BP_SOFTWARE)
         return false;
+
     /* When there is no matched breakpoint, no further action is taken */
     breakpoint_map_del(rv->breakpoint_map, addr);
     return true;

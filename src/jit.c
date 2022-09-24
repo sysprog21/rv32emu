@@ -287,7 +287,7 @@ update:
 
 static void emit_amo(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 {
-#ifdef ENABLE_RV32A
+#if RV32_HAS(EXT_A)
     const uint32_t rd = dec_rd(insn);
     const uint32_t rs1 = dec_rs1(insn);
     const uint32_t rs2 = dec_rs2(insn);
@@ -442,7 +442,7 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
             return;
         }
         break;
-#ifdef ENABLE_RV32M
+#if RV32_HAS(EXT_M)
     case 0b0000001: /* RV32M instructions */
         switch (funct3) {
         case 0b000: /* MUL */
@@ -526,7 +526,7 @@ static void emit_op(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
             return;
         }
         break;
-#endif /* ENABLE_RV32M */
+#endif /* RV32_HAS(EXT_M) */
     case 0b0100000:
         switch (funct3) {
         case 0b000: /* SUB */
@@ -619,7 +619,7 @@ static void emit_branch(rv_buffer *buff,
     CODE(
         "if (taken) {\n"
         "rv->PC += %u;\n"
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
         "if (rv->PC & 0x1)\n"
 #else
         "if (rv->PC & 0x3)\n"
@@ -650,7 +650,7 @@ static void emit_jalr(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
 
     /* check for exception */
     CODE(
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
         "if (rv->PC & 0x1) {\n"
 #else
         "if (rv->PC & 0x3) {\n"
@@ -677,7 +677,7 @@ static void emit_jal(rv_buffer *buff, uint32_t insn, struct riscv_t *rv UNUSED)
         CODE("\trv->X[%u] = ra;\n", rd);
 
     CODE(
-#ifdef ENABLE_RV32C
+#if RV32_HAS(EXT_C)
         "if (rv->PC & 0x1) {"
 #else
         "if (rv->PC & 0x3) {"
@@ -724,7 +724,7 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
             return;
         }
         break;
-#ifdef ENABLE_Zicsr
+#if RV32_HAS(Zicsr)
     case 1: { /* CSRRW    (Atomic Read/Write CSR) */
         if (rd != rv_reg_zero) {
             COMMENT("CSRRW");
@@ -769,7 +769,7 @@ static void emit_op_system(rv_buffer *buff, uint32_t insn, struct riscv_t *rv)
         CODE("rv->X[%u] = %u ? tmp_u32 : rv->X[%u];\n", rd, rd, rd);
         goto update;
     }
-#endif /* ENABLE_Zicsr */
+#endif /* RV32_HAS(Zicsr) */
     default:
         illegal_insn;
         return;
@@ -781,7 +781,7 @@ update:
 
 void emit_misc_mem(rv_buffer *buff, uint32_t insn UNUSED, struct riscv_t *rv)
 {
-#ifdef ENABLE_Zifencei
+#if RV32_HAS(Zifencei)
     UPDATE_PC(4);
     UPDATE_INSN32_LEN;
     UPDATE_PC(rv->insn_len);
@@ -894,12 +894,12 @@ void decode(struct riscv_t *rv UNUSED,
         *pc += rel;
         break;
     }
-#ifdef ENABLE_RV32A
+#if RV32_HAS(EXT_A)
     case op_amo:
         *pc += 4;
         break;
 #endif
-#ifdef ENABLE_Zifencei
+#if RV32_HAS(Zifencei)
     case op_misc_mem:
         *pc += 4;
         break;

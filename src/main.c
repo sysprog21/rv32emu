@@ -91,8 +91,9 @@ static void print_usage(const char *filename)
             "required by arch-test test\n"
 #if RV32_HAS(JIT)
             "  --jit-cache : save MIR binary cache\n"
-            "  --jit-report : report MIR compilation info add codegen dump\n",
+            "  --jit-report : report MIR compilation info add codegen dump\n"
 #endif
+            ,
             filename);
 }
 

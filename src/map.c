@@ -580,38 +580,26 @@ void map_find(map_t obj, map_iter_t *it, void *key)
     }
 
     /* Basically a repeat of insert */
-    map_node_t *cur = obj->head;
+    map_node_t **indirect = &obj->head;
 
     /* binary search */
-    while (1) {
-        int res = obj->comparator(key, cur->key);
-        if (res == 0) /* If the key matches, we hit the target */
+    while (*indirect) {
+        int res = obj->comparator(key, (*indirect)->key);
+        if (res == 0)
             break;
-
-        if (res < 0) {
-            if (!cur->left) {
-                cur = NULL;
-                break;
-            }
-            cur = cur->left;
-        } else {
-            if (!cur->right) {
-                cur = NULL;
-                break;
-            }
-            cur = cur->right;
-        }
+        indirect = res < 0 ? &(*indirect)->left : &(*indirect)->right;
     }
 
-    if (cur) {
-        it->node = cur;
-
-        /* Generate a "prev" as well */
-        map_iter_t tmp = *it;
-        map_prev(obj, &tmp);
-        it->prev = tmp.node;
-    } else
+    if (!*indirect) {
         it->node = NULL;
+        return;
+    }
+    it->node = *indirect;
+
+    /* Generate a "prev" as well */
+    map_iter_t tmp = *it;
+    map_prev(obj, &tmp);
+    it->prev = tmp.node;
 }
 
 bool map_empty(map_t obj)

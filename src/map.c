@@ -81,9 +81,7 @@ static inline void rb_set_parent_color(map_node_t *node,
  */
 static inline bool rb_is_red(map_node_t *node)
 {
-    if (node && (rb_color(node) == RB_RED))
-        return true;
-    return false;
+    return node && (rb_color(node) == RB_RED);
 }
 
 /* Create a node to be attached in the map internal tree structure */
@@ -524,34 +522,20 @@ bool map_insert(map_t obj, void *key, void *value)
     }
 
     /* Traverse the tree until we hit the end or find a side that is NULL */
-    map_node_t *cur = obj->head;
+    map_node_t **indirect = &obj->head;
 
-    while (1) {
-        int res = obj->comparator(new_node->key, cur->key);
-        if (res == 0) { /* If the key matches something else, don't insert */
+    while (*indirect) {
+        int res = obj->comparator(new_node->key, (*indirect)->key);
+        if (res == 0) { /* If the key matches something, don't insert */
             map_delete_node(obj, new_node);
             return false;
         }
-
-        if (res < 0) {
-            if (!cur->left) {
-                cur->left = new_node;
-                rb_set_parent(new_node, cur);
-                map_fix_colors(obj, new_node);
-                break;
-            }
-            cur = cur->left;
-        } else {
-            if (!cur->right) {
-                cur->right = new_node;
-                rb_set_parent(new_node, cur);
-                map_fix_colors(obj, new_node);
-                break;
-            }
-            cur = cur->right;
-        }
+        indirect = res < 0 ? &(*indirect)->left : &(*indirect)->right;
     }
 
+    *indirect = new_node;
+    rb_set_parent(new_node, *indirect);
+    map_fix_colors(obj, new_node);
     map_calibrate(obj);
     return true;
 }
@@ -635,7 +619,7 @@ bool map_empty(map_t obj)
     return (obj->size == 0);
 }
 
-/* Return true if at the the rend of the map */
+/* Return true if at the the end of the map */
 bool map_at_end(map_t obj UNUSED, map_iter_t *it)
 {
     return (it->node == NULL);

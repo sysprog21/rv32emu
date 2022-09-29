@@ -186,7 +186,7 @@ int main(int argc, char **args)
 
         /* system */
         .on_ecall = syscall_handler,
-        .on_ebreak = rv_halt,
+        .on_ebreak = ebreak_handler,
     };
 
     state_t *state = state_new();

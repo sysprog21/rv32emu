@@ -82,10 +82,9 @@ Current progress of this emulator in riscv-arch-test(RV32):
 * Passed Tests
     - `I`: Base Integer Instruction Set
     - `M`: Standard Extension for Integer Multiplication and Division
+    - `C`: Standard Extension for Compressed Instruction
     - `Zifencei`: Instruction-Fetch Fence
 * Failed Tests
-    - `C`: Standard Extension for Compressed Instruction
-        + `cebreak`
     - `privilege`: RISCV Privileged Specification
         + 2 system calls
             * `ebreak`

@@ -9,12 +9,6 @@
 
 #include "state.h"
 
-/* For optimization, the capcity of event queues must be the power of two to
- * avoid the expensive modulo operation, the details are explained here:
- * https://stackoverflow.com/questions/10527581/why-must-a-ring-buffer-size-be-a-power-of-2
- */
-#define EVENT_QUEUE_CAPACITY 128
-
 enum {
     KEY_EVENT = 0,
     MOUSE_MOTION_EVENT = 1,
@@ -47,38 +41,78 @@ typedef struct {
 } event_t;
 
 typedef struct {
-    event_t events[EVENT_QUEUE_CAPACITY];
-    size_t start, end;
-    bool full;
+    event_t *base;
+    size_t end;
 } event_queue_t;
 
+enum {
+    RELATIVE_MODE_SUBMISSION = 0,
+};
+
+typedef struct {
+    uint32_t type;
+    union {
+        union {
+            uint8_t enabled;
+        } mouse;
+    };
+} submission_t;
+
+typedef struct {
+    submission_t *base;
+    size_t start;
+} submission_queue_t;
+
+/* SDL-related variables */
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
+/* Event queue specific variables */
+static uint32_t queues_capacity;
+static uint32_t event_count;
 static event_queue_t event_queue = {
-    .events = {},
-    .start = 0,
+    .base = NULL,
     .end = 0,
-    .full = false,
+};
+static submission_queue_t submission_queue = {
+    .base = NULL,
+    .start = 0,
 };
 
-static bool event_pop(event_t *event)
+static submission_t submission_pop(void)
 {
-    if (event_queue.start == event_queue.end)
-        return false;
-    *event = event_queue.events[event_queue.start++];
-    event_queue.start &= EVENT_QUEUE_CAPACITY - 1;
-    event_queue.full = false;
-    return true;
+    submission_t submission = submission_queue.base[submission_queue.start++];
+    submission_queue.start &= queues_capacity - 1;
+    return submission;
 }
 
-static void event_push(event_t event)
+static void event_push(struct riscv_t *rv, event_t event)
 {
-    if (event_queue.full)
-        return;
-    event_queue.events[event_queue.end++] = event;
-    event_queue.end &= EVENT_QUEUE_CAPACITY - 1;
-    event_queue.full = (event_queue.start == event_queue.end);
+    event_queue.base[event_queue.end++] = event;
+    event_queue.end &= queues_capacity - 1;
+
+    state_t *s = rv_userdata(rv);
+    uint32_t count;
+    memory_read(s->mem, (void *) &count, event_count, sizeof(uint32_t));
+    count += 1;
+    memory_write(s->mem, event_count, (void *) &count, sizeof(uint32_t));
+}
+
+static uint32_t round_pow2(uint32_t x)
+{
+#if defined __GNUC__ || defined __clang__
+    x = 1 << (32 - __builtin_clz(x - 1));
+#else
+    /* Bit Twiddling Hack */
+    x--;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x++;
+#endif
+    return x;
 }
 
 /* check if we need to setup SDL and run event loop */
@@ -128,7 +162,7 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
                 .state = (bool) (event.key.state == SDL_PRESSED),
             };
             memcpy(&new_event.key_event, &key_event, sizeof(key_event));
-            event_push(new_event);
+            event_push(rv, new_event);
             break;
         }
         case SDL_MOUSEMOTION: {
@@ -141,7 +175,7 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
             };
             memcpy(&new_event.mouse.motion, &mouse_motion,
                    sizeof(mouse_motion));
-            event_push(new_event);
+            event_push(rv, new_event);
             break;
         }
         case SDL_MOUSEBUTTONDOWN:
@@ -161,7 +195,7 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
             };
             memcpy(&new_event.mouse.button, &mouse_button,
                    sizeof(mouse_button));
-            event_push(new_event);
+            event_push(rv, new_event);
             break;
         }
         }
@@ -193,34 +227,43 @@ void syscall_draw_frame(struct riscv_t *rv)
     SDL_RenderPresent(renderer);
 }
 
-void syscall_poll_event(struct riscv_t *rv)
+void syscall_setup_queue(struct riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    /* setup_queue(capacity, event_count) */
+    queues_capacity = rv_get_reg(rv, rv_reg_a0);
+    event_count = rv_get_reg(rv, rv_reg_a1);
 
-    /* poll_event(event) */
-    const uint32_t base = rv_get_reg(rv, rv_reg_a0);
-
-    event_t event;
-    if (!event_pop(&event)) {
+    queues_capacity = round_pow2(queues_capacity);
+    if (queues_capacity == 0) {
         rv_set_reg(rv, rv_reg_a0, 0);
         return;
     }
 
-    memory_write(s->mem, base + 0, (const uint8_t *) &event.type, 4);
-    switch (event.type) {
-    case KEY_EVENT:
-        memory_write(s->mem, base + 4, (const uint8_t *) &event.key_event,
-                     sizeof(key_event_t));
-        break;
-    case MOUSE_MOTION_EVENT:
-        memory_write(s->mem, base + 4, (const uint8_t *) &event.mouse.motion,
-                     sizeof(mouse_motion_t));
-        break;
-    case MOUSE_BUTTON_EVENT:
-        memory_write(s->mem, base + 4, (const uint8_t *) &event.mouse.button,
-                     sizeof(mouse_button_t));
-        break;
-    }
+    /* FIXME: Allocate a memory chunk in the emulator's address space so that
+     * the user can access it */
+    void *base = malloc(sizeof(event_t) * queues_capacity +
+                        sizeof(submission_t) * queues_capacity);
+    event_queue.base = base;
+    submission_queue.base = base + sizeof(event_t) * queues_capacity;
 
-    rv_set_reg(rv, rv_reg_a0, 1);
+    rv_set_reg(
+        rv, rv_reg_a0,
+        (uint32_t) (uintptr_t) base); /* eliminate the "cast from pointer to
+                                         integer of different size" warning*/
+}
+
+void syscall_submit_queue(struct riscv_t *rv)
+{
+    /* submit_queue(count) */
+    uint32_t count = rv_get_reg(rv, rv_reg_a0);
+
+    while (count--) {
+        submission_t submission = submission_pop();
+
+        switch (submission.type) {
+        case RELATIVE_MODE_SUBMISSION:
+            SDL_SetRelativeMouseMode(submission.mouse.enabled);
+            break;
+        }
+    }
 }

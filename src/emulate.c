@@ -148,6 +148,37 @@ static void rv_except_illegal_insn(struct riscv_t *rv, uint32_t insn)
     rv->csr_mcause = code;
 }
 
+static void rv_except_breakpoint(struct riscv_t *rv, uint32_t old_pc)
+{
+    /* mtvec (Machine Trap-Vector Base Address Register)
+     * mtvec[MXLEN-1:2]: vector base address
+     * mtvec[1:0] : vector mode
+     */
+    const uint32_t base = rv->csr_mtvec & ~0x3;
+    const uint32_t mode = rv->csr_mtvec & 0x3;
+
+    /* Exception Code: Breakpoint */
+    const uint32_t code = 3;
+
+    /* mepc (Machine Exception Program Counter)
+     * mtval(Machine Trap Value Register) : Breakpoint
+     */
+    rv->csr_mepc = old_pc;
+    rv->csr_mtval = old_pc;
+
+    switch (mode) {
+    case 0: /* DIRECT: All exceptions set PC to base */
+        rv->PC = base;
+        break;
+    case 1: /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */
+        rv->PC = base + 4 * code;
+        break;
+    }
+
+    /* mcause (Machine Cause Register): store exception code */
+    rv->csr_mcause = code;
+}
+
 /* RV32I Base Instruction Set
  *
  * bits  0-6:  opcode
@@ -2188,4 +2219,10 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
 #endif
 
     rv->halt = false;
+}
+
+void ebreak_handler(struct riscv_t *rv)
+{
+    assert(rv);
+    rv_except_breakpoint(rv, rv->PC);
 }

@@ -37,7 +37,8 @@
 #if RV32_HAS(SDL)
 #define __SYSCALL_LIST_EXT \
     _(draw_frame, 0xBEEF)  \
-    _(poll_event, 0xC0DE)
+    _(setup_queue, 0xC0DE) \
+    _(submit_queue, 0xFEED)
 #else
 #define __SYSCALL_LIST_EXT
 #endif
@@ -316,7 +317,8 @@ static void syscall_open(struct riscv_t *rv)
 
 #if RV32_HAS(SDL)
 extern void syscall_draw_frame(struct riscv_t *rv);
-extern void syscall_poll_event(struct riscv_t *rv);
+extern void syscall_setup_queue(struct riscv_t *rv);
+extern void syscall_submit_queue(struct riscv_t *rv);
 #endif
 
 void syscall_handler(struct riscv_t *rv)

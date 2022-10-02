@@ -27,15 +27,32 @@ These system calls are solely for the convenience of accessing the [SDL library]
 
 If a window does not already exist, one will be created with the specified `width` and `height`. The `screen` buffer will replace the content of the framebuffer, passing a different `width` or `height` compared to the size of the window is undefined behavior. This system call additionally polls events from the SDL library, and, if necessary, update the internal input specific event queue.
 
-### `poll_event(event)` - Poll a input specific event from SDL
+### `setup_queue` - Setup input system's dedicated event and submission queue
 
 **system call number**: `0xC0DE`
 
-**synopsis**: `int poll_event(void *event)`
+**synopsis**: `void *setup_queue(int capacity, unsigned int* event_count)`
 
-`event` will be filled with the polled event data, it should have a 32-bit `type` field, and associated with an appropriately sized value buffer. The internal event queue will be updated everytime `draw_frame` is called.
+Allocate a continuous memory chunk that has the requested capacity and two closely packed queues, the event queue and the submission queue. The base address of the event queue is located in the returned address, and the submission queue is immediately after the event queue's last element, which is the event queue's base address plus the size of each event element times the given capacity. The capacity must be a power of 2; if it is not, it will be rounded up to the next highest power of 2. It is crucial to initialize the event counter variable before supplying its address to this system call because it serves as an interaction to the user that an event has been added to the event queue.
 
-Currently accepted event types include the following:
-* `KEY_EVENT` - `0x0`: Triggered when the status of keyboard changes, either when a key is pressed or released, and it returns a 32-bit keycode and a 8-bit key state, the values of the hexadecimal keycodes are listed in [SDL Keycode Lookup Table](https://wiki.libsdl.org/SDLKeycodeLookup)
-* `MOUSE_MOTION_EVENT` - `0x1`: A mouse move event, with relative position information, two 32-bit signed integers that correspond to the x and y delta value, the mouse is continually wrapped in the window border by default.
-* `MOUSE_BUTTON_EVENT` - `0x2`: the user code receives this event whenever the state of a mouse button changes, whether a button is pressed or released, and it returns a 8-bit value that indicates which button is updated(1 is left, 2 is middle, 3 is right and so on), as well as a 8-bit state value that indicates whether the button is pressed.
+#### Events
+
+An event entry is made up of a 32-bit value representing the event's type and a `union` buffer containing t1he event's parameters.
+
+* `KEY_EVENT`: Either a key is pressed or released. Its value buffer is made up of a 32-bit universal key code and an 8-bit state flag; if the corresponding character of the pressed key is not printable, the bit right after the most significant bit is set; for example, the "a" key's correspoding character is printable, so its keycode is the ASCII code of the "a" character, which is `0x61`. However, because the left shift key doesn't have a corresponding printable key, its hexadecimal value is `0x400000E1`, with the 31 bit is set.
+* `MOUSE_MOTION_EVENT`: The cursor is moved during the current frame. This event contains two signed integer value, which is the delta of x position and y position respectively. If the relative mouse mode is enabled, the mouse movement will never be 0 because the cursor is wrapped within the canvas and is repeated whenever the cursor reaches the border. 
+* `MOUSE_BUTTON_EVENT`: The state of a mouse button has been changed. Its value buffer contains a 8-bit button value(1 is left, 2 is middle, 3 is right and so on) and an 8-bit boolean flag that indicates whether the mouse button is pressed.
+
+### `submit_queue` - Notify the emulator a submission has been pushed into the submission queue
+
+**system call number**: `0xFEED`
+
+**synopsis**: `void submit_queue(int count)`
+
+To inform the emulator that a batch of submissions should be processed, the application code should push several submissions into the queue first, and then pass the size of the submissions batch to this system call; the submissions will be processed and executed sequentially and immediately.
+
+#### Submissions
+
+The submission entry is structured similarly to an event entry, with a 32-bit type field and an associated dynamic-sized value buffer whose width depends on the type of submission.
+
+* `RELATIVE_MODE_SUBMISSION`: Enable or disable the mouse relative mode. If the mouse relative mode is enabled, the mouse cursor is wrapped within the window border, it's associated with an 8-bit wide boolean value that indicates whether the relative mouse mode should be enbled.

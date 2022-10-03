@@ -24,160 +24,56 @@ extern struct target_ops gdbstub_ops;
 #include "riscv.h"
 #include "riscv_private.h"
 
-static void rv_except_insn_misaligned(struct riscv_t *rv, uint32_t old_pc)
-{
-    /* mtvec (Machine Trap-Vector Base Address Register)
-     * mtvec[MXLEN-1:2]: vector base address
-     * mtvec[1:0] : vector mode
-     */
-    const uint32_t base = rv->csr_mtvec & ~0x3;
-    const uint32_t mode = rv->csr_mtvec & 0x3;
+/* RISC-V exception code list */
+#define GET_EXCEPTION_CODE(type) rv_exception_code_##type
+#define RV_EXCEPTION_LIST                                    \
+    _(insn_misaligned)  /* Instruction address misaligned */ \
+    _(insn_fault)       /* Instruction access fault */       \
+    _(illegal_insn)     /* Illegal instruction */            \
+    _(breakpoint)       /* Breakpoint */                     \
+    _(load_misaligned)  /* Load address misaligned */        \
+    _(load_fault)       /* Load access fault */              \
+    _(store_misaligned) /* Store/AMO address misaligned */
 
-    /* Exception Code: Instruction Address Misaligned */
-    const uint32_t code = 0;
+enum {
+#define _(type) GET_EXCEPTION_CODE(type),
+    RV_EXCEPTION_LIST
+#undef _
+};
 
-    /* mepc  (Machine Exception Program Counter)
-     * mtval (Machine Trap Value Register) : Misaligned Instruction
-     */
-    rv->csr_mepc = old_pc;
-    rv->csr_mtval = rv->PC;
-
-    switch (mode) {
-    case 0: /* DIRECT: All exceptions set PC to base */
-        rv->PC = base;
-        break;
-    case 1: /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */
-        rv->PC = base + 4 * code;
-        break;
+#define EXCEPTION_HANDLER_IMPL(type)                                        \
+    UNUSED static void rv_except_##type(struct riscv_t *rv, uint32_t mtval) \
+    {                                                                       \
+        /* mtvec (Machine Trap-Vector Base Address Register)                \
+         * mtvec[MXLEN-1:2]: vector base address                            \
+         * mtvec[1:0] : vector mode                                         \
+         */                                                                 \
+        const uint32_t base = rv->csr_mtvec & ~0x3;                         \
+        const uint32_t mode = rv->csr_mtvec & 0x3;                          \
+        /* Exception Code */                                                \
+        const uint32_t code = GET_EXCEPTION_CODE(type);                     \
+        /* mepc  (Machine Exception Program Counter)                        \
+         * mtval (Machine Trap Value Register)                              \
+         */                                                                 \
+        rv->csr_mepc = rv->PC;                                              \
+        rv->csr_mtval = mtval;                                              \
+        switch (mode) {                                                     \
+        case 0: /* DIRECT: All exceptions set PC to base */                 \
+            rv->PC = base;                                                  \
+            break;                                                          \
+        /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */   \
+        case 1:                                                             \
+            rv->PC = base + 4 * code;                                       \
+            break;                                                          \
+        }                                                                   \
+        /* mcause (Machine Cause Register): store exception code */         \
+        rv->csr_mcause = code;                                              \
     }
 
-    /* mcause (Machine Cause Register): store exception code */
-    rv->csr_mcause = code;
-}
-
-static void rv_except_load_misaligned(struct riscv_t *rv, uint32_t addr)
-{
-    /* mtvec (Machine Trap-Vector Base Address Register)
-     * mtvec[MXLEN-1:2]: vector base address
-     * mtvec[1:0] : vector mode
-     */
-    const uint32_t base = rv->csr_mtvec & ~0x3;
-    const uint32_t mode = rv->csr_mtvec & 0x3;
-
-    /* Exception Code: Load Address Misaligned */
-    const uint32_t code = 4;
-
-    /* mepc (Machine Exception Program Counter)
-     * mtval(Machine Trap Value Register) : Misaligned Load Address
-     */
-    rv->csr_mepc = rv->PC;
-    rv->csr_mtval = addr;
-
-    switch (mode) {
-    case 0: /* DIRECT: All exceptions set PC to base */
-        rv->PC = base;
-        break;
-    case 1: /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */
-        rv->PC = base + 4 * code;
-        break;
-    }
-
-    /* mcause (Machine Cause Register): store exception code */
-    rv->csr_mcause = code;
-}
-
-static void rv_except_store_misaligned(struct riscv_t *rv, uint32_t addr)
-{
-    /* mtvec (Machine Trap-Vector Base Address Register)
-     * mtvec[MXLEN-1:2]: vector base address
-     * mtvec[1:0] : vector mode
-     */
-    const uint32_t base = rv->csr_mtvec & ~0x3;
-    const uint32_t mode = rv->csr_mtvec & 0x3;
-
-    /* Exception Code: Store Address Misaligned */
-    const uint32_t code = 6;
-
-    /* mepc (Machine Exception Program Counter)
-     * mtval(Machine Trap Value Register) : Misaligned Store Address
-     */
-    rv->csr_mepc = rv->PC;
-    rv->csr_mtval = addr;
-
-    switch (mode) {
-    case 0: /* DIRECT: All exceptions set PC to base */
-        rv->PC = base;
-        break;
-    case 1: /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */
-        rv->PC = base + 4 * code;
-        break;
-    }
-
-    /* mcause (Machine Cause Register): store exception code */
-    rv->csr_mcause = code;
-}
-
-static void rv_except_illegal_insn(struct riscv_t *rv, uint32_t insn)
-{
-    /* mtvec (Machine Trap-Vector Base Address Register)
-     * mtvec[MXLEN-1:2]: vector base address
-     * mtvec[1:0] : vector mode
-     */
-    const uint32_t base = rv->csr_mtvec & ~0x3;
-    const uint32_t mode = rv->csr_mtvec & 0x3;
-
-    /* Exception Code: Illegal Instruction */
-    const uint32_t code = 2;
-
-    /* mepc (Machine Exception Program Counter)
-     * mtval(Machine Trap Value Register) : Illegal Instruction
-     */
-    rv->csr_mepc = rv->PC;
-    rv->csr_mtval = insn;
-
-    switch (mode) {
-    case 0: /* DIRECT: All exceptions set PC to base */
-        rv->PC = base;
-        break;
-    case 1: /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */
-        rv->PC = base + 4 * code;
-        break;
-    }
-
-    /* mcause (Machine Cause Register): store exception code */
-    rv->csr_mcause = code;
-}
-
-static void rv_except_breakpoint(struct riscv_t *rv, uint32_t old_pc)
-{
-    /* mtvec (Machine Trap-Vector Base Address Register)
-     * mtvec[MXLEN-1:2]: vector base address
-     * mtvec[1:0] : vector mode
-     */
-    const uint32_t base = rv->csr_mtvec & ~0x3;
-    const uint32_t mode = rv->csr_mtvec & 0x3;
-
-    /* Exception Code: Breakpoint */
-    const uint32_t code = 3;
-
-    /* mepc (Machine Exception Program Counter)
-     * mtval(Machine Trap Value Register) : Breakpoint
-     */
-    rv->csr_mepc = old_pc;
-    rv->csr_mtval = old_pc;
-
-    switch (mode) {
-    case 0: /* DIRECT: All exceptions set PC to base */
-        rv->PC = base;
-        break;
-    case 1: /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */
-        rv->PC = base + 4 * code;
-        break;
-    }
-
-    /* mcause (Machine Cause Register): store exception code */
-    rv->csr_mcause = code;
-}
+/* RISC-V exception handlers */
+#define _(type) EXCEPTION_HANDLER_IMPL(type)
+RV_EXCEPTION_LIST
+#undef _
 
 /* RV32I Base Instruction Set
  *

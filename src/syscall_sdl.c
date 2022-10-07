@@ -1,3 +1,8 @@
+/*
+ * rv32emu is freely redistributable under the MIT License. See the file
+ * "LICENSE" for information on usage and redistribution of this file.
+ */
+
 #if !RV32_HAS(SDL)
 #error "Do not manage to build this file unless you enable SDL support."
 #endif

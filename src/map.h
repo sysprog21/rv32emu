@@ -1,4 +1,9 @@
 /*
+ * rv32emu is freely redistributable under the MIT License. See the file
+ * "LICENSE" for information on usage and redistribution of this file.
+ */
+
+/*
  * C Implementation for C++ std::map using red-black tree.
  *
  * Any data type can be stored in a map, just like std::map.

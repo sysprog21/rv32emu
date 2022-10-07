@@ -3,6 +3,10 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#if !RV32_HAS(GDBSTUB)
+#error "Do not manage to build this file unless you enable gdbstub support."
+#endif
+
 #include "breakpoint.h"
 #include <assert.h>
 
@@ -25,6 +29,7 @@ bool breakpoint_map_insert(breakpoint_map_t map, riscv_word_t addr)
     /* We don't expect to set breakpoint at duplicate address */
     if (!map_at_end(map, &it))
         return false;
+
     return map_insert(map, &addr, &bp);
 }
 
@@ -33,9 +38,8 @@ static bool breakpoint_map_find_it(breakpoint_map_t map,
                                    map_iter_t *it)
 {
     map_find(map, it, &addr);
-    if (map_at_end(map, it)) {
+    if (map_at_end(map, it))
         return false;
-    }
 
     return true;
 }

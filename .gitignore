@@ -11,3 +11,4 @@ build/arch-test
 build/mini-gdbstub
 *.o
 *.o.d
+tests/**/*.elf

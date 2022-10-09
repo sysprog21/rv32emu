@@ -1,6 +1,6 @@
 .PHONY: clean
 
-CROSS_COMPILE ?= riscv32-unknown-elf-
+include ../../mk/toolchain.mk
 
 ASFLAGS = -march=rv32i -mabi=ilp32
 LDFLAGS = --oformat=elf32-littleriscv

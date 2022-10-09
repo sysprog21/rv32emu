@@ -17,7 +17,7 @@ static bool opt_trace = false;
 static bool opt_gdbstub = false;
 #endif
 
-/* RISCV arch-test */
+/* RISC-V arch-test */
 static bool opt_arch_test = false;
 static char *signature_out_file;
 

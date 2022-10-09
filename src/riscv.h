@@ -105,7 +105,7 @@ void rv_delete(struct riscv_t *);
 void rv_reset(struct riscv_t *, riscv_word_t pc);
 
 #if RV32_HAS(GDBSTUB)
-/* Run the RISCV-emulator as gdbstub */
+/* Run the RISC-V emulator as gdbstub */
 void rv_debug(struct riscv_t *rv);
 #endif
 

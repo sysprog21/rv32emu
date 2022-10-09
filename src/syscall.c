@@ -28,27 +28,23 @@
  *
  * system call: name, number
  */
-#define __SYSCALL_LIST_BASE \
-    _(close, 57)            \
-    _(lseek, 62)            \
-    _(read, 63)             \
-    _(write, 64)            \
-    _(fstat, 80)            \
-    _(exit, 93)             \
-    _(gettimeofday, 169)    \
-    _(brk, 214)             \
-    _(open, 1024)
-
-#if RV32_HAS(SDL)
-#define __SYSCALL_LIST_EXT \
-    _(draw_frame, 0xBEEF)  \
-    _(setup_queue, 0xC0DE) \
-    _(submit_queue, 0xFEED)
-#else
-#define __SYSCALL_LIST_EXT
-#endif
-
-#define SUPPORTED_SYSCALLS __SYSCALL_LIST_BASE __SYSCALL_LIST_EXT
+/* clang-format off */
+#define SUPPORTED_SYSCALLS       \
+    _(close,            57)      \
+    _(lseek,            62)      \
+    _(read,             63)      \
+    _(write,            64)      \
+    _(fstat,            80)      \
+    _(exit,             93)      \
+    _(gettimeofday,     169)     \
+    _(brk,              214)     \
+    _(open,             1024)    \
+    IIF(RV32_HAS(SDL))(          \
+        _(draw_frame,   0xBEEF)  \
+        _(setup_queue,  0xC0DE)  \
+        _(submit_queue, 0xFEED), \
+    )
+/* clang-format on */
 
 enum {
 #define _(name, number) SYS_##name = number,

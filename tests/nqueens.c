@@ -2,6 +2,7 @@
  * source: https://computerpuzzle.net/english/nqueens/
  */
 
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -166,7 +167,7 @@ int main(void)
     printf(" N:        Total       Unique\n");
     for (int size = 2; size <= MAXSIZE; size++) {
         nqueens(size);
-        printf("%2d:%13lld%13lld\n", size,
+        printf("%2d:%13" PRId64 "%13" PRId64 "\n", size,
                count8 * 8 + count4 * 4 + count2 * 2 /* total solutions */,
                count8 + count4 + count2 /* unique solutions */);
     }

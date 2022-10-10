@@ -148,6 +148,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
 * `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
 * `mandelbrot.elf` : See [tests/mandelbrot.c](tests/mandelbrot.c)
+* `nqueens.elf` : See [tests/nqueens.c](tests/nqueens.c)
 * `pi.elf` : See [tests/pi.c](tests/pi.c) [RV32M]
 * `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
 

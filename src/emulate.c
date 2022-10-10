@@ -4,7 +4,9 @@
  */
 
 #include <assert.h>
+#include <inttypes.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -2126,6 +2128,12 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
 #endif
 
     rv->halt = false;
+}
+
+/* FIXME: provide real implementation */
+void rv_stats(struct riscv_t *rv)
+{
+    printf("CSR cycle count: %" PRIu64 "\n", rv->csr_cycle);
 }
 
 void ebreak_handler(struct riscv_t *rv)

@@ -133,6 +133,9 @@ void syscall_handler(struct riscv_t *rv);
 /* breakpoint exception handler */
 void ebreak_handler(struct riscv_t *rv);
 
+/* statistics */
+void rv_stats(struct riscv_t *);
+
 /* halt the core */
 void rv_halt(struct riscv_t *);
 

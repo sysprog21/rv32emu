@@ -12,10 +12,14 @@
 
 /* enable program trace mode */
 static bool opt_trace = false;
+
 #if RV32_HAS(GDBSTUB)
 /* enable program gdbstub mode */
 static bool opt_gdbstub = false;
 #endif
+
+/* statistics */
+static bool opt_stats = false;
 
 /* RISC-V arch-test */
 static bool opt_arch_test = false;
@@ -88,6 +92,7 @@ static void print_usage(const char *filename)
 #if RV32_HAS(GDBSTUB)
             "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
 #endif
+            "  --stats : printf statistics\n"
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n",
             filename);
@@ -112,6 +117,10 @@ static bool parse_args(int argc, char **args)
                 continue;
             }
 #endif
+            if (!strcmp(arg, "--stats")) {
+                opt_stats = true;
+                continue;
+            }
             if (!strcmp(arg, "--arch-test")) {
                 opt_arch_test = true;
                 if (i + 1 >= argc) {
@@ -226,6 +235,10 @@ int main(int argc, char **args)
     else {
         run(rv);
     }
+
+    /* print statistics */
+    if (opt_stats)
+        rv_stats(rv);
 
     /* dump test result in test mode */
     if (opt_arch_test)

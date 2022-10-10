@@ -5,7 +5,7 @@ RUN_TARGET= $(TARGETDIR)/build/rv32emu $(<) \
 
 RISCV_GCC      ?= $(RISCV_PREFIX)gcc
 RISCV_GCC_OPTS ?= \
-    -march=rv32gc \
+    -march=rv32g \
     -mabi=ilp32 \
     -static \
     -mcmodel=medany \

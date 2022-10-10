@@ -761,7 +761,7 @@ static inline bool op_system(struct riscv_t *rv, uint32_t insn)
      *  31     20 19   15 14    12 11   7 6      0
      * |   csr   |  rs1  | funct3 |  rd  | opcode |
      */
-    const int32_t imm = dec_itype_imm(insn);
+    const int32_t funct12 = dec_funct12(insn);
     const int32_t csr = dec_csr(insn);
     const uint32_t funct3 = dec_funct3(insn);
     const uint32_t rs1 = dec_rs1(insn);
@@ -770,13 +770,13 @@ static inline bool op_system(struct riscv_t *rv, uint32_t insn)
     /* dispatch by func3 field */
     switch (funct3) {
     case 0:
-        switch (imm) { /* dispatch from imm field */
-        case 0:        /* ECALL: Environment Call */
+        switch (funct12) { /* dispatch from imm field */
+        case 0:            /* ECALL: Environment Call */
             rv->io.on_ecall(rv);
             break;
         case 1: /* EBREAK: Environment Break */
             rv->io.on_ebreak(rv);
-            break;
+            return true;
         case 0x002: /* URET: Return from handling an interrupt or exception */
         case 0x102: /* SRET */
         case 0x202: /* HRET */

@@ -86,19 +86,8 @@ Current progress of this emulator in riscv-arch-test(RV32):
     - `Zifencei`: Instruction-Fetch Fence
 * Failed Tests
     - `privilege`: RISCV Privileged Specification
-        + 2 system calls
-            * `ebreak`
+        + 1 system calls
             * `ecall`
-        + 5 misaligned CB-type instructions
-            * `misalign-beq`
-            * `misalign-bge`
-            * `misalign-bgeu`
-            * `misalign-blt`
-            * `misalign-bltu`
-        + 1 misaligned CL-type instructions
-            * `misalign-lw`
-        + 1 misaligned CS-type instructions
-            * `misalign-sw`
 * Unsupported tests (runnable but incomplete)
     - `F` Standard Extension for Single-Precision Floating-Point
 

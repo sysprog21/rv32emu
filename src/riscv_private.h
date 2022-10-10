@@ -261,6 +261,12 @@ static inline uint32_t dec_r4type_rs3(const uint32_t insn)
     return (insn & FR4_RS3) >> 27;
 }
 
+/* decode system instruction immediate (same as itype) */
+static inline uint32_t dec_funct12(const uint32_t insn)
+{
+    return ((uint32_t)(insn & FI_IMM_11_0)) >> 20;
+}
+
 /* decode csr instruction immediate (same as itype, zero extend) */
 static inline uint32_t dec_csr(const uint32_t insn)
 {

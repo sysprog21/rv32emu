@@ -90,8 +90,8 @@ RV_EXCEPTION_LIST
 static inline bool op_load(struct riscv_t *rv, uint32_t insn UNUSED)
 {
     /* I-type
-     * 31        26        21        16        11   9     6           0
-     * [ rd    5][ rs1   5][ immhi 5][ immlo     7][fun3][ opcode    7]
+     *  31       20 19   15 14    12 11   7 6      0
+     * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
      */
     const int32_t imm = dec_itype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn);
@@ -167,8 +167,8 @@ static inline bool op_misc_mem(struct riscv_t *rv, uint32_t insn UNUSED)
 static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
 {
     /* I-type
-     * 31        26        21        16        11   9     6           0
-     * [ rd    5][ rs1   5][ immhi 5][ immlo     7][fun3][ opcode    7]
+     *  31       20 19   15 14    12 11   7 6      0
+     * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
      */
     const int32_t imm = dec_itype_imm(insn);
     const uint32_t rd = dec_rd(insn);
@@ -268,8 +268,8 @@ static inline bool op_op_imm(struct riscv_t *rv, uint32_t insn)
 static inline bool op_auipc(struct riscv_t *rv, uint32_t insn)
 {
     /* U-type
-     * 31        26        21        16        11   9     6           0
-     * [ rd    5][ upper immediate                    19][ opcode    7]
+     *  31        12 11   7 6      0
+     * | imm[31:12] |  rd  | opcode |
      */
     const uint32_t rd = dec_rd(insn);
     const uint32_t val = dec_utype_imm(insn) + rv->PC;
@@ -287,7 +287,8 @@ static inline bool op_auipc(struct riscv_t *rv, uint32_t insn)
 static inline bool op_store(struct riscv_t *rv, uint32_t insn)
 {
     /* S-type
-     * | imm[11:5]    | rs2 | rs1 | imm[4:0]    | rd | opcode |
+     *  31       25 24   20 19   15 14    12 11       7 6      0
+     * | imm[11:5] |  rs2  |  rs1  | funct3 | imm[4:0] | opcode |
      */
     const int32_t imm = dec_stype_imm(insn);
     const uint32_t rs1 = dec_rs1(insn), rs2 = dec_rs2(insn);
@@ -335,8 +336,8 @@ static inline bool op_store(struct riscv_t *rv, uint32_t insn)
 static inline bool op_op(struct riscv_t *rv, uint32_t insn)
 {
     /* R-type
-     * 31        26        21        16        11   9     6           0
-     * [ rd    5][ rs1   5][ rs2   5][ funct          10][ opcode    7]
+     *  31    25 24   20 19   15 14    12 11   7 6      0
+     * | funct7 |  rs2  |  rs1  | funct3 |  rd  | opcode |
      */
     const uint32_t rd = dec_rd(insn);
     const uint32_t funct3 = dec_funct3(insn);
@@ -496,8 +497,8 @@ static inline bool op_op(struct riscv_t *rv, uint32_t insn)
 static inline bool op_lui(struct riscv_t *rv, uint32_t insn)
 {
     /* U-type
-     * 31        26        21        16        11   9     6           0
-     * [ rd    5][ upper immediate                    19][ opcode    7]
+     *  31        12 11   7 6      0
+     * | imm[31:12] |  rd  | opcode |
      */
     const uint32_t rd = dec_rd(insn);
     const uint32_t val = dec_utype_imm(insn);
@@ -517,8 +518,8 @@ static inline bool op_branch(struct riscv_t *rv, uint32_t insn)
     const uint32_t pc = rv->PC;
 
     /* B-type
-     * 31        26        21        16        11   9     6           0
-     * [ immhi 5][ rs1   5][ rs2   5][ immlo     7][fun3][ opcode    7]
+     *     31     30     25   24 20 19 15 14    12 11       8     7     6    0
+     * | imm[12] | imm[10:5] | rs2 | rs1 | funct3 | imm[4:1] | imm[11] |opcode|
      */
     const uint32_t func3 = dec_funct3(insn);
     const int32_t imm = dec_btype_imm(insn);
@@ -586,8 +587,8 @@ static inline bool op_jalr(struct riscv_t *rv, uint32_t insn)
     const uint32_t pc = rv->PC;
 
     /* I-type
-     * 31        26        21        16        11   9     6           0
-     * [ rd    5][ rs1   5][ immhi 5][ immlo     7][fun3][ opcode    7]
+     *  31       20 19   15 14    12 11   7 6      0
+     * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
      */
     const uint32_t rd = dec_rd(insn);
     const uint32_t rs1 = dec_rs1(insn);
@@ -627,8 +628,8 @@ static inline bool op_jal(struct riscv_t *rv, uint32_t insn)
     const uint32_t pc = rv->PC;
 
     /* J-type
-     * 31        26        21        16        11   9     6           0
-     * [ jump target                                  25][ opcode    7]
+     *     31     30       21     20    19        12 11   7 6      0
+     * | imm[20] | imm[10:1] | imm[11] | imm[19:12] |  rd  | opcode |
      */
     const uint32_t rd = dec_rd(insn);
     const int32_t rel = dec_jtype_imm(insn);
@@ -752,10 +753,15 @@ static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
 static inline bool op_system(struct riscv_t *rv, uint32_t insn)
 {
     /* I-type
-     * 31        26        21        16        11   9     6           0
-     * [ rd    5][ rs1   5][ immhi 5][ immlo     7][fun3][ opcode    7]
+     * system instruction
+     *  31     20 19   15 14    12 11   7 6      0
+     * | funct12 |  rs1  | funct3 |  rd  | opcode |
+     *
+     * csr instruction
+     *  31     20 19   15 14    12 11   7 6      0
+     * |   csr   |  rs1  | funct3 |  rd  | opcode |
      */
-    const int32_t imm = dec_itype_imm(insn);
+    const int32_t funct12 = dec_funct12(insn);
     const int32_t csr = dec_csr(insn);
     const uint32_t funct3 = dec_funct3(insn);
     const uint32_t rs1 = dec_rs1(insn);
@@ -764,13 +770,13 @@ static inline bool op_system(struct riscv_t *rv, uint32_t insn)
     /* dispatch by func3 field */
     switch (funct3) {
     case 0:
-        switch (imm) { /* dispatch from imm field */
-        case 0:        /* ECALL: Environment Call */
+        switch (funct12) { /* dispatch from imm field */
+        case 0:            /* ECALL: Environment Call */
             rv->io.on_ecall(rv);
             break;
         case 1: /* EBREAK: Environment Break */
             rv->io.on_ebreak(rv);
-            break;
+            return true;
         case 0x002: /* URET: Return from handling an interrupt or exception */
         case 0x102: /* SRET */
         case 0x202: /* HRET */

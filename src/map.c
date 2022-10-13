@@ -547,33 +547,27 @@ bool map_insert(map_t obj, void *key, void *value)
 
 static void map_prev(map_t obj, map_iter_t *it)
 {
-    if (!it->node) {
-        it->prev = NULL;
+    /* We have hit the end or null node. */
+    if (!it->node || it->node == obj->it_least.node) {
+        it->prev = it->node = NULL;
         return;
     }
 
-    if (it->node == obj->it_least.node) { /* We have hit the end. */
-        it->prev = it->node = NULL;
-    } else {
-        if (it->node->left) { /* To the left, as far right as possible */
-            it->node = it->node->left;
-
-            while (it->node->right)
-                it->node = it->node->right;
-        } else {
-            /* Keep going up until there is a left child */
+    if (it->node->left) { /* To the left, as far right as possible */
+        for (it->node = it->node->left; it->node->right;
+             it->node = it->node->right)
             it->prev = it->node;
-            it->node = rb_parent(it->node);
+        return;
+    }
 
-            if (!it->node)
-                return;
+    /* If there is no left child, keep going up until there is a left child */
+    it->prev = it->node;
+    it->node = rb_parent(it->node);
 
-            while (rb_parent(it->node) && it->node->left &&
-                   (it->node->left == it->prev)) {
-                it->prev = it->node;
-                it->node = rb_parent(it->node);
-            }
-        }
+    while (rb_parent(it->node) && it->node->left &&
+           (it->node->left == it->prev)) {
+        it->prev = it->node;
+        it->node = rb_parent(it->node);
     }
 }
 

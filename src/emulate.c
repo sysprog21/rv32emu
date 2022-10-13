@@ -32,53 +32,59 @@ extern struct target_ops gdbstub_ops;
 #include "riscv_private.h"
 
 /* RISC-V exception code list */
-#define GET_EXCEPTION_CODE(type) rv_exception_code_##type
-#define RV_EXCEPTION_LIST                                    \
-    _(insn_misaligned)  /* Instruction address misaligned */ \
-    _(insn_fault)       /* Instruction access fault */       \
-    _(illegal_insn)     /* Illegal instruction */            \
-    _(breakpoint)       /* Breakpoint */                     \
-    _(load_misaligned)  /* Load address misaligned */        \
-    _(load_fault)       /* Load access fault */              \
-    _(store_misaligned) /* Store/AMO address misaligned */
+#define RV_EXCEPTION_LIST                                       \
+    _(insn_misaligned, 0)  /* Instruction address misaligned */ \
+    _(illegal_insn, 2)     /* Illegal instruction */            \
+    _(breakpoint, 3)       /* Breakpoint */                     \
+    _(load_misaligned, 4)  /* Load address misaligned */        \
+    _(store_misaligned, 6) /* Store/AMO address misaligned */   \
+    _(ecall_M, 11)         /* Environment call from M-mode */
 
 enum {
-#define _(type) GET_EXCEPTION_CODE(type),
+#define _(type, code) rv_exception_code##type = code,
     RV_EXCEPTION_LIST
 #undef _
 };
 
-#define EXCEPTION_HANDLER_IMPL(type)                                        \
-    UNUSED static void rv_except_##type(struct riscv_t *rv, uint32_t mtval) \
-    {                                                                       \
-        /* mtvec (Machine Trap-Vector Base Address Register)                \
-         * mtvec[MXLEN-1:2]: vector base address                            \
-         * mtvec[1:0] : vector mode                                         \
-         */                                                                 \
-        const uint32_t base = rv->csr_mtvec & ~0x3;                         \
-        const uint32_t mode = rv->csr_mtvec & 0x3;                          \
-        /* Exception Code */                                                \
-        const uint32_t code = GET_EXCEPTION_CODE(type);                     \
-        /* mepc  (Machine Exception Program Counter)                        \
-         * mtval (Machine Trap Value Register)                              \
-         */                                                                 \
-        rv->csr_mepc = rv->PC;                                              \
-        rv->csr_mtval = mtval;                                              \
-        switch (mode) {                                                     \
-        case 0: /* DIRECT: All exceptions set PC to base */                 \
-            rv->PC = base;                                                  \
-            break;                                                          \
-        /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */   \
-        case 1:                                                             \
-            rv->PC = base + 4 * code;                                       \
-            break;                                                          \
-        }                                                                   \
-        /* mcause (Machine Cause Register): store exception code */         \
-        rv->csr_mcause = code;                                              \
+static void rv_exception_default_handler(struct riscv_t *rv)
+{
+    rv->csr_mepc += rv->insn_len;
+    rv->PC = rv->csr_mepc; /* mret */
+}
+
+#define EXCEPTION_HANDLER_IMPL(type, code)                                \
+    static void rv_except_##type(struct riscv_t *rv, uint32_t mtval)      \
+    {                                                                     \
+        /* mtvec (Machine Trap-Vector Base Address Register)              \
+         * mtvec[MXLEN-1:2]: vector base address                          \
+         * mtvec[1:0] : vector mode                                       \
+         */                                                               \
+        const uint32_t base = rv->csr_mtvec & ~0x3;                       \
+        const uint32_t mode = rv->csr_mtvec & 0x3;                        \
+        /* mepc  (Machine Exception Program Counter)                      \
+         * mtval (Machine Trap Value Register)                            \
+         * mcause (Machine Cause Register): store exception code          \
+         */                                                               \
+        rv->csr_mepc = rv->PC;                                            \
+        rv->csr_mtval = mtval;                                            \
+        rv->csr_mcause = code;                                            \
+        if (!rv->csr_mtvec) { /* in case CSR is not configured */         \
+            rv_exception_default_handler(rv);                             \
+            return;                                                       \
+        }                                                                 \
+        switch (mode) {                                                   \
+        case 0: /* DIRECT: All exceptions set PC to base */               \
+            rv->PC = base;                                                \
+            break;                                                        \
+        /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */ \
+        case 1:                                                           \
+            rv->PC = base + 4 * code;                                     \
+            break;                                                        \
+        }                                                                 \
     }
 
 /* RISC-V exception handlers */
-#define _(type) EXCEPTION_HANDLER_IMPL(type)
+#define _(type, code) EXCEPTION_HANDLER_IMPL(type, code)
 RV_EXCEPTION_LIST
 #undef _
 
@@ -775,7 +781,7 @@ static inline bool op_system(struct riscv_t *rv, uint32_t insn)
         switch (funct12) { /* dispatch from imm field */
         case 0:            /* ECALL: Environment Call */
             rv->io.on_ecall(rv);
-            break;
+            return true;
         case 1: /* EBREAK: Environment Break */
             rv->io.on_ebreak(rv);
             return true;
@@ -2118,6 +2124,7 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
     rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;
 
     /* reset the csrs */
+    rv->csr_mtvec = 0;
     rv->csr_cycle = 0;
     rv->csr_mstatus = 0;
 
@@ -2140,4 +2147,11 @@ void ebreak_handler(struct riscv_t *rv)
 {
     assert(rv);
     rv_except_breakpoint(rv, rv->PC);
+}
+
+void ecall_handler(struct riscv_t *rv)
+{
+    assert(rv);
+    rv_except_ecall_M(rv, 0);
+    syscall_handler(rv);
 }

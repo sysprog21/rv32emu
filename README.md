@@ -84,10 +84,7 @@ Current progress of this emulator in riscv-arch-test(RV32):
     - `M`: Standard Extension for Integer Multiplication and Division
     - `C`: Standard Extension for Compressed Instruction
     - `Zifencei`: Instruction-Fetch Fence
-* Failed Tests
     - `privilege`: RISCV Privileged Specification
-        + 1 system calls
-            * `ecall`
 * Unsupported tests (runnable but incomplete)
     - `F` Standard Extension for Single-Precision Floating-Point
 

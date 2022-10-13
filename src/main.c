@@ -199,7 +199,7 @@ int main(int argc, char **args)
         .mem_write_b = MEMIO(write_b),
 
         /* system */
-        .on_ecall = syscall_handler,
+        .on_ecall = ecall_handler,
         .on_ebreak = ebreak_handler,
     };
 

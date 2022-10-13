@@ -130,6 +130,9 @@ riscv_word_t rv_get_reg(struct riscv_t *, uint32_t reg);
 /* system call handler */
 void syscall_handler(struct riscv_t *rv);
 
+/* environment call handler */
+void ecall_handler(struct riscv_t *rv);
+
 /* breakpoint exception handler */
 void ebreak_handler(struct riscv_t *rv);
 

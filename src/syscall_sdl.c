@@ -234,27 +234,14 @@ void syscall_draw_frame(struct riscv_t *rv)
 
 void syscall_setup_queue(struct riscv_t *rv)
 {
-    /* setup_queue(capacity, event_count) */
-    queues_capacity = rv_get_reg(rv, rv_reg_a0);
-    event_count = rv_get_reg(rv, rv_reg_a1);
+    /* setup_queue(base, capacity, event_count) */
+    void *base = (void *) (uintptr_t) rv_get_reg(rv, rv_reg_a0);
+    queues_capacity = rv_get_reg(rv, rv_reg_a1);
+    event_count = rv_get_reg(rv, rv_reg_a2);
 
-    queues_capacity = round_pow2(queues_capacity);
-    if (queues_capacity == 0) {
-        rv_set_reg(rv, rv_reg_a0, 0);
-        return;
-    }
-
-    /* FIXME: Allocate a memory chunk in the emulator's address space so that
-     * the user can access it */
-    void *base = malloc(sizeof(event_t) * queues_capacity +
-                        sizeof(submission_t) * queues_capacity);
     event_queue.base = base;
     submission_queue.base = base + sizeof(event_t) * queues_capacity;
-
-    rv_set_reg(
-        rv, rv_reg_a0,
-        (uint32_t) (uintptr_t) base); /* eliminate the "cast from pointer to
-                                         integer of different size" warning*/
+    queues_capacity = round_pow2(queues_capacity);
 }
 
 void syscall_submit_queue(struct riscv_t *rv)

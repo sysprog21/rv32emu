@@ -31,9 +31,9 @@ If a window does not already exist, one will be created with the specified `widt
 
 **system call number**: `0xC0DE`
 
-**synopsis**: `void *setup_queue(int capacity, unsigned int* event_count)`
+**synopsis**: `void *setup_queue(void *base, int capacity, unsigned int *event_count)`
 
-Allocate a continuous memory chunk that has the requested capacity and two closely packed queues, the event queue and the submission queue. The base address of the event queue is located in the returned address, and the submission queue is immediately after the event queue's last element, which is the event queue's base address plus the size of each event element times the given capacity. The capacity must be a power of 2; if it is not, it will be rounded up to the next highest power of 2. It is crucial to initialize the event counter variable before supplying its address to this system call because it serves as an interaction to the user that an event has been added to the event queue.
+The user must pass a continuous memory chunk that contains two tightly packed queues, the event queue and the submission queue. And the submission queue is immediately following the last element of the event queue, which is the event queue's base address plus the size of each event element multiplied by the given capacity. If the capacity is not a power of two, it will be treated as the rounded value of the next highest power of two. Additionally, because the event counter variable serves as a notifier to the user that an event has been added to the event queue, it is critical to initialize it before passing its address to this system call.
 
 #### Events
 

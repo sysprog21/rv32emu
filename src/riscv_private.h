@@ -167,6 +167,7 @@ struct riscv_t {
 
     /* csr registers */
     uint64_t csr_cycle;
+    uint64_t csr_time;
     uint32_t csr_mstatus;
     uint32_t csr_mtvec;
     uint32_t csr_misa;
@@ -176,7 +177,7 @@ struct riscv_t {
     uint32_t csr_mepc;
     uint32_t csr_mip;
     uint32_t csr_mbadaddr;
-    
+
     /* current instruction length */
     uint8_t insn_len;
 };

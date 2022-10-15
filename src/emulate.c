@@ -30,6 +30,7 @@ extern struct target_ops gdbstub_ops;
 
 #include "riscv.h"
 #include "riscv_private.h"
+#include "utils.h"
 
 /* RISC-V exception code list */
 #define RV_EXCEPTION_LIST                                       \
@@ -665,30 +666,56 @@ static inline bool op_jal(struct riscv_t *rv, uint32_t insn)
     return false;
 }
 
+/* Get current time in microsecnds and update csr_time register */
+static inline void update_time(struct riscv_t *rv)
+{
+    struct timeval tv;
+    rv_gettimeofday(&tv);
+
+    rv->csr_time = (uint64_t) tv.tv_sec * 1e6 + (uint32_t) tv.tv_usec;
+}
+
 /* get a pointer to a CSR */
 static uint32_t *csr_get_ptr(struct riscv_t *rv, uint32_t csr)
 {
     switch (csr) {
-    case CSR_CYCLE:
-        return (uint32_t *) (&rv->csr_cycle) + 0;
-    case CSR_CYCLEH:
-        return (uint32_t *) (&rv->csr_cycle) + 1;
-    case CSR_MSTATUS:
+    case CSR_MSTATUS: /* Machine Status */
         return (uint32_t *) (&rv->csr_mstatus);
-    case CSR_MTVEC:
+    case CSR_MTVEC: /* Machine Trap Handler */
         return (uint32_t *) (&rv->csr_mtvec);
-    case CSR_MISA:
+    case CSR_MISA: /* Machine ISA and Extensions */
         return (uint32_t *) (&rv->csr_misa);
-    case CSR_MSCRATCH:
+
+    /* Machine Trap Handling */
+    case CSR_MSCRATCH: /* Machine Scratch Register */
         return (uint32_t *) (&rv->csr_mscratch);
-    case CSR_MEPC:
+    case CSR_MEPC: /* Machine Exception Program Counter */
         return (uint32_t *) (&rv->csr_mepc);
-    case CSR_MCAUSE:
+    case CSR_MCAUSE: /* Machine Exception Cause */
         return (uint32_t *) (&rv->csr_mcause);
-    case CSR_MTVAL:
+    case CSR_MTVAL: /* Machine Trap Value */
         return (uint32_t *) (&rv->csr_mtval);
-    case CSR_MIP:
+    case CSR_MIP: /* Machine Interrupt Pending */
         return (uint32_t *) (&rv->csr_mip);
+
+    /* Machine Counter/Timers */
+    case CSR_CYCLE: /* Cycle counter for RDCYCLE instruction */
+        return (uint32_t *) (&rv->csr_cycle) + 0;
+    case CSR_CYCLEH: /* Upper 32 bits of cycle */
+        return (uint32_t *) (&rv->csr_cycle) + 1;
+
+    /* TIME/TIMEH - very roughly about 1 ms per tick */
+    case CSR_TIME: { /* Timer for RDTIME instruction */
+        update_time(rv);
+        return (uint32_t *) (&rv->csr_time) + 0;
+    }
+    case CSR_TIMEH: { /* Upper 32 bits of time */
+        update_time(rv);
+        return (uint32_t *) (&rv->csr_time) + 1;
+    }
+    case CSR_INSTRET: /* Number of Instructions Retired Counter */
+        /* Number of Instructions Retired Counter, just use cycle */
+        return (uint32_t *) (&rv->csr_cycle) + 0;
 #if RV32_HAS(EXT_F)
     case CSR_FFLAGS:
         return (uint32_t *) (&rv->csr_fcsr);

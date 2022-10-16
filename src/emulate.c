@@ -705,7 +705,7 @@ static bool csr_is_writable(uint32_t csr)
     return csr < 0xc00;
 }
 
-/* perform csrrw */
+/* perform csrrw (atoimc read and write) */
 static uint32_t csr_csrrw(struct riscv_t *rv, uint32_t csr, uint32_t val)
 {
     uint32_t *c = csr_get_ptr(rv, csr);

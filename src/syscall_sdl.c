@@ -46,7 +46,7 @@ typedef struct {
 } event_t;
 
 typedef struct {
-    event_t *base;
+    uint32_t base;
     size_t end;
 } event_queue_t;
 
@@ -64,7 +64,7 @@ typedef struct {
 } submission_t;
 
 typedef struct {
-    submission_t *base;
+    uint32_t base;
     size_t start;
 } submission_queue_t;
 
@@ -76,27 +76,35 @@ static SDL_Texture *texture;
 static uint32_t queues_capacity;
 static uint32_t event_count;
 static event_queue_t event_queue = {
-    .base = NULL,
+    .base = 0,
     .end = 0,
 };
 static submission_queue_t submission_queue = {
-    .base = NULL,
+    .base = 0,
     .start = 0,
 };
 
-static submission_t submission_pop(void)
+static submission_t submission_pop(struct riscv_t *rv)
 {
-    submission_t submission = submission_queue.base[submission_queue.start++];
+    state_t *s = rv_userdata(rv);
+    submission_t submission;
+    memory_read(
+        s->mem, (void *) &submission,
+        submission_queue.base + submission_queue.start * sizeof(submission_t),
+        sizeof(submission_t));
+    ++submission_queue.start;
     submission_queue.start &= queues_capacity - 1;
     return submission;
 }
 
 static void event_push(struct riscv_t *rv, event_t event)
 {
-    event_queue.base[event_queue.end++] = event;
+    state_t *s = rv_userdata(rv);
+    memory_write(s->mem, event_queue.base + event_queue.end * sizeof(event_t),
+                 (void *) &event, sizeof(event_t));
+    ++event_queue.end;
     event_queue.end &= queues_capacity - 1;
 
-    state_t *s = rv_userdata(rv);
     uint32_t count;
     memory_read(s->mem, (void *) &count, event_count, sizeof(uint32_t));
     count += 1;
@@ -235,7 +243,7 @@ void syscall_draw_frame(struct riscv_t *rv)
 void syscall_setup_queue(struct riscv_t *rv)
 {
     /* setup_queue(base, capacity, event_count) */
-    void *base = (void *) (uintptr_t) rv_get_reg(rv, rv_reg_a0);
+    uint32_t base = rv_get_reg(rv, rv_reg_a0);
     queues_capacity = rv_get_reg(rv, rv_reg_a1);
     event_count = rv_get_reg(rv, rv_reg_a2);
 
@@ -250,7 +258,7 @@ void syscall_submit_queue(struct riscv_t *rv)
     uint32_t count = rv_get_reg(rv, rv_reg_a0);
 
     while (count--) {
-        submission_t submission = submission_pop();
+        submission_t submission = submission_pop(rv);
 
         switch (submission.type) {
         case RELATIVE_MODE_SUBMISSION:

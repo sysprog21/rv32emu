@@ -528,6 +528,7 @@ bool map_insert(map_t obj, void *key, void *value)
 
     /* Traverse the tree until we hit the end or find a side that is NULL */
     map_node_t **indirect = &obj->head;
+    map_node_t *parent = obj->head;
 
     while (*indirect) {
         int res = obj->comparator(new_node->key, (*indirect)->key);
@@ -535,11 +536,12 @@ bool map_insert(map_t obj, void *key, void *value)
             map_delete_node(obj, new_node);
             return false;
         }
+        parent = *indirect;
         indirect = res < 0 ? &(*indirect)->left : &(*indirect)->right;
     }
 
     *indirect = new_node;
-    rb_set_parent(new_node, *indirect);
+    rb_set_parent(new_node, parent);
     map_fix_colors(obj, new_node);
     map_calibrate(obj);
     return true;

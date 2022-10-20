@@ -75,6 +75,7 @@ static SDL_Texture *texture;
 /* Event queue specific variables */
 static uint32_t queues_capacity;
 static uint32_t event_count;
+static uint32_t deferred_submissions = 0;
 static event_queue_t event_queue = {
     .base = 0,
     .end = 0,
@@ -128,6 +129,8 @@ static uint32_t round_pow2(uint32_t x)
     return x;
 }
 
+void syscall_submit_queue(struct riscv_t *rv);
+
 /* check if we need to setup SDL and run event loop */
 static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
 {
@@ -136,7 +139,6 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
             fprintf(stderr, "Failed to call SDL_Init()\n");
             exit(1);
         }
-
         window = SDL_CreateWindow("rv32emu", SDL_WINDOWPOS_UNDEFINED,
                                   SDL_WINDOWPOS_UNDEFINED, width, height,
                                   0 /* flags */);
@@ -149,6 +151,11 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
         texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
                                     SDL_TEXTUREACCESS_STREAMING, width, height);
+
+        if (deferred_submissions) {
+            syscall_submit_queue(rv);
+            deferred_submissions = 0;
+        }
     }
 
     SDL_Event event;
@@ -158,12 +165,6 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
             rv_halt(rv);
             return false;
         case SDL_KEYDOWN:
-            if (event.key.keysym.sym == SDLK_ESCAPE &&
-                SDL_GetRelativeMouseMode() == SDL_TRUE) {
-                SDL_SetRelativeMouseMode(SDL_FALSE);
-                break;
-            }
-            /* fall through */
         case SDL_KEYUP: {
             if (event.key.repeat)
                 break;
@@ -192,12 +193,6 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
             break;
         }
         case SDL_MOUSEBUTTONDOWN:
-            if (event.button.button == SDL_BUTTON_LEFT &&
-                SDL_GetRelativeMouseMode() == SDL_FALSE) {
-                SDL_SetRelativeMouseMode(SDL_TRUE);
-                break;
-            }
-            /* fall through */
         case SDL_MOUSEBUTTONUP: {
             event_t new_event = {
                 .type = MOUSE_BUTTON_EVENT,
@@ -256,6 +251,14 @@ void syscall_submit_queue(struct riscv_t *rv)
 {
     /* submit_queue(count) */
     uint32_t count = rv_get_reg(rv, rv_reg_a0);
+
+    if (!window) {
+        deferred_submissions += count;
+        return;
+    }
+
+    if (deferred_submissions)
+        count = deferred_submissions;
 
     while (count--) {
         submission_t submission = submission_pop(rv);

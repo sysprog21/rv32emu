@@ -705,7 +705,13 @@ static bool csr_is_writable(uint32_t csr)
     return csr < 0xc00;
 }
 
-/* perform csrrw (atoimc read and write) */
+/* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
+ * CSRs and integer registers. CSRRW reads the old value of the CSR,
+ * zero - extends the value to XLEN bits, then writes it to integer register rd.
+ * The initial value in rs1 is written to the CSR.
+ * If rd == x0, then the instruction shall not read the CSR and shall not cause
+ * any of the side effects that might occur on a CSR read.
+ */
 static uint32_t csr_csrrw(struct riscv_t *rv, uint32_t csr, uint32_t val)
 {
     uint32_t *c = csr_get_ptr(rv, csr);
@@ -741,7 +747,10 @@ static uint32_t csr_csrrs(struct riscv_t *rv, uint32_t csr, uint32_t val)
     return out;
 }
 
-/* perform csrrc (atomic read and clear) */
+/* perform csrrc (atomic read and clear)
+ * Read old value of CSR, zero-extend to XLEN bits, write to rd
+ * Read value from rs1, use as bit mask to clear bits in CSR
+ */
 static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
 {
     uint32_t *c = csr_get_ptr(rv, csr);

@@ -43,6 +43,26 @@
 |   0000000    |     rs2     |     rs1     | 111 |     rd      | 0110011 | AND
 ```
 
+## Pseudo-instructions
+
+Pseudo-instructions give RISC-V a richer set of assembly language instructions.
+The following example shows the `li` pseudo-instruction which is used to load immediate values:
+```
+.org 0
+.globl _start
+.text
+_start:
+    .equ CONSTANT, 0xcafebabe
+    li a0, CONSTANT
+```
+
+which generates the following assembler output as seen by `objdump`:
+```
+00000000 <_start>:
+   0:	cafec537        lui     a0,0xcafec
+   4:	abe50513        addi    a0,a0,-1346 # cafebabe <CONSTANT+0x0>
+```
+
 ## Reference
 * [RISC-V Opcodes](https://github.com/riscv/riscv-opcodes)
 * [RISC-V Instruction Set Metadata](https://github.com/michaeljclark/riscv-meta)

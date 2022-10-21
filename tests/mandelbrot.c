@@ -26,8 +26,8 @@ short toPrec(double f, int bitsPrecision)
 }
 #endif
 
-static const int width = 64;  /* basic width of a zx81 */
-static const int height = 32; /* basic width of a zx81 */
+static const int width = 64;  /* basic width */
+static const int height = 32; /* basic width */
 static const int zoom = 1;    /* leave at 1 for 32x22 */
 
 int main(int argc, char *argv[])
@@ -41,8 +41,8 @@ int main(int argc, char *argv[])
     const short LIMIT = 0x100; /* toPrec(4, bitsPrecision) */
 
     /* fractal */
-    char charset[] = ".:-=X$#@.";
-    short max_iter = sizeof(charset) - 1;
+    char charset[] = ".:-=X$#@ ";
+    const short max_iter = sizeof(charset) - 1;
 
     for (short py = 0; py < height * zoom; py++) {
         for (short px = 0; px < width * zoom; px++) {
@@ -50,8 +50,8 @@ int main(int argc, char *argv[])
             short y0 = ((py * Y1) / height) - Y2;
             short x = 0, y = 0;
 
-            short i = 0;
-            while (i < max_iter) {
+            short i;
+            for (i = 0; i < max_iter; i++) {
                 short xSqr = (x * x) >> bitsPrecision;
                 short ySqr = (y * y) >> bitsPrecision;
 
@@ -63,16 +63,14 @@ int main(int argc, char *argv[])
                  * and we see nothing. By including the overflow break out we
                  * can see the fractal again though with noise.
                  */
-                if ((xSqr + ySqr) >= LIMIT || (xSqr + ySqr) < 0)
+                if ((xSqr + ySqr) >= LIMIT)
                     break;
 
                 short xt = xSqr - ySqr + x0;
                 y = (((x * y) >> bitsPrecision) * 2) + y0;
                 x = xt;
-
-                i++;
             }
-            printf("%c", charset[--i]);
+            printf("\033[48;05;%dm%c\033[0m", i, charset[i - 1]);
         }
 
         printf("\n");

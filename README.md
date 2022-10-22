@@ -147,6 +147,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `mandelbrot.elf` : See [tests/mandelbrot.c](tests/mandelbrot.c)
 * `nqueens.elf` : See [tests/nqueens.c](tests/nqueens.c)
 * `pi.elf` : See [tests/pi.c](tests/pi.c) [RV32M]
+* `qrcode.elf` : See [tests/qrcode.c](tests/qrcode.c)
 * `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
 
 ## Reference

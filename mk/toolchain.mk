@@ -9,24 +9,20 @@ else
 endif
 
 # Validate GNU Toolchain for RISC-V
-CROSS_COMPILE ?= riscv32-unknown-elf-
-RV32_CC = $(CROSS_COMPILE)gcc
-RV32_CC := $(shell which $(RV32_CC))
-ifndef RV32_CC
-    # xPack GNU RISC-V Embedded GCC
-    CROSS_COMPILE = riscv-none-elf-
-    RV32_CC = $(CROSS_COMPILE)gcc
-    RV32_CC := $(shell which $(RV32_CC))
-    ifndef RV32_CC
-        # DEPRECATED: Replaced by xpack-dev-tools/riscv-none-elf-gcc-xpack
-        CROSS_COMPILE = riscv-none-embed-
-        RV32_CC = $(CROSS_COMPILE)gcc
-        RV32_CC := $(shell which $(RV32_CC))
-        ifndef RV32_CC
-        $(warning No GNU Toolchain for RISC-V found.)
-        CROSS_COMPILE :=
-        endif
-    endif
+TOOLCHAIN_LIST := riscv-none-elf-      \
+		  riscv32-unknown-elf- \
+		  riscv64-unknown-elf- \
+		  riscv-none-embed-
+
+# TODO: add support to clang/llvm based cross compilers
+VALID_TOOLCHAIN := $(foreach toolchain,$(TOOLCHAIN_LIST),     \
+		   $(shell which $(toolchain)gcc > /dev/null) \
+		   $(if $(filter 0,$(.SHELLSTATUS)),$(toolchain)))
+
+# Get the first element in valid toolchain list
+CROSS_COMPILE ?= $(word 1,$(VALID_TOOLCHAIN))
+ifeq ($(CROSS_COMPILE),)
+$(warning GNU Toolchain for RISC-V is required. Please check package installation)
 endif
 
 export CROSS_COMPILE

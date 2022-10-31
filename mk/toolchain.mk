@@ -8,21 +8,24 @@ else
     endif
 endif
 
-# Validate GNU Toolchain for RISC-V
+# Supported GNU Toolchain for RISC-V
 TOOLCHAIN_LIST := riscv-none-elf-      \
 		  riscv32-unknown-elf- \
 		  riscv64-unknown-elf- \
 		  riscv-none-embed-
 
-# TODO: add support to clang/llvm based cross compilers
-VALID_TOOLCHAIN := $(foreach toolchain,$(TOOLCHAIN_LIST),     \
-		   $(shell which $(toolchain)gcc > /dev/null) \
-		   $(if $(filter 0,$(.SHELLSTATUS)),$(toolchain)))
+define check-cross-tools
+$(shell which $(1)gcc >/dev/null &&
+        which $(1)cpp >/dev/null &&
+        echo | $(1)cpp -dM - | grep __riscv >/dev/null &&
+        echo "$(1) ")
+endef
 
-# Get the first element in valid toolchain list
-CROSS_COMPILE ?= $(word 1,$(VALID_TOOLCHAIN))
+# TODO: support clang/llvm based cross compilers
+# TODO: support native RISC-V compilers
+CROSS_COMPILE ?= $(word 1,$(foreach prefix,$(TOOLCHAIN_LIST),$(call check-cross-tools, $(prefix))))
 ifeq ($(CROSS_COMPILE),)
-$(warning GNU Toolchain for RISC-V is required. Please check package installation)
+$(warning GNU Toolchain for RISC-V is required to build architecture tests. Please check package installation)
 endif
 
 export CROSS_COMPILE

@@ -68,6 +68,11 @@ the test is successful.
 make arch-test
 ```
 
+Users of macOS might need to install "sdiff" first.
+```shell
+brew install diffutils
+```
+
 * To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`,`M`,`C`,`Zifencei`,`privilege`.
 ```shell
 make arch-test RISCV_DEVICE=I

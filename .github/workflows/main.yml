@@ -6,7 +6,7 @@ jobs:
   rv32emu:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.0.2
+    - uses: actions/checkout@v3.1.0
     - name: install-dependencies
       run: | 
             sudo apt-get update
@@ -28,7 +28,7 @@ jobs:
   coding_style:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.0.2
+    - uses: actions/checkout@v3.1.0
     - name: coding convention
       run: |
             sudo apt-get install -q -y clang-format-12

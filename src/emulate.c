@@ -1193,9 +1193,16 @@ static inline bool op_fp(struct riscv_t *rv, uint32_t insn)
     case 0b1010000:
         switch (rm) {
         case 0b010: /* FEQ.S */
+            /* FEQ.S performs a quiet comparison: it only sets the invalid
+             * operation exception flag if either input is a signaling NaN.
+             */
             rv->X[rd] = (rv->F[rs1] == rv->F[rs2]) ? 1 : 0;
             break;
         case 0b001: /* FLT.S */
+            /* FLT.S and FLE.S perform what the IEEE 754-2008 standard refers
+             * to as signaling comparisons: that is, they set the invalid
+             * operation exception flag if either input is NaN.
+             */
             rv->X[rd] = (rv->F[rs1] < rv->F[rs2]) ? 1 : 0;
             break;
         case 0b000: /* FLE.S */

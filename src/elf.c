@@ -51,23 +51,23 @@ enum {
 };
 
 enum {
-    SHT_NULL = 0,
-    SHT_PROGBITS = 1,
-    SHT_SYMTAB = 2,
-    SHT_STRTAB = 3,
-    SHT_RELA = 4,
-    SHT_HASH = 5,
-    SHT_DYNAMIC = 6,
-    SHT_NOTE = 7,
-    SHT_NOBITS = 8,
-    SHT_REL = 9,
-    SHT_SHLIB = 10,
-    SHT_DYNSYM = 11,
+    SHT_NULL = 0,     /* Section header table entry unused */
+    SHT_PROGBITS = 1, /* Program data */
+    SHT_SYMTAB = 2,   /* Symbol table */
+    SHT_STRTAB = 3,   /* String table */
+    SHT_RELA = 4,     /* Relocation entries with addends */
+    SHT_HASH = 5,     /* Symbol hash table */
+    SHT_DYNAMIC = 6,  /* Dynamic linking information */
+    SHT_NOTE = 7,     /* Notes */
+    SHT_NOBITS = 8,   /* Program space with no data (bss) */
+    SHT_REL = 9,      /* Relocation entries, no addends */
+    SHT_SHLIB = 10,   /* Reserved */
+    SHT_DYNSYM = 11,  /* Dynamic linker symbol table */
     SHT_NUM = 12,
-    SHT_LOPROC = 0x70000000,
-    SHT_HIPROC = 0x7fffffff,
-    SHT_LOUSER = 0x80000000,
-    SHT_HIUSER = 0xffffffff
+    SHT_LOPROC = 0x70000000, /* Start of processor-specific */
+    SHT_HIPROC = 0x7fffffff, /* End of processor-specific */
+    SHT_LOUSER = 0x80000000, /* Start of application-specific */
+    SHT_HIUSER = 0xffffffff, /* End of application-specific */
 };
 
 #define ELF_ST_TYPE(x) (((unsigned int) x) & 0xf)
@@ -75,19 +75,19 @@ enum {
 /* Elf32 header */
 struct Elf32_Ehdr {
     uint8_t e_ident[EI_NIDENT];
-    Elf32_Half e_type;
-    Elf32_Half e_machine;
-    Elf32_Word e_version;
-    Elf32_Addr e_entry;
-    Elf32_Off e_phoff;
-    Elf32_Off e_shoff;
-    Elf32_Word e_flags;
-    Elf32_Half e_ehsize;
-    Elf32_Half e_phentsize;
-    Elf32_Half e_phnum;
-    Elf32_Half e_shentsize;
-    Elf32_Half e_shnum;
-    Elf32_Half e_shstrndx;
+    Elf32_Half e_type;      /* Object file type */
+    Elf32_Half e_machine;   /* Architecture */
+    Elf32_Word e_version;   /* Object file version */
+    Elf32_Addr e_entry;     /* Entry point virtual address */
+    Elf32_Off e_phoff;      /* Program header table file offset */
+    Elf32_Off e_shoff;      /* Section header table file offset */
+    Elf32_Word e_flags;     /* Processor-specific flags */
+    Elf32_Half e_ehsize;    /* ELF header size in bytes */
+    Elf32_Half e_phentsize; /* Program header table entry size */
+    Elf32_Half e_phnum;     /* Program header table entry count */
+    Elf32_Half e_shentsize; /* Section header table entry size */
+    Elf32_Half e_shnum;     /* Section header table entry count */
+    Elf32_Half e_shstrndx;  /* Section header string table index */
 };
 
 /* Elf32 program header table */
@@ -104,16 +104,16 @@ struct Elf32_Phdr {
 
 /* Elf32 section header table */
 struct Elf32_Shdr {
-    Elf32_Word sh_name;
-    Elf32_Word sh_type;
-    Elf32_Word sh_flags;
-    Elf32_Addr sh_addr;
-    Elf32_Off sh_offset;
-    Elf32_Word sh_size;
-    Elf32_Word sh_link;
-    Elf32_Word sh_info;
-    Elf32_Word sh_addralign;
-    Elf32_Word sh_entsize;
+    Elf32_Word sh_name;      /* Section name */
+    Elf32_Word sh_type;      /* Section type */
+    Elf32_Word sh_flags;     /* Section flags */
+    Elf32_Addr sh_addr;      /* Section virtual addr at execution */
+    Elf32_Off sh_offset;     /* Section file offset */
+    Elf32_Word sh_size;      /* Section size in bytes */
+    Elf32_Word sh_link;      /* Link to another section */
+    Elf32_Word sh_info;      /* Additional section information */
+    Elf32_Word sh_addralign; /* Section alignment */
+    Elf32_Word sh_entsize;   /* Entry size if section holds table */
 };
 
 struct elf_internal {

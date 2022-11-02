@@ -1,15 +1,69 @@
 # System Calls
 
-## System Call Calling Protocol
+## Background
 
-RISC-V
-```
-ecall	a7	a0	a1
+The primary means of communication between an application and the operating system kernel are system calls.
+To avoid using other libraries, you can access them from assembler programs.
+See [`man 2 syscalls`](http://man7.org/linux/man-pages/man2/syscalls.2.html) for more information and a complete list of system calls.
+
+## System Calls in C
+
+In C, a list of parameters is passed to the kernel in a certain sequence. e.g., for `write`, we have (see [`man 2 write`](https://man7.org/linux/man-pages/man2/write.2.html)):
+```c
+ssize_t write(int fd, const void *buf, size_t count);
 ```
 
-meaning that the syscall number is in register x17 (i.e., a7) and, optionally,
-the first and second parameters to the syscall are in registers x10 (i.e., a0)
-and x11 (i.e., a1), respectively.
+The three parameters passed are a file descriptor, a pointer to a character buffer (in other words, a string) and the number of characters in that string to be printed.
+The file descriptor can be the Standard Output.
+Note the string is not zero-terminated.
+
+## RISC-V calling conventions
+
+The RISC-V convention as defined by [Calling Convention](https://riscv.org/wp-content/uploads/2015/01/riscv-calling.pdf) is to map these parameters one by one to the registers starting at `a0`, put the number for the system call in `a7`, and execute the `ecall` instruction.
+* The file descriptor number goes in `a0`.
+* The pointer to the string -- its address -- goes in `a1`.
+* The number of characters to print goes in `a2`.
+
+To find the magic number for the system call for write and the `rv32emu`, we take a look at [riscv-pk/pk/syscall.h](https://github.com/riscv/riscv-pk/blob/master/pk/syscall.h).
+It turns out to be `64`. This goes into `a7`.
+
+After a successful write, we should receive the number of characters written in `a0`.
+If there was an error, the return value should be `-1`.
+
+To print the string "RISC-V" and then quit with the exit system call with the GNU GCC compiler suite and the `rv32emu`, this is one possible solution: (`hello.S`)
+
+```assembly
+    .equ STDOUT, 1
+    .equ WRITE, 64
+    .equ EXIT, 93
+
+    .section .rodata
+    .align 2
+msg:
+    .ascii "RISC-V\n"
+
+    .section .text
+    .align 2
+
+    .globl  _start
+_start:
+    li a0, STDOUT  # file descriptor
+    la a1, msg     # address of string
+    li a2, 7       # length of string
+    li a7, WRITE   # syscall number for write
+    ecall
+
+    # MISSING: Check for error condition
+    li a0, 0       # 0 signals success
+    li a7, EXIT
+    ecall
+```
+
+We assemble, link and run this program for `rv32emu` with
+```shell
+riscv-none-elf-gcc -march=rv32i -mabi=ilp32 -nostartfiles -nostdlib -o hello hello.S
+build/rv32emu hello
+```
 
 ## Newlib integration
 

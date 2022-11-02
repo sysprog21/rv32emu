@@ -11,9 +11,21 @@
 extern "C" {
 #endif
 
-/* RISC-V registers (mnemonics, ABI names) */
+/* RISC-V registers (mnemonics, ABI names)
+ *
+ * There are 32 registers in RISC-V. The program counter is a further register
+ * "pc" that is present.
+ *
+ * There is no dedicated register that is used for the stack pointer, or
+ * subroutine return address. The instruction encoding allows any x register
+ * to be used for that purpose.
+ *
+ * However the standard calling conventions uses "x1" to store the return
+ * address of call,  with "x5" as an alternative link register, and "x2" as
+ * the stack pointer.
+ */
 enum {
-    rv_reg_zero = 0, /* hard-wired zero */
+    rv_reg_zero = 0, /* hard-wired zero, ignoring any writes */
     rv_reg_ra,       /* return address */
     rv_reg_sp,       /* stack pointer */
     rv_reg_gp,       /* global pointer */

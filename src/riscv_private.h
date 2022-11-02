@@ -17,29 +17,29 @@
 /* csrs */
 enum {
     /* floating point */
-    CSR_FFLAGS = 0x001,
-    CSR_FRM = 0x002,
-    CSR_FCSR = 0x003,
+    CSR_FFLAGS = 0x001, /* Floating-point accrued exceptions */
+    CSR_FRM = 0x002,    /* Floating-point dynamic rounding mode */
+    CSR_FCSR = 0x003,   /* Floating-point control and status register */
 
-    /* machine trap status */
-    CSR_MSTATUS = 0x300,
-    CSR_MISA = 0x301,
-    CSR_MEDELEG = 0x302,
-    CSR_MIDELEG = 0x303,
-    CSR_MIE = 0x304,
-    CSR_MTVEC = 0x305,
-    CSR_MCOUNTEREN = 0x306,
+    /* Machine trap setup */
+    CSR_MSTATUS = 0x300,    /* Machine status register */
+    CSR_MISA = 0x301,       /* ISA and extensions */
+    CSR_MEDELEG = 0x302,    /* Machine exception delegate register */
+    CSR_MIDELEG = 0x303,    /* Machine interrupt delegate register */
+    CSR_MIE = 0x304,        /* Machine interrupt-enable register */
+    CSR_MTVEC = 0x305,      /* Machine trap-handler base address */
+    CSR_MCOUNTEREN = 0x306, /* Machine counter enable */
 
     /* machine trap handling */
-    CSR_MSCRATCH = 0x340,
-    CSR_MEPC = 0x341,
-    CSR_MCAUSE = 0x342,
-    CSR_MTVAL = 0x343,
-    CSR_MIP = 0x344,
+    CSR_MSCRATCH = 0x340, /* Scratch register for machine trap handlers */
+    CSR_MEPC = 0x341,     /* Machine exception program counter */
+    CSR_MCAUSE = 0x342,   /* Machine trap cause */
+    CSR_MTVAL = 0x343,    /* Machine bad address or instruction */
+    CSR_MIP = 0x344,      /* Machine interrupt pending */
 
     /* low words */
-    CSR_CYCLE = 0xC00,
-    CSR_TIME = 0xC01,
+    CSR_CYCLE = 0xC00, /* Cycle counter for RDCYCLE instruction */
+    CSR_TIME = 0xC01,  /* Timer for RDTIME instruction */
     CSR_INSTRET = 0xC02,
 
     /* high words */
@@ -47,10 +47,10 @@ enum {
     CSR_TIMEH = 0xC81,
     CSR_INSTRETH = 0xC82,
 
-    CSR_MVENDORID = 0xF11,
-    CSR_MARCHID = 0xF12,
-    CSR_MIMPID = 0xF13,
-    CSR_MHARTID = 0xF14,
+    CSR_MVENDORID = 0xF11, /* Vendor ID */
+    CSR_MARCHID = 0xF12,   /* Architecture ID */
+    CSR_MIMPID = 0xF13,    /* Implementation ID */
+    CSR_MHARTID = 0xF14,   /* Hardware thread ID */
 };
 
 /* clang-format off */

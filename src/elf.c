@@ -173,10 +173,8 @@ static void release(elf_t *e)
 static bool is_valid(elf_t *e)
 {
     /* check for ELF magic */
-    if (e->hdr->e_ident[EI_MAG0] != 0x7f || e->hdr->e_ident[EI_MAG1] != 'E' ||
-        e->hdr->e_ident[EI_MAG2] != 'L' || e->hdr->e_ident[EI_MAG3] != 'F') {
+    if (memcmp(e->hdr->e_ident, "\177ELF", 4))
         return false;
-    }
 
     /* must be 32bit ELF */
     if (e->hdr->e_ident[EI_CLASS] != ELFCLASS32)

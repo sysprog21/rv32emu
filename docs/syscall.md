@@ -98,6 +98,8 @@ These system calls are solely for the convenience of accessing the [SDL library]
 
 If a window does not already exist, one will be created with the specified `width` and `height`. The `screen` buffer will replace the content of the framebuffer, passing a different `width` or `height` compared to the size of the window is undefined behavior. This system call additionally polls events from the SDL library, and, if necessary, update the internal input specific event queue.
 
+The width and height are merely the virutal dimensions of the screen; they are unrelated to the window's real size. The system call would deal with resizing events internally when they occurred.
+
 ### `setup_queue` - Setup input system's dedicated event and submission queue
 
 **system call number**: `0xC0DE`

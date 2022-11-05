@@ -141,7 +141,7 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
         }
         window = SDL_CreateWindow("rv32emu", SDL_WINDOWPOS_UNDEFINED,
                                   SDL_WINDOWPOS_UNDEFINED, width, height,
-                                  0 /* flags */);
+                                  SDL_WINDOW_RESIZABLE);
         if (!window) {
             fprintf(stderr, "Window could not be created! SDL_Error: %s\n",
                     SDL_GetError());
@@ -231,7 +231,10 @@ void syscall_draw_frame(struct riscv_t *rv)
     memory_read(s->mem, pixels_ptr, screen, width * height * 4);
     SDL_UnlockTexture(texture);
 
-    SDL_RenderCopy(renderer, texture, NULL, &(SDL_Rect){0, 0, width, height});
+    int actual_width, actual_height;
+    SDL_GetWindowSize(window, &actual_width, &actual_height);
+    SDL_RenderCopy(renderer, texture, NULL,
+                   &(SDL_Rect){0, 0, actual_width, actual_height});
     SDL_RenderPresent(renderer);
 }
 

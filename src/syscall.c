@@ -11,18 +11,6 @@
 #include "state.h"
 #include "utils.h"
 
-#if defined(__APPLE__)
-#define HAVE_MACH_TIMER
-#include <mach/mach_time.h>
-#elif !defined(_WIN32) && !defined(_WIN64)
-#define HAVE_POSIX_TIMER
-#ifdef CLOCK_MONOTONIC
-#define CLOCKID CLOCK_MONOTONIC
-#else
-#define CLOCKID CLOCK_REALTIME
-#endif
-#endif
-
 /* newlib is a portable (not RISC-V specific) C library, which implements
  * printf(3) and other functions described in C standards. Some system calls
  * should be provided in conjunction with newlib.
@@ -39,6 +27,7 @@
     _(exit,             93)      \
     _(gettimeofday,     169)     \
     _(brk,              214)     \
+    _(clock_gettime,    403)     \
     _(open,             1024)    \
     IIF(RV32_HAS(SDL))(          \
         _(draw_frame,   0xBEEF)  \
@@ -159,6 +148,36 @@ static void syscall_gettimeofday(struct riscv_t *rv)
 
     if (tz) {
         /* FIXME: This parameter is ignored by the syscall handler in newlib. */
+    }
+
+    /* success */
+    rv_set_reg(rv, rv_reg_a0, 0);
+}
+
+static void syscall_clock_gettime(struct riscv_t *rv)
+{
+    state_t *s = rv_userdata(rv); /* access userdata */
+
+    /* get the parameters */
+    riscv_word_t id = rv_get_reg(rv, rv_reg_a0);
+    riscv_word_t tp = rv_get_reg(rv, rv_reg_a1);
+
+    switch (id) {
+    case CLOCK_REALTIME:
+#ifdef CLOCK_MONOTONIC
+    case CLOCK_MONOTONIC:
+#endif
+        break;
+    default:
+        rv_set_reg(rv, rv_reg_a0, -1);
+        return;
+    }
+
+    if (tp) {
+        struct timespec tp_s;
+        rv_clock_gettime(&tp_s);
+        memory_write(s->mem, tp + 0, (const uint8_t *) &tp_s.tv_sec, 4);
+        memory_write(s->mem, tp + 8, (const uint8_t *) &tp_s.tv_nsec, 4);
     }
 
     /* success */

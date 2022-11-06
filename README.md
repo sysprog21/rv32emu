@@ -166,6 +166,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * [Writing a RISC-V Emulator in Rust](https://book.rvemu.app/)
 * [Juraj's RISC-V note](https://jborza.com/tags/riscv/)
 * [libriscv: RISC-V userspace emulator library](https://github.com/fwsGonzo/libriscv)
+* [LupV: an education-friendly RISC-V based system emulator](https://gitlab.com/luplab/lupv)
 * [Threaded Code](https://www.complang.tuwien.ac.at/forth/threaded-code.html) / [threaded-code-benchmark](https://github.com/shadowofneptune/threaded-code-benchmark)
 
 ## License

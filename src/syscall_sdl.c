@@ -72,6 +72,7 @@ typedef struct {
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
+
 /* Event queue specific variables */
 static uint32_t queues_capacity;
 static uint32_t event_count;
@@ -112,9 +113,9 @@ static void event_push(struct riscv_t *rv, event_t event)
     memory_write(s->mem, event_count, (void *) &count, sizeof(uint32_t));
 }
 
-static uint32_t round_pow2(uint32_t x)
+static inline uint32_t round_pow2(uint32_t x)
 {
-#if defined __GNUC__ || defined __clang__
+#if defined(__GNUC__) || defined(__clang__)
     x = 1 << (32 - __builtin_clz(x - 1));
 #else
     /* Bit Twiddling Hack */
@@ -206,6 +207,8 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
             event_push(rv, new_event);
             break;
         }
+        default:
+            break;
         }
     }
     return true;

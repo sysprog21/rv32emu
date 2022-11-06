@@ -52,7 +52,7 @@ bool elf_open(elf_t *e, const char *path);
 /* Find a symbol entry */
 const struct Elf32_Sym *elf_get_symbol(elf_t *e, const char *name);
 
-/* Find symbole from a specified ELF file */
+/* Find symbol from a specified ELF file */
 const char *elf_find_symbol(elf_t *e, uint32_t addr);
 
 /* get the range of .data section from the ELF file */

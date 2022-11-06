@@ -72,17 +72,18 @@ The [newlib](https://sourceware.org/newlib/) implements a whole C standard libra
 There is one subsystem supported which supplies a very limited set of POSIX-compliant system calls.
 Currently only a couple system calls are supported via semihosting, which enables code running on RISC-V target to communicate with and use the I/O of the host computer.
 
-|#     | System call  | Current support |
-|------|--------------|-----------------|
-|   57 | close        | Deletes a descriptor from the per-process object reference table. |
-|   62 | lseek        | Repositions the file offset of the open file description to the argument offset according to the directive whence. |
-|   63 | read         | Reads specific bytes of data from the object referenced by the descriptor fildes into the buffer. |
-|   64 | write        | Prints the buffer as a string to the specified file descriptor. |
-|   80 | fstat        | No effect. |
-|   93 | exit         | Terminates with a status code. |
-|  169 | gettimeofday | Gets date and time. Current time zone is NOT obtained. |
-|  214 | brk          | Supports updating the program break and returning the current program break. |
-| 1024 | open         | Opens or creates a file for reading or writing. |
+|#     | System call     | Current support |
+|------|-----------------|-----------------|
+|   57 | `close`         | Deletes a descriptor from the per-process object reference table. |
+|   62 | `lseek`         | Repositions the file offset of the open file description to the argument offset according to the directive whence. |
+|   63 | `read`          | Reads specific bytes of data from the object referenced by the descriptor fildes into the buffer. |
+|   64 | `write`         | Prints the buffer as a string to the specified file descriptor. |
+|   80 | `fstat`         | No effect. |
+|   93 | `exit`          | Terminates with a status code. |
+|  169 | `gettimeofday`  | Gets date and time. Current time zone is NOT obtained. |
+|  214 | `brk`           | Supports updating the program break and returning the current program break. |
+|  403 | `clock_gettime` | Retrieves the value used by a clock which is specified by clock-id. |
+| 1024 | `open`          | Opens or creates a file for reading or writing. |
 
 Any other system calls will fail with an "unknown syscall" error.
 

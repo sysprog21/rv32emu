@@ -1667,11 +1667,10 @@ bool rv_decode(struct rv_insn_t *ir, uint32_t insn, uint8_t *insn_len)
 
 #define OP_UNIMP op_unimp
 #define OP(insn) op_##insn
-#define TABLE_TYPE const decode_t
 
     /* RV32 base opcode map */
     /* clang-format off */
-    TABLE_TYPE rv_jump_table[] = {
+    static const decode_t rv_jump_table[] = {
     //  000         001           010        011           100         101        110        111
         OP(load),   OP(load_fp),  OP(unimp), OP(misc_mem), OP(op_imm), OP(auipc), OP(unimp), OP(unimp), // 00
         OP(store),  OP(store_fp), OP(unimp), OP(amo),      OP(op),     OP(lui),   OP(unimp), OP(unimp), // 01
@@ -1681,7 +1680,7 @@ bool rv_decode(struct rv_insn_t *ir, uint32_t insn, uint8_t *insn_len)
 
 #if RV32_HAS(EXT_C)
     /* RV32C opcode map */
-    static TABLE_TYPE rvc_jump_table[] = {
+    static const decode_t rvc_jump_table[] = {
     //  00             01             10          11
         OP(caddi4spn), OP(caddi),     OP(cslli),  OP(unimp),  // 000
         OP(cfld),      OP(cjal),      OP(cfldsp), OP(unimp),  // 001
@@ -1706,7 +1705,7 @@ bool rv_decode(struct rv_insn_t *ir, uint32_t insn, uint8_t *insn_len)
         *insn_len = INSN_16;
 
         /* decode instruction (compressed instructions) */
-        TABLE_TYPE op = rvc_jump_table[c_index];
+        const decode_t op = rvc_jump_table[c_index];
         assert(op);
         return op(ir, insn);
     }
@@ -1717,7 +1716,10 @@ bool rv_decode(struct rv_insn_t *ir, uint32_t insn, uint8_t *insn_len)
     *insn_len = INSN_32;
 
     /* decode instruction */
-    TABLE_TYPE op = rv_jump_table[index];
+    const decode_t op = rv_jump_table[index];
     assert(op);
     return op(ir, insn);
+
+#undef OP_UNIMP
+#undef OP
 }

@@ -96,6 +96,7 @@ all: $(BIN)
 OBJS := \
 	map.o \
 	utils.o \
+	decode.o \
 	emulate.o \
 	io.o \
 	elf.o \

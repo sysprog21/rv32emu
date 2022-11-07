@@ -1,10 +1,15 @@
+/*
+ * rv32emu is freely redistributable under the MIT License. See the file
+ * "LICENSE" for information on usage and redistribution of this file.
+ */
+
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 
 enum {
-    /* RV32I Base Instruction Set*/
+    /* RV32I Base Instruction Set */
     rv_insn_lui,
     rv_insn_auipc,
     rv_insn_jal,
@@ -44,6 +49,7 @@ enum {
     rv_insn_and,
     rv_insn_ecall,
     rv_insn_ebreak,
+
     /* RISC-V Privileged Instruction */
     rv_insn_wfi,
     rv_insn_uret,
@@ -224,8 +230,9 @@ struct rv_insn_t {
         uint8_t rs3;
     };
     uint8_t rd, rs1, rs2;
-    /* store ir list */
+    /* store IR list */
     uint8_t opcode;
+
 #if RV32_HAS(EXT_C)
     uint8_t shamt;
 #endif

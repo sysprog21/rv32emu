@@ -301,7 +301,7 @@ static inline uint16_t c_decode_cbtype_imm(const uint16_t insn)
         tmp |= (0x0100 & tmp) << i;
     return tmp;
 }
-#endif
+#endif /* RV32_HAS(EXT_C) */
 
 /* decode I-type
  *  31       20 19   15 14    12 11   7 6      0
@@ -388,7 +388,7 @@ static inline void decode_r4type(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_load(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:0] rs1 funct3 rd opcode
-     * ------------------------------------
+     * ----+---------+---+------+--+-------
      * LB   imm[11:0] rs1 000    rd 0000011
      * LH   imm[11:0] rs1 001    rd 0000011
      * LW   imm[11:0] rs1 010    rd 0000011
@@ -431,7 +431,7 @@ static inline bool op_load(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_op_imm(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst  imm[11:5] imm[4:0]   rs1 funct3 rd opcode
-     * ------------------------------------------------
+     * -----+---------+----------+---+------+--+-------
      * ADDI  imm[11:0]            rs1 000    rd 0010011
      * SLLI  0000000   shamt[4:0] rs1 001    rd 0010011
      * SLTI  imm[11:0]            rs1 010    rd 0010011
@@ -490,12 +490,13 @@ static inline bool op_op_imm(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_auipc(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst  imm[31:12] rd opcode
-     * ---------------------------
+     * -----+----------+--+-------
      * AUPIC imm[31:12] rd 0010111
      */
 
     /* decode U-type */
     decode_utype(ir, insn);
+
     ir->opcode = rv_insn_auipc;
     return true;
 }
@@ -507,7 +508,7 @@ static inline bool op_auipc(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_store(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:5] rs2 rs1 funct3 imm[4:0] opcode
-     * ----------------------------------------------
+     * ----+---------+---+---+------+--------+-------
      * SB   imm[11:5] rs2 rs1 000    imm[4:0] 0100011
      * SH   imm[11:5] rs2 rs1 001    imm[4:0] 0100011
      * SW   imm[11:5] rs2 rs1 010    imm[4:0] 0100011
@@ -541,7 +542,7 @@ static inline bool op_store(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_op(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct7  rs2 rs1 funct3 rd opcode
-     * --------------------------------------
+     * ----+-------+---+---+------+--+-------
      * ADD  0000000 rs2 rs1 000    rd 0110011
      * SUB  0100000 rs2 rs1 000    rd 0110011
      * SLL  0000000 rs2 rs1 001    rd 0110011
@@ -592,9 +593,10 @@ static inline bool op_op(struct rv_insn_t *ir, const uint32_t insn)
             return false;
         }
         break;
+
 #if RV32_HAS(EXT_M)
     /* inst   funct7  rs2 rs1 funct3 rd opcode
-     * ----------------------------------------
+     * ------+-------+---+---+------+--+-------
      * MUL    0000001 rs2 rs1 000    rd 0110011
      * MULH   0000001 rs2 rs1 001    rd 0110011
      * MULHSU 0000001 rs2 rs1 010    rd 0110011
@@ -635,6 +637,7 @@ static inline bool op_op(struct rv_insn_t *ir, const uint32_t insn)
         }
         break;
 #endif /* RV32_HAS(EXT_M) */
+
     case 0b0100000:
         switch (funct3) {
         case 0b000: /* SUB: Substract */
@@ -666,6 +669,7 @@ static inline bool op_lui(struct rv_insn_t *ir, const uint32_t insn)
 
     /* decode U-type */
     decode_utype(ir, insn);
+
     ir->opcode = rv_insn_lui;
     return true;
 }
@@ -677,7 +681,7 @@ static inline bool op_lui(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_branch(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[12] imm[10:5] rs2 rs1 funct3 imm[4:1] imm[11] opcode
-     * --------------------------------------------------------------
+     * ----+-------+---------+---+---+------+--------+-------+-------
      * BEQ  imm[12  imm[10:5] rs2 rs1 000    imm[4:1  imm[11] 1100011
      * BNE  imm[12  imm[10:5] rs2 rs1 001    imm[4:1  imm[11] 1100011
      * BLT  imm[12  imm[10:5] rs2 rs1 100    imm[4:1  imm[11] 1100011
@@ -722,12 +726,13 @@ static inline bool op_branch(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_jalr(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:0] rs1 funct3 rd opcode
-     * ------------------------------------
+     * ----+---------+---+------+--+-------
      * JALR imm[11:0] rs1 000    rd 1100111
      */
 
     /* decode I-type */
     decode_itype(ir, insn);
+
     ir->opcode = rv_insn_jalr;
     return true;
 }
@@ -739,12 +744,13 @@ static inline bool op_jalr(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_jal(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[20] imm[10:1] imm[11] imm[19:12] rd opcode
-     * ----------------------------------------------------
+     * ----+-------+---------+-------+----------+--+-------
      * JALR imm[20] imm[10:1] imm[11] imm[19:12] rd 1101111
      */
 
     /* decode J-type */
     decode_jtype(ir, insn);
+
     ir->opcode = rv_insn_jal;
     return true;
 }
@@ -756,7 +762,7 @@ static inline bool op_jal(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_system(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   imm[11:0]    rs1   funct3 rd    opcode
-     * ----------------------------------------------
+     * ------+------------+-----+------+-----+-------
      * ECALL  000000000000 00000 000    00000 1110011
      * EBREAK 000000000001 00000 000    00000 1110011
      * WFI    000100000101 00000 000    00000 1110011
@@ -793,12 +799,13 @@ static inline bool op_system(struct rv_insn_t *ir, const uint32_t insn)
             return false;
         }
         break;
+
 #if RV32_HAS(Zicsr)
     /* All CSR instructions atomically read-modify-write a single CSR.
      * Register operand
      * ---------------------------------------------------------
      * Instruction         rd          rs1        Read    Write
-     * ---------------------------------------------------------
+     * -------------------+-----------+----------+-------+------
      * CSRRW               x0          -          no      yes
      * CSRRW               !x0         -          yes     yes
      * CSRRS/C             -           x0         yes     no
@@ -807,7 +814,7 @@ static inline bool op_system(struct rv_insn_t *ir, const uint32_t insn)
      * Immediate operand
      * --------------------------------------------------------
      * Instruction         rd          uimm       Read    Write
-     * ---------------------------------------------------------
+     * -------------------+-----------+----------+-------+------
      * CSRRWI              x0          -          no      yes
      * CSRRWI              !x0         -          yes     yes
      * CSRRS/CI            -           0          yes     no
@@ -815,7 +822,7 @@ static inline bool op_system(struct rv_insn_t *ir, const uint32_t insn)
      */
 
     /* inst   imm[11:0] rs1  funct3 rd opcode
-     * ----------------------------------------
+     * ------+---------+----+------+--+--------
      * CSRRW  csr       rs1  001    rd 1110011
      * CSRRS  csr       rs1  010    rd 1110011
      * CSRRC  csr       rs1  011    rd 1110011
@@ -841,7 +848,8 @@ static inline bool op_system(struct rv_insn_t *ir, const uint32_t insn)
     case 7: /* CSRRCI */
         ir->opcode = rv_insn_csrrci;
         break;
-#endif       /* RV32_HAS(Zicsr) */
+#endif /* RV32_HAS(Zicsr) */
+
     default: /* illegal instruction */
         return false;
     }
@@ -869,18 +877,14 @@ static inline bool op_misc_mem(struct rv_insn_t *ir, const uint32_t insn UNUSED)
 #endif /* RV32_HAS(Zifencei) */
 
 #if RV32_HAS(EXT_A)
-/* At present, AMO is not implemented atomically because the emulated RISC-V
- * core just runs on single thread, and no out-of-order execution happens.
- * In addition, rl/aq are not handled.
- *
- * AMO: R-type
+/* AMO: R-type
  *  31    27  26   25  24   20 19   15 14    12 11   7 6      0
  * | funct5 | aq | rl |  rs2  |  rs1  | funct3 |  rd  | opcode |
  */
 static inline bool op_amo(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst      funct5 aq rl rs2   rs1 funct3 rd  opcode
-     * ---------------------------------------------------
+     * ---------+------+--+--+-----+---+------+---+-------
      * LR.W      00010  aq rl 00000 rs1 010    rd  0101111
      * SC.W      00011  aq rl rs2   rs1 010    rd  0101111
      * AMOSWAP.W 00001  aq rl rs2   rs1 010    rd  0101111
@@ -896,6 +900,7 @@ static inline bool op_amo(struct rv_insn_t *ir, const uint32_t insn)
 
     /* decode R-type */
     decode_rtype(ir, insn);
+
     /* compute funct5 field */
     const uint32_t funct5 = (decode_funct7(insn) >> 2) & 0x1f;
 
@@ -951,12 +956,13 @@ static inline bool op_amo(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_load_fp(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:0] rs1 width rd opcode
-     * -----------------------------------
+     * ----+---------+---+-----+--+-------
      * FLW  imm[11:0] rs1 010   rd 0000111
      */
 
     /* decode I-type */
     decode_itype(ir, insn);
+
     ir->opcode = rv_insn_flw;
     return true;
 }
@@ -968,12 +974,13 @@ static inline bool op_load_fp(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_store_fp(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:5] rs2 rs1 width imm[4:0] opcode
-     * ---------------------------------------------
+     * ----+---------+---+---+-----+--------+-------
      * FSW  imm[11:5] rs2 rs1 010   imm[4:0] 0100111
      */
 
     /* decode S-type */
     decode_stype(ir, insn);
+
     ir->opcode = rv_insn_fsw;
     return true;
 }
@@ -985,7 +992,7 @@ static inline bool op_store_fp(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_op_fp(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst      funct7  rs2   rs1 rm  rd opcode
-     * ------------------------------------------
+     * ---------+-------+-----+---+---+--+-------
      * FADD.S    0000000 rs2   rs1 rm  rd 1010011
      * FSUB.S    0000100 rs2   rs1 rm  rd 1010011
      * FMUL.S    0001000 rs2   rs1 rm  rd 1010011
@@ -1127,12 +1134,13 @@ static inline bool op_op_fp(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_madd(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst    rs3 fmt rs2 rs1 rm rd opcode
-     * -------------------------------------
+     * -------+---+---+---+---+--+--+-------
      * FMADD.S rs3 00  rs2 rs1 rm rd 1000011
      */
 
     /* decode R4-type */
     decode_r4type(ir, insn);
+
     ir->opcode = rv_insn_fmadds;
     return true;
 }
@@ -1144,12 +1152,13 @@ static inline bool op_madd(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_msub(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst    rs3 fmt rs2 rs1 rm rd opcode
-     * -------------------------------------
+     * -------+---+---+---+---+--+--+-------
      * FMSUB.S rs3 00  rs2 rs1 rm rd 1000111
      */
 
     /* decode R4-type */
     decode_r4type(ir, insn);
+
     ir->opcode = rv_insn_fmsubs;
     return true;
 }
@@ -1161,12 +1170,13 @@ static inline bool op_msub(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_nmadd(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst    rs3 fmt rs2 rs1 rm rd opcode
-     * -------------------------------------
+     * -------+---+---+---+---+--+--+-------
      * FMSUB.S rs3 00  rs2 rs1 rm rd 1001111
      */
 
     /* decode R4-type */
     decode_r4type(ir, insn);
+
     ir->opcode = rv_insn_fnmadds;
     return true;
 }
@@ -1178,16 +1188,18 @@ static inline bool op_nmadd(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_nmsub(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst    rs3 fmt rs2 rs1 rm rd opcode
-     * -------------------------------------
+     * -------+---+---+---+---+--+--+-------
      * FMSUB.S rs3 00  rs2 rs1 rm rd 1001011
      */
 
     /* decode R4-type */
     decode_r4type(ir, insn);
+
     ir->opcode = rv_insn_fnmsubs;
     return true;
 }
-#else
+
+#else /* !RV32_HAS(EXT_F) */
 #define op_load_fp OP_UNIMP
 #define op_store_fp OP_UNIMP
 #define op_op_fp OP_UNIMP
@@ -1205,23 +1217,23 @@ static inline bool op_nmsub(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_caddi(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm[5]   rd/rs1    imm[4:0]   op
-     * ----------------------------------------------
+     * ------+------+--------+---------+----------+--
      * C.NOP  000    nzimm[5] 00000     nzimm[4:0] 01
      * C.ADDI 000    nzimm[5] rs1/rd!=0 nzimm[4:0] 01
      */
 
     ir->rd = c_decode_rd(insn);
+
     /* dispatch from rd/rs1 field */
     switch (ir->rd) {
     case 0: /* C.NOP */
         ir->opcode = rv_insn_cnop;
         break;
-    default: { /* C.ADDI */
+    default: /* C.ADDI */
         /* Add 6-bit signed immediate to rds, serving as NOP for X0 register. */
         ir->imm = c_decode_citype_imm(insn);
         ir->opcode = rv_insn_caddi;
         break;
-    }
     }
     return true;
 }
@@ -1233,7 +1245,7 @@ static inline bool op_caddi(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_caddi4spn(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst       funct3 imm                 rd' op
-     * --------------------------------------------
+     * ----------+------+-------------------+---+--
      * C.ADDI4SPN 000    nzuimm[5:4|9:6|2|3] rd' 00
      */
 
@@ -1609,7 +1621,8 @@ static inline bool op_cbnez(struct rv_insn_t *ir, const uint32_t insn)
     ir->opcode = rv_insn_cbnez;
     return true;
 }
-#else
+
+#else /* !RV32_HAS(EXT_C) */
 #define op_caddi4spn OP_UNIMP
 #define op_caddi OP_UNIMP
 #define op_cslli OP_UNIMP
@@ -1627,7 +1640,7 @@ static inline bool op_cbnez(struct rv_insn_t *ir, const uint32_t insn)
 #define op_cbnez OP_UNIMP
 #endif /* RV32_HAS(EXT_C) */
 
-/* No RV32C.F support */
+/* TODO: RV32C.F support */
 #define op_cfldsp OP_UNIMP
 #define op_cflwsp OP_UNIMP
 #define op_cfswsp OP_UNIMP

@@ -12,7 +12,6 @@
 
 #if RV32_HAS(EXT_F)
 #include <math.h>
-
 #include "soft-float.h"
 
 #if defined(__APPLE__)
@@ -25,7 +24,7 @@ static inline int isnanf(float x)
     return x != x;
 }
 #endif
-#endif
+#endif /* RV32_HAS(EXT_F) */
 
 #if RV32_HAS(GDBSTUB)
 extern struct target_ops gdbstub_ops;
@@ -260,7 +259,7 @@ static bool insn_is_misaligned(uint32_t pc)
 static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
 {
     switch (ir->opcode) {
-    /* RV32I Base Instruction Set*/
+    /* RV32I Base Instruction Set */
     case rv_insn_lui: /* LUI: Load Upper Immediate */
         /* LUI is used to build 32-bit constants and uses the U-type format. LUI
          * places the U-immediate value in the top 20 bits of the destination
@@ -651,6 +650,10 @@ static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
 #endif
 
 #if RV32_HAS(EXT_A)
+    /* At present, AMO is not implemented atomically because the emulated
+     * RISC-V core just runs on single thread, and no out-of-order execution
+     * happens. In addition, rl/aq are not handled.
+     */
     /* RV32A Standard Extension */
     case rv_insn_lrw: /* LR.W: Load Reserved */
         rv->X[ir->rd] = rv->io.mem_read_w(rv, rv->X[ir->rs1]);
@@ -1146,6 +1149,7 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
             rv_except_illegal_insn(rv, insn);
             break;
         }
+
         /* execute the instruciton */
         if (!rv_emulate(rv, &ir))
             break;

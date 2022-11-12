@@ -119,18 +119,20 @@ static inline uint32_t decode_r4type_rs3(const uint32_t insn)
 
 #if RV32_HAS(EXT_C)
 enum {
-    /*               ....xxxx....xxxx */
-    CJ_IMM_11 = 0b0001000000000000,
-    CJ_IMM_4 = 0b0000100000000000,
-    CJ_IMM_9_8 = 0b0000011000000000,
-    CJ_IMM_10 = 0b0000000100000000,
-    CJ_IMM_6 = 0b0000000010000000,
-    CJ_IMM_7 = 0b0000000001000000,
-    CJ_IMM_3_1 = 0b0000000000111000,
-    CJ_IMM_5 = 0b0000000000000100,
-    /*               ....xxxx....xxxx */
-    CB_SHAMT_5 = 0b0001000000000000,
+    /* clang-format off */
+    /*             ....xxxx....xxxx */
+    CJ_IMM_11    = 0b0001000000000000,
+    CJ_IMM_4     = 0b0000100000000000,
+    CJ_IMM_9_8   = 0b0000011000000000,
+    CJ_IMM_10    = 0b0000000100000000,
+    CJ_IMM_6     = 0b0000000010000000,
+    CJ_IMM_7     = 0b0000000001000000,
+    CJ_IMM_3_1   = 0b0000000000111000,
+    CJ_IMM_5     = 0b0000000000000100,
+    /*             ....xxxx....xxxx */
+    CB_SHAMT_5   = 0b0001000000000000,
     CB_SHAMT_4_0 = 0b0000000001111100,
+    /* clang-format on */
 };
 
 /* decode rs1 field
@@ -663,7 +665,7 @@ static inline bool op_op(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_lui(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[31:12] rd opcode
-     * --------------------------
+     * ----+----------+--+-------
      * LUI  imm[31:12] rd 0110111
      */
 
@@ -864,7 +866,7 @@ static inline bool op_system(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_misc_mem(struct rv_insn_t *ir, const uint32_t insn UNUSED)
 {
     /* inst   imm[11:0] rs1 funct3 rd opcode
-     * --------------------------------------
+     * ------+---------+---+------+--+-------
      * FENCEI imm[11:0] rs1 001    rd 0001111
      */
 
@@ -1266,7 +1268,7 @@ static inline bool op_caddi4spn(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_cli(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct3 imm[5] rd/rs1    imm[4:0] op
-     * ----------------------------------------
+     * ----+------+------+---------+--------+--
      * C.LI 010    imm[5] rs1/rd!=0 imm[4:0] 01
      */
 
@@ -1283,7 +1285,7 @@ static inline bool op_cli(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_clui(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst       funct3 imm[5]    rd/rs1    imm[4:0]         op
-     * ---------------------------------------------------------
+     * ----------+------+---------+---------+----------------+--
      * C.ADDI16SP 011    nzimm[9]  2         nzimm[4|6|8:7|5] 01
      * C.LUI      011    nzimm[17] rd!={0,2} nzimm[16:12]     01
      */
@@ -1327,7 +1329,7 @@ static inline bool op_clui(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_cmisc_alu(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 shamt[5]  funct2 rd'/rs1' shamt[4:0]  op
-     * ------------------------------------------------------
+     * ------+------+---------+------+--------+-----------+--
      * C.SRLI 100    nzuimm[5] 00     rd'/rs1' nzuimm[4:0] 01
      * C.SRAI 100    nzuimm[5] 01     rd'/rs1' nzuimm[4:0] 01
      * C.ANDI 100    imm[5]    10     rd'/rs1' imm[4:0]    01
@@ -1412,7 +1414,7 @@ static inline bool op_cmisc_alu(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_cslli(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 shamt[5]  rd/rs1    shamt[4:0]  op
-     * ------------------------------------------------
+     * ------+------+---------+---------+-----------+--
      * C.SLLI 000    nzuimm[5] rs1/rd!=0 nzuimm[4:0] 01
      */
     uint32_t tmp = 0;
@@ -1431,7 +1433,7 @@ static inline bool op_cslli(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_clwsp(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm     rd    imm           op
-     * --------------------------------------------
+     * ------+------+-------+-----+-------------+--
      * C.LWSP 000    uimm[5] rd!=0 uimm[4:2|7:6] 01
      */
     uint16_t tmp = 0;
@@ -1453,7 +1455,7 @@ static inline bool op_clwsp(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_cswsp(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm           rs2 op
-     * ----------------------------------
+     * ------+------+-------------+---+--
      * C.LWSP 110    uimm[5:2|7:6] rs2 10
      */
     ir->imm = (insn & 0x1e00) >> 7 | (insn & 0x180) >> 1;
@@ -1469,7 +1471,7 @@ static inline bool op_cswsp(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_clw(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct3 imm       rs1' imm       rd' op
-     * -------------------------------------------
+     * ----+------+---------+----+---------+---+--
      * C.LW 010    uimm[5:3] rs1' uimm[7:6] rd' 00
      */
     uint16_t tmp = 0;
@@ -1490,7 +1492,7 @@ static inline bool op_clw(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_csw(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct3 imm       rs1' imm       rs2' op
-     * --------------------------------------------
+     * ----+------+---------+----+---------+----+--
      * C.SW 110    uimm[5:3] rs1' uimm[2|6] rs2' 00
      */
     uint32_t tmp = 0;
@@ -1512,7 +1514,7 @@ static inline bool op_csw(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_cj(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct3 imm                        op
-     * -----------------------------------------
+     * ----+------+--------------------------+--
      * C.J  101    imm[11|4|9:8|10|6|7|3:1|5] 01
      */
     ir->imm = c_decode_cjtype_imm(insn);
@@ -1527,7 +1529,7 @@ static inline bool op_cj(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_cjal(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst  funct3 imm                        op
-     * ------------------------------------------
+     * -----+------+--------------------------+--
      * C.JAL 001    imm[11|4|9:8|10|6|7|3:1|5] 01
      */
     ir->imm = sign_extend_h(c_decode_cjtype_imm(insn));
@@ -1542,7 +1544,7 @@ static inline bool op_cjal(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_ccr(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst     funct4 rs1       rs2    op
-     * -----------------------------------
+     * --------+------+---------+------+--
      * C.JR     100    rs1!=0    0      10
      * C.MV     100    rd!=0     rs2!=0 10
      * C.EBREAK 100    0         0      10
@@ -1597,7 +1599,7 @@ static inline bool op_ccr(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_cbeqz(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm        rs1' imm            op
-     * -----------------------------------------------
+     * ------+------+----------+----+--------------+--
      * C.BEQZ 110    imm[8|4:3] rs1' imm[7:6|2:1|5] 01
      */
     ir->imm = sign_extend_h(c_decode_cbtype_imm(insn));
@@ -1613,7 +1615,7 @@ static inline bool op_cbeqz(struct rv_insn_t *ir, const uint32_t insn)
 static inline bool op_cbnez(struct rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm        rs1' imm            op
-     * -----------------------------------------------
+     * ------+------+----------+----+--------------+--
      * C.BNEZ 111    imm[8|4:3] rs1' imm[7:6|2:1|5] 01
      */
     ir->imm = sign_extend_h(c_decode_cbtype_imm(insn));

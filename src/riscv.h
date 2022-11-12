@@ -111,7 +111,7 @@ struct riscv_io_t {
 struct riscv_t *rv_create(const struct riscv_io_t *io, riscv_user_t user_data);
 
 /* delete a RISC-V emulator */
-void rv_delete(struct riscv_t *);
+void rv_delete(struct riscv_t *rv);
 
 /* reset the RISC-V processor */
 void rv_reset(struct riscv_t *, riscv_word_t pc);

@@ -10,6 +10,7 @@
 #include "breakpoint.h"
 #include "mini-gdbstub/include/gdbstub.h"
 #endif
+#include "decode.h"
 #include "riscv.h"
 
 #define RV_NUM_REGS 32
@@ -96,6 +97,20 @@ struct riscv_t {
     uint32_t csr_mip;
     uint32_t csr_mbadaddr;
 
-    /* current instruction length */
-    uint8_t insn_len;
+    /* current instruction is compressed or not */
+    bool compressed;
+    /* basic block map */
+    struct block_map block_map;
 };
+
+/* sign extend a 16 bit value */
+static inline uint32_t sign_extend_h(const uint32_t x)
+{
+    return (int32_t) ((int16_t) x);
+}
+
+/* sign extend an 8 bit value */
+static inline uint32_t sign_extend_b(const uint32_t x)
+{
+    return (int32_t) ((int8_t) x);
+}

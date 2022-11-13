@@ -65,6 +65,14 @@ riscv-none-elf-gcc -march=rv32i -mabi=ilp32 -nostartfiles -nostdlib -o hello hel
 build/rv32emu hello
 ```
 
+There is an `ecall` instruction for trapping into the kernel, and three privilege
+modes: User mode, Supervisor mode, and Machine mode. There are correspondingly
+three versions of iret: `uret` from any mode if you have the `N-extension` to
+enable user-mode trap handlers, sret from S-mode (or M-mode), and `mret` only
+from M-mode.
+
+NOTE: the stack pointer must always be 16-byte aligned on RV32 and RV64.
+
 ## Newlib integration
 
 The [newlib](https://sourceware.org/newlib/) implements a whole C standard library, minus threads. C functions such as `malloc`, `printf`, `memcpy`, and many more are implemented. `rv32emu` provides the essential subset of system calls required by [newlib](https://sourceware.org/newlib/), so that it allows cross-compiled binary files running on `rv32emu`.

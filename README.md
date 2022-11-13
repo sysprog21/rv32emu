@@ -171,5 +171,5 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * [Threaded Code](https://www.complang.tuwien.ac.at/forth/threaded-code.html) / [threaded-code-benchmark](https://github.com/shadowofneptune/threaded-code-benchmark)
 
 ## License
-`rv32emu` is released under the MIT License.
-Use of this source code is governed by a MIT license that can be found in the LICENSE file.
+`rv32emu` is available under a permissive MIT-style license.
+Use of this source code is governed by a MIT license that can be found in the [LICENSE](LICENSE) file.

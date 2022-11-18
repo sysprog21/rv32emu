@@ -87,6 +87,73 @@ which generates the following assembler output as seen by `objdump`:
 
 The `lui` (load-upper-immediate) instruction has a 20-bit immediate, so the other immediate-load instructions have only 12-bit immediates.
 
+## Instruction Examples
+
+### Encoding instruction `0x01e007ef`
+
+First, convert hex into binary:
+
+| hex |  `0`   |  `1`   |   `e`  |   `0`  |   `0`  |   `7`  |   `e`  |   `f`  |
+|:---:|:------:|:------:|:------:|:------:|:------:|:------:|:------:|:------:|
+| bin | `0000` | `0001` | `1110` | `0000` | `0000` | `0111` | `1110` | `1111` |
+
+Instructions are better decoded reading them from right to left, so that the first thing you find are its quadrant and opcode.
+
+|  RV32I  | `00000001111000000000` | `01111`   |    `11011`    |    `11`      |
+|:-------:|:----------------------:|:---------:|:-------------:|:------------:|
+| Meaning |  `<imm> (encoded)`     |   `rd`    | `opcode`      | `quadrant`   |
+|  Value  |  `<imm>`               |   15      | Jump and Link |  4th         |
+
+We therefore obtain `jal x15 <imm>```, where `<imm>` is the still to be decoded immediate.
+
+All the instruction fields except `<imm>` are decodable just from the tables, for this instruction. For `<imm>` we have to further scramble some bits to decode it.
+
+Identify the subfields of the immediate:
+
+| `<imm> (encoded)` |  `0` | `0000001111` | `0`  | `00000000` |
+|:-----------------:|:----:|:------------:|:----:|:----------:|
+|  Encoding         | `m2` |   `imm2`     | `m1` |  `imm1`    |
+
+Re-order the subfields as written on the tables. Usually the immediate encoding is just below the corresponding instruction's encoding.
+
+| Decoding di `<imm>` |    `-m2-`      |  `imm1`    | `m1` |   `imm2`     | `0` |
+|:-------------------:|:--------------:|:----------:|:----:|:------------:|:---:|
+| `<imm> (bin)`       | `000000000000` | `00000000` | `0`  | `0000001111` | `0` |
+
+We obtain the 2's complement
+- `<imm> (bin)` = `00000000000000000000000000011110`
+
+that is the decimal
+- `<imm> (dec)` = `30`
+
+The complete disassembled instruction is therefore `jal x15 30`, or `jal a5 30` using the ABI register aliases.
+
+### Deconding instruction `j -12`
+
+The instruction `j`.
+
+| Instruction Encoding `j` | `<imm> (encoded)` | 00000 | 11011 | 11 |
+|:------------------------:|:-----------------:|:-----:|:-----:|:--:|
+
+We therefore know the least significant bits `xxxxxxxxxxxxxxxxxxxx000001101111`. The rest is just an immediate, `<imm> = 30 `, which we now have to encode.
+Then sign-extend it to cover all 32 bits of its width, converting `<imm> (bin)` = `11111111111111111110100` from `<imm> (bin)` = `-12` to `<imm> (bin)` = `10100`.
+
+Divide this number into its subfields.
+
+| `<imm> (bin)`    | `111111111111` | `11111111` | `1`  | `1111111010` | `0` |
+|:----------------:|:--------------:|:----------:|:----:|:------------:|:---:|
+| Decoding `<imm>` |    `-m2-`      |  `imm1`    | `m1` |   `imm2`     | `0` |
+
+Re-order the fields to encode the immediate:
+
+|       Encoding    | `m2` |   `imm2`     | `m1` |  `imm1`    |
+|:-----------------:|:----:|:------------:|:----:|:----------:|
+| `<imm> (encoded)` | `1`  | `1111111010` | `1`  | `11111111` |
+
+We obtain `<imm> (encoded)` = `11111111010111111111xxxxxxxxxxxx`, that are the missing most significant bits.
+
+The complete assembled instruction is therefore `11111111010111111111000001101111`, after having jointed the two half-results above.
+
 ## "RVC" compressed instructions
 
 Chapter 12, p. 67 (79 of 145), explains a Thumb-2-like scheme, providing a

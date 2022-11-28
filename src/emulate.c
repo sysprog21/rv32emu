@@ -1185,7 +1185,7 @@ static block_t *block_alloc(const uint8_t bits)
 }
 
 /* insert a block into block map */
-static void block_insert(struct block_map *map, const block_t *block)
+static void block_insert(block_map_t *map, const block_t *block)
 {
     assert(map && block);
     const uint32_t mask = map->block_capacity - 1;
@@ -1202,7 +1202,7 @@ static void block_insert(struct block_map *map, const block_t *block)
 }
 
 /* try to locate an already translated block in the block map */
-static block_t *block_find(const struct block_map *map, const uint32_t pc)
+static block_t *block_find(const block_map_t *map, const uint32_t pc)
 {
     assert(map);
     uint32_t index = hash(pc);
@@ -1269,7 +1269,7 @@ static void block_translate(riscv_t *rv, block_t *block)
 
 static block_t *block_find_or_translate(riscv_t *rv, block_t *prev)
 {
-    struct block_map *map = &rv->block_map;
+    block_map_t *map = &rv->block_map;
     /* lookup the next block in the block map */
     block_t *next = block_find(map, rv->PC);
 

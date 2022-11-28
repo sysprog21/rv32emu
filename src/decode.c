@@ -1727,7 +1727,7 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
 }
 
 /* clear all block in the block map */
-void block_map_clear(struct block_map *map)
+void block_map_clear(block_map_t *map)
 {
     assert(map);
     for (uint32_t i = 0; i < map->block_capacity; i++) {

@@ -12,7 +12,7 @@
 #include "riscv_private.h"
 
 /* initialize the block map */
-static void block_map_init(struct block_map *map, const uint8_t bits)
+static void block_map_init(block_map_t *map, const uint8_t bits)
 {
     map->block_capacity = 1 << bits;
     map->size = 0;

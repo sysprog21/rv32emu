@@ -97,8 +97,8 @@ struct riscv_internal {
     uint32_t csr_mip;
     uint32_t csr_mbadaddr;
 
-    bool compressed;            /**< current instruction is compressed or not */
-    struct block_map block_map; /**< basic block map */
+    bool compressed;       /**< current instruction is compressed or not */
+    block_map_t block_map; /**< basic block map */
 };
 
 /* sign extend a 16 bit value */

@@ -250,14 +250,14 @@ typedef struct block {
     rv_insn_t *ir;          /**< IR as memory blocks */
 } block_t;
 
-struct block_map {
+typedef struct {
     uint32_t block_capacity; /**< max number of entries in the block map */
     uint32_t size;           /**< number of entries currently in the map */
     struct block **map;      /**< block map */
-};
+} block_map_t;
 
 /* clear all block in the block map */
-void block_map_clear(struct block_map *map);
+void block_map_clear(block_map_t *map);
 
 /* decode the RISC-V instruction */
 bool rv_decode(rv_insn_t *ir, const uint32_t insn);

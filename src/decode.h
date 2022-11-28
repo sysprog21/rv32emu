@@ -242,25 +242,18 @@ typedef struct {
 
 /* translated basic block */
 typedef struct block {
-    /* number of instructions encompased */
-    uint32_t n_insn;
-    /* address range of the basic block */
-    uint32_t pc_start, pc_end;
+    uint32_t n_insn;           /**< number of instructions encompased */
+    uint32_t pc_start, pc_end; /**< address range of the basic block */
     /* maximum of instructions encompased */
-    uint32_t insn_capacity;
-    /* block predictoin */
-    struct block *predict;
-    /* memory blocks */
-    rv_insn_t *ir;
+    uint32_t insn_capacity; /**< maximum of instructions encompased */
+    struct block *predict;  /**< block prediction */
+    rv_insn_t *ir;          /**< IR as memory blocks */
 } block_t;
 
 struct block_map {
-    /* max number of entries in the block map */
-    uint32_t block_capacity;
-    /* number of entries currently in the map */
-    uint32_t size;
-    /* block map */
-    struct block **map;
+    uint32_t block_capacity; /**< max number of entries in the block map */
+    uint32_t size;           /**< number of entries currently in the map */
+    struct block **map;      /**< block map */
 };
 
 /* clear all block in the block map */

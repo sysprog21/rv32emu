@@ -15,7 +15,7 @@
 
 #define RV_NUM_REGS 32
 
-/* csrs */
+/* CSRs */
 enum {
     /* floating point */
     CSR_FFLAGS = 0x001, /* Floating-point accrued exceptions */
@@ -97,10 +97,8 @@ struct riscv_internal {
     uint32_t csr_mip;
     uint32_t csr_mbadaddr;
 
-    /* current instruction is compressed or not */
-    bool compressed;
-    /* basic block map */
-    struct block_map block_map;
+    bool compressed;            /**< current instruction is compressed or not */
+    struct block_map block_map; /**< basic block map */
 };
 
 /* sign extend a 16 bit value */

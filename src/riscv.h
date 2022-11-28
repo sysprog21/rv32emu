@@ -115,7 +115,7 @@ riscv_t *rv_create(const riscv_io_t *io, riscv_user_t user_data);
 void rv_delete(riscv_t *rv);
 
 /* reset the RISC-V processor */
-void rv_reset(riscv_t *, riscv_word_t pc);
+void rv_reset(riscv_t *rv, riscv_word_t pc);
 
 #if RV32_HAS(GDBSTUB)
 /* Run the RISC-V emulator as gdbstub */
@@ -123,10 +123,10 @@ void rv_debug(riscv_t *rv);
 #endif
 
 /* step the RISC-V emulator */
-void rv_step(riscv_t *, int32_t cycles);
+void rv_step(riscv_t *rv, int32_t cycles);
 
 /* get RISC-V user data bound to an emulator */
-riscv_user_t rv_userdata(riscv_t *);
+riscv_user_t rv_userdata(riscv_t *rv);
 
 /* set the program counter of a RISC-V emulator */
 bool rv_set_pc(riscv_t *rv, riscv_word_t pc);
@@ -135,10 +135,10 @@ bool rv_set_pc(riscv_t *rv, riscv_word_t pc);
 riscv_word_t rv_get_pc(riscv_t *rv);
 
 /* set a register of the RISC-V emulator */
-void rv_set_reg(riscv_t *, uint32_t reg, riscv_word_t in);
+void rv_set_reg(riscv_t *rv, uint32_t reg, riscv_word_t in);
 
 /* get a register of the RISC-V emulator */
-riscv_word_t rv_get_reg(riscv_t *, uint32_t reg);
+riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg);
 
 /* system call handler */
 void syscall_handler(riscv_t *rv);
@@ -150,13 +150,13 @@ void ecall_handler(riscv_t *rv);
 void ebreak_handler(riscv_t *rv);
 
 /* statistics */
-void rv_stats(riscv_t *);
+void rv_stats(riscv_t *rv);
 
 /* halt the core */
-void rv_halt(riscv_t *);
+void rv_halt(riscv_t *rv);
 
 /* return the halt state */
-bool rv_has_halted(riscv_t *);
+bool rv_has_halted(riscv_t *rv);
 
 #ifdef __cplusplus
 };

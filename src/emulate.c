@@ -1178,7 +1178,7 @@ static struct block *block_alloc(const uint8_t bits)
 {
     struct block *block = malloc(sizeof(struct block));
     block->insn_capacity = 1 << bits;
-    block->insn_number = 0;
+    block->n_insn = 0;
     block->predict = NULL;
     block->ir = malloc(block->insn_capacity * sizeof(struct rv_insn_t));
     return block;
@@ -1224,7 +1224,7 @@ static struct block *block_find(const struct block_map *map, const uint32_t pc)
 static bool block_emulate(struct riscv_t *rv, const struct block *block)
 {
     /* execute the block */
-    for (uint32_t i = 0; i < block->insn_number; i++) {
+    for (uint32_t i = 0; i < block->n_insn; i++) {
         /* enforce zero register */
         rv->X[rv_reg_zero] = 0;
 
@@ -1244,8 +1244,8 @@ static void block_translate(struct riscv_t *rv, struct block *block)
     block->pc_end = rv->PC;
 
     /* translate the basic block */
-    while (block->insn_number < block->insn_capacity) {
-        struct rv_insn_t *ir = block->ir + block->insn_number;
+    while (block->n_insn < block->insn_capacity) {
+        struct rv_insn_t *ir = block->ir + block->n_insn;
         memset(ir, 0, sizeof(struct rv_insn_t));
 
         /* fetch the next instruction */
@@ -1259,7 +1259,7 @@ static void block_translate(struct riscv_t *rv, struct block *block)
 
         /* compute the end of pc */
         block->pc_end += ir->insn_len;
-        block->insn_number++;
+        block->n_insn++;
 
         /* stop on branch */
         if (insn_is_branch(ir->opcode))

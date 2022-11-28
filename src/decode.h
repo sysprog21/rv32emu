@@ -243,7 +243,7 @@ struct rv_insn_t {
 /* translated basic block */
 struct block {
     /* number of instructions encompased */
-    uint32_t insn_number;
+    uint32_t n_insn;
     /* address range of the basic block */
     uint32_t pc_start, pc_end;
     /* maximum of instructions encompased */

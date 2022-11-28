@@ -59,4 +59,4 @@ const char *elf_find_symbol(elf_t *e, uint32_t addr);
 bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end);
 
 /* Load the ELF file into a memory abstraction */
-bool elf_load(elf_t *e, struct riscv_t *rv, memory_t *mem);
+bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem);

@@ -48,14 +48,14 @@ enum {
 #undef _
 };
 
-static void rv_exception_default_handler(struct riscv_t *rv)
+static void rv_exception_default_handler(riscv_t *rv)
 {
     rv->csr_mepc += rv->compressed ? INSN_16 : INSN_32;
     rv->PC = rv->csr_mepc; /* mret */
 }
 
 #define EXCEPTION_HANDLER_IMPL(type, code)                                \
-    static void rv_except_##type(struct riscv_t *rv, uint32_t mtval)      \
+    static void rv_except_##type(riscv_t *rv, uint32_t mtval)             \
     {                                                                     \
         /* mtvec (Machine Trap-Vector Base Address Register)              \
          * mtvec[MXLEN-1:2]: vector base address                          \
@@ -91,7 +91,7 @@ RV_EXCEPTION_LIST
 #undef _
 
 /* Get current time in microsecnds and update csr_time register */
-static inline void update_time(struct riscv_t *rv)
+static inline void update_time(riscv_t *rv)
 {
     struct timeval tv;
     rv_gettimeofday(&tv);
@@ -101,7 +101,7 @@ static inline void update_time(struct riscv_t *rv)
 
 #if RV32_HAS(Zicsr)
 /* get a pointer to a CSR */
-static uint32_t *csr_get_ptr(struct riscv_t *rv, uint32_t csr)
+static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
 {
     switch (csr) {
     case CSR_MSTATUS: /* Machine Status */
@@ -164,7 +164,7 @@ static bool csr_is_writable(uint32_t csr)
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
  */
-static uint32_t csr_csrrw(struct riscv_t *rv, uint32_t csr, uint32_t val)
+static uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
 {
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
@@ -182,7 +182,7 @@ static uint32_t csr_csrrw(struct riscv_t *rv, uint32_t csr, uint32_t val)
 }
 
 /* perform csrrs (atomic read and set) */
-static uint32_t csr_csrrs(struct riscv_t *rv, uint32_t csr, uint32_t val)
+static uint32_t csr_csrrs(riscv_t *rv, uint32_t csr, uint32_t val)
 {
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
@@ -203,7 +203,7 @@ static uint32_t csr_csrrs(struct riscv_t *rv, uint32_t csr, uint32_t val)
  * Read old value of CSR, zero-extend to XLEN bits, write to rd
  * Read value from rs1, use as bit mask to clear bits in CSR
  */
-static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
+static uint32_t csr_csrrc(riscv_t *rv, uint32_t csr, uint32_t val)
 {
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
@@ -221,7 +221,7 @@ static uint32_t csr_csrrc(struct riscv_t *rv, uint32_t csr, uint32_t val)
 #endif
 
 #if RV32_HAS(GDBSTUB)
-void rv_debug(struct riscv_t *rv)
+void rv_debug(riscv_t *rv)
 {
     if (!gdbstub_init(&rv->gdbstub, &gdbstub_ops,
                       (arch_info_t){
@@ -254,7 +254,7 @@ static bool insn_is_misaligned(uint32_t pc)
     );
 }
 
-static bool emulate(struct riscv_t *rv, struct rv_insn_t *ir)
+static bool emulate(riscv_t *rv, rv_insn_t *ir)
 {
     /* check instruction is compressed or not */
     rv->compressed = (ir->insn_len == INSN_16);
@@ -1174,18 +1174,18 @@ static uint32_t hash(size_t k)
 }
 
 /* allocate a basic block */
-static struct block *block_alloc(const uint8_t bits)
+static block_t *block_alloc(const uint8_t bits)
 {
-    struct block *block = malloc(sizeof(struct block));
+    block_t *block = malloc(sizeof(struct block));
     block->insn_capacity = 1 << bits;
     block->n_insn = 0;
     block->predict = NULL;
-    block->ir = malloc(block->insn_capacity * sizeof(struct rv_insn_t));
+    block->ir = malloc(block->insn_capacity * sizeof(rv_insn_t));
     return block;
 }
 
 /* insert a block into block map */
-static void block_insert(struct block_map *map, const struct block *block)
+static void block_insert(struct block_map *map, const block_t *block)
 {
     assert(map && block);
     const uint32_t mask = map->block_capacity - 1;
@@ -1194,7 +1194,7 @@ static void block_insert(struct block_map *map, const struct block *block)
     /* insert into the block map */
     for (;; index++) {
         if (!map->map[index & mask]) {
-            map->map[index & mask] = (struct block *) block;
+            map->map[index & mask] = (block_t *) block;
             break;
         }
     }
@@ -1202,7 +1202,7 @@ static void block_insert(struct block_map *map, const struct block *block)
 }
 
 /* try to locate an already translated block in the block map */
-static struct block *block_find(const struct block_map *map, const uint32_t pc)
+static block_t *block_find(const struct block_map *map, const uint32_t pc)
 {
     assert(map);
     uint32_t index = hash(pc);
@@ -1210,7 +1210,7 @@ static struct block *block_find(const struct block_map *map, const uint32_t pc)
 
     /* find block in block map */
     for (;; index++) {
-        struct block *block = map->map[index & mask];
+        block_t *block = map->map[index & mask];
         if (!block)
             return NULL;
 
@@ -1221,7 +1221,7 @@ static struct block *block_find(const struct block_map *map, const uint32_t pc)
 }
 
 /* execute a basic block */
-static bool block_emulate(struct riscv_t *rv, const struct block *block)
+static bool block_emulate(riscv_t *rv, const block_t *block)
 {
     /* execute the block */
     for (uint32_t i = 0; i < block->n_insn; i++) {
@@ -1238,15 +1238,15 @@ static bool block_emulate(struct riscv_t *rv, const struct block *block)
     return true;
 }
 
-static void block_translate(struct riscv_t *rv, struct block *block)
+static void block_translate(riscv_t *rv, block_t *block)
 {
     block->pc_start = rv->PC;
     block->pc_end = rv->PC;
 
     /* translate the basic block */
     while (block->n_insn < block->insn_capacity) {
-        struct rv_insn_t *ir = block->ir + block->n_insn;
-        memset(ir, 0, sizeof(struct rv_insn_t));
+        rv_insn_t *ir = block->ir + block->n_insn;
+        memset(ir, 0, sizeof(rv_insn_t));
 
         /* fetch the next instruction */
         const uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
@@ -1267,12 +1267,11 @@ static void block_translate(struct riscv_t *rv, struct block *block)
     }
 }
 
-static struct block *block_find_or_translate(struct riscv_t *rv,
-                                             struct block *prev)
+static block_t *block_find_or_translate(riscv_t *rv, block_t *prev)
 {
     struct block_map *map = &rv->block_map;
     /* lookup the next block in the block map */
-    struct block *next = block_find(map, rv->PC);
+    block_t *next = block_find(map, rv->PC);
 
     if (!next) {
         if (map->size * 1.25 > map->block_capacity) {
@@ -1297,12 +1296,12 @@ static struct block *block_find_or_translate(struct riscv_t *rv,
     return next;
 }
 
-void rv_step(struct riscv_t *rv, int32_t cycles)
+void rv_step(riscv_t *rv, int32_t cycles)
 {
     assert(rv);
 
     /* find or translate a block for starting PC */
-    struct block *prev = NULL, *next = NULL;
+    block_t *prev = NULL, *next = NULL;
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 
     while (rv->csr_cycle < cycles_target && !rv->halt) {
@@ -1323,13 +1322,13 @@ void rv_step(struct riscv_t *rv, int32_t cycles)
     }
 }
 
-void ebreak_handler(struct riscv_t *rv)
+void ebreak_handler(riscv_t *rv)
 {
     assert(rv);
     rv_except_breakpoint(rv, rv->PC);
 }
 
-void ecall_handler(struct riscv_t *rv)
+void ecall_handler(riscv_t *rv)
 {
     assert(rv);
     rv_except_ecall_M(rv, 0);

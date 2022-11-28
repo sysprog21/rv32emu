@@ -310,7 +310,7 @@ static inline uint16_t c_decode_cbtype_imm(const uint16_t insn)
  *  31       20 19   15 14    12 11   7 6      0
  * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
  */
-static inline void decode_itype(struct rv_insn_t *ir, const uint32_t insn)
+static inline void decode_itype(rv_insn_t *ir, const uint32_t insn)
 {
     ir->imm = decode_itype_imm(insn);
     ir->rs1 = decode_rs1(insn);
@@ -321,7 +321,7 @@ static inline void decode_itype(struct rv_insn_t *ir, const uint32_t insn)
  *  31        12 11   7 6      0
  * | imm[31:12] |  rd  | opcode |
  */
-static inline void decode_utype(struct rv_insn_t *ir, const uint32_t insn)
+static inline void decode_utype(rv_insn_t *ir, const uint32_t insn)
 {
     ir->imm = decode_utype_imm(insn);
     ir->rd = decode_rd(insn);
@@ -331,7 +331,7 @@ static inline void decode_utype(struct rv_insn_t *ir, const uint32_t insn)
  *  31       25 24   20 19   15 14    12 11       7 6      0
  * | imm[11:5] |  rs2  |  rs1  | funct3 | imm[4:0] | opcode |
  */
-static inline void decode_stype(struct rv_insn_t *ir, const uint32_t insn)
+static inline void decode_stype(rv_insn_t *ir, const uint32_t insn)
 {
     ir->imm = decode_stype_imm(insn);
     ir->rs2 = decode_rs2(insn);
@@ -342,7 +342,7 @@ static inline void decode_stype(struct rv_insn_t *ir, const uint32_t insn)
  *  31    25 24   20 19   15 14    12 11   7 6      0
  * | funct7 |  rs2  |  rs1  | funct3 |  rd  | opcode |
  */
-static inline void decode_rtype(struct rv_insn_t *ir, const uint32_t insn)
+static inline void decode_rtype(rv_insn_t *ir, const uint32_t insn)
 {
     ir->rs2 = decode_rs2(insn);
     ir->rs1 = decode_rs1(insn);
@@ -353,7 +353,7 @@ static inline void decode_rtype(struct rv_insn_t *ir, const uint32_t insn)
  *     31     30     25   24 20 19 15 14    12 11       8     7     6      0
  * | imm[12] | imm[10:5] | rs2 | rs1 | funct3 | imm[4:1] | imm[11] | opcode |
  */
-static inline void decode_btype(struct rv_insn_t *ir, const uint32_t insn)
+static inline void decode_btype(rv_insn_t *ir, const uint32_t insn)
 {
     ir->imm = decode_btype_imm(insn);
     ir->rs2 = decode_rs2(insn);
@@ -364,7 +364,7 @@ static inline void decode_btype(struct rv_insn_t *ir, const uint32_t insn)
  *     31     30       21     20    19        12 11   7 6      0
  * | imm[20] | imm[10:1] | imm[11] | imm[19:12] |  rd  | opcode |
  */
-static inline void decode_jtype(struct rv_insn_t *ir, const uint32_t insn)
+static inline void decode_jtype(rv_insn_t *ir, const uint32_t insn)
 {
     ir->imm = decode_jtype_imm(insn);
     ir->rd = decode_rd(insn);
@@ -375,7 +375,7 @@ static inline void decode_jtype(struct rv_insn_t *ir, const uint32_t insn)
  *  31   27 26    25 24   20 19   15 14    12 11   7 6      0
  * |  rs3  | funct2 |  rs2  |  rs1  | funct3 |  rd  | opcode |
  */
-static inline void decode_r4type(struct rv_insn_t *ir, const uint32_t insn)
+static inline void decode_r4type(rv_insn_t *ir, const uint32_t insn)
 {
     ir->rd = decode_rd(insn);
     ir->rs1 = decode_rs1(insn);
@@ -388,7 +388,7 @@ static inline void decode_r4type(struct rv_insn_t *ir, const uint32_t insn)
  *  31       20 19   15 14    12 11   7 6      0
  * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
  */
-static inline bool op_load(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_load(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:0] rs1 funct3 rd opcode
      * ----+---------+---+------+--+-------
@@ -431,7 +431,7 @@ static inline bool op_load(struct rv_insn_t *ir, const uint32_t insn)
  *  31       20 19   15 14    12 11   7 6      0
  * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
  */
-static inline bool op_op_imm(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst  imm[11:5] imm[4:0]   rs1 funct3 rd opcode
      * -----+---------+----------+---+------+--+-------
@@ -490,7 +490,7 @@ static inline bool op_op_imm(struct rv_insn_t *ir, const uint32_t insn)
  *  31        12 11   7 6      0
  * | imm[31:12] |  rd  | opcode |
  */
-static inline bool op_auipc(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_auipc(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst  imm[31:12] rd opcode
      * -----+----------+--+-------
@@ -508,7 +508,7 @@ static inline bool op_auipc(struct rv_insn_t *ir, const uint32_t insn)
  *  31       25 24   20 19   15 14    12 11       7 6      0
  * | imm[11:5] |  rs2  |  rs1  | funct3 | imm[4:0] | opcode |
  */
-static inline bool op_store(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_store(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:5] rs2 rs1 funct3 imm[4:0] opcode
      * ----+---------+---+---+------+--------+-------
@@ -542,7 +542,7 @@ static inline bool op_store(struct rv_insn_t *ir, const uint32_t insn)
  *  31    25 24   20 19   15 14    12 11   7 6      0
  * | funct7 |  rs2  |  rs1  | funct3 |  rd  | opcode |
  */
-static inline bool op_op(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct7  rs2 rs1 funct3 rd opcode
      * ----+-------+---+---+------+--+-------
@@ -663,7 +663,7 @@ static inline bool op_op(struct rv_insn_t *ir, const uint32_t insn)
  *  31        12 11   7 6      0
  * | imm[31:12] |  rd  | opcode |
  */
-static inline bool op_lui(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_lui(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[31:12] rd opcode
      * ----+----------+--+-------
@@ -681,7 +681,7 @@ static inline bool op_lui(struct rv_insn_t *ir, const uint32_t insn)
  *     31     30     25   24 20 19 15 14    12 11       8     7     6      0
  * | imm[12] | imm[10:5] | rs2 | rs1 | funct3 | imm[4:1] | imm[11] | opcode |
  */
-static inline bool op_branch(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_branch(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[12] imm[10:5] rs2 rs1 funct3 imm[4:1] imm[11] opcode
      * ----+-------+---------+---+---+------+--------+-------+-------
@@ -726,7 +726,7 @@ static inline bool op_branch(struct rv_insn_t *ir, const uint32_t insn)
  *  31       20 19   15 14    12 11   7 6      0
  * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
  */
-static inline bool op_jalr(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_jalr(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:0] rs1 funct3 rd opcode
      * ----+---------+---+------+--+-------
@@ -744,7 +744,7 @@ static inline bool op_jalr(struct rv_insn_t *ir, const uint32_t insn)
  *     31     30       21     20    19        12 11   7 6      0
  * | imm[20] | imm[10:1] | imm[11] | imm[19:12] |  rd  | opcode |
  */
-static inline bool op_jal(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_jal(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[20] imm[10:1] imm[11] imm[19:12] rd opcode
      * ----+-------+---------+-------+----------+--+-------
@@ -762,7 +762,7 @@ static inline bool op_jal(struct rv_insn_t *ir, const uint32_t insn)
  *  31       20 19   15 14    12 11   7 6      0
  * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
  */
-static inline bool op_system(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   imm[11:0]    rs1   funct3 rd    opcode
      * ------+------------+-----+------+-----+-------
@@ -864,7 +864,7 @@ static inline bool op_system(struct rv_insn_t *ir, const uint32_t insn)
  *  31       20 19   15 14    12 11   7 6      0
  * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
  */
-static inline bool op_misc_mem(struct rv_insn_t *ir, const uint32_t insn UNUSED)
+static inline bool op_misc_mem(rv_insn_t *ir, const uint32_t insn UNUSED)
 {
     /* inst   imm[11:0] rs1 funct3 rd opcode
      * ------+---------+---+------+--+-------
@@ -884,7 +884,7 @@ static inline bool op_misc_mem(struct rv_insn_t *ir, const uint32_t insn UNUSED)
  *  31    27  26   25  24   20 19   15 14    12 11   7 6      0
  * | funct5 | aq | rl |  rs2  |  rs1  | funct3 |  rd  | opcode |
  */
-static inline bool op_amo(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_amo(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst      funct5 aq rl rs2   rs1 funct3 rd  opcode
      * ---------+------+--+--+-----+---+------+---+-------
@@ -956,7 +956,7 @@ static inline bool op_amo(struct rv_insn_t *ir, const uint32_t insn)
  *  31       20 19   15 14   12 11   7 6      0
  * | imm[11:0] |  rs1  | width |  rd  | opcode |
  */
-static inline bool op_load_fp(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_load_fp(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:0] rs1 width rd opcode
      * ----+---------+---+-----+--+-------
@@ -974,7 +974,7 @@ static inline bool op_load_fp(struct rv_insn_t *ir, const uint32_t insn)
  *  31       25 24   20 19   15 14   12 11       7 6      0
  * | imm[11:5] |  rs2  |  rs1  | width | imm[4:0] | opcode |
  */
-static inline bool op_store_fp(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_store_fp(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst imm[11:5] rs2 rs1 width imm[4:0] opcode
      * ----+---------+---+---+-----+--------+-------
@@ -992,7 +992,7 @@ static inline bool op_store_fp(struct rv_insn_t *ir, const uint32_t insn)
  *  31    27 26   25 24   20 19   15 14    12 11   7 6      0
  * | funct5 |  fmt  |  rs2  |  rs1  |   rm   |  rd  | opcode |
  */
-static inline bool op_op_fp(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst      funct7  rs2   rs1 rm  rd opcode
      * ---------+-------+-----+---+---+--+-------
@@ -1134,7 +1134,7 @@ static inline bool op_op_fp(struct rv_insn_t *ir, const uint32_t insn)
  *  31   27 26   25 24   20 19   15 14    12 11   7 6      0
  * |  rs3  |  fmt  |  rs2  |  rs1  |   rm   |  rd  | opcode |
  */
-static inline bool op_madd(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_madd(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst    rs3 fmt rs2 rs1 rm rd opcode
      * -------+---+---+---+---+--+--+-------
@@ -1152,7 +1152,7 @@ static inline bool op_madd(struct rv_insn_t *ir, const uint32_t insn)
  *  31   27 26   25 24   20 19   15 14    12 11   7 6      0
  * |  rs3  |  fmt  |  rs2  |  rs1  |   rm   |  rd  | opcode |
  */
-static inline bool op_msub(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_msub(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst    rs3 fmt rs2 rs1 rm rd opcode
      * -------+---+---+---+---+--+--+-------
@@ -1170,7 +1170,7 @@ static inline bool op_msub(struct rv_insn_t *ir, const uint32_t insn)
  *  31   27 26   25 24   20 19   15 14    12 11   7 6      0
  * |  rs3  |  fmt  |  rs2  |  rs1  |   rm   |  rd  | opcode |
  */
-static inline bool op_nmadd(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_nmadd(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst    rs3 fmt rs2 rs1 rm rd opcode
      * -------+---+---+---+---+--+--+-------
@@ -1188,7 +1188,7 @@ static inline bool op_nmadd(struct rv_insn_t *ir, const uint32_t insn)
  *  31   27 26   25 24   20 19   15 14    12 11   7 6      0
  * |  rs3  |  fmt  |  rs2  |  rs1  |   rm   |  rd  | opcode |
  */
-static inline bool op_nmsub(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_nmsub(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst    rs3 fmt rs2 rs1 rm rd opcode
      * -------+---+---+---+---+--+--+-------
@@ -1217,7 +1217,7 @@ static inline bool op_nmsub(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13    12    11       7 6        2 1  0
  * | funct3 | imm[5] |  rd/rs1  | imm[4:0] | op |
  */
-static inline bool op_caddi(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_caddi(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm[5]   rd/rs1    imm[4:0]   op
      * ------+------+--------+---------+----------+--
@@ -1245,7 +1245,7 @@ static inline bool op_caddi(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13 12    5 4   2 1  0
  * | funct3 |  imm  | rd' | op |
  */
-static inline bool op_caddi4spn(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_caddi4spn(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst       funct3 imm                 rd' op
      * ----------+------+-------------------+---+--
@@ -1266,7 +1266,7 @@ static inline bool op_caddi4spn(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13    12    11       7 6        2 1  0
  * | funct3 | imm[5] |  rd/rs1  | imm[4:0] | op |
  */
-static inline bool op_cli(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_cli(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct3 imm[5] rd/rs1    imm[4:0] op
      * ----+------+------+---------+--------+--
@@ -1283,7 +1283,7 @@ static inline bool op_cli(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13    12    11       7 6        2 1  0
  * | funct3 | imm[5] |  rd/rs1  | imm[4:0] | op |
  */
-static inline bool op_clui(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_clui(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst       funct3 imm[5]    rd/rs1    imm[4:0]         op
      * ----------+------+---------+---------+----------------+--
@@ -1327,7 +1327,7 @@ static inline bool op_clui(struct rv_insn_t *ir, const uint32_t insn)
  *  15                        10 9        7 6      5 4    2 1  0
  * |           funct6           | rd'/rs1' | funct2 | rs2' | op |
  */
-static inline bool op_cmisc_alu(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_cmisc_alu(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 shamt[5]  funct2 rd'/rs1' shamt[4:0]  op
      * ------+------+---------+------+--------+-----------+--
@@ -1412,7 +1412,7 @@ static inline bool op_cmisc_alu(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13     12     11       7 6          2 1  0
  * | funct3 | shamt[5] |  rd/rs1  | shamt[4:0] | op |
  */
-static inline bool op_cslli(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_cslli(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 shamt[5]  rd/rs1    shamt[4:0]  op
      * ------+------+---------+---------+-----------+--
@@ -1431,7 +1431,7 @@ static inline bool op_cslli(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13  12   11   7 6   2 1  0
  * | funct3 | imm |  rd  | imm | op |
  */
-static inline bool op_clwsp(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_clwsp(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm     rd    imm           op
      * ------+------+-------+-----+-------------+--
@@ -1453,7 +1453,7 @@ static inline bool op_clwsp(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13 12    7 6   2 1  0
  * | funct3 |  imm  | rs2 | op |
  */
-static inline bool op_cswsp(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_cswsp(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm           rs2 op
      * ------+------+-------------+---+--
@@ -1469,7 +1469,7 @@ static inline bool op_cswsp(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13 12   10 9    7 6   5 4   2 1  0
  * | funct3 |  imm  | rs1' | imm | rd' | op |
  */
-static inline bool op_clw(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_clw(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct3 imm       rs1' imm       rd' op
      * ----+------+---------+----+---------+---+--
@@ -1490,7 +1490,7 @@ static inline bool op_clw(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13 12   10 9    7 6   5 4    2 1  0
  * | funct3 |  imm  | rs1' | imm | rs2' | op |
  */
-static inline bool op_csw(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_csw(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct3 imm       rs1' imm       rs2' op
      * ----+------+---------+----+---------+----+--
@@ -1512,7 +1512,7 @@ static inline bool op_csw(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13 12    2 1  0
  * | funct3 |  imm  | op |
  */
-static inline bool op_cj(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_cj(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst funct3 imm                        op
      * ----+------+--------------------------+--
@@ -1527,7 +1527,7 @@ static inline bool op_cj(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13 12    2 1  0
  * | funct3 |  imm  | op |
  */
-static inline bool op_cjal(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_cjal(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst  funct3 imm                        op
      * -----+------+--------------------------+--
@@ -1542,7 +1542,7 @@ static inline bool op_cjal(struct rv_insn_t *ir, const uint32_t insn)
  *  15    12 11    7 6    2 1  0
  * | funct4 |  rs1  |  rs2 | op |
  */
-static inline bool op_ccr(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_ccr(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst     funct4 rs1       rs2    op
      * --------+------+---------+------+--
@@ -1597,7 +1597,7 @@ static inline bool op_ccr(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13 12     10 9    7 6       2 1  0
  * | funct3 |   imm   | rs1' |   imm   | op |
  */
-static inline bool op_cbeqz(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_cbeqz(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm        rs1' imm            op
      * ------+------+----------+----+--------------+--
@@ -1613,7 +1613,7 @@ static inline bool op_cbeqz(struct rv_insn_t *ir, const uint32_t insn)
  *  15    13 12     10 9    7 6       2 1  0
  * | funct3 |   imm   | rs1' |   imm   | op |
  */
-static inline bool op_cbnez(struct rv_insn_t *ir, const uint32_t insn)
+static inline bool op_cbnez(rv_insn_t *ir, const uint32_t insn)
 {
     /* inst   funct3 imm        rs1' imm            op
      * ------+------+----------+----+--------------+--
@@ -1654,16 +1654,16 @@ static inline bool op_cbnez(struct rv_insn_t *ir, const uint32_t insn)
 #define op_cfsd OP_UNIMP
 
 /* handler for all unimplemented opcodes */
-static inline bool op_unimp(struct rv_insn_t *ir UNUSED, uint32_t insn UNUSED)
+static inline bool op_unimp(rv_insn_t *ir UNUSED, uint32_t insn UNUSED)
 {
     return false;
 }
 
 /* RV32 decode handler type */
-typedef bool (*decode_t)(struct rv_insn_t *ir, uint32_t insn);
+typedef bool (*decode_t)(rv_insn_t *ir, uint32_t insn);
 
 /* decode RISC-V instruction */
-bool rv_decode(struct rv_insn_t *ir, uint32_t insn)
+bool rv_decode(rv_insn_t *ir, uint32_t insn)
 {
     assert(ir);
 
@@ -1731,7 +1731,7 @@ void block_map_clear(struct block_map *map)
 {
     assert(map);
     for (uint32_t i = 0; i < map->block_capacity; i++) {
-        struct block *block = map->map[i];
+        block_t *block = map->map[i];
         if (block) {
             free(block->ir);
             free(block);

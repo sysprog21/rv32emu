@@ -19,13 +19,13 @@ static void block_map_init(struct block_map *map, const uint8_t bits)
     map->map = calloc(map->block_capacity, sizeof(struct block *));
 }
 
-riscv_user_t rv_userdata(struct riscv_t *rv)
+riscv_user_t rv_userdata(riscv_t *rv)
 {
     assert(rv);
     return rv->userdata;
 }
 
-bool rv_set_pc(struct riscv_t *rv, riscv_word_t pc)
+bool rv_set_pc(riscv_t *rv, riscv_word_t pc)
 {
     assert(rv);
 #if RV32_HAS(EXT_C)
@@ -39,20 +39,20 @@ bool rv_set_pc(struct riscv_t *rv, riscv_word_t pc)
     return true;
 }
 
-riscv_word_t rv_get_pc(struct riscv_t *rv)
+riscv_word_t rv_get_pc(riscv_t *rv)
 {
     assert(rv);
     return rv->PC;
 }
 
-void rv_set_reg(struct riscv_t *rv, uint32_t reg, riscv_word_t in)
+void rv_set_reg(riscv_t *rv, uint32_t reg, riscv_word_t in)
 {
     assert(rv);
     if (reg < RV_NUM_REGS && reg != rv_reg_zero)
         rv->X[reg] = in;
 }
 
-riscv_word_t rv_get_reg(struct riscv_t *rv, uint32_t reg)
+riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg)
 {
     assert(rv);
     if (reg < RV_NUM_REGS)
@@ -61,14 +61,14 @@ riscv_word_t rv_get_reg(struct riscv_t *rv, uint32_t reg)
     return ~0U;
 }
 
-struct riscv_t *rv_create(const struct riscv_io_t *io, riscv_user_t userdata)
+riscv_t *rv_create(const riscv_io_t *io, riscv_user_t userdata)
 {
     assert(io);
 
-    struct riscv_t *rv = calloc(1, sizeof(struct riscv_t));
+    riscv_t *rv = calloc(1, sizeof(riscv_t));
 
     /* copy over the IO interface */
-    memcpy(&rv->io, io, sizeof(struct riscv_io_t));
+    memcpy(&rv->io, io, sizeof(riscv_io_t));
 
     /* copy over the userdata */
     rv->userdata = userdata;
@@ -82,24 +82,24 @@ struct riscv_t *rv_create(const struct riscv_io_t *io, riscv_user_t userdata)
     return rv;
 }
 
-void rv_halt(struct riscv_t *rv)
+void rv_halt(riscv_t *rv)
 {
     rv->halt = true;
 }
 
-bool rv_has_halted(struct riscv_t *rv)
+bool rv_has_halted(riscv_t *rv)
 {
     return rv->halt;
 }
 
-void rv_delete(struct riscv_t *rv)
+void rv_delete(riscv_t *rv)
 {
     assert(rv);
     block_map_clear(&rv->block_map);
     free(rv);
 }
 
-void rv_reset(struct riscv_t *rv, riscv_word_t pc)
+void rv_reset(riscv_t *rv, riscv_word_t pc)
 {
     assert(rv);
     memset(rv->X, 0, sizeof(uint32_t) * RV_NUM_REGS);
@@ -125,7 +125,7 @@ void rv_reset(struct riscv_t *rv, riscv_word_t pc)
 }
 
 /* FIXME: provide real implementation */
-void rv_stats(struct riscv_t *rv)
+void rv_stats(riscv_t *rv)
 {
     printf("CSR cycle count: %" PRIu64 "\n", rv->csr_cycle);
 }

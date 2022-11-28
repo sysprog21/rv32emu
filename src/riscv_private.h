@@ -54,11 +54,11 @@ enum {
     CSR_MHARTID = 0xF14,   /* Hardware thread ID */
 };
 
-struct riscv_t {
+struct riscv_internal {
     bool halt;
 
     /* I/O interface */
-    struct riscv_io_t io;
+    riscv_io_t io;
 
     /* integer registers */
     riscv_word_t X[RV_NUM_REGS];

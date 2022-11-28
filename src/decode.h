@@ -223,7 +223,7 @@ enum {
     INSN_32 = 4,
 };
 
-struct rv_insn_t {
+typedef struct {
     union {
         int32_t imm;
         uint8_t rs3;
@@ -238,10 +238,10 @@ struct rv_insn_t {
 
     /* instruction length */
     uint8_t insn_len;
-};
+} rv_insn_t;
 
 /* translated basic block */
-struct block {
+typedef struct block {
     /* number of instructions encompased */
     uint32_t n_insn;
     /* address range of the basic block */
@@ -251,8 +251,8 @@ struct block {
     /* block predictoin */
     struct block *predict;
     /* memory blocks */
-    struct rv_insn_t *ir;
-};
+    rv_insn_t *ir;
+} block_t;
 
 struct block_map {
     /* max number of entries in the block map */
@@ -267,4 +267,4 @@ struct block_map {
 void block_map_clear(struct block_map *map);
 
 /* decode the RISC-V instruction */
-bool rv_decode(struct rv_insn_t *ir, const uint32_t insn);
+bool rv_decode(rv_insn_t *ir, const uint32_t insn);

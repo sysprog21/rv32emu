@@ -219,7 +219,6 @@ enum {
 /* clang-format on */
 
 enum {
-    INSN_UNKNOWN = 0,
     INSN_16 = 2,
     INSN_32 = 4,
 };
@@ -236,21 +235,36 @@ struct rv_insn_t {
 #if RV32_HAS(EXT_C)
     uint8_t shamt;
 #endif
+
+    /* instruction length */
+    uint8_t insn_len;
 };
 
-/* sign extend a 16 bit value */
-static inline uint32_t sign_extend_h(const uint32_t x)
-{
-    return (int32_t) ((int16_t) x);
-}
+/* translated basic block */
+struct block {
+    /* number of instructions encompased */
+    uint32_t insn_number;
+    /* address range of the basic block */
+    uint32_t pc_start, pc_end;
+    /* maximum of instructions encompased */
+    uint32_t insn_capacity;
+    /* block predictoin */
+    struct block *predict;
+    /* memory blocks */
+    struct rv_insn_t *ir;
+};
 
-/* sign extend an 8 bit value */
-static inline uint32_t sign_extend_b(const uint32_t x)
-{
-    return (int32_t) ((int8_t) x);
-}
+struct block_map {
+    /* max number of entries in the block map */
+    uint32_t block_capacity;
+    /* number of entries currently in the map */
+    uint32_t size;
+    /* block map */
+    struct block **map;
+};
+
+/* clear all block in the block map */
+void block_map_clear(struct block_map *map);
 
 /* decode the RISC-V instruction */
-bool rv_decode(struct rv_insn_t *rv_insn,
-               const uint32_t insn,
-               uint8_t *insn_len);
+bool rv_decode(struct rv_insn_t *ir, const uint32_t insn);

@@ -4,9 +4,10 @@
  */
 
 #include <assert.h>
-#include <stdio.h>
+#include <stdlib.h>
 
 #include "decode.h"
+#include "riscv_private.h"
 
 /* decode rd field
  * rd = insn[11:7]
@@ -1653,19 +1654,18 @@ static inline bool op_cbnez(struct rv_insn_t *ir, const uint32_t insn)
 #define op_cfsd OP_UNIMP
 
 /* handler for all unimplemented opcodes */
-static inline bool op_unimp(struct rv_insn_t *rv_insn UNUSED,
-                            uint32_t insn UNUSED)
+static inline bool op_unimp(struct rv_insn_t *ir UNUSED, uint32_t insn UNUSED)
 {
     return false;
 }
 
 /* RV32 decode handler type */
-typedef bool (*decode_t)(struct rv_insn_t *rv_insn, uint32_t insn);
+typedef bool (*decode_t)(struct rv_insn_t *ir, uint32_t insn);
 
 /* decode RISC-V instruction */
-bool rv_decode(struct rv_insn_t *ir, uint32_t insn, uint8_t *insn_len)
+bool rv_decode(struct rv_insn_t *ir, uint32_t insn)
 {
-    assert(ir && insn_len);
+    assert(ir);
 
 #define OP_UNIMP op_unimp
 #define OP(insn) op_##insn
@@ -1704,7 +1704,7 @@ bool rv_decode(struct rv_insn_t *ir, uint32_t insn, uint8_t *insn_len)
     if ((insn & FC_OPCODE) != 3) {
         insn &= 0x0000FFFF;
         const uint16_t c_index = (insn & FC_FUNC3) >> 11 | (insn & FC_OPCODE);
-        *insn_len = INSN_16;
+        ir->insn_len = INSN_16;
 
         /* decode instruction (compressed instructions) */
         const decode_t op = rvc_jump_table[c_index];
@@ -1715,7 +1715,7 @@ bool rv_decode(struct rv_insn_t *ir, uint32_t insn, uint8_t *insn_len)
 
     /* standard uncompressed instruction */
     const uint32_t index = (insn & INSN_6_2) >> 2;
-    *insn_len = INSN_32;
+    ir->insn_len = INSN_32;
 
     /* decode instruction */
     const decode_t op = rv_jump_table[index];
@@ -1724,4 +1724,19 @@ bool rv_decode(struct rv_insn_t *ir, uint32_t insn, uint8_t *insn_len)
 
 #undef OP_UNIMP
 #undef OP
+}
+
+/* clear all block in the block map */
+void block_map_clear(struct block_map *map)
+{
+    assert(map);
+    for (uint32_t i = 0; i < map->block_capacity; i++) {
+        struct block *block = map->map[i];
+        if (block) {
+            free(block->ir);
+            free(block);
+            map->map[i] = NULL;
+        }
+    }
+    map->size = 0;
 }

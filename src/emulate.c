@@ -4,9 +4,7 @@
  */
 
 #include <assert.h>
-#include <inttypes.h>
 #include <stdbool.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -52,7 +50,7 @@ enum {
 
 static void rv_exception_default_handler(struct riscv_t *rv)
 {
-    rv->csr_mepc += rv->insn_len;
+    rv->csr_mepc += rv->compressed ? INSN_16 : INSN_32;
     rv->PC = rv->csr_mepc; /* mret */
 }
 
@@ -256,8 +254,11 @@ static bool insn_is_misaligned(uint32_t pc)
     );
 }
 
-static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
+static bool emulate(struct riscv_t *rv, struct rv_insn_t *ir)
 {
+    /* check instruction is compressed or not */
+    rv->compressed = (ir->insn_len == INSN_16);
+
     switch (ir->opcode) {
     /* RV32I Base Instruction Set */
     case rv_insn_lui: /* LUI: Load Upper Immediate */
@@ -286,7 +287,7 @@ static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
         rv->PC += ir->imm;
         /* link with return address */
         if (ir->rd)
-            rv->X[ir->rd] = pc + rv->insn_len;
+            rv->X[ir->rd] = pc + ir->insn_len;
         /* check instruction misaligned */
         if (insn_is_misaligned(rv->PC)) {
             rv_except_insn_misaligned(rv, pc);
@@ -308,7 +309,7 @@ static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
         rv->PC = (rv->X[ir->rs1] + ir->imm) & ~1U;
         /* link */
         if (ir->rd)
-            rv->X[ir->rd] = pc + rv->insn_len;
+            rv->X[ir->rd] = pc + ir->insn_len;
         /* check instruction misaligned */
         if (insn_is_misaligned(rv->PC)) {
             rv_except_insn_misaligned(rv, pc);
@@ -963,7 +964,7 @@ static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
         rv->X[ir->rd] += (int16_t) ir->imm;
         break;
     case rv_insn_cjal:
-        rv->X[1] = rv->PC + rv->insn_len;
+        rv->X[1] = rv->PC + ir->insn_len;
         rv->PC += ir->imm;
         if (rv->PC & 0x1) {
             rv_except_insn_misaligned(rv, rv->PC);
@@ -1055,11 +1056,11 @@ static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
          * the value in register rs1' is zero. It expands to beq rs1', x0,
          * offset[8:1].
          */
-        rv->PC += (!rv->X[ir->rs1]) ? (uint32_t) ir->imm : rv->insn_len;
+        rv->PC += (!rv->X[ir->rs1]) ? (uint32_t) ir->imm : ir->insn_len;
         /* can branch */
         return true;
     case rv_insn_cbnez: /* C.BEQZ */
-        rv->PC += (rv->X[ir->rs1]) ? (uint32_t) ir->imm : rv->insn_len;
+        rv->PC += (rv->X[ir->rs1]) ? (uint32_t) ir->imm : ir->insn_len;
         /* can branch */
         return true;
     case rv_insn_cslli: /* C.SLLI */
@@ -1093,7 +1094,7 @@ static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
     case rv_insn_cjalr: { /* C.JALR */
         /* Unconditional jump and store PC+2 to ra */
         const int32_t jump_to = rv->X[ir->rs1];
-        rv->X[rv_reg_ra] = rv->PC + rv->insn_len;
+        rv->X[rv_reg_ra] = rv->PC + ir->insn_len;
         rv->PC = jump_to;
         if (rv->PC & 0x1) {
             rv_except_insn_misaligned(rv, rv->PC);
@@ -1125,146 +1126,201 @@ static bool rv_emulate(struct riscv_t *rv, struct rv_insn_t *ir)
     }
 
     /* step over instruction */
-    rv->PC += rv->insn_len;
+    rv->PC += ir->insn_len;
     return true;
+}
+
+static bool insn_is_branch(uint8_t opcode)
+{
+    switch (opcode) {
+    case rv_insn_jal:
+    case rv_insn_jalr:
+    case rv_insn_beq:
+    case rv_insn_bne:
+    case rv_insn_blt:
+    case rv_insn_bge:
+    case rv_insn_bltu:
+    case rv_insn_bgeu:
+    case rv_insn_ecall:
+    case rv_insn_ebreak:
+    case rv_insn_mret:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cj:
+    case rv_insn_cjr:
+    case rv_insn_cjal:
+    case rv_insn_cjalr:
+    case rv_insn_cbeqz:
+    case rv_insn_cbnez:
+    case rv_insn_cebreak:
+#endif
+#if RV32_HAS(Zifencei)
+    case rv_insn_fencei:
+#endif
+        return true;
+    }
+    return false;
+}
+
+/* hash function is used when mapping address into the block map */
+static uint32_t hash(size_t k)
+{
+    k ^= k << 21;
+    k ^= k >> 17;
+#if (SIZE_MAX > 0xFFFFFFFF)
+    k ^= k >> 35;
+    k ^= k >> 51;
+#endif
+    return k;
+}
+
+/* allocate a basic block */
+static struct block *block_alloc(const uint8_t bits)
+{
+    struct block *block = malloc(sizeof(struct block));
+    block->insn_capacity = 1 << bits;
+    block->insn_number = 0;
+    block->predict = NULL;
+    block->ir = malloc(block->insn_capacity * sizeof(struct rv_insn_t));
+    return block;
+}
+
+/* insert a block into block map */
+static void block_insert(struct block_map *map, const struct block *block)
+{
+    assert(map && block);
+    const uint32_t mask = map->block_capacity - 1;
+    uint32_t index = hash(block->pc_start);
+
+    /* insert into the block map */
+    for (;; index++) {
+        if (!map->map[index & mask]) {
+            map->map[index & mask] = (struct block *) block;
+            break;
+        }
+    }
+    map->size++;
+}
+
+/* try to locate an already translated block in the block map */
+static struct block *block_find(const struct block_map *map, const uint32_t pc)
+{
+    assert(map);
+    uint32_t index = hash(pc);
+    const uint32_t mask = map->block_capacity - 1;
+
+    /* find block in block map */
+    for (;; index++) {
+        struct block *block = map->map[index & mask];
+        if (!block)
+            return NULL;
+
+        if (block->pc_start == pc)
+            return block;
+    }
+    return NULL;
+}
+
+/* execute a basic block */
+static bool block_emulate(struct riscv_t *rv, const struct block *block)
+{
+    /* execute the block */
+    for (uint32_t i = 0; i < block->insn_number; i++) {
+        /* enforce zero register */
+        rv->X[rv_reg_zero] = 0;
+
+        /* execute the instruction */
+        if (!emulate(rv, block->ir + i))
+            return false;
+
+        /* increment the cycles csr */
+        rv->csr_cycle++;
+    }
+    return true;
+}
+
+static void block_translate(struct riscv_t *rv, struct block *block)
+{
+    block->pc_start = rv->PC;
+    block->pc_end = rv->PC;
+
+    /* translate the basic block */
+    while (block->insn_number < block->insn_capacity) {
+        struct rv_insn_t *ir = block->ir + block->insn_number;
+        memset(ir, 0, sizeof(struct rv_insn_t));
+
+        /* fetch the next instruction */
+        const uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
+
+        /* decode the instruction */
+        if (!rv_decode(ir, insn)) {
+            rv_except_illegal_insn(rv, insn);
+            break;
+        }
+
+        /* compute the end of pc */
+        block->pc_end += ir->insn_len;
+        block->insn_number++;
+
+        /* stop on branch */
+        if (insn_is_branch(ir->opcode))
+            break;
+    }
+}
+
+static struct block *block_find_or_translate(struct riscv_t *rv,
+                                             struct block *prev)
+{
+    struct block_map *map = &rv->block_map;
+    /* lookup the next block in the block map */
+    struct block *next = block_find(map, rv->PC);
+
+    if (!next) {
+        if (map->size * 1.25 > map->block_capacity) {
+            block_map_clear(map);
+            prev = NULL;
+        }
+
+        /* allocate a new block */
+        next = block_alloc(10);
+
+        /* translate the basic block */
+        block_translate(rv, next);
+
+        /* insert the block into block map */
+        block_insert(&rv->block_map, next);
+
+        /* update the block prediction */
+        if (prev)
+            prev->predict = next;
+    }
+
+    return next;
 }
 
 void rv_step(struct riscv_t *rv, int32_t cycles)
 {
     assert(rv);
-    uint32_t insn;
-    struct rv_insn_t ir;
+
+    /* find or translate a block for starting PC */
+    struct block *prev = NULL, *next = NULL;
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 
     while (rv->csr_cycle < cycles_target && !rv->halt) {
-        /* enforce zero register */
-        rv->X[rv_reg_zero] = 0;
-
-        /* fetch the next instruction */
-        insn = rv->io.mem_ifetch(rv, rv->PC);
-        memset(&ir, 0, sizeof(struct rv_insn_t));
-
-        /* decode the instruction */
-        if (!rv_decode(&ir, insn, &rv->insn_len)) {
-            rv_except_illegal_insn(rv, insn);
-            break;
+        /* check the block prediction first */
+        if (prev && prev->predict && prev->predict->pc_start == rv->PC) {
+            next = prev->predict;
+        } else {
+            next = block_find_or_translate(rv, prev);
         }
 
-        /* execute the instruciton */
-        if (!rv_emulate(rv, &ir))
+        assert(next);
+
+        /* execute the block */
+        if (!block_emulate(rv, next))
             break;
 
-        /* increment the cycles csr */
-        rv->csr_cycle++;
+        prev = next;
     }
-}
-
-riscv_user_t rv_userdata(struct riscv_t *rv)
-{
-    assert(rv);
-    return rv->userdata;
-}
-
-bool rv_set_pc(struct riscv_t *rv, riscv_word_t pc)
-{
-    assert(rv);
-#if RV32_HAS(EXT_C)
-    if (pc & 1)
-#else
-    if (pc & 3)
-#endif
-        return false;
-
-    rv->PC = pc;
-    return true;
-}
-
-riscv_word_t rv_get_pc(struct riscv_t *rv)
-{
-    assert(rv);
-    return rv->PC;
-}
-
-void rv_set_reg(struct riscv_t *rv, uint32_t reg, riscv_word_t in)
-{
-    assert(rv);
-    if (reg < RV_NUM_REGS && reg != rv_reg_zero)
-        rv->X[reg] = in;
-}
-
-riscv_word_t rv_get_reg(struct riscv_t *rv, uint32_t reg)
-{
-    assert(rv);
-    if (reg < RV_NUM_REGS)
-        return rv->X[reg];
-
-    return ~0U;
-}
-
-struct riscv_t *rv_create(const struct riscv_io_t *io, riscv_user_t userdata)
-{
-    assert(io);
-    struct riscv_t *rv = (struct riscv_t *) malloc(sizeof(struct riscv_t));
-    memset(rv, 0, sizeof(struct riscv_t));
-
-    /* copy over the IO interface */
-    memcpy(&rv->io, io, sizeof(struct riscv_io_t));
-
-    /* copy over the userdata */
-    rv->userdata = userdata;
-
-    /* reset */
-    rv_reset(rv, 0U);
-
-    return rv;
-}
-
-void rv_halt(struct riscv_t *rv)
-{
-    rv->halt = true;
-}
-
-bool rv_has_halted(struct riscv_t *rv)
-{
-    return rv->halt;
-}
-
-void rv_delete(struct riscv_t *rv)
-{
-    assert(rv);
-    free(rv);
-}
-
-void rv_reset(struct riscv_t *rv, riscv_word_t pc)
-{
-    assert(rv);
-    memset(rv->X, 0, sizeof(uint32_t) * RV_NUM_REGS);
-
-    /* set the reset address */
-    rv->PC = pc;
-    rv->insn_len = INSN_UNKNOWN;
-
-    /* set the default stack pointer */
-    rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;
-
-    /* reset the csrs */
-    rv->csr_mtvec = 0;
-    rv->csr_cycle = 0;
-    rv->csr_mstatus = 0;
-
-#if RV32_HAS(EXT_F)
-    /* reset float registers */
-    memset(rv->F, 0, sizeof(float) * RV_NUM_REGS);
-    rv->csr_fcsr = 0;
-#endif
-
-    rv->halt = false;
-}
-
-/* FIXME: provide real implementation */
-void rv_stats(struct riscv_t *rv)
-{
-    printf("CSR cycle count: %" PRIu64 "\n", rv->csr_cycle);
 }
 
 void ebreak_handler(struct riscv_t *rv)

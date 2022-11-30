@@ -247,6 +247,7 @@ instructions. You would need to add a few additional 16-bit instructions for
 accessing CSRs, loading addresses, and handling traps.
 
 ## Reference
+* [RISC-V: An Overview of the Instruction Set Architecture](http://web.cecs.pdx.edu/~harry/riscv/RISCV-Summary.pdf)
 * [RISC-V Opcodes](https://github.com/riscv/riscv-opcodes)
 * [RISC-V Instruction Set Metadata](https://github.com/michaeljclark/riscv-meta)
 * [RISC-V Instruction-Set Cheatsheet](https://itnext.io/risc-v-instruction-set-cheatsheet-70961b4bbe8)

@@ -255,7 +255,7 @@ typedef struct block {
 typedef struct {
     uint32_t block_capacity; /**< max number of entries in the block map */
     uint32_t size;           /**< number of entries currently in the map */
-    struct block **map;      /**< block map */
+    block_t **map;           /**< block map */
 } block_map_t;
 
 /* clear all block in the block map */

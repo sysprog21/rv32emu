@@ -1202,10 +1202,10 @@ static void block_insert(block_map_t *map, const block_t *block)
 }
 
 /* try to locate an already translated block in the block map */
-static block_t *block_find(const block_map_t *map, const uint32_t pc)
+static block_t *block_find(const block_map_t *map, const uint32_t addr)
 {
     assert(map);
-    uint32_t index = hash(pc);
+    uint32_t index = hash(addr);
     const uint32_t mask = map->block_capacity - 1;
 
     /* find block in block map */
@@ -1214,7 +1214,7 @@ static block_t *block_find(const block_map_t *map, const uint32_t pc)
         if (!block)
             return NULL;
 
-        if (block->pc_start == pc)
+        if (block->pc_start == addr)
             return block;
     }
     return NULL;
@@ -1240,8 +1240,7 @@ static bool block_emulate(riscv_t *rv, const block_t *block)
 
 static void block_translate(riscv_t *rv, block_t *block)
 {
-    block->pc_start = rv->PC;
-    block->pc_end = rv->PC;
+    block->pc_start = block->pc_end = rv->PC;
 
     /* translate the basic block */
     while (block->n_insn < block->insn_capacity) {
@@ -1288,7 +1287,11 @@ static block_t *block_find_or_translate(riscv_t *rv, block_t *prev)
         /* insert the block into block map */
         block_insert(&rv->block_map, next);
 
-        /* update the block prediction */
+        /* update the block prediction
+         * When we translate a new block, the block predictor may benefit,
+         * but when it is updated after we find a particular block, it may
+         * penalize us significantly.
+         */
         if (prev)
             prev->predict = next;
     }
@@ -1301,24 +1304,32 @@ void rv_step(riscv_t *rv, int32_t cycles)
     assert(rv);
 
     /* find or translate a block for starting PC */
-    block_t *prev = NULL, *next = NULL;
+    block_t *prev = NULL;
+
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 
+    /* loop until we hit out cycle target */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
-        /* check the block prediction first */
+        block_t *block;
+
+        /* try to predict the next block */
         if (prev && prev->predict && prev->predict->pc_start == rv->PC) {
-            next = prev->predict;
+            block = prev->predict;
         } else {
-            next = block_find_or_translate(rv, prev);
+            /* lookup the next block in block map or translate a new block,
+             * and move onto the next block.
+             */
+            block = block_find_or_translate(rv, prev);
         }
 
-        assert(next);
+        /* we should have a block by now */
+        assert(block);
 
         /* execute the block */
-        if (!block_emulate(rv, next))
+        if (!block_emulate(rv, block))
             break;
 
-        prev = next;
+        prev = block;
     }
 }
 

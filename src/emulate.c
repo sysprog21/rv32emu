@@ -256,9 +256,6 @@ static bool insn_is_misaligned(uint32_t pc)
 
 static bool emulate(riscv_t *rv, rv_insn_t *ir)
 {
-    /* check instruction is compressed or not */
-    rv->compressed = (ir->insn_len == INSN_16);
-
     switch (ir->opcode) {
     /* RV32I Base Instruction Set */
     case rv_insn_lui: /* LUI: Load Upper Immediate */
@@ -290,6 +287,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
             rv->X[ir->rd] = pc + ir->insn_len;
         /* check instruction misaligned */
         if (insn_is_misaligned(rv->PC)) {
+            rv->compressed = false;
             rv_except_insn_misaligned(rv, pc);
             return false;
         }
@@ -312,6 +310,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
             rv->X[ir->rd] = pc + ir->insn_len;
         /* check instruction misaligned */
         if (insn_is_misaligned(rv->PC)) {
+            rv->compressed = false;
             rv_except_insn_misaligned(rv, pc);
             return false;
         }
@@ -324,6 +323,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
             rv->PC += ir->imm;
             /* check instruction misaligned */
             if (insn_is_misaligned(rv->PC)) {
+                rv->compressed = false;
                 rv_except_insn_misaligned(rv, pc);
                 return false;
             }
@@ -338,6 +338,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
             rv->PC += ir->imm;
             /* check instruction misaligned */
             if (insn_is_misaligned(rv->PC)) {
+                rv->compressed = false;
                 rv_except_insn_misaligned(rv, pc);
                 return false;
             }
@@ -352,6 +353,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
             rv->PC += ir->imm;
             /* check instruction misaligned */
             if (insn_is_misaligned(rv->PC)) {
+                rv->compressed = false;
                 rv_except_insn_misaligned(rv, pc);
                 return false;
             }
@@ -366,6 +368,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
             rv->PC += ir->imm;
             /* check instruction misaligned */
             if (insn_is_misaligned(rv->PC)) {
+                rv->compressed = false;
                 rv_except_insn_misaligned(rv, pc);
                 return false;
             }
@@ -380,6 +383,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
             rv->PC += ir->imm;
             /* check instruction misaligned */
             if (insn_is_misaligned(rv->PC)) {
+                rv->compressed = false;
                 rv_except_insn_misaligned(rv, pc);
                 return false;
             }
@@ -394,6 +398,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
             rv->PC += ir->imm;
             /* check instruction misaligned */
             if (insn_is_misaligned(rv->PC)) {
+                rv->compressed = false;
                 rv_except_insn_misaligned(rv, pc);
                 return false;
             }
@@ -409,6 +414,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
     case rv_insn_lh: { /* LH: Load Halfword */
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         if (addr & 1) {
+            rv->compressed = false;
             rv_except_load_misaligned(rv, addr);
             return false;
         }
@@ -418,6 +424,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
     case rv_insn_lw: { /* LW: Load Word */
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         if (addr & 3) {
+            rv->compressed = false;
             rv_except_load_misaligned(rv, addr);
             return false;
         }
@@ -430,6 +437,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
     case rv_insn_lhu: { /* LHU: Load Halfword Unsigned */
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         if (addr & 1) {
+            rv->compressed = false;
             rv_except_load_misaligned(rv, addr);
             return false;
         }
@@ -442,6 +450,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
     case rv_insn_sh: { /* SH: Store Halfword */
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         if (addr & 1) {
+            rv->compressed = false;
             rv_except_store_misaligned(rv, addr);
             return false;
         }
@@ -451,6 +460,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
     case rv_insn_sw: { /* SW: Store Word */
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         if (addr & 3) {
+            rv->compressed = false;
             rv_except_store_misaligned(rv, addr);
             return false;
         }
@@ -541,9 +551,11 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
         rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2];
         break;
     case rv_insn_ecall: /* ECALL: Environment Call */
+        rv->compressed = false;
         rv->io.on_ecall(rv);
         return true;
     case rv_insn_ebreak: /* EBREAK: Environment Break */
+        rv->compressed = false;
         rv->io.on_ebreak(rv);
         return true;
     case rv_insn_wfi:  /* WFI: Wait for Interrupt */
@@ -931,6 +943,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
          */
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
         if (addr & 3) {
+            rv->compressed = true;
             rv_except_load_misaligned(rv, addr);
             return false;
         }
@@ -945,6 +958,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
          */
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
         if (addr & 3) {
+            rv->compressed = true;
             rv_except_store_misaligned(rv, addr);
             return false;
         }
@@ -967,6 +981,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
         rv->X[1] = rv->PC + ir->insn_len;
         rv->PC += ir->imm;
         if (rv->PC & 0x1) {
+            rv->compressed = true;
             rv_except_insn_misaligned(rv, rv->PC);
             return false;
         }
@@ -1044,6 +1059,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
          */
         rv->PC += ir->imm;
         if (rv->PC & 0x1) {
+            rv->compressed = true;
             rv_except_insn_misaligned(rv, rv->PC);
             return false;
         }
@@ -1074,6 +1090,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
     case rv_insn_clwsp: { /* C.LWSP */
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
         if (addr & 3) {
+            rv->compressed = true;
             rv_except_load_misaligned(rv, addr);
             return false;
         }
@@ -1088,6 +1105,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
         rv->X[ir->rd] = rv->X[ir->rs2];
         break;
     case rv_insn_cebreak: /* C.EBREAK */
+        rv->compressed = true;
         rv->io.on_ebreak(rv);
         /* can branch */
         return true;
@@ -1097,6 +1115,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
         rv->X[rv_reg_ra] = rv->PC + ir->insn_len;
         rv->PC = jump_to;
         if (rv->PC & 0x1) {
+            rv->compressed = true;
             rv_except_insn_misaligned(rv, rv->PC);
             return false;
         }
@@ -1116,6 +1135,7 @@ static bool emulate(riscv_t *rv, rv_insn_t *ir)
     case rv_insn_cswsp: { /* C.SWSP */
         const uint32_t addr = rv->X[2] + ir->imm;
         if (addr & 3) {
+            rv->compressed = true;
             rv_except_store_misaligned(rv, addr);
             return false;
         }
@@ -1252,6 +1272,7 @@ static void block_translate(riscv_t *rv, block_t *block)
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
+            rv->compressed = (ir->insn_len == INSN_16);
             rv_except_illegal_insn(rv, insn);
             break;
         }

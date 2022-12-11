@@ -29,17 +29,16 @@ static char *signature_out_file;
 static const char *opt_prog_name = "a.out";
 
 #define MEMIO(op) on_mem_##op
-#define IO_HANDLER_IMPL(type, op, RW)                                  \
-    static IIF(RW)(                                                    \
-        /* W */ void MEMIO(op)(struct riscv_t * rv, riscv_word_t addr, \
-                               riscv_##type##_t data),                 \
-        /* R */ riscv_##type##_t MEMIO(op)(struct riscv_t * rv,        \
-                                           riscv_word_t addr))         \
-    {                                                                  \
-        state_t *s = rv_userdata(rv);                                  \
-        IIF(RW)                                                        \
-        (memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data)),  \
-         return memory_##op(s->mem, addr));                            \
+#define IO_HANDLER_IMPL(type, op, RW)                                        \
+    static IIF(RW)(                                                          \
+        /* W */ void MEMIO(op)(riscv_t * rv, riscv_word_t addr,              \
+                               riscv_##type##_t data),                       \
+        /* R */ riscv_##type##_t MEMIO(op)(riscv_t * rv, riscv_word_t addr)) \
+    {                                                                        \
+        state_t *s = rv_userdata(rv);                                        \
+        IIF(RW)                                                              \
+        (memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data)),        \
+         return memory_##op(s->mem, addr));                                  \
     }
 
 #define R 0
@@ -58,7 +57,7 @@ IO_HANDLER_IMPL(byte, write_b, W)
 #undef W
 
 /* run: printing out an instruction trace */
-static void run_and_trace(struct riscv_t *rv, elf_t *elf)
+static void run_and_trace(riscv_t *rv, elf_t *elf)
 {
     const uint32_t cycles_per_step = 1;
 
@@ -73,7 +72,7 @@ static void run_and_trace(struct riscv_t *rv, elf_t *elf)
     }
 }
 
-static void run(struct riscv_t *rv)
+static void run(riscv_t *rv)
 {
     const uint32_t cycles_per_step = 100;
     for (; !rv_has_halted(rv);) { /* run until the flag is done */
@@ -143,7 +142,7 @@ static bool parse_args(int argc, char **args)
     return true;
 }
 
-static void dump_test_signature(struct riscv_t *rv, elf_t *elf)
+static void dump_test_signature(riscv_t *rv, elf_t *elf)
 {
     uint32_t start = 0, end = 0;
     const struct Elf32_Sym *sym;
@@ -186,7 +185,7 @@ int main(int argc, char **args)
     }
 
     /* install the I/O handlers for the RISC-V runtime */
-    const struct riscv_io_t io = {
+    const riscv_io_t io = {
         /* memory read interface */
         .mem_ifetch = MEMIO(ifetch),
         .mem_read_w = MEMIO(read_w),
@@ -211,7 +210,7 @@ int main(int argc, char **args)
         state->break_addr = end->st_value;
 
     /* create the RISC-V runtime */
-    struct riscv_t *rv = rv_create(&io, state);
+    riscv_t *rv = rv_create(&io, state);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
         return 1;

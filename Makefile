@@ -79,7 +79,8 @@ src/mini-gdbstub/Makefile:
 GDBSTUB_LIB := $(GDBSTUB_OUT)/libgdbstub.a
 $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 	$(MAKE) -C $(dir $<) O=$(dir $@)
-$(OUT)/emulate.o: $(GDBSTUB_LIB)
+# FIXME: track gdbstub dependency properly
+$(OUT)/decode.o: $(GDBSTUB_LIB)
 OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB)
@@ -96,12 +97,14 @@ all: $(BIN)
 OBJS := \
 	map.o \
 	utils.o \
-	emulate.o \
+	decode.o \
 	io.o \
-	elf.o \
-	main.o \
 	syscall.o \
-	$(OBJS_EXT)
+	emulate.o \
+	riscv.o \
+	elf.o \
+	$(OBJS_EXT) \
+	main.o
 
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)

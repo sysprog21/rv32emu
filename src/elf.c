@@ -304,7 +304,7 @@ bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)
     return true;
 }
 
-bool elf_load(elf_t *e, struct riscv_t *rv, memory_t *mem)
+bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem)
 {
     /* set the entry point */
     if (!rv_set_pc(rv, e->hdr->e_entry))

@@ -59,7 +59,8 @@ enum {
     rv_reg_t6,
 };
 
-struct riscv_t;
+/* forward declaration for internal structure */
+typedef struct riscv_internal riscv_t;
 typedef void *riscv_user_t;
 
 typedef uint32_t riscv_word_t;
@@ -69,28 +70,28 @@ typedef uint32_t riscv_exception_t;
 typedef float riscv_float_t;
 
 /* memory read handlers */
-typedef riscv_word_t (*riscv_mem_ifetch)(struct riscv_t *rv, riscv_word_t addr);
-typedef riscv_word_t (*riscv_mem_read_w)(struct riscv_t *rv, riscv_word_t addr);
-typedef riscv_half_t (*riscv_mem_read_s)(struct riscv_t *rv, riscv_word_t addr);
-typedef riscv_byte_t (*riscv_mem_read_b)(struct riscv_t *rv, riscv_word_t addr);
+typedef riscv_word_t (*riscv_mem_ifetch)(riscv_t *rv, riscv_word_t addr);
+typedef riscv_word_t (*riscv_mem_read_w)(riscv_t *rv, riscv_word_t addr);
+typedef riscv_half_t (*riscv_mem_read_s)(riscv_t *rv, riscv_word_t addr);
+typedef riscv_byte_t (*riscv_mem_read_b)(riscv_t *rv, riscv_word_t addr);
 
 /* memory write handlers */
-typedef void (*riscv_mem_write_w)(struct riscv_t *rv,
+typedef void (*riscv_mem_write_w)(riscv_t *rv,
                                   riscv_word_t addr,
                                   riscv_word_t data);
-typedef void (*riscv_mem_write_s)(struct riscv_t *rv,
+typedef void (*riscv_mem_write_s)(riscv_t *rv,
                                   riscv_word_t addr,
                                   riscv_half_t data);
-typedef void (*riscv_mem_write_b)(struct riscv_t *rv,
+typedef void (*riscv_mem_write_b)(riscv_t *rv,
                                   riscv_word_t addr,
                                   riscv_byte_t data);
 
 /* system instruction handlers */
-typedef void (*riscv_on_ecall)(struct riscv_t *rv);
-typedef void (*riscv_on_ebreak)(struct riscv_t *rv);
+typedef void (*riscv_on_ecall)(riscv_t *rv);
+typedef void (*riscv_on_ebreak)(riscv_t *rv);
 
 /* RISC-V emulator I/O interface */
-struct riscv_io_t {
+typedef struct {
     /* memory read interface */
     riscv_mem_ifetch mem_ifetch;
     riscv_mem_read_w mem_read_w;
@@ -105,57 +106,57 @@ struct riscv_io_t {
     /* system */
     riscv_on_ecall on_ecall;
     riscv_on_ebreak on_ebreak;
-};
+} riscv_io_t;
 
 /* create a RISC-V emulator */
-struct riscv_t *rv_create(const struct riscv_io_t *io, riscv_user_t user_data);
+riscv_t *rv_create(const riscv_io_t *io, riscv_user_t user_data);
 
 /* delete a RISC-V emulator */
-void rv_delete(struct riscv_t *);
+void rv_delete(riscv_t *rv);
 
 /* reset the RISC-V processor */
-void rv_reset(struct riscv_t *, riscv_word_t pc);
+void rv_reset(riscv_t *rv, riscv_word_t pc);
 
 #if RV32_HAS(GDBSTUB)
 /* Run the RISC-V emulator as gdbstub */
-void rv_debug(struct riscv_t *rv);
+void rv_debug(riscv_t *rv);
 #endif
 
 /* step the RISC-V emulator */
-void rv_step(struct riscv_t *, int32_t cycles);
+void rv_step(riscv_t *rv, int32_t cycles);
 
 /* get RISC-V user data bound to an emulator */
-riscv_user_t rv_userdata(struct riscv_t *);
+riscv_user_t rv_userdata(riscv_t *rv);
 
 /* set the program counter of a RISC-V emulator */
-bool rv_set_pc(struct riscv_t *rv, riscv_word_t pc);
+bool rv_set_pc(riscv_t *rv, riscv_word_t pc);
 
 /* get the program counter of a RISC-V emulator */
-riscv_word_t rv_get_pc(struct riscv_t *rv);
+riscv_word_t rv_get_pc(riscv_t *rv);
 
 /* set a register of the RISC-V emulator */
-void rv_set_reg(struct riscv_t *, uint32_t reg, riscv_word_t in);
+void rv_set_reg(riscv_t *rv, uint32_t reg, riscv_word_t in);
 
 /* get a register of the RISC-V emulator */
-riscv_word_t rv_get_reg(struct riscv_t *, uint32_t reg);
+riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg);
 
 /* system call handler */
-void syscall_handler(struct riscv_t *rv);
+void syscall_handler(riscv_t *rv);
 
 /* environment call handler */
-void ecall_handler(struct riscv_t *rv);
+void ecall_handler(riscv_t *rv);
 
 /* breakpoint exception handler */
-void ebreak_handler(struct riscv_t *rv);
+void ebreak_handler(riscv_t *rv);
 
 /* statistics */
-void rv_stats(struct riscv_t *);
+void rv_stats(riscv_t *rv);
 
 /* halt the core */
-void rv_halt(struct riscv_t *);
+void rv_halt(riscv_t *rv);
 
 /* return the halt state */
-bool rv_has_halted(struct riscv_t *);
+bool rv_has_halted(riscv_t *rv);
 
 #ifdef __cplusplus
 };

@@ -8,7 +8,6 @@
 #endif
 
 #include "breakpoint.h"
-#include <assert.h>
 
 static inline int cmp(const void *arg0, const void *arg1)
 {

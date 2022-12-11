@@ -86,7 +86,7 @@ static submission_queue_t submission_queue = {
     .start = 0,
 };
 
-static submission_t submission_pop(struct riscv_t *rv)
+static submission_t submission_pop(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv);
     submission_t submission;
@@ -99,7 +99,7 @@ static submission_t submission_pop(struct riscv_t *rv)
     return submission;
 }
 
-static void event_push(struct riscv_t *rv, event_t event)
+static void event_push(riscv_t *rv, event_t event)
 {
     state_t *s = rv_userdata(rv);
     memory_write(s->mem, event_queue.base + event_queue.end * sizeof(event_t),
@@ -130,10 +130,10 @@ static inline uint32_t round_pow2(uint32_t x)
     return x;
 }
 
-void syscall_submit_queue(struct riscv_t *rv);
+void syscall_submit_queue(riscv_t *rv);
 
 /* check if we need to setup SDL and run event loop */
-static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
+static bool check_sdl(riscv_t *rv, uint32_t width, uint32_t height)
 {
     if (!window) { /* check if video has been initialized. */
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -214,7 +214,7 @@ static bool check_sdl(struct riscv_t *rv, uint32_t width, uint32_t height)
     return true;
 }
 
-void syscall_draw_frame(struct riscv_t *rv)
+void syscall_draw_frame(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -241,7 +241,7 @@ void syscall_draw_frame(struct riscv_t *rv)
     SDL_RenderPresent(renderer);
 }
 
-void syscall_setup_queue(struct riscv_t *rv)
+void syscall_setup_queue(riscv_t *rv)
 {
     /* setup_queue(base, capacity, event_count) */
     uint32_t base = rv_get_reg(rv, rv_reg_a0);
@@ -253,7 +253,7 @@ void syscall_setup_queue(struct riscv_t *rv)
     queues_capacity = round_pow2(queues_capacity);
 }
 
-void syscall_submit_queue(struct riscv_t *rv)
+void syscall_submit_queue(riscv_t *rv)
 {
     /* submit_queue(count) */
     uint32_t count = rv_get_reg(rv, rv_reg_a0);

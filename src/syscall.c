@@ -73,7 +73,7 @@ static const char *get_mode_str(uint32_t flags, uint32_t mode UNUSED)
     }
 }
 
-static void syscall_write(struct riscv_t *rv)
+static void syscall_write(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -103,7 +103,7 @@ static void syscall_write(struct riscv_t *rv)
     free(tmp);
 }
 
-static void syscall_exit(struct riscv_t *rv)
+static void syscall_exit(riscv_t *rv)
 {
     rv_halt(rv);
 
@@ -117,7 +117,7 @@ static void syscall_exit(struct riscv_t *rv)
  *   - 8 byte alignment for malloc chunks
  *   - 4 KiB aligned for sbrk blocks
  */
-static void syscall_brk(struct riscv_t *rv)
+static void syscall_brk(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -130,7 +130,7 @@ static void syscall_brk(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, s->break_addr);
 }
 
-static void syscall_gettimeofday(struct riscv_t *rv)
+static void syscall_gettimeofday(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -154,7 +154,7 @@ static void syscall_gettimeofday(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, 0);
 }
 
-static void syscall_clock_gettime(struct riscv_t *rv)
+static void syscall_clock_gettime(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -184,7 +184,7 @@ static void syscall_clock_gettime(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, 0);
 }
 
-static void syscall_close(struct riscv_t *rv)
+static void syscall_close(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -211,7 +211,7 @@ static void syscall_close(struct riscv_t *rv)
  * with the file descriptor fd to the argument offset according to the
  * directive whence.
  */
-static void syscall_lseek(struct riscv_t *rv)
+static void syscall_lseek(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -240,7 +240,7 @@ static void syscall_lseek(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, 0);
 }
 
-static void syscall_read(struct riscv_t *rv)
+static void syscall_read(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -270,12 +270,12 @@ static void syscall_read(struct riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, r);
 }
 
-static void syscall_fstat(struct riscv_t *rv UNUSED)
+static void syscall_fstat(riscv_t *rv UNUSED)
 {
     /* FIXME: fill real implementation */
 }
 
-static void syscall_open(struct riscv_t *rv)
+static void syscall_open(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
@@ -316,12 +316,12 @@ static void syscall_open(struct riscv_t *rv)
 }
 
 #if RV32_HAS(SDL)
-extern void syscall_draw_frame(struct riscv_t *rv);
-extern void syscall_setup_queue(struct riscv_t *rv);
-extern void syscall_submit_queue(struct riscv_t *rv);
+extern void syscall_draw_frame(riscv_t *rv);
+extern void syscall_setup_queue(riscv_t *rv);
+extern void syscall_submit_queue(riscv_t *rv);
 #endif
 
-void syscall_handler(struct riscv_t *rv)
+void syscall_handler(riscv_t *rv)
 {
     /* get the syscall number */
     riscv_word_t syscall = rv_get_reg(rv, rv_reg_a7);

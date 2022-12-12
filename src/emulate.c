@@ -254,7 +254,7 @@ static bool insn_is_misaligned(uint32_t pc)
     );
 }
 
-static bool emulate(riscv_t *rv, rv_insn_t *ir)
+static bool emulate(riscv_t *rv, const rv_insn_t *ir)
 {
     switch (ir->opcode) {
     /* RV32I Base Instruction Set */
@@ -1243,13 +1243,16 @@ static block_t *block_find(const block_map_t *map, const uint32_t addr)
 /* execute a basic block */
 static bool block_emulate(riscv_t *rv, const block_t *block)
 {
+    const uint32_t n_insn = block->n_insn;
+    const rv_insn_t *ir = block->ir;
+
     /* execute the block */
-    for (uint32_t i = 0; i < block->n_insn; i++) {
+    for (uint32_t i = 0; i < n_insn; i++) {
         /* enforce zero register */
         rv->X[rv_reg_zero] = 0;
 
         /* execute the instruction */
-        if (!emulate(rv, block->ir + i))
+        if (!emulate(rv, ir + i))
             return false;
 
         /* increment the cycles csr */

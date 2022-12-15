@@ -449,6 +449,10 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
     /* decode I-type */
     decode_itype(ir, insn);
 
+    /* nop can be implemented as "addi x0, x0, 0" */
+    if (unlikely(ir->rd == rv_reg_zero))
+        return true;
+
     /* dispatch from funct3 field */
     switch (decode_funct3(insn)) {
     case 0: /* ADDI: Add Immediate */
@@ -559,10 +563,13 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
      */
 
     /* decode R-type */
-    uint8_t funct3 = decode_funct3(insn);
     decode_rtype(ir, insn);
 
-    /* TODO: skip zero register here */
+    /* nop can be implemented as "add x0, x1, x2" */
+    if (unlikely(ir->rd == rv_reg_zero))
+        return true;
+
+    uint8_t funct3 = decode_funct3(insn);
 
     /* dispatch from funct7 field */
     switch (decode_funct7(insn)) {

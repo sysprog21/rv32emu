@@ -11,6 +11,7 @@
 /* RISC-V instruction list */
 /* clang-format off */
 #define RISCV_INSN_LIST                    \
+    _(nop)                                 \
     /* RV32I Base Instruction Set */       \
     _(lui)                                 \
     _(auipc)                               \

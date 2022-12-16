@@ -450,8 +450,10 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
     decode_itype(ir, insn);
 
     /* nop can be implemented as "addi x0, x0, 0" */
-    if (unlikely(ir->rd == rv_reg_zero))
+    if (unlikely(ir->rd == rv_reg_zero)) {
+        ir->opcode = rv_insn_nop;
         return true;
+    }
 
     /* dispatch from funct3 field */
     switch (decode_funct3(insn)) {
@@ -566,8 +568,10 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
     decode_rtype(ir, insn);
 
     /* nop can be implemented as "add x0, x1, x2" */
-    if (unlikely(ir->rd == rv_reg_zero))
+    if (unlikely(ir->rd == rv_reg_zero)) {
+        ir->opcode = rv_insn_nop;
         return true;
+    }
 
     uint8_t funct3 = decode_funct3(insn);
 

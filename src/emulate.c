@@ -319,6 +319,9 @@ static bool emulate(riscv_t *rv, const block_t *block)
     /* main loop */
     DISPATCH()
 
+    /* Internal */
+    _(nop, /* no operation */)
+
     /* LUI (Load Upper Immediate) is used to build 32-bit constants and uses the
      * U-type format. LUI places the U-immediate value in the top 20 bits of the
      * destination register rd, filling in the lowest 12 bits with zeros. The

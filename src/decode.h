@@ -243,24 +243,5 @@ typedef struct {
     uint8_t insn_len;
 } rv_insn_t;
 
-/* translated basic block */
-typedef struct block {
-    uint32_t n_insn;           /**< number of instructions encompased */
-    uint32_t pc_start, pc_end; /**< address range of the basic block */
-    /* maximum of instructions encompased */
-    uint32_t insn_capacity; /**< maximum of instructions encompased */
-    struct block *predict;  /**< block prediction */
-    rv_insn_t *ir;          /**< IR as memory blocks */
-} block_t;
-
-typedef struct {
-    uint32_t block_capacity; /**< max number of entries in the block map */
-    uint32_t size;           /**< number of entries currently in the map */
-    block_t **map;           /**< block map */
-} block_map_t;
-
-/* clear all block in the block map */
-void block_map_clear(block_map_t *map);
-
 /* decode the RISC-V instruction */
 bool rv_decode(rv_insn_t *ir, const uint32_t insn);

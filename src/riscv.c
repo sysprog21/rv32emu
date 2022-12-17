@@ -19,6 +19,21 @@ static void block_map_init(block_map_t *map, const uint8_t bits)
     map->map = calloc(map->block_capacity, sizeof(struct block *));
 }
 
+/* clear all block in the block map */
+void block_map_clear(block_map_t *map)
+{
+    assert(map);
+    for (uint32_t i = 0; i < map->block_capacity; i++) {
+        block_t *block = map->map[i];
+        if (!block)
+            continue;
+        free(block->ir);
+        free(block);
+        map->map[i] = NULL;
+    }
+    map->size = 0;
+}
+
 riscv_user_t rv_userdata(riscv_t *rv)
 {
     assert(rv);

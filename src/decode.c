@@ -1736,18 +1736,3 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
 #undef OP_UNIMP
 #undef OP
 }
-
-/* clear all block in the block map */
-void block_map_clear(block_map_t *map)
-{
-    assert(map);
-    for (uint32_t i = 0; i < map->block_capacity; i++) {
-        block_t *block = map->map[i];
-        if (block) {
-            free(block->ir);
-            free(block);
-            map->map[i] = NULL;
-        }
-    }
-    map->size = 0;
-}

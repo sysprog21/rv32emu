@@ -57,6 +57,7 @@ enum {
     rv_reg_t4,
     rv_reg_t5,
     rv_reg_t6,
+    RV_N_REGS, /* NOTE: shoule be the last */
 };
 
 /* forward declaration for internal structure */

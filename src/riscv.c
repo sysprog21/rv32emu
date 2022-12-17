@@ -63,14 +63,14 @@ riscv_word_t rv_get_pc(riscv_t *rv)
 void rv_set_reg(riscv_t *rv, uint32_t reg, riscv_word_t in)
 {
     assert(rv);
-    if (reg < RV_NUM_REGS && reg != rv_reg_zero)
+    if (reg < RV_N_REGS && reg != rv_reg_zero)
         rv->X[reg] = in;
 }
 
 riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg)
 {
     assert(rv);
-    if (reg < RV_NUM_REGS)
+    if (reg < RV_N_REGS)
         return rv->X[reg];
 
     return ~0U;
@@ -117,7 +117,7 @@ void rv_delete(riscv_t *rv)
 void rv_reset(riscv_t *rv, riscv_word_t pc)
 {
     assert(rv);
-    memset(rv->X, 0, sizeof(uint32_t) * RV_NUM_REGS);
+    memset(rv->X, 0, sizeof(uint32_t) * RV_N_REGS);
 
     /* set the reset address */
     rv->PC = pc;
@@ -132,7 +132,7 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 
 #if RV32_HAS(EXT_F)
     /* reset float registers */
-    memset(rv->F, 0, sizeof(float) * RV_NUM_REGS);
+    memset(rv->F, 0, sizeof(float) * RV_N_REGS);
     rv->csr_fcsr = 0;
 #endif
 

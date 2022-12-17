@@ -13,8 +13,6 @@
 #include "decode.h"
 #include "riscv.h"
 
-#define RV_NUM_REGS 32
-
 /* CSRs */
 enum {
     /* floating point */
@@ -79,7 +77,7 @@ struct riscv_internal {
     riscv_io_t io;
 
     /* integer registers */
-    riscv_word_t X[RV_NUM_REGS];
+    riscv_word_t X[RV_N_REGS];
     riscv_word_t PC;
 
     /* user provided data */
@@ -96,8 +94,8 @@ struct riscv_internal {
 #if RV32_HAS(EXT_F)
     /* float registers */
     union {
-        riscv_float_t F[RV_NUM_REGS];
-        uint32_t F_int[RV_NUM_REGS]; /* integer shortcut */
+        riscv_float_t F[RV_N_REGS];
+        uint32_t F_int[RV_N_REGS]; /* integer shortcut */
     };
     uint32_t csr_fcsr;
 #endif

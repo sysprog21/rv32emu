@@ -649,6 +649,7 @@ static bool emulate(riscv_t *rv, const block_t *block)
 
     /* ECALL: Environment Call */
     _(ecall, {
+        rv->compressed = false;
         rv->io.on_ecall(rv); /* increment the cycles csr */
         rv->csr_cycle++;
         return true;
@@ -656,6 +657,7 @@ static bool emulate(riscv_t *rv, const block_t *block)
 
     /* EBREAK: Environment Break */
     _(ebreak, {
+        rv->compressed = false;
         rv->io.on_ebreak(rv); /* increment the cycles csr */
         rv->csr_cycle++;
         return true;
@@ -1288,6 +1290,7 @@ static bool emulate(riscv_t *rv, const block_t *block)
 
     /* C.EBREAK */
     _(cebreak, {
+        rv->compressed = true;
         rv->io.on_ebreak(rv);
         /* increment the cycles csr */
         rv->csr_cycle++;

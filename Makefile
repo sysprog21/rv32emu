@@ -5,6 +5,7 @@ OUT ?= build
 BIN := $(OUT)/rv32emu
 
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
+CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
 
 # Set the default stack pointer
@@ -87,6 +88,10 @@ LDFLAGS += $(GDBSTUB_LIB)
 gdbstub-test: $(BIN)
 	$(Q)tests/gdbstub.sh && $(call notice, [OK])
 endif
+
+# For tail-call elimination, we need a specific set of build flags applied.
+# FIXME: On macOS + Apple Silicon, -fno-stack-protector might have a negative impact.
+$(OUT)/emulate.o: CFLAGS += -fomit-frame-pointer -fno-stack-check -fno-stack-protector
 
 # Clear the .DEFAULT_GOAL special variable, so that the following turns
 # to the first target after .DEFAULT_GOAL is not set.

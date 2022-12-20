@@ -24,6 +24,16 @@
 #define __ALIGNED(x)
 #endif
 
+/* There is no tail-call optimization(TCO) in non-optimized builds. To work
+ * around this, we attempts to use a compiler attribute called musttail that
+ * forces the compiler to TCO even when optimizations aren't on.
+ */
+#if defined(__has_attribute) && __has_attribute(musttail)
+#define MUST_TAIL __attribute__((musttail))
+#else
+#define MUST_TAIL
+#endif
+
 /* Pattern Matching for C macros.
  * https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
  */

@@ -24,6 +24,10 @@ jobs:
             make distclean ENABLE_COMPUTED_GOTO=0 ENABLE_EXT_C=1
             make distclean ENABLE_GDBSTUB=0
             make distclean ENABLE_SDL=0
+    - name: architectural test
+      run: |
+            sh .ci/riscv-tests.sh
+      shell: bash
 
   coding_style:
     runs-on: ubuntu-22.04

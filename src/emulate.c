@@ -266,9 +266,9 @@ enum {
     {                                                                     \
         rv->X[rv_reg_zero] = 0;                                           \
         code;                                                             \
+        rv->csr_cycle++;                                                  \
         if (__rv_insn_##inst##_canbranch) {                               \
             /* can branch */                                              \
-            rv->csr_cycle++;                                              \
             return true;                                                  \
         }                                                                 \
     nextop:                                                               \

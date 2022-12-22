@@ -62,7 +62,7 @@
     _(mret, 1)                             \
     /* RV32 Zifencei Standard Extension */ \
     IIF(RV32_HAS(Zifencei))(               \
-        _(fencei, 0)                       \
+        _(fencei, 1)                       \
     )                                      \
     /* RV32 Zicsr Standard Extension */    \
     IIF(RV32_HAS(Zicsr))(                  \

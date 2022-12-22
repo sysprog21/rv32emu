@@ -266,9 +266,9 @@ enum {
     {                                                                     \
         rv->X[rv_reg_zero] = 0;                                           \
         code;                                                             \
+        rv->csr_cycle++;                                                  \
         if (__rv_insn_##inst##_canbranch) {                               \
             /* can branch */                                              \
-            rv->csr_cycle++;                                              \
             return true;                                                  \
         }                                                                 \
     nextop:                                                               \
@@ -616,10 +616,10 @@ RVOP(hret, {
 RVOP(mret, { rv->PC = rv->csr_mepc; })
 
 #if RV32_HAS(Zifencei) /* RV32 Zifencei Standard Extension */
-RVOP(fencei,
-     {
-         /* FIXME: fill real implementations */
-     })
+RVOP(fencei, {
+    rv->PC += ir->insn_len;
+    /* FIXME: fill real implementations */
+})
 #endif
 
 #if RV32_HAS(Zicsr) /* RV32 Zicsr Standard Extension */

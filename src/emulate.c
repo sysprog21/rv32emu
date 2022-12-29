@@ -10,7 +10,7 @@
 
 #if RV32_HAS(EXT_F)
 #include <math.h>
-#include "soft-float.h"
+#include "softfloat.h"
 
 #if defined(__APPLE__)
 static inline int isinff(float x)

@@ -172,6 +172,9 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * [libriscv: RISC-V userspace emulator library](https://github.com/fwsGonzo/libriscv)
 * [LupV: an education-friendly RISC-V based system emulator](https://gitlab.com/luplab/lupv)
 * [mini-rv32ima](https://github.com/cnlohr/mini-rv32ima)
+* [yutongshen/RISC-V-Simulator](https://github.com/yutongshen/RISC-V-Simulator)
+* [rvc](https://github.com/PiMaker/rvc)
+* [RVVM](https://github.com/LekKit/RVVM)
 * [Threaded Code](https://www.complang.tuwien.ac.at/forth/threaded-code.html) / [threaded-code-benchmark](https://github.com/shadowofneptune/threaded-code-benchmark)
 
 ## License

@@ -133,7 +133,7 @@ static inline uint32_t round_pow2(uint32_t x)
 void syscall_submit_queue(riscv_t *rv);
 
 /* check if we need to setup SDL and run event loop */
-static bool check_sdl(riscv_t *rv, uint32_t width, uint32_t height)
+static bool check_sdl(riscv_t *rv, int width, int height)
 {
     if (!window) { /* check if video has been initialized. */
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -218,10 +218,10 @@ void syscall_draw_frame(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
 
-    /* draw_frame(screen, width, height) */
+    /* draw_frame(base, width, height) */
     const uint32_t screen = rv_get_reg(rv, rv_reg_a0);
-    const uint32_t width = rv_get_reg(rv, rv_reg_a1);
-    const uint32_t height = rv_get_reg(rv, rv_reg_a2);
+    const int width = rv_get_reg(rv, rv_reg_a1);
+    const int height = rv_get_reg(rv, rv_reg_a2);
 
     if (!check_sdl(rv, width, height))
         return;

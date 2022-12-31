@@ -103,9 +103,9 @@ These system calls are solely for the convenience of accessing the [SDL library]
 
 **system call number**: `0xBEEF`
 
-**synopsis**: `void draw_frame(void *screen, int width, int height)`
+**synopsis**: `void draw_frame(void *base, int width, int height)`
 
-If a window does not already exist, one will be created with the specified `width` and `height`. The `screen` buffer will replace the content of the framebuffer, passing a different `width` or `height` compared to the size of the window is undefined behavior. This system call additionally polls events from the SDL library, and, if necessary, update the internal input specific event queue.
+If a window does not already exist, one will be created with the specified `width` and `height`. The buffer pointed to by `base` will replace the content of the framebuffer, passing a different `width` or `height` compared to the size of the window is undefined behavior. This system call additionally polls events from the SDL library, and, if necessary, update the internal input specific event queue.
 
 The width and height are merely the virutal dimensions of the screen; they are unrelated to the window's real size. The system call would deal with resizing events internally when they occurred.
 
@@ -113,7 +113,7 @@ The width and height are merely the virutal dimensions of the screen; they are u
 
 **system call number**: `0xC0DE`
 
-**synopsis**: `void *setup_queue(void *base, int capacity, unsigned int *event_count)`
+**synopsis**: `void setup_queue(void *base, size_t capacity, size_t *event_count)`
 
 The user must pass a continuous memory chunk that contains two tightly packed queues, the event queue and the submission queue. And the submission queue is immediately following the last element of the event queue, which is the event queue's base address plus the size of each event element multiplied by the given capacity. If the capacity is not a power of two, it will be treated as the rounded value of the next highest power of two. Additionally, because the event counter variable serves as a notifier to the user that an event has been added to the event queue, it is critical to initialize it before passing its address to this system call.
 
@@ -129,7 +129,7 @@ An event entry is made up of a 32-bit value representing the event's type and a 
 
 **system call number**: `0xFEED`
 
-**synopsis**: `void submit_queue(int count)`
+**synopsis**: `void submit_queue(size_t count)`
 
 To inform the emulator that a batch of submissions should be processed, the application code should push several submissions into the queue first, and then pass the size of the submissions batch to this system call; the submissions will be processed and executed sequentially and immediately.
 

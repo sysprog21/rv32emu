@@ -1,7 +1,7 @@
 # Demos
 
 ## Doom
-**source**: [doom_riscv](https://github.com/smunaut/doom_riscv)
+**source**: [doom_riscv](https://github.com/sysprog21/doom_riscv)
 
 **commmad**: `make doom`
 
@@ -24,8 +24,6 @@
 **command**: `make quake`
 
 [Quake](https://en.wikipedia.org/wiki/Quake_(series)) was created in 1996 as a successor of the highly succcessful first-person shooter game Doom, it is based on Doom's game engine and 3D graphics compability, and it enhanced the fast-paced gameplay and online multiplayer over the Internet. 
-
-[quake-embedded](https://github.com/sysprog21/quake-embedded/) is an embedded RISC-V port of Quake based on [QuakEMBD](https://github.com/FantomJAC/quakembd).
 
 Build Instruction:
 ```shell

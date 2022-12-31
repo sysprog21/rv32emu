@@ -154,6 +154,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
 * `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
 * `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)
+* `lena.elf`: See [tests/lena.c](tests/lena.c)
 * `line.elf` : See [tests/line.c](tests/line.c)
 * `maj2random.elf` : See [tests/maj2random.c](tests/maj2random.c) [RV32F]
 * `mandelbrot.elf` : See [tests/mandelbrot.c](tests/mandelbrot.c)

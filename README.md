@@ -164,6 +164,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `qrcode.elf` : See [tests/qrcode.c](tests/qrcode.c)
 * `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
 * `richards.elf` : See [tests/richards.c](tests/richards.c)
+* `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
 
 ## Reference
 

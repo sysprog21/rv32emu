@@ -19,16 +19,16 @@ typedef uint16_t Elf32_Half;
 typedef uint32_t Elf32_Word;
 
 enum {
-    EI_MAG0 = 0,
+    EI_MAG0 = 0, /* ELF magic value */
     EI_MAG1 = 1,
     EI_MAG2 = 2,
     EI_MAG3 = 3,
-    EI_CLASS = 4,
-    EI_DATA = 5,
-    EI_VERSION = 6,
+    EI_CLASS = 4,   /* ELF class, one of ELF_IDENT_CLASS_ */
+    EI_DATA = 5,    /* Data type of the remainder of the file */
+    EI_VERSION = 6, /* Version of the header, ELF_IDENT_VERSION_CURRENT */
     EI_OSABI = 7,
     EI_ABIVERSION = 8,
-    EI_PAD = 9,
+    EI_PAD = 9, /* nused padding */
     EI_NIDENT = 16,
 };
 

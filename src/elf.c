@@ -92,14 +92,14 @@ struct Elf32_Ehdr {
 
 /* Elf32 program header table */
 struct Elf32_Phdr {
-    Elf32_Word p_type;
-    Elf32_Off p_offset;
-    Elf32_Addr p_vaddr;
-    Elf32_Addr p_paddr;
-    Elf32_Word p_filesz;
-    Elf32_Word p_memsz;
-    Elf32_Word p_flags;
-    Elf32_Word p_align;
+    Elf32_Word p_type;   /* Type, a combination of ELF_PROGRAM_TYPE_ */
+    Elf32_Off p_offset;  /* Offset in the file of the program image */
+    Elf32_Addr p_vaddr;  /* Virtual address in memory */
+    Elf32_Addr p_paddr;  /* Optional physical address in memory */
+    Elf32_Word p_filesz; /* Size of the image in the file */
+    Elf32_Word p_memsz;  /* Size of the image in memory */
+    Elf32_Word p_flags;  /* Type-specific flags */
+    Elf32_Word p_align;  /* Memory alignment in bytes */
 };
 
 /* Elf32 section header table */

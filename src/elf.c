@@ -304,6 +304,24 @@ bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)
     return true;
 }
 
+/* A quick ELF briefer:
+ *    +--------------------------------+
+ *    | ELF Header                     |--+
+ *    +--------------------------------+  |
+ *    | Program Header                 |  |
+ *    +--------------------------------+  |
+ * +->| Sections: .text, .strtab, etc. |  |
+ * |  +--------------------------------+  |
+ * +--| Section Headers                |<-+
+ *    +--------------------------------+
+ *
+ * Finding the section header table (SHT):
+ *   File start + ELF_header.shoff -> section_header table
+ * Finding the string table for section header names:
+ *   section_header table[ELF_header.shstrndx] -> section header for name table
+ * Finding data for section headers:
+ *   File start + section_header.offset -> section Data
+ */
 bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem)
 {
     /* set the entry point */

@@ -148,6 +148,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `aes.elf` : See [tests/aes.c](tests/aes.c)
 * `captcha.elf` : See [tests/captcha.c](tests/captcha.c)
+* `cc.elf` : See [tests/cc](tests/cc)
 * `chacha20.elf` : See [tests/chacha20](tests/chacha20.c)
 * `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark) [RV32M]
 * `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)

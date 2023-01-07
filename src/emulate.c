@@ -256,7 +256,8 @@ static inline bool insn_is_misaligned(uint32_t pc)
 
 /* can-branch information for each RISC-V instruction */
 enum {
-#define _(inst, can_branch) __rv_insn_##inst##_canbranch = can_branch,
+#define _(inst, can_branch, jump_or_call) \
+    __rv_insn_##inst##_canbranch = can_branch,
     RISCV_INSN_LIST
 #undef _
 };
@@ -1228,15 +1229,16 @@ RVOP(cswsp, {
 #endif
 
 static const void *dispatch_table[] = {
-#define _(inst, can_branch) [rv_insn_##inst] = do_##inst,
+#define _(inst, can_branch, jump_or_call) [rv_insn_##inst] = do_##inst,
     RISCV_INSN_LIST
 #undef _
 };
 
-static bool insn_is_branch(uint8_t opcode)
+static bool insn_is_jump_or_call(uint8_t opcode)
 {
     switch (opcode) {
-#define _(inst, can_branch) IIF(can_branch)(case rv_insn_##inst:, )
+#define _(inst, can_branch, jump_or_call) \
+    IIF(jump_or_call)(case rv_insn_##inst:, )
         RISCV_INSN_LIST
 #undef _
         return true;
@@ -1327,7 +1329,7 @@ static void block_translate(riscv_t *rv, block_t *block)
         block->n_insn++;
 
         /* stop on branch */
-        if (insn_is_branch(ir->opcode))
+        if (insn_is_jump_or_call(ir->opcode))
             break;
     }
     block->ir[block->n_insn - 1].tailcall = true;

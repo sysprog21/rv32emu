@@ -150,70 +150,280 @@ void svpng(FILE *fp, unsigned w, unsigned h, const uint8_t *img, bool alpha)
     SVPNG_END(); /* IEND chunk {} */
 }
 
-#include <math.h>  // ceilf(), floorf(), fminf(), fmaxf(), sinf(), cosf(), sqrtf()
 #include <string.h>  // memset()
+#define Q (20)
+#define Q_PI (1686629713 >> (29 - Q))
 
-#define PI 3.14159265359f
+/* 32-bit Q notation to specify a fixed point number format. */
+typedef int32_t qfixed_t;
+
+/* 64-bit Q format buffer, for handling overflow cases */
+typedef int64_t qbuf_t;
+
+/* format convertion: float to Q format */
+#define f2Q(x) ((qfixed_t) ((x) * (1 << Q)))
+
+/* format convertion: Q format to float */
+#define Q2f(x) (((float) (x)) / (1 << Q))
+
+/* format convertion: Q format to int */
+#define Q2I(x) ((int) ((x) >> Q))
+
+/* format convertion: int to Q format */
+#define I2Q(x) ((qfixed_t) ((x) << Q))
+
+/* maximum value of Q format */
+#define QFMT_MAX 0x7FFFFFFF
+
+/* minimum value of Q format */
+#define QFMT_MIN 0x80000000
+
+/* addition of Q format value */
+static inline qfixed_t q_add(qfixed_t a, qfixed_t b)
+{
+    qbuf_t tmp = (qbuf_t) a + (qbuf_t) b;
+    if (tmp > (qbuf_t) QFMT_MAX)
+        return (qfixed_t) QFMT_MAX;
+    if (~tmp + 1 >= (qbuf_t) QFMT_MIN)
+        return (qfixed_t) QFMT_MIN;
+    return (qfixed_t) tmp;
+};
+
+/* multiplication of Q format value */
+static inline qfixed_t q_mul(qfixed_t a, qfixed_t b)
+{
+    qbuf_t tmp = (qbuf_t) a * (qbuf_t) b;
+
+    /* rounding and resize */
+    tmp += (qbuf_t) (1 << (Q - 1));
+    tmp >>= Q;
+
+    /* check overflow */
+    if (tmp > (qbuf_t) QFMT_MAX)
+        return (qfixed_t) QFMT_MAX;
+    if (tmp * -1 >= (qbuf_t) QFMT_MIN)
+        return (qfixed_t) QFMT_MIN;
+    return (qfixed_t) tmp;
+}
+
+/* division of Q format value */
+static inline qfixed_t q_div(qfixed_t a, qfixed_t b)
+{
+    qbuf_t tmp = (qbuf_t) a << Q;
+    if ((tmp >= 0 && b >= 0) || (tmp < 0 && b < 0)) {
+        tmp += (b >> 1);
+    } else {
+        tmp -= (b >> 1);
+    }
+    return (qfixed_t) (tmp / b);
+}
+
+/* return the largest integral value that is not greater than x */
+static inline qfixed_t q_floor(qfixed_t x)
+{
+    qfixed_t mask = (0xFFFFFFFF >> Q) << Q;
+    return x & mask;
+}
+
+/* return the smallest integral value that is not less than x */
+static inline qfixed_t q_ceil(qfixed_t x)
+{
+    qfixed_t mask = (0xFFFFFFFF >> Q) << Q;
+    qfixed_t delta = x & ~mask;
+    x = x & mask;
+    return delta ? q_add(x, 1 << Q) : x;
+}
+
+/* return the nonnegative square root of x */
+static inline qfixed_t q_sqrt(qfixed_t x)
+{
+    if (x <= 0)
+        return 0;
+    if (x < I2Q(1) + (1 << (Q / 2 - 1)) && x > I2Q(1) - (1 << (Q / 2 - 1)))
+        return I2Q(1);
+
+    qfixed_t res = 0;
+    qfixed_t bit = 1 << 15;
+
+    /* left shift x as more as possible */
+    int offset = 0;
+    for (qfixed_t i = x; !(0x40000000 & i); i <<= 1)
+        ++offset;
+    offset = (offset & ~1);
+    x <<= offset;
+
+    /* shift bit to the highest bit 1' in x */
+    while (bit > x)
+        bit >>= 1;
+
+    for (bit; bit > 0; bit >>= 1) {
+        int tmp = bit + res;
+
+        /* check overflow: 46341^2 > 2^31 - 1, which is the maximun value */
+        if (tmp > 46340)
+            continue;
+
+        int square = tmp * tmp;
+        if (square <= x) {
+            res = tmp;
+            if (square == x)
+                break;
+        }
+    } /* iter: goto next lower bit to get more precise sqrt value */
+
+    offset >>= 1;
+    offset -= (Q >> 1);
+    return (offset >= 0) ? res >> offset : res << (-offset);
+}
+
+/* get both sin and cos value in the same radius */
+static inline void q_sincos(qfixed_t radius, qfixed_t *sin_t, qfixed_t *cos_t)
+{
+    int region = (radius / (Q_PI >> 1)) & 0b11;
+
+    /* theta must be pi/2 to 0 and start from x-axis */
+    qfixed_t theta = radius % (Q_PI >> 1);
+    if (region & 0b1)
+        theta = (Q_PI >> 1) - theta;
+
+    /* start from cos(pi/2) and sin(pi/2) */
+    radius = Q_PI >> 1;
+    qfixed_t cos_rad = 0;
+    qfixed_t sin_rad = I2Q(1);
+
+    /* start from cos(0) and sin(0) */
+    *cos_t = I2Q(1);
+    *sin_t = 0;
+
+    while (radius > 0) {
+        if (radius <= theta) {
+            theta -= radius;
+            /*
+             * Trigonometric Identities:
+             * cos(a + b) = cos(a)*cos(b) - sin(a)sin(b)
+             * sin(a + b) = sin(a)*cos(b) + cos(a)sin(b)
+             */
+            qfixed_t tmp = q_mul(*cos_t, cos_rad) - q_mul(*sin_t, sin_rad);
+            *sin_t = q_mul(*sin_t, cos_rad) + q_mul(*cos_t, sin_rad);
+            *cos_t = tmp;
+        }
+        if (theta == 0)
+            break;
+
+        /* Half angle formula to approach the value */
+        radius >>= 1;
+        sin_rad = q_sqrt((I2Q(1) - cos_rad) >> 1);
+        cos_rad = q_sqrt((I2Q(1) + cos_rad) >> 1);
+    }
+
+    if (region == 0b10 || region == 0b01)
+        *cos_t = ~*cos_t + 1;
+    if (region & 0b10)
+        *sin_t = ~*sin_t + 1;
+}
+
 #define W 512
 #define H 512
 static uint8_t img[W * H * 3];
 
-/* Using signed distnace field (SDF) of capsule shape to perform anti-aliasing
+#define max(a, b)           \
+    ({                      \
+        typeof(a) _a = (a); \
+        typeof(b) _b = (b); \
+        _a > _b ? _a : _b;  \
+    })
+#define min(a, b)           \
+    ({                      \
+        typeof(a) _a = (a); \
+        typeof(b) _b = (b); \
+        _a < _b ? _a : _b;  \
+    })
+
+/*
+ * Using signed distnace field (SDF) of capsule shape to perform anti-aliasing
  * with single sample per pixel.
  */
-float capsuleSDF(float px,
-                 float py,
-                 float ax,
-                 float ay,
-                 float bx,
-                 float by,
-                 float r)
+qfixed_t capsuleSDF(qfixed_t px,
+                    qfixed_t py,
+                    qfixed_t ax,
+                    qfixed_t ay,
+                    qfixed_t bx,
+                    qfixed_t by,
+                    qfixed_t r)
 {
-    float pax = px - ax, pay = py - ay, bax = bx - ax, bay = by - ay;
-    float h = fmaxf(
-        fminf((pax * bax + pay * bay) / (bax * bax + bay * bay), 1.0f), 0.0f);
-    float dx = pax - bax * h, dy = pay - bay * h;
-    return sqrtf(dx * dx + dy * dy) - r;
+    qfixed_t pax = q_add(px, -ax);
+    qfixed_t pay = q_add(py, -ay);
+    qfixed_t bax = q_add(bx, -ax);
+    qfixed_t bay = q_add(by, -ay);
+
+    qfixed_t t0 = q_add(q_mul(pax, bax), q_mul(pay, bay));
+    qfixed_t t1 = q_add(q_mul(bax, bax), q_mul(bay, bay));
+    qfixed_t tmp = min(q_div(t0, t1), I2Q(1));
+    qfixed_t h = max(tmp, 0);
+
+    qfixed_t dx = q_add(pax, -q_mul(bax, h));
+    qfixed_t dy = q_add(pay, -q_mul(bay, h));
+
+    tmp = q_add(q_mul(dx, dx), q_mul(dy, dy));
+    qfixed_t res = q_add(q_sqrt(tmp), -r);
+    return res;
 }
 
+#define PUT(v)            \
+    p[v] = (uint8_t) Q2I( \
+        q_add(p[v] * q_add((1 << Q), -alpha), q_mul(g, alpha) * 255))
+
 /* Render shapes into the buffer individually with alpha blending. */
-void alphablend(int x, int y, float alpha, float r, float g, float b)
+void alphablend(int x,
+                int y,
+                qfixed_t alpha,
+                qfixed_t r,
+                qfixed_t g,
+                qfixed_t b)
 {
     uint8_t *p = img + (y * W + x) * 3;
-    p[0] = (uint8_t) (p[0] * (1 - alpha) + r * alpha * 255);
-    p[1] = (uint8_t) (p[1] * (1 - alpha) + g * alpha * 255);
-    p[2] = (uint8_t) (p[2] * (1 - alpha) + b * alpha * 255);
+    PUT(0);
+    PUT(1);
+    PUT(2);
 }
 
 /* Use AABB of capsule to reduce the number of samples. */
-void lineSDFAABB(float ax, float ay, float bx, float by, float r)
+void lineSDFAABB(qfixed_t ax, qfixed_t ay, qfixed_t bx, qfixed_t by, qfixed_t r)
 {
-    int x0 = (int) floorf(fminf(ax, bx) - r);
-    int x1 = (int) ceilf(fmaxf(ax, bx) + r);
-    int y0 = (int) floorf(fminf(ay, by) - r);
-    int y1 = (int) ceilf(fmaxf(ay, by) + r);
+    int x0 = Q2I(q_floor(q_add(min(ax, bx), -r)));
+    int x1 = Q2I(q_ceil(q_add(max(ax, bx), r)));
+    int y0 = Q2I(q_floor(q_add(min(ay, by), -r)));
+    int y1 = Q2I(q_ceil(q_add(max(ay, by), r)));
     for (int y = y0; y <= y1; y++) {
         for (int x = x0; x <= x1; x++)
-            alphablend(
-                x, y,
-                fmaxf(fminf(0.5f - capsuleSDF(x, y, ax, ay, bx, by, r), 1.0f),
-                      0.0f),
-                0.0f, 0.0f, 0.0f);
+            alphablend(x, y,
+                       max(min((1 << (Q - 1)) - capsuleSDF(I2Q(x), I2Q(y), ax,
+                                                           ay, bx, by, r),
+                               I2Q(1)),
+                           0),
+                       0, 0, 0);
     }
 }
 
 int main()
 {
     memset(img, 255, sizeof(img));
-    float cx = W * 0.5f, cy = H * 0.5f;
+
+    /* center of the line drawing, (1 << (Q - 1)) is equal to 0.5 */
+    qfixed_t cx = W * (1 << (Q - 1)), cy = H * (1 << (Q - 1));
+    /* cos(theta) and sin(theta) value for each line */
+    qfixed_t ct, st;
+
     for (int j = 0; j < 5; j++) {
-        float r1 = fminf(W, H) * (j + 0.5f) * 0.085f;
-        float r2 = fminf(W, H) * (j + 1.5f) * 0.085f;
-        float t = j * PI / 64.0f, r = (j + 1) * 0.5f;
-        for (int i = 1; i <= 64; i++, t += 2.0f * PI / 64.0f) {
-            float ct = cosf(t), st = sinf(t);
-            lineSDFAABB(cx + r1 * ct, cy - r1 * st, cx + r2 * ct, cy - r2 * st,
-                        r);
+        qfixed_t r1 = min(W, H) * q_mul((I2Q(j) + (1 << (Q - 1))), f2Q(0.085f));
+        qfixed_t r2 = min(W, H) * q_mul((I2Q(j) + (3 << (Q - 1))), f2Q(0.085f));
+        qfixed_t t = j * q_div(Q_PI, I2Q(64));
+        qfixed_t r = (j + 1) * (1 << (Q - 1));
+        for (int i = 1; i <= 64; i++) {
+            t = q_add(t, q_mul(I2Q(2), q_div(Q_PI, I2Q(64))));
+            q_sincos(t, &st, &ct);
+            lineSDFAABB(q_add(cx, q_mul(r1, ct)), q_add(cy, -q_mul(r1, st)),
+                        q_add(cx, q_mul(r2, ct)), q_add(cy, -q_mul(r2, st)), r);
         }
     }
     svpng(fopen("line.png", "wb"), W, H, img, false);

@@ -256,7 +256,7 @@ static inline qfixed_t q_sqrt(qfixed_t x)
     while (bit > x)
         bit >>= 1;
 
-    for (bit; bit > 0; bit >>= 1) {
+    for (; bit > 0; bit >>= 1) {
         int tmp = bit + res;
 
         /* check overflow: 46341^2 > 2^31 - 1, which is the maximun value */
@@ -326,18 +326,8 @@ static inline void q_sincos(qfixed_t radius, qfixed_t *sin_t, qfixed_t *cos_t)
 #define H 512
 static uint8_t img[W * H * 3];
 
-#define max(a, b)           \
-    ({                      \
-        typeof(a) _a = (a); \
-        typeof(b) _b = (b); \
-        _a > _b ? _a : _b;  \
-    })
-#define min(a, b)           \
-    ({                      \
-        typeof(a) _a = (a); \
-        typeof(b) _b = (b); \
-        _a < _b ? _a : _b;  \
-    })
+#define max(a, b) ((a) > (b) ? (a) : (b))
+#define min(a, b) ((a) < (b) ? (a) : (b))
 
 /*
  * Using signed distnace field (SDF) of capsule shape to perform anti-aliasing
@@ -386,6 +376,7 @@ void alphablend(int x,
     PUT(1);
     PUT(2);
 }
+#undef PUT
 
 /* Use AABB of capsule to reduce the number of samples. */
 void lineSDFAABB(qfixed_t ax, qfixed_t ay, qfixed_t bx, qfixed_t by, qfixed_t r)

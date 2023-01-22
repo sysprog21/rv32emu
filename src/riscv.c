@@ -74,7 +74,9 @@ riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg)
     return ~0U;
 }
 
-riscv_t *rv_create(const riscv_io_t *io, riscv_user_t userdata)
+riscv_t *rv_create(const riscv_io_t *io,
+                   riscv_user_t userdata,
+                   bool output_exit_code)
 {
     assert(io);
 
@@ -85,6 +87,8 @@ riscv_t *rv_create(const riscv_io_t *io, riscv_user_t userdata)
 
     /* copy over the userdata */
     rv->userdata = userdata;
+
+    rv->output_exit_code = output_exit_code;
 
     /* initialize the block map */
     block_map_init(&rv->block_map, 10);
@@ -103,6 +107,11 @@ void rv_halt(riscv_t *rv)
 bool rv_has_halted(riscv_t *rv)
 {
     return rv->halt;
+}
+
+bool rv_enables_to_output_exit_code(riscv_t *rv)
+{
+    return rv->output_exit_code;
 }
 
 void rv_delete(riscv_t *rv)

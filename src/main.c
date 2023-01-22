@@ -18,6 +18,12 @@ static bool opt_trace = false;
 static bool opt_gdbstub = false;
 #endif
 
+/* dump registers as JSON */
+static bool opt_dump_regs = false;
+
+/* statistics */
+static bool opt_stats = false;
+
 /* RISC-V arch-test */
 static bool opt_arch_test = false;
 static char *signature_out_file;
@@ -91,6 +97,8 @@ static void print_usage(const char *filename)
 #if RV32_HAS(GDBSTUB)
             "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
 #endif
+            "  --stats : printf statistics\n"
+            "  --dump-registers: dump registers as JSON\n"
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n",
             filename);
@@ -115,6 +123,14 @@ static bool parse_args(int argc, char **args)
                 continue;
             }
 #endif
+            if (!strcmp(arg, "--stats")) {
+                opt_stats = true;
+                continue;
+            }
+            if (!strcmp(arg, "--dump-registers")) {
+                opt_dump_regs = true;
+                continue;
+            }
             if (!strcmp(arg, "--arch-test")) {
                 opt_arch_test = true;
                 if (i + 1 >= argc) {
@@ -212,7 +228,7 @@ int main(int argc, char **args)
         state->break_addr = end->st_value;
 
     /* create the RISC-V runtime */
-    riscv_t *rv = rv_create(&io, state);
+    riscv_t *rv = rv_create(&io, state, !opt_dump_regs);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
         return 1;
@@ -236,6 +252,14 @@ int main(int argc, char **args)
     else {
         run(rv);
     }
+
+    /* print statistics */
+    if (opt_stats)
+        rv_stats(rv);
+
+    /* dump registers as JSON */
+    if (opt_dump_regs)
+        dump_registers(rv);
 
     /* dump test result in test mode */
     if (opt_arch_test)

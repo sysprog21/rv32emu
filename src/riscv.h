@@ -113,7 +113,9 @@ typedef struct {
 } riscv_io_t;
 
 /* create a RISC-V emulator */
-riscv_t *rv_create(const riscv_io_t *io, riscv_user_t user_data);
+riscv_t *rv_create(const riscv_io_t *io,
+                   riscv_user_t user_data,
+                   bool output_exit_code);
 
 /* delete a RISC-V emulator */
 void rv_delete(riscv_t *rv);
@@ -150,6 +152,9 @@ void syscall_handler(riscv_t *rv);
 /* environment call handler */
 void ecall_handler(riscv_t *rv);
 
+/* dump registers as JSON */
+void dump_registers(riscv_t *rv);
+
 /* breakpoint exception handler */
 void ebreak_handler(riscv_t *rv);
 
@@ -158,6 +163,9 @@ void rv_halt(riscv_t *rv);
 
 /* return the halt state */
 bool rv_has_halted(riscv_t *rv);
+
+/* return the flag of outputting exit code */
+bool rv_enables_to_output_exit_code(riscv_t *rv);
 
 #ifdef __cplusplus
 };

@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1455,4 +1456,14 @@ void ecall_handler(riscv_t *rv)
     assert(rv);
     rv_except_ecall_M(rv, 0);
     syscall_handler(rv);
+}
+
+void dump_registers(riscv_t *rv)
+{
+    printf("{\n");
+    for (unsigned i = 0; i < RV_N_REGS; i++) {
+        char *comma = i < RV_N_REGS - 1 ? "," : "";
+        printf("  \"x%d\": %u%s\n", i, rv->X[i], comma);
+    }
+    printf("}\n");
 }

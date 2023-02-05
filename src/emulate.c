@@ -821,14 +821,13 @@ RVOP(amomaxuw, {
 RVOP(flw, {
     /* copy into the float register */
     const uint32_t data = rv->io.mem_read_w(rv, rv->X[ir->rs1] + ir->imm);
-    memcpy(rv->F + ir->rd, &data, 4);
+    rv->F_int[ir->rd] = data;
 })
 
 /* FSW */
 RVOP(fsw, {
     /* copy from float registers */
-    uint32_t data;
-    memcpy(&data, (const void *) (rv->F + ir->rs2), 4);
+    uint32_t data = rv->F_int[ir->rs2];
     rv->io.mem_write_w(rv, rv->X[ir->rs1] + ir->imm, data);
 })
 
@@ -884,35 +883,29 @@ RVOP(fsqrts, { rv->F[ir->rd] = sqrtf(rv->F[ir->rs1]); })
 
 /* FSGNJ.S */
 RVOP(fsgnjs, {
-    uint32_t f1;
-    uint32_t f2;
+    uint32_t f1 = rv->F_int[ir->rs1];
+    uint32_t f2 = rv->F_int[ir->rs2];
     uint32_t res;
-    memcpy(&f1, rv->F + ir->rs1, 4);
-    memcpy(&f2, rv->F + ir->rs2, 4);
     res = (f1 & ~FMASK_SIGN) | (f2 & FMASK_SIGN);
-    memcpy(rv->F + ir->rd, &res, 4);
+    rv->F_int[ir->rd] = res;
 })
 
 /* FSGNJN.S */
 RVOP(fsgnjns, {
-    uint32_t f1;
-    uint32_t f2;
+    uint32_t f1 = rv->F_int[ir->rs1];
+    uint32_t f2 = rv->F_int[ir->rs2];
     uint32_t res;
-    memcpy(&f1, rv->F + ir->rs1, 4);
-    memcpy(&f2, rv->F + ir->rs2, 4);
     res = (f1 & ~FMASK_SIGN) | (~f2 & FMASK_SIGN);
-    memcpy(rv->F + ir->rd, &res, 4);
+    rv->F_int[ir->rd] = res;
 })
 
 /* FSGNJX.S */
 RVOP(fsgnjxs, {
-    uint32_t f1;
-    uint32_t f2;
+    uint32_t f1 = rv->F_int[ir->rs1];
+    uint32_t f2 = rv->F_int[ir->rs2];
     uint32_t res;
-    memcpy(&f1, rv->F + ir->rs1, 4);
-    memcpy(&f2, rv->F + ir->rs2, 4);
     res = f1 ^ (f2 & FMASK_SIGN);
-    memcpy(rv->F + ir->rd, &res, 4);
+    rv->F_int[ir->rd] = res;
 })
 
 /* FMIN.S
@@ -923,16 +916,14 @@ RVOP(fsgnjxs, {
  * When input is signaling NaN, raise invalid operation
  */
 RVOP(fmins, {
-    uint32_t x;
-    uint32_t y;
-    memcpy(&x, rv->F + ir->rs1, 4);
-    memcpy(&y, rv->F + ir->rs2, 4);
-    if (is_nan(x) || is_nan(y)) {
-        if (is_snan(x) || is_snan(y))
+    uint32_t a = rv->F_int[ir->rs1];
+    uint32_t b = rv->F_int[ir->rs2];
+    if (is_nan(a) || is_nan(b)) {
+        if (is_snan(a) || is_snan(b))
             rv->csr_fcsr |= FFLAG_INVALID_OP;
-        if (is_nan(x) && !is_nan(y)) {
+        if (is_nan(a) && !is_nan(b)) {
             rv->F[ir->rd] = rv->F[ir->rs2];
-        } else if (!is_nan(x) && is_nan(y)) {
+        } else if (!is_nan(a) && is_nan(b)) {
             rv->F[ir->rd] = rv->F[ir->rs1];
         } else {
             rv->F_int[ir->rd] = RV_NAN;
@@ -940,8 +931,8 @@ RVOP(fmins, {
     } else {
         uint32_t a_sign;
         uint32_t b_sign;
-        a_sign = x & FMASK_SIGN;
-        b_sign = y & FMASK_SIGN;
+        a_sign = a & FMASK_SIGN;
+        b_sign = b & FMASK_SIGN;
         if (a_sign != b_sign) {
             rv->F[ir->rd] = a_sign ? rv->F[ir->rs1] : rv->F[ir->rs2];
         } else {
@@ -953,16 +944,14 @@ RVOP(fmins, {
 
 /* FMAX.S */
 RVOP(fmaxs, {
-    uint32_t x;
-    uint32_t y;
-    memcpy(&x, rv->F + ir->rs1, 4);
-    memcpy(&y, rv->F + ir->rs2, 4);
-    if (is_nan(x) || is_nan(y)) {
-        if (is_snan(x) || is_snan(y))
+    uint32_t a = rv->F_int[ir->rs1];
+    uint32_t b = rv->F_int[ir->rs2];
+    if (is_nan(a) || is_nan(b)) {
+        if (is_snan(a) || is_snan(b))
             rv->csr_fcsr |= FFLAG_INVALID_OP;
-        if (is_nan(x) && !is_nan(y)) {
+        if (is_nan(a) && !is_nan(b)) {
             rv->F[ir->rd] = rv->F[ir->rs2];
-        } else if (!is_nan(x) && is_nan(y)) {
+        } else if (!is_nan(a) && is_nan(b)) {
             rv->F[ir->rd] = rv->F[ir->rs1];
         } else {
             rv->F_int[ir->rd] = RV_NAN;
@@ -970,8 +959,8 @@ RVOP(fmaxs, {
     } else {
         uint32_t a_sign;
         uint32_t b_sign;
-        a_sign = x & FMASK_SIGN;
-        b_sign = y & FMASK_SIGN;
+        a_sign = a & FMASK_SIGN;
+        b_sign = b & FMASK_SIGN;
         if (a_sign != b_sign) {
             rv->F[ir->rd] = a_sign ? rv->F[ir->rs2] : rv->F[ir->rs1];
         } else {
@@ -981,6 +970,10 @@ RVOP(fmaxs, {
     }
 })
 
+/* FCVT.W.S and FCVT.WU.S convert a floating point number
+ * to an integer, the rounding mode is specified in rm field.
+ */
+
 /* FCVT.W.S */
 RVOP(fcvtws, { rv->X[ir->rd] = (int32_t) rv->F[ir->rs1]; })
 
@@ -988,36 +981,47 @@ RVOP(fcvtws, { rv->X[ir->rd] = (int32_t) rv->F[ir->rs1]; })
 RVOP(fcvtwus, { rv->X[ir->rd] = (uint32_t) rv->F[ir->rs1]; })
 
 /* FMV.X.W */
-RVOP(fmvxw, { memcpy(rv->X + ir->rd, rv->F + ir->rs1, 4); })
+RVOP(fmvxw, { rv->X[ir->rd] = rv->F_int[ir->rs1]; })
 
 /* FEQ.S performs a quiet comparison: it only sets the invalid
  * operation exception flag if either input is a signaling NaN.
  */
-RVOP(feqs, { rv->X[ir->rd] = (rv->F[ir->rs1] == rv->F[ir->rs2]) ? 1 : 0; })
+RVOP(feqs, {
+    rv->X[ir->rd] = (rv->F[ir->rs1] == rv->F[ir->rs2]) ? 1 : 0;
+    if (is_snan(rv->F_int[ir->rs1]) || is_snan(rv->F_int[ir->rs2]))
+        rv->csr_fcsr |= FFLAG_INVALID_OP;
+})
 
 /* FLT.S and FLE.S perform what the IEEE 754-2008 standard refers
  * to as signaling comparisons: that is, they set the invalid
  * operation exception flag if either input is NaN.
  */
-RVOP(flts, { rv->X[ir->rd] = (rv->F[ir->rs1] < rv->F[ir->rs2]) ? 1 : 0; })
+RVOP(flts, {
+    rv->X[ir->rd] = (rv->F[ir->rs1] < rv->F[ir->rs2]) ? 1 : 0;
+    if (is_nan(rv->F_int[ir->rs1]) || is_nan(rv->F_int[ir->rs2]))
+        rv->csr_fcsr |= FFLAG_INVALID_OP;
+})
 
-RVOP(fles, { rv->X[ir->rd] = (rv->F[ir->rs1] <= rv->F[ir->rs2]) ? 1 : 0; })
+RVOP(fles, {
+    rv->X[ir->rd] = (rv->F[ir->rs1] <= rv->F[ir->rs2]) ? 1 : 0;
+    if (is_nan(rv->F_int[ir->rs1]) || is_nan(rv->F_int[ir->rs2]))
+        rv->csr_fcsr |= FFLAG_INVALID_OP;
+})
 
 /* FCLASS.S */
 RVOP(fclasss, {
-    uint32_t bits;
-    memcpy(&bits, rv->F + ir->rs1, 4);
+    uint32_t bits = rv->F_int[ir->rs1];
     rv->X[ir->rd] = calc_fclass(bits);
 })
 
 /* FCVT.S.W */
-RVOP(fcvtsw, { rv->F[ir->rd] = (float) (int32_t) rv->X[ir->rs1]; })
+RVOP(fcvtsw, { rv->F_int[ir->rd] = rv->X[ir->rs1]; })
 
 /* FCVT.S.WU */
-RVOP(fcvtswu, { rv->F[ir->rd] = (float) (uint32_t) rv->X[ir->rs1]; })
+RVOP(fcvtswu, { rv->F_int[ir->rd] = rv->X[ir->rs1]; })
 
 /* FMV.W.X */
-RVOP(fmvwx, { memcpy(rv->F + ir->rd, rv->X + ir->rs1, 4); })
+RVOP(fmvwx, { rv->F_int[ir->rd] = rv->X[ir->rs1]; })
 #endif
 
 #if RV32_HAS(EXT_C) /* RV32C Standard Extension */

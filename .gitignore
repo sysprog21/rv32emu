@@ -13,3 +13,5 @@ build/mini-gdbstub
 *.o
 *.o.d
 tests/**/*.elf
+tests/arch-test-target/config.ini
+__pycache__/

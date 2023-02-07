@@ -23,6 +23,11 @@ access to all of its features. Your target system must have a functional [SDL2 l
 * macOS: `brew install sdl2`
 * Ubuntu Linux / Debian: `sudo apt install libsdl2-dev`
 
+Install [RISCOF](https://riscof.readthedocs.io/en/stable/installation.html#install-riscof).
+```shell
+python3 -m pip install git+https://github.com/riscv/riscof
+```
+
 Build the emulator.
 ```shell
 make
@@ -48,7 +53,9 @@ make quake
 
 The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](docs/demo.md).
 
-## riscv-arch-test
+## RISCOF
+
+[RISCOF](https://github.com/riscv-software-src/riscof) - RISC-V Compatibility Framework is a pyton based framework which enables testing of RISC-V target against a golden reference model. 
 
 The RISC-V Architectural Tests, also known as [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test),
 provides the fundamental set of tests that can be used to confirm that the behavior
@@ -78,12 +85,6 @@ To run the tests for specific extension, set the environmental variable `RISCV_D
 make arch-test RISCV_DEVICE=I
 ```
 
-To run a specific test case, set both `RISCV_DEVICE` and `RISCV_TEST`. For example:
-```shell
-make arch-test RISCV_DEVICE=M RISCV_TEST=div-01
-```
-The details about the setup environment variables can be found in the [RISC-V Architectural Testing Framework](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/doc/README.adoc), **5.1 Setup environment variables**.
-
 Current progress of this emulator in riscv-arch-test(RV32):
 * Passed Tests
     - `I`: Base Integer Instruction Set
@@ -95,6 +96,7 @@ Current progress of this emulator in riscv-arch-test(RV32):
     - `F` Standard Extension for Single-Precision Floating-Point
 
 Detail in riscv-arch-test:
+* [RISCOF document](https://riscof.readthedocs.io/en/stable/)
 * [riscv-arch-test repository](https://github.com/riscv-non-isa/riscv-arch-test)
 * [RISC-V Architectural Testing Framework](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/doc/README.adoc)
 * [RISC-V Architecture Test Format Specification](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/spec/TestFormatSpec.adoc)

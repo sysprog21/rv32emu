@@ -136,11 +136,11 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     }
     case CSR_TIMEH: { /* Upper 32 bits of time */
         update_time(rv);
-        return (uint32_t *) (&rv->csr_time) + 1;
+        return (uint32_t *) (&rv->csr_time + 4);
     }
     case CSR_INSTRET: /* Number of Instructions Retired Counter */
         /* Number of Instructions Retired Counter, just use cycle */
-        return (uint32_t *) (&rv->csr_cycle) + 0;
+        return (uint32_t *) (&rv->csr_cycle);
 #if RV32_HAS(EXT_F)
     case CSR_FFLAGS:
         return (uint32_t *) (&rv->csr_fcsr);

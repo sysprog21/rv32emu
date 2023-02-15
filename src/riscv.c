@@ -111,6 +111,7 @@ void rv_delete(riscv_t *rv)
 {
     assert(rv);
     block_map_clear(&rv->block_map);
+    free(rv->block_map.map);
     free(rv);
 }
 

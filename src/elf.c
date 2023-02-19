@@ -138,7 +138,7 @@ elf_t *elf_new()
     e->hdr = NULL;
     e->raw_size = 0;
     e->symbols = map_init(int, char *, map_cmp_uint);
-    e->raw_data = malloc(1);
+    e->raw_data = NULL;
     return e;
 }
 

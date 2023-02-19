@@ -102,7 +102,7 @@ struct riscv_internal {
 
     /* csr registers */
     uint64_t csr_cycle;
-    uint64_t csr_time;
+    uint32_t csr_time[2];
     uint32_t csr_mstatus;
     uint32_t csr_mtvec;
     uint32_t csr_misa;

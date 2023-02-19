@@ -96,7 +96,9 @@ static inline void update_time(riscv_t *rv)
     struct timeval tv;
     rv_gettimeofday(&tv);
 
-    rv->csr_time = (uint64_t) tv.tv_sec * 1e6 + (uint32_t) tv.tv_usec;
+    uint64_t t = (uint64_t) tv.tv_sec * 1e6 + (uint32_t) tv.tv_usec;
+    rv->csr_time[0] = t & 0xFFFFFFFF;
+    rv->csr_time[1] = t >> 32;
 }
 
 #if RV32_HAS(Zicsr)
@@ -132,11 +134,11 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     /* TIME/TIMEH - very roughly about 1 ms per tick */
     case CSR_TIME: { /* Timer for RDTIME instruction */
         update_time(rv);
-        return (uint32_t *) (&rv->csr_time) + 0;
+        return &rv->csr_time[0];
     }
     case CSR_TIMEH: { /* Upper 32 bits of time */
         update_time(rv);
-        return (uint32_t *) (&rv->csr_time + 4);
+        return &rv->csr_time[1];
     }
     case CSR_INSTRET: /* Number of Instructions Retired Counter */
         /* Number of Instructions Retired Counter, just use cycle */

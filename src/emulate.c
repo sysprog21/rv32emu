@@ -236,6 +236,7 @@ void rv_debug(riscv_t *rv)
     }
 
     rv->breakpoint_map = breakpoint_map_new();
+    rv->is_interrupted = false;
 
     if (!gdbstub_run(&rv->gdbstub, (void *) rv))
         return;

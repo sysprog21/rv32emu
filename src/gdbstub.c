@@ -55,17 +55,25 @@ static void rv_write_mem(void *args, size_t addr, size_t len, void *val)
         rv->io.mem_write_b(rv, addr + i, *((uint8_t *) val + i));
 }
 
+static inline bool rv_is_interrupt(riscv_t *rv)
+{
+    return __atomic_load_n(&rv->is_interrupted, __ATOMIC_RELAXED);
+}
+
 static gdb_action_t rv_cont(void *args)
 {
     riscv_t *rv = (riscv_t *) args;
     const uint32_t cycles_per_step = 1;
 
-    for (; !rv_has_halted(rv);) {
+    for (; !rv_has_halted(rv) && !rv_is_interrupt(rv);) {
         if (breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv)))
             break;
 
         rv_step(rv, cycles_per_step);
     }
+
+    /* Clear the interrupt if it's pending */
+    __atomic_store_n(&rv->is_interrupted, false, __ATOMIC_RELAXED);
 
     return ACT_RESUME;
 }
@@ -97,6 +105,14 @@ static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
     return true;
 }
 
+static void rv_on_interrupt(void *args)
+{
+    riscv_t *rv = (riscv_t *) args;
+
+    /* Notify the emulator to break out the for loop in rv_cont */
+    __atomic_store_n(&rv->is_interrupted, true, __ATOMIC_RELAXED);
+}
+
 const struct target_ops gdbstub_ops = {
     .read_reg = rv_read_reg,
     .write_reg = rv_write_reg,
@@ -106,4 +122,5 @@ const struct target_ops gdbstub_ops = {
     .stepi = rv_stepi,
     .set_bp = rv_set_bp,
     .del_bp = rv_del_bp,
+    .on_interrupt = rv_on_interrupt,
 };

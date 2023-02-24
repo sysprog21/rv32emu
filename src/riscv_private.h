@@ -89,6 +89,10 @@ struct riscv_internal {
 
     /* GDB instruction breakpoint */
     breakpoint_map_t breakpoint_map;
+
+    /* The flag to notify interrupt from GDB client: it should
+     * be accessed by atomic operation when starting the GDBSTUB. */
+    bool is_interrupted;
 #endif
 
 #if RV32_HAS(EXT_F)

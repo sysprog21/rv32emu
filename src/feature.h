@@ -43,11 +43,6 @@
 #define RV32_FEATURE_SDL 1
 #endif
 
-/* Use computed goto to accelerate the interpreter */
-#ifndef RV32_FEATURE_COMPUTED_GOTO
-#define RV32_FEATURE_COMPUTED_GOTO 1
-#endif
-
 /* GDB remote debugging */
 #ifndef RV32_FEATURE_GDBSTUB
 #define RV32_FEATURE_GDBSTUB 1

@@ -55,21 +55,6 @@ $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs)
 endif
 
-# Whether to enable computed goto
-ENABLE_COMPUTED_GOTO ?= 1
-ifeq ($(call has, COMPUTED_GOTO), 1)
-ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
-$(warning Computed goto is only supported in clang and gcc.)
-override ENABLE_COMPUTED_GOTO := 0
-endif
-endif
-$(call set-feature, COMPUTED_GOTO)
-ifeq ($(call has, COMPUTED_GOTO), 1)
-ifeq ("$(CC_IS_GCC)", "1")
-$(OUT)/emulate.o: CFLAGS += -fno-gcse -fno-crossjumping
-endif
-endif
-
 ENABLE_GDBSTUB ?= 1
 $(call set-feature, GDBSTUB)
 ifeq ($(call has, GDBSTUB), 1)

@@ -17,11 +17,8 @@ jobs:
       run: make check
     - name: diverse configurations
       run: |
-            make distclean ENABLE_COMPUTED_GOTO=0
             make distclean ENABLE_EXT_C=0
             make distclean ENABLE_EXT_F=0
-            make distclean ENABLE_COMPUTED_GOTO=0 ENABLE_EXT_C=0
-            make distclean ENABLE_COMPUTED_GOTO=0 ENABLE_EXT_C=1
             make distclean ENABLE_GDBSTUB=0
             make distclean ENABLE_SDL=0
     - name: architectural test

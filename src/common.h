@@ -49,3 +49,28 @@
 #define IIF_0(t, ...) __VA_ARGS__
 /* run the 1st parameter */
 #define IIF_1(t, ...) t
+
+#if defined(__GNUC__) || defined(__clang__)
+#define __HAVE_TYPEOF 1
+#endif
+
+/**
+ * container_of() - Calculate address of object that contains address ptr
+ * @ptr: pointer to member variable
+ * @type: type of the structure containing ptr
+ * @member: name of the member variable in struct @type
+ *
+ * Return: @type pointer of object containing ptr
+ */
+#ifndef container_of
+#ifdef __HAVE_TYPEOF
+#define container_of(ptr, type, member)                            \
+    __extension__({                                                \
+        const __typeof__(((type *) 0)->member) *__pmember = (ptr); \
+        (type *) ((char *) __pmember - offsetof(type, member));    \
+    })
+#else
+#define container_of(ptr, type, member) \
+    ((type *) ((char *) (ptr) - (offsetof(type, member))))
+#endif
+#endif

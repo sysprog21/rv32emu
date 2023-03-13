@@ -93,6 +93,7 @@ OBJS := \
 	emulate.o \
 	riscv.o \
 	elf.o \
+	cache.o \
 	$(OBJS_EXT) \
 	main.o
 
@@ -109,6 +110,7 @@ $(BIN): $(OBJS)
 
 # RISC-V Architecture Tests
 include mk/riscv-arch-test.mk
+include mk/tests.mk
 
 CHECK_ELF_FILES := \
 	hello \
@@ -143,7 +145,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(deps)
+	$(RM) $(BIN) $(OBJS) $(deps) $(CACHE_OUT)
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1

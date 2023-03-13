@@ -13,3 +13,7 @@ UseTab: Never
 IndentWidth: 4
 BreakBeforeBraces: Linux
 AccessModifierOffset: -4
+ForEachMacros:
+  - list_for_each_entry
+  - list_for_each_entry_safe
+  - hlist_for_each_entry

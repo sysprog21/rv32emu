@@ -13,8 +13,10 @@ jobs:
             sudo apt-get install libsdl2-dev
     - name: default build
       run: make
-    - name: check
-      run: make check
+    - name: check + tests
+      run: |
+            make check
+            make tests
     - name: diverse configurations
       run: |
             make distclean ENABLE_COMPUTED_GOTO=0

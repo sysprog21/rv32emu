@@ -55,7 +55,7 @@ The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](do
 
 ## RISCOF
 
-[RISCOF](https://github.com/riscv-software-src/riscof) - RISC-V Compatibility Framework is a pyton based framework which enables testing of RISC-V target against a golden reference model. 
+[RISCOF](https://github.com/riscv-software-src/riscof) - RISC-V Compatibility Framework is a python based framework which enables testing of RISC-V target against a golden reference model. 
 
 The RISC-V Architectural Tests, also known as [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test),
 provides the fundamental set of tests that can be used to confirm that the behavior

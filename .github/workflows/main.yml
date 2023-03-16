@@ -6,7 +6,7 @@ jobs:
   rv32emu:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.2.0
+    - uses: actions/checkout@v3.4.0
     - name: install-dependencies
       run: | 
             sudo apt-get update
@@ -19,10 +19,10 @@ jobs:
             make tests
     - name: diverse configurations
       run: |
-            make distclean ENABLE_EXT_C=0
-            make distclean ENABLE_EXT_F=0
-            make distclean ENABLE_GDBSTUB=0
-            make distclean ENABLE_SDL=0
+            make distclean ENABLE_EXT_C=0 check
+            make distclean ENABLE_EXT_F=0 check
+            make distclean ENABLE_GDBSTUB=0 check
+            make distclean ENABLE_SDL=0 check
     - name: architectural test
       run: |
             sh .ci/riscv-tests.sh
@@ -31,7 +31,7 @@ jobs:
   coding_style:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.2.0
+    - uses: actions/checkout@v3.4.0
     - name: coding convention
       run: |
             sudo apt-get install -q -y clang-format-12

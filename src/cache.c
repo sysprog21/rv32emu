@@ -249,6 +249,20 @@ cache_t *cache_create(int size_bits)
                cache->list_size[LFU_ghost_list] <=                          \
            2 * cache->capacity);
 
+#define REPLACE_LIST(op1, op2)                                                 \
+    if (cache->list_size[LFU_list] &&                                          \
+        cache->list_size[LFU_list] op1(cache->capacity -                       \
+                                       cache->lru_capacity)) {                 \
+        move_to_mru(                                                           \
+            cache, list_last_entry(cache->lists[LFU_list], arc_entry_t, list), \
+            LFU_ghost_list);                                                   \
+    } else if (cache->list_size[LRU_list] &&                                   \
+               cache->list_size[LRU_list] op2 cache->lru_capacity) {           \
+        move_to_mru(                                                           \
+            cache, list_last_entry(cache->lists[LRU_list], arc_entry_t, list), \
+            LRU_ghost_list);                                                   \
+    }
+
 static inline void move_to_mru(cache_t *cache,
                                arc_entry_t *entry,
                                const cache_list_t type)
@@ -258,19 +272,6 @@ static inline void move_to_mru(cache_t *cache,
     entry->type = type;
     list_del_init(&entry->list);
     list_add(&entry->list, cache->lists[type]);
-}
-
-static inline void replace_list(cache_t *cache)
-{
-    if (cache->list_size[LRU_list] >= cache->lru_capacity)
-        move_to_mru(cache,
-                    list_last_entry(cache->lists[LRU_list], arc_entry_t, list),
-                    LRU_ghost_list);
-    else if (cache->list_size[LFU_list] >=
-             (cache->capacity - cache->lru_capacity))
-        move_to_mru(cache,
-                    list_last_entry(cache->lists[LFU_list], arc_entry_t, list),
-                    LFU_ghost_list);
 }
 
 void *cache_get(cache_t *cache, uint32_t key)
@@ -292,10 +293,8 @@ void *cache_get(cache_t *cache, uint32_t key)
     if (!entry || entry->key != key)
         return NULL;
     /* cache hit in LRU_list */
-    if (entry->type == LRU_list) {
-        replace_list(cache);
+    if (entry->type == LRU_list && cache->lru_capacity != cache->capacity)
         move_to_mru(cache, entry, LFU_list);
-    }
 
     /* cache hit in LFU_list */
     if (entry->type == LFU_list)
@@ -303,17 +302,26 @@ void *cache_get(cache_t *cache, uint32_t key)
 
     /* cache hit in LRU_ghost_list */
     if (entry->type == LRU_ghost_list) {
-        cache->lru_capacity = MIN(cache->lru_capacity + 1, cache->capacity);
-        replace_list(cache);
-        move_to_mru(cache, entry, LFU_list);
+        if (cache->lru_capacity != cache->capacity) {
+            cache->lru_capacity = cache->lru_capacity + 1;
+            if (cache->list_size[LFU_list] &&
+                cache->list_size[LFU_list] >=
+                    (cache->capacity - cache->lru_capacity))
+                move_to_mru(
+                    cache,
+                    list_last_entry(cache->lists[LFU_list], arc_entry_t, list),
+                    LFU_ghost_list);
+            move_to_mru(cache, entry, LFU_list);
+        }
     }
 
     /* cache hit in LFU_ghost_list */
     if (entry->type == LFU_ghost_list) {
         cache->lru_capacity = cache->lru_capacity ? cache->lru_capacity - 1 : 0;
-        replace_list(cache);
+        REPLACE_LIST(>=, >);
         move_to_mru(cache, entry, LFU_list);
     }
+
     CACHE_ASSERT(cache);
     /* return NULL if cache miss */
     return entry->value;
@@ -337,7 +345,12 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
             delete_value = delete_target->value;
             free(delete_target);
             cache->list_size[LRU_ghost_list]--;
-            replace_list(cache);
+            if (cache->list_size[LRU_list] &&
+                cache->list_size[LRU_list] >= cache->lru_capacity)
+                move_to_mru(
+                    cache,
+                    list_last_entry(cache->lists[LRU_list], arc_entry_t, list),
+                    LRU_ghost_list);
         } else {
             arc_entry_t *delete_target =
                 list_last_entry(cache->lists[LRU_list], arc_entry_t, list);
@@ -362,15 +375,23 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
             free(delete_target);
             cache->list_size[LFU_ghost_list]--;
         }
-        replace_list(cache);
+        REPLACE_LIST(>, >=)
     }
     arc_entry_t *new_entry = malloc(sizeof(arc_entry_t));
     new_entry->key = key;
     new_entry->value = value;
-    new_entry->type = LRU_list;
-    list_add(&new_entry->list, cache->lists[LRU_list]);
+    /* check if all cache become LFU */
+    if (cache->lru_capacity != 0) {
+        new_entry->type = LRU_list;
+        list_add(&new_entry->list, cache->lists[LRU_list]);
+        cache->list_size[LRU_list]++;
+    } else {
+        new_entry->type = LRU_ghost_list;
+        list_add(&new_entry->list, cache->lists[LRU_ghost_list]);
+        cache->list_size[LRU_ghost_list]++;
+    }
     hlist_add_head(&new_entry->ht_list, &cache->map->ht_list_head[HASH(key)]);
-    cache->list_size[LRU_list]++;
+
     CACHE_ASSERT(cache);
     return delete_value;
 }

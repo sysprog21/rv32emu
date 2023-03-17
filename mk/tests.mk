@@ -16,6 +16,7 @@ CACHE_CHECK_ELF_FILES := \
 	cache-get \
 	cache-lru-replace \
 	cache-lfu-replace \
+	cache-lru-ghost-replace \
 	cache-lfu-ghost-replace 
 
 CACHE_OUT = $(addprefix $(CACHE_BUILD_DIR)/, $(CACHE_CHECK_ELF_FILES:%=%.out))

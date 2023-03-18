@@ -69,7 +69,7 @@ $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 $(OUT)/decode.o: $(GDBSTUB_LIB)
 OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
-LDFLAGS += $(GDBSTUB_LIB)
+LDFLAGS += $(GDBSTUB_LIB) -lpthread
 gdbstub-test: $(BIN)
 	$(Q)tests/gdbstub.sh && $(call notice, [OK])
 endif

@@ -150,9 +150,6 @@ void ecall_handler(riscv_t *rv);
 /* breakpoint exception handler */
 void ebreak_handler(riscv_t *rv);
 
-/* statistics */
-void rv_stats(riscv_t *rv);
-
 /* halt the core */
 void rv_halt(riscv_t *rv);
 

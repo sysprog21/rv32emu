@@ -4,8 +4,6 @@
  */
 
 #include <assert.h>
-#include <inttypes.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -138,10 +136,4 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 #endif
 
     rv->halt = false;
-}
-
-/* FIXME: provide real implementation */
-void rv_stats(riscv_t *rv)
-{
-    printf("CSR cycle count: %" PRIu64 "\n", rv->csr_cycle);
 }

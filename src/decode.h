@@ -259,6 +259,14 @@ typedef struct rv_insn {
      */
     bool tailcall;
     bool (*impl)(riscv_t *, const struct rv_insn *);
+
+    /* We employ two pointers, branch taken and branch untaken, to avoid the
+     * significant overhead resulting from aggressive memory copy. Instead of
+     * copying the entire IR array, these pointers respectively point to the
+     * first IR of the first basic block in the path of the taken and untaken
+     * branches, so we can jump to the specific IR array directly.
+     */
+    struct rv_insn *branch_taken, *branch_untaken;
 } rv_insn_t;
 
 /* decode the RISC-V instruction */

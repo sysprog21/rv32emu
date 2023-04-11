@@ -94,6 +94,7 @@ OBJS := \
 	riscv.o \
 	elf.o \
 	cache.o \
+	mpool.o \
 	$(OBJS_EXT) \
 	main.o
 

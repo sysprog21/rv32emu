@@ -90,6 +90,22 @@ static void rv_exception_default_handler(riscv_t *rv)
 RV_EXCEPTION_LIST
 #undef _
 
+/* wrap load/store and insn misaligned handler
+ * @mask_or_pc: mask for load/store and pc for insn misaligned handler.
+ * @type: type of misaligned handler
+ * @compress: compressed instruction or not
+ * @IO: whether the misaligned handler is for load/store or insn.
+ */
+#define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)       \
+    IIF(IO)                                                           \
+    (if (!rv->io.allow_misalign && unlikely(addr & (mask_or_pc))),    \
+     if (unlikely(insn_is_misaligned(rv->PC))))                       \
+    {                                                                 \
+        rv->compressed = compress;                                    \
+        rv_except_##type##_misaligned(rv, IIF(IO)(addr, mask_or_pc)); \
+        return false;                                                 \
+    }
+
 /* Get current time in microsecnds and update csr_time register */
 static inline void update_time(riscv_t *rv)
 {
@@ -310,11 +326,7 @@ RVOP(jal, {
     if (ir->rd)
         rv->X[ir->rd] = pc + ir->insn_len;
     /* check instruction misaligned */
-    if (unlikely(insn_is_misaligned(rv->PC))) {
-        rv->compressed = false;
-        rv_except_insn_misaligned(rv, pc);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     return true;
 })
 
@@ -333,11 +345,7 @@ RVOP(jalr, {
     if (ir->rd)
         rv->X[ir->rd] = pc + ir->insn_len;
     /* check instruction misaligned */
-    if (unlikely(insn_is_misaligned(rv->PC))) {
-        rv->compressed = false;
-        rv_except_insn_misaligned(rv, pc);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     return true;
 })
 
@@ -352,11 +360,7 @@ RVOP(beq, {
     }
     rv->PC += ir->imm;
     /* check instruction misaligned */
-    if (unlikely(insn_is_misaligned(rv->PC))) {
-        rv->compressed = false;
-        rv_except_insn_misaligned(rv, pc);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     if (ir->branch_taken)
         return ir->branch_taken->impl(rv, ir->branch_taken);
     return true;
@@ -373,11 +377,7 @@ RVOP(bne, {
     }
     rv->PC += ir->imm;
     /* check instruction misaligned */
-    if (unlikely(insn_is_misaligned(rv->PC))) {
-        rv->compressed = false;
-        rv_except_insn_misaligned(rv, pc);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     if (ir->branch_taken)
         return ir->branch_taken->impl(rv, ir->branch_taken);
     return true;
@@ -394,11 +394,7 @@ RVOP(blt, {
     }
     rv->PC += ir->imm;
     /* check instruction misaligned */
-    if (unlikely(insn_is_misaligned(rv->PC))) {
-        rv->compressed = false;
-        rv_except_insn_misaligned(rv, pc);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     if (ir->branch_taken)
         return ir->branch_taken->impl(rv, ir->branch_taken);
     return true;
@@ -415,11 +411,7 @@ RVOP(bge, {
     }
     rv->PC += ir->imm;
     /* check instruction misaligned */
-    if (unlikely(insn_is_misaligned(rv->PC))) {
-        rv->compressed = false;
-        rv_except_insn_misaligned(rv, pc);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     if (ir->branch_taken)
         return ir->branch_taken->impl(rv, ir->branch_taken);
     return true;
@@ -436,11 +428,7 @@ RVOP(bltu, {
     }
     rv->PC += ir->imm;
     /* check instruction misaligned */
-    if (unlikely(insn_is_misaligned(rv->PC))) {
-        rv->compressed = false;
-        rv_except_insn_misaligned(rv, pc);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     if (ir->branch_taken)
         return ir->branch_taken->impl(rv, ir->branch_taken);
     return true;
@@ -457,11 +445,7 @@ RVOP(bgeu, {
     }
     rv->PC += ir->imm;
     /* check instruction misaligned */
-    if (unlikely(insn_is_misaligned(rv->PC))) {
-        rv->compressed = false;
-        rv_except_insn_misaligned(rv, pc);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     if (ir->branch_taken)
         return ir->branch_taken->impl(rv, ir->branch_taken);
     return true;
@@ -476,22 +460,14 @@ RVOP(lb, {
 /* LH: Load Halfword */
 RVOP(lh, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    if (unlikely(addr & 1)) {
-        rv->compressed = false;
-        rv_except_load_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(1, load, false, 1);
     rv->X[ir->rd] = sign_extend_h(rv->io.mem_read_s(rv, addr));
 })
 
 /* LW: Load Word */
 RVOP(lw, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    if (unlikely(addr & 3)) {
-        rv->compressed = false;
-        rv_except_load_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
     rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
 })
 
@@ -501,11 +477,7 @@ RVOP(lbu, { rv->X[ir->rd] = rv->io.mem_read_b(rv, rv->X[ir->rs1] + ir->imm); })
 /* LHU: Load Halfword Unsigned */
 RVOP(lhu, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    if (unlikely(addr & 1)) {
-        rv->compressed = false;
-        rv_except_load_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(1, load, false, 1);
     rv->X[ir->rd] = rv->io.mem_read_s(rv, addr);
 })
 
@@ -515,22 +487,14 @@ RVOP(sb, { rv->io.mem_write_b(rv, rv->X[ir->rs1] + ir->imm, rv->X[ir->rs2]); })
 /* SH: Store Halfword */
 RVOP(sh, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    if (unlikely(addr & 1)) {
-        rv->compressed = false;
-        rv_except_store_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(1, store, false, 1);
     rv->io.mem_write_s(rv, addr, rv->X[ir->rs2]);
 })
 
 /* SW: Store Word */
 RVOP(sw, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    if (unlikely(addr & 3)) {
-        rv->compressed = false;
-        rv_except_store_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
     rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
 })
 
@@ -1088,11 +1052,7 @@ RVOP(caddi4spn, { rv->X[ir->rd] = rv->X[2] + (uint16_t) ir->imm; })
  */
 RVOP(clw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
-    if (unlikely(addr & 3)) {
-        rv->compressed = true;
-        rv_except_load_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(3, load, true, 1);
     rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
 })
 
@@ -1103,11 +1063,7 @@ RVOP(clw, {
  */
 RVOP(csw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
-    if (unlikely(addr & 3)) {
-        rv->compressed = true;
-        rv_except_store_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(3, store, true, 1);
     rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
 })
 
@@ -1126,11 +1082,7 @@ RVOP(caddi, { rv->X[ir->rd] += (int16_t) ir->imm; })
 RVOP(cjal, {
     rv->X[1] = rv->PC + ir->insn_len;
     rv->PC += ir->imm;
-    if (unlikely(rv->PC & 0x1)) {
-        rv->compressed = true;
-        rv_except_insn_misaligned(rv, rv->PC);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
     return true;
 })
 
@@ -1198,11 +1150,7 @@ RVOP(cand, { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; })
  */
 RVOP(cj, {
     rv->PC += ir->imm;
-    if (unlikely(rv->PC & 0x1)) {
-        rv->compressed = true;
-        rv_except_insn_misaligned(rv, rv->PC);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
     return true;
 })
 
@@ -1249,11 +1197,7 @@ RVOP(cslli, { rv->X[ir->rd] <<= (uint8_t) ir->imm; })
 /* C.LWSP */
 RVOP(clwsp, {
     const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
-    if (unlikely(addr & 3)) {
-        rv->compressed = true;
-        rv_except_load_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(3, load, true, 1);
     rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
 })
 
@@ -1279,11 +1223,7 @@ RVOP(cjalr, {
     const int32_t jump_to = rv->X[ir->rs1];
     rv->X[rv_reg_ra] = rv->PC + ir->insn_len;
     rv->PC = jump_to;
-    if (unlikely(rv->PC & 0x1)) {
-        rv->compressed = true;
-        rv_except_insn_misaligned(rv, rv->PC);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
     return true;
 })
 
@@ -1299,11 +1239,7 @@ RVOP(cadd, { rv->X[ir->rd] = rv->X[ir->rs1] + rv->X[ir->rs2]; })
 /* C.SWSP */
 RVOP(cswsp, {
     const uint32_t addr = rv->X[2] + ir->imm;
-    if (unlikely(addr & 3)) {
-        rv->compressed = true;
-        rv_except_store_misaligned(rv, addr);
-        return false;
-    }
+    RV_EXC_MISALIGN_HANDLER(3, store, true, 1);
     rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
 })
 #endif

@@ -43,4 +43,11 @@ void memory_write(memory_t *m,
                   uint32_t addr,
                   const uint8_t *src,
                   uint32_t size);
+
+void memory_write_w(memory_t *m, uint32_t addr, const uint8_t *src);
+
+void memory_write_s(memory_t *m, uint32_t addr, const uint8_t *src);
+
+void memory_write_b(memory_t *m, uint32_t addr, const uint8_t *src);
+
 void memory_fill(memory_t *m, uint32_t addr, uint32_t size, uint8_t val);

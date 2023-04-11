@@ -9,14 +9,19 @@
 #include <string.h>
 
 #include "io.h"
+#include "mpool.h"
 
 static const uint32_t mask_lo = 0xffff;
 static const uint32_t mask_hi = ~(0xffff);
 
+static struct mpool *mp;
+
 memory_t *memory_new()
 {
-    memory_t *m = malloc(sizeof(memory_t));
-    memset(m->chunks, 0, sizeof(m->chunks));
+    memory_t *m = calloc(1, sizeof(memory_t));
+    /* Initialize the mpool size to sizeof(chunk_t) << 2, and it will extend
+     * automatically if needed */
+    mp = mpool_create(sizeof(chunk_t) << 2, sizeof(chunk_t));
     return m;
 }
 
@@ -24,12 +29,7 @@ void memory_delete(memory_t *m)
 {
     if (!m)
         return;
-
-    for (uint32_t i = 0; i < (sizeof(m->chunks) / sizeof(chunk_t *)); i++) {
-        chunk_t *c = m->chunks[i];
-        if (c)
-            free(c);
-    }
+    mpool_destory(mp);
     free(m);
 }
 
@@ -85,53 +85,52 @@ uint32_t memory_ifetch(memory_t *m, uint32_t addr)
 uint32_t memory_read_w(memory_t *m, uint32_t addr)
 {
     const uint32_t addr_lo = addr & mask_lo;
-    if (addr_lo <= 0xfffc) { /* test if this is within one chunk */
-        chunk_t *c;
-        if ((c = m->chunks[addr >> 16]))
-            return *(const uint32_t *) (c->data + addr_lo);
-        return 0U;
-    }
-    uint32_t dst = 0;
-    memory_read(m, (uint8_t *) &dst, addr, 4);
-    return dst;
+    chunk_t *c = m->chunks[addr >> 16];
+    return *(const uint32_t *) (c->data + addr_lo);
 }
 
 uint16_t memory_read_s(memory_t *m, uint32_t addr)
 {
     const uint32_t addr_lo = addr & mask_lo;
-    if (addr_lo <= 0xfffe) { /* test if this is within one chunk */
-        chunk_t *c;
-        if ((c = m->chunks[addr >> 16]))
-            return *(const uint16_t *) (c->data + addr_lo);
-        return 0U;
-    }
-    uint16_t dst = 0;
-    memory_read(m, (uint8_t *) &dst, addr, 2);
-    return dst;
+    chunk_t *c = m->chunks[addr >> 16];
+    return *(const uint16_t *) (c->data + addr_lo);
 }
 
 uint8_t memory_read_b(memory_t *m, uint32_t addr)
 {
-    chunk_t *c;
-    if ((c = m->chunks[addr >> 16]))
-        return *(c->data + (addr & 0xffff));
-    return 0U;
+    chunk_t *c = m->chunks[addr >> 16];
+    return c->data[addr & mask_lo];
 }
 
 void memory_write(memory_t *m, uint32_t addr, const uint8_t *src, uint32_t size)
 {
     for (uint32_t i = 0; i < size; ++i) {
-        uint32_t p = addr + i;
-        uint32_t x = p >> 16;
-        chunk_t *c = m->chunks[x];
+        const uint32_t addr_lo = (addr + i) & mask_lo,
+                       addr_hi = (addr + i) >> 16;
+        chunk_t *c = m->chunks[addr_hi];
         if (!c) {
-            c = malloc(sizeof(chunk_t));
-            memset(c->data, 0, sizeof(c->data));
-            m->chunks[x] = c;
+            c = mpool_calloc(mp);
+            m->chunks[addr_hi] = c;
         }
-        c->data[p & 0xffff] = src[i];
+        c->data[addr_lo] = src[i];
     }
 }
+
+#define MEM_WRITE_IMPL(size, type)                                           \
+    void memory_write_##size(memory_t *m, uint32_t addr, const uint8_t *src) \
+    {                                                                        \
+        const uint32_t addr_lo = addr & mask_lo, addr_hi = addr >> 16;       \
+        chunk_t *c = m->chunks[addr_hi];                                     \
+        if (unlikely(!c)) {                                                  \
+            c = mpool_calloc(mp);                                            \
+            m->chunks[addr_hi] = c;                                          \
+        }                                                                    \
+        *(type *) (c->data + addr_lo) = *(const type *) src;                 \
+    }
+
+MEM_WRITE_IMPL(w, uint32_t);
+MEM_WRITE_IMPL(s, uint16_t);
+MEM_WRITE_IMPL(b, uint8_t);
 
 void memory_fill(memory_t *m, uint32_t addr, uint32_t size, uint8_t val)
 {
@@ -140,8 +139,7 @@ void memory_fill(memory_t *m, uint32_t addr, uint32_t size, uint8_t val)
         uint32_t x = p >> 16;
         chunk_t *c = m->chunks[x];
         if (!c) {
-            c = malloc(sizeof(chunk_t));
-            memset(c->data, 0, sizeof(c->data));
+            c = mpool_calloc(mp);
             m->chunks[x] = c;
         }
         c->data[p & 0xffff] = val;

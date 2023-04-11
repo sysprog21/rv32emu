@@ -107,6 +107,9 @@ typedef struct {
     /* system */
     riscv_on_ecall on_ecall;
     riscv_on_ebreak on_ebreak;
+
+    /* enable misaligned memory access */
+    bool allow_misalign;
 } riscv_io_t;
 
 /* create a RISC-V emulator */

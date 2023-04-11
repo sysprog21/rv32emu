@@ -25,6 +25,9 @@ static char *signature_out_file;
 /* target executable */
 static const char *opt_prog_name = "a.out";
 
+/* enable misaligned memory access */
+static bool opt_misaligned = false;
+
 #define MEMIO(op) on_mem_##op
 #define IO_HANDLER_IMPL(type, op, RW)                                        \
     static IIF(RW)(                                                          \
@@ -34,7 +37,7 @@ static const char *opt_prog_name = "a.out";
     {                                                                        \
         state_t *s = rv_userdata(rv);                                        \
         IIF(RW)                                                              \
-        (memory_write(s->mem, addr, (uint8_t *) &data, sizeof(data)),        \
+        (memory_##op(s->mem, addr, (uint8_t *) &data),                       \
          return memory_##op(s->mem, addr));                                  \
     }
 
@@ -123,6 +126,12 @@ static bool parse_args(int argc, char **args)
                 signature_out_file = args[++i];
                 continue;
             }
+
+            if (!strcmp(arg, "--misalign")) {
+                opt_misaligned = true;
+                continue;
+            }
+
             /* otherwise, error */
             fprintf(stderr, "Unknown argument '%s'\n", arg);
             return false;
@@ -192,6 +201,7 @@ int main(int argc, char **args)
         /* system */
         .on_ecall = ecall_handler,
         .on_ebreak = ebreak_handler,
+        .allow_misalign = opt_misaligned,
     };
 
     state_t *state = state_new();

@@ -17,6 +17,7 @@ jobs:
       run: |
             make check
             make tests
+            make misalign
     - name: diverse configurations
       run: |
             make distclean ENABLE_EXT_C=0 check

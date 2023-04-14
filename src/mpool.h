@@ -23,14 +23,14 @@ struct mpool *mpool_create(size_t pool_size, size_t chunk_size);
 void *mpool_alloc(struct mpool *mp);
 
 /**
- * mpool_calloc - allocate a memory chunk from target memory pool
+ * mpool_calloc - allocate a memory chunk from target memory pool and set it to
+ * zero
  * @mp: a pointer points to the target memory pool
  */
 void *mpool_calloc(struct mpool *mp);
 
 /**
- * mpool_calloc - allocate a memory chunk from target memory pool and set it to
- * zero
+ * mpool_free - free a memory pool
  * @mp: a pointer points to target memory pool
  * @target: a pointer points to the target memory chunk
  */

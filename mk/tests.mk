@@ -9,15 +9,23 @@ CACHE_OBJS := $(addprefix $(CACHE_BUILD_DIR)/, $(CACHE_OBJS))
 OBJS += $(CACHE_OBJS)
 deps += $(CACHE_OBJS:%.o=%.o.d)
 
-
+# Check adaptive replacement cache policy is enabled or not, default is LRU 
+ifeq ($(ENABLE_ARC), 1)
 CACHE_CHECK_ELF_FILES := \
-	cache-new \
-	cache-put \
-	cache-get \
-	cache-lru-replace \
-	cache-lfu-replace \
-	cache-lru-ghost-replace \
-	cache-lfu-ghost-replace 
+	arc/cache-new \
+	arc/cache-put \
+	arc/cache-get \
+	arc/cache-lru-replace \
+	arc/cache-lfu-replace \
+	arc/cache-lru-ghost-replace \
+	arc/cache-lfu-ghost-replace 
+else
+CACHE_CHECK_ELF_FILES := \
+	lfu/cache-new \
+	lfu/cache-put \
+	lfu/cache-get \
+	lfu/cache-lfu-replace 
+endif
 
 CACHE_OUT = $(addprefix $(CACHE_BUILD_DIR)/, $(CACHE_CHECK_ELF_FILES:%=%.out))
 
@@ -39,9 +47,9 @@ $(CACHE_OUT): $(TARGET)
 
 $(TARGET): $(CACHE_OBJS)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ build/cache.o -o $(CACHE_BUILD_DIR)/$(TARGET)
+	$(Q)$(CC) $^ build/cache.o build/mpool.o -o $(CACHE_BUILD_DIR)/$(TARGET)
 	
 $(CACHE_BUILD_DIR)/%.o: $(CACHE_TEST_DIR)/%.c 
 	$(VECHO) "  CC\t$@\n"
-	$(Q)mkdir -p $(dir $@)
+	$(Q)mkdir -p $(dir $@)/arc $(dir $@)/lfu
 	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<

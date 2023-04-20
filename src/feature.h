@@ -48,6 +48,11 @@
 #define RV32_FEATURE_GDBSTUB 1
 #endif
 
+/* Import adaptive replacement cache to manage block */
+#ifndef RV32_FEATURE_ARC
+#define RV32_FEATURE_ARC 0
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x
 

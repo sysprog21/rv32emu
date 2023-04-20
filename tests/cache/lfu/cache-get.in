@@ -1,0 +1,6 @@
+NEW
+GET 1
+GET 2
+PUT 3 3
+GET 3
+FREE

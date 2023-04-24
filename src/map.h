@@ -1,691 +1,73 @@
+/*
+ * rv32emu is freely redistributable under the MIT License. See the file
+ * "LICENSE" for information on usage and redistribution of this file.
+ */
+
+/*
+ * C Implementation for C++ std::map using red-black tree.
+ *
+ * Any data type can be stored in a map, just like std::map.
+ * A map instance requires the specification of two file types:
+ *   1. the key;
+ *   2. what data type the tree node will store;
+ *
+ * It will also require a comparison function to sort the tree.
+ */
+
 #pragma once
 
-#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 
-/* C macro implementation of left-leaning 2-3 red-black trees.  Parent
- * pointers are not used, and color bits are stored in the least significant
- * bit of right-child pointers, thus making node linkage as compact as is
- * possible for red-black trees.
- */
+typedef struct map_node map_node_t;
+struct map_node {
+    void *key;
+    void *val;
+    struct {
+        map_node_t *left, *right_red;
+    } link;
+};
 
-/* Each node in the RB tree consumes at least 1 byte of space (for the linkage
- * if nothing else, so there are a maximum of sizeof(void *) << 3 rb tree nodes
- * in any process (and thus, at most sizeof(void *) << 3 nodes in any rb tree).
- * The choice of algorithm bounds the depth of a tree to twice the binary log of
- * the number of elements in the tree; the following bound follows.
- */
-#define RB_MAX_DEPTH (sizeof(void *) << 4)
+typedef struct {
+    map_node_t *root;
+    int (*cmp)(const void *, const void *);
+    size_t key_size;
+    size_t val_size;
+} map_head_t;
 
-/* Node structure */
-#define rb_node(x_type)           \
-    struct {                      \
-        x_type *left, *right_red; \
-    }
+typedef map_head_t *map_t;
 
-/* Root structure */
-#define rb_tree(x_type)  \
-    struct {             \
-        x_type *root;    \
-        size_t key_size; \
-        size_t val_size; \
-    }
-
-/* Left accessors */
-#define rbtn_left_get(x_type, x_field, x_node) ((x_node)->x_field.left)
-#define rbtn_left_set(x_type, x_field, x_node, x_left) \
-    do {                                               \
-        (x_node)->x_field.left = x_left;               \
-    } while (0)
-
-/* Right accessors */
-#define rbtn_right_get(x_type, x_field, x_node) \
-    ((x_type *) (((intptr_t) (x_node)->x_field.right_red) & ~3))
-#define rbtn_right_set(x_type, x_field, x_node, x_right)                  \
-    do {                                                                  \
-        (x_node)->x_field.right_red =                                     \
-            (x_type *) (((uintptr_t) x_right) |                           \
-                        (((uintptr_t) (x_node)->x_field.right_red) & 1)); \
-    } while (0)
-
-/* Color accessors */
-#define rbtn_red_get(x_type, x_field, x_node) \
-    ((bool) (((uintptr_t) (x_node)->x_field.right_red) & 1))
-#define rbtn_color_set(x_type, x_field, x_node, x_red)                    \
-    do {                                                                  \
-        (x_node)->x_field.right_red =                                     \
-            (x_type *) ((((intptr_t) (x_node)->x_field.right_red) & ~3) | \
-                        ((ssize_t) x_red));                               \
-    } while (0)
-#define rbtn_red_set(x_type, x_field, x_node)                           \
-    do {                                                                \
-        (x_node)->x_field.right_red =                                   \
-            (x_type *) (((uintptr_t) (x_node)->x_field.right_red) | 1); \
-    } while (0)
-#define rbtn_black_set(x_type, x_field, x_node)                         \
-    do {                                                                \
-        (x_node)->x_field.right_red =                                   \
-            (x_type *) (((intptr_t) (x_node)->x_field.right_red) & ~3); \
-    } while (0)
-
-/* Node initializer */
-#define rbt_node_new(x_type, x_field, x_rbt, x_node)          \
-    do {                                                      \
-        /* Bookkeeping bit cannot be used by node pointer. */ \
-        assert(((uintptr_t) (x_node) & (0x1)) == 0);          \
-        rbtn_left_set(x_type, x_field, (x_node), NULL);       \
-        rbtn_right_set(x_type, x_field, (x_node), NULL);      \
-        rbtn_red_set(x_type, x_field, (x_node));              \
-    } while (0)
-
-/* Tree initializer. */
-#define rb_new(x_type, x_field, x_rbt) \
-    do {                               \
-        (x_rbt)->root = NULL;          \
-    } while (0)
-
-/* Internal utility macros */
-#define rbtn_rotate_left(x_type, x_field, x_node, r_node)         \
-    do {                                                          \
-        (r_node) = rbtn_right_get(x_type, x_field, (x_node));     \
-        rbtn_right_set(x_type, x_field, (x_node),                 \
-                       rbtn_left_get(x_type, x_field, (r_node))); \
-        rbtn_left_set(x_type, x_field, (r_node), (x_node));       \
-    } while (0)
-
-#define rbtn_rotate_right(x_type, x_field, x_node, r_node)        \
-    do {                                                          \
-        (r_node) = rbtn_left_get(x_type, x_field, (x_node));      \
-        rbtn_left_set(x_type, x_field, (x_node),                  \
-                      rbtn_right_get(x_type, x_field, (r_node))); \
-        rbtn_right_set(x_type, x_field, (r_node), (x_node));      \
-    } while (0)
-
-/* The rb_proto() macro generate function prototypes that correspond to the
- * functions generated by an equivalently parameterized call to rb_gen().
- */
-#define rb_proto(x_attr, x_prefix, x_rbt_type, x_type)                      \
-    x_attr void x_prefix##new (x_rbt_type * rbtree);                        \
-    x_attr x_type *x_prefix##search(x_rbt_type *rbtree, const x_type *key); \
-    x_attr void x_prefix##insert(x_rbt_type *rbtree, x_type *node);         \
-    x_attr void x_prefix##remove(x_rbt_type *rbtree, x_type *node);         \
-    x_attr void x_prefix##destroy(x_rbt_type *rbtree,                       \
-                                  void (*cb)(x_type *, void *), void *arg);
-
-/* The rb_gen() macro generates a type-specific red-black tree implementation,
- * based on the above C macros.
- * Arguments:
- *
- *   x_attr:
- *     Function attribute for generated functions (e.g., static).
- *   x_prefix:
- *     Prefix for generated functions (e.g., ex_).
- *   x_rb_type:
- *     Type for red-black tree data structure (e.g., ex_t).
- *   x_type:
- *     Type for red-black tree node data structure (e.g., ex_node_t).
- *   x_field:
- *     Name of red-black tree node linkage (e.g., ex_link).
- *   x_cmp:
- *     Node comparison function name, with the following prototype:
- *
- *     int x_cmp(x_type *x_node, x_type *x_other);
- *                        ^^^^^^
- *                        or x_key
- *     Interpretation of comparison function return values:
- *       -1 : x_node <  x_other
- *        0 : x_node == x_other
- *        1 : x_node >  x_other
- *     In all cases, the x_node or x_key macro argument is the first argument to
- *     the comparison function, which makes it possible to write comparison
- *     functions that treat the first argument specially.  x_cmp must be a total
- *     order on values inserted into the tree -- duplicates are not allowed.
- *
- * Assuming the following setup:
- *
- *   typedef struct ex_node_s ex_node_t;
- *   struct ex_node_s {
- *       rb_node(ex_node_t) ex_link;
- *   };
- *   typedef rb_tree(ex_node_t) ex_t;
- *   rb_gen(static, ex_, ex_t, ex_node_t, ex_link, ex_cmp)
- *
- * The following API is generated:
- *
- *   static void
- *   ex_new(ex_t *tree);
- *       Description: Initialize a red-black tree structure.
- *       Args:
- *         tree: Pointer to an uninitialized red-black tree object.
- *
- *   static ex_node_t *
- *   ex_search(ex_t *tree, const ex_node_t *key);
- *       Description: Search for node that matches key.
- *       Args:
- *         tree: Pointer to an initialized red-black tree object.
- *         key : Search key.
- *       Ret: Node in tree that matches key, or NULL if no match.
- *
- *   static void
- *   ex_insert(ex_t *tree, ex_node_t *node);
- *       Description: Insert node into tree.
- *       Args:
- *         tree: Pointer to an initialized red-black tree object.
- *         node: Node to be inserted into tree.
- *
- *   static void
- *   ex_remove(ex_t *tree, ex_node_t *node);
- *       Description: Remove node from tree.
- *       Args:
- *         tree: Pointer to an initialized red-black tree object.
- *         node: Node in tree to be removed.
- *
- *   static void
- *   ex_destroy(ex_t *tree, void (*cb)(ex_node_t *, void *), void *arg);
- *       Description: Iterate over the tree with post-order traversal, remove
- *                    each node, and run the callback if non-null.  This is
- *                    used for destroying a tree without paying the cost to
- *                    rebalance it.  The tree must not be otherwise altered
- *                    during traversal.
- *       Args:
- *         tree: Pointer to an initialized red-black tree object.
- *         cb  : Callback function, which, if non-null, is called for each node
- *               during iteration.  There is no way to stop iteration once it
- *               has begun.
- *         arg : Opaque pointer passed to cb().
- */
-#define rb_gen(x_attr, x_prefix, x_rbt_type, x_type, x_field, x_cmp)           \
-    typedef struct {                                                           \
-        x_type *node;                                                          \
-        int cmp;                                                               \
-    } x_prefix##path_entry_t;                                                  \
-    x_attr void x_prefix##new (x_rbt_type * rbtree)                            \
-    {                                                                          \
-        rb_new(x_type, x_field, rbtree);                                       \
-    }                                                                          \
-    x_attr x_type *x_prefix##search(x_rbt_type *rbtree, const x_type *key)     \
-    {                                                                          \
-        int cmp;                                                               \
-        x_type *ret = rbtree->root;                                            \
-        while (ret && (cmp = (x_cmp) (key, ret)) != 0) {                       \
-            if (cmp < 0) {                                                     \
-                ret = rbtn_left_get(x_type, x_field, ret);                     \
-            } else {                                                           \
-                ret = rbtn_right_get(x_type, x_field, ret);                    \
-            }                                                                  \
-        }                                                                      \
-        return ret;                                                            \
-    }                                                                          \
-    x_attr void x_prefix##insert(x_rbt_type *rbtree, x_type *node)             \
-    {                                                                          \
-        x_prefix##path_entry_t path[RB_MAX_DEPTH];                             \
-        x_prefix##path_entry_t *pathp;                                         \
-        rbt_node_new(x_type, x_field, rbtree, node);                           \
-        /* Wind. */                                                            \
-        path->node = rbtree->root;                                             \
-        for (pathp = path; pathp->node; pathp++) {                             \
-            int cmp = pathp->cmp = x_cmp(node, pathp->node);                   \
-            if (cmp == 0) {                                                    \
-                /* assert(cmp != 0); */                                        \
-                break; /* If the key matches something, don't insert */        \
-            }                                                                  \
-            if (cmp < 0) {                                                     \
-                pathp[1].node = rbtn_left_get(x_type, x_field, pathp->node);   \
-            } else {                                                           \
-                pathp[1].node = rbtn_right_get(x_type, x_field, pathp->node);  \
-            }                                                                  \
-        }                                                                      \
-        pathp->node = node;                                                    \
-        /* A loop invariant we maintain is that all nodes with            */   \
-        /* out-of-date summaries live in path[0], path[1], ..., *pathp.   */   \
-        /* To maintain this, we have to summarize node, since we          */   \
-        /* decrement pathp before the first iteration.                    */   \
-        assert(!rbtn_left_get(x_type, x_field, node));                         \
-        assert(!rbtn_right_get(x_type, x_field, node));                        \
-        /* Unwind. */                                                          \
-        for (pathp--; (uintptr_t) pathp >= (uintptr_t) path; pathp--) {        \
-            x_type *cnode = pathp->node;                                       \
-            if (pathp->cmp < 0) {                                              \
-                x_type *left = pathp[1].node;                                  \
-                rbtn_left_set(x_type, x_field, cnode, left);                   \
-                if (!rbtn_red_get(x_type, x_field, left))                      \
-                    return;                                                    \
-                x_type *leftleft = rbtn_left_get(x_type, x_field, left);       \
-                if (leftleft && rbtn_red_get(x_type, x_field, leftleft)) {     \
-                    /* Fix up 4-node. */                                       \
-                    x_type *tnode;                                             \
-                    rbtn_black_set(x_type, x_field, leftleft);                 \
-                    rbtn_rotate_right(x_type, x_field, cnode, tnode);          \
-                    cnode = tnode;                                             \
-                }                                                              \
-            } else {                                                           \
-                x_type *right = pathp[1].node;                                 \
-                rbtn_right_set(x_type, x_field, cnode, right);                 \
-                if (!rbtn_red_get(x_type, x_field, right))                     \
-                    return;                                                    \
-                x_type *left = rbtn_left_get(x_type, x_field, cnode);          \
-                if (left && rbtn_red_get(x_type, x_field, left)) {             \
-                    /* Split 4-node. */                                        \
-                    rbtn_black_set(x_type, x_field, left);                     \
-                    rbtn_black_set(x_type, x_field, right);                    \
-                    rbtn_red_set(x_type, x_field, cnode);                      \
-                } else {                                                       \
-                    /* Lean left. */                                           \
-                    x_type *tnode;                                             \
-                    bool tred = rbtn_red_get(x_type, x_field, cnode);          \
-                    rbtn_rotate_left(x_type, x_field, cnode, tnode);           \
-                    rbtn_color_set(x_type, x_field, tnode, tred);              \
-                    rbtn_red_set(x_type, x_field, cnode);                      \
-                    cnode = tnode;                                             \
-                }                                                              \
-            }                                                                  \
-            pathp->node = cnode;                                               \
-        }                                                                      \
-        /* Set root, and make it black. */                                     \
-        rbtree->root = path->node;                                             \
-        rbtn_black_set(x_type, x_field, rbtree->root);                         \
-    }                                                                          \
-    x_attr void x_prefix##remove(x_rbt_type *rbtree, x_type *node)             \
-    {                                                                          \
-        x_prefix##path_entry_t path[RB_MAX_DEPTH];                             \
-        x_prefix##path_entry_t *pathp;                                         \
-        x_prefix##path_entry_t *nodep;                                         \
-        /* This is just to silence a compiler warning. */                      \
-        nodep = NULL;                                                          \
-        /* Wind. */                                                            \
-        path->node = rbtree->root;                                             \
-        for (pathp = path; pathp->node; pathp++) {                             \
-            int cmp = pathp->cmp = x_cmp(node, pathp->node);                   \
-            if (cmp < 0) {                                                     \
-                pathp[1].node = rbtn_left_get(x_type, x_field, pathp->node);   \
-            } else {                                                           \
-                pathp[1].node = rbtn_right_get(x_type, x_field, pathp->node);  \
-                if (cmp == 0) {                                                \
-                    /* Find node's successor, in preparation for swap. */      \
-                    pathp->cmp = 1;                                            \
-                    nodep = pathp;                                             \
-                    for (pathp++; pathp->node; pathp++) {                      \
-                        pathp->cmp = -1;                                       \
-                        pathp[1].node =                                        \
-                            rbtn_left_get(x_type, x_field, pathp->node);       \
-                    }                                                          \
-                    break;                                                     \
-                }                                                              \
-            }                                                                  \
-        }                                                                      \
-        assert(nodep->node == node);                                           \
-        pathp--;                                                               \
-        if (pathp->node != node) {                                             \
-            /* Swap node with its successor. */                                \
-            bool tred = rbtn_red_get(x_type, x_field, pathp->node);            \
-            rbtn_color_set(x_type, x_field, pathp->node,                       \
-                           rbtn_red_get(x_type, x_field, node));               \
-            rbtn_left_set(x_type, x_field, pathp->node,                        \
-                          rbtn_left_get(x_type, x_field, node));               \
-            /* If node's successor is its right child, the following code */   \
-            /* will do the wrong thing for the right child pointer.       */   \
-            /* However, it doesn't matter, because the pointer will be    */   \
-            /* properly set when the successor is pruned.                 */   \
-            rbtn_right_set(x_type, x_field, pathp->node,                       \
-                           rbtn_right_get(x_type, x_field, node));             \
-            rbtn_color_set(x_type, x_field, node, tred);                       \
-            /* The pruned leaf node's child pointers are never accessed   */   \
-            /* again, so don't bother setting them to nil.                */   \
-            nodep->node = pathp->node;                                         \
-            pathp->node = node;                                                \
-            if (nodep == path) {                                               \
-                rbtree->root = nodep->node;                                    \
-            } else {                                                           \
-                if (nodep[-1].cmp < 0) {                                       \
-                    rbtn_left_set(x_type, x_field, nodep[-1].node,             \
-                                  nodep->node);                                \
-                } else {                                                       \
-                    rbtn_right_set(x_type, x_field, nodep[-1].node,            \
-                                   nodep->node);                               \
-                }                                                              \
-            }                                                                  \
-        } else {                                                               \
-            x_type *left = rbtn_left_get(x_type, x_field, node);               \
-            if (left) {                                                        \
-                /* node has no successor, but it has a left child.        */   \
-                /* Splice node out, without losing the left child.        */   \
-                assert(!rbtn_red_get(x_type, x_field, node));                  \
-                assert(rbtn_red_get(x_type, x_field, left));                   \
-                rbtn_black_set(x_type, x_field, left);                         \
-                if (pathp == path) {                                           \
-                    rbtree->root = left;                                       \
-                    /* Nothing to summarize -- the subtree rooted at the  */   \
-                    /* node's left child hasn't changed, and it's now the */   \
-                    /* root.                                              */   \
-                } else {                                                       \
-                    if (pathp[-1].cmp < 0) {                                   \
-                        rbtn_left_set(x_type, x_field, pathp[-1].node, left);  \
-                    } else {                                                   \
-                        rbtn_right_set(x_type, x_field, pathp[-1].node, left); \
-                    }                                                          \
-                }                                                              \
-                return;                                                        \
-            } else if (pathp == path) {                                        \
-                /* The tree only contained one node. */                        \
-                rbtree->root = NULL;                                           \
-                return;                                                        \
-            }                                                                  \
-        }                                                                      \
-        /* We've now established the invariant that the node has no right */   \
-        /* child (well, morally; we didn't bother nulling it out if we    */   \
-        /* swapped it with its successor), and that the only nodes with   */   \
-        /* out-of-date summaries live in path[0], path[1], ..., pathp[-1].*/   \
-        if (rbtn_red_get(x_type, x_field, pathp->node)) {                      \
-            /* Prune red node, which requires no fixup. */                     \
-            assert(pathp[-1].cmp < 0);                                         \
-            rbtn_left_set(x_type, x_field, pathp[-1].node, NULL);              \
-            return;                                                            \
-        }                                                                      \
-        /* The node to be pruned is black, so unwind until balance is     */   \
-        /* restored.                                                      */   \
-        pathp->node = NULL;                                                    \
-        for (pathp--; (uintptr_t) pathp >= (uintptr_t) path; pathp--) {        \
-            assert(pathp->cmp != 0);                                           \
-            if (pathp->cmp < 0) {                                              \
-                rbtn_left_set(x_type, x_field, pathp->node, pathp[1].node);    \
-                if (rbtn_red_get(x_type, x_field, pathp->node)) {              \
-                    x_type *right =                                            \
-                        rbtn_right_get(x_type, x_field, pathp->node);          \
-                    x_type *rightleft = rbtn_left_get(x_type, x_field, right); \
-                    x_type *tnode;                                             \
-                    if (rightleft &&                                           \
-                        rbtn_red_get(x_type, x_field, rightleft)) {            \
-                        /* In the following diagrams, ||, //, and \\      */   \
-                        /* indicate the path to the removed node.         */   \
-                        /*                                                */   \
-                        /*      ||                                        */   \
-                        /*    pathp(r)                                    */   \
-                        /*  //        \                                   */   \
-                        /* (b)        (b)                                 */   \
-                        /*           /                                    */   \
-                        /*          (r)                                   */   \
-                        /*                                                */   \
-                        rbtn_black_set(x_type, x_field, pathp->node);          \
-                        rbtn_rotate_right(x_type, x_field, right, tnode);      \
-                        rbtn_right_set(x_type, x_field, pathp->node, tnode);   \
-                        rbtn_rotate_left(x_type, x_field, pathp->node, tnode); \
-                    } else {                                                   \
-                        /*      ||                                        */   \
-                        /*    pathp(r)                                    */   \
-                        /*  //        \                                   */   \
-                        /* (b)        (b)                                 */   \
-                        /*           /                                    */   \
-                        /*          (b)                                   */   \
-                        /*                                                */   \
-                        rbtn_rotate_left(x_type, x_field, pathp->node, tnode); \
-                    }                                                          \
-                    /* Balance restored, but rotation modified subtree    */   \
-                    /* root.                                              */   \
-                    assert((uintptr_t) pathp > (uintptr_t) path);              \
-                    if (pathp[-1].cmp < 0) {                                   \
-                        rbtn_left_set(x_type, x_field, pathp[-1].node, tnode); \
-                    } else {                                                   \
-                        rbtn_right_set(x_type, x_field, pathp[-1].node,        \
-                                       tnode);                                 \
-                    }                                                          \
-                    return;                                                    \
-                } else {                                                       \
-                    x_type *right =                                            \
-                        rbtn_right_get(x_type, x_field, pathp->node);          \
-                    x_type *rightleft = rbtn_left_get(x_type, x_field, right); \
-                    if (rightleft &&                                           \
-                        rbtn_red_get(x_type, x_field, rightleft)) {            \
-                        /*      ||                                        */   \
-                        /*    pathp(b)                                    */   \
-                        /*  //        \                                   */   \
-                        /* (b)        (b)                                 */   \
-                        /*           /                                    */   \
-                        /*          (r)                                   */   \
-                        x_type *tnode;                                         \
-                        rbtn_black_set(x_type, x_field, rightleft);            \
-                        rbtn_rotate_right(x_type, x_field, right, tnode);      \
-                        rbtn_right_set(x_type, x_field, pathp->node, tnode);   \
-                        rbtn_rotate_left(x_type, x_field, pathp->node, tnode); \
-                        /* Balance restored, but rotation modified        */   \
-                        /* subtree root, which may actually be the tree   */   \
-                        /* root.                                          */   \
-                        if (pathp == path) {                                   \
-                            /* Set root. */                                    \
-                            rbtree->root = tnode;                              \
-                        } else {                                               \
-                            if (pathp[-1].cmp < 0) {                           \
-                                rbtn_left_set(x_type, x_field, pathp[-1].node, \
-                                              tnode);                          \
-                            } else {                                           \
-                                rbtn_right_set(x_type, x_field,                \
-                                               pathp[-1].node, tnode);         \
-                            }                                                  \
-                        }                                                      \
-                        return;                                                \
-                    } else {                                                   \
-                        /*      ||                                        */   \
-                        /*    pathp(b)                                    */   \
-                        /*  //        \                                   */   \
-                        /* (b)        (b)                                 */   \
-                        /*           /                                    */   \
-                        /*          (b)                                   */   \
-                        x_type *tnode;                                         \
-                        rbtn_red_set(x_type, x_field, pathp->node);            \
-                        rbtn_rotate_left(x_type, x_field, pathp->node, tnode); \
-                        pathp->node = tnode;                                   \
-                    }                                                          \
-                }                                                              \
-            } else {                                                           \
-                x_type *left;                                                  \
-                rbtn_right_set(x_type, x_field, pathp->node, pathp[1].node);   \
-                left = rbtn_left_get(x_type, x_field, pathp->node);            \
-                if (rbtn_red_get(x_type, x_field, left)) {                     \
-                    x_type *tnode;                                             \
-                    x_type *leftright = rbtn_right_get(x_type, x_field, left); \
-                    x_type *leftrightleft =                                    \
-                        rbtn_left_get(x_type, x_field, leftright);             \
-                    if (leftrightleft &&                                       \
-                        rbtn_red_get(x_type, x_field, leftrightleft)) {        \
-                        /*      ||                                        */   \
-                        /*    pathp(b)                                    */   \
-                        /*   /        \\                                  */   \
-                        /* (r)        (b)                                 */   \
-                        /*   \                                            */   \
-                        /*   (b)                                          */   \
-                        /*   /                                            */   \
-                        /* (r)                                            */   \
-                        x_type *unode;                                         \
-                        rbtn_black_set(x_type, x_field, leftrightleft);        \
-                        rbtn_rotate_right(x_type, x_field, pathp->node,        \
-                                          unode);                              \
-                        rbtn_rotate_right(x_type, x_field, pathp->node,        \
-                                          tnode);                              \
-                        rbtn_right_set(x_type, x_field, unode, tnode);         \
-                        rbtn_rotate_left(x_type, x_field, unode, tnode);       \
-                    } else {                                                   \
-                        /*      ||                                        */   \
-                        /*    pathp(b)                                    */   \
-                        /*   /        \\                                  */   \
-                        /* (r)        (b)                                 */   \
-                        /*   \                                            */   \
-                        /*   (b)                                          */   \
-                        /*   /                                            */   \
-                        /* (b)                                            */   \
-                        assert(leftright);                                     \
-                        rbtn_red_set(x_type, x_field, leftright);              \
-                        rbtn_rotate_right(x_type, x_field, pathp->node,        \
-                                          tnode);                              \
-                        rbtn_black_set(x_type, x_field, tnode);                \
-                    }                                                          \
-                    /* Balance restored, but rotation modified subtree    */   \
-                    /* root, which may actually be the tree root.         */   \
-                    if (pathp == path) {                                       \
-                        /* Set root. */                                        \
-                        rbtree->root = tnode;                                  \
-                    } else {                                                   \
-                        if (pathp[-1].cmp < 0) {                               \
-                            rbtn_left_set(x_type, x_field, pathp[-1].node,     \
-                                          tnode);                              \
-                        } else {                                               \
-                            rbtn_right_set(x_type, x_field, pathp[-1].node,    \
-                                           tnode);                             \
-                        }                                                      \
-                    }                                                          \
-                    return;                                                    \
-                } else if (rbtn_red_get(x_type, x_field, pathp->node)) {       \
-                    x_type *leftleft = rbtn_left_get(x_type, x_field, left);   \
-                    if (leftleft && rbtn_red_get(x_type, x_field, leftleft)) { \
-                        /*        ||                                      */   \
-                        /*      pathp(r)                                  */   \
-                        /*     /        \\                                */   \
-                        /*   (b)        (b)                               */   \
-                        /*   /                                            */   \
-                        /* (r)                                            */   \
-                        x_type *tnode;                                         \
-                        rbtn_black_set(x_type, x_field, pathp->node);          \
-                        rbtn_red_set(x_type, x_field, left);                   \
-                        rbtn_black_set(x_type, x_field, leftleft);             \
-                        rbtn_rotate_right(x_type, x_field, pathp->node,        \
-                                          tnode);                              \
-                        /* Balance restored, but rotation modified        */   \
-                        /* subtree root.                                  */   \
-                        assert((uintptr_t) pathp > (uintptr_t) path);          \
-                        if (pathp[-1].cmp < 0) {                               \
-                            rbtn_left_set(x_type, x_field, pathp[-1].node,     \
-                                          tnode);                              \
-                        } else {                                               \
-                            rbtn_right_set(x_type, x_field, pathp[-1].node,    \
-                                           tnode);                             \
-                        }                                                      \
-                        return;                                                \
-                    } else {                                                   \
-                        /*        ||                                      */   \
-                        /*      pathp(r)                                  */   \
-                        /*     /        \\                                */   \
-                        /*   (b)        (b)                               */   \
-                        /*   /                                            */   \
-                        /* (b)                                            */   \
-                        rbtn_red_set(x_type, x_field, left);                   \
-                        rbtn_black_set(x_type, x_field, pathp->node);          \
-                        /* Balance restored. */                                \
-                        return;                                                \
-                    }                                                          \
-                } else {                                                       \
-                    x_type *leftleft = rbtn_left_get(x_type, x_field, left);   \
-                    if (leftleft && rbtn_red_get(x_type, x_field, leftleft)) { \
-                        /*               ||                               */   \
-                        /*             pathp(b)                           */   \
-                        /*            /        \\                         */   \
-                        /*          (b)        (b)                        */   \
-                        /*          /                                     */   \
-                        /*        (r)                                     */   \
-                        x_type *tnode;                                         \
-                        rbtn_black_set(x_type, x_field, leftleft);             \
-                        rbtn_rotate_right(x_type, x_field, pathp->node,        \
-                                          tnode);                              \
-                        /* Balance restored, but rotation modified        */   \
-                        /* subtree root, which may actually be the tree   */   \
-                        /* root.                                          */   \
-                        if (pathp == path) {                                   \
-                            /* Set root. */                                    \
-                            rbtree->root = tnode;                              \
-                        } else {                                               \
-                            if (pathp[-1].cmp < 0) {                           \
-                                rbtn_left_set(x_type, x_field, pathp[-1].node, \
-                                              tnode);                          \
-                            } else {                                           \
-                                rbtn_right_set(x_type, x_field,                \
-                                               pathp[-1].node, tnode);         \
-                            }                                                  \
-                        }                                                      \
-                        return;                                                \
-                    } else {                                                   \
-                        /*               ||                               */   \
-                        /*             pathp(b)                           */   \
-                        /*            /        \\                         */   \
-                        /*          (b)        (b)                        */   \
-                        /*          /                                     */   \
-                        /*        (b)                                     */   \
-                        rbtn_red_set(x_type, x_field, left);                   \
-                    }                                                          \
-                }                                                              \
-            }                                                                  \
-        }                                                                      \
-        /* Set root. */                                                        \
-        rbtree->root = path->node;                                             \
-        assert(!rbtn_red_get(x_type, x_field, rbtree->root));                  \
-    }                                                                          \
-    x_attr void x_prefix##destroy_recurse(x_rbt_type *rbtree, x_type *node,    \
-                                          void (*cb)(x_type *, void *),        \
-                                          void *arg)                           \
-    {                                                                          \
-        if (!node)                                                             \
-            return;                                                            \
-        x_prefix##destroy_recurse(                                             \
-            rbtree, rbtn_left_get(x_type, x_field, node), cb, arg);            \
-        rbtn_left_set(x_type, x_field, (node), NULL);                          \
-        x_prefix##destroy_recurse(                                             \
-            rbtree, rbtn_right_get(x_type, x_field, node), cb, arg);           \
-        rbtn_right_set(x_type, x_field, (node), NULL);                         \
-        if (cb) {                                                              \
-            cb(node, arg);                                                     \
-        }                                                                      \
-    }                                                                          \
-    x_attr void x_prefix##destroy(x_rbt_type *rbtree,                          \
-                                  void (*cb)(x_type *, void *), void *arg)     \
-    {                                                                          \
-        x_prefix##destroy_recurse(rbtree, rbtree->root, cb, arg);              \
-        rbtree->root = NULL;                                                   \
-    }
-
-#define map_init(key_type, element_type, __func) \
-    map_new(sizeof(key_type), sizeof(element_type), __func)
+typedef struct {
+    map_node_t *prev, *node;
+    size_t count;
+} map_iter_t;
 
 #define map_iter_value(it, type) (*(type *) (it)->node->val)
 
-typedef struct node_ map_node;
-struct node_ {
-    void *key;
-    void *val;
-    rb_node(map_node) link;
-};
-
 enum { _CMP_LESS = -1, _CMP_EQUAL = 0, _CMP_GREATER = 1 };
 
+typedef enum { RB_BLACK = 0, RB_RED } map_color_t;
+
 /* Integer comparison */
-static inline int map_cmp_int(const map_node *arg0, const map_node *arg1)
+static inline int map_cmp_int(const void *arg0, const void *arg1)
 {
-    int *a = (int *) arg0->key, *b = (int *) arg1->key;
+    int *a = (int *) arg0;
+    int *b = (int *) arg1;
     return (*a < *b) ? _CMP_LESS : (*a > *b) ? _CMP_GREATER : _CMP_EQUAL;
 }
 
 /* Unsigned integer comparison */
-static inline int map_cmp_uint(const map_node *arg0, const map_node *arg1)
+static inline int map_cmp_uint(const void *arg0, const void *arg1)
 {
-    unsigned int *a = (unsigned int *) arg0->key,
-                 *b = (unsigned int *) arg1->key;
+    unsigned int *a = (unsigned int *) arg0;
+    unsigned int *b = (unsigned int *) arg1;
     return (*a < *b) ? _CMP_LESS : (*a > *b) ? _CMP_GREATER : _CMP_EQUAL;
 }
 
-static inline void cb(map_node *node, void *UNUSED)
-{
-    free(node);
-}
-
-typedef rb_tree(map_node) map_internal_t;
-typedef map_internal_t *map_t;
-rb_gen(static, internal_map_, map_internal_t, map_node, link, map_cmp_uint);
-
-typedef struct {
-    map_node *prev, *node;
-    size_t count;
-} map_iter_t;
-
 /* Constructor */
-map_t map_new(size_t, size_t, int (*)(const map_node *, const map_node *));
+map_t map_new(size_t, size_t, int (*)(const void *, const void *));
 
 /* Add function */
 bool map_insert(map_t, void *, void *);
@@ -703,3 +85,6 @@ void map_clear(map_t);
 
 /* Destructor */
 void map_delete(map_t);
+
+#define map_init(key_type, element_type, __func) \
+    map_new(sizeof(key_type), sizeof(element_type), __func)

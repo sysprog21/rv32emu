@@ -1028,10 +1028,10 @@ RVOP(fclasss, {
 })
 
 /* FCVT.S.W */
-RVOP(fcvtsw, { rv->F_int[ir->rd] = rv->X[ir->rs1]; })
+RVOP(fcvtsw, { rv->F[ir->rd] = (int32_t) rv->X[ir->rs1]; })
 
 /* FCVT.S.WU */
-RVOP(fcvtswu, { rv->F_int[ir->rd] = rv->X[ir->rs1]; })
+RVOP(fcvtswu, { rv->F[ir->rd] = rv->X[ir->rs1]; })
 
 /* FMV.W.X */
 RVOP(fmvwx, { rv->F_int[ir->rd] = rv->X[ir->rs1]; })

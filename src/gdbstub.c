@@ -105,6 +105,14 @@ static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
     return true;
 }
 
+static void rv_on_interrupt(void *args)
+{
+    riscv_t *rv = (riscv_t *) args;
+
+    /* Notify the emulator to break out the for loop in rv_cont */
+    __atomic_store_n(&rv->is_interrupted, true, __ATOMIC_RELAXED);
+}
+
 const struct target_ops gdbstub_ops = {
     .read_reg = rv_read_reg,
     .write_reg = rv_write_reg,
@@ -114,4 +122,5 @@ const struct target_ops gdbstub_ops = {
     .stepi = rv_stepi,
     .set_bp = rv_set_bp,
     .del_bp = rv_del_bp,
+    .on_interrupt = rv_on_interrupt,
 };

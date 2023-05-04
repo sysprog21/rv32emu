@@ -21,9 +21,6 @@ static bool opt_gdbstub = false;
 /* dump registers as JSON */
 static bool opt_dump_regs = false;
 
-/* statistics */
-static bool opt_stats = false;
-
 /* RISC-V arch-test */
 static bool opt_arch_test = false;
 static char *signature_out_file;
@@ -123,10 +120,6 @@ static bool parse_args(int argc, char **args)
                 continue;
             }
 #endif
-            if (!strcmp(arg, "--stats")) {
-                opt_stats = true;
-                continue;
-            }
             if (!strcmp(arg, "--dump-registers")) {
                 opt_dump_regs = true;
                 continue;
@@ -252,10 +245,6 @@ int main(int argc, char **args)
     else {
         run(rv);
     }
-
-    /* print statistics */
-    if (opt_stats)
-        rv_stats(rv);
 
     /* dump registers as JSON */
     if (opt_dump_regs)

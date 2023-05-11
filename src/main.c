@@ -94,7 +94,6 @@ static void print_usage(const char *filename)
 #if RV32_HAS(GDBSTUB)
             "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
 #endif
-            "  --stats : printf statistics\n"
             "  --dump-registers: dump registers as JSON\n"
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n",

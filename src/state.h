@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <stdio.h>
+#include <stdlib.h>
 #include "io.h"
 #include "map.h"
 #include "riscv.h"

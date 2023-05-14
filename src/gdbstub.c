@@ -8,51 +8,73 @@
 #endif
 
 #include <assert.h>
+#include <errno.h>
 
 #include "mini-gdbstub/include/gdbstub.h"
 
 #include "breakpoint.h"
 #include "riscv_private.h"
+#include "state.h"
 
-static size_t rv_read_reg(void *args, int regno)
+static int rv_read_reg(void *args, int regno, size_t *data)
 {
     riscv_t *rv = (riscv_t *) args;
 
     if (unlikely(regno > 32))
-        return -1;
+        return EFAULT;
 
     if (regno == 32)
-        return rv_get_pc(rv);
+        *data = rv_get_pc(rv);
+    else
+        *data = rv_get_reg(rv, regno);
 
-    return rv_get_reg(rv, regno);
+    return 0;
 }
 
-static void rv_write_reg(void *args, int regno, size_t data)
+static int rv_write_reg(void *args, int regno, size_t data)
 {
     if (unlikely(regno > 32))
-        return;
+        return EFAULT;
 
     riscv_t *rv = (riscv_t *) args;
     if (regno == 32)
         rv_set_pc(rv, data);
     else
         rv_set_reg(rv, regno, data);
+
+    return 0;
 }
 
-static void rv_read_mem(void *args, size_t addr, size_t len, void *val)
+static int rv_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     riscv_t *rv = (riscv_t *) args;
+    state_t *s = rv_userdata(rv);
 
-    for (size_t i = 0; i < len; i++)
+    int err = 0;
+    for (size_t i = 0; i < len; i++) {
+        /* FIXME: This is implemented as a simple workaround for reading
+         * an invalid address. We may have to do error handling in the
+         * mem_read_* function directly. */
+        uint32_t addr_hi = (addr + i) >> 16;
+        if (!s->mem->chunks[addr_hi]) {
+            err = EFAULT;
+            continue;
+        }
+
         *((uint8_t *) val + i) = rv->io.mem_read_b(rv, addr + i);
+    }
+
+    return err;
 }
 
-static void rv_write_mem(void *args, size_t addr, size_t len, void *val)
+static int rv_write_mem(void *args, size_t addr, size_t len, void *val)
 {
     riscv_t *rv = (riscv_t *) args;
 
     for (size_t i = 0; i < len; i++)
         rv->io.mem_write_b(rv, addr + i, *((uint8_t *) val + i));
+
+    return 0;
 }
 
 static inline bool rv_is_interrupt(riscv_t *rv)

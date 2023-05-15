@@ -8,9 +8,11 @@ jobs:
     steps:
     - uses: actions/checkout@v3.4.0
     - name: install-dependencies
-      run: | 
+      run: |
             sudo apt-get update
             sudo apt-get install libsdl2-dev
+            sh .ci/riscv-toolchain-install.sh
+      shell: bash
     - name: default build
       run: make
     - name: check + tests
@@ -30,6 +32,9 @@ jobs:
       run: |
             sh .ci/riscv-tests.sh
       shell: bash
+    - name: gdbstub test
+      run: |
+            make gdbstub-test
 
   coding_style:
     runs-on: ubuntu-22.04

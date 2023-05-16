@@ -251,6 +251,7 @@ void rv_debug(riscv_t *rv)
         return;
     }
 
+    rv->debug_mode = true;
     rv->breakpoint_map = breakpoint_map_new();
     rv->is_interrupted = false;
 
@@ -280,6 +281,12 @@ enum {
 #undef _
 };
 
+#if RV32_HAS(GDBSTUB)
+#define RVOP_RUN_NEXT ((!ir->tailcall) && (!rv->debug_mode))
+#else
+#define RVOP_RUN_NEXT (!ir->tailcall)
+#endif
+
 #define RVOP(inst, code)                                                  \
     static bool do_##inst(riscv_t *rv UNUSED, const rv_insn_t *ir UNUSED) \
     {                                                                     \
@@ -288,7 +295,7 @@ enum {
         rv->csr_cycle++;                                                  \
     nextop:                                                               \
         rv->PC += ir->insn_len;                                           \
-        if (ir->tailcall)                                                 \
+        if (!RVOP_RUN_NEXT)                                               \
             return true;                                                  \
         const rv_insn_t *next = ir + 1;                                   \
         MUST_TAIL return next->impl(rv, next);                            \

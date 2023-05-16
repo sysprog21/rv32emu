@@ -75,7 +75,7 @@ OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB) -lpthread
 gdbstub-test: $(BIN)
-	$(Q)tests/gdbstub.sh && $(call notice, [OK])
+	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif
 
 # For tail-call elimination, we need a specific set of build flags applied.

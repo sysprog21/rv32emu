@@ -87,6 +87,8 @@ struct riscv_internal {
     /* gdbstub instance */
     gdbstub_t gdbstub;
 
+    bool debug_mode;
+
     /* GDB instruction breakpoint */
     breakpoint_map_t breakpoint_map;
 

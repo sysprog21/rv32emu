@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+export PATH=`pwd`/toolchain/riscv/bin:$PATH
+
 GDB=
 prefixes=("${CROSS_COMPILE}" "riscv32-unknown-elf" "riscv-none-elf")
 for prefix in "${prefixes[@]}"; do

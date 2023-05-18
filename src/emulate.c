@@ -708,6 +708,13 @@ RVOP(mulhu, {
 })
 
 /* DIV: Divide Signed */
+/* +------------------------+-----------+----------+-----------+
+ * |       Condition        |  Dividend |  Divisor |   DIV[W]  |
+ * +------------------------+-----------+----------+-----------+
+ * | Division by zero       |  x        |  0       |  −1       |
+ * | Overflow (signed only) |  −2^{L−1} |  −1      |  −2^{L−1} |
+ * +------------------------+-----------+----------+-----------+
+ */
 RVOP(div, {
     const int32_t dividend = (int32_t) rv->X[ir->rs1];
     const int32_t divisor = (int32_t) rv->X[ir->rs2];
@@ -718,6 +725,12 @@ RVOP(div, {
 })
 
 /* DIVU: Divide Unsigned */
+/* +------------------------+-----------+----------+----------+
+ * |       Condition        |  Dividend |  Divisor |  DIVU[W] |
+ * +------------------------+-----------+----------+----------+
+ * | Division by zero       |  x        |  0       |  2^L − 1 |
+ * +------------------------+-----------+----------+----------+
+ */
 RVOP(divu, {
     const uint32_t dividend = rv->X[ir->rs1];
     const uint32_t divisor = rv->X[ir->rs2];
@@ -725,6 +738,13 @@ RVOP(divu, {
 })
 
 /* REM: Remainder Signed */
+/* +------------------------+-----------+----------+---------+
+ * |       Condition        |  Dividend |  Divisor |  REM[W] |
+ * +------------------------+-----------+----------+---------+
+ * | Division by zero       |  x        |  0       |  x      |
+ * | Overflow (signed only) |  −2^{L−1} |  −1      |  0      |
+ * +------------------------+-----------+----------+---------+
+ */
 RVOP(rem, {
     const int32_t dividend = rv->X[ir->rs1];
     const int32_t divisor = rv->X[ir->rs2];
@@ -735,6 +755,12 @@ RVOP(rem, {
 })
 
 /* REMU: Remainder Unsigned */
+/* +------------------------+-----------+----------+----------+
+ * |       Condition        |  Dividend |  Divisor |  REMU[W] |
+ * +------------------------+-----------+----------+----------+
+ * | Division by zero       |  x        |  0       |  x       |
+ * +------------------------+-----------+----------+----------+
+ */
 RVOP(remu, {
     const uint32_t dividend = rv->X[ir->rs1];
     const uint32_t divisor = rv->X[ir->rs2];

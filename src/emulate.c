@@ -287,18 +287,22 @@ enum {
 #define RVOP_RUN_NEXT (!ir->tailcall)
 #endif
 
-#define RVOP(inst, code)                                                  \
-    static bool do_##inst(riscv_t *rv UNUSED, const rv_insn_t *ir UNUSED) \
-    {                                                                     \
-        rv->X[rv_reg_zero] = 0;                                           \
-        code;                                                             \
-        rv->csr_cycle++;                                                  \
-    nextop:                                                               \
-        rv->PC += ir->insn_len;                                           \
-        if (!RVOP_RUN_NEXT)                                               \
-            return true;                                                  \
-        const rv_insn_t *next = ir + 1;                                   \
-        MUST_TAIL return next->impl(rv, next);                            \
+/* branch_taken record the branch is taken or not during emulation */
+static bool branch_taken = false;
+/* last_pc record the program counter of the previous block */
+static uint32_t last_pc = 0;
+#define RVOP(inst, code)                                    \
+    static bool do_##inst(riscv_t *rv, const rv_insn_t *ir) \
+    {                                                       \
+        rv->X[rv_reg_zero] = 0;                             \
+        rv->csr_cycle++;                                    \
+        code;                                               \
+    nextop:                                                 \
+        rv->PC += ir->insn_len;                             \
+        if (!RVOP_RUN_NEXT)                                 \
+            return true;                                    \
+        const rv_insn_t *next = ir + 1;                     \
+        MUST_TAIL return next->impl(rv, next);              \
     }
 
 /* RV32I Base Instruction Set */
@@ -334,7 +338,7 @@ RVOP(jal, {
         rv->X[ir->rd] = pc + ir->insn_len;
     /* check instruction misaligned */
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    return true;
+    return ir->branch_taken->impl(rv, ir->branch_taken);
 })
 
 /*The indirect jump instruction JALR uses the I-type encoding. The
@@ -356,107 +360,45 @@ RVOP(jalr, {
     return true;
 })
 
-/* BEQ: Branch if Equal */
-RVOP(beq, {
-    const uint32_t pc = rv->PC;
-    if (rv->X[ir->rs1] != rv->X[ir->rs2]) {
-        if (!ir->branch_untaken)
-            goto nextop;
-        rv->PC += ir->insn_len;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken);
-    }
-    rv->PC += ir->imm;
-    /* check instruction misaligned */
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
+/* clang-format off */
+#define BRANCH_FUNC(type, cond)                                  \
+    const uint32_t pc = rv->PC;                                  \
+    if ((type) rv->X[ir->rs1] cond (type) rv->X[ir->rs2]) {      \
+        branch_taken = false;                                    \
+        if (!ir->branch_untaken)                                 \
+            goto nextop;                                         \
+        rv->PC += ir->insn_len;                                  \
+        last_pc = rv->PC;                                        \
+        return ir->branch_untaken->impl(rv, ir->branch_untaken); \
+    }                                                            \
+    branch_taken = true;                                         \
+    rv->PC += ir->imm;                                           \
+    /* check instruction misaligned */                           \
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                 \
+    if (ir->branch_taken) {                                      \
+        last_pc = rv->PC;                                        \
+        return ir->branch_taken->impl(rv, ir->branch_taken);     \
+    }                                                            \
     return true;
-})
+/* clang-format on */
+
+/* BEQ: Branch if Equal */
+RVOP(beq, { BRANCH_FUNC(uint32_t, !=); })
 
 /* BNE: Branch if Not Equal */
-RVOP(bne, {
-    const uint32_t pc = rv->PC;
-    if (rv->X[ir->rs1] == rv->X[ir->rs2]) {
-        if (!ir->branch_untaken)
-            goto nextop;
-        rv->PC += ir->insn_len;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken);
-    }
-    rv->PC += ir->imm;
-    /* check instruction misaligned */
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
-    return true;
-})
+RVOP(bne, { BRANCH_FUNC(uint32_t, ==); })
 
 /* BLT: Branch if Less Than */
-RVOP(blt, {
-    const uint32_t pc = rv->PC;
-    if ((int32_t) rv->X[ir->rs1] >= (int32_t) rv->X[ir->rs2]) {
-        if (!ir->branch_untaken)
-            goto nextop;
-        rv->PC += ir->insn_len;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken);
-    }
-    rv->PC += ir->imm;
-    /* check instruction misaligned */
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
-    return true;
-})
+RVOP(blt, { BRANCH_FUNC(int32_t, >=); })
 
 /* BGE: Branch if Greater Than */
-RVOP(bge, {
-    const uint32_t pc = rv->PC;
-    if ((int32_t) rv->X[ir->rs1] < (int32_t) rv->X[ir->rs2]) {
-        if (!ir->branch_untaken)
-            goto nextop;
-        rv->PC += ir->insn_len;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken);
-    }
-    rv->PC += ir->imm;
-    /* check instruction misaligned */
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
-    return true;
-})
+RVOP(bge, { BRANCH_FUNC(int32_t, <); })
 
 /* BLTU: Branch if Less Than Unsigned */
-RVOP(bltu, {
-    const uint32_t pc = rv->PC;
-    if (rv->X[ir->rs1] >= rv->X[ir->rs2]) {
-        if (!ir->branch_untaken)
-            goto nextop;
-        rv->PC += ir->insn_len;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken);
-    }
-    rv->PC += ir->imm;
-    /* check instruction misaligned */
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
-    return true;
-})
+RVOP(bltu, { BRANCH_FUNC(uint32_t, >=); })
 
 /* BGEU: Branch if Greater Than Unsigned */
-RVOP(bgeu, {
-    const uint32_t pc = rv->PC;
-    if (rv->X[ir->rs1] < rv->X[ir->rs2]) {
-        if (!ir->branch_untaken)
-            goto nextop;
-        rv->PC += ir->insn_len;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken);
-    }
-    rv->PC += ir->imm;
-    /* check instruction misaligned */
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
-    return true;
-})
+RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 
 /* LB: Load Byte */
 RVOP(lb, {
@@ -1116,7 +1058,7 @@ RVOP(cjal, {
     rv->X[1] = rv->PC + ir->insn_len;
     rv->PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
-    return true;
+    return ir->branch_taken->impl(rv, ir->branch_taken);
 })
 
 /* C.LI loads the sign-extended 6-bit immediate, imm, into register rd.
@@ -1184,7 +1126,7 @@ RVOP(cand, { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; })
 RVOP(cj, {
     rv->PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
-    return true;
+    return ir->branch_taken->impl(rv, ir->branch_taken);
 })
 
 /* C.BEQZ performs conditional control transfers. The offset is
@@ -1195,11 +1137,13 @@ RVOP(cj, {
  */
 RVOP(cbeqz, {
     if (rv->X[ir->rs1]) {
+        branch_taken = false;
         if (!ir->branch_untaken)
             goto nextop;
         rv->PC += ir->insn_len;
         return ir->branch_untaken->impl(rv, ir->branch_untaken);
     }
+    branch_taken = true;
     rv->PC += (uint32_t) ir->imm;
     if (ir->branch_taken)
         return ir->branch_taken->impl(rv, ir->branch_taken);
@@ -1209,11 +1153,13 @@ RVOP(cbeqz, {
 /* C.BEQZ */
 RVOP(cbnez, {
     if (!rv->X[ir->rs1]) {
+        branch_taken = false;
         if (!ir->branch_untaken)
             goto nextop;
         rv->PC += ir->insn_len;
         return ir->branch_untaken->impl(rv, ir->branch_untaken);
     }
+    branch_taken = true;
     rv->PC += (uint32_t) ir->imm;
     if (ir->branch_taken)
         return ir->branch_taken->impl(rv, ir->branch_taken);
@@ -1289,6 +1235,26 @@ static bool insn_is_branch(uint8_t opcode)
 #define _(inst, can_branch) IIF(can_branch)(case rv_insn_##inst:, )
         RISCV_INSN_LIST
 #undef _
+        return true;
+    }
+    return false;
+}
+
+static bool insn_is_unconditional_branch(uint8_t opcode)
+{
+    switch (opcode) {
+    case rv_insn_ecall:
+    case rv_insn_ebreak:
+    case rv_insn_jal:
+    case rv_insn_jalr:
+    case rv_insn_mret:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cj:
+    case rv_insn_cjalr:
+    case rv_insn_cjal:
+    case rv_insn_cjr:
+    case rv_insn_cebreak:
+#endif
         return true;
     }
     return false;
@@ -1377,37 +1343,25 @@ static void block_translate(riscv_t *rv, block_t *block)
         block->n_insn++;
 
         /* stop on branch */
-        if (insn_is_branch(ir->opcode))
+        if (insn_is_branch(ir->opcode)) {
+            /* recursive jump translation */
+            if (ir->opcode == rv_insn_jal
+#if RV32_HAS(EXT_C)
+                || ir->opcode == rv_insn_cj || ir->opcode == rv_insn_cjal
+#endif
+            ) {
+                block->pc_end = block->pc_end - ir->insn_len + ir->imm;
+                ir->branch_taken = ir + 1;
+                continue;
+            }
             break;
+        }
     }
     block->ir[block->n_insn - 1].tailcall = true;
 }
 
-static void extend_block(riscv_t *rv, block_t *block)
-{
-    rv_insn_t *last_ir = block->ir + block->n_insn - 1;
-    if (last_ir->branch_taken && last_ir->branch_untaken)
-        return;
-    /* calculate the PC of taken and untaken branches to find block */
-    uint32_t taken_pc = block->pc_end - last_ir->insn_len + last_ir->imm,
-             not_taken_pc = block->pc_end;
-
-    block_map_t *map = &rv->block_map;
-    block_t *next;
-
-    /* check the branch_taken/branch_untaken pointer has been assigned and the
-     * first basic block in the path of the taken/untaken branches exists or
-     * not. If either of these conditions is not met, it will not be possible to
-     * extend the path of the taken/untaken branches for basic block.
-     */
-    if (!last_ir->branch_taken && (next = block_find(map, taken_pc)))
-        last_ir->branch_taken = next->ir;
-
-    if (!last_ir->branch_untaken && (next = block_find(map, not_taken_pc)))
-        last_ir->branch_untaken = next->ir;
-}
-
-static block_t *block_find_or_translate(riscv_t *rv, block_t *prev)
+static block_t *prev = NULL;
+static block_t *block_find_or_translate(riscv_t *rv)
 {
     block_map_t *map = &rv->block_map;
     /* lookup the next block in the block map */
@@ -1435,9 +1389,7 @@ static block_t *block_find_or_translate(riscv_t *rv, block_t *prev)
          */
         if (prev)
             prev->predict = next;
-    } else
-        extend_block(rv, next);
-
+    }
 
     return next;
 }
@@ -1447,14 +1399,11 @@ void rv_step(riscv_t *rv, int32_t cycles)
     assert(rv);
 
     /* find or translate a block for starting PC */
-    block_t *prev = NULL;
-
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 
     /* loop until we hit out cycle target */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         block_t *block;
-
         /* try to predict the next block */
         if (prev && prev->predict && prev->predict->pc_start == rv->PC) {
             block = prev->predict;
@@ -1462,11 +1411,32 @@ void rv_step(riscv_t *rv, int32_t cycles)
             /* lookup the next block in block map or translate a new block,
              * and move onto the next block.
              */
-            block = block_find_or_translate(rv, prev);
+            block = block_find_or_translate(rv);
         }
 
         /* we should have a block by now */
         assert(block);
+
+        /* After emulating the previous block, we determine whether the branch
+         * is taken or not. Consequently, we assign the IR array of the current
+         * block to either the branch_taken or branch_untaken pointer of the
+         * previous block.
+         */
+        if (prev) {
+            /* updtae previous block */
+            if (prev->pc_start != last_pc)
+                prev = block_find(&rv->block_map, last_pc);
+
+            rv_insn_t *last_ir = prev->ir + prev->n_insn - 1;
+            /* chain block */
+            if (!insn_is_unconditional_branch(last_ir->opcode)) {
+                if (branch_taken && !last_ir->branch_taken)
+                    last_ir->branch_taken = block->ir;
+                else if (!last_ir->branch_untaken)
+                    last_ir->branch_untaken = block->ir;
+            }
+        }
+        last_pc = rv->PC;
 
         /* execute the block */
         const rv_insn_t *ir = block->ir;

@@ -76,9 +76,9 @@ if ((num_filtered > 0)); then
     done
 
     average_dmips=$(echo "scale=2; $total_dmips / $num_filtered" | bc -l)
-    echo "---------------------"
-    echo "Average DMIPS (Excluding Outliers): $average_dmips"
-    echo "---------------------"
+    echo "--------------------------"
+    echo "Average DMIPS : $average_dmips"
+    echo "--------------------------"
 else
     fail
 fi

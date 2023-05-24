@@ -24,9 +24,9 @@
 #define __ALIGNED(x)
 #endif
 
-/* There is no tail-call optimization(TCO) in non-optimized builds. To work
- * around this, we attempts to use a compiler attribute called musttail that
- * forces the compiler to TCO even when optimizations aren't on.
+/* Non-optimized builds do not have tail-call optimization (TCO). To work
+ * around this, the compiler attribute 'musttail' is used, which forces TCO
+ * even without optimizations enabled.
  */
 #if defined(__has_attribute) && __has_attribute(musttail)
 #define MUST_TAIL __attribute__((musttail))

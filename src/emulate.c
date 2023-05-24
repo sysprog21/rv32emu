@@ -106,7 +106,7 @@ RV_EXCEPTION_LIST
         return false;                                                 \
     }
 
-/* Get current time in microsecnds and update csr_time register */
+/* get current time in microsecnds and update csr_time register */
 static inline void update_time(riscv_t *rv)
 {
     struct timeval tv;
@@ -177,7 +177,7 @@ static inline bool csr_is_writable(uint32_t csr)
 
 /* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
- * zero - extends the value to XLEN bits, then writes it to integer register rd.
+ * zero-extends the value to XLEN bits, and then writes it to register rd.
  * The initial value in rs1 is written to the CSR.
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
@@ -218,8 +218,8 @@ static uint32_t csr_csrrs(riscv_t *rv, uint32_t csr, uint32_t val)
 }
 
 /* perform csrrc (atomic read and clear)
- * Read old value of CSR, zero-extend to XLEN bits, write to rd
- * Read value from rs1, use as bit mask to clear bits in CSR
+ * Read old value of CSR, zero-extend to XLEN bits, write to rd.
+ * Read value from rs1, use as bit mask to clear bits in CSR.
  */
 static uint32_t csr_csrrc(riscv_t *rv, uint32_t csr, uint32_t val)
 {
@@ -287,10 +287,12 @@ enum {
 #define RVOP_RUN_NEXT (!ir->tailcall)
 #endif
 
-/* branch_taken record the branch is taken or not during emulation */
+/* record whether the branch is taken or not during emulation */
 static bool branch_taken = false;
-/* last_pc record the program counter of the previous block */
+
+/* record the program counter of the previous block */
 static uint32_t last_pc = 0;
+
 #define RVOP(inst, code)                                    \
     static bool do_##inst(riscv_t *rv, const rv_insn_t *ir) \
     {                                                       \
@@ -317,11 +319,10 @@ RVOP(nop, {/* no operation */});
  */
 RVOP(lui, { rv->X[ir->rd] = ir->imm; })
 
-/* AUIPC is used to build pc-relative addresses and uses the U-type
- * format. AUIPC forms a 32-bit offset from the 20-bit U-immediate,
- * filling in the lowest 12 bits with zeros, adds this offset to the
- * address of the AUIPC instruction, then places the result in register
- * rd.
+/* AUIPC is used to build pc-relative addresses and uses the U-type format.
+ * AUIPC forms a 32-bit offset from the 20-bit U-immediate, filling in the
+ * lowest 12 bits with zeros, adds this offset to the address of the AUIPC
+ * instruction, then places the result in register rd.
  */
 RVOP(auipc, { rv->X[ir->rd] = ir->imm + rv->PC; })
 
@@ -341,12 +342,12 @@ RVOP(jal, {
     return ir->branch_taken->impl(rv, ir->branch_taken);
 })
 
-/*The indirect jump instruction JALR uses the I-type encoding. The
- * target address is obtained by adding the sign-extended 12-bit
- * I-immediate to the register rs1, then setting the least-significant
- * bit of the result to zero. The address of the instruction following
- * the jump (pc+4) is written to register rd. Register x0 can be used as
- * the destination if the result is not required.
+/* The indirect jump instruction JALR uses the I-type encoding. The target
+ * address is obtained by adding the sign-extended 12-bit I-immediate to the
+ * register rs1, then setting the least-significant bit of the result to zero.
+ * The address of the instruction following the jump (pc+4) is written to
+ * register rd. Register x0 can be used as the destination if the result is
+ * not required.
  */
 RVOP(jalr, {
     const uint32_t pc = rv->PC;
@@ -455,14 +456,13 @@ RVOP(sw, {
 RVOP(addi, { rv->X[ir->rd] = (int32_t) (rv->X[ir->rs1]) + ir->imm; })
 
 /* SLTI place the value 1 in register rd if register rs1 is less than the
- * signextended immediate when both are treated as signed numbers, else
- * 0 is written to rd.
+ * signextended immediate when both are treated as signed numbers, else 0 is
+ * written to rd.
  */
 RVOP(slti, { rv->X[ir->rd] = ((int32_t) (rv->X[ir->rs1]) < ir->imm) ? 1 : 0; })
 
 /* SLTIU places the value 1 in register rd if register rs1 is less than the
- * immediate when both are treated as unsigned numbers, else 0 is
- * written to rd.
+ * immediate when both are treated as unsigned numbers, else 0 is written to rd.
  */
 RVOP(sltiu, { rv->X[ir->rd] = (rv->X[ir->rs1] < (uint32_t) ir->imm) ? 1 : 0; })
 
@@ -482,13 +482,13 @@ RVOP(andi, { rv->X[ir->rd] = rv->X[ir->rs1] & ir->imm; })
  */
 RVOP(slli, { rv->X[ir->rd] = rv->X[ir->rs1] << (ir->imm & 0x1f); })
 
-/* SRLI performs logical right shift on the value in register rs1 by the
- * shift amount held in the lower 5 bits of the immediate.
+/* SRLI performs logical right shift on the value in register rs1 by the shift
+ * amount held in the lower 5 bits of the immediate.
  */
 RVOP(srli, { rv->X[ir->rd] = rv->X[ir->rs1] >> (ir->imm & 0x1f); })
 
-/* SRAI performs arithmetic right shift on the value in register rs1 by
- * the shift amount held in the lower 5 bits of the immediate.
+/* SRAI performs arithmetic right shift on the value in register rs1 by the
+ * shift amount held in the lower 5 bits of the immediate.
  */
 RVOP(srai, { rv->X[ir->rd] = ((int32_t) rv->X[ir->rs1]) >> (ir->imm & 0x1f); })
 
@@ -711,9 +711,9 @@ RVOP(remu, {
 #endif
 
 #if RV32_HAS(EXT_A) /* RV32A Standard Extension */
-/* At present, AMO is not implemented atomically because the rvop_jump_table[(ir
- * + 1)->opcode]d RISC-V core just runs on single thread, and no out-of-order
- * execution happens. In addition, rl/aq are not handled.
+/* At present, AMO is not implemented atomically because the emulated RISC-V
+ * core just runs on single thread, and no out-of-order execution happens.
+ * In addition, rl/aq are not handled.
  */
 
 /* LR.W: Load Reserved */
@@ -958,8 +958,8 @@ RVOP(fmaxs, {
     }
 })
 
-/* FCVT.W.S and FCVT.WU.S convert a floating point number
- * to an integer, the rounding mode is specified in rm field.
+/* FCVT.W.S and FCVT.WU.S convert a floating point number to an integer,
+ * the rounding mode is specified in rm field.
  */
 
 /* FCVT.W.S */
@@ -971,8 +971,8 @@ RVOP(fcvtwus, { rv->X[ir->rd] = (uint32_t) rv->F[ir->rs1]; })
 /* FMV.X.W */
 RVOP(fmvxw, { rv->X[ir->rd] = rv->F_int[ir->rs1]; })
 
-/* FEQ.S performs a quiet comparison: it only sets the invalid
- * operation exception flag if either input is a signaling NaN.
+/* FEQ.S performs a quiet comparison: it only sets the invalid operation
+ * exception flag if either input is a signaling NaN.
  */
 RVOP(feqs, {
     rv->X[ir->rd] = (rv->F[ir->rs1] == rv->F[ir->rs2]) ? 1 : 0;
@@ -980,9 +980,9 @@ RVOP(feqs, {
         rv->csr_fcsr |= FFLAG_INVALID_OP;
 })
 
-/* FLT.S and FLE.S perform what the IEEE 754-2008 standard refers
- * to as signaling comparisons: that is, they set the invalid
- * operation exception flag if either input is NaN.
+/* FLT.S and FLE.S perform what the IEEE 754-2008 standard refers to as
+ * signaling comparisons: that is, they set the invalid operation exception
+ * flag if either input is NaN.
  */
 RVOP(flts, {
     rv->X[ir->rd] = (rv->F[ir->rs1] < rv->F[ir->rs2]) ? 1 : 0;
@@ -1013,17 +1013,17 @@ RVOP(fmvwx, { rv->F_int[ir->rd] = rv->X[ir->rs1]; })
 #endif
 
 #if RV32_HAS(EXT_C) /* RV32C Standard Extension */
-/* C.ADDI4SPN is a CIW-format instruction that adds a zero-extended
- * non-zero immediate, scaledby 4, to the stack pointer, x2, and writes
- * the result to rd'. This instruction is used to generate pointers to
- * stack-allocated variables, and expands to addi rd', x2, nzuimm[9:2].
+/* C.ADDI4SPN is a CIW-format instruction that adds a zero-extended non-zero
+ * immediate, scaledby 4, to the stack pointer, x2, and writes the result to
+ * rd'.
+ * This instruction is used to generate pointers to stack-allocated variables,
+ * and expands to addi rd', x2, nzuimm[9:2].
  */
 RVOP(caddi4spn, { rv->X[ir->rd] = rv->X[2] + (uint16_t) ir->imm; })
 
-/* C.LW loads a 32-bit value from memory into register rd'. It computes
- * an ffective address by adding the zero-extended offset, scaled by 4,
- * to the base address in register rs1'. It expands to  # lw rd',
- * offset[6:2](rs1').
+/* C.LW loads a 32-bit value from memory into register rd'. It computes an
+ * effective address by adding the zero-extended offset, scaled by 4, to the
+ * base address in register rs1'. It expands to lw rd', offset[6:2](rs1').
  */
 RVOP(clw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
@@ -1032,9 +1032,9 @@ RVOP(clw, {
 })
 
 /* C.SW stores a 32-bit value in register rs2' to memory. It computes an
- * effective address by adding the zero-extended offset, scaled by 4, to
- * the base address in register rs1'.
- * It expands to sw rs2', offset[6:2](rs1')
+ * effective address by adding the zero-extended offset, scaled by 4, to the
+ * base address in register rs1'.
+ * It expands to sw rs2', offset[6:2](rs1').
  */
 RVOP(csw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
@@ -1045,11 +1045,11 @@ RVOP(csw, {
 /* C.NOP */
 RVOP(cnop, {/* no operation */})
 
-/* C.ADDI adds the non-zero sign-extended 6-bit immediate to the value
- * in register rd then writes the result to rd. C.ADDI expands into addi
- * rd, rd, nzimm[5:0]. C.ADDI is only valid when rd̸=x0. The code point
- * with both rd=x0 and nzimm=0 encodes the C.NOP instruction; the
- * remaining code points with either rd=x0 or nzimm=0 encode HINTs.
+/* C.ADDI adds the non-zero sign-extended 6-bit immediate to the value in
+ * register rd then writes the result to rd. C.ADDI expands into
+ * addi rd, rd, nzimm[5:0]. C.ADDI is only valid when rd'=x0. The code point
+ * with both rd=x0 and nzimm=0 encodes the C.NOP instruction; the remaining
+ * code points with either rd=x0 or nzimm=0 encode HINTs.
  */
 RVOP(caddi, { rv->X[ir->rd] += (int16_t) ir->imm; })
 
@@ -1063,16 +1063,14 @@ RVOP(cjal, {
 
 /* C.LI loads the sign-extended 6-bit immediate, imm, into register rd.
  * C.LI expands into addi rd, x0, imm[5:0].
- * C.LI is only valid when rd=x0; the code points with rd=x0 encode
- * HINTs.
+ * C.LI is only valid when rd=x0; the code points with rd=x0 encode HINTs.
  */
 RVOP(cli, { rv->X[ir->rd] = ir->imm; })
 
-/* C.ADDI16SP is used to adjust the stack pointer in procedure
- * prologues and epilogues.
- * It expands into addi x2, x2, nzimm[9:4].
- * C.ADDI16SP is only valid when nzimm̸=0; the code point with nzimm=0
- * is reserved.
+/* C.ADDI16SP is used to adjust the stack pointer in procedure prologues
+ * and epilogues. It expands into addi x2, x2, nzimm[9:4].
+ * C.ADDI16SP is only valid when nzimm'=0; the code point with nzimm=0 is
+ * reserved.
  */
 RVOP(caddi16sp, { rv->X[ir->rd] += ir->imm; })
 
@@ -1080,8 +1078,8 @@ RVOP(caddi16sp, { rv->X[ir->rd] += ir->imm; })
  * destination register, clears the bottom 12 bits, and sign-extends bit
  * 17 into all higher bits of the destination.
  * C.LUI expands into lui rd, nzimm[17:12].
- * C.LUI is only valid when rd̸={x0, x2}, and when the immediate is not
- * equal to zero.
+ * C.LUI is only valid when rd'={x0, x2}, and when the immediate is not equal
+ * to zero.
  */
 RVOP(clui, { rv->X[ir->rd] = ir->imm; })
 
@@ -1102,9 +1100,9 @@ RVOP(csrai, {
         rv->X[ir->rs1] |= mask >> i;
 })
 
-/* C.ANDI is a CB-format instruction that computes the bitwise AND of
- * the value in register rd' and the sign-extended 6-bit immediate, then
- * writes the result to rd'. C.ANDI expands to andi rd', rd', imm[5:0].
+/* C.ANDI is a CB-format instruction that computes the bitwise AND of the
+ * value in register rd' and the sign-extended 6-bit immediate, then writes
+ * the result to rd'. C.ANDI expands to andi rd', rd', imm[5:0].
  */
 RVOP(candi, { rv->X[ir->rs1] &= ir->imm; })
 
@@ -1118,8 +1116,8 @@ RVOP(cor, { rv->X[ir->rd] = rv->X[ir->rs1] | rv->X[ir->rs2]; })
 
 RVOP(cand, { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; })
 
-/* C.J performs an unconditional control transfer. The offset is
- * sign-extended and added to the pc to form the jump target address.
+/* C.J performs an unconditional control transfer. The offset is sign-extended
+ * and added to the pc to form the jump target address.
  * C.J can therefore target a ±2 KiB range.
  * C.J expands to jal x0, offset[11:1].
  */
@@ -1129,11 +1127,10 @@ RVOP(cj, {
     return ir->branch_taken->impl(rv, ir->branch_taken);
 })
 
-/* C.BEQZ performs conditional control transfers. The offset is
- * sign-extended and added to the pc to form the branch target address.
- * It can therefore target a ±256 B range. C.BEQZ takes the branch if
- * the value in register rs1' is zero. It expands to beq rs1', x0,
- * offset[8:1].
+/* C.BEQZ performs conditional control transfers. The offset is sign-extended
+ * and added to the pc to form the branch target address.
+ * It can therefore target a ±256 B range. C.BEQZ takes the branch if the
+ * value in register rs1' is zero. It expands to beq rs1', x0, offset[8:1].
  */
 RVOP(cbeqz, {
     if (rv->X[ir->rs1]) {
@@ -1166,10 +1163,9 @@ RVOP(cbnez, {
     return true;
 })
 
-/* C.SLLI is a CI-format instruction that performs a logical left shift
- * of the value in register rd then writes the result to rd. The shift
- * amount is encoded in the shamt field. C.SLLI expands into slli rd,
- * rd, shamt[5:0].
+/* C.SLLI is a CI-format instruction that performs a logical left shift of
+ * the value in register rd then writes the result to rd. The shift amount
+ * is encoded in the shamt field. C.SLLI expands into slli rd, rd, shamt[5:0].
  */
 RVOP(cslli, { rv->X[ir->rd] <<= (uint8_t) ir->imm; })
 
@@ -1206,12 +1202,12 @@ RVOP(cjalr, {
     return true;
 })
 
-/* C.ADD adds the values in registers rd and rs2 and writes the
- * result to register rd.
+/* C.ADD adds the values in registers rd and rs2 and writes the result to
+ * register rd.
  * C.ADD expands into add rd, rd, rs2.
- * C.ADD is only valid when rs2=x0; the code points with rs2=x0
- * correspond to the C.JALR and C.EBREAK instructions. The code
- * points with rs2=x0 and rd=x0 are HINTs.
+ * C.ADD is only valid when rs2=x0; the code points with rs2=x0 correspond to
+ * the C.JALR and C.EBREAK instructions. The code points with rs2=x0 and rd=x0
+ * are HINTs.
  */
 RVOP(cadd, { rv->X[ir->rd] = rv->X[ir->rs1] + rv->X[ir->rs2]; })
 
@@ -1382,10 +1378,10 @@ static block_t *block_find_or_translate(riscv_t *rv)
         /* insert the block into block map */
         block_insert(&rv->block_map, next);
 
-        /* update the block prediction
-         * When we translate a new block, the block predictor may benefit,
-         * but when it is updated after we find a particular block, it may
-         * penalize us significantly.
+        /* update the block prediction.
+         * When translating a new block, the block predictor may benefit,
+         * but updating it after finding a particular block may penalize
+         * significantly.
          */
         if (prev)
             prev->predict = next;
@@ -1401,7 +1397,7 @@ void rv_step(riscv_t *rv, int32_t cycles)
     /* find or translate a block for starting PC */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 
-    /* loop until we hit out cycle target */
+    /* loop until hitting the cycle target */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         block_t *block;
         /* try to predict the next block */
@@ -1414,13 +1410,13 @@ void rv_step(riscv_t *rv, int32_t cycles)
             block = block_find_or_translate(rv);
         }
 
-        /* we should have a block by now */
+        /* by now, a block should be available */
         assert(block);
 
-        /* After emulating the previous block, we determine whether the branch
-         * is taken or not. Consequently, we assign the IR array of the current
-         * block to either the branch_taken or branch_untaken pointer of the
-         * previous block.
+        /* After emulating the previous block, it is determined whether the
+         * branch is taken or not. The IR array of the current block is then
+         * assigned to either the branch_taken or branch_untaken pointer of
+         * the previous block.
          */
         if (prev) {
             /* updtae previous block */

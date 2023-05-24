@@ -82,7 +82,7 @@ static void syscall_write(riscv_t *rv)
     riscv_word_t buffer = rv_get_reg(rv, rv_reg_a1);
     riscv_word_t count = rv_get_reg(rv, rv_reg_a2);
 
-    /* read the string that we are printing */
+    /* read the string being printed */
     uint8_t *tmp = malloc(count);
     memory_read(s->mem, tmp, buffer, count);
 

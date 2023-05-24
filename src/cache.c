@@ -16,25 +16,27 @@
 #define GOLDEN_RATIO_32 0x61C88647
 #define HASH(val) \
     (((val) * (GOLDEN_RATIO_32)) >> (32 - (cache_size_bits))) & (cache_size - 1)
+
 /* THRESHOLD is set to identify hot spots. Once the frequency of use for a block
- * exceeds the THRESHOLD, the JIT compiler flow is triggered. */
+ * exceeds the THRESHOLD, the JIT compiler flow is triggered.
+ */
 #define THRESHOLD 1000
 
 static uint32_t cache_size, cache_size_bits;
 static struct mpool *cache_mp;
 
 #if RV32_HAS(ARC)
-/*
- * Adaptive Replacement Cache (ARC) improves the fundamental LRU strategy
- * by dividing the cache into two lists, T1 and T2. list T1 is for LRU
- * strategy and list T2 is for LFU strategy. Moreover, it keeps two ghost
- * lists, B1 and B2, with replaced entries from the LRU list going into B1
- * and the LFU list going into B2.
+/* The Adaptive Replacement Cache (ARC) improves the traditional LRU strategy
+ * by dividing the cache into two lists: T1 and T2. T1 follows the LRU
+ * strategy, while T2 follows the LFU strategy. Additionally, ARC maintains two
+ * ghost lists, B1 and B2, which store replaced entries from the LRU and LFU
+ * lists, respectively.
  *
- * Based on B1 and B2, ARC will modify the size of T1 and T2. When a cache
- * hit occurs in B1, it indicates that T1's capacity is too little, therefore
- * we increase T1's size while decreasing T2. But, if the cache hit occurs in
- * B2, we would increase the size of T2 and decrease the size of T1.
+ * Based on the contents of B1 and B2, ARC dynamically adjusts the sizes of T1
+ * and T2. If a cache hit occurs in B1, it indicates that the size of T1 is
+ * insufficient, leading to an increase in T1's size and a decrease in T2's
+ * size. Conversely, if a cache hit occurs in B2, T2's size is increased while
+ * T1's size is decreased.
  */
 typedef enum {
     LRU_list,
@@ -57,8 +59,7 @@ struct hlist_node {
 };
 
 #if RV32_HAS(ARC)
-/*
- * list maintains four cache lists T1, T2, B1, and B2.
+/* list maintains four cache lists T1, T2, B1, and B2.
  * ht_list maintains hashtable and improves the performance of cache searching.
  */
 typedef struct {
@@ -225,7 +226,6 @@ static inline void hlist_del_init(struct hlist_node *n)
          pos = hlist_entry_safe((pos)->member.next, type, member))
 #endif
 
-
 cache_t *cache_create(int size_bits)
 {
     cache_t *cache = malloc(sizeof(cache_t));
@@ -291,12 +291,12 @@ cache_t *cache_create(int size_bits)
 
 
 #if RV32_HAS(ARC)
-/* Rules of ARC
+/* Rules of ARC:
  * 1. size of LRU_list + size of LFU_list <= c
  * 2. size of LRU_list + size of LRU_ghost_list <= c
  * 3. size of LFU_list + size of LFU_ghost_list <= 2c
  * 4. size of LRU_list + size of LFU_list + size of LRU_ghost_list + size of
- * LFU_ghost_list <= 2c
+ *    LFU_ghost_list <= 2c
  */
 #define CACHE_ASSERT(cache)                                                 \
     assert(cache->list_size[LRU_list] + cache->list_size[LFU_list] <=       \
@@ -401,10 +401,11 @@ void *cache_get(cache_t *cache, uint32_t key)
     if (!entry || entry->key != key)
         return NULL;
 
-    /* Once the frequency of use for a specific block exceeds the predetermined
-     * THRESHOLD, we dispatch the block to the code generator for the purpose of
-     * generating C code. Subsequently, the generated C code is compiled into
-     * machine code by the target compiler. */
+    /* When the frequency of use for a specific block exceeds the predetermined
+     * THRESHOLD, the block is dispatched to the code generator to generate C
+     * code. The generated C code is then compiled into machine code by the
+     * target compiler.
+     */
     if (entry->frequency < THRESHOLD) {
         list_del_init(&entry->list);
         list_add(&entry->list, cache->lists[entry->frequency++]);
@@ -420,8 +421,8 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
 #if RV32_HAS(ARC)
     assert(cache->list_size[LRU_list] + cache->list_size[LRU_ghost_list] <=
            cache->capacity);
-    /* Before adding new element to cach, we should check the status
-     * of cache.
+    /* Before adding a new element to the cache, it is necessary to check the
+     * status of the cache.
      */
     if ((cache->list_size[LRU_list] + cache->list_size[LRU_ghost_list]) ==
         cache->capacity) {

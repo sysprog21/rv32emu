@@ -2,14 +2,12 @@
 
 source tests/common.sh
 
-num_runs=10
+# Set the number of runs for the Dhrystone benchmark
+N_RUNS=10
 
 function run_dhrystone()
 {
     # Run Dhrystone and extract the DMIPS value
-#    output=$($RUN $O/dhrystone.elf)
-#    dmips=$(echo "$output" | grep -oE '[0-9]+' | awk 'NR==5{print}')
-#    echo "$dmips"
     output=$($RUN $O/dhrystone.elf 2>&1)
     local exit_code=$?
     [ $exit_code -ne 0 ] && fail
@@ -19,35 +17,67 @@ function run_dhrystone()
 
 # Run Dhrystone benchmark and collect DMIPS values
 dmips_values=()
-for ((i=1; i<=$num_runs; i++))
+for ((i=1; i<=$N_RUNS; i++))
 do
-    echo "Running Dhrystone benchmark - Run $i"
+    echo "Running Dhrystone benchmark - Run #$i"
     dmips=$(run_dhrystone)
     exit_code=$?
     [ $exit_code -ne 0 ] && fail
     dmips_values+=("$dmips")
 done
 
-# Filter out non-numeric values
+# Sort DMIPS values
+sorted_dmips=($(printf "%s\n" "${dmips_values[@]}" | sort -n))
+
+# Calculate Median Absolute Deviation (MAD)
+num_dmips=${#sorted_dmips[@]}
+median_index=$((num_dmips / 2))
+if ((num_dmips % 2 == 0)); then
+    median=$(echo "scale=2; (${sorted_dmips[median_index - 1]} + ${sorted_dmips[median_index]}) / 2" | bc -l)
+else
+    median=${sorted_dmips[median_index]}
+fi
+
+deviation=0
+for dmips in "${sorted_dmips[@]}"; do
+    if (( $(echo "$dmips > $median" | bc -l) )); then
+        diff=$(echo "$dmips - $median" | bc -l)
+    else
+        diff=$(echo "$median - $dmips" | bc -l)
+    fi
+    deviation=$(echo "scale=2; $deviation + $diff" | bc -l)
+done
+
+mad=$(echo "scale=2; $deviation / $num_dmips" | bc -l)
+
+# Filter outliers based on MAD
 filtered_dmips=()
-for dmips in "${dmips_values[@]}"
+for dmips in "${sorted_dmips[@]}"
 do
-    if [[ $dmips =~ ^[0-9]+$ ]]; then
-        filtered_dmips+=("$dmips")
+    if (( $(echo "$dmips > 0" | bc -l) )); then
+        if (( $(echo "$dmips > $median" | bc -l) )); then
+            diff=$(echo "$dmips - $median" | bc -l)
+        else
+            diff=$(echo "$median - $dmips" | bc -l)
+        fi
+        if (( $(echo "$diff <= $mad * 2" | bc -l) )); then
+            filtered_dmips+=("$dmips")
+        fi
     fi
 done
 
 # Calculate average DMIPS excluding outliers
 num_filtered=${#filtered_dmips[@]}
 if ((num_filtered > 0)); then
-    total_filtered_dmips=0
+    total_dmips=0
     for dmips in "${filtered_dmips[@]}"
     do
-        total_filtered_dmips=$(echo "$total_filtered_dmips + $dmips" | bc -l)
+        total_dmips=$(echo "scale=2; $total_dmips + $dmips" | bc -l)
     done
-    average_filtered_dmips=$(echo "scale=2; $total_filtered_dmips / $num_filtered" | bc -l)
+
+    average_dmips=$(echo "scale=2; $total_dmips / $num_filtered" | bc -l)
     echo "---------------------"
-    echo "Average DMIPS (Excluding Outliers): $average_filtered_dmips"
+    echo "Average DMIPS (Excluding Outliers): $average_dmips"
     echo "---------------------"
 else
     fail

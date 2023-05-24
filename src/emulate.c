@@ -1229,7 +1229,7 @@ static const void *dispatch_table[] = {
 #undef _
 };
 
-static bool insn_is_branch(uint8_t opcode)
+static inline bool insn_is_branch(uint8_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch) IIF(can_branch)(case rv_insn_##inst:, )
@@ -1240,7 +1240,7 @@ static bool insn_is_branch(uint8_t opcode)
     return false;
 }
 
-static bool insn_is_unconditional_branch(uint8_t opcode)
+static inline bool insn_is_unconditional_branch(uint8_t opcode)
 {
     switch (opcode) {
     case rv_insn_ecall:
@@ -1261,7 +1261,7 @@ static bool insn_is_unconditional_branch(uint8_t opcode)
 }
 
 /* hash function is used when mapping address into the block map */
-static uint32_t hash(size_t k)
+static inline uint32_t hash(size_t k)
 {
     k ^= k << 21;
     k ^= k >> 17;

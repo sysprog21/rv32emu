@@ -24,6 +24,19 @@
 #define __ALIGNED(x)
 #endif
 
+/* The purpose of __builtin_unreachable() is to assist the compiler in:
+ * - Eliminating dead code that the programmer knows will never be executed.
+ * - Linearizing the code by indicating to the compiler that the path is 'cold'
+ *   (a similar effect can be achieved by calling a noreturn function).
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define __UNREACHABLE __builtin_unreachable()
+#else /* unspported compilers */
+/* clang-format off */
+#define __UNREACHABLE do { /* nop */ } while (0)
+/* clang-format on */
+#endif
+
 /* Non-optimized builds do not have tail-call optimization (TCO). To work
  * around this, the compiler attribute 'musttail' is used, which forces TCO
  * even without optimizations enabled.

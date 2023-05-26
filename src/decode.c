@@ -1411,7 +1411,7 @@ static inline bool op_cmisc_alu(rv_insn_t *ir, const uint32_t insn)
             assert(!"Instruction reserved");
             break;
         default:
-            assert(!"Should not be reachable");
+            __UNREACHABLE;
             break;
         }
         break;
@@ -1598,7 +1598,7 @@ static inline bool op_ccr(rv_insn_t *ir, const uint32_t insn)
         }
         break;
     default:
-        assert(!"Should be unreachable.");
+        __UNREACHABLE;
         break;
     }
     return true;

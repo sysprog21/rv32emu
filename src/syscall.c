@@ -107,8 +107,8 @@ static void syscall_exit(riscv_t *rv)
 {
     rv_halt(rv);
 
-    /* _exit(code); */
     riscv_word_t code = rv_get_reg(rv, rv_reg_a0);
+    /* FIXME: add an option to show/hide this message */
     fprintf(stdout, "inferior exit code %d\n", (int) code);
 }
 

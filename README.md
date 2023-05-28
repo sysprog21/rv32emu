@@ -180,7 +180,6 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * [yutongshen/RISC-V-Simulator](https://github.com/yutongshen/RISC-V-Simulator)
 * [rvc](https://github.com/PiMaker/rvc)
 * [RVVM](https://github.com/LekKit/RVVM)
-* [Threaded Code](https://www.complang.tuwien.ac.at/forth/threaded-code.html) / [threaded-code-benchmark](https://github.com/shadowofneptune/threaded-code-benchmark)
 
 ## License
 `rv32emu` is available under a permissive MIT-style license.

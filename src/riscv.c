@@ -25,6 +25,8 @@ void block_map_clear(block_map_t *map)
         block_t *block = map->map[i];
         if (!block)
             continue;
+        for (uint32_t i = 0; i < block->n_insn; i++)
+            free(block->ir[i].fuse);
         free(block->ir);
         free(block);
         map->map[i] = NULL;

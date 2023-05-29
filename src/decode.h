@@ -156,7 +156,14 @@
         _(cjalr, 1)                        \
         _(cadd, 0)                         \
         _(cswsp, 0)                        \
-    )
+    )                                      \
+    /* macro operation fusion: convert specific RISC-V instruction patterns 
+     * into faster and equivalent code 
+     */                                    \
+    _(fuse1, 0)                            \
+    _(fuse2, 0)                            \
+    _(fuse3, 0)                            \
+    _(fuse4, 0)
 /* clang-format on */
 
 /* IR list */
@@ -228,6 +235,11 @@ enum {
     INSN_32 = 4,
 };
 
+typedef struct {
+    int32_t imm;
+    uint8_t rd, rs1, rs2;
+} opcode_fuse_t;
+
 typedef struct rv_insn {
     union {
         int32_t imm;
@@ -240,6 +252,9 @@ typedef struct rv_insn {
 #if RV32_HAS(EXT_C)
     uint8_t shamt;
 #endif
+    /* fuse operation */
+    int16_t imm2;
+    opcode_fuse_t *fuse;
 
     /* instruction length */
     uint8_t insn_len;

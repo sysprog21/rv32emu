@@ -31,6 +31,7 @@ extern struct target_ops gdbstub_ops;
 #include "decode.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "state.h"
 #include "utils.h"
 
 /* RISC-V exception code list */
@@ -310,7 +311,15 @@ static uint32_t last_pc = 0;
 /* RV32I Base Instruction Set */
 
 /* Internal */
-RVOP(nop, {/* no operation */});
+static bool do_nop(riscv_t *rv, const rv_insn_t *ir)
+{
+    rv->X[rv_reg_zero] = 0;
+    rv->csr_cycle++;
+    rv->PC += ir->insn_len;
+    const rv_insn_t *next = ir + 1;
+    MUST_TAIL return next->impl(rv, next);
+}
+
 
 /* LUI is used to build 32-bit constants and uses the U-type format. LUI
  * places the U-immediate value in the top 20 bits of the destination
@@ -1219,6 +1228,46 @@ RVOP(cswsp, {
 })
 #endif
 
+/* auipc + addi */
+RVOP(fuse1, { rv->X[ir->rd] = (int32_t) (rv->PC + ir->imm + ir->imm2); })
+
+/* auipc + add */
+RVOP(fuse2, {
+    rv->X[ir->rd] = (int32_t) (rv->X[ir->rs1]) + (int32_t) (rv->PC + ir->imm);
+})
+
+/* multiple sw */
+RVOP(fuse3, {
+    opcode_fuse_t *fuse = ir->fuse;
+    uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
+    /* the memory addresses of the sw instructions are contiguous, so we only
+     * need to check the first sw instruction to determine if its memory address
+     * is misaligned or if the memory chunk does not exist.
+     */
+    RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
+    rv->io.mem_write_w(rv, addr, rv->X[fuse[0].rs2]);
+    for (int i = 1; i < ir->imm2; i++) {
+        addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        rv->io.mem_write_w(rv, addr, rv->X[fuse[i].rs2]);
+    }
+})
+
+/* multiple lw */
+RVOP(fuse4, {
+    opcode_fuse_t *fuse = ir->fuse;
+    uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
+    /* the memory addresses of the lw instructions are contiguous, so we only
+     * need to check the first lw instruction to determine if its memory address
+     * is misaligned or if the memory chunk does not exist.
+     */
+    RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
+    rv->X[fuse[0].rd] = rv->io.mem_read_w(rv, addr);
+    for (int i = 1; i < ir->imm2; i++) {
+        addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        rv->X[fuse[i].rd] = rv->io.mem_read_w(rv, addr);
+    }
+})
+
 static const void *dispatch_table[] = {
 #define _(inst, can_branch) [rv_insn_##inst] = do_##inst,
     RISCV_INSN_LIST
@@ -1337,7 +1386,6 @@ static void block_translate(riscv_t *rv, block_t *block)
         /* compute the end of pc */
         block->pc_end += ir->insn_len;
         block->n_insn++;
-
         /* stop on branch */
         if (insn_is_branch(ir->opcode)) {
             /* recursive jump translation */
@@ -1354,6 +1402,85 @@ static void block_translate(riscv_t *rv, block_t *block)
         }
     }
     block->ir[block->n_insn - 1].tailcall = true;
+}
+
+#define COMBINE_MEM_OPS(RW)                                                \
+    count = 1;                                                             \
+    next_ir = ir + 1;                                                      \
+    if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw))                \
+        break;                                                             \
+    sign = (ir->imm - next_ir->imm) >> 31 ? -1 : 1;                        \
+    for (uint32_t j = 1; j < block->n_insn - 1 - i; j++) {                 \
+        next_ir = ir + j;                                                  \
+        if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw) ||          \
+            ir->rs1 != next_ir->rs1 || ir->imm - next_ir->imm != 4 * sign) \
+            break;                                                         \
+        count++;                                                           \
+    }                                                                      \
+    if (count > 1) {                                                       \
+        ir->opcode = IIF(RW)(rv_insn_fuse4, rv_insn_fuse3);                \
+        ir->fuse = malloc(count * sizeof(opcode_fuse_t));                  \
+        ir->imm2 = count;                                                  \
+        memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));                       \
+        ir->impl = dispatch_table[ir->opcode];                             \
+        for (int j = 1; j < count; j++) {                                  \
+            next_ir = ir + j;                                              \
+            memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));          \
+            next_ir->opcode = rv_insn_nop;                                 \
+            next_ir->impl = dispatch_table[next_ir->opcode];               \
+        }                                                                  \
+    }
+
+
+/* examine whether instructions in a block match a specific pattern. If so,
+ * rewrite them into fused instructions.
+ *
+ * We plan to devise strategies to increase the number of instructions that
+ * match the pattern, such as reordering the instructions.
+ */
+static void match_pattern(block_t *block)
+{
+    for (uint32_t i = 0; i < block->n_insn - 1; i++) {
+        rv_insn_t *ir = block->ir + i, *next_ir = NULL;
+        int32_t count = 0, sign = 1;
+        switch (ir->opcode) {
+        case rv_insn_auipc:
+            next_ir = ir + 1;
+            if (next_ir->opcode == rv_insn_addi && ir->rd == next_ir->rs1) {
+                /* the destination register of instruction auipc is equal to the
+                 * source register 1 of next instruction addi */
+                ir->opcode = rv_insn_fuse1;
+                ir->rd = next_ir->rd;
+                ir->imm2 = next_ir->imm;
+                ir->impl = dispatch_table[ir->opcode];
+                next_ir->opcode = rv_insn_nop;
+                next_ir->impl = dispatch_table[next_ir->opcode];
+            } else if (next_ir->opcode == rv_insn_add &&
+                       ir->rd == next_ir->rs2) {
+                /* the destination register of instruction auipc is equal to the
+                 * source register 2 of next instruction add */
+                ir->opcode = rv_insn_fuse2;
+                ir->rd = next_ir->rd;
+                ir->rs1 = next_ir->rs1;
+                ir->impl = dispatch_table[ir->opcode];
+                next_ir->opcode = rv_insn_nop;
+                next_ir->impl = dispatch_table[next_ir->opcode];
+            }
+            break;
+        /* If the memory addresses of a sequence of store or load instructions
+         * are contiguous, combine these instructions.
+         */
+        case rv_insn_sw:
+            COMBINE_MEM_OPS(0);
+            break;
+        case rv_insn_lw:
+            COMBINE_MEM_OPS(1);
+            break;
+            /* FIXME: lui + addi */
+            /* TODO: mixture of sw and lw */
+            /* TODO: reorder insturction to match pattern */
+        }
+    }
 }
 
 static block_t *prev = NULL;
@@ -1374,6 +1501,12 @@ static block_t *block_find_or_translate(riscv_t *rv)
 
         /* translate the basic block */
         block_translate(rv, next);
+#if RV32_HAS(GDBSTUB)
+        if (!rv->debug_mode)
+#endif
+            /* macro operation fusion */
+            match_pattern(next);
+
 
         /* insert the block into block map */
         block_insert(&rv->block_map, next);

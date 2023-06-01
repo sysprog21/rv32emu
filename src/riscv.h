@@ -152,8 +152,8 @@ void syscall_handler(riscv_t *rv);
 /* environment call handler */
 void ecall_handler(riscv_t *rv);
 
-/* dump registers as JSON */
-void dump_registers(riscv_t *rv);
+/* dump registers as JSON to out_file_path */
+void dump_registers(riscv_t *rv, char *out_file_path);
 
 /* breakpoint exception handler */
 void ebreak_handler(riscv_t *rv);

@@ -20,6 +20,7 @@ static bool opt_gdbstub = false;
 
 /* dump registers as JSON */
 static bool opt_dump_regs = false;
+static char *registers_out_file;
 
 /* RISC-V arch-test */
 static bool opt_arch_test = false;
@@ -94,7 +95,8 @@ static void print_usage(const char *filename)
 #if RV32_HAS(GDBSTUB)
             "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
 #endif
-            "  --dump-registers: dump registers as JSON\n"
+            "  --dump-registers [filename]: dump registers as JSON to the "
+            "given file or `-` (STDIN)\n"
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n",
             filename);
@@ -121,6 +123,13 @@ static bool parse_args(int argc, char **args)
 #endif
             if (!strcmp(arg, "--dump-registers")) {
                 opt_dump_regs = true;
+                if (i + 1 >= argc) {
+                    fprintf(stderr,
+                            "Filename for registers output required by "
+                            "dump-registers.\n");
+                    return false;
+                }
+                registers_out_file = args[++i];
                 continue;
             }
             if (!strcmp(arg, "--arch-test")) {
@@ -247,7 +256,7 @@ int main(int argc, char **args)
 
     /* dump registers as JSON */
     if (opt_dump_regs)
-        dump_registers(rv);
+        dump_registers(rv, registers_out_file);
 
     /* dump test result in test mode */
     if (opt_arch_test)

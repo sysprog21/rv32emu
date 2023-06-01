@@ -1458,12 +1458,24 @@ void ecall_handler(riscv_t *rv)
     syscall_handler(rv);
 }
 
-void dump_registers(riscv_t *rv)
+void dump_registers(riscv_t *rv, char *out_file_path)
 {
-    printf("{\n");
+    FILE *f;
+    if (strncmp(out_file_path, "-", 1) == 0) {
+        f = stdout;
+    } else {
+        f = fopen(out_file_path, "w");
+    }
+
+    if (!f) {
+        fprintf(stderr, "Cannot open registers output file.\n");
+        return;
+    }
+
+    fprintf(f, "{\n");
     for (unsigned i = 0; i < RV_N_REGS; i++) {
         char *comma = i < RV_N_REGS - 1 ? "," : "";
-        printf("  \"x%d\": %u%s\n", i, rv->X[i], comma);
+        fprintf(f, "  \"x%d\": %u%s\n", i, rv->X[i], comma);
     }
-    printf("}\n");
+    fprintf(f, "}\n");
 }

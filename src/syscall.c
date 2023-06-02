@@ -107,9 +107,11 @@ static void syscall_exit(riscv_t *rv)
 {
     rv_halt(rv);
 
-    riscv_word_t code = rv_get_reg(rv, rv_reg_a0);
-    /* FIXME: add an option to show/hide this message */
-    fprintf(stdout, "inferior exit code %d\n", (int) code);
+    /* To avoid mixing with JSON output */
+    if (rv_enables_to_output_exit_code(rv)) {
+        riscv_word_t code = rv_get_reg(rv, rv_reg_a0);
+        fprintf(stdout, "inferior exit code %d\n", (int) code);
+    }
 }
 
 /* brk(increment)

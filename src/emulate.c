@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1587,4 +1588,26 @@ void ecall_handler(riscv_t *rv)
     assert(rv);
     rv_except_ecall_M(rv, 0);
     syscall_handler(rv);
+}
+
+void dump_registers(riscv_t *rv, char *out_file_path)
+{
+    FILE *f;
+    if (strncmp(out_file_path, "-", 1) == 0) {
+        f = stdout;
+    } else {
+        f = fopen(out_file_path, "w");
+    }
+
+    if (!f) {
+        fprintf(stderr, "Cannot open registers output file.\n");
+        return;
+    }
+
+    fprintf(f, "{\n");
+    for (unsigned i = 0; i < RV_N_REGS; i++) {
+        char *comma = i < RV_N_REGS - 1 ? "," : "";
+        fprintf(f, "  \"x%d\": %u%s\n", i, rv->X[i], comma);
+    }
+    fprintf(f, "}\n");
 }

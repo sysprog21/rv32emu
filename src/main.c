@@ -18,9 +18,16 @@ static bool opt_trace = false;
 static bool opt_gdbstub = false;
 #endif
 
+/* dump registers as JSON */
+static bool opt_dump_regs = false;
+static char *registers_out_file;
+
 /* RISC-V arch-test */
 static bool opt_arch_test = false;
 static char *signature_out_file;
+
+/* Quiet outputs */
+static bool opt_quiet_outputs = false;
 
 /* target executable */
 static const char *opt_prog_name = "a.out";
@@ -91,6 +98,9 @@ static void print_usage(const char *filename)
 #if RV32_HAS(GDBSTUB)
             "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
 #endif
+            "  --dump-registers [filename]: dump registers as JSON to the "
+            "given file or `-` (STDOUT)\n"
+            "  --quiet : Suppress outputs other than `dump-registers`\n"
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n",
             filename);
@@ -115,6 +125,23 @@ static bool parse_args(int argc, char **args)
                 continue;
             }
 #endif
+            if (!strcmp(arg, "--dump-registers")) {
+                opt_dump_regs = true;
+                if (i + 1 >= argc) {
+                    fprintf(stderr,
+                            "Filename for registers output required by "
+                            "dump-registers.\n");
+                    return false;
+                }
+                registers_out_file = args[++i];
+                continue;
+            }
+
+            if (!strcmp(arg, "--quiet")) {
+                opt_quiet_outputs = true;
+                continue;
+            }
+
             if (!strcmp(arg, "--arch-test")) {
                 opt_arch_test = true;
                 if (i + 1 >= argc) {
@@ -212,7 +239,7 @@ int main(int argc, char **args)
         state->break_addr = end->st_value;
 
     /* create the RISC-V runtime */
-    riscv_t *rv = rv_create(&io, state);
+    riscv_t *rv = rv_create(&io, state, !opt_quiet_outputs);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
         return 1;
@@ -236,6 +263,10 @@ int main(int argc, char **args)
     else {
         run(rv);
     }
+
+    /* dump registers as JSON */
+    if (opt_dump_regs)
+        dump_registers(rv, registers_out_file);
 
     /* dump test result in test mode */
     if (opt_arch_test)

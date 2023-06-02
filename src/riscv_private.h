@@ -121,6 +121,9 @@ struct riscv_internal {
 
     bool compressed;       /**< current instruction is compressed or not */
     block_map_t block_map; /**< basic block map */
+
+    /* print exit code on syscall_exit */
+    bool output_exit_code;
 };
 
 /* sign extend a 16 bit value */

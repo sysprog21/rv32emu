@@ -123,7 +123,8 @@ static inline void update_time(riscv_t *rv)
 /* get a pointer to a CSR */
 static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
 {
-    switch (csr) {
+    /* csr & 0xFFF prevent sign-extension in decode stage */
+    switch (csr & 0xFFF) {
     case CSR_MSTATUS: /* Machine Status */
         return (uint32_t *) (&rv->csr_mstatus);
     case CSR_MTVEC: /* Machine Trap Handler */

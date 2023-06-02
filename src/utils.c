@@ -30,9 +30,8 @@ void rv_gettimeofday(struct timeval *tv)
     int32_t tv_usec = t.tv_nsec / 1000;
 #elif defined(HAVE_MACH_TIMER)
     static mach_timebase_info_data_t info;
-    /* If this is the first time we have run, get the timebase.
-     * We can use denom == 0 to indicate that sTimebaseInfo is
-     * uninitialized.
+    /* If it is the first time running, obtain the timebase. Using denom == 0
+     * indicates that sTimebaseInfo is uninitialized.
      */
     if (info.denom == 0)
         (void) mach_timebase_info(&info);
@@ -60,9 +59,8 @@ void rv_clock_gettime(struct timespec *tp)
     int32_t tv_msec = t.tv_nsec / 1e6; /* resolution (ms) */
 #elif defined(HAVE_MACH_TIMER)
     static mach_timebase_info_data_t info;
-    /* If this is the first time we have run, get the timebase.
-     * We can use denom == 0 to indicate that sTimebaseInfo is
-     * uninitialized.
+    /* If it is the first time running, obtain the timebase. Using denom == 0
+     * indicates that sTimebaseInfo is uninitialized.
      */
     if (info.denom == 0)
         (void) mach_timebase_info(&info);

@@ -82,7 +82,7 @@ static void syscall_write(riscv_t *rv)
     riscv_word_t buffer = rv_get_reg(rv, rv_reg_a1);
     riscv_word_t count = rv_get_reg(rv, rv_reg_a2);
 
-    /* read the string that we are printing */
+    /* read the string being printed */
     uint8_t *tmp = malloc(count);
     memory_read(s->mem, tmp, buffer, count);
 
@@ -109,7 +109,6 @@ static void syscall_exit(riscv_t *rv)
 
     /* To avoid mixing with JSON output */
     if (rv_enables_to_output_exit_code(rv)) {
-        /* _exit(code); */
         riscv_word_t code = rv_get_reg(rv, rv_reg_a0);
         fprintf(stdout, "inferior exit code %d\n", (int) code);
     }

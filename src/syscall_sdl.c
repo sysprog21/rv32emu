@@ -132,7 +132,7 @@ static inline uint32_t round_pow2(uint32_t x)
 
 void syscall_submit_queue(riscv_t *rv);
 
-/* check if we need to setup SDL and run event loop */
+/* check if SDL needs to be set up and run the event loop */
 static bool check_sdl(riscv_t *rv, int width, int height)
 {
     if (!window) { /* check if video has been initialized. */

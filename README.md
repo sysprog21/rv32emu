@@ -1,4 +1,4 @@
-# RISC-V RV32I[MACF] emulator with ELF support
+# RISC-V RV32I[MACF] emulator
 ![GitHub Actions](https://github.com/sysprog21/rv32emu/actions/workflows/main.yml/badge.svg)
 ```
                        /--===============------\
@@ -14,12 +14,23 @@
      |____/_____|     [-------------------------]
 ```
 
-`rv32emu` is an instruction set architecture (ISA) emulator implementing the 32 bit [RISC-V processor model](https://riscv.org/technical/specifications/).
+`rv32emu` is an emulator for the 32 bit [RISC-V processor model](https://riscv.org/technical/specifications/),
+implementing the RISC-V instruction set architecture (ISA).
+
+Features:
+* Fast interpreter for executing RV32 ISA
+* Full coverage of RV32I and M, A, C extensions
+* Partial support for F extension
+* Memory-efficient
+* Built-in ELF loader
+* Implementation of common newlib system calls
+* Experimental SDL-based display/event system calls for running video games
+* Support for remote GDB debugging
 
 ## Build and Verify
 
-`rv32emu` relies on some third-party packages to be fully usable and to provide you full
-access to all of its features. Your target system must have a functional [SDL2 library](https://www.libsdl.org/).
+`rv32emu` relies on certain third-party packages for full functionality and access to all its features.
+To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/) installed.
 * macOS: `brew install sdl2`
 * Ubuntu Linux / Debian: `sudo apt install libsdl2-dev`
 
@@ -85,7 +96,7 @@ To run the tests for specific extension, set the environmental variable `RISCV_D
 make arch-test RISCV_DEVICE=I
 ```
 
-Current progress of this emulator in riscv-arch-test(RV32):
+Current progress of this emulator in riscv-arch-test (RV32):
 * Passed Tests
     - `I`: Base Integer Instruction Set
     - `M`: Standard Extension for Integer Multiplication and Division
@@ -165,7 +176,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `aes.elf` : See [tests/aes.c](tests/aes.c)
 * `captcha.elf` : See [tests/captcha.c](tests/captcha.c)
 * `cc.elf` : See [tests/cc](tests/cc)
-* `chacha20.elf` : See [tests/chacha20](tests/chacha20.c)
+* `chacha20.elf` : See [tests/chacha20](tests/chacha20)
 * `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark) [RV32M]
 * `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
 * `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
@@ -180,6 +191,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `pi.elf` : See [tests/pi.c](tests/pi.c) [RV32M]
 * `qrcode.elf` : See [tests/qrcode.c](tests/qrcode.c)
 * `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
+* `readelf.elf` : See [tests/readelf](tests/readelf)
 * `richards.elf` : See [tests/richards.c](tests/richards.c)
 * `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
 
@@ -194,7 +206,6 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * [yutongshen/RISC-V-Simulator](https://github.com/yutongshen/RISC-V-Simulator)
 * [rvc](https://github.com/PiMaker/rvc)
 * [RVVM](https://github.com/LekKit/RVVM)
-* [Threaded Code](https://www.complang.tuwien.ac.at/forth/threaded-code.html) / [threaded-code-benchmark](https://github.com/shadowofneptune/threaded-code-benchmark)
 
 ## License
 `rv32emu` is available under a permissive MIT-style license.

@@ -1,0 +1,8 @@
+#ifndef READELF_H
+#define READELF_H
+
+#define FLAG_ELF_HEADER 0x01
+#define FLAG_PROGRAM_HEADER 0x02
+#define FLAG_SECTION_HEADER 0x04
+
+#endif  // READELF_H

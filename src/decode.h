@@ -156,7 +156,14 @@
         _(cjalr, 1)                        \
         _(cadd, 0)                         \
         _(cswsp, 0)                        \
-    )
+    )                                      \
+    /* macro operation fusion: convert specific RISC-V instruction patterns 
+     * into faster and equivalent code 
+     */                                    \
+    _(fuse1, 0)                            \
+    _(fuse2, 0)                            \
+    _(fuse3, 0)                            \
+    _(fuse4, 0)
 /* clang-format on */
 
 /* IR list */
@@ -228,6 +235,11 @@ enum {
     INSN_32 = 4,
 };
 
+typedef struct {
+    int32_t imm;
+    uint8_t rd, rs1, rs2;
+} opcode_fuse_t;
+
 typedef struct rv_insn {
     union {
         int32_t imm;
@@ -240,31 +252,35 @@ typedef struct rv_insn {
 #if RV32_HAS(EXT_C)
     uint8_t shamt;
 #endif
+    /* fuse operation */
+    int16_t imm2;
+    opcode_fuse_t *fuse;
 
     /* instruction length */
     uint8_t insn_len;
 
-    /* According to tail-call optimization (TCO), if a C function ends with
-     * a function call to another function or itself and simply returns that
-     * function's result, the compiler can substitute a simple jump to the
-     * other function for the 'call' and 'return' instructions . The self
-     * -recursive function can therefore use the same function stack frame.
+    /* Tail-call optimization (TCO) allows a C function to replace a function
+     * call to another function or itself, followed by a simple return of the
+     * function's result, with a direct jump to the target function. This
+     * optimization enables the self-recursive function to reuse the same
+     * function stack frame.
      *
-     * Using member tailcall, we can tell whether an IR is the final IR in
-     * a basic block. Additionally, member 'impl' allows us to invoke next
-     * instruction emulation directly without computing the jumping address.
-     * In order to enable the compiler to perform TCO, we can use these two
-     * members to rewrite all instruction emulations into a self-recursive
-     * version.
+     * The @tailcall member indicates whether an intermediate representation
+     * (IR) is the final instruction in a basic block. The @impl member
+     * facilitates the direct invocation of the next instruction emulation
+     * without the need to compute the jump address. By utilizing these two
+     * members, all instruction emulations can be rewritten into a
+     * self-recursive version, enabling the compiler to leverage TCO.
      */
     bool tailcall;
     bool (*impl)(riscv_t *, const struct rv_insn *);
 
-    /* We employ two pointers, branch taken and branch untaken, to avoid the
-     * significant overhead resulting from aggressive memory copy. Instead of
-     * copying the entire IR array, these pointers respectively point to the
-     * first IR of the first basic block in the path of the taken and untaken
-     * branches, so we can jump to the specific IR array directly.
+    /* Two pointers, 'branch_taken' and 'branch_untaken', are employed to
+     * avoid the overhead associated with aggressive memory copying. Instead
+     * of copying the entire intermediate representation (IR) array, these
+     * pointers indicate the first IR of the first basic block in the path of
+     * the taken and untaken branches. This allows for direct jumping to the
+     * specific IR array without the need for additional copying.
      */
     struct rv_insn *branch_taken, *branch_untaken;
 } rv_insn_t;

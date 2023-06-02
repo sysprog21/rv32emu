@@ -142,6 +142,20 @@ $ riscv32-unknown-elf-gdb
 Congratulate yourself if `riscv-gdb` does not produce an error message. Now that the GDB
 command line is available, you can communicate with `rv32emu`.
 
+## Command line options
+
+### Dump registers as JSON
+
+If an option `--dump-registers [filename]` is specified, the emulator outputs registers as JSON format.
+This can be used for tests using the emulator, such as compiler tests.
+
+You can use the option with `--quiet` to use the output directly.
+
+```
+# Read the register x10 (a0).
+$ build/rv32emu --dump-registers - out.elf --quiet | jq .x10
+```
+
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 

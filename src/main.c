@@ -99,7 +99,7 @@ static void print_usage(const char *filename)
             "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
 #endif
             "  --dump-registers [filename]: dump registers as JSON to the "
-            "given file or `-` (STDIN)\n"
+            "given file or `-` (STDOUT)\n"
             "  --quiet : Suppress outputs other than `dump-registers`\n"
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n",

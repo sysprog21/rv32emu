@@ -26,6 +26,9 @@ static char *registers_out_file;
 static bool opt_arch_test = false;
 static char *signature_out_file;
 
+/* Quiet outputs */
+static bool opt_quiet_outputs = false;
+
 /* target executable */
 static const char *opt_prog_name = "a.out";
 
@@ -97,6 +100,7 @@ static void print_usage(const char *filename)
 #endif
             "  --dump-registers [filename]: dump registers as JSON to the "
             "given file or `-` (STDIN)\n"
+            "  --quiet : Suppress outputs other than `dump-registers`\n"
             "  --arch-test [filename] : dump signature to the given file, "
             "required by arch-test test\n",
             filename);
@@ -132,6 +136,12 @@ static bool parse_args(int argc, char **args)
                 registers_out_file = args[++i];
                 continue;
             }
+
+            if (!strcmp(arg, "--quiet")) {
+                opt_quiet_outputs = true;
+                continue;
+            }
+
             if (!strcmp(arg, "--arch-test")) {
                 opt_arch_test = true;
                 if (i + 1 >= argc) {
@@ -229,7 +239,7 @@ int main(int argc, char **args)
         state->break_addr = end->st_value;
 
     /* create the RISC-V runtime */
-    riscv_t *rv = rv_create(&io, state, !opt_dump_regs);
+    riscv_t *rv = rv_create(&io, state, !opt_quiet_outputs);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
         return 1;

@@ -1,28 +1,30 @@
-CACHE_TEST_DIR := tests/cache
-CACHE_BUILD_DIR := build/cache
-CACHE_TARGET := test-cache
+CACHE_TEST_SRCDIR := tests/cache
+CACHE_TEST_OUTDIR := build/cache
+CACHE_TEST_TARGET := $(CACHE_TEST_OUTDIR)/test-cache
 
-MAP_TEST_DIR := tests/map
-MAP_BUILD_DIR:= build/map
-MAP_TARGET := test-map
+MAP_TEST_SRCDIR := tests/map
+MAP_TEST_OUTDIR:= build/map
+MAP_TEST_TARGET := $(MAP_TEST_OUTDIR)/test-map
 
-CACHE_OBJS := \
+CACHE_TEST_OBJS := \
 	test-cache.o
 
-MAP_OBJS := \
+MAP_TEST_OBJS := \
 	test-map.o
 
-CACHE_OBJS := $(addprefix $(CACHE_BUILD_DIR)/, $(CACHE_OBJS))
-OBJS += $(CACHE_OBJS)
-deps += $(CACHE_OBJS:%.o=%.o.d)
+CACHE_TEST_OBJS := $(addprefix $(CACHE_TEST_OUTDIR)/, $(CACHE_TEST_OBJS)) \
+		   $(OUT)/cache.o $(OUT)/mpool.o
+OBJS += $(CACHE_TEST_OBJS)
+deps += $(CACHE_TEST_OBJS:%.o=%.o.d)
 
-MAP_OBJS := $(addprefix $(MAP_BUILD_DIR)/, $(MAP_OBJS))
-OBJS += $(MAP_OBJS)
-deps += $(MAP_OBJS:%.o=%.o.d)
+MAP_TEST_OBJS := $(addprefix $(MAP_TEST_OUTDIR)/, $(MAP_TEST_OBJS)) \
+		 $(OUT)/map.o
+OBJS += $(MAP_TEST_OBJS)
+deps += $(MAP_TEST_OBJS:%.o=%.o.d)
 
-# Check adaptive replacement cache policy is enabled or not, default is LRU
+# Check adaptive replacement cache policy is enabled or not, default is LFU
 ifeq ($(ENABLE_ARC), 1)
-CACHE_CHECK_ELF_FILES := \
+CACHE_TEST_ACTIONS := \
 	arc/cache-new \
 	arc/cache-put \
 	arc/cache-get \
@@ -31,57 +33,60 @@ CACHE_CHECK_ELF_FILES := \
 	arc/cache-lru-ghost-replace \
 	arc/cache-lfu-ghost-replace
 else
-CACHE_CHECK_ELF_FILES := \
+CACHE_TEST_ACTIONS := \
 	lfu/cache-new \
 	lfu/cache-put \
 	lfu/cache-get \
 	lfu/cache-lfu-replace
 endif
 
-CACHE_OUT = $(addprefix $(CACHE_BUILD_DIR)/, $(CACHE_CHECK_ELF_FILES:%=%.out))
-MAP_OUT = $(addprefix $(MAP_BUILD_DIR)/$(MAP_TARGET), ".out")
+CACHE_TEST_OUT = $(addprefix $(CACHE_TEST_OUTDIR)/, $(CACHE_TEST_ACTIONS:%=%.out))
+MAP_TEST_OUT = $(MAP_TEST_TARGET).out
 
-tests : run_cache_test run_map_test
+tests : run-test-cache run-test-map
 
-run_cache_test : $(CACHE_OUT)
-	$(Q)$(foreach e,$(CACHE_CHECK_ELF_FILES),\
-		$(PRINTF) "Running $(e) ... "; \
-		if cmp $(CACHE_TEST_DIR)/$(e).expect $(CACHE_BUILD_DIR)/$(e).out; then \
-		$(call notice, [OK]); \
-		else \
-		$(PRINTF) "Failed.\n"; \
-		exit 1; \
-		fi; \
+run-test-cache: $(CACHE_TEST_OUT)
+	$(Q)$(foreach e,$(CACHE_TEST_ACTIONS),\
+	    $(PRINTF) "Running $(e) ... "; \
+	    if cmp $(CACHE_TEST_SRCDIR)/$(e).expect $(CACHE_TEST_OUTDIR)/$(e).out; then \
+	    $(call notice, [OK]); \
+	    else \
+	    $(PRINTF) "Failed.\n"; \
+	    exit 1; \
+	    fi; \
 	)
 
-run_map_test: $(MAP_TARGET)
-
-$(CACHE_OUT): $(CACHE_TARGET)
-	$(Q)$(foreach e,$(CACHE_CHECK_ELF_FILES),\
-		$(CACHE_BUILD_DIR)/$(CACHE_TARGET) $(CACHE_TEST_DIR)/$(e).in > $(CACHE_BUILD_DIR)/$(e).out; \
-	)
-
-$(CACHE_TARGET): $(CACHE_OBJS)
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ build/cache.o build/mpool.o -o $(CACHE_BUILD_DIR)/$(CACHE_TARGET)
-
-$(CACHE_BUILD_DIR)/%.o: $(CACHE_TEST_DIR)/%.c
-	$(VECHO) "  CC\t$@\n"
-	$(Q)mkdir -p $(dir $@)/arc $(dir $@)/lfu
-	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
-
-$(MAP_TARGET): $(MAP_OBJS)
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ build/map.o -o $(MAP_BUILD_DIR)/$(MAP_TARGET)
-	$(Q)$(MAP_BUILD_DIR)/$(MAP_TARGET)
-	$(Q)$(PRINTF) "Running test-map ... "; \
+run-test-map: $(MAP_TEST_OUT)
+	$(Q)$(MAP_TEST_TARGET)
+	$(VECHO) "Running test-map ... "; \
 	if [ $$? -eq 0 ]; then \
 	$(call notice, [OK]); \
 	else \
 	$(PRINTF) "Failed.\n"; \
 	fi;
 
-$(MAP_BUILD_DIR)/%.o: $(MAP_TEST_DIR)/%.c
+$(CACHE_TEST_OUT): $(CACHE_TEST_TARGET)
+	$(Q)$(foreach e,$(CACHE_TEST_ACTIONS),\
+	    $(CACHE_TEST_TARGET) $(CACHE_TEST_SRCDIR)/$(e).in > $(CACHE_TEST_OUTDIR)/$(e).out; \
+	)
+
+$(CACHE_TEST_TARGET): $(CACHE_TEST_OBJS)
+	$(VECHO) "  CC\t$@\n"
+	$(Q)$(CC) $^ -o $@
+
+$(CACHE_TEST_OUTDIR)/%.o: $(CACHE_TEST_SRCDIR)/%.c
+	$(VECHO) "  CC\t$@\n"
+	$(Q)mkdir -p $(dir $@)/arc $(dir $@)/lfu
+	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
+
+$(MAP_TEST_OUT): $(MAP_TEST_TARGET)
+	$(Q)touch $@
+
+$(MAP_TEST_TARGET): $(MAP_TEST_OBJS)
+	$(VECHO) "  CC\t$@\n"
+	$(Q)$(CC) $^ -o $@
+
+$(MAP_TEST_OUTDIR)/%.o: $(MAP_TEST_SRCDIR)/%.c
 	$(VECHO) "  CC\t$@\n"
 	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<

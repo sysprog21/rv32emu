@@ -5,7 +5,7 @@
 
 #include "cache.h"
 
-void print_value(int *val)
+static void print_value(int *val)
 {
     if (val)
         printf("%d\n", *val);
@@ -13,11 +13,11 @@ void print_value(int *val)
         printf("NULL\n");
 }
 
-void split(char **arr, char *str, const char *del)
+static void split(char **arr, char *str, const char *del)
 {
     char *s = strtok(str, del);
 
-    while (s != NULL) {
+    while (s) {
         *arr++ = s;
         s = strtok(NULL, del);
     }
@@ -31,10 +31,12 @@ void split(char **arr, char *str, const char *del)
  */
 int main(int argc, char *argv[])
 {
-    if (argc < 2) {
-        printf("Fail\n");
-    }
+    if (argc < 2)
+        return 1; /* Fail */
+
     FILE *fp = fopen(argv[1], "r");
+    assert(fp);
+
     char *line = NULL, *ptr = NULL;
     size_t len = 0;
     struct cache *cache = NULL;
@@ -65,5 +67,6 @@ int main(int argc, char *argv[])
         }
     }
     fclose(fp);
+
     return 0;
 }

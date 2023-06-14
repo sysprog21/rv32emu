@@ -8,7 +8,9 @@
 #include <string.h>
 
 #include "riscv_private.h"
+#include "utils.h"
 
+#if !RV32_HAS(JIT)
 /* initialize the block map */
 static void block_map_init(block_map_t *map, const uint8_t bits)
 {
@@ -33,6 +35,7 @@ void block_map_clear(block_map_t *map)
     }
     map->size = 0;
 }
+#endif
 
 riscv_user_t rv_userdata(riscv_t *rv)
 {
@@ -92,8 +95,12 @@ riscv_t *rv_create(const riscv_io_t *io,
 
     rv->output_exit_code = output_exit_code;
 
+#if !RV32_HAS(JIT)
     /* initialize the block map */
     block_map_init(&rv->block_map, 10);
+#else
+    rv->cache = cache_create(10);
+#endif
 
     /* reset */
     rv_reset(rv, 0U);
@@ -116,11 +123,23 @@ bool rv_enables_to_output_exit_code(riscv_t *rv)
     return rv->output_exit_code;
 }
 
+#if RV32_HAS(JIT)
+static void release_block(void *block)
+{
+    free(((block_t *) block)->ir);
+    free(block);
+}
+#endif
+
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
+#if !RV32_HAS(JIT)
     block_map_clear(&rv->block_map);
     free(rv->block_map.map);
+#else
+    cache_free(rv->cache, release_block);
+#endif
     free(rv);
 }
 
@@ -148,3 +167,124 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 
     rv->halt = false;
 }
+
+/* get current time in microsecnds and update csr_time register */
+static inline void update_time(riscv_t *rv)
+{
+    struct timeval tv;
+    rv_gettimeofday(&tv);
+
+    uint64_t t = (uint64_t) tv.tv_sec * 1e6 + (uint32_t) tv.tv_usec;
+    rv->csr_time[0] = t & 0xFFFFFFFF;
+    rv->csr_time[1] = t >> 32;
+}
+
+#if RV32_HAS(Zicsr)
+/* get a pointer to a CSR */
+static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
+{
+    /* csr & 0xFFF prevent sign-extension in decode stage */
+    switch (csr & 0xFFF) {
+    case CSR_MSTATUS: /* Machine Status */
+        return (uint32_t *) (&rv->csr_mstatus);
+    case CSR_MTVEC: /* Machine Trap Handler */
+        return (uint32_t *) (&rv->csr_mtvec);
+    case CSR_MISA: /* Machine ISA and Extensions */
+        return (uint32_t *) (&rv->csr_misa);
+
+    /* Machine Trap Handling */
+    case CSR_MSCRATCH: /* Machine Scratch Register */
+        return (uint32_t *) (&rv->csr_mscratch);
+    case CSR_MEPC: /* Machine Exception Program Counter */
+        return (uint32_t *) (&rv->csr_mepc);
+    case CSR_MCAUSE: /* Machine Exception Cause */
+        return (uint32_t *) (&rv->csr_mcause);
+    case CSR_MTVAL: /* Machine Trap Value */
+        return (uint32_t *) (&rv->csr_mtval);
+    case CSR_MIP: /* Machine Interrupt Pending */
+        return (uint32_t *) (&rv->csr_mip);
+
+    /* Machine Counter/Timers */
+    case CSR_CYCLE: /* Cycle counter for RDCYCLE instruction */
+        return &((uint32_t *) &rv->csr_cycle)[0];
+    case CSR_CYCLEH: /* Upper 32 bits of cycle */
+        return &((uint32_t *) &rv->csr_cycle)[1];
+
+    /* TIME/TIMEH - very roughly about 1 ms per tick */
+    case CSR_TIME: { /* Timer for RDTIME instruction */
+        update_time(rv);
+        return &rv->csr_time[0];
+    }
+    case CSR_TIMEH: { /* Upper 32 bits of time */
+        update_time(rv);
+        return &rv->csr_time[1];
+    }
+    case CSR_INSTRET: /* Number of Instructions Retired Counter */
+        /* Number of Instructions Retired Counter, just use cycle */
+        return (uint32_t *) (&rv->csr_cycle);
+#if RV32_HAS(EXT_F)
+    case CSR_FFLAGS:
+        return (uint32_t *) (&rv->csr_fcsr);
+    case CSR_FCSR:
+        return (uint32_t *) (&rv->csr_fcsr);
+#endif
+    default:
+        return NULL;
+    }
+}
+
+static inline bool csr_is_writable(uint32_t csr)
+{
+    return csr < 0xc00;
+}
+
+uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
+{
+    uint32_t *c = csr_get_ptr(rv, csr);
+    if (!c)
+        return 0;
+
+    uint32_t out = *c;
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
+    if (csr_is_writable(csr))
+        *c = val;
+
+    return out;
+}
+
+uint32_t csr_csrrs(riscv_t *rv, uint32_t csr, uint32_t val)
+{
+    uint32_t *c = csr_get_ptr(rv, csr);
+    if (!c)
+        return 0;
+
+    uint32_t out = *c;
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
+    if (csr_is_writable(csr))
+        *c |= val;
+
+    return out;
+}
+
+uint32_t csr_csrrc(riscv_t *rv, uint32_t csr, uint32_t val)
+{
+    uint32_t *c = csr_get_ptr(rv, csr);
+    if (!c)
+        return 0;
+
+    uint32_t out = *c;
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FFLAGS)
+        out &= FFLAG_MASK;
+#endif
+    if (csr_is_writable(csr))
+        *c &= ~val;
+    return out;
+}
+#endif

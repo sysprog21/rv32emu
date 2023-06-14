@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 struct cache;
@@ -38,3 +39,15 @@ void *cache_put(struct cache *cache, uint32_t key, void *value);
  * @callback: a function for freeing cache entry completely
  */
 void cache_free(struct cache *cache, void (*callback)(void *));
+
+#if RV32_HAS(JIT)
+bool cache_hot(struct cache *cache, uint32_t key);
+
+uint8_t *code_cache_lookup(struct cache *cache, uint32_t key);
+
+uint8_t *code_cache_add(struct cache *cache,
+                        uint64_t key,
+                        uint8_t *code,
+                        size_t sz,
+                        uint64_t align);
+#endif

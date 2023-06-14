@@ -8,12 +8,17 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32)
+#define USE_MMAP 1
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 #include "cache.h"
 #include "mpool.h"
+#include "utils.h"
 
 #define MIN(a, b) ((a < b) ? a : b)
-#define GOLDEN_RATIO_32 0x61C88647
 #define HASH(val) \
     (((val) * (GOLDEN_RATIO_32)) >> (32 - (cache_size_bits))) & (cache_size - 1)
 
@@ -21,6 +26,12 @@
  * exceeds the THRESHOLD, the JIT compiler flow is triggered.
  */
 #define THRESHOLD 1000
+
+#if RV32_HAS(JIT)
+#define CODE_CACHE_SIZE (64 * 1024 * 1024)
+#define sys_icache_invalidate(addr, size) \
+    __builtin___clear_cache((char *) (addr), (char *) (addr) + (size));
+#endif
 
 static uint32_t cache_size, cache_size_bits;
 static struct mpool *cache_mp;
@@ -65,9 +76,13 @@ struct hlist_node {
 typedef struct {
     void *value;
     uint32_t key;
+    uint32_t frequency;
     cache_list_t type;
     struct list_head list;
     struct hlist_node ht_list;
+#if RV32_HAS(JIT)
+    uint64_t offset;
+#endif
 } arc_entry_t;
 #else /* !RV32_HAS(ARC) */
 typedef struct {
@@ -76,6 +91,9 @@ typedef struct {
     uint32_t frequency;
     struct list_head list;
     struct hlist_node ht_list;
+#if RV32_HAS(JIT)
+    uint64_t offset;
+#endif
 } lfu_entry_t;
 #endif
 
@@ -94,6 +112,10 @@ typedef struct cache {
 #endif
     hashtable_t *map;
     uint32_t capacity;
+#if RV32_HAS(JIT)
+    uint8_t *jitcode;
+    uint64_t offset;
+#endif
 } cache_t;
 
 static inline void INIT_LIST_HEAD(struct list_head *head)
@@ -286,6 +308,18 @@ cache_t *cache_create(int size_bits)
         mpool_create(cache_size * sizeof(lfu_entry_t), sizeof(lfu_entry_t));
 #endif
     cache->capacity = cache_size;
+#if RV32_HAS(JIT)
+#if defined(USE_MMAP)
+    cache->jitcode =
+        mmap(NULL, CODE_CACHE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
+             MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    assert(cache->jitcode != MAP_FAILED);
+#else
+    cache->jitcode = malloc(CODE_CACHE_SIZE);
+    assert(cache->jitcode);
+#endif
+    cache->offset = 0;
+#endif
     return cache;
 }
 
@@ -338,7 +372,7 @@ static inline void move_to_mru(cache_t *cache,
 
 void *cache_get(cache_t *cache, uint32_t key)
 {
-    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+    if (hlist_empty(&cache->map->ht_list_head[HASH(key)]))
         return NULL;
 
 #if RV32_HAS(ARC)
@@ -353,8 +387,10 @@ void *cache_get(cache_t *cache, uint32_t key)
         if (entry->key == key)
             break;
     }
-    if (!entry || entry->key != key)
+    if (!entry)
         return NULL;
+    if (entry->frequency < THRESHOLD)
+        entry->frequency++;
     /* cache hit in LRU_list */
     if (entry->type == LRU_list && cache->lru_capacity != cache->capacity)
         move_to_mru(cache, entry, LFU_list);
@@ -469,6 +505,7 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
     arc_entry_t *new_entry = mpool_alloc(cache_mp);
     new_entry->key = key;
     new_entry->value = value;
+    new_entry->frequency = 0;
     /* check if all cache become LFU */
     if (cache->lru_capacity != 0) {
         new_entry->type = LRU_list;
@@ -541,3 +578,117 @@ void cache_free(cache_t *cache, void (*callback)(void *))
     free(cache->map);
     free(cache);
 }
+
+#if RV32_HAS(JIT)
+bool cache_hot(struct cache *cache, uint32_t key)
+{
+    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+        return false;
+#if RV32_HAS(ARC)
+    arc_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          arc_entry_t)
+#endif
+    {
+        if (entry->key == key && entry->frequency == THRESHOLD)
+            return true;
+    }
+#else
+    lfu_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          lfu_entry_t)
+#endif
+    {
+        if (entry->key == key && entry->frequency == THRESHOLD)
+            return true;
+    }
+#endif
+    return false;
+}
+
+uint8_t *code_cache_lookup(cache_t *cache, uint32_t key)
+{
+    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+        return NULL;
+#if RV32_HAS(ARC)
+    arc_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          arc_entry_t)
+#endif
+    {
+        if (entry->key == key)
+            return cache->jitcode + entry->offset;
+    }
+#else
+    lfu_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          lfu_entry_t)
+#endif
+    {
+        if (entry->key == key)
+            return cache->jitcode + entry->offset;
+    }
+#endif
+    return NULL;
+}
+
+static inline uint64_t align_to(uint64_t val, uint64_t align)
+{
+    if (unlikely(!align))
+        return val;
+    return (val + align - 1) & ~(align - 1);
+}
+
+uint8_t *code_cache_add(cache_t *cache,
+                        uint64_t key,
+                        uint8_t *code,
+                        size_t sz,
+                        uint64_t align)
+{
+    cache->offset = align_to(cache->offset, align);
+    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+        return NULL;
+#if RV32_HAS(ARC)
+    arc_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          arc_entry_t)
+#endif
+    {
+        if (entry->key == key)
+            break;
+    }
+#else
+    lfu_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          lfu_entry_t)
+#endif
+    {
+        if (entry->key == key)
+            break;
+    }
+#endif
+    memcpy(cache->jitcode + cache->offset, code, sz);
+    entry->offset = cache->offset;
+    cache->offset += sz;
+    sys_icache_invalidate(cache->jitcode + entry->offset, sz);
+    return cache->jitcode + entry->offset;
+}
+#endif

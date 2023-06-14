@@ -3,6 +3,16 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+/* This map implementation has undergone extensive modifications, heavily
+ * relying on the rb.h header file from jemalloc.
+ * The original rb.h file served as the foundation and source of inspiration
+ * for adapting and tailoring it specifically for this map implementation.
+ * Therefore, credit and sincere thanks are extended to jemalloc for their
+ * invaluable work.
+ * Reference:
+ *   https://github.com/jemalloc/jemalloc/blob/dev/include/jemalloc/internal/rb.h
+ */
+
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -10,106 +20,542 @@
 
 #include "map.h"
 
+/* TODO: Avoid relying on key_size and data_size */
 struct map_internal {
-    struct map_node *head;
+    map_node_t *root;
 
-    /* Properties */
-    size_t key_size, element_size, size;
+    /* properties */
+    size_t key_size, data_size;
 
-    map_iter_t it_end, it_most, it_least;
-
-    int (*comparator)(const void *, const void *);
+    map_cmp_t (*comparator)(const void *, const void *);
 };
 
-typedef enum { RB_RED = 0, RB_BLACK } map_color_t;
-
-/*
- * Get parent of node
- * @node: pointer to the rb node
- *
- * Return: rb parent node of @node
+/* Each node in the red-black tree consumes at least 1 byte of space (for the
+ * linkage if nothing else), so there are a maximum of sizeof(void *) << 3
+ * red-black tree nodes in any process (and thus, at most sizeof(void *) << 3
+ * nodes in any red-black tree). The choice of algorithm bounds the depth of
+ * a tree to twice the binary logarithm (base 2) of the number of elements in
+ * the tree; the following bound applies.
  */
-static inline map_node_t *rb_parent(const map_node_t *node)
+#define RB_MAX_DEPTH (sizeof(void *) << 4)
+
+typedef enum { RB_BLACK = 0, RB_RED } map_color_t;
+
+/* Left accessors */
+static inline map_node_t *rb_node_get_left(const map_node_t *node)
 {
-    return (map_node_t *) (node->parent_color & ~1LU);
+    return node->left;
 }
 
-/*
- * Get color of node
- * @node: pointer to the rb node
- *
- * Return: color of @node
- */
-static inline map_color_t rb_color(const map_node_t *node)
+static inline void rb_node_set_left(map_node_t *node, map_node_t *left)
 {
-    return (map_color_t) (node->parent_color & 1LU);
+    node->left = left;
 }
 
-/*
- * Set parent of node
- * @node: pointer to the rb node
- * @parent: pointer to the new parent node
- */
-static inline void rb_set_parent(map_node_t *node, map_node_t *parent)
+/* Right accessors */
+static inline map_node_t *rb_node_get_right(const map_node_t *node)
 {
-    node->parent_color = (unsigned long) parent | (node->parent_color & 1LU);
+    return (map_node_t *) (((uintptr_t) node->right_red) & ~3);
 }
 
-/*
- * Set color of node
- * @node: pointer to the rb node
- * @color: new color of the node
- */
-static inline void rb_set_color(map_node_t *node, map_color_t color)
+static inline void rb_node_set_right(map_node_t *node, map_node_t *right)
 {
-    node->parent_color = (node->parent_color & ~1LU) | color;
+    node->right_red = (map_node_t *) (((uintptr_t) right) |
+                                      (((uintptr_t) node->right_red) & 1));
 }
 
-/*
- * Set parent and color of node
- * @node: pointer to the rb node
- * @parent: pointer to the new parent node
- * @color: new color of the node
- */
-static inline void rb_set_parent_color(map_node_t *node,
-                                       map_node_t *parent,
-                                       map_color_t color)
+/* Color accessors */
+static inline map_color_t rb_node_get_color(const map_node_t *node)
 {
-    node->parent_color = (unsigned long) parent | color;
+    return ((uintptr_t) node->right_red) & 1;
 }
 
-/*
- * Check if node is red
- * @node: Node to check
- *
- * Return: false when @node is NULL or not red, true if @node is red
- */
-static inline bool rb_is_red(map_node_t *node)
+static inline void rb_node_set_color(map_node_t *node, map_color_t color)
 {
-    return node && (rb_color(node) == RB_RED);
+    node->right_red =
+        (map_node_t *) (((uintptr_t) node->right_red & ~3) | color);
 }
 
-/* Create a node to be attached in the map internal tree structure */
+static inline void rb_node_set_red(map_node_t *node)
+{
+    node->right_red = (map_node_t *) (((uintptr_t) node->right_red) | 1);
+}
+
+static inline void rb_node_set_black(map_node_t *node)
+{
+    node->right_red = (map_node_t *) (((uintptr_t) node->right_red) & ~3);
+}
+
+/* Node initializer */
+static inline void rb_node_init(map_node_t *node)
+{
+    assert((((uintptr_t) node) & (0x1)) == 0); /* a pointer without marker */
+    rb_node_set_left(node, NULL);
+    rb_node_set_right(node, NULL);
+    rb_node_set_red(node);
+}
+
+/* Internal helper macros */
+#define rb_node_rotate_left(x_node, r_node)                      \
+    do {                                                         \
+        (r_node) = rb_node_get_right((x_node));                  \
+        rb_node_set_right((x_node), rb_node_get_left((r_node))); \
+        rb_node_set_left((r_node), (x_node));                    \
+    } while (0)
+
+#define rb_node_rotate_right(x_node, r_node)                     \
+    do {                                                         \
+        (r_node) = rb_node_get_left((x_node));                   \
+        rb_node_set_left((x_node), rb_node_get_right((r_node))); \
+        rb_node_set_right((r_node), (x_node));                   \
+    } while (0)
+
+typedef struct {
+    map_node_t *node;
+    map_cmp_t cmp;
+} rb_path_entry_t;
+
+static inline map_node_t *rb_search(map_t rb, const map_node_t *node)
+{
+    map_node_t *ret = rb->root;
+    while (ret) {
+        map_cmp_t cmp = (rb->comparator)(node->key, ret->key);
+        switch (cmp) {
+        case _CMP_EQUAL:
+            return ret;
+        case _CMP_LESS:
+            ret = rb_node_get_left(ret);
+            break;
+        case _CMP_GREATER:
+            ret = rb_node_get_right(ret);
+            break;
+        default:
+            __UNREACHABLE;
+            break;
+        }
+    }
+    return ret;
+}
+
+static void rb_insert(map_t rb, map_node_t *node)
+{
+    rb_path_entry_t path[RB_MAX_DEPTH];
+    rb_path_entry_t *pathp;
+    rb_node_init(node);
+
+    /* Traverse through red-black tree node and find the search target node. */
+    path->node = rb->root;
+    for (pathp = path; pathp->node; pathp++) {
+        map_cmp_t cmp = pathp->cmp =
+            (rb->comparator)(node->key, pathp->node->key);
+        switch (cmp) {
+        case _CMP_LESS:
+            pathp[1].node = rb_node_get_left(pathp->node);
+            break;
+        case _CMP_GREATER:
+            pathp[1].node = rb_node_get_right(pathp->node);
+            break;
+        default:
+            /* igore duplicate key */
+            __UNREACHABLE;
+            break;
+        }
+    }
+    pathp->node = node;
+
+    assert(!rb_node_get_left(node));
+    assert(!rb_node_get_right(node));
+
+    /* Go from target node back to root node and fix color accordingly */
+    for (pathp--; (uintptr_t) pathp >= (uintptr_t) path; pathp--) {
+        map_node_t *cnode = pathp->node;
+        if (pathp->cmp == _CMP_LESS) {
+            map_node_t *left = pathp[1].node;
+            rb_node_set_left(cnode, left);
+            if (rb_node_get_color(left) == RB_BLACK)
+                return;
+            map_node_t *leftleft = rb_node_get_left(left);
+            if (leftleft && (rb_node_get_color(leftleft) == RB_RED)) {
+                /* fix up 4-node */
+                map_node_t *tnode;
+                rb_node_set_black(leftleft);
+                rb_node_rotate_right(cnode, tnode);
+                cnode = tnode;
+            }
+        } else {
+            map_node_t *right = pathp[1].node;
+            rb_node_set_right(cnode, right);
+            if (rb_node_get_color(right) == RB_BLACK)
+                return;
+            map_node_t *left = rb_node_get_left(cnode);
+            if (left && (rb_node_get_color(left) == RB_RED)) {
+                /* split 4-node */
+                rb_node_set_black(left);
+                rb_node_set_black(right);
+                rb_node_set_red(cnode);
+            } else {
+                /* lean left */
+                map_node_t *tnode;
+                map_color_t tcolor = rb_node_get_color(cnode);
+                rb_node_rotate_left(cnode, tnode);
+                rb_node_set_color(tnode, tcolor);
+                rb_node_set_red(cnode);
+                cnode = tnode;
+            }
+        }
+        pathp->node = cnode;
+    }
+
+    /* set root, and make it black */
+    rb->root = path->node;
+    rb_node_set_black(rb->root);
+}
+
+static void rb_remove(map_t rb, map_node_t *node)
+{
+    rb_path_entry_t path[RB_MAX_DEPTH];
+    rb_path_entry_t *pathp = NULL, *nodep = NULL;
+
+    /* Traverse through red-black tree node and find the search target node. */
+    path->node = rb->root;
+    pathp = path;
+    while (pathp->node) {
+        map_cmp_t cmp = pathp->cmp =
+            (rb->comparator)(node->data, pathp->node->data);
+        if (cmp == _CMP_LESS) {
+            pathp[1].node = rb_node_get_left(pathp->node);
+        } else {
+            pathp[1].node = rb_node_get_right(pathp->node);
+            if (cmp == _CMP_EQUAL) {
+                /* find node's successor, in preparation for swap */
+                pathp->cmp = _CMP_GREATER;
+                nodep = pathp;
+                for (pathp++; pathp->node; pathp++) {
+                    pathp->cmp = _CMP_LESS;
+                    pathp[1].node = rb_node_get_left(pathp->node);
+                }
+                break;
+            }
+        }
+        pathp++;
+    }
+    assert(nodep && nodep->node == node);
+
+    pathp--;
+    if (pathp->node != node) {
+        /* swap node with its successor */
+        map_color_t tcolor = rb_node_get_color(pathp->node);
+        rb_node_set_color(pathp->node, rb_node_get_color(node));
+        rb_node_set_left(pathp->node, rb_node_get_left(node));
+
+        /* If the node's successor is its right child, the following code may
+         * behave incorrectly for the right child pointer.
+         * However, it is not a problem as the pointer will be correctly set
+         * when the successor is pruned.
+         */
+        rb_node_set_right(pathp->node, rb_node_get_right(node));
+        rb_node_set_color(node, tcolor);
+
+        /* The child pointers of the pruned leaf node are never accessed again,
+         * so there is no need to set them to NULL.
+         */
+        nodep->node = pathp->node;
+        pathp->node = node;
+        if (nodep == path) {
+            rb->root = nodep->node;
+        } else {
+            if (nodep[-1].cmp == _CMP_LESS)
+                rb_node_set_left(nodep[-1].node, nodep->node);
+            else
+                rb_node_set_right(nodep[-1].node, nodep->node);
+        }
+    } else {
+        map_node_t *left = rb_node_get_left(node);
+        if (left) {
+            /* node has no successor, but it has a left child.
+             * Splice node out, without losing the left child.
+             */
+            assert(rb_node_get_color(node) == RB_BLACK);
+            assert(rb_node_get_color(left) == RB_RED);
+            rb_node_set_black(left);
+            if (pathp == path) {
+                /* the subtree rooted at the node's left child has not
+                 * changed, and it is now the root.
+                 */
+                rb->root = left;
+            } else {
+                if (pathp[-1].cmp == _CMP_LESS)
+                    rb_node_set_left(pathp[-1].node, left);
+                else
+                    rb_node_set_right(pathp[-1].node, left);
+            }
+            return;
+        } else if (pathp == path) {
+            /* the tree only contained one node */
+            rb->root = NULL;
+            return;
+        }
+    }
+
+    /* The invariant has been established that the node has no right child
+     * (morally speaking; the right child was not explicitly nulled out if
+     * swapped with its successor). Furthermore, the only nodes with
+     * out-of-date summaries exist in path[0], path[1], ..., pathp[-1].
+     */
+    if (rb_node_get_color(pathp->node) == RB_RED) {
+        /* prune red node, which requires no fixup */
+        assert(pathp[-1].cmp == _CMP_LESS);
+        rb_node_set_left(pathp[-1].node, NULL);
+        return;
+    }
+
+    /* The node to be pruned is black, so unwind until balance is restored. */
+    pathp->node = NULL;
+    for (pathp--; (uintptr_t) pathp >= (uintptr_t) path; pathp--) {
+        assert(pathp->cmp != _CMP_EQUAL);
+        if (pathp->cmp == _CMP_LESS) {
+            rb_node_set_left(pathp->node, pathp[1].node);
+            if (rb_node_get_color(pathp->node) == RB_RED) {
+                map_node_t *right = rb_node_get_right(pathp->node);
+                map_node_t *rightleft = rb_node_get_left(right);
+                map_node_t *tnode;
+                if (rightleft && (rb_node_get_color(rightleft) == RB_RED)) {
+                    /* In the following diagrams, ||, //, and \\
+                     * indicate the path to the removed node.
+                     *
+                     *      ||
+                     *    pathp(r)
+                     *  //        \
+                     * (b)        (b)
+                     *           /
+                     *          (r)
+                     */
+                    rb_node_set_black(pathp->node);
+                    rb_node_rotate_right(right, tnode);
+                    rb_node_set_right(pathp->node, tnode);
+                    rb_node_rotate_left(pathp->node, tnode);
+                } else {
+                    /*      ||
+                     *    pathp(r)
+                     *  //        \
+                     * (b)        (b)
+                     *           /
+                     *          (b)
+                     */
+                    rb_node_rotate_left(pathp->node, tnode);
+                }
+
+                /* Balance restored, but rotation modified subtree root. */
+                assert((uintptr_t) pathp > (uintptr_t) path);
+                if (pathp[-1].cmp == _CMP_LESS)
+                    rb_node_set_left(pathp[-1].node, tnode);
+                else
+                    rb_node_set_right(pathp[-1].node, tnode);
+                return;
+            } else {
+                map_node_t *right = rb_node_get_right(pathp->node);
+                map_node_t *rightleft = rb_node_get_left(right);
+                if (rightleft && (rb_node_get_color(rightleft) == RB_RED)) {
+                    /*      ||
+                     *    pathp(b)
+                     *  //        \
+                     * (b)        (b)
+                     *           /
+                     *          (r)
+                     */
+                    map_node_t *tnode;
+                    rb_node_set_black(rightleft);
+                    rb_node_rotate_right(right, tnode);
+                    rb_node_set_right(pathp->node, tnode);
+                    rb_node_rotate_left(pathp->node, tnode);
+                    /* Balance restored, but rotation modified subtree root,
+                     * which may actually be the tree root.
+                     */
+                    if (pathp == path) {
+                        /* set root */
+                        rb->root = tnode;
+                    } else {
+                        if (pathp[-1].cmp == _CMP_LESS)
+                            rb_node_set_left(pathp[-1].node, tnode);
+                        else
+                            rb_node_set_right(pathp[-1].node, tnode);
+                    }
+                    return;
+                } else {
+                    /*      ||
+                     *    pathp(b)
+                     *  //        \
+                     * (b)        (b)
+                     *           /
+                     *          (b)
+                     */
+                    map_node_t *tnode;
+                    rb_node_set_red(pathp->node);
+                    rb_node_rotate_left(pathp->node, tnode);
+                    pathp->node = tnode;
+                }
+            }
+        } else {
+            rb_node_set_right(pathp->node, pathp[1].node);
+            map_node_t *left = rb_node_get_left(pathp->node);
+            if (rb_node_get_color(left) == RB_RED) {
+                map_node_t *tnode;
+                map_node_t *leftright = rb_node_get_right(left);
+                map_node_t *leftrightleft = rb_node_get_left(leftright);
+                if (leftrightleft &&
+                    (rb_node_get_color(leftrightleft) == RB_RED)) {
+                    /*      ||
+                     *    pathp(b)
+                     *   /        \\
+                     * (r)        (b)
+                     *   \
+                     *   (b)
+                     *   /
+                     * (r)
+                     */
+                    map_node_t *unode;
+                    rb_node_set_black(leftrightleft);
+                    rb_node_rotate_right(pathp->node, unode);
+                    rb_node_rotate_right(pathp->node, tnode);
+                    rb_node_set_right(unode, tnode);
+                    rb_node_rotate_left(unode, tnode);
+                } else {
+                    /*      ||
+                     *    pathp(b)
+                     *   /        \\
+                     * (r)        (b)
+                     *   \
+                     *   (b)
+                     *   /
+                     * (b)
+                     */
+                    assert(leftright);
+                    rb_node_set_red(leftright);
+                    rb_node_rotate_right(pathp->node, tnode);
+                    rb_node_set_black(tnode);
+                }
+
+                /* Balance restored, but rotation modified subtree root, which
+                 * may actually be the tree root.
+                 */
+                if (pathp == path) {
+                    /* set root */
+                    rb->root = tnode;
+                } else {
+                    if (pathp[-1].cmp == _CMP_LESS)
+                        rb_node_set_left(pathp[-1].node, tnode);
+                    else
+                        rb_node_set_right(pathp[-1].node, tnode);
+                }
+                return;
+            } else if (rb_node_get_color(pathp->node) == RB_RED) {
+                map_node_t *leftleft = rb_node_get_left(left);
+                if (leftleft && (rb_node_get_color(leftleft) == RB_RED)) {
+                    /*        ||
+                     *      pathp(r)
+                     *     /        \\
+                     *   (b)        (b)
+                     *   /
+                     * (r)
+                     */
+                    map_node_t *tnode;
+                    rb_node_set_black(pathp->node);
+                    rb_node_set_red(left);
+                    rb_node_set_black(leftleft);
+                    rb_node_rotate_right(pathp->node, tnode);
+                    /* Balance restored, but rotation modified subtree root. */
+                    assert((uintptr_t) pathp > (uintptr_t) path);
+                    if (pathp[-1].cmp == _CMP_LESS)
+                        rb_node_set_left(pathp[-1].node, tnode);
+                    else
+                        rb_node_set_right(pathp[-1].node, tnode);
+                    return;
+                } else {
+                    /*        ||
+                     *      pathp(r)
+                     *     /        \\
+                     *   (b)        (b)
+                     *   /
+                     * (b)
+                     */
+                    rb_node_set_red(left);
+                    rb_node_set_black(pathp->node);
+                    /* balance restored */
+                    return;
+                }
+            } else {
+                map_node_t *leftleft = rb_node_get_left(left);
+                if (leftleft && (rb_node_get_color(leftleft) == RB_RED)) {
+                    /*               ||
+                     *             pathp(b)
+                     *            /        \\
+                     *          (b)        (b)
+                     *          /
+                     *        (r)
+                     */
+                    map_node_t *tnode;
+                    rb_node_set_black(leftleft);
+                    rb_node_rotate_right(pathp->node, tnode);
+                    /* Balance restored, but rotation modified subtree root,
+                     * which may actually be the tree root.
+                     */
+                    if (pathp == path) {
+                        /* set root */
+                        rb->root = tnode;
+                    } else {
+                        if (pathp[-1].cmp == _CMP_LESS)
+                            rb_node_set_left(pathp[-1].node, tnode);
+                        else
+                            rb_node_set_right(pathp[-1].node, tnode);
+                    }
+                    return;
+                } else {
+                    /*               ||
+                     *             pathp(b)
+                     *            /        \\
+                     *          (b)        (b)
+                     *          /
+                     *        (b)
+                     */
+                    rb_node_set_red(left);
+                }
+            }
+        }
+    }
+
+    /* set root */
+    rb->root = path->node;
+    assert(rb_node_get_color(rb->root) == RB_BLACK);
+}
+
+static void rb_destroy_recurse(map_t rb, map_node_t *node)
+{
+    if (!node)
+        return;
+
+    rb_destroy_recurse(rb, rb_node_get_left(node));
+    rb_node_set_left((node), NULL);
+    rb_destroy_recurse(rb, rb_node_get_right(node));
+    rb_node_set_right((node), NULL);
+    free(node->key);
+    free(node->data);
+    free(node);
+}
+
 static map_node_t *map_create_node(void *key,
                                    void *value,
                                    size_t ksize,
                                    size_t vsize)
 {
-    map_node_t *node = malloc(sizeof(struct map_node));
+    map_node_t *node = malloc(sizeof(map_node_t));
+    assert(node);
 
-    /* Allocate memory for the keys and values */
-    node->key = malloc(ksize);
-    node->data = malloc(vsize);
+    /* allocate memory for the keys and data */
+    node->key = malloc(ksize), node->data = malloc(vsize);
+    assert(node->key);
+    assert(node->data);
 
-    /* Setup the pointers */
-    node->left = node->right = NULL;
-
-    /* Set the color to read by default */
-    rb_set_parent_color(node, NULL, RB_RED);
-
-    /*
-     * Copy over the key and values
-     *
+    /* copy over the key and values.
      * If the parameter passed in is NULL, make the element blank instead of
      * a segfault.
      */
@@ -126,629 +572,68 @@ static map_node_t *map_create_node(void *key,
     return node;
 }
 
-static void map_delete_node(map_t obj UNUSED, map_node_t *node)
+/* Constructor */
+map_t map_new(size_t s1,
+              size_t s2,
+              map_cmp_t (*cmp)(const void *, const void *))
 {
-    free(node->key);
-    free(node->data);
-    free(node);
+    map_t tree = malloc(sizeof(struct map_internal));
+    assert(tree);
+
+    tree->key_size = s1, tree->data_size = s2;
+    tree->comparator = cmp;
+    tree->root = NULL;
+    return tree;
 }
 
-/*
- * Perform left rotation with "node". The following happens (with respect
- * to "C"):
- *
- *         B                C
- *        / \              / \
- *       A   C     =>     B   D
- *            \          /
- *             D        A
- *
- * Returns the new node pointing in the spot of the original node.
- */
-static map_node_t *map_rotate_left(map_t obj, map_node_t *node)
+/* Add function */
+bool map_insert(map_t obj, void *key, void *val)
 {
-    map_node_t *r = node->right, *rl = r->left, *parent = rb_parent(node);
-
-    /* Adjust */
-    rb_set_parent(r, parent);
-    r->left = node;
-
-    node->right = rl;
-    rb_set_parent(node, r);
-
-    if (node->right)
-        rb_set_parent(node->right, node);
-
-    if (parent) {
-        if (parent->right == node)
-            parent->right = r;
-        else
-            parent->left = r;
-    }
-
-    if (node == obj->head)
-        obj->head = r;
-
-    return r;
-}
-
-/*
- * Perform a right rotation with "node". The following happens (with respect
- * to "C"):
- *
- *         C                B
- *        / \              / \
- *       B   D     =>     A   C
- *      /                      \
- *     A                        D
- *
- * Return the new node pointing in the spot of the original node.
- */
-static map_node_t *map_rotate_right(map_t obj, map_node_t *node)
-{
-    map_node_t *l = node->left, *lr = l->right, *parent = rb_parent(node);
-
-    /* Adjust */
-    rb_set_parent(l, parent);
-    l->right = node;
-
-    node->left = lr;
-    rb_set_parent(node, l);
-
-    if (node->left)
-        rb_set_parent(node->left, node);
-
-    if (parent) {
-        if (parent->right == node)
-            parent->right = l;
-        else
-            parent->left = l;
-    }
-
-    if (node == obj->head)
-        obj->head = l;
-
-    return l;
-}
-
-static void map_l_l(map_t obj,
-                    map_node_t *node UNUSED,
-                    map_node_t *parent UNUSED,
-                    map_node_t *grandparent,
-                    map_node_t *uncle UNUSED)
-{
-    /* Rotate to the right according to grandparent */
-    grandparent = map_rotate_right(obj, grandparent);
-
-    /* Swap grandparent and uncle's colors */
-    map_color_t c1 = rb_color(grandparent), c2 = rb_color(grandparent->right);
-
-    rb_set_color(grandparent, c2);
-    rb_set_color(grandparent->right, c1);
-}
-
-static void map_l_r(map_t obj,
-                    map_node_t *node,
-                    map_node_t *parent,
-                    map_node_t *grandparent,
-                    map_node_t *uncle)
-{
-    /* Rotate to the left according to parent */
-    parent = map_rotate_left(obj, parent);
-
-    /* Refigure out the identity */
-    node = parent->left;
-    grandparent = rb_parent(parent);
-    uncle =
-        (grandparent->left == parent) ? grandparent->right : grandparent->left;
-
-    /* Apply left-left case */
-    map_l_l(obj, node, parent, grandparent, uncle);
-}
-
-static void map_r_r(map_t obj,
-                    map_node_t *node UNUSED,
-                    map_node_t *parent UNUSED,
-                    map_node_t *grandparent,
-                    map_node_t *uncle UNUSED)
-{
-    /* Rotate to the left according to grandparent */
-    grandparent = map_rotate_left(obj, grandparent);
-
-    /* Swap grandparent and uncle's colors */
-    map_color_t c1 = rb_color(grandparent), c2 = rb_color(grandparent->left);
-
-    rb_set_color(grandparent, c2);
-    rb_set_color(grandparent->left, c1);
-}
-
-static void map_r_l(map_t obj,
-                    map_node_t *node,
-                    map_node_t *parent,
-                    map_node_t *grandparent,
-                    map_node_t *uncle)
-{
-    /* Rotate to the right according to parent */
-    parent = map_rotate_right(obj, parent);
-
-    /* Refigure out the identity */
-    node = parent->right;
-    grandparent = rb_parent(parent);
-    uncle =
-        (grandparent->left == parent) ? grandparent->right : grandparent->left;
-
-    /* Apply right-right case */
-    map_r_r(obj, node, parent, grandparent, uncle);
-}
-
-static void map_fix_colors(map_t obj, map_node_t *node)
-{
-    /* If root, set the color to black */
-    if (node == obj->head) {
-        rb_set_color(node, RB_BLACK);
-        return;
-    }
-
-    /* If node's parent is black or node is root, back out. */
-    if (rb_color(rb_parent(node)) == RB_BLACK && rb_parent(node) != obj->head)
-        return;
-
-    /* Find out the identity */
-    map_node_t *parent = rb_parent(node), *grandparent = rb_parent(parent),
-               *uncle;
-
-    if (!rb_parent(parent))
-        return;
-
-    /* Find out the uncle */
-    if (grandparent->left == parent)
-        uncle = grandparent->right;
-    else
-        uncle = grandparent->left;
-
-    if (rb_is_red(uncle)) {
-        /* If the uncle is red, change color of parent and uncle to black */
-        rb_set_color(uncle, RB_BLACK);
-        rb_set_color(parent, RB_BLACK);
-
-        /* Change color of grandparent to red. */
-        rb_set_color(grandparent, RB_RED);
-
-        /* Call this on the grandparent */
-        map_fix_colors(obj, grandparent);
-    } else {
-        /* If the uncle is black. */
-        if (parent == grandparent->left && node == parent->left)
-            map_l_l(obj, node, parent, grandparent, uncle);
-        else if (parent == grandparent->left && node == parent->right)
-            map_l_r(obj, node, parent, grandparent, uncle);
-        else if (parent == grandparent->right && node == parent->left)
-            map_r_l(obj, node, parent, grandparent, uncle);
-        else if (parent == grandparent->right && node == parent->right)
-            map_r_r(obj, node, parent, grandparent, uncle);
-    }
-}
-
-/*
- * Fix the red-black tree post-BST deletion. This may involve multiple
- * recolors and/or rotations depending on which node was deleted, what color
- * it was, and where it was in the tree at the time of deletion.
- *
- * These fixes occur up and down the path of the tree, and each rotation is
- * guaranteed constant time. As such, there is a maximum of O(lg n) operations
- * taking place during the fixup procedure.
- */
-static void map_delete_fixup(map_t obj,
-                             map_node_t *node,
-                             map_node_t *p,
-                             bool y_is_left,
-                             map_node_t *y UNUSED)
-{
-    map_node_t *w;
-    map_color_t lc, rc;
-
-    if (!node)
-        return;
-
-    while (node != obj->head && rb_color(node) == RB_BLACK) {
-        if (y_is_left) { /* if left child */
-            w = p->right;
-
-            if (rb_is_red(w)) {
-                rb_set_color(w, RB_BLACK);
-                rb_set_color(p, RB_RED);
-                p = map_rotate_left(obj, p)->left;
-                w = p->right;
-            }
-
-            lc = !w->left ? RB_BLACK : rb_color(w->left);
-            rc = !w->right ? RB_BLACK : rb_color(w->right);
-
-            if (lc == RB_BLACK && rc == RB_BLACK) {
-                rb_set_color(w, RB_RED);
-                node = rb_parent(node);
-                p = rb_parent(node);
-
-                if (p)
-                    y_is_left = (node == p->left);
-            } else {
-                if (rc == RB_BLACK) {
-                    rb_set_color(w->left, RB_BLACK);
-                    rb_set_color(w, RB_RED);
-                    w = map_rotate_right(obj, w);
-                    w = p->right;
-                }
-
-                rb_set_color(w, rb_color(p));
-                rb_set_color(p, RB_BLACK);
-
-                if (w->right)
-                    rb_set_color(w->right, RB_BLACK);
-
-                p = map_rotate_left(obj, p);
-                node = obj->head;
-                p = NULL;
-            }
-        } else {
-            /* Same except flipped "left" and "right" */
-            w = p->left;
-
-            if (rb_is_red(w)) {
-                rb_set_color(w, RB_BLACK);
-                rb_set_color(p, RB_RED);
-                p = map_rotate_right(obj, p)->right;
-                w = p->left;
-            }
-
-            lc = !w->left ? RB_BLACK : rb_color(w->left);
-            rc = !w->right ? RB_BLACK : rb_color(w->right);
-
-            if (lc == RB_BLACK && rc == RB_BLACK) {
-                rb_set_color(w, RB_RED);
-                node = rb_parent(node);
-                p = rb_parent(node);
-                if (p)
-                    y_is_left = (node == p->left);
-            } else {
-                if (lc == RB_BLACK) {
-                    rb_set_color(w->right, RB_BLACK);
-                    rb_set_color(w, RB_RED);
-                    w = map_rotate_left(obj, w);
-                    w = p->left;
-                }
-
-                rb_set_color(w, rb_color(p));
-                rb_set_color(p, RB_BLACK);
-
-                if (w->left)
-                    rb_set_color(w->left, RB_BLACK);
-
-                p = map_rotate_right(obj, p);
-                node = obj->head;
-                p = NULL;
-            }
-        }
-    }
-
-    rb_set_color(node, RB_BLACK);
-}
-
-/*
- * Recursive wrapper for deleting nodes in a graph at an accelerated pace.
- * Skips rotations. Just aggressively goes through all nodes and deletes.
- */
-static void map_clear_nested(map_t obj, map_node_t *node)
-{
-    /* Free children */
-    if (node->left)
-        map_clear_nested(obj, node->left);
-    if (node->right)
-        map_clear_nested(obj, node->right);
-
-    /* Free self */
-    map_delete_node(obj, node);
-}
-
-/*
- * Recalculate the positions of the "least" and "most" iterators in the
- * tree. This is so iterators know where the beginning and end of the tree
- * resides.
- */
-static void map_calibrate(map_t obj)
-{
-    if (!obj->head) {
-        obj->it_least.node = obj->it_most.node = NULL;
-        return;
-    }
-
-    /* Recompute it_least and it_most */
-    obj->it_least.node = obj->it_most.node = obj->head;
-
-    while (obj->it_least.node->left)
-        obj->it_least.node = obj->it_least.node->left;
-
-    while (obj->it_most.node->right)
-        obj->it_most.node = obj->it_most.node->right;
-}
-
-/*
- * Sets up a brand new, blank map for use. The size of the node elements
- * is determined by what types are thrown in. "s1" is the size of the key
- * elements in bytes, while "s2" is the size of the value elements in
- * bytes.
- *
- * Since this is also a tree data structure, a comparison function is also
- * required to be passed in. A destruct function is optional and must be
- * added in through another function.
- */
-map_t map_new(size_t s1, size_t s2, int (*cmp)(const void *, const void *))
-{
-    map_t obj = malloc(sizeof(struct map_internal));
-
-    /* Set all pointers to NULL */
-    obj->head = NULL;
-
-    /* Set up all default properties */
-    obj->key_size = s1;
-    obj->element_size = s2;
-    obj->size = 0;
-
-    /* Function pointers */
-    obj->comparator = cmp;
-
-    obj->it_end.prev = obj->it_end.node = NULL;
-    obj->it_least.prev = obj->it_least.node = NULL;
-    obj->it_most.prev = obj->it_most.node = NULL;
-    obj->it_most.node = NULL;
-
-    return obj;
-}
-
-/*
- * Insert a key/value pair into the map. The value can be blank. If so,
- * it is filled with 0's, as defined in "map_create_node".
- */
-bool map_insert(map_t obj, void *key, void *value)
-{
-    /* Copy the key and value into new node and prepare it to put into tree. */
-    map_node_t *new_node =
-        map_create_node(key, value, obj->key_size, obj->element_size);
-
-    obj->size++;
-
-    if (!obj->head) {
-        /* Just insert the node in as the new head. */
-        obj->head = new_node;
-        rb_set_color(obj->head, RB_BLACK);
-
-        /* Calibrate the tree to properly assign pointers. */
-        map_calibrate(obj);
-        return true;
-    }
-
-    /* Traverse the tree until we hit the end or find a side that is NULL */
-    map_node_t **indirect = &obj->head;
-    map_node_t *parent = obj->head;
-
-    while (*indirect) {
-        int res = obj->comparator(new_node->key, (*indirect)->key);
-        if (res == 0) { /* If the key matches something, don't insert */
-            map_delete_node(obj, new_node);
-            return false;
-        }
-        parent = *indirect;
-        indirect = res < 0 ? &(*indirect)->left : &(*indirect)->right;
-    }
-
-    *indirect = new_node;
-    rb_set_parent(new_node, parent);
-    map_fix_colors(obj, new_node);
-    map_calibrate(obj);
+    map_node_t *node = map_create_node(key, val, obj->key_size, obj->data_size);
+    rb_insert(obj, node);
     return true;
 }
 
-static void map_prev(map_t obj, map_iter_t *it)
-{
-    /* We have hit the end or null node. */
-    if (!it->node || it->node == obj->it_least.node) {
-        it->prev = it->node = NULL;
-        return;
-    }
-
-    if (it->node->left) { /* To the left, as far right as possible */
-        for (it->node = it->node->left; it->node->right;
-             it->node = it->node->right)
-            it->prev = it->node;
-        return;
-    }
-
-    /* If there is no left child, keep going up until there is a left child */
-    it->prev = it->node;
-    it->node = rb_parent(it->node);
-
-    while (rb_parent(it->node) && it->node->left &&
-           (it->node->left == it->prev)) {
-        it->prev = it->node;
-        it->node = rb_parent(it->node);
-    }
-}
-
+/* Get functions */
 void map_find(map_t obj, map_iter_t *it, void *key)
 {
-    if (!obj->head) { /* End the search instantly if nothing is found. */
-        it->node = it->prev = NULL;
-        return;
-    }
-
-    /* Basically a repeat of insert */
-    map_node_t **indirect = &obj->head;
-
-    /* binary search */
-    while (*indirect) {
-        int res = obj->comparator(key, (*indirect)->key);
-        if (res == 0)
-            break;
-        indirect = res < 0 ? &(*indirect)->left : &(*indirect)->right;
-    }
-
-    if (!*indirect) {
-        it->node = NULL;
-        return;
-    }
-    it->node = *indirect;
-
-    /* Generate a "prev" as well */
-    map_iter_t tmp = *it;
-    map_prev(obj, &tmp);
-    it->prev = tmp.node;
+    map_node_t tmp_node = {.key = key};
+    it->node = rb_search(obj, &tmp_node);
 }
 
 bool map_empty(map_t obj)
 {
-    return (obj->size == 0);
+    return !obj->root;
 }
 
-/* Return true if at the the end of the map */
-bool map_at_end(map_t obj UNUSED, map_iter_t *it)
+/* Iteration */
+bool map_at_end(map_t UNUSED, map_iter_t *it)
 {
-    return (it->node == NULL);
+    return !(it->node);
 }
 
-/*
- * Remove a node from the map. It performs a BST delete, and then reorders
- * the tree so that it remains balanced.
- */
+/* Remove functions */
 void map_erase(map_t obj, map_iter_t *it)
 {
-    map_node_t *x, *y;
-    map_node_t *node = it->node, *target, *double_blk, *x_parent;
-
-    /* If it is the head, and the size is 1, just delete it. */
-    if (obj->size == 1 && node == obj->head) {
-        map_delete_node(obj, node);
-        obj->head = NULL;
-        obj->size--;
+    if (!it->node)
         return;
-    }
 
-    /* Determine what the target is */
-    uint8_t c = (!!node->left << 0x0) | (!!node->right << 0x1);
-
-    switch (c) {
-    case 0x0: /* Leaf node (this should be impossible) */
-        target = node;
-        break;
-
-    case 0x1: /* Has left child */
-        target = node->left;
-        break;
-
-    case 0x2: /* Has right child */
-        target = node->right;
-        break;
-
-    case 0x3: /* Has 2 children */
-        for (target = node->left; target->right; target = target->right)
-            ;
-        break;
-    }
-    assert(target);
-
-    /* Initially there is no Double Black */
-    double_blk = NULL;
-
-    if (!node->left || !node->right)
-        y = node;
-    else
-        y = target;
-
-    if (y->left)
-        x = y->left;
-    else
-        x = y->right;
-
-    if (x)
-        rb_set_parent(x, rb_parent(y));
-
-    x_parent = rb_parent(y);
-
-    bool y_is_left = false;
-    if (!rb_parent(y)) {
-        obj->head = x;
-    } else {
-        if (y == rb_parent(y)->left) {
-            rb_parent(y)->left = x;
-            y_is_left = true;
-        } else
-            rb_parent(y)->right = x;
-    }
-
-    if (y != node) {
-        free(node->key);
-        free(node->data);
-
-        node->key = y->key;
-        node->data = y->data;
-
-        y->key = y->data = NULL;
-    }
-
-    if (rb_color(y) == RB_BLACK) {
-        if (!x) { /* Make a blank node if null */
-            double_blk =
-                map_create_node(NULL, NULL, obj->key_size, obj->element_size);
-
-            x = double_blk;
-
-            if (!rb_parent(target)->left)
-                rb_parent(target)->left = x;
-            else
-                rb_parent(target)->right = x;
-
-            rb_set_parent_color(x, rb_parent(target), RB_BLACK);
-        }
-
-        /* fix the tree up */
-        map_delete_fixup(obj, x, x_parent, y_is_left, y);
-
-        /* Clean up Double Black */
-        if (double_blk) {
-            if (rb_parent(double_blk)) {
-                if (rb_parent(double_blk)->left == double_blk)
-                    rb_parent(double_blk)->left = NULL;
-                else
-                    rb_parent(double_blk)->right = NULL;
-            }
-
-            map_delete_node(obj, double_blk);
-        }
-    }
-
-    obj->size--;
-
-    map_delete_node(obj, y);
-    map_calibrate(obj);
+    rb_remove(obj, it->node);
+    free(it->node->key);
+    free(it->node->data);
+    free(it->node);
 }
 
-/*
- * Delete all nodes in the graph. This is done by calling erase on the head
- * node until the tree is empty.
- */
+/* Empty map */
 void map_clear(map_t obj)
 {
-    if (obj->head) /* Aggressively delete by recursion */
-        map_clear_nested(obj, obj->head);
-
-    obj->size = 0;
-    obj->head = NULL;
+    rb_destroy_recurse(obj, obj->root);
+    obj->root = NULL;
 }
 
-/* Free the map from memory and delete all nodes. */
+/* Destructor */
 void map_delete(map_t obj)
 {
-    /* Free all nodes */
     map_clear(obj);
-
-    /* Free the map itself */
     free(obj);
 }

@@ -607,7 +607,7 @@ bool map_empty(map_t obj)
 }
 
 /* Iteration */
-bool map_at_end(map_t UNUSED, map_iter_t *it)
+bool map_at_end(map_t m UNUSED, map_iter_t *it)
 {
     return !(it->node);
 }

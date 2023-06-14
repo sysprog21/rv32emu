@@ -19,7 +19,7 @@ enum { N_NODES = 10000 };
 static int test_map_mixed_operations()
 {
     int ret = 0;
-    map_t tree = map_init(int, int, map_cmp_uint);
+    map_t tree = map_init(int, int, map_cmp_int);
 
     int key[N_NODES], val[N_NODES];
 

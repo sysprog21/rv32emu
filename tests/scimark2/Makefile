@@ -1,4 +1,4 @@
-.PHONY: clean                                                                                                                                                 
+.PHONY: clean
 
 include ../../mk/toolchain.mk
 

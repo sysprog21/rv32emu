@@ -1149,12 +1149,15 @@ RVOP(cbeqz, {
         if (!ir->branch_untaken)
             goto nextop;
         rv->PC += ir->insn_len;
+        last_pc = rv->PC;
         return ir->branch_untaken->impl(rv, ir->branch_untaken);
     }
     branch_taken = true;
     rv->PC += (uint32_t) ir->imm;
-    if (ir->branch_taken)
+    if (ir->branch_taken) {
+        last_pc = rv->PC;
         return ir->branch_taken->impl(rv, ir->branch_taken);
+    }
     return true;
 })
 
@@ -1165,12 +1168,15 @@ RVOP(cbnez, {
         if (!ir->branch_untaken)
             goto nextop;
         rv->PC += ir->insn_len;
+        last_pc = rv->PC;
         return ir->branch_untaken->impl(rv, ir->branch_untaken);
     }
     branch_taken = true;
     rv->PC += (uint32_t) ir->imm;
-    if (ir->branch_taken)
+    if (ir->branch_taken) {
+        last_pc = rv->PC;
         return ir->branch_taken->impl(rv, ir->branch_taken);
+    }
     return true;
 })
 

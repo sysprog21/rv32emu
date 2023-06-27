@@ -11,9 +11,9 @@
 
 #include "cache.h"
 #include "mpool.h"
+#include "utils.h"
 
 #define MIN(a, b) ((a < b) ? a : b)
-#define GOLDEN_RATIO_32 0x61C88647
 #define HASH(val) \
     (((val) * (GOLDEN_RATIO_32)) >> (32 - (cache_size_bits))) & (cache_size - 1)
 
@@ -65,6 +65,7 @@ struct hlist_node {
 typedef struct {
     void *value;
     uint32_t key;
+    uint32_t frequency;
     cache_list_t type;
     struct list_head list;
     struct hlist_node ht_list;
@@ -338,7 +339,7 @@ static inline void move_to_mru(cache_t *cache,
 
 void *cache_get(cache_t *cache, uint32_t key)
 {
-    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+    if (hlist_empty(&cache->map->ht_list_head[HASH(key)]))
         return NULL;
 
 #if RV32_HAS(ARC)
@@ -353,8 +354,10 @@ void *cache_get(cache_t *cache, uint32_t key)
         if (entry->key == key)
             break;
     }
-    if (!entry || entry->key != key)
+    if (!entry)
         return NULL;
+    if (entry->frequency < THRESHOLD)
+        entry->frequency++;
     /* cache hit in LRU_list */
     if (entry->type == LRU_list && cache->lru_capacity != cache->capacity)
         move_to_mru(cache, entry, LFU_list);
@@ -469,6 +472,7 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
     arc_entry_t *new_entry = mpool_alloc(cache_mp);
     new_entry->key = key;
     new_entry->value = value;
+    new_entry->frequency = 0;
     /* check if all cache become LFU */
     if (cache->lru_capacity != 0) {
         new_entry->type = LRU_list;
@@ -541,3 +545,37 @@ void cache_free(cache_t *cache, void (*callback)(void *))
     free(cache->map);
     free(cache);
 }
+
+#if RV32_HAS(JIT)
+bool cache_hot(struct cache *cache, uint32_t key)
+{
+    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+        return false;
+#if RV32_HAS(ARC)
+    arc_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          arc_entry_t)
+#endif
+    {
+        if (entry->key == key && entry->frequency == THRESHOLD)
+            return true;
+    }
+#else
+    lfu_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          lfu_entry_t)
+#endif
+    {
+        if (entry->key == key && entry->frequency == THRESHOLD)
+            return true;
+    }
+#endif
+    return false;
+}
+#endif

@@ -35,6 +35,10 @@ jobs:
     - name: gdbstub test
       run: |
             make gdbstub-test
+    - name: JIT test
+      run: |
+            make ENABLE_JIT=1 clean all
+            make check
 
   coding_style:
     runs-on: ubuntu-22.04

@@ -171,6 +171,7 @@ enum {
 #define _(inst, can_branch) rv_insn_##inst,
     RISCV_INSN_LIST
 #undef _
+        N_RV_INSN,
 };
 
 /* clang-format off */
@@ -283,6 +284,9 @@ typedef struct rv_insn {
      * specific IR array without the need for additional copying.
      */
     struct rv_insn *branch_taken, *branch_untaken;
+#if RV32_HAS(JIT)
+    uint32_t pc;
+#endif
 } rv_insn_t;
 
 /* decode the RISC-V instruction */

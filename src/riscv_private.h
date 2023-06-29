@@ -12,6 +12,9 @@
 #endif
 #include "decode.h"
 #include "riscv.h"
+#if RV32_HAS(JIT)
+#include "cache.h"
+#endif
 
 /* CSRs */
 enum {
@@ -59,8 +62,15 @@ typedef struct block {
     uint32_t insn_capacity;    /**< maximum of instructions encompased */
     struct block *predict;     /**< block prediction */
     rv_insn_t *ir;             /**< IR as memory blocks */
+#if RV32_HAS(JIT)
+    bool hot; /**< Determine the block is hotspot or not */
+#endif
 } block_t;
 
+/* Map the translated basic block to its program counter to accelerate the
+ * searching process. It's important to note that this data structure is not
+ * utilized in JIT mode.
+ */
 typedef struct {
     uint32_t block_capacity; /**< max number of entries in the block map */
     uint32_t size;           /**< number of entries currently in the map */
@@ -119,8 +129,13 @@ struct riscv_internal {
     uint32_t csr_mip;
     uint32_t csr_mbadaddr;
 
-    bool compressed;       /**< current instruction is compressed or not */
+    bool compressed; /**< current instruction is compressed or not */
+#if !RV32_HAS(JIT)
     block_map_t block_map; /**< basic block map */
+#else
+    struct cache *block_cache;
+    struct cache *code_cache;
+#endif
 
     /* print exit code on syscall_exit */
     bool output_exit_code;
@@ -137,3 +152,39 @@ static inline uint32_t sign_extend_b(const uint32_t x)
 {
     return (int32_t) ((int8_t) x);
 }
+
+#if RV32_HAS(EXT_F)
+#include <math.h>
+#include "softfloat.h"
+
+#if defined(__APPLE__)
+static inline int isinff(float x)
+{
+    return __builtin_fabsf(x) == __builtin_inff();
+}
+static inline int isnanf(float x)
+{
+    return x != x;
+}
+#endif
+#endif /* RV32_HAS(EXT_F) */
+
+#if RV32_HAS(Zicsr)
+/* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
+ * CSRs and integer registers. CSRRW reads the old value of the CSR,
+ * zero-extends the value to XLEN bits, and then writes it to register rd.
+ * The initial value in rs1 is written to the CSR.
+ * If rd == x0, then the instruction shall not read the CSR and shall not cause
+ * any of the side effects that might occur on a CSR read.
+ */
+uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val);
+
+/* perform csrrs (atomic read and set) */
+uint32_t csr_csrrs(riscv_t *rv, uint32_t csr, uint32_t val);
+
+/* perform csrrc (atomic read and clear)
+ * Read old value of CSR, zero-extend to XLEN bits, write to rd.
+ * Read value from rs1, use as bit mask to clear bits in CSR.
+ */
+uint32_t csr_csrrc(riscv_t *rv, uint32_t csr, uint32_t val);
+#endif

@@ -53,6 +53,11 @@
 #define RV32_FEATURE_ARC 0
 #endif
 
+/* Cache */
+#ifndef RV32_FEATURE_JIT
+#define RV32_FEATURE_JIT 0
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x
 

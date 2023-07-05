@@ -20,7 +20,8 @@ We welcome all contributions from corporate, academic and individual developers.
 
 Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 12 or later.
 
-Use the command `$ clang-format -i *.[ch]` to enforce a consistent coding style.
+This repository always includes an up-to-date .clang-format file with rules that match the explained ones.
+To enforce a consistent coding style, use the command `$ clang-format -i *.[ch]` .
 
 ## Coding Style for Modern C
 
@@ -30,7 +31,16 @@ capabilities and sanitizers.
 
 ### Indentation
 
-Use 4 spaces rather than tabs.
+"In this coding style guide, the use of 4 spaces for indentation instead of tabs is strongly enforced to ensure consistency.
+Consistently apply a single space before and after comparison and assignment operators to maintain readable code.
+Additionally, it is crucial to include a single space after every comma.
+e.g.,
+```c
+for (int i = 0; i < 10; i++) {
+    printf("%d\n", i);
+    /* some operations */
+}
+```
 
 ### Line length
 
@@ -66,7 +76,12 @@ Leave two spaces between the statement and the inline comment.
 ### Spacing and brackets
 
 Use one space after the conditional or loop keyword, no spaces around
-their brackets, and one space before the opening curly bracket.
+their brackets, and one space before the opening curly bracket. e.g.,
+```c
+do {
+    /* some operations */
+} while (condition);
+```
 
 Functions (their declarations or calls), `sizeof` operator or similar
 macros shall not have a space after their name/keyword or around the
@@ -80,6 +95,8 @@ Use brackets to avoid ambiguity and with operators such as `sizeof`,
 but otherwise avoid redundant or excessive brackets.
 
 ### Variable names and declarations
+
+- Ensure that functions, variables, and comments are consistently named using English names/text.
 
 - Use descriptive names for global variables and short names for locals.
 Find the right balance between descriptive and succinct.
@@ -95,6 +112,29 @@ const char *name;  /* const pointer; '*' with the name and space before it */
 conf_t * const cfg;  /* pointer to a const data; spaces around 'const' */
 const uint8_t * const charmap;  /* const pointer and const data */
 const void * restrict key;  /* const pointer which does not alias */
+```
+
+- Local variables of the same type should be declared in the same line.
+```c
+void func(void)
+{
+    char a, b; /* OK */
+
+    char a;
+    char b;    /* Incorrect: A variable with char type already exists. */
+}
+```
+
+- Always include a trailing comma in the last element of structure initialization, including its children, to assist clang-format in correctly formatting structures. However, this can be omitted in very simple and short structures.
+```c
+typedef struct {
+    int width, height;
+} screen_t;
+
+screen_t s = {
+    .width = 640,
+    .height = 480,   /* comma here */
+}
 ```
 
 ### Type definitions

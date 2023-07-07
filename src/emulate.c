@@ -414,49 +414,48 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 
 /* LB: Load Byte */
 RVOP(lb, {
-    rv->X[ir->rd] =
-        sign_extend_b(rv->io.mem_read_b(rv, rv->X[ir->rs1] + ir->imm));
+    rv->X[ir->rd] = sign_extend_b(rv->io.mem_read_b(rv->X[ir->rs1] + ir->imm));
 })
 
 /* LH: Load Halfword */
 RVOP(lh, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, load, false, 1);
-    rv->X[ir->rd] = sign_extend_h(rv->io.mem_read_s(rv, addr));
+    rv->X[ir->rd] = sign_extend_h(rv->io.mem_read_s(addr));
 })
 
 /* LW: Load Word */
 RVOP(lw, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
+    rv->X[ir->rd] = rv->io.mem_read_w(addr);
 })
 
 /* LBU: Load Byte Unsigned */
-RVOP(lbu, { rv->X[ir->rd] = rv->io.mem_read_b(rv, rv->X[ir->rs1] + ir->imm); })
+RVOP(lbu, { rv->X[ir->rd] = rv->io.mem_read_b(rv->X[ir->rs1] + ir->imm); })
 
 /* LHU: Load Halfword Unsigned */
 RVOP(lhu, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, load, false, 1);
-    rv->X[ir->rd] = rv->io.mem_read_s(rv, addr);
+    rv->X[ir->rd] = rv->io.mem_read_s(addr);
 })
 
 /* SB: Store Byte */
-RVOP(sb, { rv->io.mem_write_b(rv, rv->X[ir->rs1] + ir->imm, rv->X[ir->rs2]); })
+RVOP(sb, { rv->io.mem_write_b(rv->X[ir->rs1] + ir->imm, rv->X[ir->rs2]); })
 
 /* SH: Store Halfword */
 RVOP(sh, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, store, false, 1);
-    rv->io.mem_write_s(rv, addr, rv->X[ir->rs2]);
+    rv->io.mem_write_s(addr, rv->X[ir->rs2]);
 })
 
 /* SW: Store Word */
 RVOP(sw, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-    rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
+    rv->io.mem_write_w(addr, rv->X[ir->rs2]);
 })
 
 /* ADDI adds the sign-extended 12-bit immediate to register rs1. Arithmetic
@@ -729,7 +728,7 @@ RVOP(remu, {
 
 /* LR.W: Load Reserved */
 RVOP(lrw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, rv->X[ir->rs1]);
+    rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
     /* skip registration of the 'reservation set'
      * FIXME: uimplemented
      */
@@ -740,78 +739,78 @@ RVOP(scw, {
     /* assume the 'reservation set' is valid
      * FIXME: unimplemented
      */
-    rv->io.mem_write_w(rv, rv->X[ir->rs1], rv->X[ir->rs2]);
+    rv->io.mem_write_w(rv->X[ir->rs1], rv->X[ir->rs2]);
     rv->X[ir->rd] = 0;
 })
 
 /* AMOSWAP.W: Atomic Swap */
 RVOP(amoswapw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
-    rv->io.mem_write_s(rv, ir->rs1, rv->X[ir->rs2]);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+    rv->io.mem_write_s(ir->rs1, rv->X[ir->rs2]);
 })
 
 /* AMOADD.W: Atomic ADD */
 RVOP(amoaddw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const int32_t res = (int32_t) rv->X[ir->rd] + (int32_t) rv->X[ir->rs2];
-    rv->io.mem_write_s(rv, ir->rs1, res);
+    rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOXOR.W: Atomix XOR */
 RVOP(amoxorw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const int32_t res = rv->X[ir->rd] ^ rv->X[ir->rs2];
-    rv->io.mem_write_s(rv, ir->rs1, res);
+    rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOAND.W: Atomic AND */
 RVOP(amoandw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const int32_t res = rv->X[ir->rd] & rv->X[ir->rs2];
-    rv->io.mem_write_s(rv, ir->rs1, res);
+    rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOOR.W: Atomic OR */
 RVOP(amoorw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const int32_t res = rv->X[ir->rd] | rv->X[ir->rs2];
-    rv->io.mem_write_s(rv, ir->rs1, res);
+    rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOMIN.W: Atomic MIN */
 RVOP(amominw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const int32_t a = rv->X[ir->rd];
     const int32_t b = rv->X[ir->rs2];
     const int32_t res = a < b ? a : b;
-    rv->io.mem_write_s(rv, ir->rs1, res);
+    rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOMAX.W: Atomic MAX */
 RVOP(amomaxw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const int32_t a = rv->X[ir->rd];
     const int32_t b = rv->X[ir->rs2];
     const int32_t res = a > b ? a : b;
-    rv->io.mem_write_s(rv, ir->rs1, res);
+    rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOMINU.W */
 RVOP(amominuw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const uint32_t a = rv->X[ir->rd];
     const uint32_t b = rv->X[ir->rs2];
     const uint32_t res = a < b ? a : b;
-    rv->io.mem_write_s(rv, ir->rs1, res);
+    rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOMAXU.W */
 RVOP(amomaxuw, {
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, ir->rs1);
+    rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const uint32_t a = rv->X[ir->rd];
     const uint32_t b = rv->X[ir->rs2];
     const uint32_t res = a > b ? a : b;
-    rv->io.mem_write_s(rv, ir->rs1, res);
+    rv->io.mem_write_s(ir->rs1, res);
 })
 #endif /* RV32_HAS(EXT_A) */
 
@@ -819,7 +818,7 @@ RVOP(amomaxuw, {
 /* FLW */
 RVOP(flw, {
     /* copy into the float register */
-    const uint32_t data = rv->io.mem_read_w(rv, rv->X[ir->rs1] + ir->imm);
+    const uint32_t data = rv->io.mem_read_w(rv->X[ir->rs1] + ir->imm);
     rv->F_int[ir->rd] = data;
 })
 
@@ -827,7 +826,7 @@ RVOP(flw, {
 RVOP(fsw, {
     /* copy from float registers */
     uint32_t data = rv->F_int[ir->rs2];
-    rv->io.mem_write_w(rv, rv->X[ir->rs1] + ir->imm, data);
+    rv->io.mem_write_w(rv->X[ir->rs1] + ir->imm, data);
 })
 
 /* FMADD.S */
@@ -1039,7 +1038,7 @@ RVOP(caddi4spn, { rv->X[ir->rd] = rv->X[2] + (uint16_t) ir->imm; })
 RVOP(clw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, load, true, 1);
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
+    rv->X[ir->rd] = rv->io.mem_read_w(addr);
 })
 
 /* C.SW stores a 32-bit value in register rs2' to memory. It computes an
@@ -1050,7 +1049,7 @@ RVOP(clw, {
 RVOP(csw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, store, true, 1);
-    rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
+    rv->io.mem_write_w(addr, rv->X[ir->rs2]);
 })
 
 /* C.NOP */
@@ -1190,7 +1189,7 @@ RVOP(cslli, { rv->X[ir->rd] <<= (uint8_t) ir->imm; })
 RVOP(clwsp, {
     const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, load, true, 1);
-    rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
+    rv->X[ir->rd] = rv->io.mem_read_w(addr);
 })
 
 /* C.JR */
@@ -1232,7 +1231,7 @@ RVOP(cadd, { rv->X[ir->rd] = rv->X[ir->rs1] + rv->X[ir->rs2]; })
 RVOP(cswsp, {
     const uint32_t addr = rv->X[2] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, store, true, 1);
-    rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
+    rv->io.mem_write_w(addr, rv->X[ir->rs2]);
 })
 #endif
 
@@ -1253,10 +1252,10 @@ RVOP(fuse3, {
      * is misaligned or if the memory chunk does not exist.
      */
     RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-    rv->io.mem_write_w(rv, addr, rv->X[fuse[0].rs2]);
+    rv->io.mem_write_w(addr, rv->X[fuse[0].rs2]);
     for (int i = 1; i < ir->imm2; i++) {
         addr = rv->X[fuse[i].rs1] + fuse[i].imm;
-        rv->io.mem_write_w(rv, addr, rv->X[fuse[i].rs2]);
+        rv->io.mem_write_w(addr, rv->X[fuse[i].rs2]);
     }
 })
 
@@ -1269,10 +1268,10 @@ RVOP(fuse4, {
      * is misaligned or if the memory chunk does not exist.
      */
     RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-    rv->X[fuse[0].rd] = rv->io.mem_read_w(rv, addr);
+    rv->X[fuse[0].rd] = rv->io.mem_read_w(addr);
     for (int i = 1; i < ir->imm2; i++) {
         addr = rv->X[fuse[i].rs1] + fuse[i].imm;
-        rv->X[fuse[i].rd] = rv->io.mem_read_w(rv, addr);
+        rv->X[fuse[i].rd] = rv->io.mem_read_w(addr);
     }
 })
 
@@ -1382,7 +1381,7 @@ static void block_translate(riscv_t *rv, block_t *block)
         memset(ir, 0, sizeof(rv_insn_t));
 
         /* fetch the next instruction */
-        const uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
+        const uint32_t insn = rv->io.mem_ifetch(block->pc_end);
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {

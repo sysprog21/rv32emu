@@ -7,12 +7,13 @@
 
 #include <stdint.h>
 
-typedef struct {
-    uint8_t data[0x10000];
-} chunk_t;
+/* Directly map a memory with a size of 2^32 bytes. All memory read/write
+ * operations can access this memory through the memory subsystem.
+ */
 
 typedef struct {
-    chunk_t *chunks[0x10000];
+    uint8_t *mem_base;
+    uint64_t mem_size;
 } memory_t;
 
 memory_t *memory_new();
@@ -25,16 +26,16 @@ uint32_t memory_read_str(memory_t *m,
                          uint32_t max);
 
 /* read an instruction from memory */
-uint32_t memory_ifetch(memory_t *m, uint32_t addr);
+uint32_t memory_ifetch(uint32_t addr);
 
 /* read a word from memory */
-uint32_t memory_read_w(memory_t *m, uint32_t addr);
+uint32_t memory_read_w(uint32_t addr);
 
 /* read a short from memory */
-uint16_t memory_read_s(memory_t *m, uint32_t addr);
+uint16_t memory_read_s(uint32_t addr);
 
 /* read a byte from memory */
-uint8_t memory_read_b(memory_t *m, uint32_t addr);
+uint8_t memory_read_b(uint32_t addr);
 
 /* read a length of data from memory */
 void memory_read(memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size);
@@ -44,10 +45,10 @@ void memory_write(memory_t *m,
                   const uint8_t *src,
                   uint32_t size);
 
-void memory_write_w(memory_t *m, uint32_t addr, const uint8_t *src);
+void memory_write_w(uint32_t addr, const uint8_t *src);
 
-void memory_write_s(memory_t *m, uint32_t addr, const uint8_t *src);
+void memory_write_s(uint32_t addr, const uint8_t *src);
 
-void memory_write_b(memory_t *m, uint32_t addr, const uint8_t *src);
+void memory_write_b(uint32_t addr, const uint8_t *src);
 
 void memory_fill(memory_t *m, uint32_t addr, uint32_t size, uint8_t val);

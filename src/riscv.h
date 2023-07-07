@@ -71,21 +71,15 @@ typedef uint32_t riscv_exception_t;
 typedef float riscv_float_t;
 
 /* memory read handlers */
-typedef riscv_word_t (*riscv_mem_ifetch)(riscv_t *rv, riscv_word_t addr);
-typedef riscv_word_t (*riscv_mem_read_w)(riscv_t *rv, riscv_word_t addr);
-typedef riscv_half_t (*riscv_mem_read_s)(riscv_t *rv, riscv_word_t addr);
-typedef riscv_byte_t (*riscv_mem_read_b)(riscv_t *rv, riscv_word_t addr);
+typedef riscv_word_t (*riscv_mem_ifetch)(riscv_word_t addr);
+typedef riscv_word_t (*riscv_mem_read_w)(riscv_word_t addr);
+typedef riscv_half_t (*riscv_mem_read_s)(riscv_word_t addr);
+typedef riscv_byte_t (*riscv_mem_read_b)(riscv_word_t addr);
 
 /* memory write handlers */
-typedef void (*riscv_mem_write_w)(riscv_t *rv,
-                                  riscv_word_t addr,
-                                  riscv_word_t data);
-typedef void (*riscv_mem_write_s)(riscv_t *rv,
-                                  riscv_word_t addr,
-                                  riscv_half_t data);
-typedef void (*riscv_mem_write_b)(riscv_t *rv,
-                                  riscv_word_t addr,
-                                  riscv_byte_t data);
+typedef void (*riscv_mem_write_w)(riscv_word_t addr, riscv_word_t data);
+typedef void (*riscv_mem_write_s)(riscv_word_t addr, riscv_half_t data);
+typedef void (*riscv_mem_write_b)(riscv_word_t addr, riscv_byte_t data);
 
 /* system instruction handlers */
 typedef void (*riscv_on_ecall)(riscv_t *rv);

@@ -48,20 +48,13 @@ static int rv_write_reg(void *args, int regno, size_t data)
 static int rv_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     riscv_t *rv = (riscv_t *) args;
-    state_t *s = rv_userdata(rv);
 
     int err = 0;
     for (size_t i = 0; i < len; i++) {
         /* FIXME: This is implemented as a simple workaround for reading
          * an invalid address. We may have to do error handling in the
          * mem_read_* function directly. */
-        uint32_t addr_hi = (addr + i) >> 16;
-        if (!s->mem->chunks[addr_hi]) {
-            err = EFAULT;
-            continue;
-        }
-
-        *((uint8_t *) val + i) = rv->io.mem_read_b(rv, addr + i);
+        *((uint8_t *) val + i) = rv->io.mem_read_b(addr + i);
     }
 
     return err;
@@ -72,7 +65,7 @@ static int rv_write_mem(void *args, size_t addr, size_t len, void *val)
     riscv_t *rv = (riscv_t *) args;
 
     for (size_t i = 0; i < len; i++)
-        rv->io.mem_write_b(rv, addr + i, *((uint8_t *) val + i));
+        rv->io.mem_write_b(addr + i, *((uint8_t *) val + i));
 
     return 0;
 }

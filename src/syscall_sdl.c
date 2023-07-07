@@ -110,7 +110,7 @@ static void event_push(riscv_t *rv, event_t event)
     uint32_t count;
     memory_read(s->mem, (void *) &count, event_count, sizeof(uint32_t));
     count += 1;
-    memory_write_w(s->mem, event_count, (void *) &count);
+    memory_write(s->mem, event_count, (void *) &count, sizeof(uint32_t));
 }
 
 static inline uint32_t round_pow2(uint32_t x)

@@ -134,8 +134,6 @@ static void syscall_brk(riscv_t *rv)
 
 static void syscall_gettimeofday(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
-
     /* get the parameters */
     riscv_word_t tv = rv_get_reg(rv, rv_reg_a0);
     riscv_word_t tz = rv_get_reg(rv, rv_reg_a1);
@@ -144,8 +142,8 @@ static void syscall_gettimeofday(riscv_t *rv)
     if (tv) {
         struct timeval tv_s;
         rv_gettimeofday(&tv_s);
-        memory_write_w(s->mem, tv + 0, (const uint8_t *) &tv_s.tv_sec);
-        memory_write_w(s->mem, tv + 8, (const uint8_t *) &tv_s.tv_usec);
+        memory_write_w(tv + 0, (const uint8_t *) &tv_s.tv_sec);
+        memory_write_w(tv + 8, (const uint8_t *) &tv_s.tv_usec);
     }
 
     if (tz) {
@@ -158,8 +156,6 @@ static void syscall_gettimeofday(riscv_t *rv)
 
 static void syscall_clock_gettime(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
-
     /* get the parameters */
     riscv_word_t id = rv_get_reg(rv, rv_reg_a0);
     riscv_word_t tp = rv_get_reg(rv, rv_reg_a1);
@@ -178,8 +174,8 @@ static void syscall_clock_gettime(riscv_t *rv)
     if (tp) {
         struct timespec tp_s;
         rv_clock_gettime(&tp_s);
-        memory_write_w(s->mem, tp + 0, (const uint8_t *) &tp_s.tv_sec);
-        memory_write_w(s->mem, tp + 8, (const uint8_t *) &tp_s.tv_nsec);
+        memory_write_w(tp + 0, (const uint8_t *) &tp_s.tv_sec);
+        memory_write_w(tp + 8, (const uint8_t *) &tp_s.tv_nsec);
     }
 
     /* success */

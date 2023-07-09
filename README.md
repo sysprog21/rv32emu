@@ -14,16 +14,16 @@
      |____/_____|     [-------------------------]
 ```
 
-`rv32emu` is an emulator for the 32 bit [RISC-V processor model](https://riscv.org/technical/specifications/),
-implementing the RISC-V instruction set architecture (ISA).
+`rv32emu` is an emulator for the 32 bit [RISC-V processor model](https://riscv.org/technical/specifications/) (RV32),
+faithfully implementing the RISC-V instruction set architecture (ISA).
 
 Features:
-* Fast interpreter for executing RV32 ISA
-* Full coverage of RV32I and M, A, C extensions
-* Partial support for F extension
-* Memory-efficient
+* Fast interpreter for executing the RV32 ISA
+* Comprehensive support for RV32I and M, A, C extensions
+* Partial support for the F extension
+* Memory-efficient design
 * Built-in ELF loader
-* Implementation of common newlib system calls
+* Implementation of commonly used newlib system calls
 * Experimental SDL-based display/event system calls for running video games
 * Support for remote GDB debugging
 

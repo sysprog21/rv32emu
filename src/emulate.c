@@ -721,7 +721,23 @@ RVOP(remu, {
 #endif
 
 #if RV32_HAS(EXT_A) /* RV32A Standard Extension */
-/* At present, AMO is not implemented atomically because the emulated RISC-V
+/* The Atomic Memory Operation (AMO) instructions execute read-modify-write
+ * operations to synchronize multiple processors and are encoded in an R-type
+ * instruction format.
+ *
+ * These AMO instructions guarantee atomicity when loading a data value from
+ * the memory address stored in the register rs1. The loaded value is then
+ * transferred to the register rd, where a binary operator is applied to this
+ * value and the original value stored in the register rs2. Finally, the
+ * resulting value is stored back to the memory address in rs1, ensuring
+ * atomicity.
+ *
+ * AMOs support the manipulation of 64-bit words exclusively in RV64, whereas
+ * both 64-bit and 32-bit words can be manipulated in other systems. In RV64,
+ * when performing 32-bit AMOs, the value placed in the register rd is always
+ * sign-extended.
+ *
+ * At present, AMO is not implemented atomically because the emulated RISC-V
  * core just runs on single thread, and no out-of-order execution happens.
  * In addition, rl/aq are not handled.
  */

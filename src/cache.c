@@ -20,7 +20,7 @@
 /* THRESHOLD is set to identify hot spots. Once the frequency of use for a block
  * exceeds the THRESHOLD, the JIT compiler flow is triggered.
  */
-#define THRESHOLD 1000
+#define THRESHOLD 32768
 
 #if RV32_HAS(JIT)
 #define sys_icache_invalidate(addr, size) \

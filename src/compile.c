@@ -154,15 +154,17 @@ RVOP(jal, {
     if (ir->branch_taken) {                                                   \
         GEN("    ir = ir->branch_taken;\n");                                  \
         NEXT_INSN(pc + ir->imm);                                              \
-    } else                                                                    \
+    } else {                                                                  \
         GEN("    return true;\n");                                            \
+    }                                                                         \
     GEN("  }\n");                                                             \
     UPDATE_PC(ir->insn_len);                                                  \
     if (ir->branch_untaken) {                                                 \
         GEN("  ir = ir->branch_untaken;\n");                                  \
         NEXT_INSN(pc + ir->insn_len);                                         \
-    } else                                                                    \
-        GEN("  return true;\n");
+    } else {                                                                  \
+        GEN("  return true;\n");                                              \
+    }
 
 RVOP(beq, { BRNACH_FUNC(uint32_t, ==); })
 
@@ -178,7 +180,7 @@ RVOP(bgeu, { BRNACH_FUNC(uint32_t, >=); })
 
 #if RV32_HAS(EXT_C)
 RVOP(cjal, {
-    GEN("  rv->X[1] = rv->PC += %u;\n", ir->insn_len);
+    GEN("  rv->X[1] = rv->PC + %u;\n", ir->insn_len);
     UPDATE_PC(ir->imm);
     GEN("  ir = ir->branch_taken;\n");
     NEXT_INSN(pc + ir->imm);
@@ -196,15 +198,17 @@ RVOP(cbeqz, {
     if (ir->branch_taken) {
         GEN("    ir = ir->branch_taken;\n");
         NEXT_INSN(pc + ir->imm);
-    } else
+    } else {
         GEN("    return true;\n");
+    }
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
         GEN("  ir = ir->branch_untaken;\n");
         NEXT_INSN(pc + ir->insn_len);
-    } else
+    } else {
         GEN("  return true;\n");
+    }
 })
 
 RVOP(cbnez, {
@@ -213,15 +217,17 @@ RVOP(cbnez, {
     if (ir->branch_taken) {
         GEN("    ir = ir->branch_taken;\n");
         NEXT_INSN(pc + ir->imm);
-    } else
+    } else {
         GEN("    return true;\n");
+    }
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
         GEN("  ir = ir->branch_untaken;\n");
         NEXT_INSN(pc + ir->insn_len);
-    } else
+    } else {
         GEN("  return true;\n");
+    }
 })
 #endif
 
@@ -339,16 +345,8 @@ static uint8_t *compile(riscv_t *rv)
     uint8_t *code = NULL;
     size_t func_len = DLIST_LENGTH(MIR_item_t, module->items);
     for (size_t i = 0; i < func_len; i++, func = DLIST_NEXT(MIR_item_t, func)) {
-        if (func->item_type == MIR_func_item) {
-            uint32_t code_len = 0;
-            uint32_t *tmp = (uint32_t *) func->addr;
-            while (*tmp) {
-                code_len += 4;
-                tmp += 1;
-            }
+        if (func->item_type == MIR_func_item)
             code = func->addr;
-            sys_icache_invalidate(func->addr, code_len)
-        }
     }
 
     MIR_gen_finish(jit->ctx);

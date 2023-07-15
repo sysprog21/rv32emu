@@ -156,6 +156,10 @@ static bool branch_taken = false;
 /* record the program counter of the previous block */
 static uint32_t last_pc = 0;
 
+/* record whether the block is replaced by cache. If so, clear the EBB
+ * information */
+static bool clear_flag = false;
+
 /* Interpreter-based execution path */
 #define RVOP(inst, code)                                    \
     static bool do_##inst(riscv_t *rv, const rv_insn_t *ir) \
@@ -480,7 +484,6 @@ void rv_step(riscv_t *rv, int32_t cycles)
 
         /* by now, a block should be available */
         assert(block);
-
         /* After emulating the previous block, it is determined whether the
          * branch is taken or not. The IR array of the current block is then
          * assigned to either the branch_taken or branch_untaken pointer of
@@ -494,13 +497,21 @@ void rv_step(riscv_t *rv, int32_t cycles)
 #else
                 prev = cache_get(rv->block_cache, last_pc);
 #endif
-
+            assert(prev);
             rv_insn_t *last_ir = prev->ir + prev->n_insn - 1;
+            if (clear_flag) {
+                if (branch_taken)
+                    last_ir->branch_taken = NULL;
+                else
+                    last_ir->branch_untaken = NULL;
+
+                clear_flag = false;
+            }
             /* chain block */
             if (!insn_is_unconditional_branch(last_ir->opcode)) {
                 if (branch_taken && !last_ir->branch_taken)
                     last_ir->branch_taken = block->ir;
-                else if (!last_ir->branch_untaken)
+                else if (!branch_taken && !last_ir->branch_untaken)
                     last_ir->branch_untaken = block->ir;
             }
         }
@@ -520,17 +531,19 @@ void rv_step(riscv_t *rv, int32_t cycles)
         }
         if (code) {
             /* execute machine code */
-            if (unlikely(!code(rv, block->ir)))
-                break;
-            prev = block;
+            code(rv, block->ir);
+            /* block should not be extended if execution mode is jit */
+            prev = NULL;
             continue;
         }
 #endif
         /* execute the block by interpreter */
         const rv_insn_t *ir = block->ir;
-        if (unlikely(!ir->impl(rv, ir)))
+        if (unlikely(!ir->impl(rv, ir))) {
+            /* block should not be extended if execption handler invoked */
+            prev = NULL;
             break;
-
+        }
         prev = block;
     }
 }

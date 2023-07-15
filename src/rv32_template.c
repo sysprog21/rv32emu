@@ -56,24 +56,36 @@ RVOP(jalr, {
 })
 
 /* clang-format off */
-#define BRANCH_FUNC(type, cond)                                  \
-    const uint32_t pc = rv->PC;                                  \
-    if ((type) rv->X[ir->rs1] cond (type) rv->X[ir->rs2]) {      \
-        branch_taken = false;                                    \
-        if (!ir->branch_untaken)                                 \
-            goto nextop;                                         \
-        rv->PC += ir->insn_len;                                  \
-        last_pc = rv->PC;                                        \
-        return ir->branch_untaken->impl(rv, ir->branch_untaken); \
-    }                                                            \
-    branch_taken = true;                                         \
-    rv->PC += ir->imm;                                           \
-    /* check instruction misaligned */                           \
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                 \
-    if (ir->branch_taken) {                                      \
-        last_pc = rv->PC;                                        \
-        return ir->branch_taken->impl(rv, ir->branch_taken);     \
-    }                                                            \
+#define BRANCH_FUNC(type, cond)                                       \
+    const uint32_t pc = rv->PC;                                       \
+    if ((type) rv->X[ir->rs1] cond (type)rv->X[ir->rs2]) {            \
+        branch_taken = false;                                         \
+        if (!ir->branch_untaken)                                      \
+            goto nextop;                                              \
+        IIF(RV32_HAS(JIT))                                            \
+        (                                                             \
+            if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) { \
+                clear_flag = true;                                    \
+                goto nextop;                                          \
+            }, );                                                     \
+        rv->PC += ir->insn_len;                                       \
+        last_pc = rv->PC;                                             \
+        return ir->branch_untaken->impl(rv, ir->branch_untaken);      \
+    }                                                                 \
+    branch_taken = true;                                              \
+    rv->PC += ir->imm;                                                \
+    /* check instruction misaligned */                                \
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                      \
+    if (ir->branch_taken) {                                           \
+        IIF(RV32_HAS(JIT))                                            \
+        (                                                             \
+            if (!cache_get(rv->block_cache, rv->PC)) {                \
+                clear_flag = true;                                    \
+                return true;                                          \
+            }, );                                                     \
+        last_pc = rv->PC;                                             \
+        return ir->branch_taken->impl(rv, ir->branch_taken);          \
+    }                                                                 \
     return true;
 /* clang-format on */
 
@@ -817,13 +829,25 @@ RVOP(cbeqz, {
         branch_taken = false;
         if (!ir->branch_untaken)
             goto nextop;
+#if RV32_HAS(JIT)
+        if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) {
+            clear_flag = true;
+            goto nextop;
+        }
+#endif
         rv->PC += ir->insn_len;
         last_pc = rv->PC;
         return ir->branch_untaken->impl(rv, ir->branch_untaken);
     }
     branch_taken = true;
-    rv->PC += (uint32_t) ir->imm;
+    rv->PC += ir->imm;
     if (ir->branch_taken) {
+#if RV32_HAS(JIT)
+        if (!cache_get(rv->block_cache, rv->PC)) {
+            clear_flag = true;
+            return true;
+        }
+#endif
         last_pc = rv->PC;
         return ir->branch_taken->impl(rv, ir->branch_taken);
     }
@@ -836,13 +860,25 @@ RVOP(cbnez, {
         branch_taken = false;
         if (!ir->branch_untaken)
             goto nextop;
+#if RV32_HAS(JIT)
+        if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) {
+            clear_flag = true;
+            goto nextop;
+        }
+#endif
         rv->PC += ir->insn_len;
         last_pc = rv->PC;
         return ir->branch_untaken->impl(rv, ir->branch_untaken);
     }
     branch_taken = true;
-    rv->PC += (uint32_t) ir->imm;
+    rv->PC += ir->imm;
     if (ir->branch_taken) {
+#if RV32_HAS(JIT)
+        if (!cache_get(rv->block_cache, rv->PC)) {
+            clear_flag = true;
+            return true;
+        }
+#endif
         last_pc = rv->PC;
         return ir->branch_taken->impl(rv, ir->branch_taken);
     }

@@ -128,7 +128,10 @@ def remove_comment(str):
 
 parse_argv(EXT_LIST, SKIPLIST)
 # prepare PROLOGUE
-output = "#define PROLOGUE\\\n  \"#include <stdint.h>\\n\"\\\n \"#include <stdbool.h>\\n\"\\\n"
+output = '''#define PROLOGUE \\
+\"#include <stdint.h>\\n\"\\
+\"#include <stdbool.h>\\n\"\\
+'''
 f = open('src/riscv.h', 'r')
 lines = f.read()
 lines = remove_comment(lines)
@@ -198,10 +201,20 @@ f.close()
 # generate jit template
 for i in range(len(str2)):
     if (not SKIPLIST.count(op[i])):
-        output = output + "RVOP(" + op[i] + ", { strcat(gencode, "
+        output = output + "RVOP(" + op[i] + ", {\n"
         substr = impl[i].split("\n")
         for str in substr:
+            IRs = re.findall(
+                r'ir->[rd|rs1|rs2|rs3|imm|imm2|insn_len|shamt]+', str)
+            str = re.sub(
+                r'ir->[rd|rs1|rs2|rs3|imm|imm2|insn_len|shamt]+', "%u", str)
             if (str != ""):
-                output = output + '\"' + str + '\\n\"'
-        output = output + ");})\n"
+                if (len(IRs)):
+                    output = output + 'GEN(\"' + str + '\\n\"'
+                    for IR in IRs:
+                        output = output + ", " + IR
+                else:
+                    output = output + 'strcat(gencode, \"' + str + '\\n\"'
+                output = output + ');\n'
+        output = output + "})\n"
 sys.stdout.write(output)

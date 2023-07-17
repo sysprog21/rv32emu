@@ -10,6 +10,7 @@ build/doomrc
 build/rv32emu
 build/arch-test
 build/mini-gdbstub
+src/jit_template.c
 *.o
 *.o.d
 tests/**/*.elf

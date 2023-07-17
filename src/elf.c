@@ -378,6 +378,7 @@ bool elf_open(elf_t *e, const char *path)
         release(e);
         return false;
     }
+    close(fd);
 
 #else  /* fallback to standard I/O text stream */
     FILE *f = fopen(path, "rb");

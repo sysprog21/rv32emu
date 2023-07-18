@@ -459,7 +459,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
 }
 
 #if RV32_HAS(JIT)
-typedef bool (*exec_block_func_t)(riscv_t *rv, rv_insn_t *ir);
+typedef bool (*exec_block_func_t)(riscv_t *rv);
 #endif
 
 void rv_step(riscv_t *rv, int32_t cycles)
@@ -531,7 +531,7 @@ void rv_step(riscv_t *rv, int32_t cycles)
         }
         if (code) {
             /* execute machine code */
-            code(rv, block->ir);
+            code(rv);
             /* block should not be extended if execution mode is jit */
             prev = NULL;
             continue;

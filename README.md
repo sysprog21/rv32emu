@@ -193,6 +193,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
 * `readelf.elf` : See [tests/readelf](tests/readelf)
 * `richards.elf` : See [tests/richards.c](tests/richards.c)
+* `rvsim.elf` : See [tests/rvsim.c](tests/rvsim.c)
 * `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
 
 ## Reference

@@ -105,13 +105,26 @@ SKIPLIST = [
     "bge",
     "bltu",
     "bgeu",
+    "lb",
+    "lh",
+    "lw",
+    "lbu",
+    "lhu",
+    "sb",
+    "sh",
+    "sw",
+    "clw",
+    "csw",
     "cjal",
     "cj",
     "cbeqz",
     "cbnez",
+    "clwsp",
+    "cswsp",
     "fuse3",
     "fuse4"]
 # check enabled extension in Makefile
+
 
 def parse_argv(EXT_LIST, SKIPLIST):
     for argv in sys.argv:
@@ -125,6 +138,7 @@ def parse_argv(EXT_LIST, SKIPLIST):
 
 def remove_comment(str):
     return re.sub(r'/\*[\s|\S]+?\*/\n', "", str)
+
 
 parse_argv(EXT_LIST, SKIPLIST)
 # prepare PROLOGUE
@@ -174,7 +188,8 @@ output += "\" uint32_t pc, addr, udividend, udivisor, tmp, data, mask, ures, \"\
 output += "\"a, b, jump_to;\"\\\n"
 output += "\"  int32_t dividend, divisor, res;\"\\\n"
 output += "\"  int64_t multiplicand, multiplier;\"\\\n"
-output += "\"  uint64_t umultiplier;\"\n"
+output += "\"  uint64_t umultiplier;\"\\\n"
+output += "\"  memory_t *m = ((state_t *)rv->userdata)->mem;\"\n"
 
 f = open('src/rv32_template.c', 'r')
 lines = f.read()

@@ -125,7 +125,6 @@ static char funcbuf[128] = {0};
         code;                                                       \
         if (!insn_is_branch(ir->opcode)) {                          \
             GEN("  rv->PC += %d;\n", ir->insn_len);                 \
-            GEN("  ir = ir + 1;\n");                                \
             NEXT_INSN(pc + ir->insn_len);                           \
         }                                                           \
     }
@@ -143,7 +142,6 @@ RVOP(jal, {
     if (ir->rd) {
         GEN("  rv->X[%u] = pc + %u;\n", ir->rd, ir->insn_len);
     }
-    GEN("  ir = ir->branch_taken;\n");
     NEXT_INSN(pc + ir->imm);
 })
 
@@ -152,7 +150,6 @@ RVOP(jal, {
         #type, ir->rs2);                                                      \
     UPDATE_PC(ir->imm);                                                       \
     if (ir->branch_taken) {                                                   \
-        GEN("    ir = ir->branch_taken;\n");                                  \
         NEXT_INSN(pc + ir->imm);                                              \
     } else {                                                                  \
         GEN("    return true;\n");                                            \
@@ -160,7 +157,6 @@ RVOP(jal, {
     GEN("  }\n");                                                             \
     UPDATE_PC(ir->insn_len);                                                  \
     if (ir->branch_untaken) {                                                 \
-        GEN("  ir = ir->branch_untaken;\n");                                  \
         NEXT_INSN(pc + ir->insn_len);                                         \
     } else {                                                                  \
         GEN("  return true;\n");                                              \
@@ -226,13 +222,11 @@ RVOP(csw, {
 RVOP(cjal, {
     GEN("  rv->X[1] = rv->PC + %u;\n", ir->insn_len);
     UPDATE_PC(ir->imm);
-    GEN("  ir = ir->branch_taken;\n");
     NEXT_INSN(pc + ir->imm);
 })
 
 RVOP(cj, {
     UPDATE_PC(ir->imm);
-    GEN("  ir = ir->branch_taken;\n");
     NEXT_INSN(pc + ir->imm);
 })
 
@@ -240,7 +234,6 @@ RVOP(cbeqz, {
     GEN("  if (!rv->X[%u]){\n", ir->rs1);
     UPDATE_PC(ir->imm);
     if (ir->branch_taken) {
-        GEN("    ir = ir->branch_taken;\n");
         NEXT_INSN(pc + ir->imm);
     } else {
         GEN("    return true;\n");
@@ -248,7 +241,6 @@ RVOP(cbeqz, {
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
-        GEN("  ir = ir->branch_untaken;\n");
         NEXT_INSN(pc + ir->insn_len);
     } else {
         GEN("  return true;\n");
@@ -259,7 +251,6 @@ RVOP(cbnez, {
     GEN("  if (rv->X[%u]){\n", ir->rs1);
     UPDATE_PC(ir->imm);
     if (ir->branch_taken) {
-        GEN("    ir = ir->branch_taken;\n");
         NEXT_INSN(pc + ir->imm);
     } else {
         GEN("    return true;\n");
@@ -267,7 +258,6 @@ RVOP(cbnez, {
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
-        GEN("  ir = ir->branch_untaken;\n");
         NEXT_INSN(pc + ir->insn_len);
     } else {
         GEN("  return true;\n");

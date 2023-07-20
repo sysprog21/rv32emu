@@ -183,7 +183,7 @@ lines = re.sub('#endif\n', "", lines)
 output = output + "\"" + \
     re.sub("\n", "\"\\\n\"", re.findall(
         r'typedef[\S|\s]+?rv_insn_t;', lines)[0]) + "\"\\\n"
-output += "\"bool start(volatile riscv_t *rv, rv_insn_t *ir) {\"\\\n"
+output += "\"bool start(riscv_t *rv) {\"\\\n"
 output += "\" uint32_t pc, addr, udividend, udivisor, tmp, data, mask, ures, \"\\\n"
 output += "\"a, b, jump_to;\"\\\n"
 output += "\"  int32_t dividend, divisor, res;\"\\\n"

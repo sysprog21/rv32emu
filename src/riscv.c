@@ -207,7 +207,7 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
 
     /* Machine Counter/Timers */
     case CSR_CYCLE: /* Cycle counter for RDCYCLE instruction */
-        return &((uint32_t *) &rv->csr_cycle)[0];
+        return (uint32_t *) &rv->csr_cycle;
     case CSR_CYCLEH: /* Upper 32 bits of cycle */
         return &((uint32_t *) &rv->csr_cycle)[1];
 

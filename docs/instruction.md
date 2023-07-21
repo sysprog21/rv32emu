@@ -6,11 +6,11 @@ and Jump), which is refreshing, and the choice to reserve two bits in the
 fixed-width 32-bit format.
 
 The S-type, B-type, and J-type instructions include immediate fields in a
-slightly weird permutation. In response to the observation that sign-extension
+slightly unusual permutation. In response to the observation that sign-extension
 was often a critical-path logic-design problem in modern CPUs, the designers
-always put the immediate sign bit in the MSB of the instruction word, so you
-can do sign-extension before instruction decoding is done, but this leads to
-the J-type format
+consistently place the immediate sign bit in the MSB of the instruction word,
+enabling sign-extension before instruction decoding is completed. However, this
+approach results in the J-type format
 ```
 imm[20] || imm[10:1] || imm11 || imm[19:12] || rd || opcode
 ```
@@ -18,9 +18,9 @@ with a ±1MiB PC-relative range, and an only slightly-less-surprising B-type
 format, with a ±4KiB range.
 
 U-type instructions, of which there are only two (`lui` and `auipc`), have
-a 20-bit immediate field, but I-type and S-type instructions (used for things
-like `addi` and `slti` and, notably, memory loads and stores) have only a
-12-bit immediate field.
+a 20-bit immediate field. However, I-type and S-type instructions, used for
+operations like `addi`, `slti`, and notably memory loads and stores, have
+only a 12-bit immediate field.
 
 ## Instruction Format
 ```
@@ -67,8 +67,9 @@ like `addi` and `slti` and, notably, memory loads and stores) have only a
 
 ## Pseudo-instructions
 
-Pseudo-instructions give RISC-V a richer set of assembly language instructions.
-The following example shows the `li` pseudo-instruction which is used to load immediate values:
+Pseudo-instructions provide RISC-V with a broader range of assembly language
+instructions. The following example demonstrates the `li` pseudo-instruction,
+which is used to load immediate values:
 ```
 .org 0
 .globl _start
@@ -85,7 +86,8 @@ which generates the following assembler output as seen by `objdump`:
    4:	abe50513        addi    a0,a0,-1346 # cafebabe <CONSTANT+0x0>
 ```
 
-The `lui` (load-upper-immediate) instruction has a 20-bit immediate, so the other immediate-load instructions have only 12-bit immediates.
+The `lui` (load-upper-immediate) instruction has a 20-bit immediate, while the
+other immediate-load instructions only have 12-bit immediates.
 
 ## Instruction Examples
 
@@ -97,16 +99,20 @@ First, convert hex into binary:
 |:---:|:------:|:------:|:------:|:------:|:------:|:------:|:------:|:------:|
 | bin | `0000` | `0001` | `1110` | `0000` | `0000` | `0111` | `1110` | `1111` |
 
-Instructions are better decoded reading them from right to left, so that the first thing you find are its quadrant and opcode.
+Instructions are better decoded by reading them from right to left, where the
+first encountered elements are their quadrant and opcode.
 
 |  RV32I  | `00000001111000000000` | `01111`   |    `11011`    |    `11`      |
 |:-------:|:----------------------:|:---------:|:-------------:|:------------:|
 | Meaning |  `<imm> (encoded)`     |   `rd`    | `opcode`      | `quadrant`   |
 |  Value  |  `<imm>`               |   15      | Jump and Link |  4th         |
 
-We therefore obtain `jal x15 <imm>```, where `<imm>` is the still to be decoded immediate.
+Therefore, `jal x15 <imm>` is obtained, with `<imm>` representing the immediate
+yet to be decoded.
 
-All the instruction fields except `<imm>` are decodable just from the tables, for this instruction. For `<imm>` we have to further scramble some bits to decode it.
+All the instruction fields except `<imm>` can be decoded directly from the
+tables for this instruction. For `<imm>`, further scrambling of some bits is
+required to decode it.
 
 Identify the subfields of the immediate:
 
@@ -114,7 +120,8 @@ Identify the subfields of the immediate:
 |:-----------------:|:----:|:------------:|:----:|:----------:|
 |  Encoding         | `m2` |   `imm2`     | `m1` |  `imm1`    |
 
-Re-order the subfields as written on the tables. Usually the immediate encoding is just below the corresponding instruction's encoding.
+Re-order the subfields as written on the tables. Typically, the immediate
+encoding is located just below the corresponding instruction's encoding.
 
 | Decoding di `<imm>` |    `-m2-`      |  `imm1`    | `m1` |   `imm2`     | `0` |
 |:-------------------:|:--------------:|:----------:|:----:|:------------:|:---:|
@@ -126,7 +133,8 @@ We obtain the 2's complement
 that is the decimal
 - `<imm> (dec)` = `30`
 
-The complete disassembled instruction is therefore `jal x15 30`, or `jal a5 30` using the ABI register aliases.
+The fully disassembled instruction is `jal x15, 30`, or `jal a5, 30` when using
+the ABI register aliases.
 
 ### Deconding instruction `j -12`
 
@@ -135,8 +143,11 @@ The instruction `j`.
 | Instruction Encoding `j` | `<imm> (encoded)` | 00000 | 11011 | 11 |
 |:------------------------:|:-----------------:|:-----:|:-----:|:--:|
 
-We therefore know the least significant bits `xxxxxxxxxxxxxxxxxxxx000001101111`. The rest is just an immediate, `<imm> = 30 `, which we now have to encode.
-Then sign-extend it to cover all 32 bits of its width, converting `<imm> (bin)` = `11111111111111111110100` from `<imm> (bin)` = `-12` to `<imm> (bin)` = `10100`.
+The least significant bits are `xxxxxxxxxxxxxxxxxxxx000001101111`.
+The rest represents an immediate, `<imm> = 30`, which needs to be encoded.
+Then sign-extend it to cover all 32 bits of its width, converting
+`<imm> (bin) = 11111111111111111110100` from `<imm> (bin) = -12` to
+`<imm> (bin) = 10100`.
 
 Divide this number into its subfields.
 
@@ -150,34 +161,36 @@ Re-order the fields to encode the immediate:
 |:-----------------:|:----:|:------------:|:----:|:----------:|
 | `<imm> (encoded)` | `1`  | `1111111010` | `1`  | `11111111` |
 
-We obtain `<imm> (encoded)` = `11111111010111111111xxxxxxxxxxxx`, that are the missing most significant bits.
+The obtained `<imm> (encoded) is 11111111010111111111xxxxxxxxxxxx`, representing
+the missing most significant bits.
 
-The complete assembled instruction is therefore `11111111010111111111000001101111`, after having jointed the two half-results above.
+The complete assembled instruction is therefore
+`11111111010111111111000001101111`, after combining the two half-results above.
 
 ## "RVC" compressed instructions
 
-Chapter 12, p. 67 (79 of 145), explains a Thumb-2-like scheme, providing a
-16-bit version of the instruction when:
+[Chapter 12](https://riscv.org/wp-content/uploads/2017/05/riscv-spec-v2.2.pdf),
+page 67 (79 of 145) explains a Thumb-2-like scheme, providing a 16-bit version
+of the instruction when:
 * the immediate or address offset is small, or
 * one of the registers is the zero register (`x0`), the ABI link register (`x1`),
-  or the ABI stack pointer (x2), or
-* the destination register and the first source register are identical, or
+  or the ABI stack pointer (`x2`), or
+* both the destination register and the first source register are identical, or
 * the registers used are the 8 most popular ones.
 
-It turns out, though, that the last two are actually an "and" rather than an
-"or", and the conditions are actually considerably more restrictive than the
-above implies.
+However, it turns out that the last two conditions are actually "and" rather
+than "or," and the conditions are more restrictive than the above implies.
 
-There is an opcode map on pp. 81–83.
+There is an opcode map on page 81–83.
 
 The designers point out that the Cray-1 also had 16-bit and 32-bit instruction
-lengths, following Stretch, the 360, the CDC 6600, and followed by not only Arm
-but also MIPS ("MIPS16" and "microMIPS") and PowerPC "VLE", and that RVC
-"fetches 25%-30% fewer instruction bits, which reduces instruction cache misses
-by 20%-25%, or roughly the same performance impact as doubling the instruction
-cache size."
+lengths, following Stretch, the 360, the CDC 6600, and followed by not only
+Arm but also MIPS ("MIPS16" and "microMIPS") and PowerPC "VLE." RVC fetches
+25%-30% fewer instruction bits, resulting in a reduction of instruction cache
+misses by 20%-25%, which is approximately equivalent to doubling the instruction
+cache size in terms of performance impact.
 
-There are eight compressed instruction formats.
+There are 8 compressed instruction formats.
 The eight registers accessible by the three-bit register fields in the `CIW` (immediate wide),
 `CL` (load), `CS` (store), and `CB` (branch) formats are not the first eight registers,
 but the second eight registers, `x8` – `x15`.
@@ -185,13 +198,14 @@ These are callee-saved `s0` – `s1` and the first argument registers `a0` – `
 The `CR` (register–register), `CI` (immediate), and `CSS` (stack store) formats have
 full-width five-bit register fields. (The `CJ` format does not refer to any registers.)
 
-Complementing the stack-store format are stack-load instructions (p. 71) using
-the CI format with a 6-bit immediate offset, which is prescaled by the data
-size (4, 8, or 16 bits). These index only upward from the stack pointer,
-institutionalizing the otherwise-only-conventional downward stack growth.
+Complementing the stack-store format are stack-load instructions (page 71)
+using the `CI` format with a 6-bit immediate offset, prescaled by the data
+size (4, 8, or 16 bits). These instructions only index upward from the stack
+pointer, institutionalizing the otherwise conventional downward stack growth.
 The immediate-offset field in the stack-store format is also 6 bits and treated
-in the same way. And there is a thing called `c.addi16sp` which adds a signed
-multiple of 16 to the stack pointer, i.e., allocates or deallocates stack space.
+in the same way. Additionally, there is a instruction called `c.addi16sp`, which
+adds a signed multiple of 16 to the stack pointer, effectively allocating or
+deallocating stack space.
 
 So in a 16-bit instruction you can load or store any of the 32 integer registers
 to any of 64 stack slots (if you have allocated that many), and you can do a
@@ -236,27 +250,29 @@ variable, if your page is mapped XWR or you do not have memory protection.)
 within 32 bytes of where you are, but then it is still in `x1` and not a popular
 register. There is no compressed version of the auipc instruction, for example.
 
-In pure 16-bit instructions you can freely walk around pointer graphs, index
-into arrays, jump around, jump up, jump up, and get down, add, subtract, and
-do bitwise operations, but you can not invoke system calls or load addresses
-of global variables or constants.
+In pure 16-bit instructions, one can freely navigate pointer graphs, index into
+arrays, perform jumps, addition, subtraction, and bitwise operations. However,
+invoking system calls or loading addresses of global variables or constants is
+not possible.
 
-So you could almost do a 16-bit instruction RISC-V hardware core that emulates
-other instructions with traps but executes at full speed when running 16-bit
-instructions. You would need to add a few additional 16-bit instructions for
-accessing CSRs, loading addresses, and handling traps.
+With this in mind, an almost complete 16-bit instruction RISC-V hardware core
+could be designed to emulate other instructions with traps, while running 16-bit
+instructions at full speed. A few additional 16-bit instructions would be
+required to handle accessing CSRs, loading addresses, and managing traps.
 
 ## Decode RISC-V instructions
 
-Various RISC-V instruction set simulators decode instructions using a series of nested `switch` statements.
+Various RISC-V instruction set simulators decode instructions using a series of
+nested `switch` statements.
+
 First, they switch on non-C vs. C (compressed if implemented) bits 1:0.
-Next, they switch on the "opcode" field bits 6:2, such as `OP-IMM`, `LOAD`, or `BRANCH`.
-Then, they typically switch on the "funct3" field bits 14:12, which distinguish instructions like
-`ADD`, `SLT`, `SLTU`, `AND`, `OR`, `XOR`, `SLL`, `SRL` for arithmetic operations,
-or `BEQ`, `BNE`, `BLT`, `BLTU`, `BGE`, `BGEU` for conditional branches,
-or the operand size for loads and stores.
-Finally, for certain instructions, they switch on the "funct7" field bits 31:25 to differentiate between
-`ADD`/`SUB` or `SRL`/`SRA`, for example.
+Next, they switch on the "opcode" field bits 6:2, such as `op-imm`, `load`, or
+`branch`. Then, they typically switch on the "funct3" field bits 14:12, which
+distinguish instructions like `add`, `slt`, `sltu`, `and`, `or`, `xor`, `sll`,
+`srl` for arithmetic operations, or `beq`, `bne`, `blt`, `bltu`, `bge`, `bgeu`
+for conditional branches, or the operand size for loads and stores.
+Finally, for certain instructions, they switch on the "funct7" field bits 31:25
+to differentiate between `add`/`sub` or `srl`/`sra`, for example.
 
 ## Reference
 * [RISC-V: An Overview of the Instruction Set Architecture](http://web.cecs.pdx.edu/~harry/riscv/RISCV-Summary.pdf)

@@ -195,6 +195,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `richards.elf` : See [tests/richards.c](tests/richards.c)
 * `rvsim.elf` : See [tests/rvsim.c](tests/rvsim.c)
 * `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
+* `stream.elf` : See [tests/stream](tests/stream.c) [RV32MF]
 
 ## Reference
 

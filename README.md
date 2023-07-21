@@ -205,7 +205,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * [GUI-VP: RISC-V based Virtual Prototype (VP) for graphical application development](https://github.com/ics-jku/GUI-VP)
 * [LupV: an education-friendly RISC-V based system emulator](https://gitlab.com/luplab/lupv)
 * [yutongshen/RISC-V-Simulator](https://github.com/yutongshen/RISC-V-Simulator)
-* [mini-rv32ima](https://github.com/cnlohr/mini-rv32ima)
+* [mini-rv32ima](https://github.com/cnlohr/mini-rv32ima) / [video: Writing a Really Tiny RISC-V Emulator](https://youtu.be/YT5vB3UqU_E)
 * [RVVM](https://github.com/LekKit/RVVM)
 
 ## License

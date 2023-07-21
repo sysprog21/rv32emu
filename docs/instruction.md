@@ -246,6 +246,18 @@ other instructions with traps but executes at full speed when running 16-bit
 instructions. You would need to add a few additional 16-bit instructions for
 accessing CSRs, loading addresses, and handling traps.
 
+## Decode RISC-V instructions
+
+Various RISC-V instruction set simulators decode instructions using a series of nested `switch` statements.
+First, they switch on non-C vs. C (compressed if implemented) bits 1:0.
+Next, they switch on the "opcode" field bits 6:2, such as `OP-IMM`, `LOAD`, or `BRANCH`.
+Then, they typically switch on the "funct3" field bits 14:12, which distinguish instructions like
+`ADD`, `SLT`, `SLTU`, `AND`, `OR`, `XOR`, `SLL`, `SRL` for arithmetic operations,
+or `BEQ`, `BNE`, `BLT`, `BLTU`, `BGE`, `BGEU` for conditional branches,
+or the operand size for loads and stores.
+Finally, for certain instructions, they switch on the "funct7" field bits 31:25 to differentiate between
+`ADD`/`SUB` or `SRL`/`SRA`, for example.
+
 ## Reference
 * [RISC-V: An Overview of the Instruction Set Architecture](http://web.cecs.pdx.edu/~harry/riscv/RISCV-Summary.pdf)
 * [RISC-V Opcodes](https://github.com/riscv/riscv-opcodes)

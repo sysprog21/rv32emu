@@ -113,6 +113,8 @@ SKIPLIST = [
     "sb",
     "sh",
     "sw",
+    "flw",
+    "fsw",
     "clw",
     "csw",
     "cjal",
@@ -137,6 +139,7 @@ def parse_argv(EXT_LIST, SKIPLIST):
 
 
 def remove_comment(str):
+    str = re.sub(r'//[\s|\S]+?\n', "", str)
     return re.sub(r'/\*[\s|\S]+?\*/\n', "", str)
 
 
@@ -152,6 +155,13 @@ lines = remove_comment(lines)
 output = output + "\"" + \
     re.sub("\n", "\"\\\n\"", re.findall(
         r'enum[\S|\s]+?riscv_io_t;', lines)[0]) + "\"\\\n"
+if sys.argv.count("RV32_FEATURE_EXT_F=1"):
+    f = open('src/softfloat.h', 'r')
+    lines = f.read()
+    lines = remove_comment(lines)
+    output = output + "\"" + \
+        re.sub("\n", "\"\\\n\"", re.findall(
+            r'enum[\S|\s]+?};', lines)[0]) + "\"\\\n"
 f = open('src/riscv_private.h', 'r')
 lines = f.read()
 lines = remove_comment(lines)

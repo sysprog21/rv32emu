@@ -176,24 +176,24 @@ RVOP(bgeu, { BRNACH_FUNC(uint32_t, >=); })
 
 RVOP(lb, {
     GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
-    GEN("  rv->X[%u] = sign_extend_b(* (const uint8_t *) (m->mem_base + "
-        "addr));\n",
+    GEN("  rv->X[%u] = sign_extend_b(*((const uint8_t *) (m->mem_base + "
+        "addr)));\n",
         ir->rd);
 })
 
 RVOP(lh, {
     GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
-    GEN("  rv->X[%u] = sign_extend_h(* (const uint16_t *) (m->mem_base + "
-        "addr));\n",
+    GEN("  rv->X[%u] = sign_extend_h(*((const uint16_t *) (m->mem_base + "
+        "addr)));\n",
         ir->rd);
 })
 
-#define MEMORY_FUNC(type, IO)                                                \
-    GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);                     \
-    IIF(IO)                                                                  \
-    (GEN("  rv->X[%u] = * (const %s *) (m->mem_base + addr);\n", ir->rd,     \
-         #type),                                                             \
-     GEN("  *(%s *) (m->mem_base + addr) = (%s) rv->X[%u];\n", #type, #type, \
+#define MEMORY_FUNC(type, IO)                                                  \
+    GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);                       \
+    IIF(IO)                                                                    \
+    (GEN("  rv->X[%u] = *((const %s *) (m->mem_base + addr));\n", ir->rd,      \
+         #type),                                                               \
+     GEN("  *((%s *) (m->mem_base + addr)) = (%s) rv->X[%u];\n", #type, #type, \
          ir->rs2));
 
 RVOP(lw, {MEMORY_FUNC(uint32_t, 1)})
@@ -208,15 +208,29 @@ RVOP(sh, {MEMORY_FUNC(uint16_t, 0)})
 
 RVOP(sw, {MEMORY_FUNC(uint32_t, 0)})
 
+#if RV32_HAS(EXT_F)
+RVOP(flw, {
+    GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
+    GEN("  rv->F_int[%u] = *((const uint32_t *) (m->mem_base + addr));\n",
+        ir->rd);
+})
+
+/* FSW */
+RVOP(fsw, {
+    GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
+    GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->F_int[%u];\n", ir->rs2);
+})
+#endif
+
 #if RV32_HAS(EXT_C)
 RVOP(clw, {
     GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
-    GEN("  rv->X[%u] = * (const uint32_t *) (m->mem_base + addr);\n", ir->rd);
+    GEN("  rv->X[%u] = *((const uint32_t *) (m->mem_base + addr));\n", ir->rd);
 })
 
 RVOP(csw, {
     GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
-    GEN("  *(uint32_t *) (m->mem_base + addr) = rv->X[%u];\n", ir->rs2);
+    GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->X[%u];\n", ir->rs2);
 })
 
 RVOP(cjal, {
@@ -266,12 +280,12 @@ RVOP(cbnez, {
 
 RVOP(clwsp, {
     GEN("addr = rv->X[rv_reg_sp] + %u;\n", ir->imm);
-    GEN("  rv->X[%u] = * (const uint32_t *) (m->mem_base + addr);\n", ir->rd);
+    GEN("  rv->X[%u] = *((const uint32_t *) (m->mem_base + addr));\n", ir->rd);
 })
 
 RVOP(cswsp, {
     GEN("addr = rv->X[rv_reg_sp] + %u;\n", ir->imm);
-    GEN("  *(uint32_t *) (m->mem_base + addr) = rv->X[%u];\n", ir->rs2);
+    GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->X[%u];\n", ir->rs2);
 })
 #endif
 
@@ -280,7 +294,8 @@ RVOP(fuse3, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         GEN("  addr = rv->X[%u] + %u;\n", fuse[i].rs1, fuse[i].imm);
-        GEN("  *(uint32_t *) (m->mem_base + addr) = rv->X[%u];\n", fuse[i].rs2)
+        GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->X[%u];\n",
+            fuse[i].rs2)
     }
 })
 
@@ -288,7 +303,7 @@ RVOP(fuse4, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         GEN("  addr = rv->X[%u] + %u;\n", fuse[i].rs1, fuse[i].imm);
-        GEN("  rv->X[%u] = * (const uint32_t *) (m->mem_base + addr);\n",
+        GEN("  rv->X[%u] = *((const uint32_t *) (m->mem_base + addr));\n",
             fuse[i].rd);
     }
 })

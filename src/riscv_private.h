@@ -93,20 +93,6 @@ struct riscv_internal {
     /* user provided data */
     riscv_user_t userdata;
 
-#if RV32_HAS(GDBSTUB)
-    /* gdbstub instance */
-    gdbstub_t gdbstub;
-
-    bool debug_mode;
-
-    /* GDB instruction breakpoint */
-    breakpoint_map_t breakpoint_map;
-
-    /* The flag to notify interrupt from GDB client: it should
-     * be accessed by atomic operation when starting the GDBSTUB. */
-    bool is_interrupted;
-#endif
-
 #if RV32_HAS(EXT_F)
     /* float registers */
     union {
@@ -130,6 +116,21 @@ struct riscv_internal {
     uint32_t csr_mbadaddr;
 
     bool compressed; /**< current instruction is compressed or not */
+
+#if RV32_HAS(GDBSTUB)
+    /* gdbstub instance */
+    gdbstub_t gdbstub;
+
+    bool debug_mode;
+
+    /* GDB instruction breakpoint */
+    breakpoint_map_t breakpoint_map;
+
+    /* The flag to notify interrupt from GDB client: it should
+     * be accessed by atomic operation when starting the GDBSTUB. */
+    bool is_interrupted;
+#endif
+
 #if !RV32_HAS(JIT)
     block_map_t block_map; /**< basic block map */
 #else

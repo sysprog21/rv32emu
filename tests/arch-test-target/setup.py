@@ -15,12 +15,12 @@ def setup_testlist(riscv_device):
     if 'M' in riscv_device:
         misa |= constants.misa_M
         ISA += 'M'
-    if 'C' in riscv_device:
-        misa |= constants.misa_C
-        ISA += 'C'
     if 'F' in riscv_device:
         misa |= constants.misa_F
         ISA += 'F'
+    if 'C' in riscv_device:
+        misa |= constants.misa_C
+        ISA += 'C'
     if 'Zicsr' in riscv_device:
         ISA += 'Zicsr'
     if 'Zifencei' in riscv_device:

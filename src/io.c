@@ -68,13 +68,13 @@ uint32_t memory_read_str(memory_t *mem,
 
 uint32_t memory_ifetch(uint32_t addr)
 {
-    return *(const uint32_t *) (data_memory_base + addr);
+    return *((const uint32_t *) (data_memory_base + addr));
 }
 
-#define MEM_READ_IMPL(size, type)                   \
-    type memory_read_##size(uint32_t addr)          \
-    {                                               \
-        return *(type *) (data_memory_base + addr); \
+#define MEM_READ_IMPL(size, type)                     \
+    type memory_read_##size(uint32_t addr)            \
+    {                                                 \
+        return *((type *) (data_memory_base + addr)); \
     }
 
 MEM_READ_IMPL(w, uint32_t);
@@ -89,10 +89,10 @@ void memory_write(memory_t *mem,
     memcpy(mem->mem_base + addr, src, size);
 }
 
-#define MEM_WRITE_IMPL(size, type)                                 \
-    void memory_write_##size(uint32_t addr, const uint8_t *src)    \
-    {                                                              \
-        *(type *) (data_memory_base + addr) = *(const type *) src; \
+#define MEM_WRITE_IMPL(size, type)                                     \
+    void memory_write_##size(uint32_t addr, const uint8_t *src)        \
+    {                                                                  \
+        *((type *) (data_memory_base + addr)) = *((const type *) src); \
     }
 
 MEM_WRITE_IMPL(w, uint32_t);

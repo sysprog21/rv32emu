@@ -64,7 +64,8 @@ RVOP(jalr, {
             goto nextop;                                              \
         IIF(RV32_HAS(JIT))                                            \
         (                                                             \
-            if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) { \
+            if (ir->branch_untaken->pc != rv->PC + ir->insn_len ||    \
+                !cache_get(rv->block_cache, rv->PC + ir->insn_len)) { \
                 clear_flag = true;                                    \
                 goto nextop;                                          \
             }, );                                                     \
@@ -79,7 +80,8 @@ RVOP(jalr, {
     if (ir->branch_taken) {                                           \
         IIF(RV32_HAS(JIT))                                            \
         (                                                             \
-            if (!cache_get(rv->block_cache, rv->PC)) {                \
+            if (ir->branch_taken->pc != rv->PC ||                     \
+                !cache_get(rv->block_cache, rv->PC)) {                \
                 clear_flag = true;                                    \
                 return true;                                          \
             }, );                                                     \
@@ -829,7 +831,8 @@ RVOP(cbeqz, {
         if (!ir->branch_untaken)
             goto nextop;
 #if RV32_HAS(JIT)
-        if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) {
+        if (ir->branch_untaken->pc != rv->PC + ir->insn_len ||
+            !cache_get(rv->block_cache, rv->PC + ir->insn_len)) {
             clear_flag = true;
             goto nextop;
         }
@@ -842,7 +845,8 @@ RVOP(cbeqz, {
     rv->PC += ir->imm;
     if (ir->branch_taken) {
 #if RV32_HAS(JIT)
-        if (!cache_get(rv->block_cache, rv->PC)) {
+        if (ir->branch_taken->pc != rv->PC ||
+            !cache_get(rv->block_cache, rv->PC)) {
             clear_flag = true;
             return true;
         }
@@ -860,7 +864,8 @@ RVOP(cbnez, {
         if (!ir->branch_untaken)
             goto nextop;
 #if RV32_HAS(JIT)
-        if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) {
+        if (ir->branch_untaken->pc != rv->PC + ir->insn_len ||
+            !cache_get(rv->block_cache, rv->PC + ir->insn_len)) {
             clear_flag = true;
             goto nextop;
         }
@@ -873,7 +878,8 @@ RVOP(cbnez, {
     rv->PC += ir->imm;
     if (ir->branch_taken) {
 #if RV32_HAS(JIT)
-        if (!cache_get(rv->block_cache, rv->PC)) {
+        if (ir->branch_taken->pc != rv->PC ||
+            !cache_get(rv->block_cache, rv->PC)) {
             clear_flag = true;
             return true;
         }

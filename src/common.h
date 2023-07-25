@@ -51,6 +51,13 @@
 #define MUST_TAIL
 #endif
 
+/* built-in prefetch intrinsic */
+#if defined(__GNUC__) || defined(__clang__)
+#define PREFETCH(x) __builtin_prefetch(x, 0)
+#else
+#define PREFETCH(x)
+#endif
+
 /* Pattern Matching for C macros.
  * https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
  */

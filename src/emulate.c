@@ -301,12 +301,13 @@ static uint32_t last_pc = 0;
     {                                                       \
         rv->X[rv_reg_zero] = 0;                             \
         rv->csr_cycle++;                                    \
+        const rv_insn_t *next = ir + 1;                     \
+        PREFETCH(next);                                     \
         code;                                               \
     nextop:                                                 \
         rv->PC += ir->insn_len;                             \
         if (unlikely(RVOP_NO_NEXT(ir)))                     \
             return true;                                    \
-        const rv_insn_t *next = ir + 1;                     \
         MUST_TAIL return next->impl(rv, next);              \
     }
 

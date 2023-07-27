@@ -285,9 +285,9 @@ enum {
 };
 
 #if RV32_HAS(GDBSTUB)
-#define RVOP_RUN_NEXT ((!ir->tailcall) && likely(!rv->debug_mode))
+#define RVOP_RUN_NEXT likely((!ir->tailcall) && (!rv->debug_mode))
 #else
-#define RVOP_RUN_NEXT (!ir->tailcall)
+#define RVOP_RUN_NEXT likely(!ir->tailcall)
 #endif
 
 /* record whether the branch is taken or not during emulation */

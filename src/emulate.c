@@ -285,7 +285,7 @@ enum {
 };
 
 #if RV32_HAS(GDBSTUB)
-#define RVOP_RUN_NEXT ((!ir->tailcall) && (!rv->debug_mode))
+#define RVOP_RUN_NEXT ((!ir->tailcall) && likely(!rv->debug_mode))
 #else
 #define RVOP_RUN_NEXT (!ir->tailcall)
 #endif
@@ -1524,7 +1524,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
         /* translate the basic block */
         block_translate(rv, next);
 #if RV32_HAS(GDBSTUB)
-        if (!rv->debug_mode)
+        if (likely(!rv->debug_mode))
 #endif
             /* macro operation fusion */
             match_pattern(next);

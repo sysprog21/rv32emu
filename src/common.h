@@ -9,9 +9,11 @@
 
 #if defined(__GNUC__) || defined(__clang__)
 #define UNUSED __attribute__((unused))
+#define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #else
 #define UNUSED
+#define likely(x) x
 #define unlikely(x) x
 #endif
 

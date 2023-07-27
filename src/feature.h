@@ -3,8 +3,7 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-#ifndef RV32_FEATURES_H
-#define RV32_FEATURES_H
+#pragma once
 
 /* enable/disable (compile time) features in this header */
 
@@ -55,5 +54,3 @@
 
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x
-
-#endif /* RV32_FEATURES_H */

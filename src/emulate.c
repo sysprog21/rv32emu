@@ -1454,7 +1454,6 @@ static void block_translate(riscv_t *rv, block_t *block)
         }                                                                  \
     }
 
-
 /* examine whether instructions in a block match a specific pattern. If so,
  * rewrite them into fused instructions.
  *
@@ -1529,7 +1528,6 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #endif
             /* macro operation fusion */
             match_pattern(next);
-
 
         /* insert the block into block map */
         block_insert(&rv->block_map, next);

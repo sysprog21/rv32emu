@@ -28,7 +28,6 @@ enum {
 };
 /* clang-format on */
 
-
 /* compute the fclass result */
 static inline uint32_t calc_fclass(uint32_t f)
 {
@@ -62,7 +61,6 @@ static inline uint32_t calc_fclass(uint32_t f)
 
     return out;
 }
-
 
 static inline bool is_nan(uint32_t f)
 {

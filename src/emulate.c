@@ -285,9 +285,9 @@ enum {
 };
 
 #if RV32_HAS(GDBSTUB)
-#define RVOP_RUN_NEXT likely((!ir->tailcall) && (!rv->debug_mode))
+#define RVOP_NO_NEXT(ir) (ir->tailcall || rv->debug_mode)
 #else
-#define RVOP_RUN_NEXT likely(!ir->tailcall)
+#define RVOP_NO_NEXT(ir) (ir->tailcall)
 #endif
 
 /* record whether the branch is taken or not during emulation */
@@ -304,7 +304,7 @@ static uint32_t last_pc = 0;
         code;                                               \
     nextop:                                                 \
         rv->PC += ir->insn_len;                             \
-        if (!RVOP_RUN_NEXT)                                 \
+        if (unlikely(RVOP_NO_NEXT(ir)))                     \
             return true;                                    \
         const rv_insn_t *next = ir + 1;                     \
         MUST_TAIL return next->impl(rv, next);              \
@@ -321,7 +321,6 @@ static bool do_nop(riscv_t *rv, const rv_insn_t *ir)
     const rv_insn_t *next = ir + 1;
     MUST_TAIL return next->impl(rv, next);
 }
-
 
 /* LUI is used to build 32-bit constants and uses the U-type format. LUI
  * places the U-immediate value in the top 20 bits of the destination

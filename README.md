@@ -16,6 +16,11 @@
 
 `rv32emu` is an emulator for the 32 bit [RISC-V processor model](https://riscv.org/technical/specifications/) (RV32),
 faithfully implementing the RISC-V instruction set architecture (ISA).
+It serves as an exercise in modeling a modern RISC-based processor, demonstrating
+the device's operations without the complexities of a hardware implementation.
+The code is designed to be accessible and expandable, making it an ideal educational
+tool and starting point for customization. It is primarily written in C99, with
+a focus on efficiency and readability.
 
 Features:
 * Fast interpreter for executing the RV32 ISA

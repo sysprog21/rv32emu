@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string.h>
 
 /* Directly map a memory with a size of 2^32 bytes. All memory read/write
  * operations can access this memory through the memory subsystem.
@@ -40,10 +41,13 @@ uint8_t memory_read_b(uint32_t addr);
 /* read a length of data from memory */
 void memory_read(memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size);
 
-void memory_write(memory_t *m,
-                  uint32_t addr,
-                  const uint8_t *src,
-                  uint32_t size);
+static inline void memory_write(memory_t *m,
+                                uint32_t addr,
+                                const uint8_t *src,
+                                uint32_t size)
+{
+    memcpy(m->mem_base + addr, src, size);
+}
 
 void memory_write_w(uint32_t addr, const uint8_t *src);
 
@@ -51,4 +55,10 @@ void memory_write_s(uint32_t addr, const uint8_t *src);
 
 void memory_write_b(uint32_t addr, const uint8_t *src);
 
-void memory_fill(memory_t *m, uint32_t addr, uint32_t size, uint8_t val);
+static inline void memory_fill(memory_t *m,
+                               uint32_t addr,
+                               uint32_t size,
+                               uint8_t val)
+{
+    memset(m->mem_base + addr, val, size);
+}

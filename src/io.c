@@ -81,14 +81,6 @@ MEM_READ_IMPL(w, uint32_t);
 MEM_READ_IMPL(s, uint16_t);
 MEM_READ_IMPL(b, uint8_t);
 
-void memory_write(memory_t *mem,
-                  uint32_t addr,
-                  const uint8_t *src,
-                  uint32_t size)
-{
-    memcpy(mem->mem_base + addr, src, size);
-}
-
 #define MEM_WRITE_IMPL(size, type)                                 \
     void memory_write_##size(uint32_t addr, const uint8_t *src)    \
     {                                                              \
@@ -98,8 +90,3 @@ void memory_write(memory_t *mem,
 MEM_WRITE_IMPL(w, uint32_t);
 MEM_WRITE_IMPL(s, uint16_t);
 MEM_WRITE_IMPL(b, uint8_t);
-
-void memory_fill(memory_t *mem, uint32_t addr, uint32_t size, uint8_t val)
-{
-    memset(mem->mem_base + addr, val, size);
-}

@@ -1572,7 +1572,7 @@ void rv_step(riscv_t *rv, int32_t cycles)
          * the previous block.
          */
         if (prev) {
-            /* updtae previous block */
+            /* update previous block */
             if (prev->pc_start != last_pc)
                 prev = block_find(&rv->block_map, last_pc);
 

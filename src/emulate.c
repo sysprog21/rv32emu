@@ -1044,7 +1044,7 @@ RVOP(fmvwx, { rv->F_int[ir->rd] = rv->X[ir->rs1]; })
  * This instruction is used to generate pointers to stack-allocated variables,
  * and expands to addi rd', x2, nzuimm[9:2].
  */
-RVOP(caddi4spn, { rv->X[ir->rd] = rv->X[2] + (uint16_t) ir->imm; })
+RVOP(caddi4spn, { rv->X[ir->rd] = rv->X[rv_reg_sp] + (uint16_t) ir->imm; })
 
 /* C.LW loads a 32-bit value from memory into register rd'. It computes an
  * effective address by adding the zero-extended offset, scaled by 4, to the
@@ -1080,7 +1080,7 @@ RVOP(caddi, { rv->X[ir->rd] += (int16_t) ir->imm; })
 
 /* C.JAL */
 RVOP(cjal, {
-    rv->X[1] = rv->PC + ir->insn_len;
+    rv->X[rv_reg_ra] = rv->PC + ir->insn_len;
     rv->PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
     return ir->branch_taken->impl(rv, ir->branch_taken);
@@ -1244,7 +1244,7 @@ RVOP(cadd, { rv->X[ir->rd] = rv->X[ir->rs1] + rv->X[ir->rs2]; })
 
 /* C.SWSP */
 RVOP(cswsp, {
-    const uint32_t addr = rv->X[2] + ir->imm;
+    const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, store, true, 1);
     rv->io.mem_write_w(addr, rv->X[ir->rs2]);
 })

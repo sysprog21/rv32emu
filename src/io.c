@@ -40,7 +40,11 @@ memory_t *memory_new()
 
 void memory_delete(memory_t *mem)
 {
+#if defined(USE_MMAP)
     munmap(mem->mem_base, MEM_SIZE);
+#else
+    free(mem->mem_base);
+#endif
 }
 
 void memory_read(memory_t *mem, uint8_t *dst, uint32_t addr, uint32_t size)

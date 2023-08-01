@@ -30,7 +30,7 @@ memory_t *memory_new()
         return NULL;
 #else
     data_memory_base = malloc(MEM_SIZE);
-    if (data_memory_base)
+    if (!data_memory_base)
         return NULL;
 #endif
     mem->mem_base = data_memory_base;

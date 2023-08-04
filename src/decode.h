@@ -163,7 +163,8 @@
     _(fuse1, 0)                            \
     _(fuse2, 0)                            \
     _(fuse3, 0)                            \
-    _(fuse4, 0)
+    _(fuse4, 0)                            \
+    _(fuse5, 0)
 /* clang-format on */
 
 /* IR list */
@@ -253,7 +254,7 @@ typedef struct rv_insn {
     uint8_t shamt;
 #endif
     /* fuse operation */
-    int16_t imm2;
+    int32_t imm2;
     opcode_fuse_t *fuse;
 
     /* instruction length */

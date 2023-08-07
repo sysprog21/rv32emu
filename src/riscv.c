@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "riscv_private.h"
+#include "state.h"
 
 /* initialize the block map */
 static void block_map_init(block_map_t *map, const uint8_t bits)
@@ -78,6 +79,8 @@ riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg)
 
 riscv_t *rv_create(const riscv_io_t *io,
                    riscv_user_t userdata,
+                   int argc,
+                   char **args,
                    bool output_exit_code)
 {
     assert(io);
@@ -96,7 +99,7 @@ riscv_t *rv_create(const riscv_io_t *io,
     block_map_init(&rv->block_map, 10);
 
     /* reset */
-    rv_reset(rv, 0U);
+    rv_reset(rv, 0U, argc, args);
 
     return rv;
 }
@@ -124,7 +127,7 @@ void rv_delete(riscv_t *rv)
     free(rv);
 }
 
-void rv_reset(riscv_t *rv, riscv_word_t pc)
+void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
 {
     assert(rv);
     memset(rv->X, 0, sizeof(uint32_t) * RV_N_REGS);
@@ -132,8 +135,100 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     /* set the reset address */
     rv->PC = pc;
 
+    state_t *s = rv_userdata(rv);
+
     /* set the default stack pointer */
     rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;
+
+    /* set emulating program's argc and args */
+    /*
+     * store argc, args to state->mem
+     * so that, we can use offset technique to compatible
+     * 32-bit emulated program on 64-bit emulator
+     * memory layout of arguments like below:
+     * -----------------------
+     * |    NULL            |
+     * -----------------------
+     * |    envp[n]         |
+     * -----------------------
+     * |    envp[n - 1]     |
+     * -----------------------
+     * |    ...             |
+     * -----------------------
+     * |    envp[0]         |
+     * -----------------------
+     * |    NULL            |
+     * -----------------------
+     * |    args[n]         |
+     * -----------------------
+     * |    args[n - 1]     |
+     * -----------------------
+     * |    ...             |
+     * -----------------------
+     * |    args[0]         |
+     * -----------------------
+     * |    argc            |
+     * -----------------------
+     *
+     * TODO: access to envp
+     */
+    int i;
+
+    /* copy args to DRAM */
+    uintptr_t args_size = (1 + argc + 1) * sizeof(uint32_t);
+    uintptr_t args_bottom = DEFAULT_ARGS_ADDR;
+    uintptr_t args_top = args_bottom - args_size;
+    args_top &= 16;
+
+    /* argc */
+    uintptr_t *args_p = (uintptr_t *) args_top;
+    memory_write(s->mem, (uintptr_t) args_p, (void *) &argc, sizeof(int));
+    args_p++;
+
+    /* args */
+    size_t args_space[256]; /* for calculating the offset of args when pushing
+                               to stack */
+    size_t args_space_idx = 0;
+    size_t args_len;
+    size_t args_len_total = 0;
+    for (i = 0; i < argc; i++) {
+        const char *arg = args[i];
+        args_len = strlen(arg);
+        memory_write(s->mem, (uintptr_t) args_p, (void *) arg,
+                     (args_len + 1) * sizeof(char));
+        args_space[args_space_idx++] = args_len + 1;
+        args_p = (uintptr_t *) (((char *) args_p) + args_len + 1);
+        args_len_total += args_len + 1;
+    }
+    args_p = (uintptr_t *) (((char *) args_p) - args_len_total);
+    args_p--; /* point to argc */
+
+    /* ready to push argc, args to stack */
+    int stack_size = (1 + argc + 1) * sizeof(uint32_t);
+    uintptr_t stack_bottom = (uintptr_t) rv->X[rv_reg_sp];
+    uintptr_t stack_top = stack_bottom - stack_size;
+    stack_top &= -16;
+
+    /* argc */
+    uintptr_t *sp = (uintptr_t *) stack_top;
+    memory_write(s->mem, (uintptr_t) sp,
+                 (void *) (s->mem->mem_base + (uintptr_t) args_p), sizeof(int));
+    args_p++;
+    sp = (uintptr_t *) ((uint32_t *) sp + 1); /* keep argc and args[0] within
+                                                 one word due to RV32 ABI */
+
+    /* args */
+    for (i = 0; i < argc; i++) {
+        uintptr_t offset = (uintptr_t) args_p;
+        memory_write(s->mem, (uintptr_t) sp, (void *) &offset,
+                     sizeof(uintptr_t));
+        args_p = (uintptr_t *) (((char *) args_p) + args_space[i]);
+        sp = (uintptr_t *) ((uint32_t *) sp + 1);
+    }
+    memory_fill(s->mem, (uintptr_t) sp, sizeof(uint32_t), 0);
+
+    /* reset sp pointing to argc */
+    rv->X[rv_reg_sp] = stack_top;
 
     /* reset the csrs */
     rv->csr_mtvec = 0;

@@ -135,17 +135,15 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
     /* set the reset address */
     rv->PC = pc;
 
-    state_t *s = rv_userdata(rv);
-
     /* set the default stack pointer */
     rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;
 
-    /* set emulating program's argc and args */
     /*
-     * store argc, args to state->mem
-     * so that, we can use offset technique to compatible
-     * 32-bit emulated program on 64-bit emulator
-     * memory layout of arguments like below:
+     * store argc and args of target program to state->mem
+     * thus, we can use offset technique for emulating
+     * 32/64-bit target program on 64-bit emulator
+     *
+     * memory layout of arguments as below:
      * -----------------------
      * |    NULL            |
      * -----------------------
@@ -172,7 +170,9 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
      *
      * TODO: access to envp
      */
+
     int i;
+    state_t *s = rv_userdata(rv);
 
     /* copy args to DRAM */
     uintptr_t args_size = (1 + argc + 1) * sizeof(uint32_t);

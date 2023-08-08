@@ -195,12 +195,12 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
         const char *arg = args[i];
         args_len = strlen(arg);
         memory_write(s->mem, (uintptr_t) args_p, (void *) arg,
-                     (args_len + 1) * sizeof(char));
+                     (args_len + 1) * sizeof(uint8_t));
         args_space[args_space_idx++] = args_len + 1;
-        args_p = (uintptr_t *) (((char *) args_p) + args_len + 1);
+        args_p = (uintptr_t *) ((uintptr_t) args_p + args_len + 1);
         args_len_total += args_len + 1;
     }
-    args_p = (uintptr_t *) (((char *) args_p) - args_len_total);
+    args_p = (uintptr_t *) ((uintptr_t) args_p - args_len_total);
     args_p--; /* point to argc */
 
     /* ready to push argc, args to stack */
@@ -222,7 +222,7 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
         uintptr_t offset = (uintptr_t) args_p;
         memory_write(s->mem, (uintptr_t) sp, (void *) &offset,
                      sizeof(uintptr_t));
-        args_p = (uintptr_t *) (((char *) args_p) + args_space[i]);
+        args_p = (uintptr_t *) ((uintptr_t) args_p + args_space[i]);
         sp = (uintptr_t *) ((uint32_t *) sp + 1);
     }
     memory_fill(s->mem, (uintptr_t) sp, sizeof(uint32_t), 0);

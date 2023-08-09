@@ -9,9 +9,9 @@ CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
 
 # Set the default stack pointer
-CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFE000
+CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFE000
 # Set the default args starting address
-CFLAGS += -D DEFAULT_ARGS_ADDR=0xFFFF000
+CFLAGS += -D DEFAULT_ARGS_ADDR=0xFFFFF000
 
 OBJS_EXT :=
 

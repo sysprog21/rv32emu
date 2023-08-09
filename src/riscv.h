@@ -109,13 +109,15 @@ typedef struct {
 /* create a RISC-V emulator */
 riscv_t *rv_create(const riscv_io_t *io,
                    riscv_user_t user_data,
+                   int argc,
+                   char **args,
                    bool output_exit_code);
 
 /* delete a RISC-V emulator */
 void rv_delete(riscv_t *rv);
 
 /* reset the RISC-V processor */
-void rv_reset(riscv_t *rv, riscv_word_t pc);
+void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args);
 
 #if RV32_HAS(GDBSTUB)
 /* Run the RISC-V emulator as gdbstub */

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "elf.h"
 #include "state.h"
@@ -31,6 +32,11 @@ static bool opt_quiet_outputs = false;
 
 /* target executable */
 static const char *opt_prog_name = "a.out";
+
+/* target argc and argv */
+static int prog_argc;
+static char **prog_args;
+static const char *optstr = "tgqmhd:a:";
 
 /* enable misaligned memory access */
 static bool opt_misaligned = false;
@@ -91,79 +97,64 @@ static void print_usage(const char *filename)
             "RV32I[MA] Emulator which loads an ELF file to execute.\n"
             "Usage: %s [options] [filename]\n"
             "Options:\n"
-            "  --trace : print executable trace\n"
+            "  -t : print executable trace\n"
 #if RV32_HAS(GDBSTUB)
-            "  --gdbstub : allow remote GDB connections (as gdbstub)\n"
+            "  -g : allow remote GDB connections (as gdbstub)\n"
 #endif
-            "  --dump-registers [filename]: dump registers as JSON to the "
+            "  -d [filename]: dump registers as JSON to the "
             "given file or `-` (STDOUT)\n"
-            "  --quiet : Suppress outputs other than `dump-registers`\n"
-            "  --arch-test [filename] : dump signature to the given file, "
-            "required by arch-test test\n",
+            "  -q : Suppress outputs other than `dump-registers`\n"
+            "  -a [filename] : dump signature to the given file, "
+            "required by arch-test test\n"
+            "  -m : enable misaligned memory access\n"
+            "  -h : show this message\n",
             filename);
 }
 
 static bool parse_args(int argc, char **args)
 {
-    /* parse each argument in turn */
-    for (int i = 1; i < argc; ++i) {
-        const char *arg = args[i];
-        /* parse flags */
-        if (arg[0] == '-') {
-            if (!strcmp(arg, "--help"))
-                return false;
-            if (!strcmp(arg, "--trace")) {
-                opt_trace = true;
-                continue;
-            }
+    int opt;
+    int emu_argc = 0;
+
+    while ((opt = getopt(argc, args, optstr)) != -1) {
+        emu_argc++;
+
+        switch (opt) {
+        case 't':
+            opt_trace = true;
+            break;
 #if RV32_HAS(GDBSTUB)
-            if (!strcmp(arg, "--gdbstub")) {
-                opt_gdbstub = true;
-                continue;
-            }
+        case 'g':
+            opt_gdbstub = true;
+            break;
 #endif
-            if (!strcmp(arg, "--dump-registers")) {
-                opt_dump_regs = true;
-                if (i + 1 >= argc) {
-                    fprintf(stderr,
-                            "Filename for registers output required by "
-                            "dump-registers.\n");
-                    return false;
-                }
-                registers_out_file = args[++i];
-                continue;
-            }
-
-            if (!strcmp(arg, "--quiet")) {
-                opt_quiet_outputs = true;
-                continue;
-            }
-
-            if (!strcmp(arg, "--arch-test")) {
-                opt_arch_test = true;
-                if (i + 1 >= argc) {
-                    fprintf(stderr,
-                            "Filename for signature output required by "
-                            "arch-test.\n");
-                    return false;
-                }
-                signature_out_file = args[++i];
-                continue;
-            }
-
-            if (!strcmp(arg, "--misalign")) {
-                opt_misaligned = true;
-                continue;
-            }
-
-            /* otherwise, error */
-            fprintf(stderr, "Unknown argument '%s'\n", arg);
+        case 'q':
+            opt_quiet_outputs = true;
+            break;
+        case 'h':
+            return false;
+        case 'm':
+            opt_misaligned = true;
+            break;
+        case 'd':
+            opt_dump_regs = true;
+            registers_out_file = optarg;
+            emu_argc++;
+            break;
+        case 'a':
+            opt_arch_test = true;
+            signature_out_file = optarg;
+            emu_argc++;
+            break;
+        default:
             return false;
         }
-        /* set the executable */
-        opt_prog_name = arg;
     }
 
+    prog_argc = argc - emu_argc - 1;
+    prog_args = &args[optind]; /* optind points to first non-option string so it
+                                  should be target program */
+    opt_prog_name = prog_args[0];
     return true;
 }
 
@@ -234,7 +225,8 @@ int main(int argc, char **args)
         state->break_addr = end->st_value;
 
     /* create the RISC-V runtime */
-    riscv_t *rv = rv_create(&io, state, !opt_quiet_outputs);
+    riscv_t *rv =
+        rv_create(&io, state, prog_argc, prog_args, !opt_quiet_outputs);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
         return 1;

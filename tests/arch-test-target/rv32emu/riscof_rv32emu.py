@@ -133,7 +133,7 @@ class rv32emu(pluginTemplate):
             # echo statement.
             if self.target_run:
             # set up the simulation command. Template is for spike. Please change.
-                simcmd = self.dut_exe + ' --arch-test {0} {1}'.format(sig_file, elf)
+                simcmd = self.dut_exe + ' -a {0} {1}'.format(sig_file, elf)
             else:
                 simcmd = 'echo "NO RUN"'
 

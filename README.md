@@ -138,7 +138,7 @@ a limited number of [GDB Remote Serial Protocol](https://sourceware.org/gdb/onli
 You must first build the emulator and set `ENABLE_GDBSTUB` to `1` in the `Makefile` in order
 to activate this feature. After that, you might execute it using the command below.
 ```shell
-build/rv32emu --gdbstub <binary>
+build/rv32emu -g <binary>
 ```
 
 The `<binary>` should be the ELF file in RISC-V 32 bit format. Additionally, it is advised
@@ -162,14 +162,14 @@ command line is available, you can communicate with `rv32emu`.
 
 ### Dump registers as JSON
 
-If an option `--dump-registers [filename]` is specified, the emulator outputs registers as JSON format.
+If an option `-d [filename]` is specified, the emulator outputs registers as JSON format.
 This can be used for tests using the emulator, such as compiler tests.
 
-You can use the option with `--quiet` to use the output directly.
+You can use the option with `-q` to use the output directly.
 
 ```
 # Read the register x10 (a0).
-$ build/rv32emu --dump-registers - out.elf --quiet | jq .x10
+$ build/rv32emu -d - out.elf -q | jq .x10
 ```
 
 ## Contributing

@@ -17,7 +17,7 @@ if [ -z ${GDB} ]; then
     exit 1
 fi
 
-build/rv32emu --gdbstub build/puzzle.elf &
+build/rv32emu -g build/puzzle.elf &
 PID=$!
 
 # Before starting GDB, we should ensure rv32emu is still running.

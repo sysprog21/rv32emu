@@ -30,8 +30,7 @@ void read_elf_data(const char *path, int flags)
 
 int main(int argc, char *argv[])
 {
-    /* FIXME: use correct argv[0] */
-    read_elf_data("build/readelf.elf", FLAG_ELF_HEADER | FLAG_SECTION_HEADER);
+    read_elf_data(argv[0], FLAG_ELF_HEADER | FLAG_SECTION_HEADER);
 
     return 0;
 }

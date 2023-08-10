@@ -23,7 +23,7 @@
 
 **command**: `make quake`
 
-[Quake](https://en.wikipedia.org/wiki/Quake_(series)) was created in 1996 as a successor of the highly succcessful first-person shooter game Doom, it is based on Doom's game engine and 3D graphics compability, and it enhanced the fast-paced gameplay and online multiplayer over the Internet. 
+[Quake](https://en.wikipedia.org/wiki/Quake_(series)) was created in 1996 as a successor of the highly successful first-person shooter game Doom, it is based on Doom's game engine and 3D graphics compatibility, and it enhanced the fast-paced gameplay and online multiplayer over the Internet. 
 
 Build Instruction:
 ```shell

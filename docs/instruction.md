@@ -136,7 +136,7 @@ that is the decimal
 The fully disassembled instruction is `jal x15, 30`, or `jal a5, 30` when using
 the ABI register aliases.
 
-### Deconding instruction `j -12`
+### Decoding instruction `j -12`
 
 The instruction `j`.
 

@@ -160,7 +160,6 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return &rv->csr_time[1];
     }
     case CSR_INSTRET: /* Number of Instructions Retired Counter */
-        /* Number of Instructions Retired Counter, just use cycle */
         return (uint32_t *) (&rv->csr_cycle);
 #if RV32_HAS(EXT_F)
     case CSR_FFLAGS:
@@ -771,7 +770,7 @@ RVOP(amoaddw, {
     rv->io.mem_write_s(ir->rs1, res);
 })
 
-/* AMOXOR.W: Atomix XOR */
+/* AMOXOR.W: Atomic XOR */
 RVOP(amoxorw, {
     rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
     const int32_t res = rv->X[ir->rd] ^ rv->X[ir->rs2];
@@ -1250,7 +1249,7 @@ RVOP(cswsp, {
 })
 #endif
 
-/* auipc + addi */
+/* AUIPC + ADDI */
 static bool do_fuse1(riscv_t *rv, const rv_insn_t *ir)
 {
     rv->X[rv_reg_zero] = 0;
@@ -1264,7 +1263,7 @@ static bool do_fuse1(riscv_t *rv, const rv_insn_t *ir)
     MUST_TAIL return next->impl(rv, next);
 }
 
-/* auipc + add */
+/* AUIPC + ADD */
 static bool do_fuse2(riscv_t *rv, const rv_insn_t *ir)
 {
     rv->X[rv_reg_zero] = 0;
@@ -1278,16 +1277,16 @@ static bool do_fuse2(riscv_t *rv, const rv_insn_t *ir)
     MUST_TAIL return next->impl(rv, next);
 }
 
-/* multiple sw */
+/* multiple SW */
 static bool do_fuse3(riscv_t *rv, const rv_insn_t *ir)
 {
     rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
-    /* the memory addresses of the sw instructions are contiguous, so we only
-     * need to check the first sw instruction to determine if its memory address
-     * is misaligned or if the memory chunk does not exist.
+    /* The memory addresses of the sw instructions are contiguous, thus only
+     * the first SW instruction needs to be checked to determine if its memory
+     * address is misaligned or if the memory chunk does not exist.
      */
     RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
     rv->io.mem_write_w(addr, rv->X[fuse[0].rs2]);
@@ -1302,16 +1301,16 @@ static bool do_fuse3(riscv_t *rv, const rv_insn_t *ir)
     MUST_TAIL return next->impl(rv, next);
 }
 
-/* multiple lw */
+/* multiple LW */
 static bool do_fuse4(riscv_t *rv, const rv_insn_t *ir)
 {
     rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
-    /* the memory addresses of the lw instructions are contiguous, so we only
-     * need to check the first lw instruction to determine if its memory address
-     * is misaligned or if the memory chunk does not exist.
+    /* The memory addresses of the lw instructions are contiguous, therefore
+     * only the first LW instruction needs to be checked to determine if its
+     * memory address is misaligned or if the memory chunk does not exist.
      */
     RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
     rv->X[fuse[0].rd] = rv->io.mem_read_w(addr);
@@ -1326,7 +1325,7 @@ static bool do_fuse4(riscv_t *rv, const rv_insn_t *ir)
     MUST_TAIL return next->impl(rv, next);
 }
 
-/* lui + addi */
+/* LUI + ADDI */
 static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
 {
     rv->X[rv_reg_zero] = 0;
@@ -1502,11 +1501,11 @@ static void block_translate(riscv_t *rv, block_t *block)
         ir->tailcall = next_ir->tailcall;                                  \
     }
 
-/* examine whether instructions in a block match a specific pattern. If so,
- * rewrite them into fused instructions.
+/* Check if instructions in a block match a specific pattern. If they do,
+ * rewrite them as fused instructions.
  *
- * We plan to devise strategies to increase the number of instructions that
- * match the pattern, such as reordering the instructions.
+ * Strategies are being devised to increase the number of instructions that
+ * match the pattern, including possible instruction reordering.
  */
 static void match_pattern(block_t *block)
 {
@@ -1517,8 +1516,8 @@ static void match_pattern(block_t *block)
         case rv_insn_auipc:
             next_ir = ir + 1;
             if (next_ir->opcode == rv_insn_addi && ir->rd == next_ir->rs1) {
-                /* the destination register of instruction auipc is equal to the
-                 * source register 1 of next instruction addi.
+                /* The destination register of the AUIPC instruction is the
+                 * same as the source register 1 of the next instruction ADDI.
                  */
                 ir->opcode = rv_insn_fuse1;
                 ir->rs1 = next_ir->rd;
@@ -1527,16 +1526,18 @@ static void match_pattern(block_t *block)
                 ir->tailcall = next_ir->tailcall;
             } else if (next_ir->opcode == rv_insn_add &&
                        ir->rd == next_ir->rs2) {
-                /* the destination register of instruction auipc is equal to the
-                 * source register 2 of next instruction add */
+                /* The destination register of the AUIPC instruction is the
+                 * same as the source register 2 of the next instruction ADD.
+                 */
                 ir->opcode = rv_insn_fuse2;
                 ir->rs2 = next_ir->rd;
                 ir->rs1 = next_ir->rs1;
                 ir->impl = dispatch_table[ir->opcode];
             } else if (next_ir->opcode == rv_insn_add &&
                        ir->rd == next_ir->rs1) {
-                /* the destination register of instruction auipc is equal to the
-                 * source register 1 of next instruction add */
+                /* The destination register of the AUIPC instruction is the
+                 * same as the source register 1 of the next instruction ADD.
+                 */
                 ir->opcode = rv_insn_fuse2;
                 ir->rs2 = next_ir->rd;
                 ir->rs1 = next_ir->rs2;
@@ -1556,8 +1557,8 @@ static void match_pattern(block_t *block)
         case rv_insn_lui:
             next_ir = ir + 1;
             if (next_ir->opcode == rv_insn_addi && ir->rd == next_ir->rs1) {
-                /* the destination register of instruction lui is equal to
-                 * the source register 1 of next instruction addi.
+                /* The destination register of the LUI instruction is the
+                 * same as the source register 1 of the next instruction ADDI.
                  */
                 ir->opcode = rv_insn_fuse5;
                 ir->rs1 = next_ir->rd;
@@ -1566,7 +1567,7 @@ static void match_pattern(block_t *block)
                 ir->tailcall = next_ir->tailcall;
             }
             break;
-            /* TODO: mixture of sw and lw */
+            /* TODO: mixture of SW and LW */
             /* TODO: reorder insturction to match pattern */
         }
     }

@@ -3,35 +3,40 @@
 :+1::tada: First off, thanks for taking the time to contribute! :tada::+1:
 
 The following is a set of guidelines for contributing to [rv32emu](https://github.com/sysprog21/rv32emu)
-hosted on GitHub. These are mostly guidelines, not rules. Use your best
-judgment, and feel free to propose changes to this document in a pull request.
+hosted on GitHub. These are mostly guidelines, not rules.
+Use your best judgment, and feel free to propose changes to this document in a pull request.
 
 ## Issues
 
-This project uses GitHub Issues to track ongoing development, discuss project plans, and keep track of bugs. Be sure to search for existing issues before you create another one.
+This project uses GitHub Issues to track ongoing development, discuss project plans, and keep track of bugs.
+Be sure to search for existing issues before you create another one.
 
 Visit our [Issues page on GitHub](https://github.com/sysprog21/rv32emu/issues) to search and submit.
 
 ## Coding Convention
 
-We welcome all contributions from corporate, academic and individual developers. However, there are a number of fundamental ground rules that you must adhere to in order to participate. These rules are outlined as follows:
-* All code must adhere to the existing C coding style (see below). While we are somewhat flexible in basic style, you will adhere to what is currently in place. Uncommented, complicated algorithmic constructs will be rejected.
-* All external pull requests must contain sufficient documentation in the pull request comments in order to be accepted.
+Contributions from developers across corporations, academia, and individuals are welcome.
+However, participation requires adherence to fundamental ground rules:
+* Code must strictly adhere to the established C coding style (refer to the guidelines below).
+  While there is some flexibility in basic style, it is crucial to stick to the current coding standards.
+  Complex algorithmic constructs without proper comments will not be accepted.
+* External pull requests should include thorough documentation in the pull request comments for consideration.
 
 Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 12 or later.
 
-This repository always includes an up-to-date .clang-format file with rules that match the explained ones.
-To enforce a consistent coding style, use the command `$ clang-format -i *.[ch]` .
+This repository consistently contains an up-to-date `.clang-format` file with rules that match the explained ones.
+For maintaining a uniform coding style, execute the command `clang-format -i *.[ch]`.
 
 ## Coding Style for Modern C
 
-This coding style is a variation of the K&R style. Some general principles: honor tradition, but accept progress; be consistent;
-embrace the latest C standards; embrace modern compilers, their static analysis
-capabilities and sanitizers.
+This coding style is a variant of the K&R style.
+Adhere to established practices while being open to innovation.
+Maintain consistency, adopt the latest C standards,
+and embrace modern compilers along with their advanced static analysis capabilities and sanitizers.
 
 ### Indentation
 
-"In this coding style guide, the use of 4 spaces for indentation instead of tabs is strongly enforced to ensure consistency.
+In this coding style guide, the use of 4 spaces for indentation instead of tabs is strongly enforced to ensure consistency.
 Consistently apply a single space before and after comparison and assignment operators to maintain readable code.
 Additionally, it is crucial to include a single space after every comma.
 e.g.,
@@ -44,10 +49,10 @@ for (int i = 0; i < 10; i++) {
 
 ### Line length
 
-All lines should generally be within 80 characters.  Wrap long lines.
-There are some good reasons behind this:
-* It forces the developer to write more succinct code;
-* Humans are better at processing information in smaller quantity portions;
+All lines should typically stay within 80 characters, and longer lines should be wrapped.
+There are valid rationales for this practice:
+* It encourages concise code writing by developers.
+* Smaller portions of information are easier for humans to process.
 * It helps users of vi/vim (and potentially other editors) who use vertical splits.
 
 ### Comments
@@ -458,9 +463,9 @@ printf("val %lld\n", SOME_CONSTANT);
 
 #### Avoid unaligned access
 
-Do not assume unaligned access is safe.  It is not safe on Arm, POWER,
-and various other architectures.  Moreover, even on x86 unaligned access
-is slower.
+Avoid assuming that unaligned access is safe.
+It is not secure on architectures like Arm, POWER, and others.
+Additionally, even on x86, unaligned access can be slower.
 
 #### Avoid extreme portability
 

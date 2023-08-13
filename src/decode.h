@@ -157,22 +157,17 @@
         _(cadd, 0)                         \
         _(cswsp, 0)                        \
     )                                      \
-    /* macro operation fusion: convert specific RISC-V instruction patterns 
-     * into faster and equivalent code 
-     */                                    \
-    _(fuse1, 0)                            \
-    _(fuse2, 0)                            \
-    _(fuse3, 0)                            \
-    _(fuse4, 0)                            \
-    _(fuse5, 0)
 /* clang-format on */
 
+/* clang-format off */
 /* IR list */
 enum {
 #define _(inst, can_branch) rv_insn_##inst,
     RISCV_INSN_LIST
 #undef _
+    N_RISCV_INSN_LIST
 };
+/* clang-format on */
 
 /* clang-format off */
 /* instruction decode masks */

@@ -317,6 +317,23 @@ static uint32_t last_pc = 0;
 
 /* Macro operation fusion */
 
+/* macro operation fusion: convert specific RISC-V instruction patterns
+ * into faster and equivalent code
+ */
+#define FUSE_INSN_LIST \
+    _(fuse1)           \
+    _(fuse2)           \
+    _(fuse3)           \
+    _(fuse4)           \
+    _(fuse5)
+
+enum {
+    rv_insn_fuse0 = N_RISCV_INSN_LIST,
+#define _(inst) rv_insn_##inst,
+    FUSE_INSN_LIST
+#undef _
+};
+
 /* AUIPC + ADDI */
 static bool do_fuse1(riscv_t *rv, const rv_insn_t *ir)
 {
@@ -407,11 +424,18 @@ static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
     MUST_TAIL return next->impl(rv, next);
 }
 
+/* clang-format off */
 static const void *dispatch_table[] = {
+    /* RV32 instructions */
 #define _(inst, can_branch) [rv_insn_##inst] = do_##inst,
     RISCV_INSN_LIST
 #undef _
+    /* Macro operation fusion instructions */
+#define _(inst) [rv_insn_##inst] = do_##inst,
+    FUSE_INSN_LIST
+#undef _
 };
+/* clang-format on */
 
 static inline bool insn_is_branch(uint8_t opcode)
 {

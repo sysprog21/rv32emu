@@ -124,7 +124,7 @@ static char funcbuf[128] = {0};
             (pc));                                                  \
         code;                                                       \
         if (!insn_is_branch(ir->opcode)) {                          \
-            GEN("  rv->PC += ir->insn_len;\n");                     \
+            GEN("  rv->PC += %d;\n", ir->insn_len);                 \
             GEN("  ir = ir + 1;\n");                                \
             NEXT_INSN(pc + ir->insn_len);                           \
         }                                                           \

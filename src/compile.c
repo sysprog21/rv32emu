@@ -3,6 +3,7 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -106,7 +107,7 @@ static bool insn_is_branch(uint8_t opcode)
     return false;
 }
 
-typedef void (*gen_func_t)(riscv_t *, const rv_insn_t *, char *, uint32_t);
+typedef void (*gen_func_t)(riscv_t *, rv_insn_t *, char *);
 static gen_func_t dispatch_table[N_RISCV_INSN_LIST + N_FUSE_INSN_LIST];
 static char funcbuf[128] = {0};
 #define GEN(...)                   \
@@ -114,19 +115,18 @@ static char funcbuf[128] = {0};
     strcat(gencode, funcbuf);
 #define UPDATE_PC(inc) GEN("  rv->PC += %d;\n", inc)
 #define NEXT_INSN(target) GEN("  goto insn_%x;\n", target)
-#define RVOP(inst, code)                                            \
-    static void gen_##inst(riscv_t *rv UNUSED, const rv_insn_t *ir, \
-                           char *gencode, uint32_t pc)              \
-    {                                                               \
-        GEN("insn_%x:\n"                                            \
-            "  rv->X[0] = 0;\n"                                     \
-            "  rv->csr_cycle++;\n",                                 \
-            (pc));                                                  \
-        code;                                                       \
-        if (!insn_is_branch(ir->opcode)) {                          \
-            GEN("  rv->PC += %d;\n", ir->insn_len);                 \
-            NEXT_INSN(pc + ir->insn_len);                           \
-        }                                                           \
+#define RVOP(inst, code)                                                     \
+    static void gen_##inst(riscv_t *rv UNUSED, rv_insn_t *ir, char *gencode) \
+    {                                                                        \
+        GEN("insn_%x:\n"                                                     \
+            "  rv->X[0] = 0;\n"                                              \
+            "  rv->csr_cycle++;\n",                                          \
+            (ir->pc));                                                       \
+        code;                                                                \
+        if (!insn_is_branch(ir->opcode)) {                                   \
+            GEN("  rv->PC += %d;\n", ir->insn_len);                          \
+            NEXT_INSN(ir->pc + ir->insn_len);                                \
+        }                                                                    \
     }
 
 #include "jit_template.c"
@@ -142,7 +142,7 @@ RVOP(jal, {
     if (ir->rd) {
         GEN("  rv->X[%u] = pc + %u;\n", ir->rd, ir->insn_len);
     }
-    NEXT_INSN(pc + ir->imm);
+    NEXT_INSN(ir->pc + ir->imm);
 })
 
 #define BRNACH_FUNC(type, comp)                                               \
@@ -150,14 +150,30 @@ RVOP(jal, {
         #type, ir->rs2);                                                      \
     UPDATE_PC(ir->imm);                                                       \
     if (ir->branch_taken) {                                                   \
-        NEXT_INSN(pc + ir->imm);                                              \
+        block_t *block = cache_get(rv->block_cache, ir->pc + ir->imm);        \
+        if (!block) {                                                         \
+            ir->branch_taken = NULL;                                          \
+            GEN("    return true;\n");                                        \
+        } else {                                                              \
+            if (ir->branch_taken->pc != ir->pc + ir->imm)                     \
+                ir->branch_taken = block->ir;                                 \
+            NEXT_INSN(ir->pc + ir->imm);                                      \
+        }                                                                     \
     } else {                                                                  \
         GEN("    return true;\n");                                            \
     }                                                                         \
     GEN("  }\n");                                                             \
     UPDATE_PC(ir->insn_len);                                                  \
     if (ir->branch_untaken) {                                                 \
-        NEXT_INSN(pc + ir->insn_len);                                         \
+        block_t *block = cache_get(rv->block_cache, ir->pc + ir->insn_len);   \
+        if (!block) {                                                         \
+            ir->branch_untaken = NULL;                                        \
+            GEN("    return true;\n");                                        \
+        } else {                                                              \
+            if (ir->branch_untaken->pc != ir->pc + ir->insn_len)              \
+                ir->branch_untaken = block->ir;                               \
+            NEXT_INSN(ir->pc + ir->insn_len);                                 \
+        }                                                                     \
     } else {                                                                  \
         GEN("  return true;\n");                                              \
     }
@@ -236,26 +252,42 @@ RVOP(csw, {
 RVOP(cjal, {
     GEN("  rv->X[1] = rv->PC + %u;\n", ir->insn_len);
     UPDATE_PC(ir->imm);
-    NEXT_INSN(pc + ir->imm);
+    NEXT_INSN(ir->pc + ir->imm);
 })
 
 RVOP(cj, {
     UPDATE_PC(ir->imm);
-    NEXT_INSN(pc + ir->imm);
+    NEXT_INSN(ir->pc + ir->imm);
 })
 
 RVOP(cbeqz, {
     GEN("  if (!rv->X[%u]){\n", ir->rs1);
     UPDATE_PC(ir->imm);
     if (ir->branch_taken) {
-        NEXT_INSN(pc + ir->imm);
+        block_t *block = cache_get(rv->block_cache, ir->pc + ir->imm);
+        if (!block) {
+            ir->branch_taken = NULL;
+            GEN("    return true;\n");
+        } else {
+            if (ir->branch_taken->pc != ir->pc + ir->imm)
+                ir->branch_taken = block->ir;
+            NEXT_INSN(ir->pc + ir->imm);
+        }
     } else {
         GEN("    return true;\n");
     }
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
-        NEXT_INSN(pc + ir->insn_len);
+        block_t *block = cache_get(rv->block_cache, ir->pc + ir->insn_len);
+        if (!block) {
+            ir->branch_untaken = NULL;
+            GEN("    return true;\n");
+        } else {
+            if (ir->branch_untaken->pc != ir->pc + ir->insn_len)
+                ir->branch_untaken = block->ir;
+            NEXT_INSN(ir->pc + ir->insn_len);
+        }
     } else {
         GEN("  return true;\n");
     }
@@ -265,14 +297,30 @@ RVOP(cbnez, {
     GEN("  if (rv->X[%u]){\n", ir->rs1);
     UPDATE_PC(ir->imm);
     if (ir->branch_taken) {
-        NEXT_INSN(pc + ir->imm);
+        block_t *block = cache_get(rv->block_cache, ir->pc + ir->imm);
+        if (!block) {
+            ir->branch_taken = NULL;
+            GEN("    return true;\n");
+        } else {
+            if (ir->branch_taken->pc != ir->pc + ir->imm)
+                ir->branch_taken = block->ir;
+            NEXT_INSN(ir->pc + ir->imm);
+        }
     } else {
         GEN("    return true;\n");
     }
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
-        NEXT_INSN(pc + ir->insn_len);
+        block_t *block = cache_get(rv->block_cache, ir->pc + ir->insn_len);
+        if (!block) {
+            ir->branch_untaken = NULL;
+            GEN("    return true;\n");
+        } else {
+            if (ir->branch_untaken->pc != ir->pc + ir->insn_len)
+                ir->branch_untaken = block->ir;
+            NEXT_INSN(ir->pc + ir->insn_len);
+        }
     } else {
         GEN("  return true;\n");
     }
@@ -290,92 +338,72 @@ RVOP(cswsp, {
 #endif
 
 
-static void gen_fuse1(riscv_t *rv UNUSED,
-                      const rv_insn_t *ir,
-                      char *gencode,
-                      uint32_t pc)
+static void gen_fuse1(riscv_t *rv UNUSED, rv_insn_t *ir, char *gencode)
 {
     GEN("insn_%x:\n"
         "  rv->X[0] = 0;\n"
-        "  rv->csr_cycle+=2;\n",
-        (pc));
-    GEN("  rv->X[ir->rd] = rv->PC + ir->imm;\n");
-    GEN("  rv->X[ir->rs1] = rv->X[ir->rd] + ir->imm2;\n");
-    GEN("  rv->PC += 2 * ir->insn_len;\n");
-    GEN("  ir = ir + 2;\n");
-    NEXT_INSN(pc + 2 * ir->insn_len);
+        "  rv->csr_cycle += 2;\n",
+        (ir->pc));
+    GEN("  rv->X[%u] = %u + %d;\n", ir->rd, ir->pc, ir->imm);
+    GEN("  rv->X[%u] = rv->X[%u] + %d;\n", ir->rs1, ir->rd, ir->imm2);
+    UPDATE_PC(2 * ir->insn_len);
+    NEXT_INSN(ir->pc + 2 * ir->insn_len);
 }
 
-static void gen_fuse2(riscv_t *rv UNUSED,
-                      const rv_insn_t *ir,
-                      char *gencode,
-                      uint32_t pc)
+static void gen_fuse2(riscv_t *rv UNUSED, rv_insn_t *ir, char *gencode)
 {
     GEN("insn_%x:\n"
         "  rv->X[0] = 0;\n"
-        "  rv->csr_cycle+=2;\n",
-        (pc));
-    GEN("  rv->X[ir->rd] = rv->PC + ir->imm;\n");
-    GEN("  rv->X[ir->rs2] = rv->X[ir->rd] + rv->X[ir->rs1];\n");
-    GEN("  rv->PC += 2 * ir->insn_len;\n");
-    GEN("  ir = ir + 2;\n");
-    NEXT_INSN(pc + 2 * ir->insn_len);
+        "  rv->csr_cycle += 2;\n",
+        (ir->pc));
+    GEN("  rv->X[%u] = %u + %d;\n", ir->rd, ir->pc, ir->imm);
+    GEN("  rv->X[%u] = rv->X[%u] + rv->X[%u];\n", ir->rs2, ir->rd, ir->rs1);
+    UPDATE_PC(2 * ir->insn_len);
+    NEXT_INSN(ir->pc + 2 * ir->insn_len);
 }
 
-static void gen_fuse3(riscv_t *rv UNUSED,
-                      const rv_insn_t *ir,
-                      char *gencode,
-                      uint32_t pc)
+static void gen_fuse3(riscv_t *rv UNUSED, rv_insn_t *ir, char *gencode)
 {
     GEN("insn_%x:\n"
         "  rv->X[0] = 0;\n"
-        "  rv->csr_cycle+=ir->imm2;\n",
-        (pc));
+        "  rv->csr_cycle += %u;\n",
+        (ir->pc), ir->imm2);
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         GEN("  addr = rv->X[%u] + %u;\n", fuse[i].rs1, fuse[i].imm);
         GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->X[%u];\n",
             fuse[i].rs2)
     }
-    GEN("  rv->PC += ir->imm2 * ir->insn_len;\n");
-    GEN("  ir = ir + ir->imm2;\n");
-    NEXT_INSN(pc + ir->imm2 * ir->insn_len);
+    UPDATE_PC(ir->imm2 * ir->insn_len);
+    NEXT_INSN(ir->pc + ir->imm2 * ir->insn_len);
 }
 
-static void gen_fuse4(riscv_t *rv UNUSED,
-                      const rv_insn_t *ir,
-                      char *gencode,
-                      uint32_t pc)
+static void gen_fuse4(riscv_t *rv UNUSED, rv_insn_t *ir, char *gencode)
 {
     GEN("insn_%x:\n"
         "  rv->X[0] = 0;\n"
-        "  rv->csr_cycle+=ir->imm2;\n",
-        (pc));
+        "  rv->csr_cycle += %u;\n",
+        (ir->pc), ir->imm2);
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         GEN("  addr = rv->X[%u] + %u;\n", fuse[i].rs1, fuse[i].imm);
         GEN("  rv->X[%u] = *((const uint32_t *) (m->mem_base + addr));\n",
             fuse[i].rd);
     }
-    GEN("  rv->PC += ir->imm2 * ir->insn_len;\n");
-    GEN("  ir = ir + ir->imm2;\n");
-    NEXT_INSN(pc + ir->imm2 * ir->insn_len);
+    UPDATE_PC(ir->imm2 * ir->insn_len);
+    NEXT_INSN(ir->pc + ir->imm2 * ir->insn_len);
 }
 
-static void gen_fuse5(riscv_t *rv UNUSED,
-                      const rv_insn_t *ir,
-                      char *gencode,
-                      uint32_t pc)
+static void gen_fuse5(riscv_t *rv UNUSED, rv_insn_t *ir, char *gencode)
 {
     GEN("insn_%x:\n"
         "  rv->X[0] = 0;\n"
-        "  rv->csr_cycle+=2;\n",
-        (pc));
-    GEN("  rv->X[ir->rd] = ir->imm;\n");
-    GEN("  rv->X[ir->rs1] = ir->imm + ir->imm2;\n");
-    GEN("  rv->PC += 2 * ir->insn_len;\n");
-    GEN("  ir = ir + 2;\n");
-    NEXT_INSN(pc + 2 * ir->insn_len);
+        "  rv->csr_cycle += 2;\n",
+        (ir->pc));
+    GEN("  rv->X[%u] = %d;\n", ir->rd, ir->imm);
+    GEN("  rv->X[%u] = %d + %d;\n", ir->rs1, ir->imm, ir->imm2);
+    UPDATE_PC(2 * ir->insn_len);
+    NEXT_INSN(ir->pc + 2 * ir->insn_len);
 }
 #undef RVOP
 
@@ -383,7 +411,7 @@ static void trace_ebb(riscv_t *rv, char *gencode, rv_insn_t *ir, set_t *set)
 {
     while (1) {
         if (set_add(set, ir->pc))
-            dispatch_table[ir->opcode](rv, ir, gencode, ir->pc);
+            dispatch_table[ir->opcode](rv, ir, gencode);
 
         if (ir->tailcall)
             break;

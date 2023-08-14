@@ -179,6 +179,7 @@ enum {
     _(fuse4)           \
     _(fuse5)
 
+/* clang-format off */
 enum {
     rv_insn_fuse0 = N_RISCV_INSN_LIST,
 #define _(inst) rv_insn_##inst,
@@ -186,6 +187,7 @@ enum {
 #undef _
     N_FUSE_INSN_LIST
 };
+/* clang-format on */
 
 /* clang-format off */
 /* instruction decode masks */

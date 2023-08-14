@@ -270,12 +270,13 @@ static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
     MUST_TAIL return next->impl(rv, next);
 }
 
+/* clang-format off */
 static const void *dispatch_table[] = {
-    /* RV32 instructions */
+/* RV32 instructions */
 #define _(inst, can_branch) [rv_insn_##inst] = do_##inst,
     RISCV_INSN_LIST
 #undef _
-    /* Macro operation fusion instructions */
+/* Macro operation fusion instructions */
 #define _(inst) [rv_insn_##inst] = do_##inst,
     FUSE_INSN_LIST
 #undef _
@@ -293,20 +294,18 @@ static inline bool insn_is_branch(uint8_t opcode)
     return false;
 }
 
-static inline bool insn_is_unconditional_branch(uint8_t opcode)
+static inline bool insn_is_conditional_branch(uint8_t opcode)
 {
     switch (opcode) {
-    case rv_insn_ecall:
-    case rv_insn_ebreak:
-    case rv_insn_jal:
-    case rv_insn_jalr:
-    case rv_insn_mret:
+    case rv_insn_beq:
+    case rv_insn_bne:
+    case rv_insn_blt:
+    case rv_insn_bltu:
+    case rv_insn_bge:
+    case rv_insn_bgeu:
 #if RV32_HAS(EXT_C)
-    case rv_insn_cj:
-    case rv_insn_cjalr:
-    case rv_insn_cjal:
-    case rv_insn_cjr:
-    case rv_insn_cebreak:
+    case rv_insn_cbeqz:
+    case rv_insn_cbnez:
 #endif
         return true;
     }
@@ -614,24 +613,19 @@ void rv_step(riscv_t *rv, int32_t cycles)
 #else
                 prev = cache_get(rv->block_cache, last_pc);
 #endif
-            assert(prev);
-            rv_insn_t *last_ir = prev->ir + prev->n_insn - 1;
-            if (clear_flag) {
-                if (branch_taken)
-                    last_ir->branch_taken = NULL;
-                else
-                    last_ir->branch_untaken = NULL;
-
-                clear_flag = false;
-            }
-            /* chain block */
-            if (!insn_is_unconditional_branch(last_ir->opcode)) {
-                if (branch_taken && !last_ir->branch_taken)
-                    last_ir->branch_taken = block->ir;
-                else if (!branch_taken && !last_ir->branch_untaken)
-                    last_ir->branch_untaken = block->ir;
+            if (prev) {
+                rv_insn_t *last_ir = prev->ir + prev->n_insn - 1;
+                /* chain block */
+                if (insn_is_conditional_branch(last_ir->opcode)) {
+                    if (branch_taken && (!last_ir->branch_taken || clear_flag))
+                        last_ir->branch_taken = block->ir;
+                    else if (!branch_taken &&
+                             (!last_ir->branch_untaken || clear_flag))
+                        last_ir->branch_untaken = block->ir;
+                }
             }
         }
+        clear_flag = false;
         last_pc = rv->PC;
 
 #if RV32_HAS(JIT)

@@ -169,6 +169,24 @@ enum {
 };
 /* clang-format on */
 
+/* Macro operation fusion: convert specific RISC-V instruction patterns
+ * into faster and equivalent code
+ */
+#define FUSE_INSN_LIST \
+    _(fuse1)           \
+    _(fuse2)           \
+    _(fuse3)           \
+    _(fuse4)           \
+    _(fuse5)
+
+enum {
+    rv_insn_fuse0 = N_RISCV_INSN_LIST,
+#define _(inst) rv_insn_##inst,
+    FUSE_INSN_LIST
+#undef _
+    N_FUSE_INSN_LIST
+};
+
 /* clang-format off */
 /* instruction decode masks */
 enum {
@@ -279,6 +297,9 @@ typedef struct rv_insn {
      * specific IR array without the need for additional copying.
      */
     struct rv_insn *branch_taken, *branch_untaken;
+#if RV32_HAS(JIT)
+    uint32_t pc;
+#endif
 } rv_insn_t;
 
 /* decode the RISC-V instruction */

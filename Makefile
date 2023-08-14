@@ -80,6 +80,27 @@ gdbstub-test: $(BIN)
 	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif
 
+ENABLE_JIT ?= 0
+$(call set-feature, JIT)
+ifeq ($(call has, JIT), 1)
+CFLAGS += -I./src/mir
+LDFLAGS += src/mir/libmir.a -lpthread
+OBJS_EXT += compile.o
+
+src/jit_template.c:
+	$(Q)tools/gen-jit-template.py $(CFLAGS) > $@
+	
+src/mir/GNUmakefile:
+	git submodule update --init $(dir $@)
+	
+src/mir/libmir.a: src/mir/GNUmakefile
+	$(MAKE) --quiet -C src/mir
+
+$(OUT)/compile.o: src/compile.c src/mir/libmir.a src/jit_template.c
+	$(VECHO) "  CC\t$@\n"
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+endif
+
 # For tail-call elimination, we need a specific set of build flags applied.
 # FIXME: On macOS + Apple Silicon, -fno-stack-protector might have a negative impact.
 $(OUT)/emulate.o: CFLAGS += -fomit-frame-pointer -fno-stack-check -fno-stack-protector
@@ -106,6 +127,9 @@ OBJS := \
 
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)
+ifeq ($(call has, JIT), 1)
+OBJS += src/mir/libmir.a
+endif
 
 $(OUT)/%.o: src/%.c
 	$(VECHO) "  CC\t$@\n"
@@ -161,7 +185,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(deps) $(CACHE_OUT)
+	$(RM) $(BIN) $(OBJS) $(deps) $(CACHE_OUT) src/jit_template.c
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1

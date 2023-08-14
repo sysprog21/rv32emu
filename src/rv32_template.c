@@ -1,14 +1,10 @@
-/* RV32I Base Instruction Set */
+/*
+ * rv32emu is freely redistributable under the MIT License. See the file
+ * "LICENSE" for information on usage and redistribution of this file.
+ */
 
 /* Internal */
-static bool do_nop(riscv_t *rv, const rv_insn_t *ir)
-{
-    rv->X[rv_reg_zero] = 0;
-    rv->csr_cycle++;
-    rv->PC += ir->insn_len;
-    const rv_insn_t *next = ir + 1;
-    MUST_TAIL return next->impl(rv, next);
-}
+RVOP(nop, {/* no operation */})
 
 /* LUI is used to build 32-bit constants and uses the U-type format. LUI
  * places the U-immediate value in the top 20 bits of the destination
@@ -60,24 +56,36 @@ RVOP(jalr, {
 })
 
 /* clang-format off */
-#define BRANCH_FUNC(type, cond)                                  \
-    const uint32_t pc = rv->PC;                                  \
-    if ((type) rv->X[ir->rs1] cond (type) rv->X[ir->rs2]) {      \
-        branch_taken = false;                                    \
-        if (!ir->branch_untaken)                                 \
-            goto nextop;                                         \
-        rv->PC += ir->insn_len;                                  \
-        last_pc = rv->PC;                                        \
-        return ir->branch_untaken->impl(rv, ir->branch_untaken); \
-    }                                                            \
-    branch_taken = true;                                         \
-    rv->PC += ir->imm;                                           \
-    /* check instruction misaligned */                           \
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                 \
-    if (ir->branch_taken) {                                      \
-        last_pc = rv->PC;                                        \
-        return ir->branch_taken->impl(rv, ir->branch_taken);     \
-    }                                                            \
+#define BRANCH_FUNC(type, cond)                                       \
+    const uint32_t pc = rv->PC;                                       \
+    if ((type) rv->X[ir->rs1] cond (type)rv->X[ir->rs2]) {            \
+        branch_taken = false;                                         \
+        if (!ir->branch_untaken)                                      \
+            goto nextop;                                              \
+        IIF(RV32_HAS(JIT))                                            \
+        (                                                             \
+            if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) { \
+                clear_flag = true;                                    \
+                goto nextop;                                          \
+            }, );                                                     \
+        rv->PC += ir->insn_len;                                       \
+        last_pc = rv->PC;                                             \
+        return ir->branch_untaken->impl(rv, ir->branch_untaken);      \
+    }                                                                 \
+    branch_taken = true;                                              \
+    rv->PC += ir->imm;                                                \
+    /* check instruction misaligned */                                \
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                      \
+    if (ir->branch_taken) {                                           \
+        IIF(RV32_HAS(JIT))                                            \
+        (                                                             \
+            if (!cache_get(rv->block_cache, rv->PC)) {                \
+                clear_flag = true;                                    \
+                return true;                                          \
+            }, );                                                     \
+        last_pc = rv->PC;                                             \
+        return ir->branch_taken->impl(rv, ir->branch_taken);          \
+    }                                                                 \
     return true;
 /* clang-format on */
 
@@ -330,16 +338,16 @@ RVOP(mul,
 
 /* MULH: Multiply High Signed Signed */
 RVOP(mulh, {
-    const int64_t a = (int32_t) rv->X[ir->rs1];
-    const int64_t b = (int32_t) rv->X[ir->rs2];
-    rv->X[ir->rd] = ((uint64_t) (a * b)) >> 32;
+    const int64_t multiplicand = (int32_t) rv->X[ir->rs1];
+    const int64_t multiplier = (int32_t) rv->X[ir->rs2];
+    rv->X[ir->rd] = ((uint64_t) (multiplicand * multiplier)) >> 32;
 })
 
 /* MULHSU: Multiply High Signed Unsigned */
 RVOP(mulhsu, {
-    const int64_t a = (int32_t) rv->X[ir->rs1];
-    const uint64_t b = rv->X[ir->rs2];
-    rv->X[ir->rd] = ((uint64_t) (a * b)) >> 32;
+    const int64_t multiplicand = (int32_t) rv->X[ir->rs1];
+    const uint64_t umultiplier = rv->X[ir->rs2];
+    rv->X[ir->rd] = ((uint64_t) (multiplicand * umultiplier)) >> 32;
 })
 
 /* MULHU: Multiply High Unsigned Unsigned */
@@ -373,9 +381,9 @@ RVOP(div, {
  * +------------------------+-----------+----------+----------+
  */
 RVOP(divu, {
-    const uint32_t dividend = rv->X[ir->rs1];
-    const uint32_t divisor = rv->X[ir->rs2];
-    rv->X[ir->rd] = !divisor ? ~0U : dividend / divisor;
+    const uint32_t udividend = rv->X[ir->rs1];
+    const uint32_t udivisor = rv->X[ir->rs2];
+    rv->X[ir->rd] = !udivisor ? ~0U : udividend / udivisor;
 })
 
 /* REM: Remainder Signed */
@@ -403,9 +411,9 @@ RVOP(rem, {
  * +------------------------+-----------+----------+----------+
  */
 RVOP(remu, {
-    const uint32_t dividend = rv->X[ir->rs1];
-    const uint32_t divisor = rv->X[ir->rs2];
-    rv->X[ir->rd] = !divisor ? dividend : dividend % divisor;
+    const uint32_t udividend = rv->X[ir->rs1];
+    const uint32_t udivisor = rv->X[ir->rs2];
+    rv->X[ir->rd] = !udivisor ? udividend : udividend % udivisor;
 })
 #endif
 
@@ -487,37 +495,33 @@ RVOP(amoorw, {
 /* AMOMIN.W: Atomic MIN */
 RVOP(amominw, {
     rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
-    const int32_t a = rv->X[ir->rd];
-    const int32_t b = rv->X[ir->rs2];
-    const int32_t res = a < b ? a : b;
+    const int32_t res =
+        rv->X[ir->rd] < rv->X[ir->rs2] ? rv->X[ir->rd] : rv->X[ir->rs2];
     rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOMAX.W: Atomic MAX */
 RVOP(amomaxw, {
     rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
-    const int32_t a = rv->X[ir->rd];
-    const int32_t b = rv->X[ir->rs2];
-    const int32_t res = a > b ? a : b;
+    const int32_t res =
+        rv->X[ir->rd] > rv->X[ir->rs2] ? rv->X[ir->rd] : rv->X[ir->rs2];
     rv->io.mem_write_s(ir->rs1, res);
 })
 
 /* AMOMINU.W */
 RVOP(amominuw, {
     rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
-    const uint32_t a = rv->X[ir->rd];
-    const uint32_t b = rv->X[ir->rs2];
-    const uint32_t res = a < b ? a : b;
-    rv->io.mem_write_s(ir->rs1, res);
+    const uint32_t ures =
+        rv->X[ir->rd] < rv->X[ir->rs2] ? rv->X[ir->rd] : rv->X[ir->rs2];
+    rv->io.mem_write_s(ir->rs1, ures);
 })
 
 /* AMOMAXU.W */
 RVOP(amomaxuw, {
     rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
-    const uint32_t a = rv->X[ir->rd];
-    const uint32_t b = rv->X[ir->rs2];
-    const uint32_t res = a > b ? a : b;
-    rv->io.mem_write_s(ir->rs1, res);
+    const uint32_t ures =
+        rv->X[ir->rd] > rv->X[ir->rs2] ? rv->X[ir->rd] : rv->X[ir->rs2];
+    rv->io.mem_write_s(ir->rs1, ures);
 })
 #endif /* RV32_HAS(EXT_A) */
 
@@ -590,29 +594,23 @@ RVOP(fsqrts, { rv->F[ir->rd] = sqrtf(rv->F[ir->rs1]); })
 
 /* FSGNJ.S */
 RVOP(fsgnjs, {
-    uint32_t f1 = rv->F_int[ir->rs1];
-    uint32_t f2 = rv->F_int[ir->rs2];
-    uint32_t res;
-    res = (f1 & ~FMASK_SIGN) | (f2 & FMASK_SIGN);
-    rv->F_int[ir->rd] = res;
+    const uint32_t ures = (((uint32_t) rv->F_int[ir->rs1]) & ~FMASK_SIGN) |
+                          (((uint32_t) rv->F_int[ir->rs2]) & FMASK_SIGN);
+    rv->F_int[ir->rd] = ures;
 })
 
 /* FSGNJN.S */
 RVOP(fsgnjns, {
-    uint32_t f1 = rv->F_int[ir->rs1];
-    uint32_t f2 = rv->F_int[ir->rs2];
-    uint32_t res;
-    res = (f1 & ~FMASK_SIGN) | (~f2 & FMASK_SIGN);
-    rv->F_int[ir->rd] = res;
+    const uint32_t ures = (((uint32_t) rv->F_int[ir->rs1]) & ~FMASK_SIGN) |
+                          (~((uint32_t) rv->F_int[ir->rs2]) & FMASK_SIGN);
+    rv->F_int[ir->rd] = ures;
 })
 
 /* FSGNJX.S */
 RVOP(fsgnjxs, {
-    uint32_t f1 = rv->F_int[ir->rs1];
-    uint32_t f2 = rv->F_int[ir->rs2];
-    uint32_t res;
-    res = f1 ^ (f2 & FMASK_SIGN);
-    rv->F_int[ir->rd] = res;
+    const uint32_t ures = ((uint32_t) rv->F_int[ir->rs1]) ^
+                          (((uint32_t) rv->F_int[ir->rs2]) & FMASK_SIGN);
+    rv->F_int[ir->rd] = ures;
 })
 
 /* FMIN.S
@@ -636,10 +634,8 @@ RVOP(fmins, {
             rv->F_int[ir->rd] = RV_NAN;
         }
     } else {
-        uint32_t a_sign;
-        uint32_t b_sign;
-        a_sign = a & FMASK_SIGN;
-        b_sign = b & FMASK_SIGN;
+        uint32_t a_sign = a & FMASK_SIGN;
+        uint32_t b_sign = b & FMASK_SIGN;
         if (a_sign != b_sign) {
             rv->F[ir->rd] = a_sign ? rv->F[ir->rs1] : rv->F[ir->rs2];
         } else {
@@ -664,10 +660,8 @@ RVOP(fmaxs, {
             rv->F_int[ir->rd] = RV_NAN;
         }
     } else {
-        uint32_t a_sign;
-        uint32_t b_sign;
-        a_sign = a & FMASK_SIGN;
-        b_sign = b & FMASK_SIGN;
+        uint32_t a_sign = a & FMASK_SIGN;
+        uint32_t b_sign = b & FMASK_SIGN;
         if (a_sign != b_sign) {
             rv->F[ir->rd] = a_sign ? rv->F[ir->rs2] : rv->F[ir->rs1];
         } else {
@@ -858,13 +852,25 @@ RVOP(cbeqz, {
         branch_taken = false;
         if (!ir->branch_untaken)
             goto nextop;
+#if RV32_HAS(JIT)
+        if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) {
+            clear_flag = true;
+            goto nextop;
+        }
+#endif
         rv->PC += ir->insn_len;
         last_pc = rv->PC;
         return ir->branch_untaken->impl(rv, ir->branch_untaken);
     }
     branch_taken = true;
-    rv->PC += (uint32_t) ir->imm;
+    rv->PC += ir->imm;
     if (ir->branch_taken) {
+#if RV32_HAS(JIT)
+        if (!cache_get(rv->block_cache, rv->PC)) {
+            clear_flag = true;
+            return true;
+        }
+#endif
         last_pc = rv->PC;
         return ir->branch_taken->impl(rv, ir->branch_taken);
     }
@@ -877,13 +883,25 @@ RVOP(cbnez, {
         branch_taken = false;
         if (!ir->branch_untaken)
             goto nextop;
+#if RV32_HAS(JIT)
+        if (!cache_get(rv->block_cache, rv->PC + ir->insn_len)) {
+            clear_flag = true;
+            goto nextop;
+        }
+#endif
         rv->PC += ir->insn_len;
         last_pc = rv->PC;
         return ir->branch_untaken->impl(rv, ir->branch_untaken);
     }
     branch_taken = true;
-    rv->PC += (uint32_t) ir->imm;
+    rv->PC += ir->imm;
     if (ir->branch_taken) {
+#if RV32_HAS(JIT)
+        if (!cache_get(rv->block_cache, rv->PC)) {
+            clear_flag = true;
+            return true;
+        }
+#endif
         last_pc = rv->PC;
         return ir->branch_taken->impl(rv, ir->branch_taken);
     }

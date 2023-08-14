@@ -4,3 +4,6 @@
 [submodule "mini-gdbstub"]
 	path = src/mini-gdbstub
 	url = https://github.com/RinHizakura/mini-gdbstub
+[submodule "src/mir"]
+	path = src/mir
+	url = https://github.com/vnmakarov/mir

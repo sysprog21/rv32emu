@@ -11,16 +11,21 @@
 
 #include "cache.h"
 #include "mpool.h"
+#include "utils.h"
 
 #define MIN(a, b) ((a < b) ? a : b)
-#define GOLDEN_RATIO_32 0x61C88647
 #define HASH(val) \
     (((val) * (GOLDEN_RATIO_32)) >> (32 - (cache_size_bits))) & (cache_size - 1)
 
 /* THRESHOLD is set to identify hot spots. Once the frequency of use for a block
  * exceeds the THRESHOLD, the JIT compiler flow is triggered.
  */
-#define THRESHOLD 1000
+#define THRESHOLD 32768
+
+#if RV32_HAS(JIT)
+#define sys_icache_invalidate(addr, size) \
+    __builtin___clear_cache((char *) (addr), (char *) (addr) + (size));
+#endif
 
 static uint32_t cache_size, cache_size_bits;
 static struct mpool *cache_mp;
@@ -65,6 +70,7 @@ struct hlist_node {
 typedef struct {
     void *value;
     uint32_t key;
+    uint32_t frequency;
     cache_list_t type;
     struct list_head list;
     struct hlist_node ht_list;
@@ -338,7 +344,7 @@ static inline void move_to_mru(cache_t *cache,
 
 void *cache_get(cache_t *cache, uint32_t key)
 {
-    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+    if (hlist_empty(&cache->map->ht_list_head[HASH(key)]))
         return NULL;
 
 #if RV32_HAS(ARC)
@@ -353,8 +359,10 @@ void *cache_get(cache_t *cache, uint32_t key)
         if (entry->key == key)
             break;
     }
-    if (!entry || entry->key != key)
+    if (!entry)
         return NULL;
+    if (entry->frequency < THRESHOLD)
+        entry->frequency++;
     /* cache hit in LRU_list */
     if (entry->type == LRU_list && cache->lru_capacity != cache->capacity)
         move_to_mru(cache, entry, LFU_list);
@@ -469,6 +477,7 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
     arc_entry_t *new_entry = mpool_alloc(cache_mp);
     new_entry->key = key;
     new_entry->value = value;
+    new_entry->frequency = 0;
     /* check if all cache become LFU */
     if (cache->lru_capacity != 0) {
         new_entry->type = LRU_list;
@@ -522,6 +531,8 @@ void cache_free(cache_t *cache, void (*callback)(void *))
         list_for_each_entry_safe (entry, safe, cache->lists[i], list,
                                   arc_entry_t)
 #endif
+            callback(entry->value);
+    }
 #else /* !RV32_HAS(ARC) */
     for (int i = 0; i < THRESHOLD; i++) {
         if (list_empty(cache->lists[i]))
@@ -532,12 +543,47 @@ void cache_free(cache_t *cache, void (*callback)(void *))
 #else
         list_for_each_entry_safe (entry, safe, cache->lists[i], list,
                                   lfu_entry_t)
-#endif
+
 #endif
             callback(entry->value);
     }
+#endif
     mpool_destory(cache_mp);
     free(cache->map->ht_list_head);
     free(cache->map);
     free(cache);
 }
+
+#if RV32_HAS(JIT)
+bool cache_hot(struct cache *cache, uint32_t key)
+{
+    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+        return false;
+#if RV32_HAS(ARC)
+    arc_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          arc_entry_t)
+#endif
+    {
+        if (entry->key == key && entry->frequency == THRESHOLD)
+            return true;
+    }
+#else
+    lfu_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
+                          lfu_entry_t)
+#endif
+    {
+        if (entry->key == key && entry->frequency == THRESHOLD)
+            return true;
+    }
+#endif
+    return false;
+}
+#endif

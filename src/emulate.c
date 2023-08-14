@@ -12,17 +12,6 @@
 #if RV32_HAS(EXT_F)
 #include <math.h>
 #include "softfloat.h"
-
-#if defined(__APPLE__)
-static inline int isinff(float x)
-{
-    return __builtin_fabsf(x) == __builtin_inff();
-}
-static inline int isnanf(float x)
-{
-    return x != x;
-}
-#endif
 #endif /* RV32_HAS(EXT_F) */
 
 #if RV32_HAS(GDBSTUB)
@@ -34,6 +23,10 @@ extern struct target_ops gdbstub_ops;
 #include "riscv_private.h"
 #include "state.h"
 #include "utils.h"
+#if RV32_HAS(JIT)
+#include "cache.h"
+#include "compile.h"
+#endif
 
 /* RISC-V exception code list */
 #define RV_EXCEPTION_LIST                                       \
@@ -108,138 +101,6 @@ RV_EXCEPTION_LIST
         return false;                                                 \
     }
 
-/* get current time in microsecnds and update csr_time register */
-static inline void update_time(riscv_t *rv)
-{
-    struct timeval tv;
-    rv_gettimeofday(&tv);
-
-    uint64_t t = (uint64_t) tv.tv_sec * 1e6 + (uint32_t) tv.tv_usec;
-    rv->csr_time[0] = t & 0xFFFFFFFF;
-    rv->csr_time[1] = t >> 32;
-}
-
-#if RV32_HAS(Zicsr)
-/* get a pointer to a CSR */
-static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
-{
-    /* csr & 0xFFF prevent sign-extension in decode stage */
-    switch (csr & 0xFFF) {
-    case CSR_MSTATUS: /* Machine Status */
-        return (uint32_t *) (&rv->csr_mstatus);
-    case CSR_MTVEC: /* Machine Trap Handler */
-        return (uint32_t *) (&rv->csr_mtvec);
-    case CSR_MISA: /* Machine ISA and Extensions */
-        return (uint32_t *) (&rv->csr_misa);
-
-    /* Machine Trap Handling */
-    case CSR_MSCRATCH: /* Machine Scratch Register */
-        return (uint32_t *) (&rv->csr_mscratch);
-    case CSR_MEPC: /* Machine Exception Program Counter */
-        return (uint32_t *) (&rv->csr_mepc);
-    case CSR_MCAUSE: /* Machine Exception Cause */
-        return (uint32_t *) (&rv->csr_mcause);
-    case CSR_MTVAL: /* Machine Trap Value */
-        return (uint32_t *) (&rv->csr_mtval);
-    case CSR_MIP: /* Machine Interrupt Pending */
-        return (uint32_t *) (&rv->csr_mip);
-
-    /* Machine Counter/Timers */
-    case CSR_CYCLE: /* Cycle counter for RDCYCLE instruction */
-        return (uint32_t *) &rv->csr_cycle;
-    case CSR_CYCLEH: /* Upper 32 bits of cycle */
-        return &((uint32_t *) &rv->csr_cycle)[1];
-
-    /* TIME/TIMEH - very roughly about 1 ms per tick */
-    case CSR_TIME: { /* Timer for RDTIME instruction */
-        update_time(rv);
-        return &rv->csr_time[0];
-    }
-    case CSR_TIMEH: { /* Upper 32 bits of time */
-        update_time(rv);
-        return &rv->csr_time[1];
-    }
-    case CSR_INSTRET: /* Number of Instructions Retired Counter */
-        return (uint32_t *) (&rv->csr_cycle);
-#if RV32_HAS(EXT_F)
-    case CSR_FFLAGS:
-        return (uint32_t *) (&rv->csr_fcsr);
-    case CSR_FCSR:
-        return (uint32_t *) (&rv->csr_fcsr);
-#endif
-    default:
-        return NULL;
-    }
-}
-
-static inline bool csr_is_writable(uint32_t csr)
-{
-    return csr < 0xc00;
-}
-
-/* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
- * CSRs and integer registers. CSRRW reads the old value of the CSR,
- * zero-extends the value to XLEN bits, and then writes it to register rd.
- * The initial value in rs1 is written to the CSR.
- * If rd == x0, then the instruction shall not read the CSR and shall not cause
- * any of the side effects that might occur on a CSR read.
- */
-static uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
-{
-    uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
-    if (csr_is_writable(csr))
-        *c = val;
-
-    return out;
-}
-
-/* perform csrrs (atomic read and set) */
-static uint32_t csr_csrrs(riscv_t *rv, uint32_t csr, uint32_t val)
-{
-    uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
-    if (csr_is_writable(csr))
-        *c |= val;
-
-    return out;
-}
-
-/* perform csrrc (atomic read and clear)
- * Read old value of CSR, zero-extend to XLEN bits, write to rd.
- * Read value from rs1, use as bit mask to clear bits in CSR.
- */
-static uint32_t csr_csrrc(riscv_t *rv, uint32_t csr, uint32_t val)
-{
-    uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
-    if (csr_is_writable(csr))
-        *c &= ~val;
-    return out;
-}
-#endif
-
 #if RV32_HAS(GDBSTUB)
 void rv_debug(riscv_t *rv)
 {
@@ -295,6 +156,10 @@ static bool branch_taken = false;
 /* record the program counter of the previous block */
 static uint32_t last_pc = 0;
 
+/* record whether the block is replaced by cache. If so, clear the EBB
+ * information */
+static bool clear_flag = false;
+
 /* Interpreter-based execution path */
 #define RVOP(inst, code)                                    \
     static bool do_##inst(riscv_t *rv, const rv_insn_t *ir) \
@@ -314,25 +179,6 @@ static uint32_t last_pc = 0;
 #undef RVOP
 
 /* FIXME: Add JIT-based execution path */
-
-/* Macro operation fusion */
-
-/* macro operation fusion: convert specific RISC-V instruction patterns
- * into faster and equivalent code
- */
-#define FUSE_INSN_LIST \
-    _(fuse1)           \
-    _(fuse2)           \
-    _(fuse3)           \
-    _(fuse4)           \
-    _(fuse5)
-
-enum {
-    rv_insn_fuse0 = N_RISCV_INSN_LIST,
-#define _(inst) rv_insn_##inst,
-    FUSE_INSN_LIST
-#undef _
-};
 
 /* AUIPC + ADDI */
 static bool do_fuse1(riscv_t *rv, const rv_insn_t *ir)
@@ -424,7 +270,6 @@ static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
     MUST_TAIL return next->impl(rv, next);
 }
 
-/* clang-format off */
 static const void *dispatch_table[] = {
     /* RV32 instructions */
 #define _(inst, can_branch) [rv_insn_##inst] = do_##inst,
@@ -468,6 +313,8 @@ static inline bool insn_is_unconditional_branch(uint8_t opcode)
     return false;
 }
 
+/* TODO: unify the hash function of cache and map */
+#if !RV32_HAS(JIT)
 /* hash function is used when mapping address into the block map */
 static inline uint32_t hash(size_t k)
 {
@@ -479,6 +326,7 @@ static inline uint32_t hash(size_t k)
 #endif
     return k;
 }
+#endif
 
 /* allocate a basic block */
 static block_t *block_alloc(const uint8_t bits)
@@ -488,9 +336,13 @@ static block_t *block_alloc(const uint8_t bits)
     block->n_insn = 0;
     block->predict = NULL;
     block->ir = malloc(block->insn_capacity * sizeof(rv_insn_t));
+#if RV32_HAS(JIT)
+    block->hot = false;
+#endif
     return block;
 }
 
+#if !RV32_HAS(JIT)
 /* insert a block into block map */
 static void block_insert(block_map_t *map, const block_t *block)
 {
@@ -526,6 +378,7 @@ static block_t *block_find(const block_map_t *map, const uint32_t addr)
     }
     return NULL;
 }
+#endif
 
 static void block_translate(riscv_t *rv, block_t *block)
 {
@@ -546,6 +399,9 @@ static void block_translate(riscv_t *rv, block_t *block)
             break;
         }
         ir->impl = dispatch_table[ir->opcode];
+#if RV32_HAS(JIT)
+        ir->pc = block->pc_end;
+#endif
         /* compute the end of pc */
         block->pc_end += ir->insn_len;
         block->n_insn++;
@@ -668,16 +524,23 @@ static void match_pattern(block_t *block)
 static block_t *prev = NULL;
 static block_t *block_find_or_translate(riscv_t *rv)
 {
+#if !RV32_HAS(JIT)
     block_map_t *map = &rv->block_map;
+
     /* lookup the next block in the block map */
     block_t *next = block_find(map, rv->PC);
+#else
+    /* lookup the next block in the block cache */
+    block_t *next = (block_t *) cache_get(rv->block_cache, rv->PC);
+#endif
 
     if (!next) {
+#if !RV32_HAS(JIT)
         if (map->size * 1.25 > map->block_capacity) {
             block_map_clear(map);
             prev = NULL;
         }
-
+#endif
         /* allocate a new block */
         next = block_alloc(10);
 
@@ -689,9 +552,17 @@ static block_t *block_find_or_translate(riscv_t *rv)
             /* macro operation fusion */
             match_pattern(next);
 
+#if !RV32_HAS(JIT)
         /* insert the block into block map */
         block_insert(&rv->block_map, next);
-
+#else
+        /* insert the block into block cache */
+        block_t *delete_target = cache_put(rv->block_cache, rv->PC, &(*next));
+        if (delete_target) {
+            free(delete_target->ir);
+            free(delete_target);
+        }
+#endif
         /* update the block prediction.
          * When translating a new block, the block predictor may benefit,
          * but updating it after finding a particular block may penalize
@@ -703,6 +574,10 @@ static block_t *block_find_or_translate(riscv_t *rv)
 
     return next;
 }
+
+#if RV32_HAS(JIT)
+typedef bool (*exec_block_func_t)(riscv_t *rv, rv_insn_t *ir);
+#endif
 
 void rv_step(riscv_t *rv, int32_t cycles)
 {
@@ -726,7 +601,6 @@ void rv_step(riscv_t *rv, int32_t cycles)
 
         /* by now, a block should be available */
         assert(block);
-
         /* After emulating the previous block, it is determined whether the
          * branch is taken or not. The IR array of the current block is then
          * assigned to either the branch_taken or branch_untaken pointer of
@@ -735,24 +609,58 @@ void rv_step(riscv_t *rv, int32_t cycles)
         if (prev) {
             /* update previous block */
             if (prev->pc_start != last_pc)
+#if !RV32_HAS(JIT)
                 prev = block_find(&rv->block_map, last_pc);
-
+#else
+                prev = cache_get(rv->block_cache, last_pc);
+#endif
+            assert(prev);
             rv_insn_t *last_ir = prev->ir + prev->n_insn - 1;
+            if (clear_flag) {
+                if (branch_taken)
+                    last_ir->branch_taken = NULL;
+                else
+                    last_ir->branch_untaken = NULL;
+
+                clear_flag = false;
+            }
             /* chain block */
             if (!insn_is_unconditional_branch(last_ir->opcode)) {
                 if (branch_taken && !last_ir->branch_taken)
                     last_ir->branch_taken = block->ir;
-                else if (!last_ir->branch_untaken)
+                else if (!branch_taken && !last_ir->branch_untaken)
                     last_ir->branch_untaken = block->ir;
             }
         }
         last_pc = rv->PC;
 
-        /* execute the block */
+#if RV32_HAS(JIT)
+        /* execute the block by JIT compiler */
+        exec_block_func_t code = NULL;
+        if (block->hot)
+            code = (exec_block_func_t) cache_get(rv->code_cache, rv->PC);
+        if (!code) {
+            /* check if using frequency of block exceed threshold */
+            if ((block->hot = cache_hot(rv->block_cache, block->pc_start))) {
+                code = (exec_block_func_t) block_compile(rv);
+                cache_put(rv->code_cache, rv->PC, code);
+            }
+        }
+        if (code) {
+            /* execute machine code */
+            code(rv, block->ir);
+            /* block should not be extended if execution mode is jit */
+            prev = NULL;
+            continue;
+        }
+#endif
+        /* execute the block by interpreter */
         const rv_insn_t *ir = block->ir;
-        if (unlikely(!ir->impl(rv, ir)))
+        if (unlikely(!ir->impl(rv, ir))) {
+            /* block should not be extended if execption handler invoked */
+            prev = NULL;
             break;
-
+        }
         prev = block;
     }
 }

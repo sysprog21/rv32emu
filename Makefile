@@ -115,6 +115,9 @@ $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
+# Tools
+include mk/tools.mk
+
 # RISC-V Architecture Tests
 include mk/riscv-arch-test.mk
 include mk/tests.mk
@@ -161,7 +164,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(deps) $(CACHE_OUT)
+	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT)
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1

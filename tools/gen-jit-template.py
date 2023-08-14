@@ -113,6 +113,8 @@ SKIPLIST = [
     "sb",
     "sh",
     "sw",
+    "flw",
+    "fsw",
     "clw",
     "csw",
     "cjal",
@@ -137,6 +139,7 @@ def parse_argv(EXT_LIST, SKIPLIST):
 
 
 def remove_comment(str):
+    str = re.sub(r'//[\s|\S]+?\n', "", str)
     return re.sub(r'/\*[\s|\S]+?\*/\n', "", str)
 
 
@@ -152,6 +155,13 @@ lines = remove_comment(lines)
 output = output + "\"" + \
     re.sub("\n", "\"\\\n\"", re.findall(
         r'enum[\S|\s]+?riscv_io_t;', lines)[0]) + "\"\\\n"
+if sys.argv.count("RV32_FEATURE_EXT_F=1"):
+    f = open('src/softfloat.h', 'r')
+    lines = f.read()
+    lines = remove_comment(lines)
+    output = output + "\"" + \
+        re.sub("\n", "\"\\\n\"", re.findall(
+            r'enum[\S|\s]+?};', lines)[0]) + "\"\\\n"
 f = open('src/riscv_private.h', 'r')
 lines = f.read()
 lines = remove_comment(lines)
@@ -183,7 +193,7 @@ lines = re.sub('#endif\n', "", lines)
 output = output + "\"" + \
     re.sub("\n", "\"\\\n\"", re.findall(
         r'typedef[\S|\s]+?rv_insn_t;', lines)[0]) + "\"\\\n"
-output += "\"bool start(volatile riscv_t *rv, rv_insn_t *ir) {\"\\\n"
+output += "\"bool start(riscv_t *rv) {\"\\\n"
 output += "\" uint32_t pc, addr, udividend, udivisor, tmp, data, mask, ures, \"\\\n"
 output += "\"a, b, jump_to;\"\\\n"
 output += "\"  int32_t dividend, divisor, res;\"\\\n"

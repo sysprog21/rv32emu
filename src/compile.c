@@ -125,7 +125,6 @@ static char funcbuf[128] = {0};
         code;                                                       \
         if (!insn_is_branch(ir->opcode)) {                          \
             GEN("  rv->PC += %d;\n", ir->insn_len);                 \
-            GEN("  ir = ir + 1;\n");                                \
             NEXT_INSN(pc + ir->insn_len);                           \
         }                                                           \
     }
@@ -143,7 +142,6 @@ RVOP(jal, {
     if (ir->rd) {
         GEN("  rv->X[%u] = pc + %u;\n", ir->rd, ir->insn_len);
     }
-    GEN("  ir = ir->branch_taken;\n");
     NEXT_INSN(pc + ir->imm);
 })
 
@@ -152,7 +150,6 @@ RVOP(jal, {
         #type, ir->rs2);                                                      \
     UPDATE_PC(ir->imm);                                                       \
     if (ir->branch_taken) {                                                   \
-        GEN("    ir = ir->branch_taken;\n");                                  \
         NEXT_INSN(pc + ir->imm);                                              \
     } else {                                                                  \
         GEN("    return true;\n");                                            \
@@ -160,7 +157,6 @@ RVOP(jal, {
     GEN("  }\n");                                                             \
     UPDATE_PC(ir->insn_len);                                                  \
     if (ir->branch_untaken) {                                                 \
-        GEN("  ir = ir->branch_untaken;\n");                                  \
         NEXT_INSN(pc + ir->insn_len);                                         \
     } else {                                                                  \
         GEN("  return true;\n");                                              \
@@ -180,24 +176,24 @@ RVOP(bgeu, { BRNACH_FUNC(uint32_t, >=); })
 
 RVOP(lb, {
     GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
-    GEN("  rv->X[%u] = sign_extend_b(* (const uint8_t *) (m->mem_base + "
-        "addr));\n",
+    GEN("  rv->X[%u] = sign_extend_b(*((const uint8_t *) (m->mem_base + "
+        "addr)));\n",
         ir->rd);
 })
 
 RVOP(lh, {
     GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
-    GEN("  rv->X[%u] = sign_extend_h(* (const uint16_t *) (m->mem_base + "
-        "addr));\n",
+    GEN("  rv->X[%u] = sign_extend_h(*((const uint16_t *) (m->mem_base + "
+        "addr)));\n",
         ir->rd);
 })
 
-#define MEMORY_FUNC(type, IO)                                                \
-    GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);                     \
-    IIF(IO)                                                                  \
-    (GEN("  rv->X[%u] = * (const %s *) (m->mem_base + addr);\n", ir->rd,     \
-         #type),                                                             \
-     GEN("  *(%s *) (m->mem_base + addr) = (%s) rv->X[%u];\n", #type, #type, \
+#define MEMORY_FUNC(type, IO)                                                  \
+    GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);                       \
+    IIF(IO)                                                                    \
+    (GEN("  rv->X[%u] = *((const %s *) (m->mem_base + addr));\n", ir->rd,      \
+         #type),                                                               \
+     GEN("  *((%s *) (m->mem_base + addr)) = (%s) rv->X[%u];\n", #type, #type, \
          ir->rs2));
 
 RVOP(lw, {MEMORY_FUNC(uint32_t, 1)})
@@ -212,27 +208,39 @@ RVOP(sh, {MEMORY_FUNC(uint16_t, 0)})
 
 RVOP(sw, {MEMORY_FUNC(uint32_t, 0)})
 
+#if RV32_HAS(EXT_F)
+RVOP(flw, {
+    GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
+    GEN("  rv->F_int[%u] = *((const uint32_t *) (m->mem_base + addr));\n",
+        ir->rd);
+})
+
+/* FSW */
+RVOP(fsw, {
+    GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
+    GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->F_int[%u];\n", ir->rs2);
+})
+#endif
+
 #if RV32_HAS(EXT_C)
 RVOP(clw, {
     GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
-    GEN("  rv->X[%u] = * (const uint32_t *) (m->mem_base + addr);\n", ir->rd);
+    GEN("  rv->X[%u] = *((const uint32_t *) (m->mem_base + addr));\n", ir->rd);
 })
 
 RVOP(csw, {
     GEN("  addr = rv->X[%u] + %u;\n", ir->rs1, ir->imm);
-    GEN("  *(uint32_t *) (m->mem_base + addr) = rv->X[%u];\n", ir->rs2);
+    GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->X[%u];\n", ir->rs2);
 })
 
 RVOP(cjal, {
     GEN("  rv->X[1] = rv->PC + %u;\n", ir->insn_len);
     UPDATE_PC(ir->imm);
-    GEN("  ir = ir->branch_taken;\n");
     NEXT_INSN(pc + ir->imm);
 })
 
 RVOP(cj, {
     UPDATE_PC(ir->imm);
-    GEN("  ir = ir->branch_taken;\n");
     NEXT_INSN(pc + ir->imm);
 })
 
@@ -240,7 +248,6 @@ RVOP(cbeqz, {
     GEN("  if (!rv->X[%u]){\n", ir->rs1);
     UPDATE_PC(ir->imm);
     if (ir->branch_taken) {
-        GEN("    ir = ir->branch_taken;\n");
         NEXT_INSN(pc + ir->imm);
     } else {
         GEN("    return true;\n");
@@ -248,7 +255,6 @@ RVOP(cbeqz, {
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
-        GEN("  ir = ir->branch_untaken;\n");
         NEXT_INSN(pc + ir->insn_len);
     } else {
         GEN("  return true;\n");
@@ -259,7 +265,6 @@ RVOP(cbnez, {
     GEN("  if (rv->X[%u]){\n", ir->rs1);
     UPDATE_PC(ir->imm);
     if (ir->branch_taken) {
-        GEN("    ir = ir->branch_taken;\n");
         NEXT_INSN(pc + ir->imm);
     } else {
         GEN("    return true;\n");
@@ -267,7 +272,6 @@ RVOP(cbnez, {
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
-        GEN("  ir = ir->branch_untaken;\n");
         NEXT_INSN(pc + ir->insn_len);
     } else {
         GEN("  return true;\n");
@@ -276,12 +280,12 @@ RVOP(cbnez, {
 
 RVOP(clwsp, {
     GEN("addr = rv->X[rv_reg_sp] + %u;\n", ir->imm);
-    GEN("  rv->X[%u] = * (const uint32_t *) (m->mem_base + addr);\n", ir->rd);
+    GEN("  rv->X[%u] = *((const uint32_t *) (m->mem_base + addr));\n", ir->rd);
 })
 
 RVOP(cswsp, {
     GEN("addr = rv->X[rv_reg_sp] + %u;\n", ir->imm);
-    GEN("  *(uint32_t *) (m->mem_base + addr) = rv->X[%u];\n", ir->rs2);
+    GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->X[%u];\n", ir->rs2);
 })
 #endif
 
@@ -330,7 +334,8 @@ static void gen_fuse3(riscv_t *rv UNUSED,
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         GEN("  addr = rv->X[%u] + %u;\n", fuse[i].rs1, fuse[i].imm);
-        GEN("  *(uint32_t *) (m->mem_base + addr) = rv->X[%u];\n", fuse[i].rs2)
+        GEN("  *((uint32_t *) (m->mem_base + addr)) = rv->X[%u];\n",
+            fuse[i].rs2)
     }
     GEN("  rv->PC += ir->imm2 * ir->insn_len;\n");
     GEN("  ir = ir + ir->imm2;\n");
@@ -349,7 +354,7 @@ static void gen_fuse4(riscv_t *rv UNUSED,
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         GEN("  addr = rv->X[%u] + %u;\n", fuse[i].rs1, fuse[i].imm);
-        GEN("  rv->X[%u] = * (const uint32_t *) (m->mem_base + addr);\n",
+        GEN("  rv->X[%u] = *((const uint32_t *) (m->mem_base + addr));\n",
             fuse[i].rd);
     }
     GEN("  rv->PC += ir->imm2 * ir->insn_len;\n");

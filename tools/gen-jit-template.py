@@ -189,6 +189,7 @@ lines = re.sub("uint32_t a_sign", "a_sign", lines)
 lines = re.sub("uint32_t b_sign", "b_sign", lines)
 lines = re.sub("uint32_t data", "data", lines)
 lines = re.sub("uint32_t bits", "bits", lines)
+lines = re.sub("%", "%%", lines)
 str2 = re.findall(r'RVOP\([\s|\S]+?}\)', lines)
 op = []
 impl = []

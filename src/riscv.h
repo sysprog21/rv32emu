@@ -11,6 +11,40 @@
 extern "C" {
 #endif
 
+#define RV_REGS_LIST                                   \
+    _(zero) /* hard-wired zero, ignoring any writes */ \
+    _(ra)   /* return address */                       \
+    _(sp)   /* stack pointer */                        \
+    _(gp)   /* global pointer */                       \
+    _(tp)   /* thread pointer */                       \
+    _(t0)   /* temporary/alternate link register */    \
+    _(t1)   /* temporaries */                          \
+    _(t2)                                              \
+    _(s0) /* saved register/frame pointer */           \
+    _(s1)                                              \
+    _(a0) /* function arguments / return values */     \
+    _(a1)                                              \
+    _(a2) /* function arguments */                     \
+    _(a3)                                              \
+    _(a4)                                              \
+    _(a5)                                              \
+    _(a6)                                              \
+    _(a7)                                              \
+    _(s2) /* saved register */                         \
+    _(s3)                                              \
+    _(s4)                                              \
+    _(s5)                                              \
+    _(s6)                                              \
+    _(s7)                                              \
+    _(s8)                                              \
+    _(s9)                                              \
+    _(s10)                                             \
+    _(s11)                                             \
+    _(t3) /* temporary register */                     \
+    _(t4)                                              \
+    _(t5)                                              \
+    _(t6)
+
 /* RISC-V registers (mnemonics, ABI names)
  *
  * There are 32 registers in RISC-V. The program counter is a further register
@@ -25,39 +59,10 @@ extern "C" {
  * the stack pointer.
  */
 enum {
-    rv_reg_zero = 0, /* hard-wired zero, ignoring any writes */
-    rv_reg_ra,       /* return address */
-    rv_reg_sp,       /* stack pointer */
-    rv_reg_gp,       /* global pointer */
-    rv_reg_tp,       /* thread pointer */
-    rv_reg_t0,       /* temporary/alternate link register */
-    rv_reg_t1,       /* temporaries */
-    rv_reg_t2,
-    rv_reg_s0, /* saved register/frame pointer */
-    rv_reg_s1,
-    rv_reg_a0, /* function arguments / return values */
-    rv_reg_a1,
-    rv_reg_a2, /* function arguments */
-    rv_reg_a3,
-    rv_reg_a4,
-    rv_reg_a5,
-    rv_reg_a6,
-    rv_reg_a7,
-    rv_reg_s2, /* saved register */
-    rv_reg_s3,
-    rv_reg_s4,
-    rv_reg_s5,
-    rv_reg_s6,
-    rv_reg_s7,
-    rv_reg_s8,
-    rv_reg_s9,
-    rv_reg_s10,
-    rv_reg_s11,
-    rv_reg_t3, /* temporary register */
-    rv_reg_t4,
-    rv_reg_t5,
-    rv_reg_t6,
-    RV_N_REGS, /* NOTE: shoule be the last */
+#define _(reg) rv_reg_##reg,
+    RV_REGS_LIST
+#undef _
+        N_RV_REGS
 };
 
 /* forward declaration for internal structure */

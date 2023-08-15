@@ -278,7 +278,7 @@ static inline bool insn_is_misaligned(uint32_t pc)
 
 /* can-branch information for each RISC-V instruction */
 enum {
-#define _(inst, can_branch) __rv_insn_##inst##_canbranch = can_branch,
+#define _(inst, can_branch, reg_mask) __rv_insn_##inst##_canbranch = can_branch,
     RISCV_INSN_LIST
 #undef _
 };
@@ -427,7 +427,7 @@ static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
 /* clang-format off */
 static const void *dispatch_table[] = {
     /* RV32 instructions */
-#define _(inst, can_branch) [rv_insn_##inst] = do_##inst,
+#define _(inst, can_branch, reg_mask) [rv_insn_##inst] = do_##inst,
     RISCV_INSN_LIST
 #undef _
     /* Macro operation fusion instructions */
@@ -440,7 +440,7 @@ static const void *dispatch_table[] = {
 static inline bool insn_is_branch(uint8_t opcode)
 {
     switch (opcode) {
-#define _(inst, can_branch) IIF(can_branch)(case rv_insn_##inst:, )
+#define _(inst, can_branch, reg_mask) IIF(can_branch)(case rv_insn_##inst:, )
         RISCV_INSN_LIST
 #undef _
         return true;
@@ -785,8 +785,8 @@ void dump_registers(riscv_t *rv, char *out_file_path)
     }
 
     fprintf(f, "{\n");
-    for (unsigned i = 0; i < RV_N_REGS; i++) {
-        char *comma = i < RV_N_REGS - 1 ? "," : "";
+    for (unsigned i = 0; i < N_RV_REGS; i++) {
+        char *comma = i < N_RV_REGS - 1 ? "," : "";
         fprintf(f, "  \"x%d\": %u%s\n", i, rv->X[i], comma);
     }
     fprintf(f, "}\n");

@@ -10,159 +10,178 @@
 
 #include "riscv.h"
 
-/* RISC-V instruction list in format _(instruction-name, can-branch) */
+enum op_field {
+    F_none = 0,
+    F_rs1 = 1,
+    F_rs2 = 2,
+    F_rs3 = 4,
+    F_rd = 8,
+};
+
+#define ENC4(a, b, c, d, ...) F_##a | F_##b | F_##c | F_##d
+#define ENC3(a, b, c, ...) F_##a | F_##b | F_##c
+#define ENC2(a, b, ...) F_##a | F_##b
+#define ENC1(a, ...) F_##a
+#define ENC0(...) F_none
+
+#define ENCN(X, A) X##A
+#define ENC_GEN(X, A) ENCN(X, A)
+#define ENC(...) ENC_GEN(ENC, COUNT_VARARGS(__VA_ARGS__))(__VA_ARGS__)
+
+/* RISC-V instruction list in format _(instruction-name, can-branch, reg-mask)
+ */
 /* clang-format off */
-#define RISCV_INSN_LIST                    \
-    _(nop, 0)                              \
-    /* RV32I Base Instruction Set */       \
-    _(lui, 0)                              \
-    _(auipc, 0)                            \
-    _(jal, 1)                              \
-    _(jalr, 1)                             \
-    _(beq, 1)                              \
-    _(bne, 1)                              \
-    _(blt, 1)                              \
-    _(bge, 1)                              \
-    _(bltu, 1)                             \
-    _(bgeu, 1)                             \
-    _(lb, 0)                               \
-    _(lh, 0)                               \
-    _(lw, 0)                               \
-    _(lbu, 0)                              \
-    _(lhu, 0)                              \
-    _(sb, 0)                               \
-    _(sh, 0)                               \
-    _(sw, 0)                               \
-    _(addi, 0)                             \
-    _(slti, 0)                             \
-    _(sltiu, 0)                            \
-    _(xori, 0)                             \
-    _(ori, 0)                              \
-    _(andi, 0)                             \
-    _(slli, 0)                             \
-    _(srli, 0)                             \
-    _(srai, 0)                             \
-    _(add, 0)                              \
-    _(sub, 0)                              \
-    _(sll, 0)                              \
-    _(slt, 0)                              \
-    _(sltu, 0)                             \
-    _(xor, 0)                              \
-    _(srl, 0)                              \
-    _(sra, 0)                              \
-    _(or, 0)                               \
-    _(and, 0)                              \
-    _(ecall, 1)                            \
-    _(ebreak, 1)                           \
-    /* RISC-V Privileged Instruction */    \
-    _(wfi, 0)                              \
-    _(uret, 0)                             \
-    _(sret, 0)                             \
-    _(hret, 0)                             \
-    _(mret, 1)                             \
-    /* RV32 Zifencei Standard Extension */ \
-    IIF(RV32_HAS(Zifencei))(               \
-        _(fencei, 1)                       \
-    )                                      \
-    /* RV32 Zicsr Standard Extension */    \
-    IIF(RV32_HAS(Zicsr))(                  \
-        _(csrrw, 0)                        \
-        _(csrrs, 0)                        \
-        _(csrrc, 0)                        \
-        _(csrrwi, 0)                       \
-        _(csrrsi, 0)                       \
-        _(csrrci, 0)                       \
-    )                                      \
-    /* RV32M Standard Extension */         \
-    IIF(RV32_HAS(EXT_M))(                  \
-        _(mul, 0)                          \
-        _(mulh, 0)                         \
-        _(mulhsu, 0)                       \
-        _(mulhu, 0)                        \
-        _(div, 0)                          \
-        _(divu, 0)                         \
-        _(rem, 0)                          \
-        _(remu, 0)                         \
-    )                                      \
-    /* RV32A Standard Extension */         \
-    IIF(RV32_HAS(EXT_A))(                  \
-        _(lrw, 0)                          \
-        _(scw, 0)                          \
-        _(amoswapw, 0)                     \
-        _(amoaddw, 0)                      \
-        _(amoxorw, 0)                      \
-        _(amoandw, 0)                      \
-        _(amoorw, 0)                       \
-        _(amominw, 0)                      \
-        _(amomaxw, 0)                      \
-        _(amominuw, 0)                     \
-        _(amomaxuw, 0)                     \
-    )                                      \
-    /* RV32F Standard Extension */         \
-    IIF(RV32_HAS(EXT_F))(                  \
-        _(flw, 0)                          \
-        _(fsw, 0)                          \
-        _(fmadds, 0)                       \
-        _(fmsubs, 0)                       \
-        _(fnmsubs, 0)                      \
-        _(fnmadds, 0)                      \
-        _(fadds, 0)                        \
-        _(fsubs, 0)                        \
-        _(fmuls, 0)                        \
-        _(fdivs, 0)                        \
-        _(fsqrts, 0)                       \
-        _(fsgnjs, 0)                       \
-        _(fsgnjns, 0)                      \
-        _(fsgnjxs, 0)                      \
-        _(fmins, 0)                        \
-        _(fmaxs, 0)                        \
-        _(fcvtws, 0)                       \
-        _(fcvtwus, 0)                      \
-        _(fmvxw, 0)                        \
-        _(feqs, 0)                         \
-        _(flts, 0)                         \
-        _(fles, 0)                         \
-        _(fclasss, 0)                      \
-        _(fcvtsw, 0)                       \
-        _(fcvtswu, 0)                      \
-        _(fmvwx, 0)                        \
-    )                                      \
-    /* RV32C Standard Extension */         \
-    IIF(RV32_HAS(EXT_C))(                  \
-        _(caddi4spn, 0)                    \
-        _(clw, 0)                          \
-        _(csw, 0)                          \
-        _(cnop, 0)                         \
-        _(caddi, 0)                        \
-        _(cjal, 1)                         \
-        _(cli, 0)                          \
-        _(caddi16sp, 0)                    \
-        _(clui, 0)                         \
-        _(csrli, 0)                        \
-        _(csrai, 0)                        \
-        _(candi, 0)                        \
-        _(csub, 0)                         \
-        _(cxor, 0)                         \
-        _(cor, 0)                          \
-        _(cand, 0)                         \
-        _(cj, 1)                           \
-        _(cbeqz, 1)                        \
-        _(cbnez, 1)                        \
-        _(cslli, 0)                        \
-        _(clwsp, 0)                        \
-        _(cjr, 1)                          \
-        _(cmv, 0)                          \
-        _(cebreak, 1)                      \
-        _(cjalr, 1)                        \
-        _(cadd, 0)                         \
-        _(cswsp, 0)                        \
-    )                                      \
+#define RISCV_INSN_LIST                          \
+    _(nop, 0, ENC(rs1, rd))                      \
+    /* RV32I Base Instruction Set */             \
+    _(lui, 0, ENC(rd))                           \
+    _(auipc, 0, ENC(rd))                         \
+    _(jal, 1, ENC(rd))                           \
+    _(jalr, 1, ENC(rs1, rd))                     \
+    _(beq, 1, ENC(rs1, rs2))                     \
+    _(bne, 1, ENC(rs1, rs2))                     \
+    _(blt, 1, ENC(rs1, rs2))                     \
+    _(bge, 1, ENC(rs1, rs2))                     \
+    _(bltu, 1, ENC(rs1, rs2))                    \
+    _(bgeu, 1, ENC(rs1, rs2))                    \
+    _(lb, 0, ENC(rs1, rd))                       \
+    _(lh, 0, ENC(rs1, rd))                       \
+    _(lw, 0, ENC(rs1, rd))                       \
+    _(lbu, 0, ENC(rs1, rd))                      \
+    _(lhu, 0, ENC(rs1, rd))                      \
+    _(sb, 0, ENC(rs1, rs2))                      \
+    _(sh, 0, ENC(rs1, rs2))                      \
+    _(sw, 0, ENC(rs1, rs2))                      \
+    _(addi, 0, ENC(rs1, rd))                     \
+    _(slti, 0, ENC(rs1, rd))                     \
+    _(sltiu, 0, ENC(rs1, rd))                    \
+    _(xori, 0, ENC(rs1, rd))                     \
+    _(ori, 0, ENC(rs1, rd))                      \
+    _(andi, 0, ENC(rs1, rd))                     \
+    _(slli, 0, ENC(rs1, rd))                     \
+    _(srli, 0, ENC(rs1, rd))                     \
+    _(srai, 0, ENC(rs1, rd))                     \
+    _(add, 0, ENC(rs1, rs2, rd))                 \
+    _(sub, 0, ENC(rs1, rs2, rd))                 \
+    _(sll, 0, ENC(rs1, rs2, rd))                 \
+    _(slt, 0, ENC(rs1, rs2, rd))                 \
+    _(sltu, 0, ENC(rs1, rs2, rd))                \
+    _(xor, 0, ENC(rs1, rs2, rd))                 \
+    _(srl, 0, ENC(rs1, rs2, rd))                 \
+    _(sra, 0, ENC(rs1, rs2, rd))                 \
+    _(or, 0, ENC(rs1, rs2, rd))                  \
+    _(and, 0, ENC(rs1, rs2, rd))                 \
+    _(ecall, 1, ENC(rs1, rd))                    \
+    _(ebreak, 1, ENC(rs1, rd))                   \
+    /* RISC-V Privileged Instruction */          \
+    _(wfi, 0, ENC(rs1, rd))                      \
+    _(uret, 0, ENC(rs1, rd))                     \
+    _(sret, 0, ENC(rs1, rd))                     \
+    _(hret, 0, ENC(rs1, rd))                     \
+    _(mret, 1, ENC(rs1, rd))                     \
+    /* RV32 Zifencei Standard Extension */       \
+    IIF(RV32_HAS(Zifencei))(                     \
+        _(fencei, 1, ENC(rs1, rd))               \
+    )                                            \
+    /* RV32 Zicsr Standard Extension */          \
+    IIF(RV32_HAS(Zicsr))(                        \
+        _(csrrw, 0, ENC(rs1, rd))                \
+        _(csrrs, 0, ENC(rs1, rd))                \
+        _(csrrc, 0, ENC(rs1, rd))                \
+        _(csrrwi, 0, ENC(rs1, rd))               \
+        _(csrrsi, 0, ENC(rs1, rd))               \
+        _(csrrci, 0, ENC(rs1, rd))               \
+    )                                            \
+    /* RV32M Standard Extension */               \
+    IIF(RV32_HAS(EXT_M))(                        \
+        _(mul, 0, ENC(rs1, rs2, rd))             \
+        _(mulh, 0, ENC(rs1, rs2, rd))            \
+        _(mulhsu, 0, ENC(rs1, rs2, rd))          \
+        _(mulhu, 0, ENC(rs1, rs2, rd))           \
+        _(div, 0, ENC(rs1, rs2, rd))             \
+        _(divu, 0, ENC(rs1, rs2, rd))            \
+        _(rem, 0, ENC(rs1, rs2, rd))             \
+        _(remu, 0, ENC(rs1, rs2, rd))            \
+    )                                            \
+    /* RV32A Standard Extension */               \
+    IIF(RV32_HAS(EXT_A))(                        \
+        _(lrw, 0, ENC(rs1, rs2, rd))             \
+        _(scw, 0, ENC(rs1, rs2, rd))             \
+        _(amoswapw, 0, ENC(rs1, rs2, rd))        \
+        _(amoaddw, 0, ENC(rs1, rs2, rd))         \
+        _(amoxorw, 0, ENC(rs1, rs2, rd))         \
+        _(amoandw, 0, ENC(rs1, rs2, rd))         \
+        _(amoorw, 0, ENC(rs1, rs2, rd))          \
+        _(amominw, 0, ENC(rs1, rs2, rd))         \
+        _(amomaxw, 0, ENC(rs1, rs2, rd))         \
+        _(amominuw, 0, ENC(rs1, rs2, rd))        \
+        _(amomaxuw, 0, ENC(rs1, rs2, rd))        \
+    )                                            \
+    /* RV32F Standard Extension */               \
+    IIF(RV32_HAS(EXT_F))(                        \
+        _(flw, 0, ENC(rs1, rd))                  \
+        _(fsw, 0, ENC(rs1, rs2))                 \
+        _(fmadds, 0, ENC(rs1, rs2, rs3, rd))     \
+        _(fmsubs, 0, ENC(rs1, rs2, rs3, rd))     \
+        _(fnmsubs, 0, ENC(rs1, rs2, rs3, rd))    \
+        _(fnmadds, 0, ENC(rs1, rs2, rs3, rd))    \
+        _(fadds, 0, ENC(rs1, rs2, rd))           \
+        _(fsubs, 0, ENC(rs1, rs2, rd))           \
+        _(fmuls, 0, ENC(rs1, rs2, rd))           \
+        _(fdivs, 0, ENC(rs1, rs2, rd))           \
+        _(fsqrts, 0, ENC(rs1, rs2, rd))          \
+        _(fsgnjs, 0, ENC(rs1, rs2, rd))          \
+        _(fsgnjns, 0, ENC(rs1, rs2, rd))         \
+        _(fsgnjxs, 0, ENC(rs1, rs2, rd))         \
+        _(fmins, 0, ENC(rs1, rs2, rd))           \
+        _(fmaxs, 0, ENC(rs1, rs2, rd))           \
+        _(fcvtws, 0, ENC(rs1, rs2, rd))          \
+        _(fcvtwus, 0, ENC(rs1, rs2, rd))         \
+        _(fmvxw, 0, ENC(rs1, rs2, rd))           \
+        _(feqs, 0, ENC(rs1, rs2, rd))            \
+        _(flts, 0, ENC(rs1, rs2, rd))            \
+        _(fles, 0, ENC(rs1, rs2, rd))            \
+        _(fclasss, 0, ENC(rs1, rs2, rd))         \
+        _(fcvtsw, 0, ENC(rs1, rs2, rd))          \
+        _(fcvtswu, 0, ENC(rs1, rs2, rd))         \
+        _(fmvwx, 0, ENC(rs1, rs2, rd))           \
+    )                                            \
+    /* RV32C Standard Extension */               \
+    IIF(RV32_HAS(EXT_C))(                        \
+        _(caddi4spn, 0, ENC(rd))                 \
+        _(clw, 0, ENC(rs1, rd))                  \
+        _(csw, 0, ENC(rs1, rs2))                 \
+        _(cnop, 0, ENC())                        \
+        _(caddi, 0, ENC(rd))                     \
+        _(cjal, 1, ENC())                        \
+        _(cli, 0, ENC(rd))                       \
+        _(caddi16sp, 0, ENC())                   \
+        _(clui, 0, ENC(rd))                      \
+        _(csrli, 0, ENC(rs1))                    \
+        _(csrai, 0, ENC(rs1))                    \
+        _(candi, 0, ENC(rs1))                    \
+        _(csub, 0, ENC(rs1, rs2, rd))            \
+        _(cxor, 0, ENC(rs1, rs2, rd))            \
+        _(cor, 0, ENC(rs1, rs2, rd))             \
+        _(cand, 0, ENC(rs1, rs2, rd))            \
+        _(cj, 1, ENC())                          \
+        _(cbeqz, 1, ENC(rs1))                    \
+        _(cbnez, 1, ENC(rs1))                    \
+        _(cslli, 0, ENC(rd))                     \
+        _(clwsp, 0, ENC(rd))                     \
+        _(cjr, 1, ENC(rs1, rs2, rd))             \
+        _(cmv, 0, ENC(rs1, rs2, rd))             \
+        _(cebreak, 1, ENC(rs1, rs2, rd))         \
+        _(cjalr, 1, ENC(rs1, rs2, rd))           \
+        _(cadd, 0, ENC(rs1, rs2, rd))            \
+        _(cswsp, 0, ENC(rs2))                    \
+    )                                            \
 /* clang-format on */
 
 /* clang-format off */
 /* IR list */
 enum {
-#define _(inst, can_branch) rv_insn_##inst,
+#define _(inst, can_branch, reg_mask) rv_insn_##inst,
     RISCV_INSN_LIST
 #undef _
     N_RISCV_INSN_LIST

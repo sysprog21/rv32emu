@@ -58,12 +58,14 @@ extern "C" {
  * address of call,  with "x5" as an alternative link register, and "x2" as
  * the stack pointer.
  */
+/* clang-format off */
 enum {
-#define _(reg) rv_reg_##reg,
+#define _(r) rv_reg_##r,
     RV_REGS_LIST
 #undef _
-        N_RV_REGS
+    N_RV_REGS
 };
+/* clang-format on */
 
 /* forward declaration for internal structure */
 typedef struct riscv_internal riscv_t;

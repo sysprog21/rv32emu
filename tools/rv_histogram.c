@@ -40,7 +40,7 @@ typedef struct {
 
 static rv_hist_t rv_insn_stats[] = {
 #define _(inst, can_branch, reg_mask) {#inst, 0, reg_mask},
-    RISCV_INSN_LIST _(unknown, 0, 0)
+    RV_INSN_LIST _(unknown, 0, 0)
 #undef _
 };
 
@@ -206,7 +206,7 @@ void reg_hist_incr(rv_insn_t *ir)
 void insn_hist_incr(rv_insn_t *ir)
 {
     if (!ir) {
-        rv_insn_stats[N_RISCV_INSN_LIST].freq++;
+        rv_insn_stats[N_RV_INSNS].freq++;
         return;
     }
     rv_insn_stats[ir->opcode].freq++;
@@ -298,8 +298,8 @@ int main(int argc, char *args[])
         printf("+---------------------------------------------+\n");
         printf("| RV32 Target Instruction Frequency Histogram |\n");
         printf("+---------------------------------------------+\n");
-        find_max_freq(rv_insn_stats, N_RISCV_INSN_LIST + 1);
-        print_hist_stats(rv_insn_stats, N_RISCV_INSN_LIST + 1);
+        find_max_freq(rv_insn_stats, N_RV_INSNS + 1);
+        print_hist_stats(rv_insn_stats, N_RV_INSNS + 1);
     }
 
     free(shdrs);

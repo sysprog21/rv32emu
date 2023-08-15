@@ -279,7 +279,7 @@ static inline bool insn_is_misaligned(uint32_t pc)
 /* can-branch information for each RISC-V instruction */
 enum {
 #define _(inst, can_branch, reg_mask) __rv_insn_##inst##_canbranch = can_branch,
-    RISCV_INSN_LIST
+    RV_INSN_LIST
 #undef _
 };
 
@@ -328,7 +328,7 @@ static uint32_t last_pc = 0;
     _(fuse5)
 
 enum {
-    rv_insn_fuse0 = N_RISCV_INSN_LIST,
+    rv_insn_fuse0 = N_RV_INSNS,
 #define _(inst) rv_insn_##inst,
     FUSE_INSN_LIST
 #undef _
@@ -428,7 +428,7 @@ static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
 static const void *dispatch_table[] = {
     /* RV32 instructions */
 #define _(inst, can_branch, reg_mask) [rv_insn_##inst] = do_##inst,
-    RISCV_INSN_LIST
+    RV_INSN_LIST
 #undef _
     /* Macro operation fusion instructions */
 #define _(inst) [rv_insn_##inst] = do_##inst,
@@ -441,7 +441,7 @@ static inline bool insn_is_branch(uint8_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch, reg_mask) IIF(can_branch)(case rv_insn_##inst:, )
-        RISCV_INSN_LIST
+        RV_INSN_LIST
 #undef _
         return true;
     }

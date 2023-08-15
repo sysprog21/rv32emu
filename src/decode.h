@@ -31,7 +31,7 @@ enum op_field {
 /* RISC-V instruction list in format _(instruction-name, can-branch, reg-mask)
  */
 /* clang-format off */
-#define RISCV_INSN_LIST                          \
+#define RV_INSN_LIST                             \
     _(nop, 0, ENC(rs1, rd))                      \
     /* RV32I Base Instruction Set */             \
     _(lui, 0, ENC(rd))                           \
@@ -175,16 +175,16 @@ enum op_field {
         _(cjalr, 1, ENC(rs1, rs2, rd))           \
         _(cadd, 0, ENC(rs1, rs2, rd))            \
         _(cswsp, 0, ENC(rs2))                    \
-    )                                            \
+    )
 /* clang-format on */
 
 /* clang-format off */
 /* IR list */
 enum {
 #define _(inst, can_branch, reg_mask) rv_insn_##inst,
-    RISCV_INSN_LIST
+    RV_INSN_LIST
 #undef _
-    N_RISCV_INSN_LIST
+    N_RV_INSNS
 };
 /* clang-format on */
 

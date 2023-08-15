@@ -13,7 +13,7 @@ deps += $(HIST_OBJS:%.o=%.o.d)
 
 $(OUT)/%.o: tools/%.c
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -Isrc -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) -Wno-missing-field-initializers -Isrc -c -MMD -MF $@.d $<
 
 # GDBSTUB is diabled for excluding the mini-gdb during compilation
 $(HIST_BIN): $(HIST_OBJS)

@@ -67,6 +67,20 @@
 /* run the 1st parameter */
 #define IIF_1(t, ...) t
 
+/* Accept any number of args >= N, but expand to just the Nth one. The macro
+ * that calls the function still only supports 4 args, but the set of values
+ * that might need to be returned is 1 larger, so N is increased to 6.
+ */
+#define _GET_NTH_ARG(_1, _2, _3, _4, _5, N, ...) N
+
+/* Count how many args are in a variadic macro. The GCC/Clang extension is used
+ * to handle the case where ... expands to nothing. A placeholder arg is added
+ * before ##VA_ARGS (its value is irrelevant but necessary to preserve the
+ * shifting offset).
+ * Additionally, 0 is added as a valid value in the N position.
+ */
+#define COUNT_VARARGS(...) _GET_NTH_ARG("ignored", ##__VA_ARGS__, 4, 3, 2, 1, 0)
+
 #if defined(__GNUC__) || defined(__clang__)
 #define __HAVE_TYPEOF 1
 #endif

@@ -175,8 +175,8 @@ void print_hist_stats(const rv_hist_t *stats, size_t stats_size)
         insn_reg = stats[i].insn_reg;
         freq = stats[i].freq;
 
-        percent = (float) freq / total_freq;
-        if (percent < 0.01)
+        percent = ((float) freq / total_freq) * 100;
+        if (percent < 1.00)
             continue;
 
         printf(fmt, idx, insn_reg, percent, freq,

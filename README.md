@@ -172,6 +172,27 @@ You can use the option with `-q` to use the output directly.
 $ build/rv32emu -d - out.elf -q | jq .x10
 ```
 
+## Tools
+
+```shell
+make tool
+```
+### rv_histogram
+This is a static analysis tool of RV32 instructions/registers usage
+in the target program.
+```shell
+build/rv_histogram [-ar] [target_program_path]
+```
+It has two optional options:
+* `-a`: output the analysis in ascending order(default is descending order)
+* `-r`: output usage of registers(default is usage of instructions)
+
+_Example Instructions Histogram_
+![Instructions Hisrogram Example](/docs/histogram_instructions.png)
+
+_Example Registers Histogram_
+![Registers Hisrogram Example](/docs/histogram_registers.png)
+
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 

@@ -193,14 +193,22 @@ void reg_hist_incr(rv_insn_t *ir)
 
     uint8_t reg_mask = rv_insn_stats[ir->opcode].reg_mask;
 
-    if (reg_mask & 0x1)
+    if (reg_mask & F_rs1) {
         rv_reg_stats[ir->rs1].freq++;
-    if (reg_mask & 0x2)
+        total_freq++;
+    }
+    if (reg_mask & F_rs2) {
         rv_reg_stats[ir->rs2].freq++;
-    if (reg_mask & 0x4)
+        total_freq++;
+    }
+    if (reg_mask & F_rs3) {
         rv_reg_stats[ir->rs3].freq++;
-    if (reg_mask & 0x8)
+        total_freq++;
+    }
+    if (reg_mask & F_rd) {
         rv_reg_stats[ir->rd].freq++;
+        total_freq++;
+    }
 }
 
 void insn_hist_incr(rv_insn_t *ir)
@@ -210,6 +218,7 @@ void insn_hist_incr(rv_insn_t *ir)
         return;
     }
     rv_insn_stats[ir->opcode].freq++;
+    total_freq++;
 }
 
 int main(int argc, char *args[])
@@ -273,9 +282,7 @@ int main(int argc, char *args[])
                 hist_record(NULL);
                 continue;
             }
-
             hist_record(&ir);
-            total_freq++;
         }
     }
 

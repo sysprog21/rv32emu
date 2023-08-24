@@ -550,19 +550,8 @@ static void block_translate(riscv_t *rv, block_t *block)
         block->pc_end += ir->insn_len;
         block->n_insn++;
         /* stop on branch */
-        if (insn_is_branch(ir->opcode)) {
-            /* recursive jump translation */
-            if (ir->opcode == rv_insn_jal
-#if RV32_HAS(EXT_C)
-                || ir->opcode == rv_insn_cj || ir->opcode == rv_insn_cjal
-#endif
-            ) {
-                block->pc_end = block->pc_end - ir->insn_len + ir->imm;
-                ir->branch_taken = ir + 1;
-                continue;
-            }
+        if (insn_is_branch(ir->opcode))
             break;
-        }
     }
     block->ir[block->n_insn - 1].tailcall = true;
 }
@@ -744,6 +733,14 @@ void rv_step(riscv_t *rv, int32_t cycles)
                     last_ir->branch_taken = block->ir;
                 else if (!last_ir->branch_untaken)
                     last_ir->branch_untaken = block->ir;
+            } else if (last_ir->opcode == rv_insn_jal
+#if RV32_HAS(EXT_C)
+                       || last_ir->opcode == rv_insn_cj ||
+                       last_ir->opcode == rv_insn_cjal
+#endif
+            ) {
+                if (!last_ir->branch_taken)
+                    last_ir->branch_taken = block->ir;
             }
         }
         last_pc = rv->PC;

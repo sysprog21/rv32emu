@@ -2,36 +2,48 @@
 
 ## Background
 
-The primary means of communication between an application and the operating system kernel are system calls.
-To avoid using other libraries, you can access them from assembler programs.
-See [`man 2 syscalls`](http://man7.org/linux/man-pages/man2/syscalls.2.html) for more information and a complete list of system calls.
+System calls serve as the principal method of interaction between an application and the underlying operating system kernel.
+They enable applications to access services and resources provided by the OS kernel,
+such as file operations, network communication, and memory management.
+System calls are essential for performing privileged operations that applications can not directly execute,
+ensuring a secure and controlled environment.
+To directly interact with system calls without relying on external libraries, programmers can invoke them from assembler programs.
+For a comprehensive list of available system calls and detailed information about their usage, see [`man 2 syscalls`](http://man7.org/linux/man-pages/man2/syscalls.2.html).
 
 ## System Calls in C
 
-In C, a list of parameters is passed to the kernel in a certain sequence. e.g., for `write`, we have (see [`man 2 write`](https://man7.org/linux/man-pages/man2/write.2.html)):
+In C, a list of parameters is passed to the kernel in a certain sequence.
+For example, for the `write` system call, the parameters are structured as follows (see [`man 2 write`](https://man7.org/linux/man-pages/man2/write.2.html)):
 ```c
 ssize_t write(int fd, const void *buf, size_t count);
 ```
 
-The three parameters passed are a file descriptor, a pointer to a character buffer (in other words, a string) and the number of characters in that string to be printed.
-The file descriptor can be the Standard Output.
-Note the string is not zero-terminated.
+The three parameters passed are a file descriptor, a pointer to a character buffer (essentially a string),
+and the number of characters in that string to be written.
+The file descriptor can represent the standard output.
+It is important to note that the string is not zero-terminated.
 
 ## RISC-V calling conventions
 
-The RISC-V convention as defined by [Calling Convention](https://riscv.org/wp-content/uploads/2015/01/riscv-calling.pdf) is to map these parameters one by one to the registers starting at `a0`, put the number for the system call in `a7`, and execute the `ecall` instruction.
-* The file descriptor number goes in `a0`.
-* The pointer to the string -- its address -- goes in `a1`.
-* The number of characters to print goes in `a2`.
+The RISC-V convention, as defined by the [Calling Convention](https://riscv.org/wp-content/uploads/2015/01/riscv-calling.pdf),
+involves mapping these parameters one by one to the registers, starting at `a0`.
+The system call number is placed in `a7`, and then the `ecall` instruction is executed.
 
-To find the magic number for the system call for write and the `rv32emu`, we take a look at [riscv-pk/pk/syscall.h](https://github.com/riscv/riscv-pk/blob/master/pk/syscall.h).
-It turns out to be `64`. This goes into `a7`.
+Here is how the parameters are mapped:
+- The file descriptor number is placed in `a0`.
+- The pointer to the string (its address) is placed in `a1`.
+- The number of characters to print is placed in `a2`.
 
-After a successful write, we should receive the number of characters written in `a0`.
-If there was an error, the return value should be `-1`.
+For determining the specific system call number for the 'write' operation in the context of `rv32emu`,
+reference can be made to [riscv-pk/pk/syscall.h](https://github.com/riscv/riscv-pk/blob/master/pk/syscall.h).
+In the case of the `write` system call, the associated number is `64`, which is then assigned to the register `a7`.
 
-To print the string "RISC-V" and then quit with the exit system call with the GNU GCC compiler suite and the `rv32emu`, this is one possible solution: (`hello.S`)
+Following a successful write operation, the count of written characters should be present in the `a0` register.
+Conversely, if an error occurs, the return value is represented as `-1`.
 
+For instance, to print the string "RISC-V" and subsequently exit using the exit system call,
+the GNU GCC compiler suite in combination with `rv32emu` offers a feasible approach.
+The following is a potential program in assembly code (`hello.S`):
 ```assembly
     .equ STDOUT, 1
     .equ WRITE, 64
@@ -59,26 +71,31 @@ _start:
     ecall
 ```
 
-We assemble, link and run this program for `rv32emu` with
+The program is assembled, linked, and executed on `rv32emu` using the following commands:
 ```shell
-riscv-none-elf-gcc -march=rv32i -mabi=ilp32 -nostartfiles -nostdlib -o hello hello.S
-build/rv32emu hello
+$ riscv-none-elf-gcc -march=rv32i -mabi=ilp32 -nostartfiles -nostdlib -o hello hello.S
+$ build/rv32emu hello
 ```
 
-There is an `ecall` instruction for trapping into the kernel, and three privilege
-modes: User mode, Supervisor mode, and Machine mode. There are correspondingly
-three versions of iret: `uret` from any mode if you have the `N-extension` to
-enable user-mode trap handlers, sret from S-mode (or M-mode), and `mret` only
-from M-mode.
+An `ecall` instruction is used to trigger a trap into the kernel,
+and there exist three privilege modes: User mode, Supervisor mode, and Machine mode.
+Corresponding to these modes, there are three versions of the iret instruction:
+`uret` which can be used from any mode if the `N-extension` is enabled to allow user-mode trap handlers,
+`sret` which is used from S-mode (or M-mode), and `mret` which can only be used from M-mode.
 
-NOTE: the stack pointer must always be 16-byte aligned on RV32 and RV64.
+NOTE: On RV32 and RV64 architectures, the stack pointer must always be aligned to a 16-byte boundary.
 
 ## Newlib integration
 
-The [newlib](https://sourceware.org/newlib/) implements a whole C standard library, minus threads. C functions such as `malloc`, `printf`, `memcpy`, and many more are implemented. `rv32emu` provides the essential subset of system calls required by [newlib](https://sourceware.org/newlib/), so that it allows cross-compiled binary files running on `rv32emu`.
+The [newlib](https://sourceware.org/newlib/) library encompasses most of the C standard library functionality,
+excluding thread support.
+C functions like `malloc`, `printf`, `memcpy`, and many others are included in its implementation.
+To enable cross-compiled binary files to run on this emulator,
+`rv32emu` offers a fundamental subset of necessary system calls that [newlib](https://sourceware.org/newlib/) requires.
 
-There is one subsystem supported which supplies a very limited set of POSIX-compliant system calls.
-Currently only a couple system calls are supported via semihosting, which enables code running on RISC-V target to communicate with and use the I/O of the host computer.
+A subsystem is also provided to support a limited set of POSIX-compliant system calls.
+Presently, only a few system calls are accessible through semihosting.
+This mechanism allows code executed on a RISC-V target to interact with and utilize the I/O capabilities of the host computer.
 
 |#     | System call     | Current support |
 |------|-----------------|-----------------|
@@ -119,7 +136,7 @@ The user must pass a continuous memory chunk that contains two tightly packed qu
 
 #### Events
 
-An event entry is made up of a 32-bit value representing the event's type and a `union` buffer containing t1he event's parameters.
+An event entry is made up of a 32-bit value representing the event's type and a `union` buffer containing the event's parameters.
 
 * `KEY_EVENT`: Either a key is pressed or released. Its value buffer is made up of a 32-bit universal key code and an 8-bit state flag; if the corresponding character of the pressed key is not printable, the bit right after the most significant bit is set; for example, the "a" key's corresponding character is printable, so its keycode is the ASCII code of the "a" character, which is `0x61`. However, because the left shift key doesn't have a corresponding printable key, its hexadecimal value is `0x400000E1`, with the 31 bit is set.
 * `MOUSE_MOTION_EVENT`: The cursor is moved during the current frame. This event contains two signed integer value, which is the delta of x position and y position respectively. If the relative mouse mode is enabled, the mouse movement will never be 0 because the cursor is wrapped within the canvas and is repeated whenever the cursor reaches the border. 

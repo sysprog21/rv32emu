@@ -35,9 +35,10 @@ Features:
 ## Build and Verify
 
 `rv32emu` relies on certain third-party packages for full functionality and access to all its features.
-To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/) installed.
-* macOS: `brew install sdl2`
-* Ubuntu Linux / Debian: `sudo apt install libsdl2-dev`
+To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/) 
+and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
+* macOS: `brew install sdl2 sdl2_mixer`
+* Ubuntu Linux / Debian: `sudo apt install libsdl2-dev libsdl2-mixer-dev`
 
 Build the emulator.
 ```shell

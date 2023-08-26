@@ -18,21 +18,23 @@
  * system call: name, number
  */
 /* clang-format off */
-#define SUPPORTED_SYSCALLS       \
-    _(close,            57)      \
-    _(lseek,            62)      \
-    _(read,             63)      \
-    _(write,            64)      \
-    _(fstat,            80)      \
-    _(exit,             93)      \
-    _(gettimeofday,     169)     \
-    _(brk,              214)     \
-    _(clock_gettime,    403)     \
-    _(open,             1024)    \
-    IIF(RV32_HAS(SDL))(          \
-        _(draw_frame,   0xBEEF)  \
-        _(setup_queue,  0xC0DE)  \
-        _(submit_queue, 0xFEED), \
+#define SUPPORTED_SYSCALLS           \
+    _(close,                57)      \
+    _(lseek,                62)      \
+    _(read,                 63)      \
+    _(write,                64)      \
+    _(fstat,                80)      \
+    _(exit,                 93)      \
+    _(gettimeofday,         169)     \
+    _(brk,                  214)     \
+    _(clock_gettime,        403)     \
+    _(open,                 1024)    \
+    IIF(RV32_HAS(SDL))(              \
+        _(draw_frame,       0xBEEF)  \
+        _(setup_queue,      0xC0DE)  \
+        _(submit_queue,     0xFEED)  \
+        _(setup_audio,      0xBABE)  \
+        _(control_audio,    0xD00D), \
     )
 /* clang-format on */
 
@@ -317,6 +319,8 @@ static void syscall_open(riscv_t *rv)
 extern void syscall_draw_frame(riscv_t *rv);
 extern void syscall_setup_queue(riscv_t *rv);
 extern void syscall_submit_queue(riscv_t *rv);
+extern void syscall_setup_audio(riscv_t *rv);
+extern void syscall_control_audio(riscv_t *rv);
 #endif
 
 void syscall_handler(riscv_t *rv)

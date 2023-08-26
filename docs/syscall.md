@@ -112,9 +112,9 @@ This mechanism allows code executed on a RISC-V target to interact with and util
 
 Any other system calls will fail with an "unknown syscall" error.
 
-## Experimental Display and Event System Calls
+## Experimental Display, Event, and Sound System Calls
 
-These system calls are solely for the convenience of accessing the [SDL library](https://www.libsdl.org/) and are only intended for the presentation of RISC-V graphics applications. They are not present in the ABI interface of POSIX or Linux.
+These system calls are solely for the convenience of accessing the [SDL library](https://www.libsdl.org/) and [SDL2_Mixer](https://wiki.libsdl.org/SDL2_mixer) and are only intended for the presentation of RISC-V graphics applications. They are not present in the ABI interface of POSIX or Linux.
 
 ### `draw_frame` - Draw a frame around the SDL window
 
@@ -139,7 +139,7 @@ The user must pass a continuous memory chunk that contains two tightly packed qu
 An event entry is made up of a 32-bit value representing the event's type and a `union` buffer containing the event's parameters.
 
 * `KEY_EVENT`: Either a key is pressed or released. Its value buffer is made up of a 32-bit universal key code and an 8-bit state flag; if the corresponding character of the pressed key is not printable, the bit right after the most significant bit is set; for example, the "a" key's corresponding character is printable, so its keycode is the ASCII code of the "a" character, which is `0x61`. However, because the left shift key doesn't have a corresponding printable key, its hexadecimal value is `0x400000E1`, with the 31 bit is set.
-* `MOUSE_MOTION_EVENT`: The cursor is moved during the current frame. This event contains two signed integer value, which is the delta of x position and y position respectively. If the relative mouse mode is enabled, the mouse movement will never be 0 because the cursor is wrapped within the canvas and is repeated whenever the cursor reaches the border. 
+* `MOUSE_MOTION_EVENT`: The cursor is moved during the current frame. This event contains two signed integer value, which is the delta of x position and y position respectively. If the relative mouse mode is enabled, the mouse movement will never be 0 because the cursor is wrapped within the canvas and is repeated whenever the cursor reaches the border.
 * `MOUSE_BUTTON_EVENT`: The state of a mouse button has been changed. Its value buffer contains a 8-bit button value(1 is left, 2 is middle, 3 is right and so on) and an 8-bit boolean flag that indicates whether the mouse button is pressed.
 
 ### `submit_queue` - Notify the emulator a submission has been pushed into the submission queue
@@ -155,3 +155,35 @@ To inform the emulator that a batch of submissions should be processed, the appl
 The submission entry is structured similarly to an event entry, with a 32-bit type field and an associated dynamic-sized value buffer whose width depends on the type of submission.
 
 * `RELATIVE_MODE_SUBMISSION`: Enable or disable the mouse relative mode. If the mouse relative mode is enabled, the mouse cursor is wrapped within the window border, it's associated with an 8-bit wide boolean value that indicates whether the relative mouse mode should be enbled.
+
+### `control_audio` - control the behavior of music and sound effect(sfx)
+
+**system call number**: `0xD00D`
+
+**synopsis**: `void control_audio(int request)`
+
+The application must prepare the sound data and then give the address of the sound data to register `a1`, the volume of the music to register `a2` (if necessary), and looping to register `a3` (if necessary).  in order to ask the emulator to perform some sound operations. The request will be processed as soon as possible. Three different sorts of requests exist:
+* `PLAY_MUSIC`: Play the music. If any music is currently playing, it will be changed to something new. In order to avoid blocking on the main thread, the music is played by a new thread.
+* `STOP_MUSIC`: Halt the music.
+* `SET_MUSIC_VOLUME`: If necessary, adjust the music level at some point.
+
+The request is similar to how music is managed earlier in the description and supports one type of sound effect request, however it does not support looping:
+* `PLAY_SFX`: Play the sound effect, however keep in mind that playing too many at once may cause the channel to run out and the sound effects to stop working. A new thread is used to play the sound effect, and it does so for the same reason as `PLAY_MUSIC`.
+
+#### Music
+Music data is defined in a structure called `musicinfo_t`. The SDL2_mixer library is used by the emulator to play music using the fields `data` and `size` in the structure.
+
+#### Sound Effect(sfx)
+`sfxinfo_t` is a structure that defines sound effect data and size. The `data` and `size` fields of the structure are used to play sound effect with the SDL2_mixer library.
+
+### `setup_audio` - setup or shutdown sound system
+
+**system call number**: `0xBABE`
+
+**synopsis**: `void setup_audio(int request)`
+
+The majority of games, such as Doom and Quake, will maintain its own sound system or server, hence there should be a pair of initialization and destruct semantics. I believe that we should give users access to activities like startup and termination in order to maintain the semantic clarity. If not, the emulator will repeatedly check whether audio is enabled before playing music or sound effects.
+
+Requesting the sound system to be turned on or off in the emulator. When the audio device is not in the busy status, the request will be handled. Two categories of requests exist:
+* `INIT_AUDIO`: Setup the audio device and the sfx samples buffer. After initialization, open the audio device and get ready to play some music.
+* `SHUTDOWN_AUDIO`: Release all the resources that initialized by `INIT_SOUND` request.

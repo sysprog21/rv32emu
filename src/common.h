@@ -24,8 +24,28 @@
 #define __ALIGNED(x) __attribute__((aligned(x)))
 #elif defined(_MSC_VER)
 #define __ALIGNED(x) __declspec(align(x))
-#else /* unspported compilers */
+#else /* unsupported compilers */
 #define __ALIGNED(x)
+#endif
+
+/* Packed macro */
+#if defined(__GNUC__) || defined(__clang__)
+#define PACKED(name) name __attribute__((packed))
+#elif defined(_MSC_VER)
+#define PACKED(name) __pragma(pack(push, 1)) name __pragma(pack(pop))
+#else /* unsupported compilers */
+#define PACKED(name)
+#endif
+
+/* Endianness */
+#if defined(__GNUC__) || defined(__clang__)
+#define bswap16(x) __builtin_bswap16(x)
+#define bswap32(x) __builtin_bswap32(x)
+#else
+#define bswap16(x) ((x & 0xff) << 8) | ((x >> 8) & 0xff)
+#define bswap32(x)                                                    \
+    (bswap16(((x & 0xffff) << 16) | ((x >> 16) & 0xffff)) & 0xffff) | \
+        (bswap16(((x & 0xffff) << 16) | ((x >> 16) & 0xffff)) & 0xffff) << 16
 #endif
 
 /* The purpose of __builtin_unreachable() is to assist the compiler in:
@@ -55,7 +75,7 @@
  * https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
  */
 
-/* In Visual Stido, __VA_ARGS__ is treated as a separate parameter. */
+/* In Visual Studio, __VA_ARGS__ is treated as a separate parameter. */
 #define FIX_VC_BUG(x) x
 
 /* catenate */

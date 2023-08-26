@@ -53,12 +53,17 @@ ifeq (, $(shell which sdl2-config))
 $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
 override ENABLE_SDL := 0
 endif
+ifeq (1, $(shell pkg-config --exists SDL2_mixer; echo $$?))
+$(warning No SDL2_mixer lib installed. Check SDL2_mixer installation in advance)
+override ENABLE_SDL := 0
+endif
 endif
 $(call set-feature, SDL)
 ifeq ($(call has, SDL), 1)
 OBJS_EXT += syscall_sdl.o
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs)
+LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
 endif
 
 ENABLE_GDBSTUB ?= 1

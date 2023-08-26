@@ -7,12 +7,73 @@
 #error "Do not manage to build this file unless you enable SDL support."
 #endif
 
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <unistd.h>
 
 #include <SDL.h>
+#include <SDL_mixer.h>
 
 #include "state.h"
+
+/*
+ * Only the DSITMBK sound effect in DOOM1.WAD uses sample rate 22050
+ * nonetheless, since we are playing single-player rather than multiplayer,
+ * sticking with 11025 is acceptable.
+ *
+ * In Quake, most sound effects with sample rate 11025
+ */
+#define SAMPLE_RATE 11025
+
+/* Most audio device supports stereo */
+#define CHANNEL_USED 2
+
+#define CHUNK_SIZE 2048
+
+#define MUSIC_MAX_SIZE 65536
+
+/* Max size of sound is around 18000 bytes */
+#define SFX_SAMPLE_SIZE 32768
+
+/* sound-related request type */
+enum {
+    INIT_AUDIO,
+    SHUTDOWN_AUDIO,
+    PLAY_MUSIC,
+    PLAY_SFX,
+    SET_MUSIC_VOLUME,
+    STOP_MUSIC,
+};
+
+typedef struct sound {
+    uint8_t *data;
+    size_t size;
+    int looping;
+    int volume;
+} sound_t;
+
+/* SDL-mixer-related and music-related variables */
+static pthread_t music_thread;
+static uint8_t *music_midi_data;
+static Mix_Music *mid;
+
+/* SDL-mixer-related and sfx-related variables */
+static pthread_t sfx_thread;
+static Mix_Chunk *sfx_chunk;
+static uint8_t *sfx_samples;
+static uint32_t nr_sfx_samples;
+static int chan;
+
+typedef struct {
+    void *data;
+    int size;
+} musicinfo_t;
+
+typedef struct {
+    void *data;
+    int size;
+} sfxinfo_t;
 
 enum {
     KEY_EVENT = 0,
@@ -136,7 +197,7 @@ void syscall_submit_queue(riscv_t *rv);
 static bool check_sdl(riscv_t *rv, int width, int height)
 {
     if (!window) { /* check if video has been initialized. */
-        if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
             fprintf(stderr, "Failed to call SDL_Init()\n");
             exit(1);
         }
@@ -274,5 +335,460 @@ void syscall_submit_queue(riscv_t *rv)
             SDL_SetRelativeMouseMode(submission.mouse.enabled);
             break;
         }
+    }
+}
+
+/* Portions Copyright (C) 2021-2022 Steve Clark
+ *
+ * This software is provided 'as-is', without any express or implied
+ * warranty.  In no event will the authors be held liable for any damages
+ * arising from the use of this software.
+ *
+ * Permission is granted to anyone to use this software for any purpose,
+ * including commercial applications, and to alter it and redistribute it
+ * freely, subject to the following restrictions:
+ *
+ * 1. The origin of this software must not be misrepresented; you must not
+ *    claim that you wrote the original software. If you use this software
+ *    in a product, an acknowledgment in the product documentation would
+ *    be appreciated but is not required.
+ * 2. Altered source versions must be plainly marked as such, and must not be
+ *    misrepresented as being the original software.
+ * 3. This notice may not be removed or altered from any source distribution.
+ */
+
+/*
+ * This is a straightforward MUS to MIDI converter made for programs
+ * like DOOM that use MIDI to store sound.
+ *
+ * Sfx_handler can handle Quake's sound effects because they are all in WAV
+ * format.
+ */
+
+typedef PACKED(struct {
+    char id[4];
+    uint16_t score_len;
+    uint16_t score_start;
+}) mus_header_t;
+
+typedef PACKED(struct {
+    char id[4];
+    int length;
+    uint16_t type;
+    uint16_t ntracks;
+    uint16_t ticks;
+}) midi_header_t;
+
+static const char magic_mus[4] = {
+    'M',
+    'U',
+    'S',
+    0x1a,
+};
+static const char magic_midi[4] = {
+    'M',
+    'T',
+    'h',
+    'd',
+};
+static const char magic_track[4] = {
+    'M',
+    'T',
+    'r',
+    'k',
+};
+static const uint8_t magic_end_of_track[4] = {
+    0x00,
+    0xff,
+    0x2f,
+    0x00,
+};
+
+static const int controller_map[16] = {
+    -1, 0, 1, 7, 10, 11, 91, 93, 64, 67, 120, 123, 126, 127, 121, -1,
+};
+
+static uint8_t *midi_data;
+static int midi_size;
+
+static uint8_t *mus_pos;
+static int mus_end_of_track;
+
+static uint8_t delta_bytes[4];
+static int delta_cnt;
+
+/* maintain a list of channel volume */
+static uint8_t mus_channel[16];
+
+/* main conversion routine for MUS to MIDI */
+static void convert(void)
+{
+    uint8_t data, last, channel;
+    uint8_t event[3] = {0};
+    int count = 0;
+
+    data = *mus_pos++;
+    last = data & 0x80;
+    channel = data & 0xf;
+
+    switch (data & 0x70) {
+    case 0x00:
+        event[0] = 0x80;
+        event[1] = *mus_pos++ & 0x7f;
+        event[2] = mus_channel[channel];
+        count = 3;
+        break;
+
+    case 0x10:
+        event[0] = 0x90;
+        data = *mus_pos++;
+        event[1] = data & 0x7f;
+        event[2] = data & 0x80 ? *mus_pos++ : mus_channel[channel];
+        mus_channel[channel] = event[2];
+        count = 3;
+        break;
+
+    case 0x20:
+        event[0] = 0xe0;
+        event[1] = (*mus_pos & 0x01) << 6;
+        event[2] = *mus_pos++ >> 1;
+        count = 3;
+        break;
+
+    case 0x30:
+        event[0] = 0xb0;
+        event[1] = controller_map[*mus_pos++ & 0xf];
+        event[2] = 0x7f;
+        count = 3;
+        break;
+
+    case 0x40:
+        data = *mus_pos++;
+        if (data == 0) {
+            event[0] = 0xc0;
+            event[1] = *mus_pos++;
+            count = 2;
+            break;
+        }
+        event[0] = 0xb0;
+        event[1] = controller_map[data & 0xf];
+        event[2] = *mus_pos++;
+        count = 3;
+        break;
+
+    case 0x50:
+        return;
+
+    case 0x60:
+        mus_end_of_track = 1;
+        return;
+
+    case 0x70:
+        mus_pos++;
+        return;
+    }
+
+    if (channel == 9)
+        channel = 15;
+    else if (channel == 15)
+        channel = 9;
+
+    event[0] |= channel;
+
+    midi_data = realloc(midi_data, midi_size + delta_cnt + count);
+
+    memcpy(midi_data + midi_size, &delta_bytes, delta_cnt);
+    midi_size += delta_cnt;
+    memcpy(midi_data + midi_size, &event, count);
+    midi_size += count;
+
+    if (last) {
+        delta_cnt = 0;
+        do {
+            data = *mus_pos++;
+            delta_bytes[delta_cnt] = data;
+            delta_cnt++;
+        } while (data & 128);
+    } else {
+        delta_bytes[0] = 0;
+        delta_cnt = 1;
+    }
+}
+
+uint8_t *mus2midi(uint8_t *data, int *length)
+{
+    mus_header_t *mus_hdr = (mus_header_t *) data;
+    midi_header_t midi_hdr;
+    uint8_t *mid_track_len;
+    int track_len;
+
+    if (strncmp(mus_hdr->id, magic_mus, 4))
+        return NULL;
+
+    if (*length != mus_hdr->score_start + mus_hdr->score_len)
+        return NULL;
+
+    midi_size = sizeof(midi_header_t);
+    memcpy(midi_hdr.id, magic_midi, 4);
+    midi_hdr.length = bswap32(6);
+    midi_hdr.type = bswap16(0); /* single track should be type 0 */
+    midi_hdr.ntracks = bswap16(1);
+    /* maybe, set 140ppqn and set tempo to 1000000µs */
+    midi_hdr.ticks =
+        bswap16(70); /* 70 ppqn = 140 per second @ tempo = 500000µs (default) */
+    midi_data = malloc(midi_size);
+    memcpy(midi_data, &midi_hdr, midi_size);
+
+    midi_data = realloc(midi_data, midi_size + 8);
+    memcpy(midi_data + midi_size, magic_track, 4);
+    midi_size += 4;
+    mid_track_len = midi_data + midi_size;
+    midi_size += 4;
+
+    track_len = 0;
+
+    mus_pos = data + mus_hdr->score_start;
+    mus_end_of_track = 0;
+    delta_bytes[0] = 0;
+    delta_cnt = 1;
+
+    for (int i = 0; i < 16; i++)
+        mus_channel[i] = 0;
+
+    while (!mus_end_of_track)
+        convert();
+
+    /* a final delta time must be added prior to the end of track event */
+    midi_data = realloc(midi_data, midi_size + delta_cnt);
+    memcpy(midi_data + midi_size, &delta_bytes, delta_cnt);
+    midi_size += delta_cnt;
+
+    midi_data = realloc(midi_data, midi_size + 3);
+    memcpy(midi_data + midi_size, magic_end_of_track + 1, 3);
+    midi_size += 3;
+
+    track_len = bswap32(midi_size - sizeof(midi_header_t) - 8);
+    memcpy(mid_track_len, &track_len, 4);
+
+    *length = midi_size;
+
+    return midi_data;
+}
+
+static void *sfx_handler(void *arg)
+{
+    sound_t *sfx = (sound_t *) arg;
+    uint8_t *ptr = sfx->data;
+
+    /* parsing sound */
+    ptr += 2; /* skip format */
+    ptr += 2; /* skip sample rate since SAMPLE_RATE is defined */
+    nr_sfx_samples = *(uint32_t *) ptr;
+    ptr += 4;
+    ptr += 4; /* skip pad bytes */
+
+    memcpy(sfx_samples, ptr, sizeof(uint8_t) * nr_sfx_samples);
+    sfx_chunk = Mix_QuickLoad_RAW(sfx_samples, nr_sfx_samples);
+    if (!sfx_chunk)
+        return NULL;
+
+    chan = Mix_PlayChannel(-1, sfx_chunk, 0);
+    if (chan == -1)
+        return NULL;
+
+    /* multiplied by 8 because sfx->volume's max is 15 */
+    Mix_Volume(chan, sfx->volume * 8);
+
+    return NULL;
+}
+
+static void *music_handler(void *arg)
+{
+    sound_t *music = (sound_t *) arg;
+    int looping = music->looping ? -1 : 1;
+
+    free(music_midi_data);
+
+    music_midi_data = mus2midi(music->data, (int *) &music->size);
+    if (!music_midi_data) {
+        fprintf(stderr, "mus2midi failed\n");
+        return NULL;
+    }
+
+    SDL_RWops *rwops = SDL_RWFromMem(music_midi_data, music->size);
+    if (!rwops) {
+        fprintf(stderr, "SDL_RWFromMem failed: %s\n", SDL_GetError());
+        return NULL;
+    }
+
+    mid = Mix_LoadMUSType_RW(rwops, MUS_MID, SDL_TRUE);
+    if (!mid) {
+        fprintf(stderr, "Mix_LoadMUSType_RW failed: %s\n", Mix_GetError());
+        return NULL;
+    }
+
+    /*
+     * multiplied by 8 because sfx->volume's max is 15
+     * further setting volume via syscall_set_music_volume
+     */
+    Mix_VolumeMusic(music->volume * 8);
+
+    if (Mix_PlayMusic(mid, looping) == -1) {
+        fprintf(stderr, "Mix_PlayMusic failed: %s\n", Mix_GetError());
+        return NULL;
+    }
+
+    return NULL;
+}
+
+static void play_sfx(riscv_t *rv)
+{
+    state_t *s = rv_userdata(rv); /* access userdata */
+
+    const uint32_t sfxinfo_addr = (uint32_t) rv_get_reg(rv, rv_reg_a1);
+    int volume = rv_get_reg(rv, rv_reg_a2);
+
+    sfxinfo_t sfxinfo;
+    memory_read(s->mem, (uint8_t *) &sfxinfo, sfxinfo_addr, sizeof(sfxinfo_t));
+
+    /*
+     * data and size in application must be placed at
+     * first two fields in structure so that it makes emulator
+     * compatible to any applications when accessing different sfxinfo_t
+     * from applications
+     */
+    uint32_t sfx_data_offset = *((uint32_t *) &sfxinfo);
+    uint32_t sfx_data_size = *(uint32_t *) ((uint32_t *) &sfxinfo + 1);
+    uint8_t sfx_data[SFX_SAMPLE_SIZE];
+    memory_read(s->mem, sfx_data, sfx_data_offset,
+                sizeof(uint8_t) * sfx_data_size);
+
+    sound_t sfx = {
+        .data = sfx_data,
+        .size = sfx_data_size,
+        .volume = volume,
+    };
+    pthread_create(&sfx_thread, NULL, sfx_handler, &sfx);
+}
+
+static void play_music(riscv_t *rv)
+{
+    state_t *s = rv_userdata(rv); /* access userdata */
+
+    const uint32_t musicinfo_addr = (uint32_t) rv_get_reg(rv, rv_reg_a1);
+    int volume = rv_get_reg(rv, rv_reg_a2);
+    int looping = rv_get_reg(rv, rv_reg_a3);
+
+    musicinfo_t musicinfo;
+    memory_read(s->mem, (uint8_t *) &musicinfo, musicinfo_addr,
+                sizeof(musicinfo_t));
+
+    /*
+     * data and size in application must be placed at
+     * first two fields in structure so that it makes emulator
+     * compatible to any applications when accessing different sfxinfo_t
+     * from applications
+     */
+    uint32_t music_data_offset = *((uint32_t *) &musicinfo);
+    uint32_t music_data_size = *(uint32_t *) ((uint32_t *) &musicinfo + 1);
+    uint8_t music_data[MUSIC_MAX_SIZE];
+    memory_read(s->mem, music_data, music_data_offset, music_data_size);
+
+    sound_t music = {
+        .data = music_data,
+        .size = music_data_size,
+        .looping = looping,
+        .volume = volume,
+    };
+    pthread_create(&music_thread, NULL, music_handler, &music);
+}
+
+static void stop_music(riscv_t *rv UNUSED)
+{
+    if (Mix_PlayingMusic())
+        Mix_HaltMusic();
+}
+
+static void set_music_volume(riscv_t *rv)
+{
+    int volume = rv_get_reg(rv, rv_reg_a1);
+
+    /* multiplied by 8 because volume's max is 15 */
+    Mix_VolumeMusic(volume * 8);
+}
+
+static void init_audio()
+{
+    if (!(SDL_WasInit(-1) & SDL_INIT_AUDIO)) {
+        if (SDL_Init(SDL_INIT_AUDIO) != 0) {
+            fprintf(stderr, "Failed to call SDL_Init()\n");
+            exit(1);
+        }
+    }
+
+    /* sfx samples buffer */
+    sfx_samples = malloc(SFX_SAMPLE_SIZE);
+
+    /* Initialize SDL2 Mixer */
+    if (Mix_Init(MIX_INIT_MID) != MIX_INIT_MID) {
+        fprintf(stderr, "Mix_Init failed: %s\n", Mix_GetError());
+        exit(1);
+    }
+    if (Mix_OpenAudio(SAMPLE_RATE, AUDIO_U8, CHANNEL_USED, CHUNK_SIZE) == -1) {
+        fprintf(stderr, "Mix_OpenAudio failed: %s\n", Mix_GetError());
+        Mix_Quit();
+        exit(1);
+    }
+}
+
+static void shutdown_audio(riscv_t *rv)
+{
+    stop_music(rv);
+    Mix_HaltChannel(-1);
+    Mix_CloseAudio();
+    Mix_Quit();
+    free(music_midi_data);
+    free(sfx_samples);
+}
+
+void syscall_setup_audio(riscv_t *rv)
+{
+    /* setup_audio(request) */
+    const int request = rv_get_reg(rv, rv_reg_a0);
+
+    switch (request) {
+    case INIT_AUDIO:
+        init_audio();
+        break;
+    case SHUTDOWN_AUDIO:
+        shutdown_audio(rv);
+        break;
+    default:
+        fprintf(stderr, "unknown sound request\n");
+        break;
+    }
+}
+
+void syscall_control_audio(riscv_t *rv)
+{
+    /* control_audio(request) */
+    const int request = rv_get_reg(rv, rv_reg_a0);
+
+    switch (request) {
+    case PLAY_MUSIC:
+        play_music(rv);
+        break;
+    case PLAY_SFX:
+        play_sfx(rv);
+        break;
+    case SET_MUSIC_VOLUME:
+        set_music_volume(rv);
+        break;
+    case STOP_MUSIC:
+        stop_music(rv);
+        break;
+    default:
+        fprintf(stderr, "unknown sound control request\n");
+        break;
     }
 }

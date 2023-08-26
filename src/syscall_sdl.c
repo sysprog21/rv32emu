@@ -17,12 +17,11 @@
 
 #include "state.h"
 
-/*
- * Only the DSITMBK sound effect in DOOM1.WAD uses sample rate 22050
- * nonetheless, since we are playing single-player rather than multiplayer,
- * sticking with 11025 is acceptable.
+/* The DSITMBK sound effect in DOOM1.WAD uses a sample rate of 22050, but since
+ * the game is played in single-player mode, it is acceptable to stick with
+ * 11025.
  *
- * In Quake, most sound effects with sample rate 11025
+ * In Quake, most sound effects have a sample rate of 11025.
  */
 #define SAMPLE_RATE 11025
 
@@ -357,12 +356,11 @@ void syscall_submit_queue(riscv_t *rv)
  * 3. This notice may not be removed or altered from any source distribution.
  */
 
-/*
- * This is a straightforward MUS to MIDI converter made for programs
- * like DOOM that use MIDI to store sound.
+/* This is a simple MUS to MIDI converter designed for programs such as DOOM
+ * that utilize MIDI for sound storage.
  *
- * Sfx_handler can handle Quake's sound effects because they are all in WAV
- * format.
+ * The sfx_handler can also manage Quake's sound effects since they are all in
+ * WAV format.
  */
 
 typedef PACKED(struct {
@@ -627,8 +625,7 @@ static void *music_handler(void *arg)
         return NULL;
     }
 
-    /*
-     * multiplied by 8 because sfx->volume's max is 15
+    /* multiplied by 8 because sfx->volume's max is 15
      * further setting volume via syscall_set_music_volume
      */
     Mix_VolumeMusic(music->volume * 8);
@@ -651,11 +648,9 @@ static void play_sfx(riscv_t *rv)
     sfxinfo_t sfxinfo;
     memory_read(s->mem, (uint8_t *) &sfxinfo, sfxinfo_addr, sizeof(sfxinfo_t));
 
-    /*
-     * data and size in application must be placed at
-     * first two fields in structure so that it makes emulator
-     * compatible to any applications when accessing different sfxinfo_t
-     * from applications
+    /* The data and size in the application must be positioned in the first two
+     * fields of the structure. This ensures emulator compatibility with
+     * various applications when accessing different sfxinfo_t instances.
      */
     uint32_t sfx_data_offset = *((uint32_t *) &sfxinfo);
     uint32_t sfx_data_size = *(uint32_t *) ((uint32_t *) &sfxinfo + 1);
@@ -683,11 +678,9 @@ static void play_music(riscv_t *rv)
     memory_read(s->mem, (uint8_t *) &musicinfo, musicinfo_addr,
                 sizeof(musicinfo_t));
 
-    /*
-     * data and size in application must be placed at
-     * first two fields in structure so that it makes emulator
-     * compatible to any applications when accessing different sfxinfo_t
-     * from applications
+    /* The data and size in the application must be positioned in the first two
+     * fields of the structure. This ensures emulator compatibility with
+     * various applications when accessing different sfxinfo_t instances.
      */
     uint32_t music_data_offset = *((uint32_t *) &musicinfo);
     uint32_t music_data_size = *(uint32_t *) ((uint32_t *) &musicinfo + 1);

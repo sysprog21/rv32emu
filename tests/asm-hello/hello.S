@@ -8,7 +8,7 @@
 .set SYSEXIT,  93
 .set SYSWRITE, 64
 
-.data
+.section .rodata
 str: .ascii "Hello World!\n"
      .set str_size, .-str
 

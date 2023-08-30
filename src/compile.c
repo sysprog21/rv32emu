@@ -142,7 +142,11 @@ RVOP(jal, {
     if (ir->rd) {
         GEN("  rv->X[%u] = pc + %u;\n", ir->rd, ir->insn_len);
     }
-    NEXT_INSN(ir->pc + ir->imm);
+    if (ir->branch_taken) {
+        NEXT_INSN(ir->pc + ir->imm);
+    } else {
+        GEN("    return true;\n");
+    }
 })
 
 #define BRNACH_FUNC(type, comp)                                               \
@@ -150,30 +154,14 @@ RVOP(jal, {
         #type, ir->rs2);                                                      \
     UPDATE_PC(ir->imm);                                                       \
     if (ir->branch_taken) {                                                   \
-        block_t *block = cache_get(rv->block_cache, ir->pc + ir->imm);        \
-        if (!block) {                                                         \
-            ir->branch_taken = NULL;                                          \
-            GEN("    return true;\n");                                        \
-        } else {                                                              \
-            if (ir->branch_taken->pc != ir->pc + ir->imm)                     \
-                ir->branch_taken = block->ir;                                 \
-            NEXT_INSN(ir->pc + ir->imm);                                      \
-        }                                                                     \
+        NEXT_INSN(ir->pc + ir->imm);                                          \
     } else {                                                                  \
         GEN("    return true;\n");                                            \
     }                                                                         \
     GEN("  }\n");                                                             \
     UPDATE_PC(ir->insn_len);                                                  \
     if (ir->branch_untaken) {                                                 \
-        block_t *block = cache_get(rv->block_cache, ir->pc + ir->insn_len);   \
-        if (!block) {                                                         \
-            ir->branch_untaken = NULL;                                        \
-            GEN("    return true;\n");                                        \
-        } else {                                                              \
-            if (ir->branch_untaken->pc != ir->pc + ir->insn_len)              \
-                ir->branch_untaken = block->ir;                               \
-            NEXT_INSN(ir->pc + ir->insn_len);                                 \
-        }                                                                     \
+        NEXT_INSN(ir->pc + ir->insn_len);                                     \
     } else {                                                                  \
         GEN("  return true;\n");                                              \
     }
@@ -252,42 +240,34 @@ RVOP(csw, {
 RVOP(cjal, {
     GEN("  rv->X[1] = rv->PC + %u;\n", ir->insn_len);
     UPDATE_PC(ir->imm);
-    NEXT_INSN(ir->pc + ir->imm);
+    if (ir->branch_taken) {
+        NEXT_INSN(ir->pc + ir->imm);
+    } else {
+        GEN("    return true;\n");
+    }
 })
 
 RVOP(cj, {
     UPDATE_PC(ir->imm);
-    NEXT_INSN(ir->pc + ir->imm);
+    if (ir->branch_taken) {
+        NEXT_INSN(ir->pc + ir->imm);
+    } else {
+        GEN("    return true;\n");
+    }
 })
 
 RVOP(cbeqz, {
     GEN("  if (!rv->X[%u]){\n", ir->rs1);
     UPDATE_PC(ir->imm);
     if (ir->branch_taken) {
-        block_t *block = cache_get(rv->block_cache, ir->pc + ir->imm);
-        if (!block) {
-            ir->branch_taken = NULL;
-            GEN("    return true;\n");
-        } else {
-            if (ir->branch_taken->pc != ir->pc + ir->imm)
-                ir->branch_taken = block->ir;
-            NEXT_INSN(ir->pc + ir->imm);
-        }
+        NEXT_INSN(ir->pc + ir->imm);
     } else {
         GEN("    return true;\n");
     }
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
-        block_t *block = cache_get(rv->block_cache, ir->pc + ir->insn_len);
-        if (!block) {
-            ir->branch_untaken = NULL;
-            GEN("    return true;\n");
-        } else {
-            if (ir->branch_untaken->pc != ir->pc + ir->insn_len)
-                ir->branch_untaken = block->ir;
-            NEXT_INSN(ir->pc + ir->insn_len);
-        }
+        NEXT_INSN(ir->pc + ir->insn_len);
     } else {
         GEN("  return true;\n");
     }
@@ -297,30 +277,14 @@ RVOP(cbnez, {
     GEN("  if (rv->X[%u]){\n", ir->rs1);
     UPDATE_PC(ir->imm);
     if (ir->branch_taken) {
-        block_t *block = cache_get(rv->block_cache, ir->pc + ir->imm);
-        if (!block) {
-            ir->branch_taken = NULL;
-            GEN("    return true;\n");
-        } else {
-            if (ir->branch_taken->pc != ir->pc + ir->imm)
-                ir->branch_taken = block->ir;
-            NEXT_INSN(ir->pc + ir->imm);
-        }
+        NEXT_INSN(ir->pc + ir->imm);
     } else {
         GEN("    return true;\n");
     }
     GEN("  }\n");
     UPDATE_PC(ir->insn_len);
     if (ir->branch_untaken) {
-        block_t *block = cache_get(rv->block_cache, ir->pc + ir->insn_len);
-        if (!block) {
-            ir->branch_untaken = NULL;
-            GEN("    return true;\n");
-        } else {
-            if (ir->branch_untaken->pc != ir->pc + ir->insn_len)
-                ir->branch_untaken = block->ir;
-            NEXT_INSN(ir->pc + ir->insn_len);
-        }
+        NEXT_INSN(ir->pc + ir->insn_len);
     } else {
         GEN("  return true;\n");
     }
@@ -417,10 +381,22 @@ static void trace_ebb(riscv_t *rv, char *gencode, rv_insn_t *ir, set_t *set)
             break;
         ir++;
     }
-    if (ir->branch_untaken && !set_has(set, ir->branch_untaken->pc))
-        trace_ebb(rv, gencode, ir->branch_untaken, set);
-    if (ir->branch_taken && !set_has(set, ir->branch_taken->pc))
-        trace_ebb(rv, gencode, ir->branch_taken, set);
+    if (ir->branch_untaken && !set_has(set, ir->pc + ir->insn_len)) {
+        block_t *block = cache_get(rv->block_cache, ir->pc + ir->insn_len);
+        if (block) {
+            if (ir->branch_untaken->pc != ir->pc + ir->insn_len)
+                ir->branch_untaken = block->ir;
+            trace_ebb(rv, gencode, ir->branch_untaken, set);
+        }
+    }
+    if (ir->branch_taken && !set_has(set, ir->pc + ir->imm)) {
+        block_t *block = cache_get(rv->block_cache, ir->pc + ir->imm);
+        if (block) {
+            if (ir->branch_taken->pc != ir->pc + ir->imm)
+                ir->branch_taken = block->ir;
+            trace_ebb(rv, gencode, ir->branch_taken, set);
+        }
+    }
 }
 
 #define EPILOGUE "}"

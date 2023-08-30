@@ -33,7 +33,17 @@ RVOP(jal, {
         rv->X[ir->rd] = pc + ir->insn_len;
     /* check instruction misaligned */
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    return ir->branch_taken->impl(rv, ir->branch_taken);
+    if (ir->branch_taken) {
+#if RV32_HAS(JIT)
+        if (ir->branch_taken->pc != rv->PC ||
+            !cache_get(rv->block_cache, rv->PC)) {
+            clear_flag = true;
+            return true;
+        }
+#endif
+        return ir->branch_taken->impl(rv, ir->branch_taken);
+    }
+    return true;
 })
 
 /* The indirect jump instruction JALR uses the I-type encoding. The target
@@ -775,7 +785,17 @@ RVOP(cjal, {
     rv->X[rv_reg_ra] = rv->PC + ir->insn_len;
     rv->PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
-    return ir->branch_taken->impl(rv, ir->branch_taken);
+    if (ir->branch_taken) {
+#if RV32_HAS(JIT)
+        if (ir->branch_taken->pc != rv->PC ||
+            !cache_get(rv->block_cache, rv->PC)) {
+            clear_flag = true;
+            return true;
+        }
+#endif
+        return ir->branch_taken->impl(rv, ir->branch_taken);
+    }
+    return true;
 })
 
 /* C.LI loads the sign-extended 6-bit immediate, imm, into register rd.
@@ -841,7 +861,17 @@ RVOP(cand, { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; })
 RVOP(cj, {
     rv->PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
-    return ir->branch_taken->impl(rv, ir->branch_taken);
+    if (ir->branch_taken) {
+#if RV32_HAS(JIT)
+        if (ir->branch_taken->pc != rv->PC ||
+            !cache_get(rv->block_cache, rv->PC)) {
+            clear_flag = true;
+            return true;
+        }
+#endif
+        return ir->branch_taken->impl(rv, ir->branch_taken);
+    }
+    return true;
 })
 
 /* C.BEQZ performs conditional control transfers. The offset is sign-extended

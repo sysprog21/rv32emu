@@ -132,7 +132,7 @@ void mpool_free(mpool_t *mp, void *target)
     mp->chunk_count++;
 }
 
-void mpool_destory(mpool_t *mp)
+void mpool_destroy(mpool_t *mp)
 {
 #if defined(USE_MMAP)
     size_t mem_size = mp->page_count * getpagesize();

@@ -3,7 +3,6 @@
 /* Internal */
 static bool do_nop(riscv_t *rv, const rv_insn_t *ir)
 {
-    rv->X[rv_reg_zero] = 0;
     rv->csr_cycle++;
     rv->PC += ir->insn_len;
     const rv_insn_t *next = ir + 1;

@@ -449,7 +449,9 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
     /* decode I-type */
     decode_itype(ir, insn);
 
-    /* nop can be implemented as "addi x0, x0, 0" */
+    /* nop can be implemented as "addi x0, x0, 0".
+     * Any integer computational instruction writing into "x0" is NOP.
+     */
     if (unlikely(ir->rd == rv_reg_zero)) {
         ir->opcode = rv_insn_nop;
         return true;
@@ -505,6 +507,12 @@ static inline bool op_auipc(rv_insn_t *ir, const uint32_t insn)
 
     /* decode U-type */
     decode_utype(ir, insn);
+
+    /* Any integer computational instruction writing into "x0" is NOP. */
+    if (unlikely(ir->rd == rv_reg_zero)) {
+        ir->opcode = rv_insn_nop;
+        return true;
+    }
 
     ir->opcode = rv_insn_auipc;
     return true;
@@ -683,6 +691,12 @@ static inline bool op_lui(rv_insn_t *ir, const uint32_t insn)
 
     /* decode U-type */
     decode_utype(ir, insn);
+
+    /* Any integer computational instruction writing into "x0" is NOP. */
+    if (unlikely(ir->rd == rv_reg_zero)) {
+        ir->opcode = rv_insn_nop;
+        return true;
+    }
 
     ir->opcode = rv_insn_lui;
     return true;

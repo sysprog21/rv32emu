@@ -578,12 +578,16 @@ static void *sfx_handler(void *arg)
     sound_t *sfx = (sound_t *) arg;
     uint8_t *ptr = sfx->data;
 
-    /* parsing sound */
-    ptr += 2; /* skip format */
-    ptr += 2; /* skip sample rate since SAMPLE_RATE is defined */
-    nr_sfx_samples = *(uint32_t *) ptr;
-    ptr += 4;
-    ptr += 4; /* skip pad bytes */
+    if (*ptr & 0x3) { /* Doom WAV format */
+        ptr += 2;     /* skip format */
+        ptr += 2;     /* skip sample rate since SAMPLE_RATE is defined */
+        nr_sfx_samples = *(uint32_t *) ptr;
+        ptr += 4;
+        ptr += 4;  /* skip pad bytes */
+    } else {       /* Normal WAV format*/
+        ptr += 44; /* skip RIFF header */
+        nr_sfx_samples = sfx->size - 44;
+    }
 
     memcpy(sfx_samples, ptr, sizeof(uint8_t) * nr_sfx_samples);
     sfx_chunk = Mix_QuickLoad_RAW(sfx_samples, nr_sfx_samples);
@@ -594,8 +598,11 @@ static void *sfx_handler(void *arg)
     if (chan == -1)
         return NULL;
 
-    /* multiplied by 8 because sfx->volume's max is 15 */
-    Mix_Volume(chan, sfx->volume * 8);
+    if (*ptr & 0x3) /* Doom, multiplied by 8 because sfx->volume's max is 15 */
+        Mix_Volume(chan, sfx->volume * 8);
+    else /* Quake, + 1 mod by 128 because sfx->volume's max is 255 and
+            Mix_Volume's max is 128 */
+        Mix_Volume(chan, (sfx->volume + 1) % 128);
 
     return NULL;
 }

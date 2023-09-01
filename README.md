@@ -29,7 +29,7 @@ Features:
 * Memory-efficient design
 * Built-in ELF loader
 * Implementation of commonly used newlib system calls
-* Experimental SDL-based display/event system calls for running video games
+* Experimental SDL-based display/event/audio system calls for running video games
 * Support for remote GDB debugging
 
 ## Build and Verify

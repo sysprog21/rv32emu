@@ -37,7 +37,7 @@ void *mpool_calloc(struct mpool *mp);
 void mpool_free(struct mpool *mp, void *target);
 
 /**
- * mpool_destory - destroy a memory pool
+ * mpool_destroy - destroy a memory pool
  * @mp: a pointer points to the target memory pool
  */
-void mpool_destory(struct mpool *mp);
+void mpool_destroy(struct mpool *mp);

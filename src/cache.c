@@ -536,7 +536,7 @@ void cache_free(cache_t *cache, void (*callback)(void *))
 #endif
             callback(entry->value);
     }
-    mpool_destory(cache_mp);
+    mpool_destroy(cache_mp);
     free(cache->map->ht_list_head);
     free(cache->map);
     free(cache);

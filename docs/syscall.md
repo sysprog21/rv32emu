@@ -174,7 +174,7 @@ The request is similar to how music is managed earlier in the description and su
 Music data is defined in a structure called `musicinfo_t`. The SDL2_mixer library is used by the emulator to play music using the fields `data` and `size` in the structure.
 
 #### Sound Effect(sfx)
-`sfxinfo_t` is a structure that defines sound effect data and size. The `data` and `size` fields of the structure are used to play sound effect with the SDL2_mixer library.
+`sfxinfo_t` is a structure that defines sound effect data and size. The `data` and `size` fields of the structure are used to play sound effect with the SDL2_mixer library. Currently, support sound effect of [Doom's WAV](https://doomwiki.org/wiki/Sound) format and [normal WAV](https://en.wikipedia.org/wiki/WAV) format(includes [RIFF header](https://en.wikipedia.org/wiki/Resource_Interchange_File_Format)).
 
 ### `setup_audio` - setup or shutdown sound system
 

@@ -18,6 +18,9 @@
 * 1: Fist
 * 3: Shotgun
 
+### Music and sound effect(sfx)
+Support music and sound effects.
+
 ## Quake
 **source**: [quake-embedded](https://github.com/sysprog21/quake-embedded/)
 
@@ -47,6 +50,9 @@ make
 
 You may use the mouse to adjust the pitch and yaw angle
 
+### Music and sound effect(sfx)
+Support sound effects but not music currently because Quake needs a CD-ROM and the extracted pak file doesn't contain any music or bgm-related files.
+
 ### Limitations
 * Mouse wheel input is not supported
-* All sound functions are not implemented
+* Music related functions in Quake are not implemented

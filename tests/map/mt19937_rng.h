@@ -14,7 +14,7 @@
  */
 
 /* Initialize the random number generator with a seed */
-void initialize_generator(uint64_t seed);
+void mt19937_init(uint64_t seed);
 
 /* Generate and extract a 32-bit random number */
 uint64_t extract_number();

@@ -8,7 +8,7 @@
 static uint64_t MT[624];
 static uint64_t index = 0;
 
-void initialize_generator(uint64_t seed)
+void mt19937_init(uint64_t seed)
 {
     MT[0] = seed;
     for (int i = 1; i < 624; i++) {

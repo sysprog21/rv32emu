@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
     (void) argc;
     (void) argv;
 
-    initialize_generator(time(NULL));
+    mt19937_init(time(NULL));
 
     return test_map_mixed_operations();
 }

@@ -33,8 +33,8 @@ static int test_map_mixed_operations()
     }
 
     for (int i = 0; i < N_NODES; i++) {
-        int pos_a = extract_number() % N_NODES;
-        int pos_b = extract_number() % N_NODES;
+        int pos_a = mt19937_extract() % N_NODES;
+        int pos_b = mt19937_extract() % N_NODES;
         swap(&key[pos_a], &key[pos_b]);
         swap(&val[pos_a], &val[pos_b]);
     }

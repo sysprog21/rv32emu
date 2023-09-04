@@ -29,7 +29,7 @@ static void generate_numbers()
     }
 }
 
-uint64_t extract_number()
+uint64_t mt19937_extract()
 {
     if (index == 0) {
         generate_numbers();

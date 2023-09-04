@@ -10,7 +10,8 @@ CACHE_TEST_OBJS := \
 	test-cache.o
 
 MAP_TEST_OBJS := \
-	test-map.o mt19937_rng.o
+	test-map.o \
+	mt19937_rng.o
 
 CACHE_TEST_OBJS := $(addprefix $(CACHE_TEST_OUTDIR)/, $(CACHE_TEST_OBJS)) \
 		   $(OUT)/cache.o $(OUT)/mpool.o

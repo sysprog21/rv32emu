@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "map.h"
+#include "mt19937.h"
 
 static void swap(int *x, int *y)
 {
@@ -31,12 +32,9 @@ static int test_map_mixed_operations()
         val[i] = i + 1;
     }
 
-    /* TODO: This is not a reconmended way to randomize stuff, just a simple
-     * test. Using MT19937 might be better
-     */
     for (int i = 0; i < N_NODES; i++) {
-        int pos_a = rand() % N_NODES;
-        int pos_b = rand() % N_NODES;
+        int pos_a = mt19937_extract() % N_NODES;
+        int pos_b = mt19937_extract() % N_NODES;
         swap(&key[pos_a], &key[pos_b]);
         swap(&val[pos_a], &val[pos_b]);
     }
@@ -107,7 +105,7 @@ int main(int argc, char *argv[])
     (void) argc;
     (void) argv;
 
-    srand((unsigned) time(NULL));
+    mt19937_init(time(NULL));
 
     return test_map_mixed_operations();
 }

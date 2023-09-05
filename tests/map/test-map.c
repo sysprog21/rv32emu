@@ -5,7 +5,7 @@
 #include <time.h>
 
 #include "map.h"
-#include "mt19937_rng.h"
+#include "mt19937.h"
 
 static void swap(int *x, int *y)
 {

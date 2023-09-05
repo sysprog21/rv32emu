@@ -3,7 +3,7 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-#include "mt19937_rng.h"
+#include "mt19937.h"
 
 static uint64_t MT[624];
 static uint64_t index = 0;

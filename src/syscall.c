@@ -3,6 +3,7 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,7 @@
 #include "state.h"
 #include "utils.h"
 
+#define PREALLOC_SIZE 4096
 /* newlib is a portable (not RISC-V specific) C library, which implements
  * printf(3) and other functions described in C standards. Some system calls
  * should be provided in conjunction with newlib.
@@ -75,6 +77,7 @@ static const char *get_mode_str(uint32_t flags, uint32_t mode UNUSED)
     }
 }
 
+static uint8_t tmp[PREALLOC_SIZE];
 static void syscall_write(riscv_t *rv)
 {
     state_t *s = rv_userdata(rv); /* access userdata */
@@ -84,26 +87,39 @@ static void syscall_write(riscv_t *rv)
     riscv_word_t buffer = rv_get_reg(rv, rv_reg_a1);
     riscv_word_t count = rv_get_reg(rv, rv_reg_a2);
 
-    /* read the string being printed */
-    uint8_t *tmp = malloc(count);
-    memory_read(s->mem, tmp, buffer, count);
-
     /* lookup the file descriptor */
     map_iter_t it;
     map_find(s->fd_map, &it, &fd);
+    uint32_t total_write = 0;
+
+    while (count > PREALLOC_SIZE) {
+        memory_read(s->mem, tmp, buffer + total_write, PREALLOC_SIZE);
+        if (!map_at_end(s->fd_map, &it)) {
+            /* write out the data */
+            size_t written =
+                fwrite(tmp, 1, PREALLOC_SIZE, map_iter_value(&it, FILE *));
+            total_write += written;
+            count -= PREALLOC_SIZE;
+        } else
+            goto error_handler;
+    }
+    memory_read(s->mem, tmp, buffer + total_write, count);
     if (!map_at_end(s->fd_map, &it)) {
         /* write out the data */
         size_t written = fwrite(tmp, 1, count, map_iter_value(&it, FILE *));
-
-        /* return number of bytes written */
-        rv_set_reg(rv, rv_reg_a0, written);
-    } else {
-        /* error */
-        rv_set_reg(rv, rv_reg_a0, -1);
-    }
-
-    free(tmp);
+        total_write += written;
+    } else
+        goto error_handler;
+    assert(total_write == rv_get_reg(rv, rv_reg_a2));
+    /* return number of bytes written */
+    rv_set_reg(rv, rv_reg_a0, total_write);
+    return;
+    /* read the string being printed */
+error_handler:
+    /* error */
+    rv_set_reg(rv, rv_reg_a0, -1);
 }
+
 
 static void syscall_exit(riscv_t *rv)
 {
@@ -259,15 +275,21 @@ static void syscall_read(riscv_t *rv)
     }
 
     FILE *handle = map_iter_value(&it, FILE *);
-
+    uint32_t total_read = 0;
     /* read the file into runtime memory */
-    uint8_t *tmp = malloc(count);
-    size_t r = fread(tmp, 1, count, handle);
-    memory_write(s->mem, buf, tmp, r);
-    free(tmp);
 
+    while (count > PREALLOC_SIZE) {
+        size_t r = fread(tmp, 1, PREALLOC_SIZE, handle);
+        memory_write(s->mem, buf + total_read, tmp, r);
+        count -= PREALLOC_SIZE;
+        total_read += PREALLOC_SIZE;
+    }
+    size_t r = fread(tmp, 1, count, handle);
+    memory_write(s->mem, buf + total_read, tmp, r);
+    total_read += r;
+    assert(total_read == rv_get_reg(rv, rv_reg_a2));
     /* success */
-    rv_set_reg(rv, rv_reg_a0, r);
+    rv_set_reg(rv, rv_reg_a0, total_read);
 }
 
 static void syscall_fstat(riscv_t *rv UNUSED)

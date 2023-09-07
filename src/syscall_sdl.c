@@ -175,6 +175,8 @@ static void event_push(riscv_t *rv, event_t event)
 
 static inline uint32_t round_pow2(uint32_t x)
 {
+    if (x <= 1)
+        return 1;
 #if defined(__GNUC__) || defined(__clang__)
     x = 1 << (32 - __builtin_clz(x - 1));
 #else

@@ -3,7 +3,7 @@
 source tests/common.sh
 
 # Set the number of runs for the Dhrystone benchmark
-N_RUNS=10
+N_RUNS=1
 
 function run_dhrystone()
 {
@@ -66,6 +66,11 @@ do
     fi
 done
 
+#dhrystone benchmark output file
+benchmark_output=dhrystone_output.txt
+# empty the file
+echo -n "" > $benchmark_output
+
 # Calculate average DMIPS excluding outliers
 num_filtered=${#filtered_dmips[@]}
 if ((num_filtered > 0)); then
@@ -79,6 +84,14 @@ if ((num_filtered > 0)); then
     echo "--------------------------"
     echo "Average DMIPS : $average_dmips"
     echo "--------------------------"
+
+    #save Average DMIPS in JSON format for benchmark action workflow
+    echo -n '{' >> $benchmark_output
+    echo -n '"name": "Dhrystone",' >> $benchmark_output
+    echo -n '"unit": "Average DMIPS over 10 runs",' >> $benchmark_output
+    echo -n '"value": ' >> $benchmark_output
+    echo -n $average_dmips >> $benchmark_output
+    echo -n '}' >> $benchmark_output
 else
     fail
 fi

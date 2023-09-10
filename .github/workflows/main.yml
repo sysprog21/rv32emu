@@ -6,7 +6,7 @@ jobs:
   rv32emu:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.6.0
+    - uses: actions/checkout@v4
     - name: install-dependencies
       run: |
             sudo apt-get update
@@ -35,7 +35,7 @@ jobs:
   arch-tests:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.6.0
+    - uses: actions/checkout@v4
     - name: install-dependencies
       run: |
            sh .ci/riscv-toolchain-install.sh
@@ -48,7 +48,7 @@ jobs:
   coding-style:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.6.0
+    - uses: actions/checkout@v4
     - name: coding convention
       run: |
             sudo apt-get install -q -y clang-format-12

@@ -38,7 +38,7 @@ static void get_time_info(int32_t *tv_sec, int32_t *tv_usec)
     /* Hope that the multiplication doesn't overflow. */
     uint64_t nsecs = mach_absolute_time() * info.numer / info.denom;
     *tv_sec = nsecs / 1e9;
-    *tv_usec = (nsecs / 1e3) - (tv_sec * 1e6);
+    *tv_usec = (nsecs / 1e3) - (*tv_sec * 1e6);
 #else /* low resolution timer */
     clock_t t = clock();
     *tv_sec = t / CLOCKS_PER_SEC;

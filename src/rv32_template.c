@@ -764,8 +764,7 @@ RVOP(csw, {
     rv->io.mem_write_w(addr, rv->X[ir->rs2]);
 })
 
-/* C.NOP */
-RVOP(cnop, {/* no operation */})
+/* C.NOP is mapped to NOP */
 
 /* C.ADDI adds the non-zero sign-extended 6-bit immediate to the value in
  * register rd then writes the result to rd. C.ADDI expands into

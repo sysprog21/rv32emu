@@ -43,7 +43,9 @@ jobs:
           name: Benchmarks
           tool: 'customBiggerIsBetter'
           output-file-path: benchmark_output.txt
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.RV32EMU_BENCH_TOKEN }}
+          gh-repository: 'github.com/sysprog21/rv32emu-bench'
+          gh-pages-branch: 'master'
           auto-push: true
           comment-always: true
           benchmark-data-dir-path: .

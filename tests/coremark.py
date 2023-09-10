@@ -3,6 +3,7 @@ import subprocess
 import re
 import numpy
 import os
+import json
 
 iter = 10
 res = []
@@ -37,3 +38,14 @@ for n in res:
         res.remove(n)
 
 print("{:.3f}".format(numpy.mean(res, dtype=numpy.float64)))
+
+#save Average Iterations/Sec in JSON format for benchmark action workflow
+benchmark_output = "coremark_output.txt"
+benchmark_data = {
+    "name":"Coremark", 
+    "unit":"Average iterations/sec over 10 runs", 
+    "value":float("{:.3f}".format(numpy.mean(res, dtype=numpy.float64)))
+}
+f = open(benchmark_output, "w")
+f.write(json.dumps(benchmark_data))
+f.close()

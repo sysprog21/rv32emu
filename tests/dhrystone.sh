@@ -67,7 +67,7 @@ do
 done
 
 #dhrystone benchmark output file
-benchmark_output=dhrystone_output.txt
+benchmark_output=dhrystone_output.json
 # empty the file
 echo -n "" > $benchmark_output
 

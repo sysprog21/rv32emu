@@ -40,7 +40,7 @@ for n in res:
 print("{:.3f}".format(numpy.mean(res, dtype=numpy.float64)))
 
 #save Average Iterations/Sec in JSON format for benchmark action workflow
-benchmark_output = "coremark_output.txt"
+benchmark_output = "coremark_output.json"
 benchmark_data = {
     "name":"Coremark", 
     "unit":"Average iterations/sec over 10 runs", 

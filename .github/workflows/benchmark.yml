@@ -8,7 +8,7 @@ jobs:
     if: contains(toJSON(github.event.head_commit.message), 'Merge pull request ') == false
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3.6.0
+      - uses: actions/checkout@v4
       - name: Test changed files
         id: changed-files
         uses: tj-actions/changed-files@v39
@@ -21,10 +21,7 @@ jobs:
         if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
             github.event_name == 'workflow_dispatch'}}
         run: |
-            sudo apt-get update
-            sudo apt-get install libsdl2-dev libsdl2-mixer-dev
             sudo pip3 install numpy
-            sh .ci/riscv-toolchain-install.sh
         shell: bash
       - name: default build
         if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
@@ -34,7 +31,7 @@ jobs:
         if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
             github.event_name == 'workflow_dispatch'}}
         run: |
-          ./tests/benchmark_combiner.py
+          tests/bench-aggregator.py
       - name: Store benchmark results
         if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
             github.event_name == 'workflow_dispatch'}}
@@ -42,7 +39,7 @@ jobs:
         with:
           name: Benchmarks
           tool: 'customBiggerIsBetter'
-          output-file-path: benchmark_output.txt
+          output-file-path: benchmark_output.json
           github-token: ${{ secrets.RV32EMU_BENCH_TOKEN }}
           gh-repository: 'github.com/sysprog21/rv32emu-bench'
           gh-pages-branch: 'master'

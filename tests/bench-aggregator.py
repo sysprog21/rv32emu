@@ -20,12 +20,12 @@ for b in benchmarks:
 
 # combine benchmarks output data
 benchmarks_output = [
-    "dhrystone_output.txt", 
-    "coremark_output.txt"
+    "dhrystone_output.json", 
+    "coremark_output.json"
 ]
 benchmark_data = [load_benchmark(bo) for bo in benchmarks_output]
 
-benchmark_output = "benchmark_output.txt"
+benchmark_output = "benchmark_output.json"
 f = open(benchmark_output, "w")
 f.write(json.dumps(benchmark_data, indent=4))
 f.close()

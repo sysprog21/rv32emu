@@ -1,13 +1,7 @@
 /* RV32I Base Instruction Set */
 
 /* Internal */
-static bool do_nop(riscv_t *rv, const rv_insn_t *ir)
-{
-    rv->csr_cycle++;
-    rv->PC += ir->insn_len;
-    const rv_insn_t *next = ir + 1;
-    MUST_TAIL return next->impl(rv, next);
-}
+RVOP(nop, { rv->X[rv_reg_zero] = 0; })
 
 /* LUI is used to build 32-bit constants and uses the U-type format. LUI
  * places the U-immediate value in the top 20 bits of the destination

@@ -71,7 +71,7 @@ typedef struct {
 void block_map_clear(block_map_t *map);
 
 struct riscv_internal {
-    bool halt;
+    bool halt; /* indicate whether the core is halted */
 
     /* I/O interface */
     riscv_io_t io;
@@ -107,16 +107,16 @@ struct riscv_internal {
 #endif
 
     /* csr registers */
-    uint64_t csr_cycle;
-    uint32_t csr_time[2];
-    uint32_t csr_mstatus;
-    uint32_t csr_mtvec;
-    uint32_t csr_misa;
-    uint32_t csr_mtval;
-    uint32_t csr_mcause;
-    uint32_t csr_mscratch;
-    uint32_t csr_mepc;
-    uint32_t csr_mip;
+    uint64_t csr_cycle;    /* Machine cycle counter */
+    uint32_t csr_time[2];  /* Performance conter */
+    uint32_t csr_mstatus;  /* Machine status regester */
+    uint32_t csr_mtvec;    /* Machine trap-handler base address */
+    uint32_t csr_misa;     /* ISA and extensions */
+    uint32_t csr_mtval;    /* Machine bad address or instruction */
+    uint32_t csr_mcause;   /* Machine trap cause */
+    uint32_t csr_mscratch; /* Scartch register for machine trap handler */
+    uint32_t csr_mepc;     /* Machine exception program counter */
+    uint32_t csr_mip;      /* Machine interrupt pending */
     uint32_t csr_mbadaddr;
 
     bool compressed;       /**< current instruction is compressed or not */

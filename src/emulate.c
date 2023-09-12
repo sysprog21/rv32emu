@@ -299,7 +299,6 @@ static uint32_t last_pc = 0;
 #define RVOP(inst, code)                                    \
     static bool do_##inst(riscv_t *rv, const rv_insn_t *ir) \
     {                                                       \
-        rv->X[rv_reg_zero] = 0;                             \
         rv->csr_cycle++;                                    \
         code;                                               \
     nextop:                                                 \
@@ -339,7 +338,6 @@ enum {
 /* AUIPC + ADDI */
 static bool do_fuse1(riscv_t *rv, const rv_insn_t *ir)
 {
-    rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += 2;
     rv->X[ir->rd] = rv->PC + ir->imm;
     rv->X[ir->rs1] = rv->X[ir->rd] + ir->imm2;
@@ -353,7 +351,6 @@ static bool do_fuse1(riscv_t *rv, const rv_insn_t *ir)
 /* AUIPC + ADD */
 static bool do_fuse2(riscv_t *rv, const rv_insn_t *ir)
 {
-    rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += 2;
     rv->X[ir->rd] = rv->PC + ir->imm;
     rv->X[ir->rs2] = rv->X[ir->rd] + rv->X[ir->rs1];
@@ -367,7 +364,6 @@ static bool do_fuse2(riscv_t *rv, const rv_insn_t *ir)
 /* multiple SW */
 static bool do_fuse3(riscv_t *rv, const rv_insn_t *ir)
 {
-    rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
@@ -391,7 +387,6 @@ static bool do_fuse3(riscv_t *rv, const rv_insn_t *ir)
 /* multiple LW */
 static bool do_fuse4(riscv_t *rv, const rv_insn_t *ir)
 {
-    rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
@@ -415,7 +410,6 @@ static bool do_fuse4(riscv_t *rv, const rv_insn_t *ir)
 /* LUI + ADDI */
 static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
 {
-    rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += 2;
     rv->X[ir->rd] = ir->imm;
     rv->X[ir->rs1] = ir->imm + ir->imm2;
@@ -429,7 +423,6 @@ static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
 /* memset */
 static bool do_fuse6(riscv_t *rv, const rv_insn_t *ir)
 {
-    rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += 2;
     memory_t *m = ((state_t *) rv->userdata)->mem;
     memset((char *) m->mem_base + rv->X[rv_reg_a0], rv->X[rv_reg_a1],
@@ -444,7 +437,6 @@ static bool do_fuse6(riscv_t *rv, const rv_insn_t *ir)
 /* memcpy */
 static bool do_fuse7(riscv_t *rv, const rv_insn_t *ir)
 {
-    rv->X[rv_reg_zero] = 0;
     rv->csr_cycle += 2;
     memory_t *m = ((state_t *) rv->userdata)->mem;
     memcpy((char *) m->mem_base + rv->X[rv_reg_a0],

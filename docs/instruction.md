@@ -1,5 +1,17 @@
 # RISC-V instructions
 
+## ISA extensions
+
+RISC-V is designed for extensibility. A RISC-V platform must implement a base
+integer instruction set (such as RV32I or RV64I, which are ratified, or RV32E
+or RV128I, which are proposed) that defines a core set of basic instructions.
+Additional functionality is then provided through optional extensions.
+For example, the "M" extension adds integer multiplication and division
+capabilities, while the "F" extension introduces support for single-precision
+floating-point arithmetic.
+
+## Instruction Encoding
+
 In RISC-V, there are only a small number of instruction layouts (named with
 letters: Register/register, Immediate/register, Store, Upper immediate, Branch,
 and Jump), which is refreshing, and the choice to reserve two bits in the

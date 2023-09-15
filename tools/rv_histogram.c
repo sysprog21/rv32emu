@@ -137,7 +137,7 @@ static void print_usage(const char *filename)
             "rv_histogram which loads an ELF file to execute.\n"
             "Usage: %s [option] [elf_file_path]\n"
             "available options: -a, print the histogram in "
-            "ascending order(default is on decending order)\n"
+            "ascending order(default is on descending order)\n"
             "                 : -r, analysis on registers\n",
             filename);
 }

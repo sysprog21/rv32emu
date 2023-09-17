@@ -26,12 +26,16 @@ memory_t *memory_new()
 #if defined(USE_MMAP)
     data_memory_base = mmap(NULL, MEM_SIZE, PROT_READ | PROT_WRITE,
                             MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    if (data_memory_base == MAP_FAILED)
+    if (data_memory_base == MAP_FAILED) {
+        free(mem);
         return NULL;
+    }
 #else
     data_memory_base = malloc(MEM_SIZE);
-    if (!data_memory_base)
+    if (!data_memory_base) {
+        free(mem);
         return NULL;
+    }
 #endif
     mem->mem_base = data_memory_base;
     mem->mem_size = MEM_SIZE;
@@ -45,6 +49,7 @@ void memory_delete(memory_t *mem)
 #else
     free(mem->mem_base);
 #endif
+    free(mem);
 }
 
 void memory_read(memory_t *mem, uint8_t *dst, uint32_t addr, uint32_t size)

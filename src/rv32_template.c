@@ -51,6 +51,9 @@ RVOP(jalr, {
         rv->X[ir->rd] = pc + ir->insn_len;
     /* check instruction misaligned */
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
+    block_t *block = block_find(&rv->block_map, rv->PC);
+    if (block)
+        return block->ir->impl(rv, block->ir);
     return true;
 })
 
@@ -904,6 +907,9 @@ RVOP(clwsp, {
 /* C.JR */
 RVOP(cjr, {
     rv->PC = rv->X[ir->rs1];
+    block_t *block = block_find(&rv->block_map, rv->PC);
+    if (block)
+        return block->ir->impl(rv, block->ir);
     return true;
 })
 
@@ -924,6 +930,9 @@ RVOP(cjalr, {
     rv->X[rv_reg_ra] = rv->PC + ir->insn_len;
     rv->PC = jump_to;
     RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
+    block_t *block = block_find(&rv->block_map, rv->PC);
+    if (block)
+        return block->ir->impl(rv, block->ir);
     return true;
 })
 

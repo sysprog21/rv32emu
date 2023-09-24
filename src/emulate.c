@@ -265,6 +265,67 @@ void rv_debug(riscv_t *rv)
 }
 #endif /* RV32_HAS(GDBSTUB) */
 
+/* hash function is used when mapping address into the block map */
+static inline uint32_t hash(size_t k)
+{
+    k ^= k << 21;
+    k ^= k >> 17;
+#if (SIZE_MAX > 0xFFFFFFFF)
+    k ^= k >> 35;
+    k ^= k >> 51;
+#endif
+    return k;
+}
+
+/* allocate a basic block */
+static block_t *block_alloc(const uint8_t bits)
+{
+    block_t *block = malloc(sizeof(struct block));
+    assert(block);
+    block->insn_capacity = 1 << bits;
+    block->n_insn = 0;
+    block->predict = NULL;
+    block->ir = malloc(block->insn_capacity * sizeof(rv_insn_t));
+    assert(block->ir);
+    return block;
+}
+
+/* insert a block into block map */
+static void block_insert(block_map_t *map, const block_t *block)
+{
+    assert(map && block);
+    const uint32_t mask = map->block_capacity - 1;
+    uint32_t index = hash(block->pc_start);
+
+    /* insert into the block map */
+    for (;; index++) {
+        if (!map->map[index & mask]) {
+            map->map[index & mask] = (block_t *) block;
+            break;
+        }
+    }
+    map->size++;
+}
+
+/* try to locate an already translated block in the block map */
+static block_t *block_find(const block_map_t *map, const uint32_t addr)
+{
+    assert(map);
+    uint32_t index = hash(addr);
+    const uint32_t mask = map->block_capacity - 1;
+
+    /* find block in block map */
+    for (;; index++) {
+        block_t *block = map->map[index & mask];
+        if (!block)
+            return NULL;
+
+        if (block->pc_start == addr)
+            return block;
+    }
+    return NULL;
+}
+
 static inline bool insn_is_misaligned(uint32_t pc)
 {
     return (pc &
@@ -490,65 +551,6 @@ static inline bool insn_is_unconditional_branch(uint8_t opcode)
         return true;
     }
     return false;
-}
-
-/* hash function is used when mapping address into the block map */
-static inline uint32_t hash(size_t k)
-{
-    k ^= k << 21;
-    k ^= k >> 17;
-#if (SIZE_MAX > 0xFFFFFFFF)
-    k ^= k >> 35;
-    k ^= k >> 51;
-#endif
-    return k;
-}
-
-/* allocate a basic block */
-static block_t *block_alloc(const uint8_t bits)
-{
-    block_t *block = malloc(sizeof(struct block));
-    block->insn_capacity = 1 << bits;
-    block->n_insn = 0;
-    block->predict = NULL;
-    block->ir = malloc(block->insn_capacity * sizeof(rv_insn_t));
-    return block;
-}
-
-/* insert a block into block map */
-static void block_insert(block_map_t *map, const block_t *block)
-{
-    assert(map && block);
-    const uint32_t mask = map->block_capacity - 1;
-    uint32_t index = hash(block->pc_start);
-
-    /* insert into the block map */
-    for (;; index++) {
-        if (!map->map[index & mask]) {
-            map->map[index & mask] = (block_t *) block;
-            break;
-        }
-    }
-    map->size++;
-}
-
-/* try to locate an already translated block in the block map */
-static block_t *block_find(const block_map_t *map, const uint32_t addr)
-{
-    assert(map);
-    uint32_t index = hash(addr);
-    const uint32_t mask = map->block_capacity - 1;
-
-    /* find block in block map */
-    for (;; index++) {
-        block_t *block = map->map[index & mask];
-        if (!block)
-            return NULL;
-
-        if (block->pc_start == addr)
-            return block;
-    }
-    return NULL;
 }
 
 static void block_translate(riscv_t *rv, block_t *block)

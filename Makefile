@@ -122,6 +122,7 @@ $(BIN): $(OBJS)
 
 # Tools
 include mk/tools.mk
+tool: $(TOOLS_BIN)
 
 # RISC-V Architecture Tests
 include mk/riscv-arch-test.mk

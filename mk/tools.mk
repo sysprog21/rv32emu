@@ -1,6 +1,6 @@
 HIST_BIN := $(OUT)/rv_histogram
 
-# FIXME: riscv.o and map.o are dependency of elf.o not the tool
+# FIXME: riscv.o and map.o are dependencies of 'elf.o', not 'rv_histogram'.
 HIST_OBJS := \
 	riscv.o \
 	map.o \
@@ -15,9 +15,9 @@ $(OUT)/%.o: tools/%.c
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -Wno-missing-field-initializers -Isrc -c -MMD -MF $@.d $<
 
-# GDBSTUB is diabled for excluding the mini-gdb during compilation
+# GDBSTUB is disabled to exclude the mini-gdb during compilation.
 $(HIST_BIN): $(HIST_OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ -D RV32_FEATURE_GDBSTUB=0 $^ $(LDFLAGS) 
 
-tool: $(HIST_BIN)
+TOOLS_BIN += $(HIST_BIN)

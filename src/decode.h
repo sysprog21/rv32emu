@@ -270,7 +270,7 @@ typedef struct rv_insn {
     /* fuse operation */
     int32_t imm2;
     opcode_fuse_t *fuse;
-
+    uint32_t pc;
     /* instruction length */
     uint8_t insn_len;
 

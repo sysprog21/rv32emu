@@ -8,6 +8,15 @@ else
     endif
 endif
 
+# As of Xcode 15, linker warnings are emitted if duplicate '-l' options are
+# present. Until such linkopts can be deduped by the build system, we disable
+# these warnings.
+ifeq ($(UNAME_S),Darwin)
+    ifneq ($(shell ld -version_details | cut -f2 -d: | grep 15.0.0),)
+        LDFLAGS += -Wl,-no_warn_duplicate_libraries
+    endif
+endif
+
 # Supported GNU Toolchain for RISC-V
 TOOLCHAIN_LIST := riscv-none-elf-      \
 		  riscv32-unknown-elf- \

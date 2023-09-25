@@ -14,9 +14,11 @@ jobs:
         uses: tj-actions/changed-files@v39
         with:
           files: |
+              src/riscv.c
               src/decode.c
               src/emulate.c
               src/rv32_template.c
+              src/rv32_constopt.c
       - name: install-dependencies
         if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
             github.event_name == 'workflow_dispatch'}}

@@ -209,9 +209,11 @@ The results of the benchmark will be rendered on a [GitHub page](https://sysprog
 Check [benchmark-action/github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) for the reference of benchmark CI workflow.
 
 There are several files that have the potential to significantly impact the performance of `rv32emu`, including:
+* `src/riscv.c`
 * `src/decode.c`
-* `src/rv32_template.c`
 * `src/emulate.c`
+* `src/rv32_template.c`
+* `src/rv32_constopt.c`
 
 As a result, any modifications made to these files will trigger the benchmark CI.
 

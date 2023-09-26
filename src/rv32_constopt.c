@@ -443,8 +443,8 @@ CONSTOPT(mulh, {
     if (constopt_info->is_constant[ir->rs1] &&
         constopt_info->is_constant[ir->rs2]) {
         constopt_info->is_constant[ir->rd] = true;
-        const int64_t a = constopt_info->const_val[ir->rs1];
-        const int64_t b = constopt_info->const_val[ir->rs2];
+        const int64_t a = (int32_t) constopt_info->const_val[ir->rs1];
+        const int64_t b = (int32_t) constopt_info->const_val[ir->rs2];
         ir->imm = ((uint64_t) (a * b)) >> 32;
         constopt_info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
@@ -457,7 +457,6 @@ CONSTOPT(mulh, {
 CONSTOPT(mulhsu, {
     if (constopt_info->is_constant[ir->rs1] &&
         constopt_info->is_constant[ir->rs2]) {
-        printf("OPT MUL\n");
         constopt_info->is_constant[ir->rd] = true;
         const int64_t a = (int32_t) constopt_info->const_val[ir->rs1];
         const int64_t b = constopt_info->const_val[ir->rs2];
@@ -756,19 +755,17 @@ CONSTOPT(csw, {})
  */
 CONSTOPT(caddi, {
     if (constopt_info->is_constant[ir->rd]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rd] + (uint16_t) ir->imm;
+        ir->imm = constopt_info->const_val[ir->rd] + (int16_t) ir->imm;
         constopt_info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
-        constopt_info->is_constant[ir->rd] = false;
+    }
 })
 
 /* C.JAL */
 CONSTOPT(cjal, {
     constopt_info->is_constant[rv_reg_ra] = true;
-    constopt_info->const_val[ir->rd] = ir->pc + ir->insn_len;
+    constopt_info->const_val[rv_reg_ra] = ir->pc + ir->insn_len;
 })
 
 /* C.LI loads the sign-extended 6-bit immediate, imm, into register rd.
@@ -787,13 +784,11 @@ CONSTOPT(cli, {
  */
 CONSTOPT(caddi16sp, {
     if (constopt_info->is_constant[ir->rd]) {
-        constopt_info->is_constant[ir->rd] = true;
         ir->imm = constopt_info->const_val[ir->rd] + ir->imm;
         constopt_info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
-        constopt_info->is_constant[ir->rd] = false;
+    }
 })
 
 /* C.LUI loads the non-zero 6-bit immediate field into bits 17–12 of the
@@ -815,13 +810,12 @@ CONSTOPT(clui, {
  */
 CONSTOPT(csrli, {
     if (constopt_info->is_constant[ir->rs1]) {
-        constopt_info->is_constant[ir->rs1] = true;
         ir->imm = constopt_info->const_val[ir->rs1] >> ir->shamt;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        constopt_info->const_val[ir->rs1] = ir->imm;
+        ir->rd = ir->rs1;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
-        constopt_info->is_constant[ir->rs1] = false;
+    }
 })
 
 /* C.SRAI is defined analogously to C.SRLI, but instead performs an
@@ -830,15 +824,14 @@ CONSTOPT(csrli, {
 CONSTOPT(csrai, {
     if (constopt_info->is_constant[ir->rs1]) {
         const uint32_t mask = 0x80000000 & constopt_info->const_val[ir->rs1];
-        constopt_info->is_constant[ir->rs1] = true;
         ir->imm = constopt_info->const_val[ir->rs1] >> ir->shamt;
         for (unsigned int i = 0; i < ir->shamt; ++i)
             ir->imm |= mask >> i;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        constopt_info->const_val[ir->rs1] = ir->imm;
+        ir->rd = ir->rs1;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
-        constopt_info->is_constant[ir->rs1] = false;
+    }
 })
 
 /* C.ANDI is a CB-format instruction that computes the bitwise AND of the
@@ -847,13 +840,12 @@ CONSTOPT(csrai, {
  */
 CONSTOPT(candi, {
     if (constopt_info->is_constant[ir->rs1]) {
-        constopt_info->is_constant[ir->rs1] = true;
-        ir->imm = constopt_info->const_val[ir->rs1] & ir->shamt;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        ir->imm = constopt_info->const_val[ir->rs1] & ir->imm;
+        constopt_info->const_val[ir->rs1] = ir->imm;
+        ir->rd = ir->rs1;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
-        constopt_info->is_constant[ir->rs1] = false;
+    }
 })
 
 /* C.SUB */
@@ -947,13 +939,11 @@ CONSTOPT(cbnez, {
  */
 CONSTOPT(cslli, {
     if (constopt_info->is_constant[ir->rd]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs2] << (uint8_t) ir->imm;
+        ir->imm = constopt_info->const_val[ir->rd] << (uint8_t) ir->imm;
         constopt_info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
-        constopt_info->is_constant[ir->rd] = false;
+    }
 })
 
 /* C.LWSP */
@@ -970,8 +960,7 @@ CONSTOPT(cmv, {
         constopt_info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
-        constopt_info->is_constant[ir->rd] = false;
+    }
 })
 
 /* C.EBREAK */

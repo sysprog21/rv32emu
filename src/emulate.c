@@ -918,41 +918,37 @@ static void match_pattern(block_t *block)
         switch (ir->opcode) {
         case rv_insn_lui:
             next_ir = ir + 1;
-            if (next_ir->opcode == rv_insn_add && ir->rd == next_ir->rs2) {
-                /* The destination register of the LUI instruction is the
-                 * same as the source register 2 of the next instruction ADD.
-                 */
-                ir->opcode = rv_insn_fuse2;
-                ir->rs2 = next_ir->rd;
-                ir->rs1 = next_ir->rs1;
-                ir->impl = dispatch_table[ir->opcode];
-            } else if (next_ir->opcode == rv_insn_add &&
-                       ir->rd == next_ir->rs1) {
-                /* The destination register of the LUI instruction is the
-                 * same as the source register 1 of the next instruction ADD.
-                 */
-                ir->opcode = rv_insn_fuse2;
-                ir->rs2 = next_ir->rd;
-                ir->rs1 = next_ir->rs2;
-                ir->impl = dispatch_table[ir->opcode];
-            } else {
+            switch (next_ir->opcode) {
+            case rv_insn_add:
+                if (ir->rd == next_ir->rs2 || ir->rd == next_ir->rs1) {
+                    ir->opcode = rv_insn_fuse2;
+                    ir->rs2 = next_ir->rd;
+                    if (ir->rd == next_ir->rs2)
+                        ir->rs1 = next_ir->rs1;
+                    else
+                        ir->rs1 = next_ir->rs2;
+                    ir->impl = dispatch_table[ir->opcode];
+                    ir->tailcall = next_ir->tailcall;
+                }
+                break;
+            case rv_insn_lui:
                 count = 1;
-                next_ir = ir + 1;
                 while (1) {
                     if (next_ir->opcode != rv_insn_lui)
                         break;
                     next_ir->opcode = rv_insn_nop;
                     count++;
-                    next_ir += 1;
+                    if (next_ir->tailcall)
+                        break;
+                    next_ir++;
                 }
-                if (count > 1) {
-                    ir->imm2 = count;
-                    ir->opcode = rv_insn_fuse1;
-                    ir->impl = dispatch_table[ir->opcode];
-                }
+                ir->imm2 = count;
+                ir->opcode = rv_insn_fuse1;
+                ir->impl = dispatch_table[ir->opcode];
+                ir->tailcall = next_ir->tailcall;
+                break;
             }
             break;
-
         /* If the memory addresses of a sequence of store or load instructions
          * are contiguous, combine these instructions.
          */

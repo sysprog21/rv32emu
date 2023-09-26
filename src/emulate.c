@@ -926,6 +926,7 @@ static void match_pattern(block_t *block)
                 ir->rs2 = next_ir->rd;
                 ir->rs1 = next_ir->rs1;
                 ir->impl = dispatch_table[ir->opcode];
+                ir->tailcall = next_ir->tailcall;
             } else if (next_ir->opcode == rv_insn_add &&
                        ir->rd == next_ir->rs1) {
                 /* The destination register of the LUI instruction is the
@@ -935,21 +936,22 @@ static void match_pattern(block_t *block)
                 ir->rs2 = next_ir->rd;
                 ir->rs1 = next_ir->rs2;
                 ir->impl = dispatch_table[ir->opcode];
-            } else {
+                ir->tailcall = next_ir->tailcall;
+            } else if (next_ir->opcode == rv_insn_lui) {
                 count = 1;
-                next_ir = ir + 1;
                 while (1) {
                     if (next_ir->opcode != rv_insn_lui)
                         break;
                     next_ir->opcode = rv_insn_nop;
                     count++;
-                    next_ir += 1;
+                    if (next_ir->tailcall)
+                        break;
+                    next_ir++;
                 }
-                if (count > 1) {
-                    ir->imm2 = count;
-                    ir->opcode = rv_insn_fuse1;
-                    ir->impl = dispatch_table[ir->opcode];
-                }
+                ir->imm2 = count;
+                ir->opcode = rv_insn_fuse1;
+                ir->impl = dispatch_table[ir->opcode];
+                ir->tailcall = next_ir->tailcall;
             }
             break;
 

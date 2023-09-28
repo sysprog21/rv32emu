@@ -141,6 +141,8 @@ void mpool_destroy(mpool_t *mp)
         tmp = cur;
         cur = cur->next;
         munmap(tmp->mapped, mem_size);
+        if (tmp != &mp->area)
+            free(tmp);
     }
 #else
     area_t *cur = &mp->area, *tmp = NULL;
@@ -148,6 +150,8 @@ void mpool_destroy(mpool_t *mp)
         tmp = cur;
         cur = cur->next;
         free(tmp->mapped);
+        if (tmp != &mp->area)
+            free(tmp);
     }
 #endif
     free(mp);

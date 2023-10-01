@@ -287,6 +287,14 @@ RVOP(csrrw, {
 })
 
 /* CSRRS: Atomic Read and Set Bits in CSR */
+/* The initial value in integer register rs1 is treated as a bit mask that
+ * specifies the bit positions to be set in the CSR. Any bit that is set in
+ * rs1 will result in the corresponding bit being set in the CSR, provided
+ * that the CSR bit is writable. Other bits in the CSR remain unaffected,
+ * although some CSRs might exhibit side effects when written to.
+ *
+ * See Page 56 of the RISC-V Unprivileged Specification.
+ */
 RVOP(csrrs, {
     uint32_t tmp =
         csr_csrrs(rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1]);
@@ -327,6 +335,9 @@ RVOP(mul,
      { rv->X[ir->rd] = (int32_t) rv->X[ir->rs1] * (int32_t) rv->X[ir->rs2]; })
 
 /* MULH: Multiply High Signed Signed */
+/* It is important to first cast rs1 and rs2 to i32 so that the subsequent
+ * cast to i64 sign-extends the register values.
+ */
 RVOP(mulh, {
     const int64_t a = (int32_t) rv->X[ir->rs1];
     const int64_t b = (int32_t) rv->X[ir->rs2];
@@ -334,6 +345,10 @@ RVOP(mulh, {
 })
 
 /* MULHSU: Multiply High Signed Unsigned */
+/* It is essential to perform an initial cast of rs1 to i32, ensuring that the
+ * subsequent cast to i64 results in sign extension of the register value.
+ * Additionally, rs2 should not undergo sign extension.
+ */
 RVOP(mulhsu, {
     const int64_t a = (int32_t) rv->X[ir->rs1];
     const uint64_t b = rv->X[ir->rs2];

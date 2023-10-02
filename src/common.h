@@ -11,10 +11,16 @@
 #define UNUSED __attribute__((unused))
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
+#define FORCE_INLINE static inline __attribute__((always_inline))
 #else
 #define UNUSED
 #define likely(x) (x)
 #define unlikely(x) (x)
+#if defined(_MSC_VER)
+#define FORCE_INLINE static inline __forceinline
+#else
+#define FORCE_INLINE static inline
+#endif
 #endif
 
 #define ARRAYS_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))

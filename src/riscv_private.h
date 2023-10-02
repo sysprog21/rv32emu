@@ -127,13 +127,13 @@ struct riscv_internal {
 };
 
 /* sign extend a 16 bit value */
-static inline uint32_t sign_extend_h(const uint32_t x)
+FORCE_INLINE uint32_t sign_extend_h(const uint32_t x)
 {
     return (int32_t) ((int16_t) x);
 }
 
 /* sign extend an 8 bit value */
-static inline uint32_t sign_extend_b(const uint32_t x)
+FORCE_INLINE uint32_t sign_extend_b(const uint32_t x)
 {
     return (int32_t) ((int8_t) x);
 }

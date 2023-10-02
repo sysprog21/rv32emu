@@ -172,7 +172,7 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     }
 }
 
-static inline bool csr_is_writable(uint32_t csr)
+FORCE_INLINE bool csr_is_writable(uint32_t csr)
 {
     return csr < 0xc00;
 }
@@ -326,7 +326,7 @@ static block_t *block_find(const block_map_t *map, const uint32_t addr)
     return NULL;
 }
 
-static inline bool insn_is_misaligned(uint32_t pc)
+FORCE_INLINE bool insn_is_misaligned(uint32_t pc)
 {
     return (pc &
 #if RV32_HAS(EXT_C)
@@ -510,7 +510,7 @@ static const void *dispatch_table[] = {
 };
 /* clang-format on */
 
-static inline bool insn_is_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_branch(uint8_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch, reg_mask) IIF(can_branch)(case rv_insn_##inst:, )
@@ -521,7 +521,7 @@ static inline bool insn_is_branch(uint8_t opcode)
     return false;
 }
 
-static inline bool insn_is_unconditional_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
 {
     switch (opcode) {
     case rv_insn_ecall:

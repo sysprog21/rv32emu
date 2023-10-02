@@ -8,6 +8,15 @@ else
     endif
 endif
 
+CFLAGS_NO_CET :=
+processor := $(shell uname -m)
+ifeq ($(processor),$(filter $(processor),i386 x86_64))
+    # GCC and Clang can generate support code for Intel's Control-flow
+    # Enforcement Technology (CET) through this compiler flag:
+    # -fcf-protection=[full]
+    CFLAGS_NO_CET := -fcf-protection=none
+endif
+
 # As of Xcode 15, linker warnings are emitted if duplicate '-l' options are
 # present. Until such linkopts can be deduped by the build system, we disable
 # these warnings.

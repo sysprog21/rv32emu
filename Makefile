@@ -87,7 +87,7 @@ endif
 
 # For tail-call elimination, we need a specific set of build flags applied.
 # FIXME: On macOS + Apple Silicon, -fno-stack-protector might have a negative impact.
-$(OUT)/emulate.o: CFLAGS += -fomit-frame-pointer -fno-stack-check -fno-stack-protector
+$(OUT)/emulate.o: CFLAGS += $(CFLAGS_NO_CET) -fomit-frame-pointer -fno-stack-check -fno-stack-protector
 
 # Clear the .DEFAULT_GOAL special variable, so that the following turns
 # to the first target after .DEFAULT_GOAL is not set.

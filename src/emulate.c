@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,7 @@ extern struct target_ops gdbstub_ops;
 #endif
 
 #include "decode.h"
+#include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
 #include "state.h"
@@ -277,16 +279,17 @@ static inline uint32_t hash(size_t k)
     return k;
 }
 
+static void block_translate(riscv_t *rv, block_map_t *map, block_t *block);
 /* allocate a basic block */
-static block_t *block_alloc(const uint8_t bits)
+static block_t *block_alloc(riscv_t *rv, block_map_t *map)
 {
-    block_t *block = malloc(sizeof(struct block));
+    block_t *block = mpool_alloc(map->block_mp);
     assert(block);
-    block->insn_capacity = 1 << bits;
     block->n_insn = 0;
     block->predict = NULL;
-    block->ir = malloc(block->insn_capacity * sizeof(rv_insn_t));
-    assert(block->ir);
+
+    /* Initialize remaining part of block_t */
+    block_translate(rv, map, block);
     return block;
 }
 
@@ -366,7 +369,7 @@ static uint32_t last_pc = 0;
         rv->PC += ir->insn_len;                             \
         if (unlikely(RVOP_NO_NEXT(ir)))                     \
             return true;                                    \
-        const rv_insn_t *next = ir + 1;                     \
+        const rv_insn_t *next = ir->next;                   \
         MUST_TAIL return next->impl(rv, next);              \
     }
 
@@ -395,23 +398,34 @@ enum {
 #undef _
 };
 
+/* FIXME: This will simply find the n-th instruction by iterating
+ * the linked list linearly, we may want to find better approach. */
+FORCE_INLINE rv_insn_t *next_nth_insn(rv_insn_t *ir, int32_t n)
+{
+    rv_insn_t *tmp = ir;
+    for (int32_t iter = 0; iter < n; iter++)
+        tmp = tmp->next;
+    return tmp;
+}
+
 /* multiple lui */
-static bool do_fuse1(riscv_t *rv, const rv_insn_t *ir)
+static bool do_fuse1(riscv_t *rv, rv_insn_t *ir)
 {
     rv->csr_cycle += ir->imm2;
-    for (int i = 0; i < ir->imm2; i++) {
-        const rv_insn_t *cur_ir = ir + i;
+    int i;
+    rv_insn_t *cur_ir;
+    for (i = 0, cur_ir = ir; i < ir->imm2; i++, cur_ir = cur_ir->next) {
         rv->X[cur_ir->rd] = cur_ir->imm;
     }
     rv->PC += ir->imm2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = ir + ir->imm2;
+    const rv_insn_t *next = next_nth_insn(ir, ir->imm2);
     MUST_TAIL return next->impl(rv, next);
 }
 
 /* LUI + ADD */
-static bool do_fuse2(riscv_t *rv, const rv_insn_t *ir)
+static bool do_fuse2(riscv_t *rv, rv_insn_t *ir)
 {
     rv->csr_cycle += 2;
     rv->X[ir->rd] = ir->imm;
@@ -419,12 +433,12 @@ static bool do_fuse2(riscv_t *rv, const rv_insn_t *ir)
     rv->PC += 2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = ir + 2;
+    const rv_insn_t *next = next_nth_insn(ir, 2);
     MUST_TAIL return next->impl(rv, next);
 }
 
 /* multiple SW */
-static bool do_fuse3(riscv_t *rv, const rv_insn_t *ir)
+static bool do_fuse3(riscv_t *rv, rv_insn_t *ir)
 {
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
@@ -442,12 +456,12 @@ static bool do_fuse3(riscv_t *rv, const rv_insn_t *ir)
     rv->PC += ir->imm2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = ir + ir->imm2;
+    const rv_insn_t *next = next_nth_insn(ir, ir->imm2);
     MUST_TAIL return next->impl(rv, next);
 }
 
 /* multiple LW */
-static bool do_fuse4(riscv_t *rv, const rv_insn_t *ir)
+static bool do_fuse4(riscv_t *rv, rv_insn_t *ir)
 {
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
@@ -465,7 +479,7 @@ static bool do_fuse4(riscv_t *rv, const rv_insn_t *ir)
     rv->PC += ir->imm2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = ir + ir->imm2;
+    const rv_insn_t *next = next_nth_insn(ir, ir->imm2);
     MUST_TAIL return next->impl(rv, next);
 }
 
@@ -479,7 +493,7 @@ static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
     rv->PC = rv->X[rv_reg_ra] & ~1U;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = ir + 1;
+    const rv_insn_t *next = ir->next;
     MUST_TAIL return next->impl(rv, next);
 }
 
@@ -493,7 +507,7 @@ static bool do_fuse6(riscv_t *rv, const rv_insn_t *ir)
     rv->PC = rv->X[rv_reg_ra] & ~1U;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = ir + 1;
+    const rv_insn_t *next = ir->next;
     MUST_TAIL return next->impl(rv, next);
 }
 
@@ -541,14 +555,20 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     return false;
 }
 
-static void block_translate(riscv_t *rv, block_t *block)
+static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
 {
     block->pc_start = block->pc_end = rv->PC;
 
+    rv_insn_t *prev_ir = NULL;
+    rv_insn_t *ir = mpool_alloc(map->block_ir_mp);
+    block->ir_head = ir;
+
     /* translate the basic block */
-    while (block->n_insn < block->insn_capacity) {
-        rv_insn_t *ir = block->ir + block->n_insn;
+    while (true) {
         memset(ir, 0, sizeof(rv_insn_t));
+
+        if (prev_ir)
+            prev_ir->next = ir;
 
         /* fetch the next instruction */
         const uint32_t insn = rv->io.mem_ifetch(block->pc_end);
@@ -564,21 +584,29 @@ static void block_translate(riscv_t *rv, block_t *block)
         /* compute the end of pc */
         block->pc_end += ir->insn_len;
         block->n_insn++;
+        prev_ir = ir;
         /* stop on branch */
         if (insn_is_branch(ir->opcode))
             break;
+
+        ir = mpool_alloc(map->block_ir_mp);
     }
-    block->ir[block->n_insn - 1].tailcall = true;
+
+    assert(prev_ir);
+    block->ir_tail = prev_ir;
+    block->ir_tail->tailcall = true;
 }
 
 #define COMBINE_MEM_OPS(RW)                                                \
     count = 1;                                                             \
-    next_ir = ir + 1;                                                      \
+    next_ir = ir->next;                                                    \
+    tmp_ir = next_ir;                                                      \
     if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw))                \
         break;                                                             \
     sign = (ir->imm - next_ir->imm) >> 31 ? -1 : 1;                        \
-    for (uint32_t j = 1; j < block->n_insn - 1 - i; j++) {                 \
-        next_ir = ir + j;                                                  \
+    next_ir = tmp_ir;                                                      \
+    for (uint32_t j = 1; j < block->n_insn - 1 - i;                        \
+         j++, next_ir = next_ir->next) {                                   \
         if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw) ||          \
             ir->rs1 != next_ir->rs1 || ir->imm - next_ir->imm != 4 * sign) \
             break;                                                         \
@@ -590,8 +618,8 @@ static void block_translate(riscv_t *rv, block_t *block)
         ir->imm2 = count;                                                  \
         memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));                       \
         ir->impl = dispatch_table[ir->opcode];                             \
-        for (int j = 1; j < count; j++) {                                  \
-            next_ir = ir + j;                                              \
+        next_ir = tmp_ir;                                                  \
+        for (int j = 1; j < count; j++, next_ir = next_ir->next) {         \
             memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));          \
         }                                                                  \
         ir->tailcall = next_ir->tailcall;                                  \
@@ -825,7 +853,7 @@ static bool detect_memcpy(riscv_t *rv, int lib)
 
 static bool libc_substitute(riscv_t *rv, block_t *block)
 {
-    rv_insn_t *ir = block->ir, *next_ir = NULL;
+    rv_insn_t *ir = block->ir_head, *next_ir = NULL;
     switch (ir->opcode) {
     case rv_insn_addi:
         /* Compare the target block with the first basic block of
@@ -835,10 +863,10 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
          * instruction sequence.
          */
         if (ir->imm == 15 && ir->rd == rv_reg_t1 && ir->rs1 == rv_reg_zero) {
-            next_ir = ir + 1;
+            next_ir = ir->next;
             if (next_ir->opcode == rv_insn_addi && next_ir->rd == rv_reg_a4 &&
                 next_ir->rs1 == rv_reg_a0 && next_ir->rs2 == rv_reg_zero) {
-                next_ir = next_ir + 1;
+                next_ir = next_ir->next;
                 if (next_ir->opcode == rv_insn_bgeu && next_ir->imm == 60 &&
                     next_ir->rs1 == rv_reg_t1 && next_ir->rs2 == rv_reg_a2) {
                     if (detect_memset(rv, 1)) {
@@ -851,7 +879,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
             }
         } else if (ir->imm == 0 && ir->rd == rv_reg_t1 &&
                    ir->rs1 == rv_reg_a0) {
-            next_ir = ir + 1;
+            next_ir = ir->next;
             if (next_ir->opcode == rv_insn_beq && next_ir->rs1 == rv_reg_a2 &&
                 next_ir->rs2 == rv_reg_zero) {
                 if (next_ir->imm == 20 && detect_memset(rv, 2)) {
@@ -876,14 +904,14 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
          */
         if (ir->rd == rv_reg_a5 && ir->rs1 == rv_reg_a0 &&
             ir->rs2 == rv_reg_a1) {
-            next_ir = ir + 1;
+            next_ir = ir->next;
             if (next_ir->opcode == rv_insn_andi && next_ir->imm == 3 &&
                 next_ir->rd == rv_reg_a5 && next_ir->rs1 == rv_reg_a5) {
-                next_ir = next_ir + 1;
+                next_ir = next_ir->next;
                 if (next_ir->opcode == rv_insn_add &&
                     next_ir->rd == rv_reg_a7 && next_ir->rs1 == rv_reg_a0 &&
                     next_ir->rs2 == rv_reg_a2) {
-                    next_ir = next_ir + 1;
+                    next_ir = next_ir->next;
                     if (next_ir->opcode == rv_insn_bne && next_ir->imm == 104 &&
                         next_ir->rs1 == rv_reg_a5 &&
                         next_ir->rs2 == rv_reg_zero) {
@@ -912,12 +940,15 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
  */
 static void match_pattern(block_t *block)
 {
-    for (uint32_t i = 0; i < block->n_insn - 1; i++) {
-        rv_insn_t *ir = block->ir + i, *next_ir = NULL;
+    uint32_t i;
+    rv_insn_t *ir;
+    for (i = 0, ir = block->ir_head; i < block->n_insn - 1;
+         i++, ir = ir->next) {
+        rv_insn_t *next_ir = NULL, *tmp_ir = NULL;
         int32_t count = 0, sign = 1;
         switch (ir->opcode) {
         case rv_insn_lui:
-            next_ir = ir + 1;
+            next_ir = ir->next;
             switch (next_ir->opcode) {
             case rv_insn_add:
                 if (ir->rd == next_ir->rs2 || ir->rd == next_ir->rs1) {
@@ -940,7 +971,7 @@ static void match_pattern(block_t *block)
                     count++;
                     if (next_ir->tailcall)
                         break;
-                    next_ir++;
+                    next_ir = next_ir->next;
                 }
                 ir->imm2 = count;
                 ir->opcode = rv_insn_fuse1;
@@ -994,8 +1025,10 @@ static void optimize_constant(riscv_t *rv, block_t *block)
     constopt_info_t constopt_info = {0};
     constopt_info.is_constant[0] = true;
     assert(rv->X[0] == 0);
-    for (uint32_t i = 0; i < block->n_insn; i++) {
-        rv_insn_t *ir = block->ir + i;
+
+    uint32_t i;
+    rv_insn_t *ir;
+    for (i = 0, ir = block->ir_head; i < block->n_insn; i++, ir = ir->next) {
         ((constopt_func_t) constopt_table[ir->opcode])(ir, &constopt_info);
     }
 }
@@ -1014,10 +1047,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
         }
 
         /* allocate a new block */
-        next = block_alloc(10);
-
-        /* translate the basic block */
-        block_translate(rv, next);
+        next = block_alloc(rv, map);
 
         if (!libc_substitute(rv, next)) {
             optimize_constant(rv, next);
@@ -1075,13 +1105,13 @@ void rv_step(riscv_t *rv, int32_t cycles)
             if (prev->pc_start != last_pc)
                 prev = block_find(&rv->block_map, last_pc);
 
-            rv_insn_t *last_ir = prev->ir + prev->n_insn - 1;
+            rv_insn_t *last_ir = prev->ir_tail;
             /* chain block */
             if (!insn_is_unconditional_branch(last_ir->opcode)) {
                 if (branch_taken && !last_ir->branch_taken)
-                    last_ir->branch_taken = block->ir;
+                    last_ir->branch_taken = block->ir_head;
                 else if (!last_ir->branch_untaken)
-                    last_ir->branch_untaken = block->ir;
+                    last_ir->branch_untaken = block->ir_head;
             } else if (last_ir->opcode == rv_insn_jal
 #if RV32_HAS(EXT_C)
                        || last_ir->opcode == rv_insn_cj ||
@@ -1089,13 +1119,13 @@ void rv_step(riscv_t *rv, int32_t cycles)
 #endif
             ) {
                 if (!last_ir->branch_taken)
-                    last_ir->branch_taken = block->ir;
+                    last_ir->branch_taken = block->ir_head;
             }
         }
         last_pc = rv->PC;
 
         /* execute the block */
-        const rv_insn_t *ir = block->ir;
+        const rv_insn_t *ir = block->ir_head;
         if (unlikely(!ir->impl(rv, ir)))
             break;
 

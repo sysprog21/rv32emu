@@ -53,7 +53,7 @@ RVOP(jalr, {
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     block_t *block = block_find(&rv->block_map, rv->PC);
     if (block)
-        return block->ir->impl(rv, block->ir);
+        return block->ir_head->impl(rv, block->ir_head);
     return true;
 })
 
@@ -924,7 +924,7 @@ RVOP(cjr, {
     rv->PC = rv->X[ir->rs1];
     block_t *block = block_find(&rv->block_map, rv->PC);
     if (block)
-        return block->ir->impl(rv, block->ir);
+        return block->ir_head->impl(rv, block->ir_head);
     return true;
 })
 
@@ -947,7 +947,7 @@ RVOP(cjalr, {
     RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
     block_t *block = block_find(&rv->block_map, rv->PC);
     if (block)
-        return block->ir->impl(rv, block->ir);
+        return block->ir_head->impl(rv, block->ir_head);
     return true;
 })
 

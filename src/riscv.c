@@ -7,8 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "mpool.h"
 #include "riscv_private.h"
 #include "state.h"
+
+#define BLOCK_MAP_CAPACITY_BITS 10
+#define BLOCK_IR_MAP_CAPACITY_BITS 10
 
 /* initialize the block map */
 static void block_map_init(block_map_t *map, const uint8_t bits)
@@ -16,6 +20,11 @@ static void block_map_init(block_map_t *map, const uint8_t bits)
     map->block_capacity = 1 << bits;
     map->size = 0;
     map->map = calloc(map->block_capacity, sizeof(struct block *));
+
+    map->block_mp = mpool_create(sizeof(block_t) << BLOCK_MAP_CAPACITY_BITS,
+                                 sizeof(block_t));
+    map->block_ir_mp = mpool_create(
+        sizeof(rv_insn_t) << BLOCK_IR_MAP_CAPACITY_BITS, sizeof(rv_insn_t));
 }
 
 /* clear all block in the block map */
@@ -26,13 +35,27 @@ void block_map_clear(block_map_t *map)
         block_t *block = map->map[i];
         if (!block)
             continue;
-        for (uint32_t i = 0; i < block->n_insn; i++)
-            free(block->ir[i].fuse);
-        free(block->ir);
-        free(block);
+        uint32_t idx;
+        rv_insn_t *ir, *next;
+        for (idx = 0, ir = block->ir_head; idx < block->n_insn;
+             idx++, ir = next) {
+            free(ir->fuse);
+            next = ir->next;
+            mpool_free(map->block_ir_mp, ir);
+        }
+        mpool_free(map->block_mp, block);
         map->map[i] = NULL;
     }
     map->size = 0;
+}
+
+static void block_map_destroy(block_map_t *map)
+{
+    block_map_clear(map);
+    free(map->map);
+
+    mpool_destroy(map->block_mp);
+    mpool_destroy(map->block_ir_mp);
 }
 
 riscv_user_t rv_userdata(riscv_t *rv)
@@ -122,8 +145,7 @@ bool rv_enables_to_output_exit_code(riscv_t *rv)
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
-    block_map_clear(&rv->block_map);
-    free(rv->block_map.map);
+    block_map_destroy(&rv->block_map);
     free(rv);
 }
 

@@ -348,7 +348,7 @@ enum {
 };
 
 #if RV32_HAS(GDBSTUB)
-#define RVOP_NO_NEXT(ir) (ir->tailcall || rv->debug_mode)
+#define RVOP_NO_NEXT(ir) (ir->tailcall | rv->debug_mode)
 #else
 #define RVOP_NO_NEXT(ir) (ir->tailcall)
 #endif

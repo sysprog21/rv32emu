@@ -398,29 +398,18 @@ enum {
 #undef _
 };
 
-/* FIXME: This will simply find the n-th instruction by iterating
- * the linked list linearly, we may want to find better approach. */
-FORCE_INLINE rv_insn_t *next_nth_insn(rv_insn_t *ir, int32_t n)
-{
-    rv_insn_t *tmp = ir;
-    for (int32_t iter = 0; iter < n; iter++)
-        tmp = tmp->next;
-    return tmp;
-}
-
 /* multiple lui */
 static bool do_fuse1(riscv_t *rv, rv_insn_t *ir)
 {
     rv->csr_cycle += ir->imm2;
-    int i;
-    rv_insn_t *cur_ir;
-    for (i = 0, cur_ir = ir; i < ir->imm2; i++, cur_ir = cur_ir->next) {
-        rv->X[cur_ir->rd] = cur_ir->imm;
+    opcode_fuse_t *fuse = ir->fuse;
+    for (int i = 0; i < ir->imm2; i++) {
+        rv->X[fuse[i].rd] = fuse[i].imm;
     }
     rv->PC += ir->imm2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = next_nth_insn(ir, ir->imm2);
+    const rv_insn_t *next = ir->next;
     MUST_TAIL return next->impl(rv, next);
 }
 
@@ -433,7 +422,7 @@ static bool do_fuse2(riscv_t *rv, rv_insn_t *ir)
     rv->PC += 2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = next_nth_insn(ir, 2);
+    const rv_insn_t *next = ir->next;
     MUST_TAIL return next->impl(rv, next);
 }
 
@@ -456,7 +445,7 @@ static bool do_fuse3(riscv_t *rv, rv_insn_t *ir)
     rv->PC += ir->imm2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = next_nth_insn(ir, ir->imm2);
+    const rv_insn_t *next = ir->next;
     MUST_TAIL return next->impl(rv, next);
 }
 
@@ -479,7 +468,7 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir)
     rv->PC += ir->imm2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
-    const rv_insn_t *next = next_nth_insn(ir, ir->imm2);
+    const rv_insn_t *next = ir->next;
     MUST_TAIL return next->impl(rv, next);
 }
 
@@ -622,7 +611,7 @@ static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
         for (int j = 1; j < count; j++, next_ir = next_ir->next) {         \
             memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));          \
         }                                                                  \
-        ir->tailcall = next_ir->tailcall;                                  \
+        remove_next_nth_ir(rv, ir, block, count - 1);                      \
     }
 
 static bool detect_memset(riscv_t *rv, int lib)
@@ -851,6 +840,23 @@ static bool detect_memcpy(riscv_t *rv, int lib)
     return true;
 }
 
+FORCE_INLINE void remove_next_nth_ir(riscv_t *rv,
+                                     rv_insn_t *ir,
+                                     block_t *block,
+                                     uint8_t n)
+{
+    for (uint8_t i = 0; i < n; i++) {
+        rv_insn_t *next = ir->next;
+        ir->next = ir->next->next;
+        mpool_free(rv->block_map.block_ir_mp, next);
+    }
+    if (!ir->next) {
+        block->ir_tail = ir;
+        ir->tailcall = true;
+    }
+    block->n_insn -= n;
+}
+
 static bool libc_substitute(riscv_t *rv, block_t *block)
 {
     rv_insn_t *ir = block->ir_head, *next_ir = NULL;
@@ -872,7 +878,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
                     if (detect_memset(rv, 1)) {
                         ir->opcode = rv_insn_fuse5;
                         ir->impl = dispatch_table[ir->opcode];
-                        ir->tailcall = true;
+                        remove_next_nth_ir(rv, ir, block, 2);
                         return true;
                     };
                 }
@@ -885,12 +891,12 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
                 if (next_ir->imm == 20 && detect_memset(rv, 2)) {
                     ir->opcode = rv_insn_fuse5;
                     ir->impl = dispatch_table[ir->opcode];
-                    ir->tailcall = true;
+                    remove_next_nth_ir(rv, ir, block, 2);
                     return true;
                 } else if (next_ir->imm == 28 && detect_memcpy(rv, 2)) {
                     ir->opcode = rv_insn_fuse6;
                     ir->impl = dispatch_table[ir->opcode];
-                    ir->tailcall = true;
+                    remove_next_nth_ir(rv, ir, block, 2);
                     return true;
                 };
             }
@@ -918,7 +924,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
                         if (detect_memcpy(rv, 1)) {
                             ir->opcode = rv_insn_fuse6;
                             ir->impl = dispatch_table[ir->opcode];
-                            ir->tailcall = true;
+                            remove_next_nth_ir(rv, ir, block, 3);
                             return true;
                         };
                     }
@@ -938,7 +944,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
  * Strategies are being devised to increase the number of instructions that
  * match the pattern, including possible instruction reordering.
  */
-static void match_pattern(block_t *block)
+static void match_pattern(riscv_t *rv, block_t *block)
 {
     uint32_t i;
     rv_insn_t *ir;
@@ -960,6 +966,7 @@ static void match_pattern(block_t *block)
                         ir->rs1 = next_ir->rs2;
                     ir->impl = dispatch_table[ir->opcode];
                     ir->tailcall = next_ir->tailcall;
+                    remove_next_nth_ir(rv, ir, block, 1);
                 }
                 break;
             case rv_insn_lui:
@@ -967,16 +974,23 @@ static void match_pattern(block_t *block)
                 while (1) {
                     if (next_ir->opcode != rv_insn_lui)
                         break;
-                    next_ir->opcode = rv_insn_nop;
                     count++;
                     if (next_ir->tailcall)
                         break;
                     next_ir = next_ir->next;
                 }
-                ir->imm2 = count;
-                ir->opcode = rv_insn_fuse1;
-                ir->impl = dispatch_table[ir->opcode];
-                ir->tailcall = next_ir->tailcall;
+                if (count > 1) {
+                    ir->opcode = rv_insn_fuse1;
+                    ir->fuse = malloc(count * sizeof(opcode_fuse_t));
+                    ir->imm2 = count;
+                    memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
+                    ir->impl = dispatch_table[ir->opcode];
+                    next_ir = ir->next;
+                    for (int j = 1; j < count; j++, next_ir = next_ir->next) {
+                        memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));
+                    }
+                    remove_next_nth_ir(rv, ir, block, count - 1);
+                }
                 break;
             }
             break;
@@ -1055,7 +1069,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
             if (likely(!rv->debug_mode))
 #endif
                 /* macro operation fusion */
-                match_pattern(next);
+                match_pattern(rv, next);
         }
         /* insert the block into block map */
         block_insert(&rv->block_map, next);

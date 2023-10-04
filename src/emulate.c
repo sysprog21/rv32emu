@@ -389,7 +389,8 @@ static uint32_t last_pc = 0;
     _(fuse3)           \
     _(fuse4)           \
     _(fuse5)           \
-    _(fuse6)
+    _(fuse6)           \
+    _(fuse7)
 
 enum {
     rv_insn_fuse0 = N_RV_INSNS,
@@ -494,6 +495,20 @@ static bool do_fuse6(riscv_t *rv, const rv_insn_t *ir)
     memcpy((char *) m->mem_base + rv->X[rv_reg_a0],
            (char *) m->mem_base + rv->X[rv_reg_a1], rv->X[rv_reg_a2]);
     rv->PC = rv->X[rv_reg_ra] & ~1U;
+    if (unlikely(RVOP_NO_NEXT(ir)))
+        return true;
+    const rv_insn_t *next = ir->next;
+    MUST_TAIL return next->impl(rv, next);
+}
+
+/* multiple shift immediate */
+static bool do_fuse7(riscv_t *rv, const rv_insn_t *ir)
+{
+    rv->csr_cycle += ir->imm2;
+    opcode_fuse_t *fuse = ir->fuse;
+    for (int i = 0; i < ir->imm2; i++)
+        shift_func(rv, (const rv_insn_t *) (&fuse[i]));
+    rv->PC += ir->imm2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
     const rv_insn_t *next = ir->next;
@@ -608,9 +623,8 @@ static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
         memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));                       \
         ir->impl = dispatch_table[ir->opcode];                             \
         next_ir = tmp_ir;                                                  \
-        for (int j = 1; j < count; j++, next_ir = next_ir->next) {         \
+        for (int j = 1; j < count; j++, next_ir = next_ir->next)           \
             memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));          \
-        }                                                                  \
         remove_next_nth_ir(rv, ir, block, count - 1);                      \
     }
 
@@ -986,9 +1000,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
                     memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
                     ir->impl = dispatch_table[ir->opcode];
                     next_ir = ir->next;
-                    for (int j = 1; j < count; j++, next_ir = next_ir->next) {
+                    for (int j = 1; j < count; j++, next_ir = next_ir->next)
                         memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));
-                    }
                     remove_next_nth_ir(rv, ir, block, count - 1);
                 }
                 break;
@@ -1005,6 +1018,31 @@ static void match_pattern(riscv_t *rv, block_t *block)
             break;
             /* TODO: mixture of SW and LW */
             /* TODO: reorder insturction to match pattern */
+        case rv_insn_slli:
+            count = 1;
+            next_ir = ir->next;
+            while (1) {
+                if (next_ir->opcode != rv_insn_slli &&
+                    next_ir->opcode != rv_insn_srli &&
+                    next_ir->opcode != rv_insn_srai)
+                    break;
+                count++;
+                if (next_ir->tailcall)
+                    break;
+                next_ir = next_ir->next;
+            }
+            if (count > 1) {
+                ir->fuse = malloc(count * sizeof(opcode_fuse_t));
+                memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
+                ir->opcode = rv_insn_fuse7;
+                ir->imm2 = count;
+                ir->impl = dispatch_table[ir->opcode];
+                next_ir = ir->next;
+                for (int j = 1; j < count; j++, next_ir = next_ir->next)
+                    memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));
+                remove_next_nth_ir(rv, ir, block, count - 1);
+            }
+            break;
         }
     }
 }

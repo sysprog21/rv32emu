@@ -253,6 +253,7 @@ enum {
 typedef struct {
     int32_t imm;
     uint8_t rd, rs1, rs2;
+    uint8_t opcode;
 } opcode_fuse_t;
 
 typedef struct rv_insn {

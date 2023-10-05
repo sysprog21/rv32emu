@@ -432,15 +432,13 @@ static bool do_fuse3(riscv_t *rv, rv_insn_t *ir)
 {
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
-    uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
     /* The memory addresses of the sw instructions are contiguous, thus only
      * the first SW instruction needs to be checked to determine if its memory
      * address is misaligned or if the memory chunk does not exist.
      */
-    RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-    rv->io.mem_write_w(addr, rv->X[fuse[0].rs2]);
-    for (int i = 1; i < ir->imm2; i++) {
-        addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+    for (int i = 0; i < ir->imm2; i++) {
+        uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
         rv->io.mem_write_w(addr, rv->X[fuse[i].rs2]);
     }
     rv->PC += ir->imm2 * ir->insn_len;
@@ -455,15 +453,13 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir)
 {
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
-    uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
     /* The memory addresses of the lw instructions are contiguous, therefore
      * only the first LW instruction needs to be checked to determine if its
      * memory address is misaligned or if the memory chunk does not exist.
      */
-    RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-    rv->X[fuse[0].rd] = rv->io.mem_read_w(addr);
-    for (int i = 1; i < ir->imm2; i++) {
-        addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+    for (int i = 0; i < ir->imm2; i++) {
+        uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
         rv->X[fuse[i].rd] = rv->io.mem_read_w(addr);
     }
     rv->PC += ir->imm2 * ir->insn_len;
@@ -601,31 +597,27 @@ static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
     block->ir_tail->tailcall = true;
 }
 
-#define COMBINE_MEM_OPS(RW)                                                \
-    count = 1;                                                             \
-    next_ir = ir->next;                                                    \
-    tmp_ir = next_ir;                                                      \
-    if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw))                \
-        break;                                                             \
-    sign = (ir->imm - next_ir->imm) >> 31 ? -1 : 1;                        \
-    next_ir = tmp_ir;                                                      \
-    for (uint32_t j = 1; j < block->n_insn - 1 - i;                        \
-         j++, next_ir = next_ir->next) {                                   \
-        if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw) ||          \
-            ir->rs1 != next_ir->rs1 || ir->imm - next_ir->imm != 4 * sign) \
-            break;                                                         \
-        count++;                                                           \
-    }                                                                      \
-    if (count > 1) {                                                       \
-        ir->opcode = IIF(RW)(rv_insn_fuse4, rv_insn_fuse3);                \
-        ir->fuse = malloc(count * sizeof(opcode_fuse_t));                  \
-        ir->imm2 = count;                                                  \
-        memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));                       \
-        ir->impl = dispatch_table[ir->opcode];                             \
-        next_ir = tmp_ir;                                                  \
-        for (int j = 1; j < count; j++, next_ir = next_ir->next)           \
-            memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));          \
-        remove_next_nth_ir(rv, ir, block, count - 1);                      \
+#define COMBINE_MEM_OPS(RW)                                       \
+    next_ir = ir->next;                                           \
+    count = 1;                                                    \
+    while (1) {                                                   \
+        if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw))   \
+            break;                                                \
+        count++;                                                  \
+        if (next_ir->tailcall)                                    \
+            break;                                                \
+        next_ir = next_ir->next;                                  \
+    }                                                             \
+    if (count > 1) {                                              \
+        ir->opcode = IIF(RW)(rv_insn_fuse4, rv_insn_fuse3);       \
+        ir->fuse = malloc(count * sizeof(opcode_fuse_t));         \
+        ir->imm2 = count;                                         \
+        memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));              \
+        ir->impl = dispatch_table[ir->opcode];                    \
+        next_ir = ir->next;                                       \
+        for (int j = 1; j < count; j++, next_ir = next_ir->next)  \
+            memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t)); \
+        remove_next_nth_ir(rv, ir, block, count - 1);             \
     }
 
 static bool detect_memset(riscv_t *rv, int lib)
@@ -964,8 +956,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
     rv_insn_t *ir;
     for (i = 0, ir = block->ir_head; i < block->n_insn - 1;
          i++, ir = ir->next) {
-        rv_insn_t *next_ir = NULL, *tmp_ir = NULL;
-        int32_t count = 0, sign = 1;
+        rv_insn_t *next_ir = NULL;
+        int32_t count = 0;
         switch (ir->opcode) {
         case rv_insn_lui:
             next_ir = ir->next;

@@ -184,6 +184,9 @@ FORCE_INLINE void shift_func(riscv_t *rv, const rv_insn_t *ir)
     case rv_insn_srai:
         rv->X[ir->rd] = ((int32_t) rv->X[ir->rs1]) >> (ir->imm & 0x1f);
         break;
+    default:
+        __UNREACHABLE;
+        break;
     }
 };
 

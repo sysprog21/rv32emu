@@ -61,6 +61,8 @@
  */
 #if defined(__GNUC__) || defined(__clang__)
 #define __UNREACHABLE __builtin_unreachable()
+#elif defined(_MSC_VER)
+#define __UNREACHABLE __assume(false)
 #else /* unspported compilers */
 /* clang-format off */
 #define __UNREACHABLE do { /* nop */ } while (0)

@@ -95,7 +95,7 @@ static void print_usage(const char *filename)
 {
     fprintf(stderr,
             "RV32I[MA] Emulator which loads an ELF file to execute.\n"
-            "Usage: %s [options] [filename]\n"
+            "Usage: %s [options] [filename] [arguments]\n"
             "Options:\n"
             "  -t : print executable trace\n"
 #if RV32_HAS(GDBSTUB)
@@ -152,8 +152,10 @@ static bool parse_args(int argc, char **args)
     }
 
     prog_argc = argc - emu_argc - 1;
-    prog_args = &args[optind]; /* optind points to first non-option string so it
-                                  should be target program */
+    /* optind points to the first non-option string, so it should indicate the
+     * target program.
+     */
+    prog_args = &args[optind];
     opt_prog_name = prog_args[0];
     return true;
 }
@@ -186,7 +188,7 @@ static void dump_test_signature(elf_t *elf)
 
 int main(int argc, char **args)
 {
-    if (!parse_args(argc, args)) {
+    if (argc == 1 || !parse_args(argc, args)) {
         print_usage(args[0]);
         return 1;
     }

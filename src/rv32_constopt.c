@@ -9,8 +9,8 @@ CONSTOPT(nop, {})
  * result is sign-extended to 64 bits.
  */
 CONSTOPT(lui, {
-    constopt_info->is_constant[ir->rd] = true;
-    constopt_info->const_val[ir->rd] = ir->imm;
+    info->is_constant[ir->rd] = true;
+    info->const_val[ir->rd] = ir->imm;
 })
 
 /* AUIPC is used to build pc-relative addresses and uses the U-type format.
@@ -20,8 +20,8 @@ CONSTOPT(lui, {
  */
 CONSTOPT(auipc, {
     ir->imm += ir->pc;
-    constopt_info->is_constant[ir->rd] = true;
-    constopt_info->const_val[ir->rd] = ir->imm;
+    info->is_constant[ir->rd] = true;
+    info->const_val[ir->rd] = ir->imm;
     ir->opcode = rv_insn_lui;
     ir->impl = dispatch_table[ir->opcode];
 })
@@ -32,8 +32,8 @@ CONSTOPT(auipc, {
  */
 CONSTOPT(jal, {
     if (ir->rd) {
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->pc + ir->insn_len;
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->pc + ir->insn_len;
     }
 })
 
@@ -46,20 +46,19 @@ CONSTOPT(jal, {
  */
 CONSTOPT(jalr, {
     if (ir->rd) {
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->pc + ir->insn_len;
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->pc + ir->insn_len;
     }
 })
 
 /* clang-format off */
-#define OPT_BRANCH_FUNC(type, cond)                               \
-    if (constopt_info->is_constant[ir->rs1] &&                   \
-        constopt_info->is_constant[ir->rs2]) {                   \
-        if ((type) constopt_info->const_val[ir->rs1] cond (type) \
-                constopt_info->const_val[ir->rs2])               \
-            ir->imm = ir->insn_len;                               \
-        ir->opcode = rv_insn_jal;                                 \
-        ir->impl = dispatch_table[ir->opcode];                    \
+#define OPT_BRANCH_FUNC(type, cond)                                 \
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) { \
+        if ((type) info->const_val[ir->rs1] cond                    \
+            (type) info->const_val[ir->rs2])                        \
+            ir->imm = ir->insn_len;                                 \
+        ir->opcode = rv_insn_jal;                                   \
+        ir->impl = dispatch_table[ir->opcode];                      \
     }
 /* clang-format on */
 
@@ -82,19 +81,19 @@ CONSTOPT(bltu, { OPT_BRANCH_FUNC(uint32_t, >=); })
 CONSTOPT(bgeu, { OPT_BRANCH_FUNC(uint32_t, <); })
 
 /* LB: Load Byte */
-CONSTOPT(lb, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(lb, { info->is_constant[ir->rd] = false; })
 
 /* LH: Load Halfword */
-CONSTOPT(lh, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(lh, { info->is_constant[ir->rd] = false; })
 
 /* LW: Load Word */
-CONSTOPT(lw, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(lw, { info->is_constant[ir->rd] = false; })
 
 /* LBU: Load Byte Unsigned */
-CONSTOPT(lbu, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(lbu, { info->is_constant[ir->rd] = false; })
 
 /* LHU: Load Halfword Unsigned */
-CONSTOPT(lhu, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(lhu, { info->is_constant[ir->rd] = false; })
 
 /* SB: Store Byte */
 CONSTOPT(sb, {})
@@ -111,14 +110,14 @@ CONSTOPT(sw, {})
  * pseudo-instruction.
  */
 CONSTOPT(addi, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm += constopt_info->const_val[ir->rs1];
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm += info->const_val[ir->rs1];
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SLTI place the value 1 in register rd if register rs1 is less than the
@@ -126,254 +125,237 @@ CONSTOPT(addi, {
  * written to rd.
  */
 CONSTOPT(slti, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm = (int32_t) constopt_info->const_val[ir->rs1] < ir->imm ? 1 : 0;
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm = (int32_t) info->const_val[ir->rs1] < ir->imm ? 1 : 0;
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SLTIU places the value 1 in register rd if register rs1 is less than the
  * immediate when both are treated as unsigned numbers, else 0 is written to rd.
  */
 CONSTOPT(sltiu, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm =
-            constopt_info->const_val[ir->rs1] < (uint32_t) ir->imm ? 1 : 0;
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm = info->const_val[ir->rs1] < (uint32_t) ir->imm ? 1 : 0;
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* XORI: Exclusive OR Immediate */
 CONSTOPT(xori, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm ^= constopt_info->const_val[ir->rs1];
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm ^= info->const_val[ir->rs1];
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* ORI: OR Immediate */
 CONSTOPT(ori, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm |= constopt_info->const_val[ir->rs1];
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm |= info->const_val[ir->rs1];
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* ANDI performs bitwise AND on register rs1 and the sign-extended 12-bit
  * immediate and place the result in rd.
  */
 CONSTOPT(andi, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm &= constopt_info->const_val[ir->rs1];
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm &= info->const_val[ir->rs1];
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SLLI performs logical left shift on the value in register rs1 by the shift
  * amount held in the lower 5 bits of the immediate.
  */
 CONSTOPT(slli, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm = constopt_info->const_val[ir->rs1] << (ir->imm & 0x1f);
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm = info->const_val[ir->rs1] << (ir->imm & 0x1f);
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SRLI performs logical right shift on the value in register rs1 by the shift
  * amount held in the lower 5 bits of the immediate.
  */
 CONSTOPT(srli, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm = constopt_info->const_val[ir->rs1] >> (ir->imm & 0x1f);
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm = info->const_val[ir->rs1] >> (ir->imm & 0x1f);
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SRAI performs arithmetic right shift on the value in register rs1 by the
  * shift amount held in the lower 5 bits of the immediate.
  */
 CONSTOPT(srai, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm =
-            (int32_t) constopt_info->const_val[ir->rs1] >> (ir->imm & 0x1f);
-        constopt_info->is_constant[ir->rd] = true;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm = (int32_t) info->const_val[ir->rs1] >> (ir->imm & 0x1f);
+        info->is_constant[ir->rd] = true;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* ADD */
 CONSTOPT(add, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) constopt_info->const_val[ir->rs1] +
-                  (int32_t) constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = (int32_t) info->const_val[ir->rs1] +
+                  (int32_t) info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SUB: Substract */
 CONSTOPT(sub, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) constopt_info->const_val[ir->rs1] -
-                  (int32_t) constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = (int32_t) info->const_val[ir->rs1] -
+                  (int32_t) info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SLL: Shift Left Logical */
 CONSTOPT(sll, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs1]
-                  << (constopt_info->const_val[ir->rs2] & 0x1f);
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs1] << (info->const_val[ir->rs2] & 0x1f);
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SLT: Set on Less Than */
 CONSTOPT(slt, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) constopt_info->const_val[ir->rs1] <
-                          (int32_t) constopt_info->const_val[ir->rs2]
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = (int32_t) info->const_val[ir->rs1] <
+                          (int32_t) info->const_val[ir->rs2]
                       ? 1
                       : 0;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SLTU: Set on Less Than Unsigned */
 CONSTOPT(sltu, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs1] <
-                          constopt_info->const_val[ir->rs2]
-                      ? 1
-                      : 0;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs1] < info->const_val[ir->rs2] ? 1 : 0;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* XOR: Exclusive OR */
 CONSTOPT(xor, {
-  if (constopt_info->is_constant[ir->rs1] &&
-      constopt_info->is_constant[ir->rs2]) {
-      constopt_info->is_constant[ir->rd] = true;
-      ir->imm = (int32_t) constopt_info->const_val[ir->rs1] ^
-                (int32_t) constopt_info->const_val[ir->rs2];
-      constopt_info->const_val[ir->rd] = ir->imm;
+  if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+      info->is_constant[ir->rd] = true;
+      ir->imm = (int32_t) info->const_val[ir->rs1] ^
+                (int32_t) info->const_val[ir->rs2];
+      info->const_val[ir->rd] = ir->imm;
       ir->opcode = rv_insn_lui;
       ir->impl = dispatch_table[ir->opcode];
   } else
-      constopt_info->is_constant[ir->rd] = false;
+      info->is_constant[ir->rd] = false;
 })
 
 /* SRL: Shift Right Logical */
 CONSTOPT(srl, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs1] >>
-                  (constopt_info->const_val[ir->rs2] & 0x1f);
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs1] >> (info->const_val[ir->rs2] & 0x1f);
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* SRA: Shift Right Arithmetic */
 CONSTOPT(sra, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) constopt_info->const_val[ir->rs1] >>
-                  (constopt_info->const_val[ir->rs2] & 0x1f);
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = (int32_t) info->const_val[ir->rs1] >>
+                  (info->const_val[ir->rs2] & 0x1f);
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* OR */
 CONSTOPT(or, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) constopt_info->const_val[ir->rs1] |
-                  (int32_t) constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = (int32_t) info->const_val[ir->rs1] |
+                  (int32_t) info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* AND */
 CONSTOPT(and, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) constopt_info->const_val[ir->rs1] &
-                  (int32_t) constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = (int32_t) info->const_val[ir->rs1] &
+                  (int32_t) info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* ECALL: Environment Call */
@@ -403,22 +385,22 @@ CONSTOPT(fencei, {})
 
 #if RV32_HAS(Zicsr) /* RV32 Zicsr Standard Extension */
 /* CSRRW: Atomic Read/Write CSR */
-CONSTOPT(csrrw, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrw, { info->is_constant[ir->rd] = false; })
 
 /* CSRRS: Atomic Read and Set Bits in CSR */
-CONSTOPT(csrrs, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrs, { info->is_constant[ir->rd] = false; })
 
 /* CSRRC: Atomic Read and Clear Bits in CSR */
-CONSTOPT(csrrc, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrc, { info->is_constant[ir->rd] = false; })
 
 /* CSRRWI */
-CONSTOPT(csrrwi, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrwi, { info->is_constant[ir->rd] = false; })
 
 /* CSRRSI */
-CONSTOPT(csrrsi, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrsi, { info->is_constant[ir->rd] = false; })
 
 /* CSRRCI */
-CONSTOPT(csrrci, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrci, { info->is_constant[ir->rd] = false; })
 #endif
 
 /* RV32M Standard Extension */
@@ -426,61 +408,57 @@ CONSTOPT(csrrci, { constopt_info->is_constant[ir->rd] = false; })
 #if RV32_HAS(EXT_M)
 /* MUL: Multiply */
 CONSTOPT(mul, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) constopt_info->const_val[ir->rs1] *
-                  (int32_t) constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = (int32_t) info->const_val[ir->rs1] *
+                  (int32_t) info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* MULH: Multiply High Signed Signed */
 CONSTOPT(mulh, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        const int64_t a = (int32_t) constopt_info->const_val[ir->rs1];
-        const int64_t b = (int32_t) constopt_info->const_val[ir->rs2];
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        const int64_t a = (int32_t) info->const_val[ir->rs1];
+        const int64_t b = (int32_t) info->const_val[ir->rs2];
         ir->imm = ((uint64_t) (a * b)) >> 32;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* MULHSU: Multiply High Signed Unsigned */
 CONSTOPT(mulhsu, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        const int64_t a = (int32_t) constopt_info->const_val[ir->rs1];
-        const int64_t b = constopt_info->const_val[ir->rs2];
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        const int64_t a = (int32_t) info->const_val[ir->rs1];
+        const int64_t b = info->const_val[ir->rs2];
         ir->imm = ((uint64_t) (a * b)) >> 32;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* MULHU: Multiply High Unsigned Unsigned */
 CONSTOPT(mulhu, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = ((int64_t) constopt_info->const_val[ir->rs1] *
-                   (int64_t) constopt_info->const_val[ir->rs2]) >>
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = ((int64_t) info->const_val[ir->rs1] *
+                   (int64_t) info->const_val[ir->rs2]) >>
                   32;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* DIV: Divide Signed */
@@ -492,21 +470,19 @@ CONSTOPT(mulhu, {
  * +------------------------+-----------+----------+-----------+
  */
 CONSTOPT(div, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        const int32_t dividend = (int32_t) constopt_info->const_val[ir->rs1];
-        const int32_t divisor = (int32_t) constopt_info->const_val[ir->rs2];
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        const int32_t dividend = (int32_t) info->const_val[ir->rs1];
+        const int32_t divisor = (int32_t) info->const_val[ir->rs2];
         ir->imm = !divisor ? ~0U
-                  : (divisor == -1 &&
-                     constopt_info->const_val[ir->rs1] == 0x80000000U)
-                      ? constopt_info->const_val[ir->rs1] /* overflow */
+                  : (divisor == -1 && info->const_val[ir->rs1] == 0x80000000U)
+                      ? info->const_val[ir->rs1] /* overflow */
                       : (unsigned int) (dividend / divisor);
-        constopt_info->const_val[ir->rd] = ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* DIVU: Divide Unsigned */
@@ -517,17 +493,16 @@ CONSTOPT(div, {
  * +------------------------+-----------+----------+----------+
  */
 CONSTOPT(divu, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        const uint32_t dividend = constopt_info->const_val[ir->rs1];
-        const uint32_t divisor = constopt_info->const_val[ir->rs2];
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        const uint32_t dividend = info->const_val[ir->rs1];
+        const uint32_t divisor = info->const_val[ir->rs2];
         ir->imm = !divisor ? ~0U : dividend / divisor;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* REM: Remainder Signed */
@@ -539,21 +514,19 @@ CONSTOPT(divu, {
  * +------------------------+-----------+----------+---------+
  */
 CONSTOPT(rem, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        const int32_t dividend = constopt_info->const_val[ir->rs1];
-        const int32_t divisor = constopt_info->const_val[ir->rs2];
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        const int32_t dividend = info->const_val[ir->rs1];
+        const int32_t divisor = info->const_val[ir->rs2];
         ir->imm = !divisor ? dividend
-                  : (divisor == -1 &&
-                     constopt_info->const_val[ir->rs1] == 0x80000000U)
+                  : (divisor == -1 && info->const_val[ir->rs1] == 0x80000000U)
                       ? 0 /* overflow */
                       : (dividend % divisor);
-        constopt_info->const_val[ir->rd] = ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* REMU: Remainder Unsigned */
@@ -564,17 +537,16 @@ CONSTOPT(rem, {
  * +------------------------+-----------+----------+----------+
  */
 CONSTOPT(remu, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        const uint32_t dividend = constopt_info->const_val[ir->rs1];
-        const uint32_t divisor = constopt_info->const_val[ir->rs2];
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        const uint32_t dividend = info->const_val[ir->rs1];
+        const uint32_t divisor = info->const_val[ir->rs2];
         ir->imm = !divisor ? dividend : dividend % divisor;
-        constopt_info->const_val[ir->rd] = ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 #endif
 
@@ -722,21 +694,21 @@ CONSTOPT(fmvwx, {})
  * and expands to addi rd', x2, nzuimm[9:2].
  */
 CONSTOPT(caddi4spn, {
-    if (constopt_info->is_constant[rv_reg_sp]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[rv_reg_sp] + (uint16_t) ir->imm;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[rv_reg_sp]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[rv_reg_sp] + (uint16_t) ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* C.LW loads a 32-bit value from memory into register rd'. It computes an
  * effective address by adding the zero-extended offset, scaled by 4, to the
  * base address in register rs1'. It expands to lw rd', offset[6:2](rs1').
  */
-CONSTOPT(clw, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(clw, { info->is_constant[ir->rd] = false; })
 
 /* C.SW stores a 32-bit value in register rs2' to memory. It computes an
  * effective address by adding the zero-extended offset, scaled by 4, to the
@@ -754,9 +726,9 @@ CONSTOPT(csw, {})
  * code points with either rd=x0 or nzimm=0 encode HINTs.
  */
 CONSTOPT(caddi, {
-    if (constopt_info->is_constant[ir->rd]) {
-        ir->imm = constopt_info->const_val[ir->rd] + (int16_t) ir->imm;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rd]) {
+        ir->imm = info->const_val[ir->rd] + (int16_t) ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     }
@@ -764,8 +736,8 @@ CONSTOPT(caddi, {
 
 /* C.JAL */
 CONSTOPT(cjal, {
-    constopt_info->is_constant[rv_reg_ra] = true;
-    constopt_info->const_val[rv_reg_ra] = ir->pc + ir->insn_len;
+    info->is_constant[rv_reg_ra] = true;
+    info->const_val[rv_reg_ra] = ir->pc + ir->insn_len;
 })
 
 /* C.LI loads the sign-extended 6-bit immediate, imm, into register rd.
@@ -773,8 +745,8 @@ CONSTOPT(cjal, {
  * C.LI is only valid when rd=x0; the code points with rd=x0 encode HINTs.
  */
 CONSTOPT(cli, {
-    constopt_info->is_constant[ir->rd] = true;
-    constopt_info->const_val[ir->rd] = ir->imm;
+    info->is_constant[ir->rd] = true;
+    info->const_val[ir->rd] = ir->imm;
 })
 
 /* C.ADDI16SP is used to adjust the stack pointer in procedure prologues
@@ -783,9 +755,9 @@ CONSTOPT(cli, {
  * reserved.
  */
 CONSTOPT(caddi16sp, {
-    if (constopt_info->is_constant[ir->rd]) {
-        ir->imm = constopt_info->const_val[ir->rd] + ir->imm;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rd]) {
+        ir->imm = info->const_val[ir->rd] + ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     }
@@ -799,8 +771,8 @@ CONSTOPT(caddi16sp, {
  * to zero.
  */
 CONSTOPT(clui, {
-    constopt_info->is_constant[ir->rd] = true;
-    constopt_info->const_val[ir->rd] = ir->imm;
+    info->is_constant[ir->rd] = true;
+    info->const_val[ir->rd] = ir->imm;
 })
 
 /* C.SRLI is a CB-format instruction that performs a logical right shift
@@ -809,9 +781,9 @@ CONSTOPT(clui, {
  * rd', shamt[5:0].
  */
 CONSTOPT(csrli, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm = constopt_info->const_val[ir->rs1] >> ir->shamt;
-        constopt_info->const_val[ir->rs1] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm = info->const_val[ir->rs1] >> ir->shamt;
+        info->const_val[ir->rs1] = ir->imm;
         ir->rd = ir->rs1;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
@@ -822,12 +794,12 @@ CONSTOPT(csrli, {
  * arithmetic right shift. C.SRAI expands to srai rd', rd', shamt[5:0].
  */
 CONSTOPT(csrai, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        const uint32_t mask = 0x80000000 & constopt_info->const_val[ir->rs1];
-        ir->imm = constopt_info->const_val[ir->rs1] >> ir->shamt;
+    if (info->is_constant[ir->rs1]) {
+        const uint32_t mask = 0x80000000 & info->const_val[ir->rs1];
+        ir->imm = info->const_val[ir->rs1] >> ir->shamt;
         for (unsigned int i = 0; i < ir->shamt; ++i)
             ir->imm |= mask >> i;
-        constopt_info->const_val[ir->rs1] = ir->imm;
+        info->const_val[ir->rs1] = ir->imm;
         ir->rd = ir->rs1;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
@@ -839,9 +811,9 @@ CONSTOPT(csrai, {
  * the result to rd'. C.ANDI expands to andi rd', rd', imm[5:0].
  */
 CONSTOPT(candi, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        ir->imm = constopt_info->const_val[ir->rs1] & ir->imm;
-        constopt_info->const_val[ir->rs1] = ir->imm;
+    if (info->is_constant[ir->rs1]) {
+        ir->imm = info->const_val[ir->rs1] & ir->imm;
+        info->const_val[ir->rs1] = ir->imm;
         ir->rd = ir->rs1;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
@@ -850,56 +822,48 @@ CONSTOPT(candi, {
 
 /* C.SUB */
 CONSTOPT(csub, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs1] -
-                  constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs1] - info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* C.XOR */
 CONSTOPT(cxor, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs1] ^
-                  constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs1] ^ info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 CONSTOPT(cor, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs1] |
-                  constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs1] | info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 CONSTOPT(cand, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs1] &
-                  constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs1] & info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* C.J performs an unconditional control transfer. The offset is sign-extended
@@ -915,8 +879,8 @@ CONSTOPT(cj, {})
  * value in register rs1' is zero. It expands to beq rs1', x0, offset[8:1].
  */
 CONSTOPT(cbeqz, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        if (constopt_info->const_val[ir->rs1])
+    if (info->is_constant[ir->rs1]) {
+        if (info->const_val[ir->rs1])
             ir->imm = ir->insn_len;
         ir->opcode = rv_insn_cj;
         ir->impl = dispatch_table[ir->opcode];
@@ -925,8 +889,8 @@ CONSTOPT(cbeqz, {
 
 /* C.BEQZ */
 CONSTOPT(cbnez, {
-    if (constopt_info->is_constant[ir->rs1]) {
-        if (!constopt_info->const_val[ir->rs1])
+    if (info->is_constant[ir->rs1]) {
+        if (!info->const_val[ir->rs1])
             ir->imm = ir->insn_len;
         ir->opcode = rv_insn_cj;
         ir->impl = dispatch_table[ir->opcode];
@@ -938,26 +902,26 @@ CONSTOPT(cbnez, {
  * is encoded in the shamt field. C.SLLI expands into slli rd, rd, shamt[5:0].
  */
 CONSTOPT(cslli, {
-    if (constopt_info->is_constant[ir->rd]) {
-        ir->imm = constopt_info->const_val[ir->rd] << (uint8_t) ir->imm;
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rd]) {
+        ir->imm = info->const_val[ir->rd] << (uint8_t) ir->imm;
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     }
 })
 
 /* C.LWSP */
-CONSTOPT(clwsp, { constopt_info->is_constant[ir->rd] = false; })
+CONSTOPT(clwsp, { info->is_constant[ir->rd] = false; })
 
 /* C.JR */
 CONSTOPT(cjr, {})
 
 /* C.MV */
 CONSTOPT(cmv, {
-    if (constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     }
@@ -968,8 +932,8 @@ CONSTOPT(cebreak, {})
 
 /* C.JALR */
 CONSTOPT(cjalr, {
-    constopt_info->is_constant[rv_reg_ra] = true;
-    constopt_info->const_val[ir->rd] = ir->pc + ir->insn_len;
+    info->is_constant[rv_reg_ra] = true;
+    info->const_val[ir->rd] = ir->pc + ir->insn_len;
 })
 
 /* C.ADD adds the values in registers rd and rs2 and writes the result to
@@ -980,16 +944,14 @@ CONSTOPT(cjalr, {
  * are HINTs.
  */
 CONSTOPT(cadd, {
-    if (constopt_info->is_constant[ir->rs1] &&
-        constopt_info->is_constant[ir->rs2]) {
-        constopt_info->is_constant[ir->rd] = true;
-        ir->imm = constopt_info->const_val[ir->rs1] +
-                  constopt_info->const_val[ir->rs2];
-        constopt_info->const_val[ir->rd] = ir->imm;
+    if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
+        info->is_constant[ir->rd] = true;
+        ir->imm = info->const_val[ir->rs1] + info->const_val[ir->rs2];
+        info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
     } else
-        constopt_info->is_constant[ir->rd] = false;
+        info->is_constant[ir->rd] = false;
 })
 
 /* C.SWSP */

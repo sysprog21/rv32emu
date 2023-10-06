@@ -1045,11 +1045,11 @@ typedef struct {
     uint32_t const_val[N_RV_REGS];
 } constopt_info_t;
 
-#define CONSTOPT(inst, code)                                           \
-    static void constopt_##inst(UNUSED rv_insn_t *ir,                  \
-                                UNUSED constopt_info_t *constopt_info) \
-    {                                                                  \
-        code;                                                          \
+#define CONSTOPT(inst, code)                                  \
+    static void constopt_##inst(rv_insn_t *ir UNUSED,         \
+                                constopt_info_t *info UNUSED) \
+    {                                                         \
+        code;                                                 \
     }
 
 #include "rv32_constopt.c"
@@ -1064,17 +1064,15 @@ static const void *constopt_table[] = {
 
 /* clang-format on */
 typedef void (*constopt_func_t)(rv_insn_t *, constopt_info_t *);
-static void optimize_constant(riscv_t *rv, block_t *block)
+static void optimize_constant(riscv_t *rv UNUSED, block_t *block)
 {
-    constopt_info_t constopt_info = {0};
-    constopt_info.is_constant[0] = true;
+    constopt_info_t info = {.is_constant[0] = true};
     assert(rv->X[0] == 0);
 
     uint32_t i;
     rv_insn_t *ir;
-    for (i = 0, ir = block->ir_head; i < block->n_insn; i++, ir = ir->next) {
-        ((constopt_func_t) constopt_table[ir->opcode])(ir, &constopt_info);
-    }
+    for (i = 0, ir = block->ir_head; i < block->n_insn; i++, ir = ir->next)
+        ((constopt_func_t) constopt_table[ir->opcode])(ir, &info);
 }
 
 static block_t *prev = NULL;

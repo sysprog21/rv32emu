@@ -160,10 +160,9 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
     /* set the default stack pointer */
     rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;
 
-    /*
-     * store argc and args of target program to state->mem
-     * thus, we can use offset technique for emulating
-     * 32/64-bit target program on 64-bit emulator
+    /* Store 'argc' and 'args' of the target program in 'state->mem'. Thus,
+     * we can use an offset trick to emulate 32/64-bit target programs on
+     * a 64-bit built emulator.
      *
      * memory layout of arguments as below:
      * -----------------------
@@ -193,10 +192,9 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
      * TODO: access to envp
      */
 
-    int i;
     state_t *s = rv_userdata(rv);
 
-    /* copy args to DRAM */
+    /* copy args to RAM */
     uintptr_t args_size = (1 + argc + 1) * sizeof(uint32_t);
     uintptr_t args_bottom = DEFAULT_ARGS_ADDR;
     uintptr_t args_top = args_bottom - args_size;
@@ -208,12 +206,12 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
     args_p++;
 
     /* args */
-    size_t args_space[256]; /* for calculating the offset of args when pushing
-                               to stack */
+    /* used for calculating the offset of args when pushing to stack */
+    size_t args_space[256];
     size_t args_space_idx = 0;
     size_t args_len;
     size_t args_len_total = 0;
-    for (i = 0; i < argc; i++) {
+    for (int i = 0; i < argc; i++) {
         const char *arg = args[i];
         args_len = strlen(arg);
         memory_write(s->mem, (uintptr_t) args_p, (void *) arg,
@@ -236,11 +234,11 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
     memory_write(s->mem, (uintptr_t) sp,
                  (void *) (s->mem->mem_base + (uintptr_t) args_p), sizeof(int));
     args_p++;
-    sp = (uintptr_t *) ((uint32_t *) sp + 1); /* keep argc and args[0] within
-                                                 one word due to RV32 ABI */
+    /* keep argc and args[0] within one word due to RV32 ABI */
+    sp = (uintptr_t *) ((uint32_t *) sp + 1);
 
     /* args */
-    for (i = 0; i < argc; i++) {
+    for (int i = 0; i < argc; i++) {
         uintptr_t offset = (uintptr_t) args_p;
         memory_write(s->mem, (uintptr_t) sp, (void *) &offset,
                      sizeof(uintptr_t));

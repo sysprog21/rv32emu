@@ -58,35 +58,38 @@ static void rv_exception_default_handler(riscv_t *rv)
     rv->PC = rv->csr_mepc; /* mret */
 }
 
-#define EXCEPTION_HANDLER_IMPL(type, code)                                \
-    static void rv_except_##type(riscv_t *rv, uint32_t mtval)             \
-    {                                                                     \
-        /* mtvec (Machine Trap-Vector Base Address Register)              \
-         * mtvec[MXLEN-1:2]: vector base address                          \
-         * mtvec[1:0] : vector mode                                       \
-         */                                                               \
-        const uint32_t base = rv->csr_mtvec & ~0x3;                       \
-        const uint32_t mode = rv->csr_mtvec & 0x3;                        \
-        /* mepc  (Machine Exception Program Counter)                      \
-         * mtval (Machine Trap Value Register)                            \
-         * mcause (Machine Cause Register): store exception code          \
-         */                                                               \
-        rv->csr_mepc = rv->PC;                                            \
-        rv->csr_mtval = mtval;                                            \
-        rv->csr_mcause = code;                                            \
-        if (!rv->csr_mtvec) { /* in case CSR is not configured */         \
-            rv_exception_default_handler(rv);                             \
-            return;                                                       \
-        }                                                                 \
-        switch (mode) {                                                   \
-        case 0: /* DIRECT: All exceptions set PC to base */               \
-            rv->PC = base;                                                \
-            break;                                                        \
-        /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */ \
-        case 1:                                                           \
-            rv->PC = base + 4 * code;                                     \
-            break;                                                        \
-        }                                                                 \
+#define EXCEPTION_HANDLER_IMPL(type, code)                                   \
+    static void rv_except_##type(riscv_t *rv, uint32_t mtval)                \
+    {                                                                        \
+        /* mtvec (Machine Trap-Vector Base Address Register)                 \
+         * mtvec[MXLEN-1:2]: vector base address                             \
+         * mtvec[1:0] : vector mode                                          \
+         */                                                                  \
+        const uint32_t base = rv->csr_mtvec & ~0x3;                          \
+        const uint32_t mode = rv->csr_mtvec & 0x3;                           \
+        /* mepc  (Machine Exception Program Counter)                         \
+         * mtval (Machine Trap Value Register)                               \
+         * mcause (Machine Cause Register): store exception code             \
+         * mstatus (Machine Status Register): keep track of and controls the \
+         * hart’s current operating state                                  \
+         */                                                                  \
+        rv->csr_mepc = rv->PC;                                               \
+        rv->csr_mtval = mtval;                                               \
+        rv->csr_mcause = code;                                               \
+        rv->csr_mstatus = MSTATUS_MPP; /* set privilege mode */              \
+        if (!rv->csr_mtvec) {          /* in case CSR is not configured */   \
+            rv_exception_default_handler(rv);                                \
+            return;                                                          \
+        }                                                                    \
+        switch (mode) {                                                      \
+        case 0: /* DIRECT: All exceptions set PC to base */                  \
+            rv->PC = base;                                                   \
+            break;                                                           \
+        /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */    \
+        case 1:                                                              \
+            rv->PC = base + 4 * code;                                        \
+            break;                                                           \
+        }                                                                    \
     }
 
 /* RISC-V exception handlers */

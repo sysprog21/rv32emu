@@ -67,6 +67,18 @@ enum {
 };
 /* clang-format on */
 
+#define MISA_SUPER (1 << ('S' - 'A'))
+#define MISA_USER (1 << ('U' - 'A'))
+#define MISA_I (1 << ('I' - 'A'))
+#define MISA_M (1 << ('M' - 'A'))
+#define MISA_A (1 << ('A' - 'A'))
+#define MISA_F (1 << ('F' - 'A'))
+#define MISA_C (1 << ('C' - 'A'))
+#define MSTATUS_MPIE_SHIFT 7
+#define MSTATUS_MPP_SHIFT 11
+#define MSTATUS_MPIE (1 << MSTATUS_MPIE_SHIFT)
+#define MSTATUS_MPP (3 << MSTATUS_MPP_SHIFT)
+
 /* forward declaration for internal structure */
 typedef struct riscv_internal riscv_t;
 typedef void *riscv_user_t;

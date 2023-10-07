@@ -285,6 +285,7 @@ RVOP(hret, {
 
 /* MRET: return from traps in U-mode */
 RVOP(mret, {
+    rv->csr_mstatus = MSTATUS_MPIE;
     rv->PC = rv->csr_mepc;
     return true;
 })

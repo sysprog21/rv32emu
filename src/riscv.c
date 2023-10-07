@@ -254,8 +254,18 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
     rv->csr_mtvec = 0;
     rv->csr_cycle = 0;
     rv->csr_mstatus = 0;
-
+    rv->csr_misa |= MISA_SUPER | MISA_USER | MISA_I;
+#if RV32_HAS(EXT_A)
+    rv->csr_misa |= MISA_A;
+#endif
+#if RV32_HAS(EXT_C)
+    rv->csr_misa |= MISA_C;
+#endif
+#if RV32_HAS(EXT_M)
+    rv->csr_misa |= MISA_M;
+#endif
 #if RV32_HAS(EXT_F)
+    rv->csr_misa |= MISA_F;
     /* reset float registers */
     memset(rv->F, 0, sizeof(float) * N_RV_REGS);
     rv->csr_fcsr = 0;

@@ -156,14 +156,12 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return &((uint32_t *) &rv->csr_cycle)[1];
 
     /* TIME/TIMEH - very roughly about 1 ms per tick */
-    case CSR_TIME: { /* Timer for RDTIME instruction */
+    case CSR_TIME: /* Timer for RDTIME instruction */
         update_time(rv);
         return &rv->csr_time[0];
-    }
-    case CSR_TIMEH: { /* Upper 32 bits of time */
+    case CSR_TIMEH: /* Upper 32 bits of time */
         update_time(rv);
         return &rv->csr_time[1];
-    }
     case CSR_INSTRET: /* Number of Instructions Retired Counter */
         return (uint32_t *) (&rv->csr_cycle);
 #if RV32_HAS(EXT_F)
@@ -407,9 +405,8 @@ static bool do_fuse1(riscv_t *rv, rv_insn_t *ir)
 {
     rv->csr_cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
-    for (int i = 0; i < ir->imm2; i++) {
+    for (int i = 0; i < ir->imm2; i++)
         rv->X[fuse[i].rd] = fuse[i].imm;
-    }
     rv->PC += ir->imm2 * ir->insn_len;
     if (unlikely(RVOP_NO_NEXT(ir)))
         return true;
@@ -1042,7 +1039,6 @@ static void match_pattern(riscv_t *rv, block_t *block)
     }
 }
 
-
 typedef struct {
     bool is_constant[N_RV_REGS];
     uint32_t const_val[N_RV_REGS];
@@ -1194,7 +1190,7 @@ void ecall_handler(riscv_t *rv)
 void dump_registers(riscv_t *rv, char *out_file_path)
 {
     FILE *f;
-    if (strncmp(out_file_path, "-", 1) == 0) {
+    if (!strncmp(out_file_path, "-", 1)) {
         f = stdout;
     } else {
         f = fopen(out_file_path, "w");

@@ -363,9 +363,8 @@ struct Elf32_Shdr **get_elf_section_headers(elf_t *e)
     uint8_t *buf = e->raw_data + offset;
 
     struct Elf32_Shdr **shdrs = malloc(sizeof(struct Elf32_Shdr) * shnum);
-    if (!shdrs) {
+    if (!shdrs)
         return NULL;
-    }
 
     for (int i = 0; i < shnum; i++) {
         struct Elf32_Shdr *shdr = (struct Elf32_Shdr *) shdrs + i;

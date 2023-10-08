@@ -37,6 +37,13 @@ extern struct target_ops gdbstub_ops;
 #include "state.h"
 #include "utils.h"
 
+/* Shortcuts for comparing each field of specified RISC-V instruction */
+#define IF_insn(i, o) (i->opcode == rv_insn_##o)
+#define IF_rd(i, r) (i->rd == rv_reg_##r)
+#define IF_rs1(i, r) (i->rs1 == rv_reg_##r)
+#define IF_rs2(i, r) (i->rs2 == rv_reg_##r)
+#define IF_imm(i, v) (i->imm == v)
+
 /* RISC-V exception code list */
 #define RV_EXCEPTION_LIST                                       \
     _(insn_misaligned, 0)  /* Instruction address misaligned */ \
@@ -692,33 +699,32 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
          * from pc_start of the basic block and compare it with the pre-recorded
          * memset/memcpy instruction sequence.
          */
-        if (ir->imm == 15 && ir->rd == rv_reg_t1 && ir->rs1 == rv_reg_zero) {
+        if (IF_imm(ir, 15) && IF_rd(ir, t1) && IF_rs1(ir, zero)) {
             next_ir = ir->next;
-            if (next_ir->opcode == rv_insn_addi && next_ir->rd == rv_reg_a4 &&
-                next_ir->rs1 == rv_reg_a0 && next_ir->rs2 == rv_reg_zero) {
+            if (IF_insn(next_ir, addi) && IF_rd(next_ir, a4) &&
+                IF_rs1(next_ir, a0) && IF_rs2(next_ir, zero)) {
                 next_ir = next_ir->next;
-                if (next_ir->opcode == rv_insn_bgeu && next_ir->imm == 60 &&
-                    next_ir->rs1 == rv_reg_t1 && next_ir->rs2 == rv_reg_a2) {
+                if (IF_insn(next_ir, bgeu) && IF_imm(next_ir, 60) &&
+                    IF_rs1(next_ir, t1) && IF_rs2(next_ir, a2)) {
                     if (detect_memset(rv, 0)) {
                         ir->opcode = rv_insn_fuse5;
                         ir->impl = dispatch_table[ir->opcode];
                         remove_next_nth_ir(rv, ir, block, 2);
                         return true;
-                    };
+                    }
                 }
             }
-        } else if (ir->imm == 0 && ir->rd == rv_reg_t1 &&
-                   ir->rs1 == rv_reg_a0) {
+        } else if (IF_imm(ir, 0) && IF_rd(ir, t1) && IF_rs1(ir, a0)) {
             next_ir = ir->next;
-            if (next_ir->opcode == rv_insn_beq && next_ir->rs1 == rv_reg_a2 &&
-                next_ir->rs2 == rv_reg_zero) {
-                if (next_ir->imm == 20 && detect_memset(rv, 1)) {
+            if (IF_insn(next_ir, beq) && IF_rs1(next_ir, a2) &&
+                IF_rs2(next_ir, zero)) {
+                if (IF_imm(next_ir, 20) && detect_memset(rv, 1)) {
                     ir->opcode = rv_insn_fuse5;
                     ir->impl = dispatch_table[ir->opcode];
                     remove_next_nth_ir(rv, ir, block, 2);
                     return true;
                 }
-                if (next_ir->imm == 28 && detect_memcpy(rv, 1)) {
+                if (IF_imm(next_ir, 28) && detect_memcpy(rv, 1)) {
                     ir->opcode = rv_insn_fuse6;
                     ir->impl = dispatch_table[ir->opcode];
                     remove_next_nth_ir(rv, ir, block, 2);
@@ -733,25 +739,22 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
          * starting from the pc_start of the basic block and then compare
          * it with the pre-recorded memcpy instruction sequence.
          */
-        if (ir->rd == rv_reg_a5 && ir->rs1 == rv_reg_a0 &&
-            ir->rs2 == rv_reg_a1) {
+        if (IF_rd(ir, a5) && IF_rs1(ir, a0) && IF_rs2(ir, a1)) {
             next_ir = ir->next;
-            if (next_ir->opcode == rv_insn_andi && next_ir->imm == 3 &&
-                next_ir->rd == rv_reg_a5 && next_ir->rs1 == rv_reg_a5) {
+            if (IF_insn(next_ir, andi) && IF_imm(next_ir, 3) &&
+                IF_rd(next_ir, a5) && IF_rs1(next_ir, a5)) {
                 next_ir = next_ir->next;
-                if (next_ir->opcode == rv_insn_add &&
-                    next_ir->rd == rv_reg_a7 && next_ir->rs1 == rv_reg_a0 &&
-                    next_ir->rs2 == rv_reg_a2) {
+                if (IF_insn(next_ir, add) && IF_rd(next_ir, a7) &&
+                    IF_rs1(next_ir, a0) && IF_rs2(next_ir, a2)) {
                     next_ir = next_ir->next;
-                    if (next_ir->opcode == rv_insn_bne && next_ir->imm == 104 &&
-                        next_ir->rs1 == rv_reg_a5 &&
-                        next_ir->rs2 == rv_reg_zero) {
+                    if (IF_insn(next_ir, bne) && IF_imm(next_ir, 104) &&
+                        IF_rs1(next_ir, a5) && IF_rs2(next_ir, zero)) {
                         if (detect_memcpy(rv, 0)) {
                             ir->opcode = rv_insn_fuse6;
                             ir->impl = dispatch_table[ir->opcode];
                             remove_next_nth_ir(rv, ir, block, 3);
                             return true;
-                        };
+                        }
                     }
                 }
             }
@@ -798,7 +801,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
             case rv_insn_lui:
                 count = 1;
                 while (1) {
-                    if (next_ir->opcode != rv_insn_lui)
+                    if (!IF_insn(next_ir, lui))
                         break;
                     count++;
                     if (next_ir->tailcall)
@@ -834,9 +837,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
             count = 1;
             next_ir = ir->next;
             while (1) {
-                if (next_ir->opcode != rv_insn_slli &&
-                    next_ir->opcode != rv_insn_srli &&
-                    next_ir->opcode != rv_insn_srai)
+                if (!IF_insn(next_ir, slli) && !IF_insn(next_ir, srli) &&
+                    !IF_insn(next_ir, srai))
                     break;
                 count++;
                 if (next_ir->tailcall)
@@ -973,10 +975,9 @@ void rv_step(riscv_t *rv, int32_t cycles)
                     last_ir->branch_taken = block->ir_head;
                 else if (!last_ir->branch_untaken)
                     last_ir->branch_untaken = block->ir_head;
-            } else if (last_ir->opcode == rv_insn_jal
+            } else if (IF_insn(last_ir, jal)
 #if RV32_HAS(EXT_C)
-                       || last_ir->opcode == rv_insn_cj ||
-                       last_ir->opcode == rv_insn_cjal
+                       || IF_insn(last_ir, cj) || IF_insn(last_ir, cjal)
 #endif
             ) {
                 if (!last_ir->branch_taken)

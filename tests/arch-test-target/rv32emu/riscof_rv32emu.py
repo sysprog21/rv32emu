@@ -72,7 +72,7 @@ class rv32emu(pluginTemplate):
         # Note the march is not hardwired here, because it will change for each
         # test. Similarly the output elf name and compile macros will be assigned later in the
         # runTests function
-        self.compile_cmd = 'riscv{1}-unknown-elf-gcc -march={0}\
+        self.compile_cmd = os.getenv("CROSS_COMPILE") + 'gcc -march={0}\
         -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles -g\
         -T '+self.pluginpath+'/env/link.ld\
         -I '+self.pluginpath+'/env/\

@@ -4,6 +4,8 @@ include mk/toolchain.mk
 OUT ?= build
 BIN := $(OUT)/rv32emu
 
+-include $(OUT)/.config
+
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
@@ -120,6 +122,10 @@ $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
+config:
+	$(Q)echo "$(CFLAGS)" | xargs -n1 | sort | sed -n 's/^RV32_FEATURE/ENABLE/p' > $(OUT)/.config
+	$(VECHO) "Check the file $(OUT)/.config for configured items.\n"
+
 # Tools
 include mk/tools.mk
 tool: $(TOOLS_BIN)
@@ -176,5 +182,6 @@ distclean: clean
 	$(RM) -r $(OUT)/id1
 	$(RM) *.zip
 	$(RM) -r $(OUT)/mini-gdbstub
+	-$(RM) $(OUT)/.config
 
 -include $(deps)

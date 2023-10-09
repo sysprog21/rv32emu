@@ -80,6 +80,14 @@ The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](do
 
 e.g., run `make ENABLE_EXT_F=0` for the build without floating-point support.
 
+Alternatively, configure the above items in advance by executing `make config` and
+specifying them in a configuration file. Subsequently, run `make` according to the provided
+configurations. For example, employ the following commands:
+```shell
+$ make config ENABLE_SDL=0
+$ make
+```
+
 ### RISCOF
 
 [RISCOF](https://github.com/riscv-software-src/riscof) (RISC-V Compatibility Framework) is

@@ -7,7 +7,7 @@ check_platform
 mkdir -p toolchain
 
 # GNU Toolchain for RISC-V
-GCC_VER=2023.07.07
+GCC_VER=2023.10.06
 TOOLCHAIN_REPO=https://github.com/riscv-collab/riscv-gnu-toolchain/releases
 
 wget -q \

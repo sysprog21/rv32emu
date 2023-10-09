@@ -5,6 +5,9 @@ export WORK := $(TARGETDIR)/build/arch-test
 export RISCV_DEVICE ?= IMCZicsrZifencei
 
 arch-test: $(BIN)
+ifeq ($(CROSS_COMPILE),)
+	$(error GNU Toolchain for RISC-V is required to build architecture tests. Please check package installation)
+endif
 	git submodule update --init $(dir $(ARCH_TEST_DIR))
 	$(Q)python3 -B $(RISCV_TARGET)/setup.py --riscv_device=$(RISCV_DEVICE)
 	$(Q)riscof run --work-dir=$(WORK) \

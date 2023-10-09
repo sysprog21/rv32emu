@@ -4,7 +4,8 @@ include mk/toolchain.mk
 OUT ?= build
 BIN := $(OUT)/rv32emu
 
--include $(OUT)/.config
+CONFIG_FILE := $(OUT)/.config
+-include $(CONFIG_FILE)
 
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
@@ -95,7 +96,7 @@ $(OUT)/emulate.o: CFLAGS += $(CFLAGS_NO_CET) -fomit-frame-pointer -fno-stack-che
 # to the first target after .DEFAULT_GOAL is not set.
 .DEFAULT_GOAL :=
 
-all: $(BIN)
+all: config $(BIN)
 
 OBJS := \
 	map.o \
@@ -122,8 +123,9 @@ $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
-config:
-	$(Q)echo "$(CFLAGS)" | xargs -n1 | sort | sed -n 's/^RV32_FEATURE/ENABLE/p' > $(OUT)/.config
+config: $(CONFIG_FILE)
+$(CONFIG_FILE):
+	$(Q)echo "$(CFLAGS)" | xargs -n1 | sort | sed -n 's/^RV32_FEATURE/ENABLE/p' > $@
 	$(VECHO) "Check the file $(OUT)/.config for configured items.\n"
 
 # Tools

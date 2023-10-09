@@ -42,8 +42,5 @@ endef
 # TODO: support clang/llvm based cross compilers
 # TODO: support native RISC-V compilers
 CROSS_COMPILE ?= $(word 1,$(foreach prefix,$(TOOLCHAIN_LIST),$(call check-cross-tools, $(prefix))))
-ifeq ($(CROSS_COMPILE),)
-$(warning GNU Toolchain for RISC-V is required to build architecture tests. Please check package installation)
-endif
 
 export CROSS_COMPILE

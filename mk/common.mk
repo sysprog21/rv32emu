@@ -6,6 +6,10 @@ else
 endif
 
 # Control the build verbosity
+# 'make V=1' equals to 'make VERBOSE=1'
+ifeq ("$(origin V)", "command line")
+    VERBOSE = $(V)
+endif
 ifeq ("$(VERBOSE)","1")
     Q :=
     VECHO = @true

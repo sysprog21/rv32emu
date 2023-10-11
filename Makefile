@@ -65,7 +65,7 @@ $(call set-feature, SDL)
 ifeq ($(call has, SDL), 1)
 OBJS_EXT += syscall_sdl.o
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
-LDFLAGS += $(shell sdl2-config --libs)
+LDFLAGS += $(shell sdl2-config --libs) -pthread
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
 endif
 
@@ -83,7 +83,7 @@ $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 $(OUT)/decode.o: $(GDBSTUB_LIB)
 OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
-LDFLAGS += $(GDBSTUB_LIB) -lpthread
+LDFLAGS += $(GDBSTUB_LIB) -pthread
 gdbstub-test: $(BIN)
 	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif

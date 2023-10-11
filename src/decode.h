@@ -152,7 +152,7 @@ enum op_field {
         _(caddi4spn, 0, 2, ENC(rd))                 \
         _(clw, 0, 2, ENC(rs1, rd))                  \
         _(csw, 0, 2, ENC(rs1, rs2))                 \
-        /* cnop is mapped to nop */                 \
+        _(cnop, 0, 2, ENC())                        \
         _(caddi, 0, 2, ENC(rd))                     \
         _(cjal, 1, 2, ENC())                        \
         _(cli, 0, 2, ENC(rd))                       \

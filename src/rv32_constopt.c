@@ -717,7 +717,8 @@ CONSTOPT(clw, { info->is_constant[ir->rd] = false; })
  */
 CONSTOPT(csw, {})
 
-/* C.NOP is mapped to NOP */
+/* C.NOP */
+CONSTOPT(cnop, {})
 
 /* C.ADDI adds the non-zero sign-extended 6-bit immediate to the value in
  * register rd then writes the result to rd. C.ADDI expands into

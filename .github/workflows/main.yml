@@ -20,8 +20,8 @@ jobs:
             make check
             make tests
             make misalign
-            make ENABLE_ARC=1 clean all
-            make ENABLE_ARC=1 tests
+            make tool
+            make distclean ENABLE_ARC=1 tests
     - name: diverse configurations
       run: |
             make distclean ENABLE_EXT_C=0 check

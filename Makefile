@@ -156,14 +156,14 @@ check: $(BIN)
 	    fi; \
 	)
 
-EXPECTED_aes = Dec 15 2022 16:35:12 Test results AES-128 ECB encryption: PASSED! AES-128 ECB decryption: PASSED! AES-128 CBC encryption: PASSED! AES-128 CBC decryption: PASSED! AES-128 CFB encryption: PASSED! AES-128 CFB decryption: PASSED! AES-128 OFB encryption: PASSED! AES-128 OFB decryption: PASSED! AES-128 CTR encryption: PASSED! AES-128 CTR decryption: PASSED! AES-128 XTS encryption: PASSED! AES-128 XTS decryption: PASSED! AES-128 validate CMAC : PASSED! AES-128 Poly-1305 mac : PASSED! AES-128 GCM encryption: PASSED! AES-128 GCM decryption: PASSED! AES-128 CCM encryption: PASSED! AES-128 CCM decryption: PASSED! AES-128 OCB encryption: PASSED! AES-128 OCB decryption: PASSED! AES-128 SIV encryption: PASSED! AES-128 SIV decryption: PASSED! AES-128 GCMSIV encrypt: PASSED! AES-128 GCMSIV decrypt: PASSED! AES-128 EAX encryption: PASSED! AES-128 EAX decryption: PASSED! AES-128 key wrapping  : PASSED! AES-128 key unwrapping: PASSED! AES-128 FF1 encryption: PASSED! AES-128 FPE decryption: PASSED! +-> Let's do some extra tests AES-128 OCB encryption: PASSED! AES-128 OCB decryption: PASSED! AES-128 GCMSIV encrypt: PASSED! AES-128 GCMSIV decrypt: PASSED! AES-128 GCMSIV encrypt: PASSED! AES-128 GCMSIV decrypt: PASSED! AES-128 SIV encryption: PASSED! AES-128 SIV decryption: PASSED! AES-128 SIV encryption: PASSED! AES-128 SIV decryption: PASSED! AES-128 EAX encryption: PASSED! AES-128 EAX decryption: PASSED! AES-128 EAX encryption: PASSED! AES-128 EAX decryption: PASSED! AES-128 Poly-1305 mac : PASSED! inferior exit code 0
+EXPECTED_aes_sha1 = 1242a6757c8aef23e50b5264f5941a2f4b4a347e  -
 misalign: $(BIN)
 	$(Q)$(PRINTF) "Running aes.elf ... "; 
-	$(Q)if [ "$(shell $(BIN) -m $(OUT)/aes.elf | uniq)" = "$(EXPECTED_aes)" ]; then \
-        $(call notice, [OK]); \
-	else	\
-        $(PRINTF) "Failed.\n"; \
-    fi
+	$(Q)if [ "$(shell $(BIN) -m $(OUT)/aes.elf | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
+	    $(call notice, [OK]); \
+	    else \
+	    $(PRINTF) "Failed.\n"; \
+	    fi
 
 include mk/external.mk
 

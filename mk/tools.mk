@@ -6,6 +6,7 @@ HIST_OBJS := \
 	map.o \
 	elf.o \
 	decode.o \
+	mpool.o \
 	rv_histogram.o
 
 HIST_OBJS := $(addprefix $(OUT)/, $(HIST_OBJS))

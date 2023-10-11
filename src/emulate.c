@@ -61,7 +61,7 @@ enum {
 
 static void rv_exception_default_handler(riscv_t *rv)
 {
-    rv->csr_mepc += rv->compressed ? INSN_16 : INSN_32;
+    rv->csr_mepc += rv->compressed ? 2 : 4;
     rv->PC = rv->csr_mepc; /* mret */
 }
 
@@ -628,14 +628,14 @@ static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
-            rv->compressed = (ir->insn_len == INSN_16);
+            rv->compressed = is_compressed(insn);
             rv_except_illegal_insn(rv, insn);
             break;
         }
         ir->impl = dispatch_table[ir->opcode];
         ir->pc = block->pc_end;
         /* compute the end of pc */
-        block->pc_end += ir->insn_len;
+        block->pc_end += is_compressed(insn) ? 2 : 4;
         block->n_insn++;
         prev_ir = ir;
         /* stop on branch */

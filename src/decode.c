@@ -1726,10 +1726,9 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
     /* If the last 2-bit is one of 0b00, 0b01, and 0b10, it is
      * a 16-bit instruction.
      */
-    if ((insn & FC_OPCODE) != 3) {
+    if (is_compressed(insn)) {
         insn &= 0x0000FFFF;
         const uint16_t c_index = (insn & FC_FUNC3) >> 11 | (insn & FC_OPCODE);
-        ir->insn_len = INSN_16;
 
         /* decode instruction (compressed instructions) */
         const decode_t op = rvc_jump_table[c_index];
@@ -1740,7 +1739,6 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
 
     /* standard uncompressed instruction */
     const uint32_t index = (insn & INSN_6_2) >> 2;
-    ir->insn_len = INSN_32;
 
     /* decode instruction */
     const decode_t op = rv_jump_table[index];

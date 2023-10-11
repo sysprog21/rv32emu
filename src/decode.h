@@ -246,11 +246,6 @@ enum {
 };
 /* clang-format on */
 
-enum {
-    INSN_16 = 2,
-    INSN_32 = 4,
-};
-
 typedef struct {
     int32_t imm;
     uint8_t rd, rs1, rs2;
@@ -274,9 +269,6 @@ typedef struct rv_insn {
     opcode_fuse_t *fuse;
 
     uint32_t pc;
-
-    /* instruction length */
-    uint8_t insn_len;
 
     /* Tail-call optimization (TCO) allows a C function to replace a function
      * call to another function or itself, followed by a simple return of the

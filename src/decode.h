@@ -283,14 +283,14 @@ typedef struct rv_insn {
      * optimization enables the self-recursive function to reuse the same
      * function stack frame.
      *
-     * The @tailcall member indicates whether an intermediate representation
-     * (IR) is the final instruction in a basic block. The @impl member
-     * facilitates the direct invocation of the next instruction emulation
-     * without the need to compute the jump address. By utilizing these two
-     * members, all instruction emulations can be rewritten into a
+     * The @next member indicates the next intermediate representation
+     * (IR) or is NULL if it is the final instruction in a basic block. The
+     * @impl member facilitates the direct invocation of the next instruction
+     * emulation without the need to compute the jump address. By utilizing
+     * these two members, all instruction emulations can be rewritten into a
      * self-recursive version, enabling the compiler to leverage TCO.
      */
-    bool tailcall;
+    struct rv_insn *next;
     bool (*impl)(riscv_t *, const struct rv_insn *);
 
     /* Two pointers, 'branch_taken' and 'branch_untaken', are employed to
@@ -302,7 +302,6 @@ typedef struct rv_insn {
      */
     struct rv_insn *branch_taken, *branch_untaken;
 
-    struct rv_insn *next;
 } rv_insn_t;
 
 /* decode the RISC-V instruction */

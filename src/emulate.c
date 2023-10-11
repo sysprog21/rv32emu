@@ -356,9 +356,9 @@ enum {
 };
 
 #if RV32_HAS(GDBSTUB)
-#define RVOP_NO_NEXT(ir) (ir->tailcall | rv->debug_mode)
+#define RVOP_NO_NEXT(ir) (!ir->next | rv->debug_mode)
 #else
-#define RVOP_NO_NEXT(ir) (ir->tailcall)
+#define RVOP_NO_NEXT(ir) (!ir->next)
 #endif
 
 /* record whether the branch is taken or not during emulation */
@@ -601,7 +601,7 @@ static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
 
     assert(prev_ir);
     block->ir_tail = prev_ir;
-    block->ir_tail->tailcall = true;
+    block->ir_tail->next = NULL;
 }
 
 #define COMBINE_MEM_OPS(RW)                                       \
@@ -611,7 +611,7 @@ static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
         if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw))   \
             break;                                                \
         count++;                                                  \
-        if (next_ir->tailcall)                                    \
+        if (!next_ir->next)                                       \
             break;                                                \
         next_ir = next_ir->next;                                  \
     }                                                             \
@@ -683,7 +683,6 @@ FORCE_INLINE void remove_next_nth_ir(riscv_t *rv,
     }
     if (!ir->next) {
         block->ir_tail = ir;
-        ir->tailcall = true;
     }
     block->n_insn -= n;
 }
@@ -794,7 +793,6 @@ static void match_pattern(riscv_t *rv, block_t *block)
                     else
                         ir->rs1 = next_ir->rs2;
                     ir->impl = dispatch_table[ir->opcode];
-                    ir->tailcall = next_ir->tailcall;
                     remove_next_nth_ir(rv, ir, block, 1);
                 }
                 break;
@@ -804,7 +802,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
                     if (!IF_insn(next_ir, lui))
                         break;
                     count++;
-                    if (next_ir->tailcall)
+                    if (!next_ir->next)
                         break;
                     next_ir = next_ir->next;
                 }
@@ -841,7 +839,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
                     !IF_insn(next_ir, srai))
                     break;
                 count++;
-                if (next_ir->tailcall)
+                if (!next_ir->next)
                     break;
                 next_ir = next_ir->next;
             }

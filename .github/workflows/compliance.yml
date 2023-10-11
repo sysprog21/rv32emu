@@ -9,9 +9,9 @@ jobs:
     - uses: actions/checkout@v4
     - name: install-dependencies
       run: |
-           sh .ci/riscv-toolchain-install.sh
+           .ci/riscv-toolchain-install.sh
       shell: bash
     - name: architectural test
       run: |
-            sh .ci/riscv-tests.sh
+           .ci/riscv-tests.sh
       shell: bash

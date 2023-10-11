@@ -11,7 +11,7 @@ jobs:
       run: |
             sudo apt-get update
             sudo apt-get install libsdl2-dev libsdl2-mixer-dev
-            sh .ci/riscv-toolchain-install.sh
+            .ci/riscv-toolchain-install.sh
       shell: bash
     - name: default build
       run: make

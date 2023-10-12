@@ -24,6 +24,7 @@ jobs:
             make distclean ENABLE_ARC=1 tests
     - name: diverse configurations
       run: |
+            make distclean ENABLE_EXT_M=0 check
             make distclean ENABLE_EXT_A=0 check
             make distclean ENABLE_EXT_C=0 check
             make distclean ENABLE_EXT_F=0 check

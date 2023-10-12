@@ -139,7 +139,11 @@ include mk/tests.mk
 CHECK_ELF_FILES := \
 	hello \
 	puzzle \
+
+ifeq ($(call has, EXT_M), 1)
+CHECK_ELF_FILES += \
 	pi
+endif
 
 EXPECTED_hello = Hello World!
 EXPECTED_puzzle = success in 2005 trials

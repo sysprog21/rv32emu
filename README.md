@@ -148,8 +148,8 @@ Detail in riscv-arch-test:
 
 `rv32emu` is permitted to operate as gdbstub in an experimental manner since it supports
 a limited number of [GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html) (GDBRSP).
-You must first build the emulator and set `ENABLE_GDBSTUB` to `1` in the `Makefile` in order
-to activate this feature. After that, you might execute it using the command below.
+To enable this feature, you need to build the emulator and set `ENABLE_GDBSTUB=1` when running the `make` command.
+After that, you might execute it using the command below.
 ```shell
 $ build/rv32emu -g <binary>
 ```

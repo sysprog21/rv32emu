@@ -24,13 +24,13 @@ jobs:
             make distclean ENABLE_ARC=1 tests
     - name: diverse configurations
       run: |
+            make distclean ENABLE_EXT_A=0 check
             make distclean ENABLE_EXT_C=0 check
             make distclean ENABLE_EXT_F=0 check
-            make distclean ENABLE_GDBSTUB=0 check
             make distclean ENABLE_SDL=0 check
     - name: gdbstub test
       run: |
-            make gdbstub-test
+            make distclean ENABLE_GDBSTUB=1 gdbstub-test
 
   coding-style:
     runs-on: ubuntu-22.04

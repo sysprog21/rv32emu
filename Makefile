@@ -69,7 +69,7 @@ LDFLAGS += $(shell sdl2-config --libs) -pthread
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
 endif
 
-ENABLE_GDBSTUB ?= 1
+ENABLE_GDBSTUB ?= 0
 $(call set-feature, GDBSTUB)
 ifeq ($(call has, GDBSTUB), 1)
 GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)

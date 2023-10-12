@@ -44,7 +44,7 @@
 
 /* GDB remote debugging */
 #ifndef RV32_FEATURE_GDBSTUB
-#define RV32_FEATURE_GDBSTUB 1
+#define RV32_FEATURE_GDBSTUB 0
 #endif
 
 /* Import adaptive replacement cache to manage block */

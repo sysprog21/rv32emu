@@ -33,7 +33,7 @@ CONSTOPT(auipc, {
 CONSTOPT(jal, {
     if (ir->rd) {
         info->is_constant[ir->rd] = true;
-        info->const_val[ir->rd] = ir->pc + ir->insn_len;
+        info->const_val[ir->rd] = ir->pc + 4;
     }
 })
 
@@ -47,7 +47,7 @@ CONSTOPT(jal, {
 CONSTOPT(jalr, {
     if (ir->rd) {
         info->is_constant[ir->rd] = true;
-        info->const_val[ir->rd] = ir->pc + ir->insn_len;
+        info->const_val[ir->rd] = ir->pc + 4;
     }
 })
 
@@ -56,7 +56,7 @@ CONSTOPT(jalr, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) { \
         if ((type) info->const_val[ir->rs1] cond                    \
             (type) info->const_val[ir->rs2])                        \
-            ir->imm = ir->insn_len;                                 \
+            ir->imm = 4;                                            \
         ir->opcode = rv_insn_jal;                                   \
         ir->impl = dispatch_table[ir->opcode];                      \
     }
@@ -737,7 +737,7 @@ CONSTOPT(caddi, {
 /* C.JAL */
 CONSTOPT(cjal, {
     info->is_constant[rv_reg_ra] = true;
-    info->const_val[rv_reg_ra] = ir->pc + ir->insn_len;
+    info->const_val[rv_reg_ra] = ir->pc + 2;
 })
 
 /* C.LI loads the sign-extended 6-bit immediate, imm, into register rd.
@@ -881,7 +881,7 @@ CONSTOPT(cj, {})
 CONSTOPT(cbeqz, {
     if (info->is_constant[ir->rs1]) {
         if (info->const_val[ir->rs1])
-            ir->imm = ir->insn_len;
+            ir->imm = 2;
         ir->opcode = rv_insn_cj;
         ir->impl = dispatch_table[ir->opcode];
     }
@@ -891,7 +891,7 @@ CONSTOPT(cbeqz, {
 CONSTOPT(cbnez, {
     if (info->is_constant[ir->rs1]) {
         if (!info->const_val[ir->rs1])
-            ir->imm = ir->insn_len;
+            ir->imm = 2;
         ir->opcode = rv_insn_cj;
         ir->impl = dispatch_table[ir->opcode];
     }
@@ -933,7 +933,7 @@ CONSTOPT(cebreak, {})
 /* C.JALR */
 CONSTOPT(cjalr, {
     info->is_constant[rv_reg_ra] = true;
-    info->const_val[ir->rd] = ir->pc + ir->insn_len;
+    info->const_val[ir->rd] = ir->pc + 2;
 })
 
 /* C.ADD adds the values in registers rd and rs2 and writes the result to

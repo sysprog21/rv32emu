@@ -15,23 +15,25 @@ RVOP(lui, { rv->X[ir->rd] = ir->imm; })
  * lowest 12 bits with zeros, adds this offset to the address of the AUIPC
  * instruction, then places the result in register rd.
  */
-RVOP(auipc, { rv->X[ir->rd] = ir->imm + rv->PC; })
+RVOP(auipc, { rv->X[ir->rd] = ir->imm + PC; })
 
 /* JAL: Jump and Link
  * store successor instruction address into rd.
  * add next J imm (offset) to pc.
  */
 RVOP(jal, {
-    const uint32_t pc = rv->PC;
+    const uint32_t pc = PC;
     /* Jump */
-    rv->PC += ir->imm;
+    PC += ir->imm;
     /* link with return address */
     if (ir->rd)
-        rv->X[ir->rd] = pc + ir->insn_len;
+        rv->X[ir->rd] = pc + 4;
     /* check instruction misaligned */
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
+        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 
@@ -43,39 +45,43 @@ RVOP(jal, {
  * not required.
  */
 RVOP(jalr, {
-    const uint32_t pc = rv->PC;
+    const uint32_t pc = PC;
     /* jump */
-    rv->PC = (rv->X[ir->rs1] + ir->imm) & ~1U;
+    PC = (rv->X[ir->rs1] + ir->imm) & ~1U;
     /* link */
     if (ir->rd)
-        rv->X[ir->rd] = pc + ir->insn_len;
+        rv->X[ir->rd] = pc + 4;
     /* check instruction misaligned */
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    block_t *block = block_find(&rv->block_map, rv->PC);
+    block_t *block = block_find(&rv->block_map, PC);
     if (block)
-        return block->ir_head->impl(rv, block->ir_head);
+        return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 
 /* clang-format off */
-#define BRANCH_FUNC(type, cond)                                  \
-    const uint32_t pc = rv->PC;                                  \
-    if ((type) rv->X[ir->rs1] cond (type) rv->X[ir->rs2]) {      \
-        branch_taken = false;                                    \
-        if (!ir->branch_untaken)                                 \
-            goto nextop;                                         \
-        rv->PC += ir->insn_len;                                  \
-        last_pc = rv->PC;                                        \
-        return ir->branch_untaken->impl(rv, ir->branch_untaken); \
-    }                                                            \
-    branch_taken = true;                                         \
-    rv->PC += ir->imm;                                           \
-    /* check instruction misaligned */                           \
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                 \
-    if (ir->branch_taken) {                                      \
-        last_pc = rv->PC;                                        \
-        return ir->branch_taken->impl(rv, ir->branch_taken);     \
-    }                                                            \
+#define BRANCH_FUNC(type, cond)                                             \
+    const uint32_t pc = PC;                                                 \
+    if ((type) rv->X[ir->rs1] cond (type)rv->X[ir->rs2]) {                  \
+        branch_taken = false;                                               \
+        if (!ir->branch_untaken)                                            \
+            goto nextop;                                                    \
+        PC += 4;                                                            \
+        last_pc = PC;                                                       \
+        return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle, PC); \
+    }                                                                       \
+    branch_taken = true;                                                    \
+    PC += ir->imm;                                                          \
+    /* check instruction misaligned */                                      \
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                            \
+    if (ir->branch_taken) {                                                 \
+        last_pc = PC;                                                       \
+        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);     \
+    }                                                                       \
+    rv->csr_cycle = cycle;                                                  \
+    rv->PC = PC;                                                            \
     return true;
 /* clang-format on */
 
@@ -248,6 +254,8 @@ RVOP(and, { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; })
 /* ECALL: Environment Call */
 RVOP(ecall, {
     rv->compressed = false;
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     rv->io.on_ecall(rv);
     return true;
 })
@@ -255,6 +263,8 @@ RVOP(ecall, {
 /* EBREAK: Environment Break */
 RVOP(ebreak, {
     rv->compressed = false;
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     rv->io.on_ebreak(rv);
     return true;
 })
@@ -292,8 +302,10 @@ RVOP(mret, {
 
 #if RV32_HAS(Zifencei) /* RV32 Zifencei Standard Extension */
 RVOP(fencei, {
-    rv->PC += ir->insn_len;
+    PC += 4;
     /* FIXME: fill real implementations */
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 #endif
@@ -807,11 +819,13 @@ RVOP(caddi, { rv->X[ir->rd] += (int16_t) ir->imm; })
 
 /* C.JAL */
 RVOP(cjal, {
-    rv->X[rv_reg_ra] = rv->PC + ir->insn_len;
-    rv->PC += ir->imm;
-    RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
+    rv->X[rv_reg_ra] = PC + 2;
+    PC += ir->imm;
+    RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
     if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
+        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 
@@ -876,10 +890,12 @@ RVOP(cand, { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; })
  * C.J expands to jal x0, offset[11:1].
  */
 RVOP(cj, {
-    rv->PC += ir->imm;
-    RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
+    PC += ir->imm;
+    RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
     if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken);
+        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 
@@ -893,16 +909,18 @@ RVOP(cbeqz, {
         branch_taken = false;
         if (!ir->branch_untaken)
             goto nextop;
-        rv->PC += ir->insn_len;
-        last_pc = rv->PC;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken);
+        PC += 2;
+        last_pc = PC;
+        return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle, PC);
     }
     branch_taken = true;
-    rv->PC += (uint32_t) ir->imm;
+    PC += (uint32_t) ir->imm;
     if (ir->branch_taken) {
-        last_pc = rv->PC;
-        return ir->branch_taken->impl(rv, ir->branch_taken);
+        last_pc = PC;
+        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
     }
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 
@@ -912,16 +930,18 @@ RVOP(cbnez, {
         branch_taken = false;
         if (!ir->branch_untaken)
             goto nextop;
-        rv->PC += ir->insn_len;
-        last_pc = rv->PC;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken);
+        PC += 2;
+        last_pc = PC;
+        return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle, PC);
     }
     branch_taken = true;
-    rv->PC += (uint32_t) ir->imm;
+    PC += (uint32_t) ir->imm;
     if (ir->branch_taken) {
-        last_pc = rv->PC;
-        return ir->branch_taken->impl(rv, ir->branch_taken);
+        last_pc = PC;
+        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
     }
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 
@@ -940,10 +960,12 @@ RVOP(clwsp, {
 
 /* C.JR */
 RVOP(cjr, {
-    rv->PC = rv->X[ir->rs1];
-    block_t *block = block_find(&rv->block_map, rv->PC);
+    PC = rv->X[ir->rs1];
+    block_t *block = block_find(&rv->block_map, PC);
     if (block)
-        return block->ir_head->impl(rv, block->ir_head);
+        return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 
@@ -953,6 +975,8 @@ RVOP(cmv, { rv->X[ir->rd] = rv->X[ir->rs2]; })
 /* C.EBREAK */
 RVOP(cebreak, {
     rv->compressed = true;
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     rv->io.on_ebreak(rv);
     return true;
 })
@@ -961,12 +985,14 @@ RVOP(cebreak, {
 RVOP(cjalr, {
     /* Unconditional jump and store PC+2 to ra */
     const int32_t jump_to = rv->X[ir->rs1];
-    rv->X[rv_reg_ra] = rv->PC + ir->insn_len;
-    rv->PC = jump_to;
-    RV_EXC_MISALIGN_HANDLER(rv->PC, insn, true, 0);
-    block_t *block = block_find(&rv->block_map, rv->PC);
+    rv->X[rv_reg_ra] = PC + 2;
+    PC = jump_to;
+    RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
+    block_t *block = block_find(&rv->block_map, PC);
     if (block)
-        return block->ir_head->impl(rv, block->ir_head);
+        return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
     return true;
 })
 

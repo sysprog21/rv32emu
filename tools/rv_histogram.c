@@ -39,8 +39,8 @@ typedef struct {
 } rv_hist_t;
 
 static rv_hist_t rv_insn_stats[] = {
-#define _(inst, can_branch, reg_mask) {#inst, 0, reg_mask},
-    RV_INSN_LIST _(unknown, 0, 0)
+#define _(inst, can_branch, insn_len, reg_mask) {#inst, 0, reg_mask},
+    RV_INSN_LIST _(unknown, 0, 0, 0)
 #undef _
 };
 

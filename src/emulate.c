@@ -113,9 +113,11 @@ RV_EXCEPTION_LIST
 #define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)       \
     IIF(IO)                                                           \
     (if (!rv->io.allow_misalign && unlikely(addr & (mask_or_pc))),    \
-     if (unlikely(insn_is_misaligned(rv->PC))))                       \
+     if (unlikely(insn_is_misaligned(PC))))                           \
     {                                                                 \
         rv->compressed = compress;                                    \
+        rv->csr_cycle = cycle;                                        \
+        rv->PC = PC;                                                  \
         rv_except_##type##_misaligned(rv, IIF(IO)(addr, mask_or_pc)); \
         return false;                                                 \
     }
@@ -348,9 +350,18 @@ FORCE_INLINE bool insn_is_misaligned(uint32_t pc)
     );
 }
 
+/* instruction length information for each RISC-V instruction */
+enum {
+#define _(inst, can_branch, insn_len, reg_mask) \
+    __rv_insn_##inst##_len = insn_len,
+    RV_INSN_LIST
+#undef _
+};
+
 /* can-branch information for each RISC-V instruction */
 enum {
-#define _(inst, can_branch, reg_mask) __rv_insn_##inst##_canbranch = can_branch,
+#define _(inst, can_branch, insn_len, reg_mask) \
+    __rv_insn_##inst##_canbranch = can_branch,
     RV_INSN_LIST
 #undef _
 };
@@ -368,17 +379,21 @@ static bool branch_taken = false;
 static uint32_t last_pc = 0;
 
 /* Interpreter-based execution path */
-#define RVOP(inst, code)                                    \
-    static bool do_##inst(riscv_t *rv, const rv_insn_t *ir) \
-    {                                                       \
-        rv->csr_cycle++;                                    \
-        code;                                               \
-    nextop:                                                 \
-        rv->PC += ir->insn_len;                             \
-        if (unlikely(RVOP_NO_NEXT(ir)))                     \
-            return true;                                    \
-        const rv_insn_t *next = ir->next;                   \
-        MUST_TAIL return next->impl(rv, next);              \
+#define RVOP(inst, code)                                                    \
+    static bool do_##inst(riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, \
+                          uint32_t PC)                                      \
+    {                                                                       \
+        cycle++;                                                            \
+        code;                                                               \
+    nextop:                                                                 \
+        PC += __rv_insn_##inst##_len;                                       \
+        if (unlikely(RVOP_NO_NEXT(ir))) {                                   \
+            rv->csr_cycle = cycle;                                          \
+            rv->PC = PC;                                                    \
+            return true;                                                    \
+        }                                                                   \
+        const rv_insn_t *next = ir->next;                                   \
+        MUST_TAIL return next->impl(rv, next, cycle, PC);                   \
     }
 
 #include "rv32_template.c"
@@ -408,36 +423,42 @@ enum {
 };
 
 /* multiple lui */
-static bool do_fuse1(riscv_t *rv, rv_insn_t *ir)
+static bool do_fuse1(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 {
-    rv->csr_cycle += ir->imm2;
+    cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++)
         rv->X[fuse[i].rd] = fuse[i].imm;
-    rv->PC += ir->imm2 * ir->insn_len;
-    if (unlikely(RVOP_NO_NEXT(ir)))
+    PC += ir->imm2 * 4;
+    if (unlikely(RVOP_NO_NEXT(ir))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
         return true;
+    }
     const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next);
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
 /* LUI + ADD */
-static bool do_fuse2(riscv_t *rv, rv_insn_t *ir)
+static bool do_fuse2(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 {
-    rv->csr_cycle += 2;
+    cycle += 2;
     rv->X[ir->rd] = ir->imm;
     rv->X[ir->rs2] = rv->X[ir->rd] + rv->X[ir->rs1];
-    rv->PC += 2 * ir->insn_len;
-    if (unlikely(RVOP_NO_NEXT(ir)))
+    PC += 8;
+    if (unlikely(RVOP_NO_NEXT(ir))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
         return true;
+    }
     const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next);
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
 /* multiple SW */
-static bool do_fuse3(riscv_t *rv, rv_insn_t *ir)
+static bool do_fuse3(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 {
-    rv->csr_cycle += ir->imm2;
+    cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     /* The memory addresses of the sw instructions are contiguous, thus only
      * the first SW instruction needs to be checked to determine if its memory
@@ -448,17 +469,20 @@ static bool do_fuse3(riscv_t *rv, rv_insn_t *ir)
         RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
         rv->io.mem_write_w(addr, rv->X[fuse[i].rs2]);
     }
-    rv->PC += ir->imm2 * ir->insn_len;
-    if (unlikely(RVOP_NO_NEXT(ir)))
+    PC += ir->imm2 * 4;
+    if (unlikely(RVOP_NO_NEXT(ir))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
         return true;
+    }
     const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next);
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
 /* multiple LW */
-static bool do_fuse4(riscv_t *rv, rv_insn_t *ir)
+static bool do_fuse4(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 {
-    rv->csr_cycle += ir->imm2;
+    cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     /* The memory addresses of the lw instructions are contiguous, therefore
      * only the first LW instruction needs to be checked to determine if its
@@ -469,59 +493,80 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir)
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
         rv->X[fuse[i].rd] = rv->io.mem_read_w(addr);
     }
-    rv->PC += ir->imm2 * ir->insn_len;
-    if (unlikely(RVOP_NO_NEXT(ir)))
+    PC += ir->imm2 * 4;
+    if (unlikely(RVOP_NO_NEXT(ir))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
         return true;
+    }
     const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next);
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
 /* memset */
-static bool do_fuse5(riscv_t *rv, const rv_insn_t *ir)
+static bool do_fuse5(riscv_t *rv,
+                     const rv_insn_t *ir,
+                     uint64_t cycle,
+                     uint32_t PC)
 {
-    rv->csr_cycle += 2;
+    cycle += 2;
     memory_t *m = ((state_t *) rv->userdata)->mem;
     memset((char *) m->mem_base + rv->X[rv_reg_a0], rv->X[rv_reg_a1],
            rv->X[rv_reg_a2]);
-    rv->PC = rv->X[rv_reg_ra] & ~1U;
-    if (unlikely(RVOP_NO_NEXT(ir)))
+    PC = rv->X[rv_reg_ra] & ~1U;
+    if (unlikely(RVOP_NO_NEXT(ir))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
         return true;
+    }
     const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next);
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
 /* memcpy */
-static bool do_fuse6(riscv_t *rv, const rv_insn_t *ir)
+static bool do_fuse6(riscv_t *rv,
+                     const rv_insn_t *ir,
+                     uint64_t cycle,
+                     uint32_t PC)
 {
-    rv->csr_cycle += 2;
+    cycle += 2;
     memory_t *m = ((state_t *) rv->userdata)->mem;
     memcpy((char *) m->mem_base + rv->X[rv_reg_a0],
            (char *) m->mem_base + rv->X[rv_reg_a1], rv->X[rv_reg_a2]);
-    rv->PC = rv->X[rv_reg_ra] & ~1U;
-    if (unlikely(RVOP_NO_NEXT(ir)))
+    PC = rv->X[rv_reg_ra] & ~1U;
+    if (unlikely(RVOP_NO_NEXT(ir))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
         return true;
+    }
     const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next);
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
 /* multiple shift immediate */
-static bool do_fuse7(riscv_t *rv, const rv_insn_t *ir)
+static bool do_fuse7(riscv_t *rv,
+                     const rv_insn_t *ir,
+                     uint64_t cycle,
+                     uint32_t PC)
 {
-    rv->csr_cycle += ir->imm2;
+    cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++)
         shift_func(rv, (const rv_insn_t *) (&fuse[i]));
-    rv->PC += ir->imm2 * ir->insn_len;
-    if (unlikely(RVOP_NO_NEXT(ir)))
+    PC += ir->imm2 * 4;
+    if (unlikely(RVOP_NO_NEXT(ir))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
         return true;
+    }
     const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next);
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
 /* clang-format off */
 static const void *dispatch_table[] = {
     /* RV32 instructions */
-#define _(inst, can_branch, reg_mask) [rv_insn_##inst] = do_##inst,
+#define _(inst, can_branch, insn_len, reg_mask) [rv_insn_##inst] = do_##inst,
     RV_INSN_LIST
 #undef _
     /* Macro operation fusion instructions */
@@ -534,7 +579,8 @@ static const void *dispatch_table[] = {
 FORCE_INLINE bool insn_is_branch(uint8_t opcode)
 {
     switch (opcode) {
-#define _(inst, can_branch, reg_mask) IIF(can_branch)(case rv_insn_##inst:, )
+#define _(inst, can_branch, insn_len, reg_mask) \
+    IIF(can_branch)(case rv_insn_##inst:, )
         RV_INSN_LIST
 #undef _
         return true;
@@ -875,7 +921,7 @@ typedef struct {
 /* clang-format off */
 static const void *constopt_table[] = {
     /* RV32 instructions */
-#define _(inst, can_branch, reg_mask) [rv_insn_##inst] = constopt_##inst,
+#define _(inst, can_branch, insn_len, reg_mask) [rv_insn_##inst] = constopt_##inst,
     RV_INSN_LIST
 #undef _
 };
@@ -986,9 +1032,8 @@ void rv_step(riscv_t *rv, int32_t cycles)
 
         /* execute the block */
         const rv_insn_t *ir = block->ir_head;
-        if (unlikely(!ir->impl(rv, ir)))
+        if (unlikely(!ir->impl(rv, ir, rv->csr_cycle, rv->PC)))
             break;
-
         prev = block;
     }
 }

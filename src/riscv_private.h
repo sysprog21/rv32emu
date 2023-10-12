@@ -139,3 +139,9 @@ FORCE_INLINE uint32_t sign_extend_b(const uint32_t x)
 {
     return (int32_t) ((int8_t) x);
 }
+
+/* Detect the instruction is RV32C or not */
+FORCE_INLINE bool is_compressed(uint32_t insn)
+{
+    return (insn & FC_OPCODE) != 3;
+}

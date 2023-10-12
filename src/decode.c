@@ -1255,7 +1255,7 @@ static inline bool op_caddi(rv_insn_t *ir, const uint32_t insn)
     /* dispatch from rd/rs1 field */
     switch (ir->rd) {
     case 0: /* C.NOP */
-        ir->opcode = rv_insn_nop;
+        ir->opcode = rv_insn_cnop;
         break;
     default: /* C.ADDI */
         /* Add 6-bit signed immediate to rds, serving as NOP for X0 register. */
@@ -1320,7 +1320,7 @@ static inline bool op_clui(rv_insn_t *ir, const uint32_t insn)
     /* dispatch from rd/rs1 region */
     switch (ir->rd) {
     case 0: /* Code point: rd = x0 is HINTS */
-        ir->opcode = rv_insn_nop;
+        ir->opcode = rv_insn_cnop;
         break;
     case 2: { /* C.ADDI16SP */
         ir->imm = c_decode_caddi16sp_nzimm(insn);
@@ -1381,7 +1381,7 @@ static inline bool op_cmisc_alu(rv_insn_t *ir, const uint32_t insn)
         /* Code point: rd = x0 is HINTS
          * Code point: shamt = 0 is HINTS
          */
-        ir->opcode = (!ir->rs1 || !ir->shamt) ? rv_insn_nop : rv_insn_csrli;
+        ir->opcode = (!ir->rs1 || !ir->shamt) ? rv_insn_cnop : rv_insn_csrli;
         break;
     case 1: /* C.SRAI */
         ir->shamt = c_decode_cbtype_shamt(insn);
@@ -1448,7 +1448,7 @@ static inline bool op_cslli(rv_insn_t *ir, const uint32_t insn)
     tmp |= (insn & FCI_IMM_6_2) >> 2;
     ir->imm = tmp;
     ir->rd = c_decode_rd(insn);
-    ir->opcode = ir->rd ? rv_insn_cslli : rv_insn_nop;
+    ir->opcode = ir->rd ? rv_insn_cslli : rv_insn_cnop;
     return true;
 }
 
@@ -1470,7 +1470,7 @@ static inline bool op_clwsp(rv_insn_t *ir, const uint32_t insn)
     ir->rd = c_decode_rd(insn);
 
     /* reserved for rd = x0 */
-    ir->opcode = ir->rd ? rv_insn_clwsp : rv_insn_nop;
+    ir->opcode = ir->rd ? rv_insn_clwsp : rv_insn_cnop;
     return true;
 }
 
@@ -1594,7 +1594,7 @@ static inline bool op_ccr(rv_insn_t *ir, const uint32_t insn)
             break;
         default: /* C.MV */
             /* Code point: rd = x0 is HINTS */
-            ir->opcode = ir->rd ? rv_insn_cmv : rv_insn_nop;
+            ir->opcode = ir->rd ? rv_insn_cmv : rv_insn_cnop;
             break;
         }
         break;
@@ -1603,12 +1603,12 @@ static inline bool op_ccr(rv_insn_t *ir, const uint32_t insn)
             ir->opcode = rv_insn_ebreak;
         else if (ir->rs1 && ir->rs2) { /* C.ADD */
             /* Code point: rd = x0 is HINTS */
-            ir->opcode = ir->rd ? rv_insn_cadd : rv_insn_nop;
+            ir->opcode = ir->rd ? rv_insn_cadd : rv_insn_cnop;
         } else if (ir->rs1 && !ir->rs2) /* C.JALR */
             ir->opcode = rv_insn_cjalr;
         else { /* rs2 != x0 AND rs1 = x0 */
             /* Hint */
-            ir->opcode = rv_insn_nop;
+            ir->opcode = rv_insn_cnop;
         }
         break;
     default:
@@ -1726,10 +1726,9 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
     /* If the last 2-bit is one of 0b00, 0b01, and 0b10, it is
      * a 16-bit instruction.
      */
-    if ((insn & FC_OPCODE) != 3) {
+    if (is_compressed(insn)) {
         insn &= 0x0000FFFF;
         const uint16_t c_index = (insn & FC_FUNC3) >> 11 | (insn & FC_OPCODE);
-        ir->insn_len = INSN_16;
 
         /* decode instruction (compressed instructions) */
         const decode_t op = rvc_jump_table[c_index];
@@ -1740,7 +1739,6 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
 
     /* standard uncompressed instruction */
     const uint32_t index = (insn & INSN_6_2) >> 2;
-    ir->insn_len = INSN_32;
 
     /* decode instruction */
     const decode_t op = rv_jump_table[index];

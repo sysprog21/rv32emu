@@ -289,17 +289,13 @@ static inline uint32_t hash(size_t k)
     return k;
 }
 
-static void block_translate(riscv_t *rv, block_map_t *map, block_t *block);
 /* allocate a basic block */
-static block_t *block_alloc(riscv_t *rv, block_map_t *map)
+static block_t *block_alloc(riscv_t *rv)
 {
-    block_t *block = mpool_alloc(map->block_mp);
+    block_t *block = mpool_alloc(rv->block_mp);
     assert(block);
     block->n_insn = 0;
     block->predict = NULL;
-
-    /* Initialize remaining part of block_t */
-    block_translate(rv, map, block);
     return block;
 }
 
@@ -608,12 +604,12 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     return false;
 }
 
-static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
+static void block_translate(riscv_t *rv, block_t *block)
 {
     block->pc_start = block->pc_end = rv->PC;
 
     rv_insn_t *prev_ir = NULL;
-    rv_insn_t *ir = mpool_alloc(map->block_ir_mp);
+    rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
     block->ir_head = ir;
 
     /* translate the basic block */
@@ -642,7 +638,7 @@ static void block_translate(riscv_t *rv, block_map_t *map, block_t *block)
         if (insn_is_branch(ir->opcode))
             break;
 
-        ir = mpool_alloc(map->block_ir_mp);
+        ir = mpool_alloc(rv->block_ir_mp);
     }
 
     assert(prev_ir);
@@ -725,7 +721,7 @@ FORCE_INLINE void remove_next_nth_ir(riscv_t *rv,
     for (uint8_t i = 0; i < n; i++) {
         rv_insn_t *next = ir->next;
         ir->next = ir->next->next;
-        mpool_free(rv->block_map.block_ir_mp, next);
+        mpool_free(rv->block_ir_mp, next);
     }
     if (!ir->next) {
         block->ir_tail = ir;
@@ -949,12 +945,13 @@ static block_t *block_find_or_translate(riscv_t *rv)
 
     if (!next) {
         if (map->size * 1.25 > map->block_capacity) {
-            block_map_clear(map);
+            block_map_clear(rv);
             prev = NULL;
         }
 
         /* allocate a new block */
-        next = block_alloc(rv, map);
+        next = block_alloc(rv);
+        block_translate(rv, next);
 
         if (!libc_substitute(rv, next)) {
             optimize_constant(rv, next);

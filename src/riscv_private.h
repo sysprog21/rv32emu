@@ -65,12 +65,10 @@ typedef struct {
     uint32_t block_capacity; /**< max number of entries in the block map */
     uint32_t size;           /**< number of entries currently in the map */
     block_t **map;           /**< block map */
-
-    struct mpool *block_mp, *block_ir_mp;
 } block_map_t;
 
 /* clear all block in the block map */
-void block_map_clear(block_map_t *map);
+void block_map_clear(riscv_t *rv);
 
 struct riscv_internal {
     bool halt; /* indicate whether the core is halted */
@@ -123,7 +121,7 @@ struct riscv_internal {
 
     bool compressed;       /**< current instruction is compressed or not */
     block_map_t block_map; /**< basic block map */
-
+    struct mpool *block_mp, *block_ir_mp;
     /* print exit code on syscall_exit */
     bool output_exit_code;
 };

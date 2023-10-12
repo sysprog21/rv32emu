@@ -7,9 +7,12 @@ build/gfx.wad
 build/doomrc
 
 # built objects
+build/.config
 build/rv32emu
 build/arch-test
 build/mini-gdbstub
+build/cache/
+build/map/
 *.o
 *.o.d
 tests/**/*.elf

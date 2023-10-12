@@ -31,7 +31,8 @@ RVOP(jal, {
     /* check instruction misaligned */
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
+        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
+                                                PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -55,7 +56,7 @@ RVOP(jalr, {
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
     block_t *block = block_find(&rv->block_map, PC);
     if (block)
-        return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -70,7 +71,8 @@ RVOP(jalr, {
             goto nextop;                                                    \
         PC += 4;                                                            \
         last_pc = PC;                                                       \
-        return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle, PC); \
+        MUST_TAIL return ir->branch_untaken->impl(rv, ir->branch_untaken,   \
+                                                  cycle, PC);               \
     }                                                                       \
     branch_taken = true;                                                    \
     PC += ir->imm;                                                          \
@@ -78,7 +80,8 @@ RVOP(jalr, {
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                            \
     if (ir->branch_taken) {                                                 \
         last_pc = PC;                                                       \
-        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);     \
+        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken,       \
+                                                cycle, PC);                 \
     }                                                                       \
     rv->csr_cycle = cycle;                                                  \
     rv->PC = PC;                                                            \
@@ -824,7 +827,8 @@ RVOP(cjal, {
     PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
     if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
+        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
+                                                PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -894,7 +898,8 @@ RVOP(cj, {
     PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
     if (ir->branch_taken)
-        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
+        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
+                                                PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -912,13 +917,15 @@ RVOP(cbeqz, {
             goto nextop;
         PC += 2;
         last_pc = PC;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle, PC);
+        MUST_TAIL return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle,
+                                                  PC);
     }
     branch_taken = true;
     PC += (uint32_t) ir->imm;
     if (ir->branch_taken) {
         last_pc = PC;
-        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
+        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
+                                                PC);
     }
     rv->csr_cycle = cycle;
     rv->PC = PC;
@@ -933,13 +940,15 @@ RVOP(cbnez, {
             goto nextop;
         PC += 2;
         last_pc = PC;
-        return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle, PC);
+        MUST_TAIL return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle,
+                                                  PC);
     }
     branch_taken = true;
     PC += (uint32_t) ir->imm;
     if (ir->branch_taken) {
         last_pc = PC;
-        return ir->branch_taken->impl(rv, ir->branch_taken, cycle, PC);
+        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
+                                                PC);
     }
     rv->csr_cycle = cycle;
     rv->PC = PC;
@@ -964,7 +973,7 @@ RVOP(cjr, {
     PC = rv->X[ir->rs1];
     block_t *block = block_find(&rv->block_map, PC);
     if (block)
-        return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -991,7 +1000,7 @@ RVOP(cjalr, {
     RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
     block_t *block = block_find(&rv->block_map, PC);
     if (block)
-        return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;

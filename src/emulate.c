@@ -369,7 +369,7 @@ enum {
 #endif
 
 /* record whether the branch is taken or not during emulation */
-static bool branch_taken = false;
+static bool is_branch_taken = false;
 
 /* record the program counter of the previous block */
 static uint32_t last_pc = 0;
@@ -914,16 +914,14 @@ typedef struct {
     }
 
 #include "rv32_constopt.c"
-/* clang-format off */
 static const void *constopt_table[] = {
-    /* RV32 instructions */
-#define _(inst, can_branch, insn_len, reg_mask) [rv_insn_##inst] = constopt_##inst,
+#define _(inst, can_branch, insn_len, reg_mask) \
+    [rv_insn_##inst] = constopt_##inst,
     RV_INSN_LIST
 #undef _
 };
 #undef CONSTOPT
 
-/* clang-format on */
 typedef void (*constopt_func_t)(rv_insn_t *, constopt_info_t *);
 static void optimize_constant(riscv_t *rv UNUSED, block_t *block)
 {
@@ -1012,7 +1010,7 @@ void rv_step(riscv_t *rv, int32_t cycles)
             rv_insn_t *last_ir = prev->ir_tail;
             /* chain block */
             if (!insn_is_unconditional_branch(last_ir->opcode)) {
-                if (branch_taken && !last_ir->branch_taken)
+                if (is_branch_taken && !last_ir->branch_taken)
                     last_ir->branch_taken = block->ir_head;
                 else if (!last_ir->branch_untaken)
                     last_ir->branch_untaken = block->ir_head;

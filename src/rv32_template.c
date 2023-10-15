@@ -30,9 +30,9 @@ RVOP(jal, {
         rv->X[ir->rd] = pc + 4;
     /* check instruction misaligned */
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    if (ir->branch_taken)
-        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
-                                                PC);
+    struct rv_insn *taken = ir->branch_taken;
+    if (taken)
+        MUST_TAIL return taken->impl(rv, taken, cycle, PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -63,28 +63,28 @@ RVOP(jalr, {
 })
 
 /* clang-format off */
-#define BRANCH_FUNC(type, cond)                                             \
-    const uint32_t pc = PC;                                                 \
-    if ((type) rv->X[ir->rs1] cond (type)rv->X[ir->rs2]) {                  \
-        branch_taken = false;                                               \
-        if (!ir->branch_untaken)                                            \
-            goto nextop;                                                    \
-        PC += 4;                                                            \
-        last_pc = PC;                                                       \
-        MUST_TAIL return ir->branch_untaken->impl(rv, ir->branch_untaken,   \
-                                                  cycle, PC);               \
-    }                                                                       \
-    branch_taken = true;                                                    \
-    PC += ir->imm;                                                          \
-    /* check instruction misaligned */                                      \
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                            \
-    if (ir->branch_taken) {                                                 \
-        last_pc = PC;                                                       \
-        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken,       \
-                                                cycle, PC);                 \
-    }                                                                       \
-    rv->csr_cycle = cycle;                                                  \
-    rv->PC = PC;                                                            \
+#define BRANCH_FUNC(type, cond)                                 \
+    const uint32_t pc = PC;                                     \
+    if ((type) rv->X[ir->rs1] cond (type) rv->X[ir->rs2]) {     \
+        is_branch_taken = false;                                \
+        struct rv_insn *untaken = ir->branch_untaken;           \
+        if (!untaken)                                           \
+            goto nextop;                                        \
+        PC += 4;                                                \
+        last_pc = PC;                                           \
+        MUST_TAIL return untaken->impl(rv, untaken, cycle, PC); \
+    }                                                           \
+    is_branch_taken = true;                                     \
+    PC += ir->imm;                                              \
+    /* check instruction misaligned */                          \
+    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                \
+    struct rv_insn *taken = ir->branch_taken;                   \
+    if (taken) {                                                \
+        last_pc = PC;                                           \
+        MUST_TAIL return taken->impl(rv, taken, cycle, PC);     \
+    }                                                           \
+    rv->csr_cycle = cycle;                                      \
+    rv->PC = PC;                                                \
     return true;
 /* clang-format on */
 
@@ -826,9 +826,9 @@ RVOP(cjal, {
     rv->X[rv_reg_ra] = PC + 2;
     PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
-    if (ir->branch_taken)
-        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
-                                                PC);
+    struct rv_insn *taken = ir->branch_taken;
+    if (taken)
+        MUST_TAIL return taken->impl(rv, taken, cycle, PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -897,9 +897,9 @@ RVOP(cand, { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; })
 RVOP(cj, {
     PC += ir->imm;
     RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
-    if (ir->branch_taken)
-        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
-                                                PC);
+    struct rv_insn *taken = ir->branch_taken;
+    if (taken)
+        MUST_TAIL return taken->impl(rv, taken, cycle, PC);
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -912,20 +912,20 @@ RVOP(cj, {
  */
 RVOP(cbeqz, {
     if (rv->X[ir->rs1]) {
-        branch_taken = false;
-        if (!ir->branch_untaken)
+        is_branch_taken = false;
+        struct rv_insn *untaken = ir->branch_untaken;
+        if (!untaken)
             goto nextop;
         PC += 2;
         last_pc = PC;
-        MUST_TAIL return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle,
-                                                  PC);
+        MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
     }
-    branch_taken = true;
+    is_branch_taken = true;
     PC += (uint32_t) ir->imm;
-    if (ir->branch_taken) {
+    struct rv_insn *taken = ir->branch_taken;
+    if (taken) {
         last_pc = PC;
-        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
-                                                PC);
+        MUST_TAIL return taken->impl(rv, taken, cycle, PC);
     }
     rv->csr_cycle = cycle;
     rv->PC = PC;
@@ -935,20 +935,20 @@ RVOP(cbeqz, {
 /* C.BEQZ */
 RVOP(cbnez, {
     if (!rv->X[ir->rs1]) {
-        branch_taken = false;
-        if (!ir->branch_untaken)
+        is_branch_taken = false;
+        struct rv_insn *untaken = ir->branch_untaken;
+        if (!untaken)
             goto nextop;
         PC += 2;
         last_pc = PC;
-        MUST_TAIL return ir->branch_untaken->impl(rv, ir->branch_untaken, cycle,
-                                                  PC);
+        MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
     }
-    branch_taken = true;
+    is_branch_taken = true;
     PC += (uint32_t) ir->imm;
-    if (ir->branch_taken) {
+    struct rv_insn *taken = ir->branch_taken;
+    if (taken) {
         last_pc = PC;
-        MUST_TAIL return ir->branch_taken->impl(rv, ir->branch_taken, cycle,
-                                                PC);
+        MUST_TAIL return taken->impl(rv, taken, cycle, PC);
     }
     rv->csr_cycle = cycle;
     rv->PC = PC;

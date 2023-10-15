@@ -12,7 +12,6 @@
 #include "cache.h"
 #include "mpool.h"
 
-#define MIN(a, b) ((a < b) ? a : b)
 #define GOLDEN_RATIO_32 0x61C88647
 #define HASH(val) \
     (((val) * (GOLDEN_RATIO_32)) >> (32 - (cache_size_bits))) & (cache_size - 1)

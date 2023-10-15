@@ -713,19 +713,18 @@ static bool detect_memcpy(riscv_t *rv, size_t type)
     return true;
 }
 
-FORCE_INLINE void remove_next_nth_ir(riscv_t *rv,
-                                     rv_insn_t *ir,
-                                     block_t *block,
-                                     uint8_t n)
+static inline void remove_next_nth_ir(const riscv_t *rv,
+                                      rv_insn_t *ir,
+                                      block_t *block,
+                                      uint8_t n)
 {
     for (uint8_t i = 0; i < n; i++) {
         rv_insn_t *next = ir->next;
         ir->next = ir->next->next;
         mpool_free(rv->block_ir_mp, next);
     }
-    if (!ir->next) {
+    if (!ir->next)
         block->ir_tail = ir;
-    }
     block->n_insn -= n;
 }
 

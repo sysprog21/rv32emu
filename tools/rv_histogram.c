@@ -38,11 +38,14 @@ typedef struct {
     uint8_t reg_mask;  /* 0x1=rs1, 0x2=rs2, 0x4=rs3, 0x8=rd */
 } rv_hist_t;
 
+/* clang-format off */
 static rv_hist_t rv_insn_stats[] = {
 #define _(inst, can_branch, insn_len, reg_mask) {#inst, 0, reg_mask},
-    RV_INSN_LIST _(unknown, 0, 0, 0)
+    RV_INSN_LIST
+    _(unknown, 0, 0, 0)
 #undef _
 };
+/* clang-format on */
 
 static rv_hist_t rv_reg_stats[] = {
 #define _(reg) {#reg, 0},

@@ -221,7 +221,7 @@ static void rb_remove(map_t rb, map_node_t *node)
     pathp = path;
     while (pathp->node) {
         map_cmp_t cmp = pathp->cmp =
-            (rb->comparator)(node->data, pathp->node->data);
+            (rb->comparator)(node->key, pathp->node->key);
         if (cmp == _CMP_LESS) {
             pathp[1].node = rb_node_get_left(pathp->node);
         } else {

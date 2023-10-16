@@ -29,7 +29,7 @@ static int test_map_mixed_operations()
      */
     for (int i = 0; i < N_NODES; i++) {
         key[i] = i;
-        val[i] = i + 1;
+        val[i] = mt19937_extract();
     }
 
     for (int i = 0; i < N_NODES; i++) {

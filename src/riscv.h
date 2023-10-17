@@ -79,6 +79,8 @@ enum {
 #define MSTATUS_MPIE (1 << MSTATUS_MPIE_SHIFT)
 #define MSTATUS_MPP (3 << MSTATUS_MPP_SHIFT)
 
+#define BLOCK_MAP_CAPACITY_BITS 10
+
 /* forward declaration for internal structure */
 typedef struct riscv_internal riscv_t;
 typedef void *riscv_user_t;

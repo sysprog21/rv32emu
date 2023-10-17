@@ -277,17 +277,8 @@ void rv_debug(riscv_t *rv)
 }
 #endif /* RV32_HAS(GDBSTUB) */
 
-/* hash function is used when mapping address into the block map */
-static inline uint32_t hash(size_t k)
-{
-    k ^= k << 21;
-    k ^= k >> 17;
-#if (SIZE_MAX > 0xFFFFFFFF)
-    k ^= k >> 35;
-    k ^= k >> 51;
-#endif
-    return k;
-}
+/* hash function for the block map */
+HASH_FUNC_IMPL(map_hash, BLOCK_MAP_CAPACITY_BITS, 1 << BLOCK_MAP_CAPACITY_BITS);
 
 /* allocate a basic block */
 static block_t *block_alloc(riscv_t *rv)
@@ -304,7 +295,7 @@ static void block_insert(block_map_t *map, const block_t *block)
 {
     assert(map && block);
     const uint32_t mask = map->block_capacity - 1;
-    uint32_t index = hash(block->pc_start);
+    uint32_t index = map_hash(block->pc_start);
 
     /* insert into the block map */
     for (;; index++) {
@@ -320,7 +311,7 @@ static void block_insert(block_map_t *map, const block_t *block)
 static block_t *block_find(const block_map_t *map, const uint32_t addr)
 {
     assert(map);
-    uint32_t index = hash(addr);
+    uint32_t index = map_hash(addr);
     const uint32_t mask = map->block_capacity - 1;
 
     /* find block in block map */

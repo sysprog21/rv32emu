@@ -11,7 +11,6 @@
 #include "riscv_private.h"
 #include "state.h"
 
-#define BLOCK_MAP_CAPACITY_BITS 10
 #define BLOCK_IR_MAP_CAPACITY_BITS 10
 
 /* initialize the block map */

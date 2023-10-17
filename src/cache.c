@@ -11,10 +11,7 @@
 
 #include "cache.h"
 #include "mpool.h"
-
-#define GOLDEN_RATIO_32 0x61C88647
-#define HASH(val) \
-    (((val) * (GOLDEN_RATIO_32)) >> (32 - (cache_size_bits))) & (cache_size - 1)
+#include "utils.h"
 
 /* THRESHOLD is set to identify hot spots. Once the frequency of use for a block
  * exceeds the THRESHOLD, the JIT compiler flow is triggered.
@@ -23,6 +20,9 @@
 
 static uint32_t cache_size, cache_size_bits;
 static struct mpool *cache_mp;
+
+/* hash function for the cache */
+HASH_FUNC_IMPL(cache_hash, cache_size_bits, cache_size);
 
 #if RV32_HAS(ARC)
 /* The Adaptive Replacement Cache (ARC) improves the traditional LRU strategy
@@ -337,16 +337,18 @@ static inline void move_to_mru(cache_t *cache,
 
 void *cache_get(cache_t *cache, uint32_t key)
 {
-    if (!cache->capacity || hlist_empty(&cache->map->ht_list_head[HASH(key)]))
+    if (!cache->capacity ||
+        hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
         return NULL;
 
 #if RV32_HAS(ARC)
     arc_entry_t *entry = NULL;
 #ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list)
 #else
-    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
-                          arc_entry_t)
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list, arc_entry_t)
 #endif
     {
         if (entry->key == key)
@@ -388,10 +390,11 @@ void *cache_get(cache_t *cache, uint32_t key)
 #else /* !RV32_HAS(ARC) */
     lfu_entry_t *entry = NULL;
 #ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list)
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list)
 #else
-    hlist_for_each_entry (entry, &cache->map->ht_list_head[HASH(key)], ht_list,
-                          lfu_entry_t)
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list, lfu_entry_t)
 #endif
     {
         if (entry->key == key)
@@ -478,7 +481,8 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
         list_add(&new_entry->list, cache->lists[LRU_ghost_list]);
         cache->list_size[LRU_ghost_list]++;
     }
-    hlist_add_head(&new_entry->ht_list, &cache->map->ht_list_head[HASH(key)]);
+    hlist_add_head(&new_entry->ht_list,
+                   &cache->map->ht_list_head[cache_hash(key)]);
 
     CACHE_ASSERT(cache);
 #else /* !RV32_HAS(ARC) */
@@ -504,7 +508,8 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
     new_entry->frequency = 0;
     list_add(&new_entry->list, cache->lists[new_entry->frequency++]);
     cache->list_size++;
-    hlist_add_head(&new_entry->ht_list, &cache->map->ht_list_head[HASH(key)]);
+    hlist_add_head(&new_entry->ht_list,
+                   &cache->map->ht_list_head[cache_hash(key)]);
     assert(cache->list_size <= cache->capacity);
 #endif
     return delete_value;

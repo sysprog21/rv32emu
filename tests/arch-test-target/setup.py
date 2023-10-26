@@ -28,7 +28,7 @@ def setup_testlist(riscv_device):
     
     with open(ispec, 'r') as file:
         try:
-            file = ruamel.yaml.safe_load(file)
+            file = ruamel.yaml.YAML(typ='safe', pure=True).load(file)
         except ruamel.yaml.YAMLError as msg:
             print(msg)
             raise SystemExit(1)
@@ -37,7 +37,7 @@ def setup_testlist(riscv_device):
     file['hart0']['misa']['reset-val'] = misa
 
     with open(ispec, 'w+') as outfile:
-        ruamel.yaml.dump(file, outfile)
+        ruamel.yaml.YAML(typ='unsafe', pure=True).dump(file, outfile)
 
 # setup the riscof config file
 def setup_config():

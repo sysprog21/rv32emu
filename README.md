@@ -179,7 +179,7 @@ This feature can be utilized for tests involving the emulator, such as compiler 
 You can also combine this option with `-q` to directly use the output.
 For example, if you want to read the register x10 (a0), then run the following command:
 ```shell
-$ build/rv32emu -d - out.elf -q | jq .x10
+$ build/rv32emu -d - -q out.elf | jq .x10
 ```
 
 ## RISC-V Instructions/Registers Usage Statistics

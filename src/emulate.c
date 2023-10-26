@@ -1038,13 +1038,7 @@ void ecall_handler(riscv_t *rv)
 
 void dump_registers(riscv_t *rv, char *out_file_path)
 {
-    FILE *f;
-    if (!strncmp(out_file_path, "-", 1)) {
-        f = stdout;
-    } else {
-        f = fopen(out_file_path, "w");
-    }
-
+    FILE *f = out_file_path[0] == '-' ? stdout : fopen(out_file_path, "w");
     if (!f) {
         fprintf(stderr, "Cannot open registers output file.\n");
         return;

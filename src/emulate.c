@@ -278,7 +278,7 @@ void rv_debug(riscv_t *rv)
 #endif /* RV32_HAS(GDBSTUB) */
 
 /* hash function for the block map */
-HASH_FUNC_IMPL(map_hash, BLOCK_MAP_CAPACITY_BITS, 1 << BLOCK_MAP_CAPACITY_BITS);
+HASH_FUNC_IMPL(map_hash, BLOCK_MAP_CAPACITY_BITS, 1 << BLOCK_MAP_CAPACITY_BITS)
 
 /* allocate a basic block */
 static block_t *block_alloc(riscv_t *rv)

@@ -22,7 +22,7 @@ static uint32_t cache_size, cache_size_bits;
 static struct mpool *cache_mp;
 
 /* hash function for the cache */
-HASH_FUNC_IMPL(cache_hash, cache_size_bits, cache_size);
+HASH_FUNC_IMPL(cache_hash, cache_size_bits, cache_size)
 
 #if RV32_HAS(ARC)
 /* The Adaptive Replacement Cache (ARC) improves the traditional LRU strategy

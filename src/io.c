@@ -61,27 +61,22 @@ void memory_delete(memory_t *mem)
     free(mem);
 }
 
-void memory_read(memory_t *mem, uint8_t *dst, uint32_t addr, uint32_t size)
+void memory_read(const memory_t *mem,
+                 uint8_t *dst,
+                 uint32_t addr,
+                 uint32_t size)
 {
     memcpy(dst, mem->mem_base + addr, size);
 }
 
-uint32_t memory_read_str(memory_t *mem,
+uint32_t memory_read_str(const memory_t *mem,
                          uint8_t *dst,
                          uint32_t addr,
                          uint32_t max)
 {
-    uint32_t len = 0;
-    const uint8_t *end = dst + max;
-    for (;; ++len, ++dst) {
-        uint8_t ch = 0;
-        memory_read(mem, &ch, addr + len, 1);
-        if (dst < end)
-            *dst = ch;
-        if (!ch)
-            break;
-    }
-    return len + 1;
+    char *d = (char *) dst;
+    char *s = (char *) mem->mem_base + addr;
+    return strlen(strncpy(d, s, max));
 }
 
 uint32_t memory_ifetch(uint32_t addr)

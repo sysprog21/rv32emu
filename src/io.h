@@ -21,7 +21,7 @@ memory_t *memory_new();
 void memory_delete(memory_t *m);
 
 /* read a C-style string from memory */
-uint32_t memory_read_str(memory_t *m,
+uint32_t memory_read_str(const memory_t *m,
                          uint8_t *dst,
                          uint32_t addr,
                          uint32_t max);
@@ -39,7 +39,7 @@ uint16_t memory_read_s(uint32_t addr);
 uint8_t memory_read_b(uint32_t addr);
 
 /* read a length of data from memory */
-void memory_read(memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size);
+void memory_read(const memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size);
 
 static inline void memory_write(memory_t *m,
                                 uint32_t addr,

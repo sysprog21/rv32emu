@@ -21,11 +21,11 @@ static uint8_t *data_memory_base;
 /*
  * set memory size to 2^32 - 1 bytes
  *
- * The memory size is set to 2^32 - 1 bytes in order
- * to make rv32emu portable for both 32-bit and 64-bit platforms.
- * As a result, rv32emu can access any segment of the memory in
- * either platform. Furthermore, it is safe because most of the 
- * test cases' data memory usage will not exceed this memory size.
+ * The memory size is set to 2^32 - 1 bytes in order to make this emulator
+ * portable for both 32-bit and 64-bit platforms. As a result, it can access
+ * any segment of the memory on either platform. Furthermore, it is safe
+ * because most of the test cases' data memory usage will not exceed this
+ * memory size.
  */
 #define MEM_SIZE 0xFFFFFFFFULL
 

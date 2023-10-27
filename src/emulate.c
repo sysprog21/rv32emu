@@ -65,6 +65,22 @@ static void rv_exception_default_handler(riscv_t *rv)
     rv->PC = rv->csr_mepc; /* mret */
 }
 
+/* When a trap occurs in M-mode, mtval is either initialized to zero or
+ * populated with exception-specific details to assist software in managing
+ * the trap. Otherwise, the implementation never modifies mtval, although
+ * software can explicitly write to it. The hardware platform will define
+ * which exceptions are required to informatively set mtval and which may
+ * consistently set it to zero.
+ *
+ * When a hardware breakpoint is triggered or an exception like address
+ * misalignment, access fault, or page fault occurs during an instruction
+ * fetch, load, or store operation, mtval is updated with the virtual address
+ * that caused the fault. In the case of an illegal instruction trap, mtval
+ * might be updated with the first XLEN or ILEN bits of the offending
+ * instruction. For all other traps, mtval is simply set to zero. However,
+ * it is worth noting that a future standard could redefine how mtval is
+ * handled for different types of traps.
+ */
 #define EXCEPTION_HANDLER_IMPL(type, code)                                   \
     static void rv_except_##type(riscv_t *rv, uint32_t mtval)                \
     {                                                                        \

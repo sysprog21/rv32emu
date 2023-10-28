@@ -45,7 +45,7 @@ ifeq ($(call has, EXT_F), 1)
 LDFLAGS += -lm
 endif
 
-# Enable adaptive replacement cache policy, default is LRU 
+# Enable adaptive replacement cache policy, default is LRU
 ENABLE_ARC ?= 0
 $(call set-feature, ARC)
 

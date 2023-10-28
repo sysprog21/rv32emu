@@ -512,6 +512,7 @@ static bool do_fuse5(riscv_t *rv,
                      uint64_t cycle,
                      uint32_t PC)
 {
+    /* FIXME: specify the correct cycle count for memset routine */
     cycle += 2;
     memory_t *m = ((state_t *) rv->userdata)->mem;
     memset((char *) m->mem_base + rv->X[rv_reg_a0], rv->X[rv_reg_a1],
@@ -532,6 +533,7 @@ static bool do_fuse6(riscv_t *rv,
                      uint64_t cycle,
                      uint32_t PC)
 {
+    /* FIXME: specify the correct cycle count for memcpy routine */
     cycle += 2;
     memory_t *m = ((state_t *) rv->userdata)->mem;
     memcpy((char *) m->mem_base + rv->X[rv_reg_a0],

@@ -236,6 +236,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `chacha20.elf` : See [tests/chacha20](tests/chacha20)
 * `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark) [RV32M]
 * `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `donut.elf` : See [donut](tests/donut.c)
 * `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
 * `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
 * `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)

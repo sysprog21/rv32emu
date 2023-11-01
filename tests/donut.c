@@ -37,6 +37,12 @@
 #include <string.h>
 #include <time.h>
 
+/* 0 for 80x24, 1 for 160x48, etc. */
+enum {
+    RESX_SHIFT = 0,
+    RESY_SHIFT = 0,
+};
+
 /* Torus radius and camera distance.
  * These values are closely tied to other constants, so modifying them
  * significantly may lead to unexpected behavior.
@@ -89,7 +95,7 @@ static int length_cordic(int16_t x, int16_t y, int16_t *x2_, int16_t y2)
      * See https://en.wikipedia.org/wiki/CORDIC
      */
     *x2_ = (x2 >> 1) + (x2 >> 3);
-    return (x >> 1) + (x >> 3);
+    return (x >> 1) + (x >> 3) - (x >> 6);
 }
 
 int main()
@@ -113,26 +119,37 @@ int main()
 
         int niters = 0;
         int nnormals = 0;
-        int16_t yincC = (cA >> 6) + (cA >> 5);      // 12*cA >> 8;
-        int16_t yincS = (sA >> 6) + (sA >> 5);      // 12*sA >> 8;
-        int16_t xincX = (cB >> 7) + (cB >> 6);      // 6*cB >> 8;
-        int16_t xincY = (sAsB >> 7) + (sAsB >> 6);  // 6*sAsB >> 8;
-        int16_t xincZ = (cAsB >> 7) + (cAsB >> 6);  // 6*cAsB >> 8;
-        int16_t ycA = -((cA >> 1) + (cA >> 4));     // -12 * yinc1 = -9*cA >> 4;
-        int16_t ysA = -((sA >> 1) + (sA >> 4));     // -12 * yinc2 = -9*sA >> 4;
-        for (int j = 0; j < 23; j++, ycA += yincC, ysA += yincS) {
-            int xsAsB = (sAsB >> 4) - sAsB;  // -40*xincY
-            int xcAsB = (cAsB >> 4) - cAsB;  // -40*xincZ;
+        /* per-row increments
+         * These can all be compiled into two shifts and an add.
+         */
+        int16_t yincC = (12 * cA) >> (8 + RESY_SHIFT);
+        int16_t yincS = (12 * sA) >> (8 + RESY_SHIFT);
 
-            int16_t vxi14 = (cB >> 4) - cB - sB;  // -40*xincX - sB;
-            int16_t vyi14 = ycA - xsAsB - sAcB;
-            int16_t vzi14 = ysA + xcAsB + cAcB;
+        /* per-column increments */
+        int16_t xincX = (6 * cB) >> (8 + RESX_SHIFT);
+        int16_t xincY = (6 * sAsB) >> (8 + RESX_SHIFT);
+        int16_t xincZ = (6 * cAsB) >> (8 + RESX_SHIFT);
 
-            for (int i = 0; i < 79;
+        /* top row y cosine/sine */
+        int16_t ycA = -((cA >> 1) + (cA >> 4));  // -12 * yinc1 = -9*cA >> 4;
+        int16_t ysA = -((sA >> 1) + (sA >> 4));  // -12 * yinc2 = -9*sA >> 4;
+
+        for (int j = 0; j < (24 << RESY_SHIFT) - 1;
+             j++, ycA += yincC, ysA += yincS) {
+            /* left columnn x cosines/sines */
+            int xsAsB = (sAsB >> 4) - sAsB;  // -40 * xincY
+            int xcAsB = (cAsB >> 4) - cAsB;  // -40 * xincZ;
+
+            /* ray direction */
+            int16_t vxi14 = (cB >> 4) - cB - sB;  // -40 * xincX - sB;
+            int16_t vyi14 = (ycA - xsAsB - sAcB);
+            int16_t vzi14 = (ysA + xcAsB + cAcB);
+
+            for (int i = 0; i < ((80 << RESX_SHIFT) - 1);
                  i++, vxi14 += xincX, vyi14 -= xincY, vzi14 += xincZ) {
                 int t = 512;  // (256 * dz) - r2i - r1i;
 
-                /* assuming t = 512, t*vxi>>8 == vxi<<1 */
+                /* Assume t = 512, t * vxi >> 8 == vxi << 1 */
                 int16_t px = p0x + (vxi14 >> 5);
                 int16_t py = p0y + (vyi14 >> 5);
                 int16_t pz = p0z + (vzi14 >> 5);
@@ -154,7 +171,7 @@ int main()
                     } else if (d < 2) {
                         int N = lz >> 9;
                         static const char charset[] = ".,-~:;!*=#$@";
-                        printf("\033[48;05;%dm%c\033[0m", N / 3 + 1,
+                        printf("\033[48;05;%dm%c\033[0m", N / 4 + 1,
                                charset[N > 0 ? N < 12 ? N : 11 : 0]);
                         nnormals++;
                         break;
@@ -213,9 +230,10 @@ int main()
         R(6, cAcB, cAsB);
         R(6, sAcB, sAsB);
 
+        /* FIXME: Adjust tv_nsec to align with runtime expectations. */
         struct timespec ts = {.tv_sec = 0, .tv_nsec = 30000};
         nanosleep(&ts, &ts);
 
-        printf("\r\x1b[23A");
+        printf("\r\x1b[%dA", (24 << RESY_SHIFT) - 1);
     }
 }

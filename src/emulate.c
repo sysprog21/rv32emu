@@ -729,6 +729,10 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
 {
     for (uint8_t i = 0; i < n; i++) {
         rv_insn_t *next = ir->next;
+        if (!next) {
+            n = i;
+            break;
+        }
         ir->next = ir->next->next;
         mpool_free(rv->block_ir_mp, next);
     }

@@ -68,6 +68,7 @@ static const int dz = 5, r1 = 1, r2 = 2;
  * noting that only one of the two lighting normal coordinates needs to be
  * retained.
  */
+#define N_CORDIC 6
 static int length_cordic(int16_t x, int16_t y, int16_t *x2_, int16_t y2)
 {
     int x2 = *x2_;
@@ -75,7 +76,7 @@ static int length_cordic(int16_t x, int16_t y, int16_t *x2_, int16_t y2)
         x = -x;
         x2 = -x2;
     }
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < N_CORDIC; i++) {
         int t = x;
         int t2 = x2;
         if (y < 0) {
@@ -94,7 +95,7 @@ static int length_cordic(int16_t x, int16_t y, int16_t *x2_, int16_t y2)
      * introduced by this algorithm
      * See https://en.wikipedia.org/wiki/CORDIC
      */
-    *x2_ = (x2 >> 1) + (x2 >> 3);
+    *x2_ = (x2 >> 1) + (x2 >> 3) - (x2 >> 6);
     return (x >> 1) + (x >> 3) - (x >> 6);
 }
 

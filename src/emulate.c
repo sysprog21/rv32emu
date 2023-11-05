@@ -770,13 +770,13 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
                 if (IF_imm(next_ir, 20) && detect_memset(rv, 1)) {
                     ir->opcode = rv_insn_fuse5;
                     ir->impl = dispatch_table[ir->opcode];
-                    remove_next_nth_ir(rv, ir, block, 2);
+                    remove_next_nth_ir(rv, ir, block, 1);
                     return true;
                 }
                 if (IF_imm(next_ir, 28) && detect_memcpy(rv, 1)) {
                     ir->opcode = rv_insn_fuse6;
                     ir->impl = dispatch_table[ir->opcode];
-                    remove_next_nth_ir(rv, ir, block, 2);
+                    remove_next_nth_ir(rv, ir, block, 1);
                     return true;
                 };
             }

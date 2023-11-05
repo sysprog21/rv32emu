@@ -106,6 +106,13 @@ RVOP(bltu, { BRANCH_FUNC(uint32_t, >=); })
 /* BGEU: Branch if Greater Than Unsigned */
 RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 
+/* There are 5 types of loads: two for byte and halfword sizes, and one for word
+ * size. Two instructions are required for byte and halfword loads because they
+ * can be either zero-extended or sign-extended to fill the register. However,
+ * for word-sized loads, an entire register's worth of data is read from memory,
+ * and no extension is needed.
+ */
+
 /* LB: Load Byte */
 RVOP(lb, {
     rv->X[ir->rd] = sign_extend_b(rv->io.mem_read_b(rv->X[ir->rs1] + ir->imm));
@@ -134,6 +141,12 @@ RVOP(lhu, {
     RV_EXC_MISALIGN_HANDLER(1, load, false, 1);
     rv->X[ir->rd] = rv->io.mem_read_s(addr);
 })
+
+/* There are 3 types of stores: byte, halfword, and word-sized. Unlike loads,
+ * there are no signed or unsigned variants, as stores to memory write exactly
+ * the number of bytes specified, and there is no sign or zero extension
+ * involved.
+ */
 
 /* SB: Store Byte */
 RVOP(sb, { rv->io.mem_write_b(rv->X[ir->rs1] + ir->imm, rv->X[ir->rs2]); })

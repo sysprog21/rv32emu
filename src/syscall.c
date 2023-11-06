@@ -281,13 +281,19 @@ static void syscall_read(riscv_t *rv)
     while (count > PREALLOC_SIZE) {
         size_t r = fread(tmp, 1, PREALLOC_SIZE, handle);
         memory_write(s->mem, buf + total_read, tmp, r);
-        count -= PREALLOC_SIZE;
-        total_read += PREALLOC_SIZE;
+        count -= r;
+        total_read += r;
+        if (r != PREALLOC_SIZE)
+            break;
     }
     size_t r = fread(tmp, 1, count, handle);
     memory_write(s->mem, buf + total_read, tmp, r);
     total_read += r;
-    assert(total_read == rv_get_reg(rv, rv_reg_a2));
+    if (total_read != rv_get_reg(rv, rv_reg_a2) && ferror(handle)) {
+        /* error */
+        rv_set_reg(rv, rv_reg_a0, -1);
+        return;
+    }
     /* success */
     rv_set_reg(rv, rv_reg_a0, total_read);
 }

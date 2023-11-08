@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -e -u -o pipefail
+
 # Install RISCOF
 python3 -m pip install git+https://github.com/riscv/riscof
 

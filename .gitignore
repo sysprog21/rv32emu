@@ -5,6 +5,7 @@ quakesw-1.0.6.zip*
 build/id1/
 build/gfx.wad
 build/doomrc
+toolchain/
 
 # built objects
 build/.config

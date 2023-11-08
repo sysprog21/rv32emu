@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# set -e -u -o pipefail
+
 export PATH=`pwd`/toolchain/riscv/bin:$PATH
 
 GDB=

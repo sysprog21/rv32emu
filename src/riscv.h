@@ -6,6 +6,9 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#if RV32_HAS(EXT_F)
+#include "softfloat/softfloat.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,7 +92,9 @@ typedef uint32_t riscv_word_t;
 typedef uint16_t riscv_half_t;
 typedef uint8_t riscv_byte_t;
 typedef uint32_t riscv_exception_t;
-typedef float riscv_float_t;
+#if RV32_HAS(EXT_F)
+typedef float32_t riscv_float_t;
+#endif
 
 /* memory read handlers */
 typedef riscv_word_t (*riscv_mem_ifetch)(riscv_word_t addr);

@@ -64,6 +64,14 @@ $(call set-feature, EXT_C)
 ENABLE_EXT_F ?= 1
 $(call set-feature, EXT_F)
 ifeq ($(call has, EXT_F), 1)
+SOFTFLOAT_OUT = $(abspath $(OUT)/softfloat)
+src/softfloat/build/Linux-RISCV-GCC/Makefile:
+	git submodule update --init src/softfloat/
+SOFTFLOAT_LIB := $(SOFTFLOAT_OUT)/softfloat.a
+$(SOFTFLOAT_LIB): src/softfloat/build/Linux-RISCV-GCC/Makefile
+	$(MAKE) -C $(dir $<) BUILD_DIR=$(SOFTFLOAT_OUT)
+$(OUT)/decode.o $(OUT)/riscv.o: $(SOFTFLOAT_LIB)
+LDFLAGS += $(SOFTFLOAT_LIB)
 LDFLAGS += -lm
 endif
 
@@ -211,5 +219,6 @@ distclean: clean
 	$(RM) *.zip
 	$(RM) -r $(OUT)/mini-gdbstub
 	-$(RM) $(OUT)/.config
+	-$(RM) -r $(OUT)/softfloat
 
 -include $(deps)

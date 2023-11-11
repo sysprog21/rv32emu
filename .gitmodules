@@ -4,3 +4,6 @@
 [submodule "mini-gdbstub"]
 	path = src/mini-gdbstub
 	url = https://github.com/RinHizakura/mini-gdbstub
+[submodule "softfloat"]
+	path = src/softfloat
+	url = https://github.com/visitorckw/berkeley-softfloat-3

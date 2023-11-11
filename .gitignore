@@ -12,6 +12,7 @@ build/.config
 build/rv32emu
 build/arch-test
 build/mini-gdbstub
+build/softfloat
 build/cache/
 build/map/
 *.o

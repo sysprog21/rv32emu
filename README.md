@@ -24,8 +24,7 @@ a focus on efficiency and readability.
 
 Features:
 * Fast interpreter for executing the RV32 ISA
-* Comprehensive support for RV32I and M, A, C extensions
-* Partial support for the F extension
+* Comprehensive support for RV32I and M, A, C, F extensions
 * Memory-efficient design
 * Built-in ELF loader
 * Implementation of commonly used newlib system calls
@@ -143,7 +142,6 @@ Current progress of this emulator in riscv-arch-test (RV32):
     - `C`: Standard Extension for Compressed Instruction
     - `Zifencei`: Instruction-Fetch Fence
     - `privilege`: RISCV Privileged Specification
-* Unsupported tests (runnable but incomplete)
     - `F` Standard Extension for Single-Precision Floating-Point
 
 Detail in riscv-arch-test:

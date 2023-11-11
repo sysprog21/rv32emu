@@ -99,10 +99,7 @@ struct riscv_internal {
 
 #if RV32_HAS(EXT_F)
     /* float registers */
-    union {
-        riscv_float_t F[N_RV_REGS];
-        uint32_t F_int[N_RV_REGS]; /* integer shortcut */
-    };
+    riscv_float_t F[N_RV_REGS];
     uint32_t csr_fcsr;
 #endif
 

@@ -15,3 +15,4 @@ make arch-test RISCV_DEVICE=IM  || exit 1
 make arch-test RISCV_DEVICE=IC || exit 1
 make arch-test RISCV_DEVICE=IZifencei || exit 1
 make arch-test RISCV_DEVICE=IZicsr || exit 1
+make arch-test RISCV_DEVICE=FZicsr || exit 1

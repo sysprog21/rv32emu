@@ -267,7 +267,8 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
 #if RV32_HAS(EXT_F)
     rv->csr_misa |= MISA_F;
     /* reset float registers */
-    memset(rv->F, 0, sizeof(float) * N_RV_REGS);
+    for (int i = 0; i < N_RV_REGS; i++)
+        rv->F[i].v = 0;
     rv->csr_fcsr = 0;
 #endif
 

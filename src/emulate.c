@@ -13,17 +13,6 @@
 #if RV32_HAS(EXT_F)
 #include <math.h>
 #include "softfloat.h"
-
-#if defined(__APPLE__)
-static inline int isinff(float x)
-{
-    return __builtin_fabsf(x) == __builtin_inff();
-}
-static inline int isnanf(float x)
-{
-    return x != x;
-}
-#endif
 #endif /* RV32_HAS(EXT_F) */
 
 #if RV32_HAS(GDBSTUB)

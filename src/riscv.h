@@ -197,6 +197,8 @@ bool rv_has_halted(riscv_t *rv);
 /* return the flag of outputting exit code */
 bool rv_enables_to_output_exit_code(riscv_t *rv);
 
+/* the init and execute logic shared by main and fuzzer */
+int rv_init_and_execute_elf(int argc, char **args);
 #ifdef __cplusplus
 };
 #endif

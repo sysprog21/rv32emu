@@ -3,6 +3,7 @@ include mk/toolchain.mk
 
 OUT ?= build
 BIN := $(OUT)/rv32emu
+FUZZ_BIN := $(OUT)/rv32emu_fuzz
 
 CONFIG_FILE := $(OUT)/.config
 -include $(CONFIG_FILE)
@@ -214,7 +215,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT)
+	$(RM) $(BIN) $(FUZZ_BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT)
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1

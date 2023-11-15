@@ -6,18 +6,28 @@ build/id1/
 build/gfx.wad
 build/doomrc
 toolchain/
+.vscode
 
 # built objects
 build/.config
 build/rv32emu
+build/rv32emu_fuzz
 build/arch-test
 build/mini-gdbstub
 build/softfloat
 build/cache/
 build/map/
 build/path/
+build/fuzz/
 *.o
 *.o.d
 tests/**/*.elf
 tests/arch-test-target/config.ini
 __pycache__/
+
+# fuzzer
+crash-*
+leak-*
+timeout-*
+fuzz.elf
+*.log

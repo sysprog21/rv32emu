@@ -97,7 +97,7 @@ void elf_delete(elf_t *e)
 /* release a loaded ELF file */
 static void release(elf_t *e)
 {
-#if !defined(USE_MMAP)
+#if !defined(USE_MMAP) && !defined(FUZZER)
     free(e->raw_data);
 #endif
 
@@ -291,18 +291,36 @@ bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem)
     return true;
 }
 
+#ifdef FUZZER
+bool elf_open(elf_t *e, uint8_t *data, size_t len)
+#else
 bool elf_open(elf_t *e, const char *input)
+#endif
 {
     /* free previous memory */
     if (e->raw_data)
         release(e);
 
+#ifndef FUZZER
     char *path = sanitize_path(input);
     if (!path) {
         return false;
     }
+#endif
 
-#if defined(USE_MMAP)
+#if defined(FUZZER)
+    if (!data || !len) {
+        /* if the fuzzer sent in an empty buffer, we don't proceed further */
+        return false;
+    }
+
+    /* get file size */
+    e->raw_size = len;
+
+    /* allocate memory */
+    free(e->raw_data);
+    e->raw_data = (uint8_t *) data;
+#elif defined(USE_MMAP)
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         free(path);
@@ -324,7 +342,6 @@ bool elf_open(elf_t *e, const char *input)
         return false;
     }
     close(fd);
-
 #else  /* fallback to standard I/O text stream */
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -357,16 +374,24 @@ bool elf_open(elf_t *e, const char *input)
 #endif /* USE_MMAP */
 
     /* point to the header */
+    if (sizeof(struct Elf32_Ehdr) > e->raw_size) {
+        release(e);
+        return false;
+    }
     e->hdr = (const struct Elf32_Ehdr *) e->raw_data;
 
     /* check it is a valid ELF file */
     if (!is_valid(e)) {
         release(e);
+#ifndef FUZZER
         free(path);
+#endif
         return false;
     }
 
+#ifndef FUZZER
     free(path);
+#endif
     return true;
 }
 

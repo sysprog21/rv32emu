@@ -34,6 +34,18 @@ static bool opt_quiet_outputs = false;
 /* target executable */
 static const char *opt_prog_name = "a.out";
 
+#ifdef FUZZER
+/* ELF input as string (for fuzzing) */
+static bool opt_elf_string = false;
+static uint8_t *elf_string = NULL;
+
+static bool opt_elf_strlen = NULL;
+static int elf_strlen = 0;
+
+static bool opt_max_execution_cycles = NULL;
+static int max_execution_cycles = 0;
+#endif
+
 /* target argc and argv */
 static int prog_argc;
 static char **prog_args;
@@ -83,6 +95,13 @@ static void run_and_trace(riscv_t *rv, elf_t *elf)
     }
 }
 
+#ifdef FUZZER
+static void run(riscv_t *rv, int max_cycles)
+{
+    /* step instructions */
+    rv_step(rv, max_cycles);
+}
+#else
 static void run(riscv_t *rv)
 {
     const uint32_t cycles_per_step = 100;
@@ -91,6 +110,7 @@ static void run(riscv_t *rv)
         rv_step(rv, cycles_per_step);
     }
 }
+#endif
 
 static void print_usage(const char *filename)
 {
@@ -117,6 +137,40 @@ static bool parse_args(int argc, char **args)
     int opt;
     int emu_argc = 0;
 
+#ifdef FUZZER
+    /*
+     * getopt() won't work with binary data as control characters will screw the
+     * string parsing
+     */
+    int idx = 1;
+    while (idx + 1 < argc) {
+        emu_argc++;
+        char opt = args[idx][1];
+        char *optarg = args[idx + 1];
+
+        switch (opt) {
+        case 's':  /* binary string */
+            opt_elf_string = true;
+            elf_string = (uint8_t *) optarg;
+            emu_argc++;
+            break;
+        case 'l':  /* binary string len */
+            opt_elf_strlen = true;
+            elf_strlen = atoi(optarg);
+            emu_argc++;
+            break;
+        case 'k':  /* max execution cycle (since some program won't terminate, e.g. while(1) {} */
+            opt_max_execution_cycles = true;
+            max_execution_cycles = atoi(optarg);
+            emu_argc++;
+            break;
+        default:
+            return false;
+        }
+
+        idx += 2;
+    }
+#else
     while ((opt = getopt(argc, args, optstr)) != -1) {
         emu_argc++;
 
@@ -151,6 +205,7 @@ static bool parse_args(int argc, char **args)
             return false;
         }
     }
+#endif
 
     prog_argc = argc - emu_argc - 1;
     /* optind points to the first non-option string, so it should indicate the
@@ -187,7 +242,7 @@ static void dump_test_signature(elf_t *elf)
     fclose(f);
 }
 
-int main(int argc, char **args)
+int rv_init_and_execute_elf(int argc, char **args)
 {
     if (argc == 1 || !parse_args(argc, args)) {
         print_usage(args[0]);
@@ -196,8 +251,13 @@ int main(int argc, char **args)
 
     /* open the ELF file from the file system */
     elf_t *elf = elf_new();
+#ifdef FUZZER
+    if (!elf_open(elf, (uint8_t *) elf_string, elf_strlen)) {
+#else
     if (!elf_open(elf, opt_prog_name)) {
+#endif
         fprintf(stderr, "Unable to open ELF file '%s'\n", opt_prog_name);
+        elf_delete(elf);
         return 1;
     }
 
@@ -251,7 +311,11 @@ int main(int argc, char **args)
     }
 #endif
     else {
+#ifdef FUZZER
+        run(rv, max_execution_cycles);
+#else
         run(rv);
+#endif
     }
 
     /* dump registers as JSON */
@@ -269,3 +333,10 @@ int main(int argc, char **args)
 
     return 0;
 }
+
+#ifndef FUZZER
+int main(int argc, char **args)
+{
+    return rv_init_and_execute_elf(argc, args);
+}
+#endif

@@ -1,0 +1,17 @@
+name: Fuzz Test
+
+on: [push, pull_request]
+
+jobs:
+  rv32emu:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: install-dependencies
+      run: |
+            sudo apt-get update
+            sudo apt-get install clang
+      shell: bash
+    - name: Run fuzzer
+      run: .ci/fuzz.sh
+      shell: bash

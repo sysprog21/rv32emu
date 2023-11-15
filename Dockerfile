@@ -6,7 +6,7 @@ FROM ubuntu:22.04 as final
 # Install extra packages for the emulator to compile and execute with full capabilities correctly
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    libsdl2-dev libsdl2-mixer-dev python3-pip git && \
+    libsdl2-dev libsdl2-mixer-dev python3-pip git clang && \
     rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install git+https://github.com/riscv/riscof 

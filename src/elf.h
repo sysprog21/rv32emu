@@ -133,7 +133,11 @@ elf_t *elf_new();
 void elf_delete(elf_t *e);
 
 /* Open an ELF file from specified path */
+#ifdef FUZZER
+bool elf_open(elf_t *e, uint8_t *data, size_t len);
+#else
 bool elf_open(elf_t *e, const char *path);
+#endif
 
 /* Find a symbol entry */
 const struct Elf32_Sym *elf_get_symbol(elf_t *e, const char *name);

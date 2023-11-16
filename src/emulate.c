@@ -1004,20 +1004,22 @@ void rv_step(riscv_t *rv, int32_t cycles)
             if (prev->pc_start != last_pc)
                 prev = block_find(&rv->block_map, last_pc);
 
-            rv_insn_t *last_ir = prev->ir_tail;
-            /* chain block */
-            if (!insn_is_unconditional_branch(last_ir->opcode)) {
-                if (is_branch_taken && !last_ir->branch_taken)
-                    last_ir->branch_taken = block->ir_head;
-                else if (!last_ir->branch_untaken)
-                    last_ir->branch_untaken = block->ir_head;
-            } else if (IF_insn(last_ir, jal)
+            if (prev) {
+                rv_insn_t *last_ir = prev->ir_tail;
+                /* chain block */
+                if (!insn_is_unconditional_branch(last_ir->opcode)) {
+                    if (is_branch_taken && !last_ir->branch_taken)
+                        last_ir->branch_taken = block->ir_head;
+                    else if (!last_ir->branch_untaken)
+                        last_ir->branch_untaken = block->ir_head;
+                } else if (IF_insn(last_ir, jal)
 #if RV32_HAS(EXT_C)
-                       || IF_insn(last_ir, cj) || IF_insn(last_ir, cjal)
+                           || IF_insn(last_ir, cj) || IF_insn(last_ir, cjal)
 #endif
-            ) {
-                if (!last_ir->branch_taken)
-                    last_ir->branch_taken = block->ir_head;
+                ) {
+                    if (!last_ir->branch_taken)
+                        last_ir->branch_taken = block->ir_head;
+                }
             }
         }
         last_pc = rv->PC;

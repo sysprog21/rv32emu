@@ -1,4 +1,7 @@
 /* RV32I Base Instruction Set */
+/* conforming to the instructions specified in chapter 2 of the unprivileged
+ * specification version 20191213.
+ */
 
 /* Internal */
 RVOP(nop, { rv->X[rv_reg_zero] = 0; })
@@ -87,6 +90,22 @@ RVOP(jalr, {
     rv->PC = PC;                                                \
     return true;
 /* clang-format on */
+
+/* In RV32I and RV64I, if the branch is taken, set pc = pc + offset, where
+ * offset is a multiple of two; else do nothing. The offset is 13 bits long.
+ *
+ * The condition for branch taken depends on the value in mnemonic, which is
+ * one of:
+ * - "beq": src1 == src2
+ * - "bne": src1 != src2
+ * - "blt": src1 < src2 as signed integers
+ * - "bge": src1 >= src2 as signed integers
+ * - "bltu": src1 < src2 as unsigned integers
+ * - "bgeu": src1 >= src2 as unsigned integers
+ *
+ * On branch taken, an instruction-address-misaligned exception is generated
+ * if the target pc is not 4-byte aligned.
+ */
 
 /* BEQ: Branch if Equal */
 RVOP(beq, { BRANCH_FUNC(uint32_t, !=); })

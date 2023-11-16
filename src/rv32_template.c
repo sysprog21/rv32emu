@@ -627,7 +627,7 @@ RVOP(fmadds, {
 /* FMSUB.S */
 RVOP(fmsubs, {
     set_rounding_mode(rv);
-    float32_t tmp = rv->F[ir->rs3];
+    riscv_float_t tmp = rv->F[ir->rs3];
     tmp.v ^= FMASK_SIGN;
     rv->F[ir->rd] = f32_mulAdd(rv->F[ir->rs1], rv->F[ir->rs2], tmp);
     set_fflag(rv);
@@ -636,7 +636,7 @@ RVOP(fmsubs, {
 /* FNMSUB.S */
 RVOP(fnmsubs, {
     set_rounding_mode(rv);
-    float32_t tmp = rv->F[ir->rs1];
+    riscv_float_t tmp = rv->F[ir->rs1];
     tmp.v ^= FMASK_SIGN;
     rv->F[ir->rd] = f32_mulAdd(tmp, rv->F[ir->rs2], rv->F[ir->rs3]);
     set_fflag(rv);
@@ -645,8 +645,8 @@ RVOP(fnmsubs, {
 /* FNMADD.S */
 RVOP(fnmadds, {
     set_rounding_mode(rv);
-    float32_t tmp1 = rv->F[ir->rs1];
-    float32_t tmp2 = rv->F[ir->rs3];
+    riscv_float_t tmp1 = rv->F[ir->rs1];
+    riscv_float_t tmp2 = rv->F[ir->rs3];
     tmp1.v ^= FMASK_SIGN;
     tmp2.v ^= FMASK_SIGN;
     rv->F[ir->rd] = f32_mulAdd(tmp1, rv->F[ir->rs2], tmp2);

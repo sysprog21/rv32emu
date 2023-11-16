@@ -7,7 +7,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 #if RV32_HAS(EXT_F)
+#define float16_t softfloat_float16_t
+#define bfloat16_t softfloat_bfloat16_t
+#define float32_t softfloat_float32_t
+#define float64_t softfloat_float64_t
 #include "softfloat/softfloat.h"
+#undef float16_t
+#undef bfloat16_t
+#undef float32_t
+#undef float64_t
 #endif
 
 #ifdef __cplusplus
@@ -93,7 +101,7 @@ typedef uint16_t riscv_half_t;
 typedef uint8_t riscv_byte_t;
 typedef uint32_t riscv_exception_t;
 #if RV32_HAS(EXT_F)
-typedef float32_t riscv_float_t;
+typedef softfloat_float32_t riscv_float_t;
 #endif
 
 /* memory read handlers */

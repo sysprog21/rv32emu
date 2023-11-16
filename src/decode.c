@@ -1031,7 +1031,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
      * FSGNJN.S  0010000 rs2   rs1 001 rd 1010011
      * FSGNJX.S  0010000 rs2   rs1 010 rd 1010011
      * FCVT.W.S  1100000 00000 rs1 rm  rd 1010011
-     * FCVT.W.S  1100000 00000 rs1 rm  rd 1010011
+     * FCVT.WU.S 1100000 00001 rs1 rm  rd 1010011
      * FMIN.S    0010100 rs2   rs1 000 rd 1010011
      * FMAX.S    0010100 rs2   rs1 001 rd 1010011
      * FMV.X.W   1110000 00000 rs1 000 rd 1010011
@@ -1086,7 +1086,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         case 0b00000: /* FCVT.W.S */
             ir->opcode = rv_insn_fcvtws;
             break;
-        case 0b00001: /* FCVT.W.S */
+        case 0b00001: /* FCVT.WU.S */
             ir->opcode = rv_insn_fcvtwus;
             break;
         }

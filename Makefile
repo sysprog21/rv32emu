@@ -169,6 +169,7 @@ include mk/tests.mk
 CHECK_ELF_FILES := \
 	hello \
 	puzzle \
+	fcalc
 
 ifeq ($(call has, EXT_M), 1)
 CHECK_ELF_FILES += \
@@ -177,6 +178,7 @@ endif
 
 EXPECTED_hello = Hello World!
 EXPECTED_puzzle = success in 2005 trials
+EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 
 check: $(BIN)

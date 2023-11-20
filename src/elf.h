@@ -152,6 +152,3 @@ struct Elf32_Ehdr *get_elf_header(elf_t *e);
 
 /* get the first byte of ELF raw data */
 uint8_t *get_elf_first_byte(elf_t *e);
-
-/* get all of the ELF section headers */
-struct Elf32_Shdr **get_elf_section_headers(elf_t *e);

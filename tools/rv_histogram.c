@@ -3,7 +3,6 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,15 +17,12 @@
 #include "decode.h"
 #include "elf.h"
 
-typedef void (*hist_record_handler)(rv_insn_t *);
+typedef void (*hist_record_handler)(const rv_insn_t *);
 
 static bool ascending_order = false;
 static bool show_reg = false;
 static const char *elf_prog = NULL;
 
-hist_record_handler hist_record;
-static const char *insn_reg;
-static size_t freq;
 static size_t max_freq = 0;
 static size_t total_freq = 0;
 static unsigned short max_col;
@@ -92,17 +88,17 @@ static unsigned short get_used_col()
 {
     unsigned short used_col = 0;
 
-    used_col += 3;  /* width = 3 */
-    used_col += 1;  /* . */
-    used_col += 1;  /* single space */
-    used_col += 10; /* width = 10 */
-    used_col += 5;  /* width = 5 */
-    used_col += 1;  /* % */
-    used_col += 1;  /* single space */
-    used_col += 1;  /* [ */
-    used_col += 10; /* width = 10 */
-    used_col += 1;  /* ] */
-    used_col += 1;  /* single space */
+    used_col += 3u;  /* width = 3 */
+    used_col += 1u;  /* . */
+    used_col += 1u;  /* single space */
+    used_col += 10u; /* width = 10 */
+    used_col += 5u;  /* width = 5 */
+    used_col += 1u;  /* % */
+    used_col += 1u;  /* single space */
+    used_col += 1u;  /* [ */
+    used_col += 10u; /* width = 10 */
+    used_col += 1u;  /* ] */
+    used_col += 1u;  /* single space */
 
     return used_col;
 }
@@ -145,38 +141,47 @@ static void print_usage(const char *filename)
             filename);
 }
 
-static bool parse_args(int argc, char **args)
+/* FIXME: refactor to elegant code */
+static bool parse_args(int argc, const char *args[])
 {
-    const char *optstr = "ar";
-    int opt;
+    bool ret = true;
+    for (int i = 1; (i < argc) && ret; i++) {
+        const char *arg = args[i];
+        if (arg[0] == '-') {
+            if (strstr(arg, "-ar") || strstr(arg, "-ra")) {
+                ascending_order = true;
+                show_reg = true;
+                continue;
+            }
 
-    while ((opt = getopt(argc, args, optstr)) != -1) {
-        switch (opt) {
-        case 'a':
-            ascending_order = true;
-            break;
-        case 'r':
-            show_reg = true;
-            break;
-        default:
-            return false;
+            if (!strcmp(arg, "-a")) {
+                ascending_order = true;
+                continue;
+            }
+
+            if (!strcmp(arg, "-r")) {
+                show_reg = true;
+                continue;
+            }
+
+            ret = false;
         }
+        /* set the executable */
+        elf_prog = arg;
     }
 
-    elf_prog = args[optind];
-
-    return true;
+    return ret;
 }
 
-void print_hist_stats(const rv_hist_t *stats, size_t stats_size)
+static void print_hist_stats(const rv_hist_t *stats, size_t stats_size)
 {
     char hist_bar[max_col * 3 + 1];
     float percent;
     size_t idx = 1;
 
     for (size_t i = 0; i < stats_size; i++) {
-        insn_reg = stats[i].insn_reg;
-        freq = stats[i].freq;
+        const char *insn_reg = stats[i].insn_reg;
+        size_t freq = stats[i].freq;
 
         percent = ((float) freq / total_freq) * 100;
         if (percent < 1.00)
@@ -189,7 +194,7 @@ void print_hist_stats(const rv_hist_t *stats, size_t stats_size)
     }
 }
 
-void reg_hist_incr(rv_insn_t *ir)
+static void reg_hist_incr(const rv_insn_t *ir)
 {
     if (!ir)
         return;
@@ -214,7 +219,7 @@ void reg_hist_incr(rv_insn_t *ir)
     }
 }
 
-void insn_hist_incr(rv_insn_t *ir)
+static void insn_hist_incr(const rv_insn_t *ir)
 {
     if (!ir) {
         rv_insn_stats[N_RV_INSNS].freq++;
@@ -224,7 +229,7 @@ void insn_hist_incr(rv_insn_t *ir)
     total_freq++;
 }
 
-int main(int argc, char *args[])
+int main(int argc, const char *args[])
 {
     if (!parse_args(argc, args) || !elf_prog) {
         print_usage(args[0]);
@@ -232,7 +237,7 @@ int main(int argc, char *args[])
     }
 
     /* resolver of histogram accounting */
-    hist_record = show_reg ? reg_hist_incr : insn_hist_incr;
+    hist_record_handler hist_record = show_reg ? reg_hist_incr : insn_hist_incr;
 
     elf_t *e = elf_new();
     if (!elf_open(e, elf_prog)) {
@@ -241,39 +246,37 @@ int main(int argc, char *args[])
     }
 
     struct Elf32_Ehdr *hdr = get_elf_header(e);
-    struct Elf32_Shdr **shdrs = get_elf_section_headers(e);
-    if (!shdrs) {
-        fprintf(stderr, "malloc for section headers failed\n");
-        return 1;
-    }
+    uint8_t *elf_first_byte = get_elf_first_byte(e);
+    const struct Elf32_Shdr **shdrs =
+        (const struct Elf32_Shdr **) &elf_first_byte[hdr->e_shoff];
 
-    uintptr_t *elf_first_byte = (uintptr_t *) get_elf_first_byte(e);
     rv_insn_t ir;
     bool res;
 
     for (int i = 0; i < hdr->e_shnum; i++) {
-        struct Elf32_Shdr *shdr = (struct Elf32_Shdr *) shdrs + i;
+        const struct Elf32_Shdr *shdr = (const struct Elf32_Shdr *) &shdrs[i];
+        bool is_prg = shdr->sh_type & SHT_PROGBITS;
+        bool has_insn = shdr->sh_flags & SHF_EXECINSTR;
 
-        if (!(shdr->sh_type & SHT_PROGBITS && shdr->sh_flags & SHF_EXECINSTR))
+        if (!(is_prg && has_insn))
             continue;
 
-        uintptr_t *exec_start_addr =
-            (uintptr_t *) ((uint8_t *) elf_first_byte + shdr->sh_offset);
-        uintptr_t *exec_end_addr =
-            (uintptr_t *) ((uint8_t *) exec_start_addr + shdr->sh_size);
-        uintptr_t *ptr = (uintptr_t *) exec_start_addr;
+        uint8_t *exec_start_addr = &elf_first_byte[shdr->sh_offset];
+        const uint8_t *exec_end_addr = &exec_start_addr[shdr->sh_size];
+        uint8_t *ptr = exec_start_addr;
         uint32_t insn;
 
         while (ptr < exec_end_addr) {
 #if RV32_HAS(EXT_C)
             if ((*((uint32_t *) ptr) & FC_OPCODE) != 0x3) {
                 insn = *((uint16_t *) ptr);
-                ptr = (uintptr_t *) ((uint8_t *) ptr + 2);
+                ptr += 2;
                 goto decode;
             }
 #endif
             insn = *((uint32_t *) ptr);
-            ptr = (uintptr_t *) ((uint8_t *) ptr + 4);
+            ptr += 4;
+
 
 #if RV32_HAS(EXT_C)
         decode:
@@ -312,7 +315,6 @@ int main(int argc, char *args[])
         print_hist_stats(rv_insn_stats, N_RV_INSNS + 1);
     }
 
-    free(shdrs);
     elf_delete(e);
 
     return 0;

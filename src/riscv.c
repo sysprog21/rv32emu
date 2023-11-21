@@ -34,6 +34,7 @@ void block_map_clear(riscv_t *rv)
         for (idx = 0, ir = block->ir_head; idx < block->n_insn;
              idx++, ir = next) {
             free(ir->fuse);
+            free(ir->branch_table);
             next = ir->next;
             mpool_free(rv->block_ir_mp, ir);
         }

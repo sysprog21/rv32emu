@@ -41,6 +41,30 @@ RVOP(jal, {
     return true;
 })
 
+/* The branch history table records historical data pertaining to indirect jump
+ * targets. This functionality alleviates the need to invoke block_find() and
+ * incurs overhead only when the indirect jump targets are not previously
+ * recorded. Additionally, the C code generator can reference the branch history
+ * table to link he indirect jump targets.
+ */
+#define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                               \
+    /* lookup branch history table */                                         \
+    for (int i = 0; i < ir->branch_table_count; i++) {                        \
+        if (ir->branch_table[i].PC == PC) {                                   \
+            MUST_TAIL return ir->branch_table[i].branch_target->impl(         \
+                rv, ir->branch_table[i].branch_target, cycle, PC);            \
+        }                                                                     \
+    }                                                                         \
+    block_t *block = block_find(&rv->block_map, PC);                          \
+    if (block) {                                                              \
+        /* update branch history table */                                     \
+        ir->branch_table_count = (ir->branch_table_count + 1) % HISTORY_SIZE; \
+        ir->branch_table[ir->branch_table_count].PC = PC;                     \
+        ir->branch_table[ir->branch_table_count].branch_target =              \
+            block->ir_head;                                                   \
+        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC); \
+    }
+
 /* The indirect jump instruction JALR uses the I-type encoding. The target
  * address is obtained by adding the sign-extended 12-bit I-immediate to the
  * register rs1, then setting the least-significant bit of the result to zero.
@@ -57,9 +81,7 @@ RVOP(jalr, {
         rv->X[ir->rd] = pc + 4;
     /* check instruction misaligned */
     RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
-    block_t *block = block_find(&rv->block_map, PC);
-    if (block)
-        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+    LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -1016,9 +1038,7 @@ RVOP(clwsp, {
 /* C.JR */
 RVOP(cjr, {
     PC = rv->X[ir->rs1];
-    block_t *block = block_find(&rv->block_map, PC);
-    if (block)
-        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+    LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -1043,9 +1063,7 @@ RVOP(cjalr, {
     rv->X[rv_reg_ra] = PC + 2;
     PC = jump_to;
     RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
-    block_t *block = block_find(&rv->block_map, PC);
-    if (block)
-        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC);
+    LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;

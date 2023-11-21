@@ -371,21 +371,21 @@ static bool is_branch_taken = false;
 static uint32_t last_pc = 0;
 
 /* Interpreter-based execution path */
-#define RVOP(inst, code)                                                    \
-    static bool do_##inst(riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, \
-                          uint32_t PC)                                      \
-    {                                                                       \
-        cycle++;                                                            \
-        code;                                                               \
-    nextop:                                                                 \
-        PC += __rv_insn_##inst##_len;                                       \
-        if (unlikely(RVOP_NO_NEXT(ir))) {                                   \
-            rv->csr_cycle = cycle;                                          \
-            rv->PC = PC;                                                    \
-            return true;                                                    \
-        }                                                                   \
-        const rv_insn_t *next = ir->next;                                   \
-        MUST_TAIL return next->impl(rv, next, cycle, PC);                   \
+#define RVOP(inst, code)                                              \
+    static bool do_##inst(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, \
+                          uint32_t PC)                                \
+    {                                                                 \
+        cycle++;                                                      \
+        code;                                                         \
+    nextop:                                                           \
+        PC += __rv_insn_##inst##_len;                                 \
+        if (unlikely(RVOP_NO_NEXT(ir))) {                             \
+            rv->csr_cycle = cycle;                                    \
+            rv->PC = PC;                                              \
+            return true;                                              \
+        }                                                             \
+        const rv_insn_t *next = ir->next;                             \
+        MUST_TAIL return next->impl(rv, next, cycle, PC);             \
     }
 
 #include "rv32_template.c"
@@ -633,8 +633,16 @@ static void block_translate(riscv_t *rv, block_t *block)
         block->n_insn++;
         prev_ir = ir;
         /* stop on branch */
-        if (insn_is_branch(ir->opcode))
+        if (insn_is_branch(ir->opcode)) {
+            if (ir->opcode == rv_insn_jalr
+#if RV32_HAS(EXT_C)
+                || ir->opcode == rv_insn_cjalr || ir->opcode == rv_insn_cjr
+#endif
+            )
+                ir->branch_table =
+                    calloc(1, HISTORY_SIZE * sizeof(branch_history_entry_t));
             break;
+        }
 
         ir = mpool_alloc(rv->block_ir_mp);
     }

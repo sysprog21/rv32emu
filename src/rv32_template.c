@@ -49,19 +49,18 @@ RVOP(jal, {
  */
 #define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                               \
     /* lookup branch history table */                                         \
-    for (int i = 0; i < ir->branch_table_count; i++) {                        \
-        if (ir->branch_table[i].PC == PC) {                                   \
-            MUST_TAIL return ir->branch_table[i].branch_target->impl(         \
-                rv, ir->branch_table[i].branch_target, cycle, PC);            \
+    for (int i = 0; i < HISTORY_SIZE; i++) {                                  \
+        if (ir->branch_table->PC[i] == PC) {                                  \
+            MUST_TAIL return ir->branch_table->target[i]->impl(               \
+                rv, ir->branch_table->target[i], cycle, PC);                  \
         }                                                                     \
     }                                                                         \
     block_t *block = block_find(&rv->block_map, PC);                          \
     if (block) {                                                              \
         /* update branch history table */                                     \
-        ir->branch_table_count = (ir->branch_table_count + 1) % HISTORY_SIZE; \
-        ir->branch_table[ir->branch_table_count].PC = PC;                     \
-        ir->branch_table[ir->branch_table_count].branch_target =              \
-            block->ir_head;                                                   \
+        ir->branch_table->PC[ir->branch_table->idx] = PC;                     \
+        ir->branch_table->target[ir->branch_table->idx] = block->ir_head;     \
+        ir->branch_table->idx = (ir->branch_table->idx + 1) % HISTORY_SIZE;   \
         MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC); \
     }
 

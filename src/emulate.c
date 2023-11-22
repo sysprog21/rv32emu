@@ -639,8 +639,7 @@ static void block_translate(riscv_t *rv, block_t *block)
                 || ir->opcode == rv_insn_cjalr || ir->opcode == rv_insn_cjr
 #endif
             )
-                ir->branch_table =
-                    calloc(1, HISTORY_SIZE * sizeof(branch_history_entry_t));
+                ir->branch_table = calloc(1, sizeof(branch_history_table_t));
             break;
         }
 

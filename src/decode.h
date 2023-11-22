@@ -254,9 +254,10 @@ typedef struct {
 
 #define HISTORY_SIZE 16
 typedef struct {
-    uint32_t PC;
-    struct rv_insn *branch_target;
-} branch_history_entry_t;
+    uint8_t idx;
+    uint32_t PC[HISTORY_SIZE];
+    struct rv_insn *target[HISTORY_SIZE];
+} branch_history_table_t;
 
 typedef struct rv_insn {
     union {
@@ -300,8 +301,7 @@ typedef struct rv_insn {
      * specific IR array without the need for additional copying.
      */
     struct rv_insn *branch_taken, *branch_untaken;
-    uint8_t branch_table_count;
-    branch_history_entry_t *branch_table;
+    branch_history_table_t *branch_table;
 } rv_insn_t;
 
 /* decode the RISC-V instruction */

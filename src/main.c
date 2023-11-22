@@ -10,6 +10,7 @@
 
 #include "elf.h"
 #include "state.h"
+#include "utils.h"
 
 /* enable program trace mode */
 static bool opt_trace = false;
@@ -188,6 +189,10 @@ static void dump_test_signature(elf_t *elf)
 
 int main(int argc, char **args)
 {
+#ifdef UNITTEST
+    sanitize_path_test();
+#endif
+
     if (argc == 1 || !parse_args(argc, args)) {
         print_usage(args[0]);
         return 1;

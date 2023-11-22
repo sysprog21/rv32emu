@@ -47,3 +47,5 @@ void rv_clock_gettime(struct timespec *tp);
  * https://9p.io/sys/doc/lexnames.html
  */
 char *sanitize_path(const char *orig_path);
+
+void sanitize_path_test();

@@ -8,6 +8,7 @@
 
 #include "elf.h"
 #include "io.h"
+#include "utils.h"
 
 #if defined(_WIN32)
 /* fallback to standard I/O text stream */
@@ -290,16 +291,20 @@ bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem)
     return true;
 }
 
-bool elf_open(elf_t *e, const char *path)
+bool elf_open(elf_t *e, const char *_path)
 {
     /* free previous memory */
     if (e->raw_data)
         release(e);
 
+    char *path = sanitize_path(_path);
+
 #if defined(USE_MMAP)
     int fd = open(path, O_RDONLY);
-    if (fd < 0)
+    if (fd < 0) {
+        free(path);
         return false;
+    }
 
     /* get file size */
     struct stat st;
@@ -312,14 +317,17 @@ bool elf_open(elf_t *e, const char *path)
     e->raw_data = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (e->raw_data == MAP_FAILED) {
         release(e);
+        free(path);
         return false;
     }
     close(fd);
 
 #else  /* fallback to standard I/O text stream */
     FILE *f = fopen(path, "rb");
-    if (!f)
+    if (!f) {
+        free(path);
         return false;
+    }
 
     /* get file size */
     fseek(f, 0, SEEK_END);
@@ -327,6 +335,7 @@ bool elf_open(elf_t *e, const char *path)
     fseek(f, 0, SEEK_SET);
     if (e->raw_size == 0) {
         fclose(f);
+        free(path);
         return false;
     }
 
@@ -339,6 +348,7 @@ bool elf_open(elf_t *e, const char *path)
     fclose(f);
     if (r != e->raw_size) {
         release(e);
+        free(path);
         return false;
     }
 #endif /* USE_MMAP */
@@ -349,9 +359,11 @@ bool elf_open(elf_t *e, const char *path)
     /* check it is a valid ELF file */
     if (!is_valid(e)) {
         release(e);
+        free(path);
         return false;
     }
 
+    free(path);
     return true;
 }
 

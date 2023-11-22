@@ -4,6 +4,8 @@
  */
 
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -66,4 +68,99 @@ void rv_clock_gettime(struct timespec *tp)
     get_time_info(&tv_sec, &tv_usec);
     tp->tv_sec = tv_sec;
     tp->tv_nsec = tv_usec / 1000; /* Transfer to microseconds */
+}
+
+char *sanitize_path(const char *orig_path)
+{
+    size_t n = strlen(orig_path);
+
+    char *ret = (char *) malloc(n + 1);
+    memset(ret, '\0', n + 1);
+
+    /* After sanitization, the new path will only be shorter than the original
+     * one. Thus, we can reuse the space */
+    if (n == 0) {
+        ret[0] = '.';
+        return ret;
+    }
+
+    int rooted = (orig_path[0] == '/');
+
+    /*
+     * Invariants:
+     *	reading from path; r is index of next byte to process -> path[r]
+     *	writing to buf; w is index of next byte to write -> ret[strlen(ret)]
+     *	dotdot is index in buf where .. must stop, either because
+     *		a) it is the leading slash
+     *      b) it is a leading ../../.. prefix.
+     */
+    size_t w = 0;
+    size_t r = 0;
+    size_t dotdot = 0;
+    if (rooted) {
+        ret[w] = '/';
+        w++;
+        r = 1;
+        dotdot = 1;
+    }
+
+    while (r < n) {
+        if (orig_path[r] == '/') {
+            /*  empty path element */
+            r++;
+        } else if (orig_path[r] == '.' &&
+                   (r + 1 == n || orig_path[r + 1] == '/')) {
+            /* . element */
+            r++;
+        } else if (orig_path[r] == '.' && orig_path[r + 1] == '.' &&
+                   (r + 2 == n || orig_path[r + 2] == '/')) {
+            /* .. element: remove to last / */
+            r += 2;
+
+            if (w > dotdot) {
+                /* can backtrack */
+                w--;
+                while (w > dotdot && ret[w] != '/') {
+                    w--;
+                }
+            } else if (!rooted) {
+                /* cannot backtrack, but not rooted, so append .. element. */
+                if (w > 0) {
+                    ret[w] = '/';
+                    w++;
+                }
+                ret[w] = '.';
+                w++;
+                ret[w] = '.';
+                w++;
+                dotdot = w;
+            }
+        } else {
+            /* real path element.
+               add slash if needed */
+            if ((rooted && w != 1) || (!rooted && w != 0)) {
+                ret[w] = '/';
+                w++;
+            }
+
+            /* copy element */
+            for (; r < n && orig_path[r] != '/'; r++) {
+                ret[w] = orig_path[r];
+                w++;
+            }
+        }
+        // printf("w = %ld, r = %ld, dotdot = %ld\nret = %s\n", w, r, dotdot,
+        // ret);
+    }
+
+    /* Turn empty string into "." */
+    if (w == 0) {
+        ret[w] = '.';
+        w++;
+    }
+
+    for (size_t i = w; i < n; i++) {
+        ret[i] = '\0';
+    }
+    return ret;
 }

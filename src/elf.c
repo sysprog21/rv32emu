@@ -355,37 +355,6 @@ bool elf_open(elf_t *e, const char *path)
     return true;
 }
 
-struct Elf32_Shdr **get_elf_section_headers(elf_t *e)
-{
-    struct Elf32_Ehdr *elf_hdr = (struct Elf32_Ehdr *) e->hdr;
-    Elf32_Half shnum = elf_hdr->e_shnum;
-    off_t offset = elf_hdr->e_shoff;
-    uint8_t *buf = e->raw_data + offset;
-
-    struct Elf32_Shdr **shdrs = malloc(sizeof(struct Elf32_Shdr) * shnum);
-    if (!shdrs)
-        return NULL;
-
-    for (int i = 0; i < shnum; i++) {
-        struct Elf32_Shdr *shdr = (struct Elf32_Shdr *) shdrs + i;
-        struct Elf32_Shdr *_shdr =
-            (struct Elf32_Shdr *) (buf + sizeof(struct Elf32_Shdr) * i);
-
-        shdr->sh_name = _shdr->sh_name;
-        shdr->sh_type = _shdr->sh_type;
-        shdr->sh_flags = _shdr->sh_flags;
-        shdr->sh_addr = _shdr->sh_addr;
-        shdr->sh_offset = _shdr->sh_offset;
-        shdr->sh_size = _shdr->sh_size;
-        shdr->sh_link = _shdr->sh_link;
-        shdr->sh_info = _shdr->sh_info;
-        shdr->sh_addralign = _shdr->sh_addralign;
-        shdr->sh_entsize = _shdr->sh_entsize;
-    }
-
-    return shdrs;
-}
-
 struct Elf32_Ehdr *get_elf_header(elf_t *e)
 {
     return (struct Elf32_Ehdr *) e->hdr;

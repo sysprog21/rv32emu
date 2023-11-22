@@ -10,6 +10,7 @@
 
 #include "elf.h"
 #include "state.h"
+#include "utils.h"
 
 /* enable program trace mode */
 static bool opt_trace = false;

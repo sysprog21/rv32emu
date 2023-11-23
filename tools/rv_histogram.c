@@ -241,11 +241,17 @@ int main(int argc, const char *args[])
 
     elf_t *e = elf_new();
     if (!elf_open(e, elf_prog)) {
-        fprintf(stderr, "elf_open failed\n");
+        (void) fprintf(stderr, "Failed to open %s\n", elf_prog);
         return 1;
     }
 
     struct Elf32_Ehdr *hdr = get_elf_header(e);
+    if (!hdr->e_shnum) {
+        (void) fprintf(stderr, "no section headers are found in %s\n",
+                       elf_prog);
+        return 1;
+    }
+
     uint8_t *elf_first_byte = get_elf_first_byte(e);
     const struct Elf32_Shdr **shdrs =
         (const struct Elf32_Shdr **) &elf_first_byte[hdr->e_shoff];

@@ -15,6 +15,7 @@ build/mini-gdbstub
 build/softfloat
 build/cache/
 build/map/
+build/path/
 *.o
 *.o.d
 tests/**/*.elf

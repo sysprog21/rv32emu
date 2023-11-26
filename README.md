@@ -150,6 +150,34 @@ Detail in riscv-arch-test:
 * [RISC-V Architectural Testing Framework](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/doc/README.adoc)
 * [RISC-V Architecture Test Format Specification](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/spec/TestFormatSpec.adoc)
 
+## Benchmarks
+
+The benchmarks are classified into three categories based on their characteristics:
+| Category                 | Benchmark  | Description |
+| -------------------------| ---------- | ----------- |
+| Computing intensive      | puzzle     | A sliding puzzle where numbered square tiles are arranged randomly with one tile missing, designed for solving the N-puzzle problem. |
+|                          | Pi         | Calculates the millionth digit of π. |
+|                          | miniz      | Compresses and decompresses 8 MiB of data. |
+|                          | primes     | Finds the largest prime number below 33333333. |
+|                          | sha512     | Computes the SHA-512 hash of 64 MiB of data. |
+| I/O intensive            | Richards   | An OS task scheduler simulation benchmark for comparing system implementations. |
+|                          | Dhrystone  | Evaluates string operations, involves frequent memory I/O, and generates the performance metric. |
+| Computing and I/O Hybrid | Mandelbrot | A benchmark based on the Mandelbrot set, which uses fixed-point arithmetic and involves numerous integer operations. |
+|                          | AES        | Includes 23 encryption and decryption algorithms adhering to the Advanced Encryption Standard. |
+|                          | Nqueens    | A puzzle benchmark where n queens are placed on an n × n chessboard without attacking each other, using deep recursion for execution. |
+|                          | qsort      | Sorts an array with 50 million items. |
+
+These benchmarks performed by rv32emu (interpreter-only mode) and [Spike](https://github.com/riscv-software-src/riscv-isa-sim) v1.1.0. Ran on Intel Core i7-11700 CPU running at 2.5 GHz and an Ampere [eMAG](https://en.wikichip.org/wiki/ampere_computing/emag) 8180
+microprocessor equipped with 32 Arm64 cores, capable of speeds up to 3.3 GHz. Both systems ran Ubuntu Linux 22.04.1 LTS. We utilized gcc version 12.3, configured as riscv32-unknown-elf-gcc.
+
+The figures below illustrate the normalized execution time of rv32emu and Spike, where **the shorter indicates better performance**.
+
+_x86-64_
+![](docs/interp-bench-x64.png)
+
+_Arm64_
+![](docs/interp-bench-arm64.png)
+
 ## GDB Remote Debugging
 
 `rv32emu` is permitted to operate as gdbstub in an experimental manner since it supports
@@ -262,33 +290,6 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
 * `stream.elf` : See [tests/stream](tests/stream.c) [RV32MF]
 
-## Benchmarks
-The benchmarks are classified into three categories based on their characteristics:
-| Category                 | Benchmark | Description |
-| -------------------------| --------- | -------- |
-| Computing intensive      | puzzle    | The N-puzzle is a sliding puzzle where numbered square tiles are arranged randomly with one tile missing, designed for solving the N-puzzle problem. |
-|                          | Pi        | Calculates the millionth digit of π. |
-|                          | miniz     | Compresses and decompresses 8 MiB of data. |
-|                          | primes    | Finds the largest prime number below 33333333. |
-|                          | sha512    | Computes the SHA-512 hash of 64 MiB of data. |
-| I/O intensive            | Richards  | An OS task scheduler simulation benchmark for comparing system implementations. |
-|                          |Dhrystone  | Evaluates string operations, involves frequent memory I/O, and generates the performance metric. |
-| Computing and I/O Hybrid |Mandelbrot | A benchmark based on the Mandelbrot set, which uses fixed-point arithmetic and involves numerous integer operations. |
-|                          |AES        | Includes 23 encryption and decryption algorithms adhering to the Advanced Encryption Standard. |
-|                          |Nqueens    | A puzzle benchmark where n queens are placed on an n × n chessboard without attacking each other, using deep recursion for execution. |
-|                          |qsort      | Sorts an array with 50 million items. |
-
-
-These benchmarks performed by rv32emu (interpreter-only) and [Spike](https://github.com/riscv-software-src/riscv-isa-sim) v1.1.0. Ran on Intel Core i7-11700 CPU running at 2.5 GHz and an Ampere [eMAG](https://en.wikichip.org/wiki/ampere_computing/emag) 8180
-microprocessor equipped with 32 Arm64 cores, capable of speeds up to 3.3 GHz. Both systems ran Ubuntu Linux 22.04.1 LTS. We utilized gcc version 12.3, configured as riscv32-unknown-elf-gcc.
-
-The figures below illustrate the normalized execution time of rv32emu and Spike, where **the shorter indicates better performance**.
-
-_x86-64_
-![](docs/interp-bench-x64.png)
-
-_Arm64_
-![](docs/interp-bench-arm64.png)
 ## Reference
 
 * [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)

@@ -67,11 +67,7 @@ The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](do
 
 ### Docker image
 
-The image containing all the necessary tools for development and testing can be built by executing `docker build -t rv32emu .`. 
-
-This image works for both x86 and aarch64 (Apple's M1 chip) machines. Note that the image building time will be long since it will perform builds of the toolchain and the reference emulator from source. Also, it will take up about 16GB of disk space.
-
-After the image is built, you can create a docker container by executing `docker run -it rv32emu` at the project root. This will give you can interactive bash shell where you can experiment with the current codebase.
+The image containing all the necessary tools for development and testing can be executed by `docker run -it sysprog21/rv32emu:latest`. It works for both x86-64 and aarch64 (Apple's M1 chip) machines.
 
 ### Customization
 

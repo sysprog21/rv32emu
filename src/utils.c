@@ -162,7 +162,7 @@ char *sanitize_path(const char *input)
 
     /* starting from w till the end, we should mark it as \0 since that part of
      * the buffer is not used */
-    memset(ret + w, '\0', sizeof(n + 1 - w));
+    memset(ret + w, '\0', n + 1 - w);
 
     return ret;
 }

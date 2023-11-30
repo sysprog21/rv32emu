@@ -27,3 +27,8 @@ COPY --from=base_gcc /opt/riscv/ /opt/riscv/
 # replace the emulator (riscv_sim_RV32) with the arch that the container can execute 
 RUN rm /home/root/rv32emu/tests/arch-test-target/sail_cSim/riscv_sim_RV32
 COPY --from=base_sail /home/root/riscv_sim_RV32 /home/root/rv32emu/tests/arch-test-target/sail_cSim/riscv_sim_RV32
+
+# generate execution file for rv32emu and rv_histogram
+RUN make
+RUN make tool
+ENV PATH=/home/root/rv32emu/build:$PATH

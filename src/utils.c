@@ -78,9 +78,8 @@ char *sanitize_path(const char *input)
     size_t n = strnlen(input, MAX_PATH_LEN);
 
     char *ret = calloc(n + 1, sizeof(char));
-    if (!ret) {
+    if (!ret)
         return NULL;
-    }
 
     /* After sanitization, the new path will only be shorter than the original
      * one. Thus, we can reuse the space */
@@ -91,16 +90,14 @@ char *sanitize_path(const char *input)
 
     bool is_root = (input[0] == '/');
 
-    /*
-     * Invariants:
+    /* Invariants:
      * reading from path; r is index of next byte to process -> path[r]
      * writing to buf; w is index of next byte to write -> ret[strlen(ret)]
      * dotdot is index in buf where .. must stop, either because:
-     *  a) it is the leading slash
-     *  b) it is a leading ../../.. prefix.
+     *   a) it is the leading slash;
+     *   b) it is a leading ../../.. prefix.
      */
-    size_t w = 0;
-    size_t r = 0;
+    size_t w = 0, r = 0;
     size_t dotdot = 0;
     if (is_root) {
         ret[w] = '/';
@@ -118,7 +115,7 @@ char *sanitize_path(const char *input)
             r++;
         } else if (input[r] == '.' && input[r + 1] == '.' &&
                    (r + 2 == n || input[r + 2] == '/')) {
-            /* .. element: remove to last / */
+            /* .. element: remove to last '/' */
             r += 2;
 
             if (w > dotdot) {
@@ -160,8 +157,9 @@ char *sanitize_path(const char *input)
         w++;
     }
 
-    /* starting from w till the end, we should mark it as \0 since that part of
-     * the buffer is not used */
+    /* starting from w till the end, we should mark it as '\0' since that part
+     * of the buffer is not used.
+     */
     memset(ret + w, '\0', n + 1 - w);
 
     return ret;

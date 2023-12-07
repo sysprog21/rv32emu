@@ -298,9 +298,8 @@ bool elf_open(elf_t *e, const char *input)
         release(e);
 
     char *path = sanitize_path(input);
-    if (!path) {
+    if (!path)
         return false;
-    }
 
 #if defined(USE_MMAP)
     int fd = open(path, O_RDONLY);

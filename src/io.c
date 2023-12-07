@@ -8,8 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if !defined(_WIN32)
-#define USE_MMAP 1
+#if HAVE_MMAP
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -32,7 +31,7 @@ static uint8_t *data_memory_base;
 memory_t *memory_new()
 {
     memory_t *mem = malloc(sizeof(memory_t));
-#if defined(USE_MMAP)
+#if HAVE_MMAP
     data_memory_base = mmap(NULL, MEM_SIZE, PROT_READ | PROT_WRITE,
                             MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     if (data_memory_base == MAP_FAILED) {
@@ -53,7 +52,7 @@ memory_t *memory_new()
 
 void memory_delete(memory_t *mem)
 {
-#if defined(USE_MMAP)
+#if HAVE_MMAP
     munmap(mem->mem_base, MEM_SIZE);
 #else
     free(mem->mem_base);

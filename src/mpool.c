@@ -4,8 +4,7 @@
  */
 #include <stdlib.h>
 #include <string.h>
-#if !defined(_WIN32)
-#define USE_MMAP 1
+#if HAVE_MMAP
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -31,7 +30,7 @@ typedef struct mpool {
 
 static void *mem_arena(size_t sz)
 {
-#if defined(USE_MMAP)
+#if HAVE_MMAP
     void *p =
         mmap(0, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (p == MAP_FAILED)
@@ -134,7 +133,7 @@ void mpool_free(mpool_t *mp, void *target)
 
 void mpool_destroy(mpool_t *mp)
 {
-#if defined(USE_MMAP)
+#if HAVE_MMAP
     size_t mem_size = mp->page_count * getpagesize();
     area_t *cur = &mp->area, *tmp = NULL;
     while (cur) {

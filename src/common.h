@@ -79,6 +79,14 @@
 #define MUST_TAIL
 #endif
 
+/* Assume that all POSIX-compatible environments provide mmap system call. */
+#if defined(_WIN32)
+#define HAVE_MMAP 0
+#else
+/* Assume POSIX-compatible runtime */
+#define HAVE_MMAP 1
+#endif
+
 /* Pattern Matching for C macros.
  * https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
  */

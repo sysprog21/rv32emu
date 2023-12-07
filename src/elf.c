@@ -10,16 +10,14 @@
 #include "io.h"
 #include "utils.h"
 
-#if defined(_WIN32)
-/* fallback to standard I/O text stream */
-#include <stdio.h>
-#else
-/* Assume POSIX-compatible runtime */
-#define USE_MMAP 1
+#if HAVE_MMAP
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#else
+/* fallback to standard I/O text stream */
+#include <stdio.h>
 #endif
 
 enum {
@@ -85,7 +83,7 @@ void elf_delete(elf_t *e)
         return;
 
     map_delete(e->symbols);
-#if defined(USE_MMAP)
+#if HAVE_MMAP
     if (e->raw_data)
         munmap(e->raw_data, e->raw_size);
 #else
@@ -97,7 +95,7 @@ void elf_delete(elf_t *e)
 /* release a loaded ELF file */
 static void release(elf_t *e)
 {
-#if !defined(USE_MMAP)
+#if !HAVE_MMAP
     free(e->raw_data);
 #endif
 
@@ -301,7 +299,7 @@ bool elf_open(elf_t *e, const char *input)
     if (!path)
         return false;
 
-#if defined(USE_MMAP)
+#if HAVE_MMAP
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         free(path);
@@ -353,7 +351,7 @@ bool elf_open(elf_t *e, const char *input)
         free(path);
         return false;
     }
-#endif /* USE_MMAP */
+#endif /* HAVE_MMAP */
 
     /* point to the header */
     e->hdr = (const struct Elf32_Ehdr *) e->raw_data;

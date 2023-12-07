@@ -109,7 +109,10 @@
  */
 #define COUNT_VARARGS(...) _GET_NTH_ARG("ignored", ##__VA_ARGS__, 4, 3, 2, 1, 0)
 
-#if defined(__GNUC__) || defined(__clang__)
+/* As of C23, typeof is now included as part of the C standard. */
+#if defined(__GNUC__) || defined(__clang__) ||         \
+    (defined(__STDC__) && defined(__STDC_VERSION__) && \
+     (__STDC_VERSION__ >= 202000L)) /* C2x/C23 ?*/
 #define __HAVE_TYPEOF 1
 #endif
 

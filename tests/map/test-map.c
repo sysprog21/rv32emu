@@ -17,7 +17,7 @@ static void swap(int *x, int *y)
 enum { N_NODES = 10000 };
 
 /* return 0 on success; non-zero values on failure */
-static int test_map_mixed_operations()
+static int test_map_mixed_operations(void)
 {
     int ret = 0;
     map_t tree = map_init(int, int, map_cmp_int);

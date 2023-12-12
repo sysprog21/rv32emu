@@ -28,7 +28,7 @@ static uint8_t *data_memory_base;
  */
 #define MEM_SIZE 0xFFFFFFFFULL
 
-memory_t *memory_new()
+memory_t *memory_new(void)
 {
     memory_t *mem = malloc(sizeof(memory_t));
 #if HAVE_MMAP

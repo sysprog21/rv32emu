@@ -129,7 +129,7 @@ struct Elf32_Sym {
 
 typedef struct elf_internal elf_t;
 
-elf_t *elf_new();
+elf_t *elf_new(void);
 void elf_delete(elf_t *e);
 
 /* Open an ELF file from specified path */

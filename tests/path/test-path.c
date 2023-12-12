@@ -21,7 +21,7 @@ void compare(char *input, char *expected_output)
     free(input_sanitized);
 }
 
-void sanitize_path_test()
+void sanitize_path_test(void)
 {
     /* Already clean */
     compare("", ".");
@@ -71,7 +71,7 @@ void sanitize_path_test()
     compare("abc/../../././../def", "../../def");
 }
 
-int main()
+int main(void)
 {
     sanitize_path_test();
 

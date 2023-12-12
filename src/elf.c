@@ -67,7 +67,7 @@ struct elf_internal {
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
-elf_t *elf_new()
+elf_t *elf_new(void)
 {
     elf_t *e = malloc(sizeof(elf_t));
     e->hdr = NULL;

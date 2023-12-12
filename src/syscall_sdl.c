@@ -719,7 +719,7 @@ static void set_music_volume(riscv_t *rv)
     Mix_VolumeMusic(volume * 8);
 }
 
-static void init_audio()
+static void init_audio(void)
 {
     if (!(SDL_WasInit(-1) & SDL_INIT_AUDIO)) {
         if (SDL_Init(SDL_INIT_AUDIO) != 0) {

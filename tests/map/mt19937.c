@@ -17,23 +17,21 @@ void mt19937_init(uint64_t seed)
     }
 }
 
-static void generate_numbers()
+static void generate_numbers(void)
 {
     for (int i = 0; i < 624; i++) {
         uint64_t y =
             (MT[i] & 0x80000000ULL) + (MT[(i + 1) % 624] & 0x7fffffffULL);
         MT[i] = MT[(i + 397) % 624] ^ (y >> 1);
-        if (y % 2 != 0) {
+        if (y % 2 != 0)
             MT[i] = MT[i] ^ 0x9908b0dfULL;
-        }
     }
 }
 
-uint64_t mt19937_extract()
+uint64_t mt19937_extract(void)
 {
-    if (index == 0) {
+    if (index == 0)
         generate_numbers();
-    }
 
     uint64_t y = MT[index];
     y = y ^ (y >> 11);

@@ -22,7 +22,7 @@ typedef struct {
     map_t fd_map;
 } state_t;
 
-static inline state_t *state_new()
+static inline state_t *state_new(void)
 {
     state_t *s = malloc(sizeof(state_t));
     s->mem = memory_new();

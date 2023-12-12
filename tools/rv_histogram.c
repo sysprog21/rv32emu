@@ -60,7 +60,7 @@ static int cmp_asc(const void *a, const void *b)
 }
 
 /* used to adjust the length of histogram bar */
-static unsigned short get_win_max_col()
+static unsigned short get_win_max_col(void)
 {
 #if defined(_WIN32)
     CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -84,7 +84,7 @@ static void find_max_freq(const rv_hist_t *stats, size_t stats_size)
 static const char *fmt = "%3d. %-10s%5.2f%% [%-10zu] %s\n";
 
 /* get columns used by the fmt string */
-static unsigned short get_used_col()
+static unsigned short get_used_col(void)
 {
     unsigned short used_col = 0;
 

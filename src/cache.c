@@ -515,31 +515,16 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
     return delete_value;
 }
 
-void cache_free(cache_t *cache, void (*callback)(void *))
+void cache_free(cache_t *cache)
 {
 #if RV32_HAS(ARC)
     for (int i = 0; i < N_CACHE_LIST_TYPES; i++) {
-        arc_entry_t *entry, *safe;
-#ifdef __HAVE_TYPEOF
-        list_for_each_entry_safe (entry, safe, cache->lists[i], list)
-#else
-        list_for_each_entry_safe (entry, safe, cache->lists[i], list,
-                                  arc_entry_t)
-#endif
-#else /* !RV32_HAS(ARC) */
-    for (int i = 0; i < THRESHOLD; i++) {
-        if (list_empty(cache->lists[i]))
-            continue;
-        lfu_entry_t *entry, *safe;
-#ifdef __HAVE_TYPEOF
-        list_for_each_entry_safe (entry, safe, cache->lists[i], list)
-#else
-        list_for_each_entry_safe (entry, safe, cache->lists[i], list,
-                                  lfu_entry_t)
-#endif
-#endif
-            callback(entry->value);
+        free(cache->lists[i]);
     }
+#else
+    for (int i = 0; i < THRESHOLD; i++)
+        free(cache->lists[i]);
+#endif
     mpool_destroy(cache_mp);
     free(cache->map->ht_list_head);
     free(cache->map);

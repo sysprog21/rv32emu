@@ -37,4 +37,4 @@ void *cache_put(struct cache *cache, uint32_t key, void *value);
  * @cache: a pointer points to target cache
  * @callback: a function for freeing cache entry completely
  */
-void cache_free(struct cache *cache, void (*callback)(void *));
+void cache_free(struct cache *cache);

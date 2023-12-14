@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
             assert(cache);
             printf("NEW CACHE\n");
         } else if (!strcmp(arr[0], "FREE\n")) {
-            cache_free(cache, free);
+            cache_free(cache);
             printf("FREE CACHE\n");
         }
     }

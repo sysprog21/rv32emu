@@ -1,6 +1,9 @@
 CC_IS_CLANG :=
 CC_IS_GCC :=
-ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
+CC_IS_EMCC :=
+ifneq ($(shell $(CC) --version | head -n 1 | grep emcc),)
+    CC_IS_EMCC := 1
+else ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
     CC_IS_CLANG := 1
 else
     ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)

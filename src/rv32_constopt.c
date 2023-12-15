@@ -650,29 +650,50 @@ CONSTOPT(fmaxs, {})
  */
 
 /* FCVT.W.S */
-CONSTOPT(fcvtws, {})
+CONSTOPT(fcvtws, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FCVT.WU.S */
-CONSTOPT(fcvtwus, {})
+CONSTOPT(fcvtwus, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FMV.X.W */
-CONSTOPT(fmvxw, {})
+CONSTOPT(fmvxw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FEQ.S performs a quiet comparison: it only sets the invalid operation
  * exception flag if either input is a signaling NaN.
  */
-CONSTOPT(feqs, {})
+CONSTOPT(feqs, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FLT.S and FLE.S perform what the IEEE 754-2008 standard refers to as
  * signaling comparisons: that is, they set the invalid operation exception
  * flag if either input is NaN.
  */
-CONSTOPT(flts, {})
+CONSTOPT(flts, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
-CONSTOPT(fles, {})
+CONSTOPT(fles, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FCLASS.S */
-CONSTOPT(fclasss, {})
+CONSTOPT(fclasss, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FCVT.S.W */
 CONSTOPT(fcvtsw, {})

@@ -179,13 +179,31 @@ enum op_field {
     )
 /* clang-format on */
 
+/* Macro operation fusion */
+
+/* macro operation fusion: convert specific RISC-V instruction patterns
+ * into faster and equivalent code
+ */
+#define FUSE_INSN_LIST \
+    _(fuse1)           \
+    _(fuse2)           \
+    _(fuse3)           \
+    _(fuse4)           \
+    _(fuse5)           \
+    _(fuse6)           \
+    _(fuse7)
+
 /* clang-format off */
 /* IR list */
 enum {
 #define _(inst, can_branch, insn_len, reg_mask) rv_insn_##inst,
     RV_INSN_LIST
 #undef _
-    N_RV_INSNS
+    N_RV_INSNS,
+#define _(inst) rv_insn_##inst,
+    FUSE_INSN_LIST
+#undef _
+    N_TOTAL_INSNS,
 };
 /* clang-format on */
 

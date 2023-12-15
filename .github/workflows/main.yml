@@ -32,7 +32,9 @@ jobs:
     - name: gdbstub test
       run: |
             make distclean ENABLE_GDBSTUB=1 gdbstub-test
-
+    - name: JIT test
+      run: |
+            make ENABLE_JIT=1 clean check
   coding-style:
     runs-on: ubuntu-22.04
     steps:

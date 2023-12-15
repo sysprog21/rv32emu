@@ -12,6 +12,9 @@
 #endif
 #include "decode.h"
 #include "riscv.h"
+#if RV32_HAS(JIT)
+#include "cache.h"
+#endif
 
 /* CSRs */
 enum {
@@ -59,6 +62,11 @@ typedef struct block {
     struct block *predict;     /**< block prediction */
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
+    bool backward;
+#if RV32_HAS(JIT)
+    bool hot; /**< Determine the block is hotspot or not */
+    uint32_t offset;
+#endif
 } block_t;
 
 typedef struct {
@@ -83,20 +91,6 @@ struct riscv_internal {
     /* user provided data */
     riscv_user_t userdata;
 
-#if RV32_HAS(GDBSTUB)
-    /* gdbstub instance */
-    gdbstub_t gdbstub;
-
-    bool debug_mode;
-
-    /* GDB instruction breakpoint */
-    breakpoint_map_t breakpoint_map;
-
-    /* The flag to notify interrupt from GDB client: it should
-     * be accessed by atomic operation when starting the GDBSTUB. */
-    bool is_interrupted;
-#endif
-
 #if RV32_HAS(EXT_F)
     /* float registers */
     riscv_float_t F[N_RV_REGS];
@@ -116,11 +110,29 @@ struct riscv_internal {
     uint32_t csr_mip;      /* Machine interrupt pending */
     uint32_t csr_mbadaddr;
 
-    bool compressed;       /**< current instruction is compressed or not */
+    bool compressed; /**< current instruction is compressed or not */
+#if !RV32_HAS(JIT)
     block_map_t block_map; /**< basic block map */
+#else
+    struct cache *block_cache;
+#endif
     struct mpool *block_mp, *block_ir_mp;
     /* print exit code on syscall_exit */
     bool output_exit_code;
+    void *jit_state;
+#if RV32_HAS(GDBSTUB)
+    /* gdbstub instance */
+    gdbstub_t gdbstub;
+
+    bool debug_mode;
+
+    /* GDB instruction breakpoint */
+    breakpoint_map_t breakpoint_map;
+
+    /* The flag to notify interrupt from GDB client: it should
+     * be accessed by atomic operation when starting the GDBSTUB. */
+    bool is_interrupted;
+#endif
 };
 
 /* sign extend a 16 bit value */

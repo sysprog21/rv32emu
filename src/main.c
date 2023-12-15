@@ -217,6 +217,8 @@ int main(int argc, char **args)
         /* system */
         .on_ecall = ecall_handler,
         .on_ebreak = ebreak_handler,
+        .on_memcpy = memcpy_handler,
+        .on_memset = memset_handler,
         .allow_misalign = opt_misaligned,
     };
 

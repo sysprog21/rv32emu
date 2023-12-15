@@ -466,7 +466,7 @@ static void do_fuse7(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 /* clang-format off */
 static const void *dispatch_table[] = {
     /* RV32 instructions */
-#define _(inst, can_branch, insn_len, reg_mask) [rv_insn_##inst] = do_##inst,
+#define _(inst, can_branch, insn_len, translatable, reg_mask) [rv_insn_##inst] = do_##inst,
     RV_INSN_LIST
 #undef _
     /* Macro operation fusion instructions */
@@ -532,12 +532,12 @@ static void translate_chained_block(struct jit_state *state,
     rv_insn_t *ir = block->ir_tail;
     if (ir->branch_untaken && !set_has(set, ir->pc + 4)) {
         block_t *block1 = cache_get(rv->block_cache, ir->pc + 4);
-        if (block1)
+        if (block1 && block1->translatable)
             translate_chained_block(state, rv, block1, set);
     }
     if (ir->branch_taken && !set_has(set, ir->pc + ir->imm)) {
         block_t *block1 = cache_get(rv->block_cache, ir->pc + ir->imm);
-        if (block1)
+        if (block1 && block1->translatable)
             translate_chained_block(state, rv, block1, set);
     }
 }

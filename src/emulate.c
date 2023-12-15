@@ -299,6 +299,7 @@ static block_t *block_alloc(riscv_t *rv)
     block->n_insn = 0;
     block->predict = NULL;
 #if RV32_HAS(JIT)
+    block->translatable = true;
     block->hot = false;
     block->backward = false;
 #endif
@@ -356,7 +357,7 @@ FORCE_INLINE bool insn_is_misaligned(uint32_t pc)
 
 /* instruction length information for each RISC-V instruction */
 enum {
-#define _(inst, can_branch, insn_len, reg_mask) \
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
     __rv_insn_##inst##_len = insn_len,
     RV_INSN_LIST
 #undef _
@@ -364,7 +365,7 @@ enum {
 
 /* can-branch information for each RISC-V instruction */
 enum {
-#define _(inst, can_branch, insn_len, reg_mask) \
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
     __rv_insn_##inst##_canbranch = can_branch,
     RV_INSN_LIST
 #undef _
@@ -535,7 +536,7 @@ static bool do_fuse7(riscv_t *rv,
 /* clang-format off */
 static const void *dispatch_table[] = {
     /* RV32 instructions */
-#define _(inst, can_branch, insn_len, reg_mask) [rv_insn_##inst] = do_##inst,
+#define _(inst, can_branch, insn_len, translatable, reg_mask) [rv_insn_##inst] = do_##inst,
     RV_INSN_LIST
 #undef _
     /* Macro operation fusion instructions */
@@ -548,7 +549,7 @@ static const void *dispatch_table[] = {
 FORCE_INLINE bool insn_is_branch(uint8_t opcode)
 {
     switch (opcode) {
-#define _(inst, can_branch, insn_len, reg_mask) \
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
     IIF(can_branch)(case rv_insn_##inst:, )
         RV_INSN_LIST
 #undef _
@@ -556,6 +557,20 @@ FORCE_INLINE bool insn_is_branch(uint8_t opcode)
     }
     return false;
 }
+
+#if RV32_HAS(JIT)
+FORCE_INLINE bool insn_is_translatable(uint8_t opcode)
+{
+    switch (opcode) {
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
+    IIF(translatable)(case rv_insn_##inst:, )
+        RV_INSN_LIST
+#undef _
+        return true;
+    }
+    return false;
+}
+#endif
 
 FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
 {
@@ -607,6 +622,10 @@ static void block_translate(riscv_t *rv, block_t *block)
         block->pc_end += is_compressed(insn) ? 2 : 4;
         block->n_insn++;
         prev_ir = ir;
+#if RV32_HAS(JIT)
+        if (!insn_is_translatable(ir->opcode))
+            block->translatable = false;
+#endif
         /* stop on branch */
         if (insn_is_branch(ir->opcode)) {
             if (ir->imm < 0)
@@ -898,7 +917,7 @@ typedef struct {
 
 #include "rv32_constopt.c"
 static const void *constopt_table[] = {
-#define _(inst, can_branch, insn_len, reg_mask) \
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
     [rv_insn_##inst] = constopt_##inst,
     RV_INSN_LIST
 #undef _
@@ -1045,9 +1064,10 @@ void rv_step(riscv_t *rv, int32_t cycles)
             prev = NULL;
             continue;
         } /* check if using frequency of block exceed threshold */
-        else if ((block->backward &&
-                  cache_freq(rv->block_cache, block->pc_start) >= 1024) ||
-                 cache_hot(rv->block_cache, block->pc_start)) {
+        else if (block->translatable &&
+                 ((block->backward &&
+                   cache_freq(rv->block_cache, block->pc_start) >= 1024) ||
+                  cache_hot(rv->block_cache, block->pc_start))) {
             block->hot = true;
             block->offset = translate_x64(rv, block);
             ((exec_block_func_t) state->buf)(

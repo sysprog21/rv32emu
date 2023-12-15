@@ -66,6 +66,8 @@ typedef struct block {
 #if RV32_HAS(JIT)
     bool hot; /**< Determine the block is hotspot or not */
     uint32_t offset;
+    bool
+        translatable; /**< Determine the block has RV32AF insturctions or not */
 #endif
 } block_t;
 

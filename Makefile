@@ -19,14 +19,14 @@ CFLAGS += -D DEFAULT_ARGS_ADDR=0xFFFFF000
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)
-ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
-$(warning LTO is only supported in clang and gcc.)
+ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)$(CC_IS_EMCC)",)
+$(warning LTO is only supported in clang, gcc and emcc.)
 override ENABLE_LTO := 0
 endif
 endif
 $(call set-feature, LTO)
 ifeq ($(call has, LTO), 1)
-ifeq ("$(CC_IS_GCC)", "1")
+ifeq ("$(CC_IS_GCC)$(CC_IS_EMCC)", "1")
 CFLAGS += -flto
 endif
 ifeq ("$(CC_IS_CLANG)", "1")
@@ -64,12 +64,16 @@ $(call set-feature, EXT_C)
 ENABLE_EXT_F ?= 1
 $(call set-feature, EXT_F)
 ifeq ($(call has, EXT_F), 1)
+AR := ar
+ifeq ("$(CC_IS_EMCC)", "1")
+AR = emar
+endif
 SOFTFLOAT_OUT = $(abspath $(OUT)/softfloat)
 src/softfloat/build/Linux-RISCV-GCC/Makefile:
 	git submodule update --init src/softfloat/
 SOFTFLOAT_LIB := $(SOFTFLOAT_OUT)/softfloat.a
 $(SOFTFLOAT_LIB): src/softfloat/build/Linux-RISCV-GCC/Makefile
-	$(MAKE) -C $(dir $<) BUILD_DIR=$(SOFTFLOAT_OUT)
+	$(MAKE) -C $(dir $<) BUILD_DIR=$(SOFTFLOAT_OUT) CC=$(CC) AR=$(AR)
 $(OUT)/decode.o $(OUT)/riscv.o: $(SOFTFLOAT_LIB)
 LDFLAGS += $(SOFTFLOAT_LIB)
 LDFLAGS += -lm
@@ -120,6 +124,12 @@ endif
 
 # For tail-call elimination, we need a specific set of build flags applied.
 # FIXME: On macOS + Apple Silicon, -fno-stack-protector might have a negative impact.
+
+# Enable tail-call for emcc
+ifeq ("$(CC_IS_EMCC)", "1")
+CFLAGS += -mtail-call
+endif
+
 $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-stack-check -fno-stack-protector
 
 # Clear the .DEFAULT_GOAL special variable, so that the following turns
@@ -194,7 +204,7 @@ check: $(BIN)
 
 EXPECTED_aes_sha1 = 1242a6757c8aef23e50b5264f5941a2f4b4a347e  -
 misalign: $(BIN)
-	$(Q)$(PRINTF) "Running aes.elf ... "; 
+	$(Q)$(PRINTF) "Running aes.elf ... ";
 	$(Q)if [ "$(shell $(BIN) -m $(OUT)/aes.elf | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
 	    $(call notice, [OK]); \
 	    else \

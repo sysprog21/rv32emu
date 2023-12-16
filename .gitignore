@@ -21,3 +21,4 @@ build/path/
 tests/**/*.elf
 tests/arch-test-target/config.ini
 __pycache__/
+src/rv32_jit_template.c

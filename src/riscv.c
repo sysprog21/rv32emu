@@ -10,9 +10,16 @@
 #include "mpool.h"
 #include "riscv_private.h"
 #include "state.h"
+#include "utils.h"
+#if RV32_HAS(JIT)
+#include "cache.h"
+#include "jit_x64.h"
+#define CODE_CACHE_SIZE (1024 * 1024)
+#endif
 
 #define BLOCK_IR_MAP_CAPACITY_BITS 10
 
+#if !RV32_HAS(JIT)
 /* initialize the block map */
 static void block_map_init(block_map_t *map, const uint8_t bits)
 {
@@ -52,6 +59,7 @@ static void block_map_destroy(riscv_t *rv)
     mpool_destroy(rv->block_mp);
     mpool_destroy(rv->block_ir_mp);
 }
+#endif
 
 riscv_user_t rv_userdata(riscv_t *rv)
 {
@@ -119,9 +127,13 @@ riscv_t *rv_create(const riscv_io_t *io,
     rv->block_ir_mp = mpool_create(
         sizeof(rv_insn_t) << BLOCK_IR_MAP_CAPACITY_BITS, sizeof(rv_insn_t));
 
+#if !RV32_HAS(JIT)
     /* initialize the block map */
-    block_map_init(&rv->block_map, 10);
-
+    block_map_init(&rv->block_map, BLOCK_MAP_CAPACITY_BITS);
+#else
+    rv->jit_state = init_state(CODE_CACHE_SIZE);
+    rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
+#endif
     /* reset */
     rv_reset(rv, 0U, argc, args);
 
@@ -143,10 +155,16 @@ bool rv_enables_to_output_exit_code(riscv_t *rv)
     return rv->output_exit_code;
 }
 
+
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
+#if !RV32_HAS(JIT)
     block_map_destroy(rv);
+#else
+    destroy_state(rv->jit_state);
+    cache_free(rv->block_cache);
+#endif
     free(rv);
 }
 

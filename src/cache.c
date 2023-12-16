@@ -13,10 +13,13 @@
 #include "mpool.h"
 #include "utils.h"
 
-/* THRESHOLD is set to identify hot spots. Once the frequency of use for a block
- * exceeds the THRESHOLD, the JIT compiler flow is triggered.
+/* Currently, THRESHOLD is set to identify hot spots. Once the using frequency
+ * for a block exceeds the THRESHOLD, the tier-1 JIT compiler process is
+ * triggered.
+ * FIXME: Implement effective  profiler to detect hot spots, instead of simply
+ * relying on THRESHOLD.
  */
-#define THRESHOLD 1000
+#define THRESHOLD 4096
 
 static uint32_t cache_size, cache_size_bits;
 static struct mpool *cache_mp;
@@ -530,3 +533,62 @@ void cache_free(cache_t *cache)
     free(cache->map);
     free(cache);
 }
+
+#if !RV32_HAS(ARC)
+uint32_t cache_freq(struct cache *cache, uint32_t key)
+{
+    if (!cache->capacity ||
+        hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
+        return 0;
+    lfu_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list, lfu_entry_t)
+#endif
+    {
+        if (entry->key == key)
+            return entry->frequency;
+    }
+    return 0;
+}
+#endif
+
+#if RV32_HAS(JIT)
+bool cache_hot(struct cache *cache, uint32_t key)
+{
+    if (!cache->capacity ||
+        hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
+        return false;
+#if RV32_HAS(ARC)
+    arc_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list, arc_entry_t)
+#endif
+    {
+        if (entry->key == key && entry->frequency == THRESHOLD)
+            return true;
+    }
+#else
+    lfu_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list)
+#else
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list, lfu_entry_t)
+#endif
+    {
+        if (entry->key == key && entry->frequency == THRESHOLD)
+            return true;
+    }
+#endif
+    return false;
+}
+#endif

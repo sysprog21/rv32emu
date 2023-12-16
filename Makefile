@@ -122,6 +122,21 @@ gdbstub-test: $(BIN)
 	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif
 
+ENABLE_JIT ?= 0
+$(call set-feature, JIT)
+ifeq ($(call has, JIT), 1)
+OBJS_EXT += jit_x64.o 
+ifneq ($(processor), x86_64)
+$(error JIT mode only supports for x64 target currently.)
+endif
+
+src/rv32_jit_template.c:
+	$(Q)tools/gen-jit-template.py $(CFLAGS) > $@
+
+$(OUT)/jit_x64.o: src/jit_x64.c src/rv32_jit_template.c
+	$(VECHO) "  CC\t$@\n"
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+endif
 # For tail-call elimination, we need a specific set of build flags applied.
 # FIXME: On macOS + Apple Silicon, -fno-stack-protector might have a negative impact.
 
@@ -224,7 +239,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT)
+	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT) src/rv32_jit_template.c
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1

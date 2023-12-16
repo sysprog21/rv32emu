@@ -36,9 +36,9 @@ typedef struct {
 
 /* clang-format off */
 static rv_hist_t rv_insn_stats[] = {
-#define _(inst, can_branch, insn_len, reg_mask) {#inst, 0, reg_mask},
+#define _(inst, can_branch, insn_len, translatable, reg_mask) {#inst, 0, reg_mask},
     RV_INSN_LIST
-    _(unknown, 0, 0, 0)
+    _(unknown, 0, 0, 0, 0)
 #undef _
 };
 /* clang-format on */

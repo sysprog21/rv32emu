@@ -30,6 +30,7 @@ Features:
 * Implementation of commonly used newlib system calls
 * Experimental SDL-based display/event/audio system calls for running video games
 * Support for remote GDB debugging
+* Experimental JIT compiler for performance boost while maintaining a small footprint
 
 ## Build and Verify
 

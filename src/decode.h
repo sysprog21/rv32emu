@@ -29,7 +29,7 @@ enum op_field {
 #define ENC(...) ENC_GEN(ENC, COUNT_VARARGS(__VA_ARGS__))(__VA_ARGS__)
 
 /* RISC-V instruction list in format _(instruction-name, can-branch, insn_len,
- * translatable, reg-mask)
+ *                                     translatable, reg-mask)
  */
 /* clang-format off */
 #define RV_INSN_LIST                                   \

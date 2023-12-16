@@ -25,6 +25,7 @@ extern struct target_ops gdbstub_ops;
 #include "riscv_private.h"
 #include "state.h"
 #include "utils.h"
+
 #if RV32_HAS(JIT)
 #include "cache.h"
 #include "jit_x64.h"

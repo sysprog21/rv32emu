@@ -3,13 +3,13 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-
 /* This JIT implementation has undergone extensive modifications, heavily
  * relying on the ubpf_jit_x86_64.[ch] from ubpf. The original
  * ubpf_jit_x86_64.[ch] file served as the foundation and source of inspiration
  * for adapting and tailoring it specifically for this JIT implementation.
  * Therefore, credit and sincere thanks are extended to ubpf for their
  * invaluable work.
+ *
  * Reference:
  *   https://github.com/iovisor/ubpf/blob/main/vm/ubpf_jit_x86_64.c
  */
@@ -80,7 +80,7 @@ static void muldivmod(struct jit_state *state,
     bool is64 = (opcode & X64_CLS_MASK) == X64_CLS_ALU64;
     bool reg = (opcode & X64_SRC_REG) == X64_SRC_REG;
 
-    /* Short circuit for imm == 0. */
+    /* Short circuit for imm == 0 */
     if (!reg && imm == 0) {
         assert(NULL);
         if (div || mul) {
@@ -93,71 +93,66 @@ static void muldivmod(struct jit_state *state,
         return;
     }
 
-    if (dst != RAX) {
+    if (dst != RAX)
         emit_push(state, RAX);
-    }
 
-    if (dst != RDX) {
+    if (dst != RDX)
         emit_push(state, RDX);
-    }
 
-    /*  Load the divisor into RCX. */
-    if (imm) {
+    /*  Load the divisor into RCX */
+    if (imm)
         emit_load_imm(state, RCX, imm);
-    } else {
+    else
         emit_mov(state, src, RCX);
-    }
 
-    /* Load the dividend into RAX. */
+    /* Load the dividend into RAX */
     emit_mov(state, dst, RAX);
 
-    /* JIT has two different semantics for division and modulus. For division
-     * if the divisor is zero, the result is zero.  For modulus, if the divisor
-     * is zero, the result is the dividend. To handle this we set the divisor
-     * to 1 if it is zero and then set the result to zero if the divisor was
-     * zero (for division) or set the result to the dividend if the divisor was
-     * zero (for modulo).
+    /* The JIT employs two different semantics for division and modulus
+     * operations. In the case of division, if the divisor is zero, the result
+     * is set to zero. For modulus operations, if the divisor is zero, the
+     * result becomes the dividend. To manage this, we first set the divisor to
+     * 1 if it is initially zero. Then, we adjust the result accordingly: for
+     * division, we set it to zero if the original divisor was zero; for
+     * modulus, we set it to the dividend under the same condition.
      */
 
     if (div || mod) {
-        /* Check if divisor is zero. */
-        if (is64) {
+        /* Check if divisor is zero */
+        if (is64)
             emit_alu64(state, 0x85, RCX, RCX);
-        } else {
+        else
             emit_alu32(state, 0x85, RCX, RCX);
-        }
 
-        /* Save the dividend for the modulo case. */
-        if (mod) {
-            emit_push(state, RAX); /* Save dividend. */
-        }
+        /* Save the dividend for the modulo case */
+        if (mod)
+            emit_push(state, RAX); /* Save dividend */
 
-        /* Save the result of the test. */
+        /* Save the result of the test */
         emit1(state, 0x9c); /* pushfq */
 
-        /* Set the divisor to 1 if it is zero. */
+        /* Set the divisor to 1 if it is zero */
         emit_load_imm(state, RDX, 1);
         emit1(state, 0x48);
         emit1(state, 0x0f);
         emit1(state, 0x44);
-        emit1(state, 0xca); /* cmove rcx,rdx */
+        emit1(state, 0xca); /* cmove rcx, rdx */
 
         /* xor %edx,%edx */
         emit_alu32(state, 0x31, RDX, RDX);
     }
 
-    if (is64) {
+    if (is64)
         emit_rex(state, 1, 0, 0, 0);
-    }
 
-    /* Multiply or divide. */
+    /* Multiply or divide */
     emit_alu32(state, 0xf7, mul ? 4 : 6, RCX);
 
-    /* Division operation stores the remainder in RDX and the quotient in
-     * RAX.
+    /* The division operation stores the remainder in RDX and the quotient
+     * in RAX.
      */
     if (div || mod) {
-        /* Restore the result of the test. */
+        /* Restore the result of the test */
         emit1(state, 0x9d); /* popfq */
 
         /* If zero flag is set, then the divisor was zero. */
@@ -171,9 +166,9 @@ static void muldivmod(struct jit_state *state,
             emit1(state, 0x48);
             emit1(state, 0x0f);
             emit1(state, 0x44);
-            emit1(state, 0xc1); /* cmove rax,rcx */
+            emit1(state, 0xc1); /* cmove rax, rcx */
         } else {
-            /* Restore dividend to RCX. */
+            /* Restore dividend to RCX */
             emit_pop(state, RCX);
 
             /* Store the dividend in RAX if the divisor was zero. */
@@ -181,20 +176,18 @@ static void muldivmod(struct jit_state *state,
             emit1(state, 0x48);
             emit1(state, 0x0f);
             emit1(state, 0x44);
-            emit1(state, 0xd1); /* cmove rdx,rcx */
+            emit1(state, 0xd1); /* cmove rdx, rcx */
         }
     }
 
     if (dst != RDX) {
-        if (mod) {
+        if (mod)
             emit_mov(state, RDX, dst);
-        }
         emit_pop(state, RDX);
     }
     if (dst != RAX) {
-        if (div || mul) {
+        if (div || mul)
             emit_mov(state, RAX, dst);
-        }
         emit_pop(state, RAX);
     }
 }
@@ -202,15 +195,13 @@ static void muldivmod(struct jit_state *state,
 
 #define REGISTER_MAP_SIZE 11
 
-/*
- * There are two common x86-64 calling conventions, as discussed at
+/* There are two common x86-64 calling conventions, discussed at:
  * https://en.wikipedia.org/wiki/X64_calling_conventions#x86-64_calling_conventions
  *
- * Please Note: R12 is special and we are *not* using it. As a result, it is
- * omitted from the list of non-volatile registers for both platforms (even
- * though it is, in fact, non-volatile).
+ * Please note: R12 is an exception and is *not* being used. Consequently, it
+ * is omitted from the list of non-volatile registers for both platforms,
+ * despite being non-volatile.
  */
-
 #if defined(_WIN32)
 static int nonvolatile_reg[] = {RBP, RBX, RDI, RSI, R13, R14, R15};
 static int parameter_reg[] = {RCX, RDX, R8, R9};
@@ -235,12 +226,11 @@ static int map_register(int r)
 }
 
 #define SET_SIZE_BITS 10
-#define SET_SIZE 1 << SET_SIZE_BITS
+#define SET_SIZE (1 << SET_SIZE_BITS)
 #define SET_SLOTS_SIZE 32
 HASH_FUNC_IMPL(set_hash, SET_SIZE_BITS, 1 << SET_SIZE_BITS);
 
-/*
- * The set consists of SET_SIZE buckets, with each bucket containing
+/* The set consists of SET_SIZE buckets, with each bucket containing
  * SET_SLOTS_SIZE slots.
  */
 typedef struct {
@@ -299,39 +289,36 @@ static void prepare_translate(struct jit_state *state)
     /* Save platform non-volatile registers */
     for (uint32_t i = 0; i < ARRAYS_SIZE(nonvolatile_reg); i++)
         emit_push(state, nonvolatile_reg[i]);
-    /*
-     * Assuming that the stack is 16-byte aligned right before
-     * the call insn that brought us to this code, when
-     * we start executing the jit'd code, we need to regain a 16-byte
-     * alignment. The STACK_SIZE is guaranteed to be
-     * divisible by 16. However, if we pushed an even number of
-     * registers on the stack when we are saving state (see above),
-     * then we have to add an additional 8 bytes to get back
-     * to a 16-byte alignment.
+
+    /* Assuming that the stack is 16-byte aligned just before the call
+     * instruction that brought us to this code, we need to restore 16-byte
+     * alignment upon starting execution of the JIT'd code. STACK_SIZE is
+     * guaranteed to be divisible by 16. However, if an even number of
+     * registers were pushed onto the stack during state saving (see above),
+     * an additional 8 bytes must be added to regain 16-byte alignment.
      */
     if (!(ARRAYS_SIZE(nonvolatile_reg) % 2))
         emit_alu64_imm32(state, 0x81, 5, RSP, 0x8);
 
     /* Set JIT R10 (the way to access the frame in JIT) to match RSP. */
-
     emit_mov(state, RSP, map_register(VM_REG_10));
 
     /* Allocate stack space */
     emit_alu64_imm32(state, 0x81, 5, RSP, STACK_SIZE);
 
 #if defined(_WIN32)
-    /* Windows x64 ABI requires home register space */
+    /* Windows x64 ABI requires home register space. */
     /* Allocate home register space - 4 registers */
     emit_alu64_imm32(state, 0x81, 5, RSP, 4 * sizeof(uint64_t));
 #endif
 
-    /* Jump to the entry point, the entry point is stored in the second
-     * parameter. */
+    /* Jump to the entry point, which is stored in the second parameter. */
     emit1(state, 0xff);
     emit1(state, 0xe6);
 
     /* Epilogue */
     state->exit_loc = state->offset;
+
     /* Move register 0 into rax */
     if (map_register(VM_REG_0) != RAX)
         emit_mov(state, map_register(VM_REG_0), RAX);
@@ -343,9 +330,9 @@ static void prepare_translate(struct jit_state *state)
         emit_alu64_imm32(state, 0x81, 0, RSP, 0x8);
 
     /* Restore platform non-volatile registers */
-    for (uint32_t i = 0; i < ARRAYS_SIZE(nonvolatile_reg); i++) {
+    for (uint32_t i = 0; i < ARRAYS_SIZE(nonvolatile_reg); i++)
         emit_pop(state, nonvolatile_reg[ARRAYS_SIZE(nonvolatile_reg) - i - 1]);
-    }
+
     /* Return */
     emit1(state, 0xc3);
 }
@@ -356,7 +343,6 @@ static void prepare_translate(struct jit_state *state)
     {                                                                         \
         code;                                                                 \
     }
-
 #include "rv32_jit_template.c"
 #undef X64
 
@@ -475,6 +461,7 @@ static const void *dispatch_table[] = {
 #undef _
 };
 /* clang-format on */
+
 typedef void (*codegen_block_func_t)(struct jit_state *,
                                      riscv_t *,
                                      rv_insn_t *);
@@ -491,10 +478,8 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
 
 static void resolve_jumps(struct jit_state *state)
 {
-    int i;
-    for (i = 0; i < state->num_jumps; i++) {
+    for (int i = 0; i < state->num_jumps; i++) {
         struct jump jump = state->jumps[i];
-
         int target_loc;
         if (jump.target_offset != 0)
             target_loc = jump.target_offset;
@@ -526,6 +511,7 @@ static void translate_chained_block(struct jit_state *state,
 {
     if (set_has(set, block->pc_start))
         return;
+
     set_add(set, block->pc_start);
     offset_map_insert(state, block->pc_start);
     translate(state, rv, block);
@@ -562,7 +548,6 @@ uint32_t translate_x64(riscv_t *rv, block_t *block)
 out:
     return entry_loc;
 }
-
 
 struct jit_state *init_state(size_t size)
 {

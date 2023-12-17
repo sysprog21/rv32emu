@@ -50,6 +50,4 @@ void cache_free(struct cache *cache);
 bool cache_hot(struct cache *cache, uint32_t key);
 #endif
 
-#if !RV32_HAS(ARC)
 uint32_t cache_freq(struct cache *cache, uint32_t key);
-#endif

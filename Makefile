@@ -79,10 +79,6 @@ LDFLAGS += $(SOFTFLOAT_LIB)
 LDFLAGS += -lm
 endif
 
-# Enable adaptive replacement cache policy, default is LRU
-ENABLE_ARC ?= 0
-$(call set-feature, ARC)
-
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
 ifeq ($(call has, SDL), 1)

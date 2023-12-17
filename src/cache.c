@@ -27,27 +27,6 @@ static struct mpool *cache_mp;
 /* hash function for the cache */
 HASH_FUNC_IMPL(cache_hash, cache_size_bits, cache_size)
 
-#if RV32_HAS(ARC)
-/* The Adaptive Replacement Cache (ARC) improves the traditional LRU strategy
- * by dividing the cache into two lists: T1 and T2. T1 follows the LRU
- * strategy, while T2 follows the LFU strategy. Additionally, ARC maintains two
- * ghost lists, B1 and B2, which store replaced entries from the LRU and LFU
- * lists, respectively.
- *
- * Based on the contents of B1 and B2, ARC dynamically adjusts the sizes of T1
- * and T2. If a cache hit occurs in B1, it indicates that the size of T1 is
- * insufficient, leading to an increase in T1's size and a decrease in T2's
- * size. Conversely, if a cache hit occurs in B2, T2's size is increased while
- * T1's size is decreased.
- */
-typedef enum {
-    LRU_list,
-    LFU_list,
-    LRU_ghost_list,
-    LFU_ghost_list,
-    N_CACHE_LIST_TYPES
-} cache_list_t;
-#endif
 struct list_head {
     struct list_head *prev, *next;
 };
@@ -60,18 +39,6 @@ struct hlist_node {
     struct hlist_node *next, **pprev;
 };
 
-#if RV32_HAS(ARC)
-/* list maintains four cache lists T1, T2, B1, and B2.
- * ht_list maintains hashtable and improves the performance of cache searching.
- */
-typedef struct {
-    void *value;
-    uint32_t key;
-    cache_list_t type;
-    struct list_head list;
-    struct hlist_node ht_list;
-} arc_entry_t;
-#else /* !RV32_HAS(ARC) */
 typedef struct {
     void *value;
     uint32_t key;
@@ -79,21 +46,14 @@ typedef struct {
     struct list_head list;
     struct hlist_node ht_list;
 } lfu_entry_t;
-#endif
 
 typedef struct {
     struct hlist_head *ht_list_head;
 } hashtable_t;
 
 typedef struct cache {
-#if RV32_HAS(ARC)
-    struct list_head *lists[N_CACHE_LIST_TYPES];
-    uint32_t list_size[N_CACHE_LIST_TYPES];
-    uint32_t lru_capacity;
-#else /* !RV32_HAS(ARC) */
     struct list_head *lists[THRESHOLD];
     uint32_t list_size;
-#endif
     hashtable_t *map;
     uint32_t capacity;
 } cache_t;
@@ -104,12 +64,10 @@ static inline void INIT_LIST_HEAD(struct list_head *head)
     head->prev = head;
 }
 
-#if !RV32_HAS(ARC)
 static inline int list_empty(const struct list_head *head)
 {
     return (head->next == head);
 }
-#endif
 
 static inline void list_add(struct list_head *node, struct list_head *head)
 {
@@ -235,33 +193,6 @@ cache_t *cache_create(int size_bits)
         return NULL;
     cache_size_bits = size_bits;
     cache_size = 1 << size_bits;
-#if RV32_HAS(ARC)
-    for (int i = 0; i < N_CACHE_LIST_TYPES; i++) {
-        cache->lists[i] = malloc(sizeof(struct list_head));
-        INIT_LIST_HEAD(cache->lists[i]);
-        cache->list_size[i] = 0;
-    }
-
-    cache->map = malloc(sizeof(hashtable_t));
-    if (!cache->map) {
-        free(cache->lists);
-        free(cache);
-        return NULL;
-    }
-    cache->map->ht_list_head = malloc(cache_size * sizeof(struct hlist_head));
-    if (!cache->map->ht_list_head) {
-        free(cache->map);
-        free(cache->lists);
-        free(cache);
-        return NULL;
-    }
-    for (uint32_t i = 0; i < cache_size; i++) {
-        INIT_HLIST_HEAD(&cache->map->ht_list_head[i]);
-    }
-    cache->lru_capacity = cache_size / 2;
-    cache_mp =
-        mpool_create(cache_size * 2 * sizeof(arc_entry_t), sizeof(arc_entry_t));
-#else /* !RV32_HAS(ARC) */
     for (int i = 0; i < THRESHOLD; i++) {
         cache->lists[i] = malloc(sizeof(struct list_head));
         INIT_LIST_HEAD(cache->lists[i]);
@@ -286,57 +217,9 @@ cache_t *cache_create(int size_bits)
     cache->list_size = 0;
     cache_mp =
         mpool_create(cache_size * sizeof(lfu_entry_t), sizeof(lfu_entry_t));
-#endif
     cache->capacity = cache_size;
     return cache;
 }
-
-
-#if RV32_HAS(ARC)
-/* Rules of ARC:
- * 1. size of LRU_list + size of LFU_list <= c
- * 2. size of LRU_list + size of LRU_ghost_list <= c
- * 3. size of LFU_list + size of LFU_ghost_list <= 2c
- * 4. size of LRU_list + size of LFU_list + size of LRU_ghost_list + size of
- *    LFU_ghost_list <= 2c
- */
-#define CACHE_ASSERT(cache)                                                 \
-    assert(cache->list_size[LRU_list] + cache->list_size[LFU_list] <=       \
-           cache->capacity);                                                \
-    assert(cache->list_size[LRU_list] + cache->list_size[LRU_ghost_list] <= \
-           cache->capacity);                                                \
-    assert(cache->list_size[LFU_list] + cache->list_size[LFU_ghost_list] <= \
-           2 * cache->capacity);                                            \
-    assert(cache->list_size[LRU_list] + cache->list_size[LRU_ghost_list] +  \
-               cache->list_size[LFU_list] +                                 \
-               cache->list_size[LFU_ghost_list] <=                          \
-           2 * cache->capacity);
-
-#define REPLACE_LIST(op1, op2)                                                 \
-    if (cache->list_size[LFU_list] &&                                          \
-        cache->list_size[LFU_list] op1(cache->capacity -                       \
-                                       cache->lru_capacity)) {                 \
-        move_to_mru(                                                           \
-            cache, list_last_entry(cache->lists[LFU_list], arc_entry_t, list), \
-            LFU_ghost_list);                                                   \
-    } else if (cache->list_size[LRU_list] &&                                   \
-               cache->list_size[LRU_list] op2 cache->lru_capacity) {           \
-        move_to_mru(                                                           \
-            cache, list_last_entry(cache->lists[LRU_list], arc_entry_t, list), \
-            LRU_ghost_list);                                                   \
-    }
-
-static inline void move_to_mru(cache_t *cache,
-                               arc_entry_t *entry,
-                               const cache_list_t type)
-{
-    cache->list_size[entry->type]--;
-    cache->list_size[type]++;
-    entry->type = type;
-    list_del_init(&entry->list);
-    list_add(&entry->list, cache->lists[type]);
-}
-#endif
 
 void *cache_get(cache_t *cache, uint32_t key)
 {
@@ -344,53 +227,6 @@ void *cache_get(cache_t *cache, uint32_t key)
         hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
         return NULL;
 
-#if RV32_HAS(ARC)
-    arc_entry_t *entry = NULL;
-#ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
-                          ht_list)
-#else
-    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
-                          ht_list, arc_entry_t)
-#endif
-    {
-        if (entry->key == key)
-            break;
-    }
-    if (!entry || entry->key != key)
-        return NULL;
-    /* cache hit in LRU_list */
-    if (entry->type == LRU_list && cache->lru_capacity != cache->capacity)
-        move_to_mru(cache, entry, LFU_list);
-
-    /* cache hit in LFU_list */
-    if (entry->type == LFU_list)
-        move_to_mru(cache, entry, LFU_list);
-
-    /* cache hit in LRU_ghost_list */
-    if (entry->type == LRU_ghost_list) {
-        if (cache->lru_capacity != cache->capacity) {
-            cache->lru_capacity = cache->lru_capacity + 1;
-            if (cache->list_size[LFU_list] &&
-                cache->list_size[LFU_list] >=
-                    (cache->capacity - cache->lru_capacity))
-                move_to_mru(
-                    cache,
-                    list_last_entry(cache->lists[LFU_list], arc_entry_t, list),
-                    LFU_ghost_list);
-            move_to_mru(cache, entry, LFU_list);
-        }
-    }
-
-    /* cache hit in LFU_ghost_list */
-    if (entry->type == LFU_ghost_list) {
-        cache->lru_capacity = cache->lru_capacity ? cache->lru_capacity - 1 : 0;
-        REPLACE_LIST(>=, >);
-        move_to_mru(cache, entry, LFU_list);
-    }
-
-    CACHE_ASSERT(cache);
-#else /* !RV32_HAS(ARC) */
     lfu_entry_t *entry = NULL;
 #ifdef __HAVE_TYPEOF
     hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
@@ -415,7 +251,7 @@ void *cache_get(cache_t *cache, uint32_t key)
         list_del_init(&entry->list);
         list_add(&entry->list, cache->lists[entry->frequency++]);
     }
-#endif
+
     /* return NULL if cache miss */
     return entry->value;
 }
@@ -423,72 +259,6 @@ void *cache_get(cache_t *cache, uint32_t key)
 void *cache_put(cache_t *cache, uint32_t key, void *value)
 {
     void *delete_value = NULL;
-#if RV32_HAS(ARC)
-    assert(cache->list_size[LRU_list] + cache->list_size[LRU_ghost_list] <=
-           cache->capacity);
-    /* Before adding a new element to the cache, it is necessary to check the
-     * status of the cache.
-     */
-    if ((cache->list_size[LRU_list] + cache->list_size[LRU_ghost_list]) ==
-        cache->capacity) {
-        if (cache->list_size[LRU_list] < cache->capacity) {
-            arc_entry_t *delete_target = list_last_entry(
-                cache->lists[LRU_ghost_list], arc_entry_t, list);
-            list_del_init(&delete_target->list);
-            hlist_del_init(&delete_target->ht_list);
-            delete_value = delete_target->value;
-            mpool_free(cache_mp, delete_target);
-            cache->list_size[LRU_ghost_list]--;
-            if (cache->list_size[LRU_list] &&
-                cache->list_size[LRU_list] >= cache->lru_capacity)
-                move_to_mru(
-                    cache,
-                    list_last_entry(cache->lists[LRU_list], arc_entry_t, list),
-                    LRU_ghost_list);
-        } else {
-            arc_entry_t *delete_target =
-                list_last_entry(cache->lists[LRU_list], arc_entry_t, list);
-            list_del_init(&delete_target->list);
-            hlist_del_init(&delete_target->ht_list);
-            delete_value = delete_target->value;
-            mpool_free(cache_mp, delete_target);
-            cache->list_size[LRU_list]--;
-        }
-    } else {
-        assert(cache->list_size[LRU_list] + cache->list_size[LRU_ghost_list] <
-               cache->capacity);
-        uint32_t size =
-            cache->list_size[LRU_list] + cache->list_size[LRU_ghost_list] +
-            cache->list_size[LFU_list] + cache->list_size[LFU_ghost_list];
-        if (size == cache->capacity * 2) {
-            arc_entry_t *delete_target = list_last_entry(
-                cache->lists[LFU_ghost_list], arc_entry_t, list);
-            list_del_init(&delete_target->list);
-            hlist_del_init(&delete_target->ht_list);
-            delete_value = delete_target->value;
-            mpool_free(cache_mp, delete_target);
-            cache->list_size[LFU_ghost_list]--;
-        }
-        REPLACE_LIST(>, >=)
-    }
-    arc_entry_t *new_entry = mpool_alloc(cache_mp);
-    new_entry->key = key;
-    new_entry->value = value;
-    /* check if all cache become LFU */
-    if (cache->lru_capacity != 0) {
-        new_entry->type = LRU_list;
-        list_add(&new_entry->list, cache->lists[LRU_list]);
-        cache->list_size[LRU_list]++;
-    } else {
-        new_entry->type = LRU_ghost_list;
-        list_add(&new_entry->list, cache->lists[LRU_ghost_list]);
-        cache->list_size[LRU_ghost_list]++;
-    }
-    hlist_add_head(&new_entry->ht_list,
-                   &cache->map->ht_list_head[cache_hash(key)]);
-
-    CACHE_ASSERT(cache);
-#else /* !RV32_HAS(ARC) */
     assert(cache->list_size <= cache->capacity);
     /* check the cache is full or not before adding a new entry */
     if (cache->list_size == cache->capacity) {
@@ -514,27 +284,19 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
     hlist_add_head(&new_entry->ht_list,
                    &cache->map->ht_list_head[cache_hash(key)]);
     assert(cache->list_size <= cache->capacity);
-#endif
     return delete_value;
 }
 
 void cache_free(cache_t *cache)
 {
-#if RV32_HAS(ARC)
-    for (int i = 0; i < N_CACHE_LIST_TYPES; i++) {
-        free(cache->lists[i]);
-    }
-#else
     for (int i = 0; i < THRESHOLD; i++)
         free(cache->lists[i]);
-#endif
     mpool_destroy(cache_mp);
     free(cache->map->ht_list_head);
     free(cache->map);
     free(cache);
 }
 
-#if !RV32_HAS(ARC)
 uint32_t cache_freq(struct cache *cache, uint32_t key)
 {
     if (!cache->capacity ||
@@ -554,7 +316,6 @@ uint32_t cache_freq(struct cache *cache, uint32_t key)
     }
     return 0;
 }
-#endif
 
 #if RV32_HAS(JIT)
 bool cache_hot(struct cache *cache, uint32_t key)
@@ -562,20 +323,6 @@ bool cache_hot(struct cache *cache, uint32_t key)
     if (!cache->capacity ||
         hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
         return false;
-#if RV32_HAS(ARC)
-    arc_entry_t *entry = NULL;
-#ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
-                          ht_list)
-#else
-    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
-                          ht_list, arc_entry_t)
-#endif
-    {
-        if (entry->key == key && entry->frequency == THRESHOLD)
-            return true;
-    }
-#else
     lfu_entry_t *entry = NULL;
 #ifdef __HAVE_TYPEOF
     hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
@@ -588,7 +335,6 @@ bool cache_hot(struct cache *cache, uint32_t key)
         if (entry->key == key && entry->frequency == THRESHOLD)
             return true;
     }
-#endif
     return false;
 }
 #endif

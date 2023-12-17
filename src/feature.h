@@ -47,11 +47,6 @@
 #define RV32_FEATURE_GDBSTUB 0
 #endif
 
-/* Import adaptive replacement cache to manage block */
-#ifndef RV32_FEATURE_ARC
-#define RV32_FEATURE_ARC 0
-#endif
-
 /* Experimental just-in-time compiler */
 #ifndef RV32_FEATURE_JIT
 #define RV32_FEATURE_JIT 0

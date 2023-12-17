@@ -35,23 +35,11 @@ PATH_TEST_OBJS := $(addprefix $(PATH_TEST_OUTDIR)/, $(PATH_TEST_OBJS)) \
 OBJS += $(PATH_TEST_OBJS)
 deps += $(PATH_TEST_OBJS:%.o=%.o.d)
 
-# Check adaptive replacement cache policy is enabled or not, default is LFU
-ifeq ($(ENABLE_ARC), 1)
-CACHE_TEST_ACTIONS := \
-	arc/cache-new \
-	arc/cache-put \
-	arc/cache-get \
-	arc/cache-lru-replace \
-	arc/cache-lfu-replace \
-	arc/cache-lru-ghost-replace \
-	arc/cache-lfu-ghost-replace
-else
 CACHE_TEST_ACTIONS := \
 	lfu/cache-new \
 	lfu/cache-put \
 	lfu/cache-get \
 	lfu/cache-lfu-replace
-endif
 
 CACHE_TEST_OUT = $(addprefix $(CACHE_TEST_OUTDIR)/, $(CACHE_TEST_ACTIONS:%=%.out))
 MAP_TEST_OUT = $(MAP_TEST_TARGET).out
@@ -99,7 +87,7 @@ $(CACHE_TEST_TARGET): $(CACHE_TEST_OBJS)
 
 $(CACHE_TEST_OUTDIR)/%.o: $(CACHE_TEST_SRCDIR)/%.c
 	$(VECHO) "  CC\t$@\n"
-	$(Q)mkdir -p $(dir $@)/arc $(dir $@)/lfu
+	$(Q)mkdir -p $(dir $@)/lfu
 	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
 
 $(MAP_TEST_OUT): $(MAP_TEST_TARGET)

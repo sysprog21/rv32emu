@@ -203,7 +203,6 @@ enum {
 #define _(inst) rv_insn_##inst,
     FUSE_INSN_LIST
 #undef _
-    N_TOTAL_INSNS,
 };
 /* clang-format on */
 

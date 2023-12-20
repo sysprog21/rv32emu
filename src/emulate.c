@@ -405,8 +405,6 @@ static uint32_t last_pc = 0;
 #include "rv32_template.c"
 #undef RVOP
 
-/* FIXME: Add JIT-based execution path */
-
 /* multiple lui */
 static bool do_fuse1(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 {

@@ -217,14 +217,15 @@ RVOP(
 /* clang-format off */
 #define BRANCH_FUNC(type, cond)                                                \
     const uint32_t pc = PC;                                                    \
-    if ((type) rv->X[ir->rs1] cond (type)rv->X[ir->rs2]) {                     \
+    if ((type) rv->X[ir->rs1] cond (type) rv->X[ir->rs2]) {                     \
         is_branch_taken = false;                                               \
         struct rv_insn *untaken = ir->branch_untaken;                          \
         if (!untaken)                                                          \
             goto nextop;                                                       \
         IIF(RV32_HAS(JIT))                                                     \
         (                                                                      \
-            block_t *block = cache_get(rv->block_cache, PC + 4); if (!block) { \
+            block_t *block = cache_get(rv->block_cache, PC + 4);               \
+            if (!block) { \
                 ir->branch_untaken = NULL;                                     \
                 goto nextop;                                                   \
             } untaken = ir->branch_untaken = block->ir_head;                   \
@@ -240,12 +241,16 @@ RVOP(
     struct rv_insn *taken = ir->branch_taken;                                  \
     if (taken) {                                                               \
         IIF(RV32_HAS(JIT))                                                     \
-        (                                                                      \
-            {block_t *block = cache_get(rv->block_cache, PC); if (!block) {     \
+        ({                                                                     \
+            block_t *block = cache_get(rv->block_cache, PC);                   \
+            if (!block) {                                                      \
                 ir->branch_taken = NULL;                                       \
                 goto end_insn;                                                 \
-            } taken = ir->branch_taken = block->ir_head;                       \
-            if (cache_hot(rv->block_cache, PC)) goto end_insn;}, );             \
+            }                                                                  \
+            taken = ir->branch_taken = block->ir_head;                         \
+            if (cache_hot(rv->block_cache, PC))                                \
+                goto end_insn;                                                 \
+        }, );                                                                  \
         last_pc = PC;                                                          \
         MUST_TAIL return taken->impl(rv, taken, cycle, PC);                    \
     }                                                                          \
@@ -815,15 +820,17 @@ RVOP(
     }))
 
 /* AND */
+/* clang-format off */
 RVOP(
-    and,
-    { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; },
-    X64({
-        ld, S32, RAX, X, rs1;
-        ld, S32, RBX, X, rs2;
-        alu32, 0x21, RBX, RAX;
-        st, S32, RAX, X, rd;
-    }))
+     and,
+     { rv->X[ir->rd] = rv->X[ir->rs1] & rv->X[ir->rs2]; },
+     X64({
+         ld, S32, RAX, X, rs1;
+         ld, S32, RBX, X, rs2;
+         alu32, 0x21, RBX, RAX;
+         st, S32, RAX, X, rd;
+     }))
+/* clang-format on */
 
 /* ECALL: Environment Call */
 RVOP(

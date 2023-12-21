@@ -7,6 +7,7 @@
 #error "Do not manage to build this file unless you enable SDL support."
 #endif
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -421,11 +422,12 @@ static int delta_cnt;
 static uint8_t mus_channel[16];
 
 /* main conversion routine for MUS to MIDI */
-static void convert(void)
+static int convert(void)
 {
     uint8_t data, last, channel;
     uint8_t event[3] = {0};
     int count = 0;
+    uint8_t *midi_data_tmp;
 
     data = *mus_pos++;
     last = data & 0x80;
@@ -477,15 +479,15 @@ static void convert(void)
         break;
 
     case 0x50:
-        return;
+        return 0;
 
     case 0x60:
         mus_end_of_track = 1;
-        return;
+        return 0;
 
     case 0x70:
         mus_pos++;
-        return;
+        return 0;
     }
 
     if (channel == 9)
@@ -495,7 +497,12 @@ static void convert(void)
 
     event[0] |= channel;
 
-    midi_data = realloc(midi_data, midi_size + delta_cnt + count);
+    midi_data_tmp = realloc(midi_data, midi_size + delta_cnt + count);
+    if (unlikely(!midi_data_tmp)) {
+        free(midi_data);
+        return -ENOMEM;
+    }
+    midi_data = midi_data_tmp;
 
     memcpy(midi_data + midi_size, &delta_bytes, delta_cnt);
     midi_size += delta_cnt;
@@ -513,6 +520,8 @@ static void convert(void)
         delta_bytes[0] = 0;
         delta_cnt = 1;
     }
+
+    return 0;
 }
 
 uint8_t *mus2midi(uint8_t *data, int *length)
@@ -521,6 +530,7 @@ uint8_t *mus2midi(uint8_t *data, int *length)
     midi_header_t midi_hdr;
     uint8_t *mid_track_len;
     int track_len;
+    uint8_t *midi_data_tmp;
 
     if (strncmp(mus_hdr->id, magic_mus, 4))
         return NULL;
@@ -537,9 +547,16 @@ uint8_t *mus2midi(uint8_t *data, int *length)
     midi_hdr.ticks =
         bswap16(70); /* 70 ppqn = 140 per second @ tempo = 500000µs (default) */
     midi_data = malloc(midi_size);
+    if (unlikely(!midi_data))
+        return NULL;
     memcpy(midi_data, &midi_hdr, midi_size);
 
-    midi_data = realloc(midi_data, midi_size + 8);
+    midi_data_tmp = realloc(midi_data, midi_size + 8);
+    if (unlikely(!midi_data_tmp)) {
+        free(midi_data);
+        return NULL;
+    }
+    midi_data = midi_data_tmp;
     memcpy(midi_data + midi_size, magic_track, 4);
     midi_size += 4;
     mid_track_len = midi_data + midi_size;
@@ -556,14 +573,25 @@ uint8_t *mus2midi(uint8_t *data, int *length)
         mus_channel[i] = 0;
 
     while (!mus_end_of_track)
-        convert();
+        if (unlikely(convert() < 0))
+            return NULL;
 
     /* a final delta time must be added prior to the end of track event */
-    midi_data = realloc(midi_data, midi_size + delta_cnt);
+    midi_data_tmp = realloc(midi_data, midi_size + delta_cnt);
+    if (unlikely(!midi_data_tmp)) {
+        free(midi_data);
+        return NULL;
+    }
+    midi_data = midi_data_tmp;
     memcpy(midi_data + midi_size, &delta_bytes, delta_cnt);
     midi_size += delta_cnt;
 
-    midi_data = realloc(midi_data, midi_size + 3);
+    midi_data_tmp = realloc(midi_data, midi_size + 3);
+    if (unlikely(!midi_data_tmp)) {
+        free(midi_data);
+        return NULL;
+    }
+    midi_data = midi_data_tmp;
     memcpy(midi_data + midi_size, magic_end_of_track + 1, 3);
     midi_size += 3;
 
@@ -730,6 +758,10 @@ static void init_audio(void)
 
     /* sfx samples buffer */
     sfx_samples = malloc(SFX_SAMPLE_SIZE);
+    if (unlikely(!sfx_samples)) {
+        fprintf(stderr, "Failed to allocate memory for buffer\n");
+        exit(1);
+    }
 
     /* Initialize SDL2 Mixer */
     if (Mix_Init(MIX_INIT_MID) != MIX_INIT_MID) {

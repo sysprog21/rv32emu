@@ -30,7 +30,7 @@ static inline state_t *state_new(void)
 
     s->fd_map = map_init(int, FILE *, map_cmp_int);
     FILE *files[] = {stdin, stdout, stderr};
-    for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
+    for (size_t i = 0; i < ARRAYS_SIZE(files); i++)
         map_insert(s->fd_map, &i, &files[i]);
 
     return s;

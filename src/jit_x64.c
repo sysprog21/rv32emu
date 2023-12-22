@@ -33,7 +33,7 @@
 #include "decode.h"
 #include "io.h"
 #include "jit_x64.h"
-#include "state.h"
+#include "riscv.h"
 #include "utils.h"
 
 enum VM_REG {

@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-#include "state.h"
+#include "riscv.h"
 #include "utils.h"
 
 #define PREALLOC_SIZE 4096

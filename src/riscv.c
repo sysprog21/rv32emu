@@ -4,12 +4,13 @@
  */
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "mpool.h"
+#include "riscv.h"
 #include "riscv_private.h"
-#include "state.h"
 #include "utils.h"
 #if RV32_HAS(JIT)
 #include "cache.h"
@@ -155,7 +156,6 @@ bool rv_enables_to_output_exit_code(riscv_t *rv)
     return rv->output_exit_code;
 }
 
-
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
@@ -292,4 +292,29 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
 #endif
 
     rv->halt = false;
+}
+
+state_t *state_new(void)
+{
+    state_t *s = malloc(sizeof(state_t));
+    assert(s);
+    s->mem = memory_new();
+    s->break_addr = 0;
+
+    s->fd_map = map_init(int, FILE *, map_cmp_int);
+    FILE *files[] = {stdin, stdout, stderr};
+    for (size_t i = 0; i < ARRAYS_SIZE(files); i++)
+        map_insert(s->fd_map, &i, &files[i]);
+
+    return s;
+}
+
+void state_delete(state_t *s)
+{
+    if (!s)
+        return;
+
+    map_delete(s->fd_map);
+    memory_delete(s->mem);
+    free(s);
 }

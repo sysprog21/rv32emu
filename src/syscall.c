@@ -216,7 +216,11 @@ static void syscall_close(riscv_t *rv)
         map_iter_t it;
         map_find(s->fd_map, &it, &fd);
         if (!map_at_end(s->fd_map, &it)) {
-            fclose(map_iter_value(&it, FILE *));
+            if (fclose(map_iter_value(&it, FILE *))) {
+                /* error */
+                rv_set_reg(rv, rv_reg_a0, -1);
+                return;
+            }
             map_erase(s->fd_map, &it);
 
             /* success */

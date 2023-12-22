@@ -96,8 +96,10 @@ static void syscall_write(riscv_t *rv)
         memory_read(s->mem, tmp, buffer + total_write, PREALLOC_SIZE);
         if (!map_at_end(s->fd_map, &it)) {
             /* write out the data */
-            size_t written =
-                fwrite(tmp, 1, PREALLOC_SIZE, map_iter_value(&it, FILE *));
+            FILE *handle = map_iter_value(&it, FILE *);
+            size_t written = fwrite(tmp, 1, PREALLOC_SIZE, handle);
+            if (written != PREALLOC_SIZE && ferror(handle))
+                goto error_handler;
             total_write += written;
             count -= PREALLOC_SIZE;
         } else
@@ -106,7 +108,10 @@ static void syscall_write(riscv_t *rv)
     memory_read(s->mem, tmp, buffer + total_write, count);
     if (!map_at_end(s->fd_map, &it)) {
         /* write out the data */
-        size_t written = fwrite(tmp, 1, count, map_iter_value(&it, FILE *));
+        FILE *handle = map_iter_value(&it, FILE *);
+        size_t written = fwrite(tmp, 1, count, handle);
+        if (written != count && ferror(handle))
+            goto error_handler;
         total_write += written;
     } else
         goto error_handler;

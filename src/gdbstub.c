@@ -13,8 +13,8 @@
 #include "mini-gdbstub/include/gdbstub.h"
 
 #include "breakpoint.h"
+#include "riscv.h"
 #include "riscv_private.h"
-#include "state.h"
 
 static int rv_read_reg(void *args, int regno, size_t *data)
 {

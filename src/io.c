@@ -31,6 +31,7 @@ static uint8_t *data_memory_base;
 memory_t *memory_new(void)
 {
     memory_t *mem = malloc(sizeof(memory_t));
+    assert(mem);
 #if HAVE_MMAP
     data_memory_base = mmap(NULL, MEM_SIZE, PROT_READ | PROT_WRITE,
                             MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);

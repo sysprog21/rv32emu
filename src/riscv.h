@@ -4,8 +4,13 @@
  */
 
 #pragma once
+
 #include <stdbool.h>
 #include <stdint.h>
+
+#include "io.h"
+#include "map.h"
+
 #if RV32_HAS(EXT_F)
 #define float16_t softfloat_float16_t
 #define bfloat16_t softfloat_bfloat16_t
@@ -204,6 +209,23 @@ bool rv_has_halted(riscv_t *rv);
 
 /* return the flag of outputting exit code */
 bool rv_enables_to_output_exit_code(riscv_t *rv);
+
+/* state structure passed to the runtime */
+typedef struct {
+    memory_t *mem;
+
+    /* the data segment break address */
+    riscv_word_t break_addr;
+
+    /* file descriptor map: int -> (FILE *) */
+    map_t fd_map;
+} state_t;
+
+/* create a state */
+state_t *state_new(void);
+
+/* delete a state */
+void state_delete(state_t *s);
 
 #ifdef __cplusplus
 };

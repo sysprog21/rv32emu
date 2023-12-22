@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 #include "elf.h"
-#include "state.h"
+#include "riscv.h"
 #include "utils.h"
 
 /* enable program trace mode */

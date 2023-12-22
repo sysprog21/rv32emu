@@ -16,7 +16,7 @@
 #include <SDL.h>
 #include <SDL_mixer.h>
 
-#include "state.h"
+#include "riscv.h"
 
 /* The DSITMBK sound effect in DOOM1.WAD uses a sample rate of 22050, but since
  * the game is played in single-player mode, it is acceptable to stick with

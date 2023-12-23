@@ -3,14 +3,14 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  rv32emu:
+  host-x64:
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
     - name: install-dependencies
       run: |
-            sudo apt-get update
-            sudo apt-get install libsdl2-dev libsdl2-mixer-dev
+            sudo apt-get update -q -y
+            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev
             .ci/riscv-toolchain-install.sh
       shell: bash
     - name: default build
@@ -35,6 +35,27 @@ jobs:
     - name: JIT test
       run: |
             make ENABLE_JIT=1 clean check
+
+  host-arm64:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: checkout code
+      uses: actions/checkout@v4
+    - name: build artifact
+      # The GitHub Action for non-x86 CPU
+      # https://github.com/uraimo/run-on-arch-action
+      uses: uraimo/run-on-arch-action@v2.6.0
+      with:
+        arch: aarch64
+        distro: ubuntu22.04
+        install: |
+          apt-get update -q -y
+          apt-get install -q -y git build-essential libsdl2-dev libsdl2-mixer-dev
+        run: |
+          git config --global --add safe.directory /home/runner/work/rv32emu/rv32emu
+          make
+          make check
+
   coding-style:
     runs-on: ubuntu-22.04
     steps:

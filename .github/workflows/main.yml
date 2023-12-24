@@ -47,11 +47,15 @@ jobs:
       with:
         arch: aarch64
         distro: ubuntu22.04
+        # No 'sudo' is available
         install: |
           apt-get update -q -y
           apt-get install -q -y git build-essential libsdl2-dev libsdl2-mixer-dev
+          git config --global --add safe.directory ${{ github.workspace }}
+          git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
+          git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
+        # Append custom commands here
         run: |
-          git config --global --add safe.directory /home/runner/work/rv32emu/rv32emu
           make
           make check
 

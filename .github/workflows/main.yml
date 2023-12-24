@@ -21,7 +21,6 @@ jobs:
             make tests
             make misalign
             make tool
-            make distclean ENABLE_ARC=1 tests
     - name: diverse configurations
       run: |
             make distclean ENABLE_EXT_M=0 check

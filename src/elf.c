@@ -3,6 +3,7 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -70,6 +71,7 @@ struct elf_internal {
 elf_t *elf_new(void)
 {
     elf_t *e = malloc(sizeof(elf_t));
+    assert(e);
     e->hdr = NULL;
     e->raw_size = 0;
     e->symbols = map_init(int, char *, map_cmp_uint);
@@ -342,6 +344,7 @@ bool elf_open(elf_t *e, const char *input)
     /* allocate memory */
     free(e->raw_data);
     e->raw_data = malloc(e->raw_size);
+    assert(e->raw_data);
 
     /* read data into memory */
     const size_t r = fread(e->raw_data, 1, e->raw_size, f);

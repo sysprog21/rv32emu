@@ -82,6 +82,8 @@ static void *mpool_extend(mpool_t *mp)
     if (!p)
         return NULL;
     area_t *new_area = malloc(sizeof(area_t));
+    if (!new_area)
+        return NULL;
     new_area->mapped = p;
     new_area->next = NULL;
     size_t chunk_count = pool_size / (sizeof(memchunk_t) + mp->chunk_size);

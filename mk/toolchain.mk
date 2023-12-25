@@ -1,14 +1,14 @@
+CC_IS_EMCC :=
 CC_IS_CLANG :=
 CC_IS_GCC :=
-CC_IS_EMCC :=
 ifneq ($(shell $(CC) --version | head -n 1 | grep emcc),)
     CC_IS_EMCC := 1
-else ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
+endif
+ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
     CC_IS_CLANG := 1
-else
-    ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)
-        CC_IS_GCC := 1
-    endif
+endif
+ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)
+    CC_IS_GCC := 1
 endif
 
 CFLAGS_NO_CET :=
@@ -24,8 +24,10 @@ endif
 # present. Until such linkopts can be deduped by the build system, we disable
 # these warnings.
 ifeq ($(UNAME_S),Darwin)
-    ifneq ($(shell ld -version_details | cut -f2 -d: | grep 15.0.0),)
-        LDFLAGS += -Wl,-no_warn_duplicate_libraries
+    ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)", "1")
+        ifneq ($(shell ld -version_details | cut -f2 -d: | grep 15.0.0),)
+            LDFLAGS += -Wl,-no_warn_duplicate_libraries
+        endif
     endif
 endif
 

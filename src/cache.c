@@ -195,11 +195,20 @@ cache_t *cache_create(int size_bits)
     cache_size = 1 << size_bits;
     for (int i = 0; i < THRESHOLD; i++) {
         cache->lists[i] = malloc(sizeof(struct list_head));
+        if (!cache->lists[i]) {
+            for (int j = 0; j < i; j++) {
+                free(cache->lists[j]);
+            }
+            return NULL;
+        }
         INIT_LIST_HEAD(cache->lists[i]);
     }
 
     cache->map = malloc(sizeof(hashtable_t));
     if (!cache->map) {
+        for (int i = 0; i < THRESHOLD; i++) {
+            free(cache->lists[i]);
+        }
         free(cache->lists);
         free(cache);
         return NULL;
@@ -207,6 +216,9 @@ cache_t *cache_create(int size_bits)
     cache->map->ht_list_head = malloc(cache_size * sizeof(struct hlist_head));
     if (!cache->map->ht_list_head) {
         free(cache->map);
+        for (int i = 0; i < THRESHOLD; i++) {
+            free(cache->lists[i]);
+        }
         free(cache->lists);
         free(cache);
         return NULL;

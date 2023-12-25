@@ -632,8 +632,10 @@ static void block_translate(riscv_t *rv, block_t *block)
 #if RV32_HAS(EXT_C)
                 || ir->opcode == rv_insn_cjalr || ir->opcode == rv_insn_cjr
 #endif
-            )
+            ) {
                 ir->branch_table = calloc(1, sizeof(branch_history_table_t));
+                assert(ir->branch_table);
+            }
             break;
         }
 
@@ -659,6 +661,7 @@ static void block_translate(riscv_t *rv, block_t *block)
     if (count > 1) {                                              \
         ir->opcode = IIF(RW)(rv_insn_fuse4, rv_insn_fuse3);       \
         ir->fuse = malloc(count * sizeof(opcode_fuse_t));         \
+        assert(ir->fuse);                                         \
         ir->imm2 = count;                                         \
         memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));              \
         ir->impl = dispatch_table[ir->opcode];                    \
@@ -849,6 +852,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
                 if (count > 1) {
                     ir->opcode = rv_insn_fuse1;
                     ir->fuse = malloc(count * sizeof(opcode_fuse_t));
+                    assert(ir->fuse);
                     ir->imm2 = count;
                     memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
                     ir->impl = dispatch_table[ir->opcode];
@@ -887,6 +891,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
             }
             if (count > 1) {
                 ir->fuse = malloc(count * sizeof(opcode_fuse_t));
+                assert(ir->fuse);
                 memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
                 ir->opcode = rv_insn_fuse7;
                 ir->imm2 = count;

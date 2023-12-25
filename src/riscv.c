@@ -27,6 +27,7 @@ static void block_map_init(block_map_t *map, const uint8_t bits)
     map->block_capacity = 1 << bits;
     map->size = 0;
     map->map = calloc(map->block_capacity, sizeof(struct block *));
+    assert(map->map);
 }
 
 /* clear all block in the block map */
@@ -113,6 +114,7 @@ riscv_t *rv_create(const riscv_io_t *io,
     assert(io);
 
     riscv_t *rv = calloc(1, sizeof(riscv_t));
+    assert(rv);
 
     /* copy over the IO interface */
     memcpy(&rv->io, io, sizeof(riscv_io_t));

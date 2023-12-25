@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -47,3 +48,11 @@ void rv_clock_gettime(struct timespec *tp);
  * https://9p.io/sys/doc/lexnames.html
  */
 char *sanitize_path(const char *input);
+
+static inline uintptr_t align_up(uintptr_t sz, size_t alignment)
+{
+    uintptr_t mask = alignment - 1;
+    if (likely((alignment & mask) == 0))
+        return ((sz + mask) & ~mask);
+    return (((sz + mask) / alignment) * alignment);
+}

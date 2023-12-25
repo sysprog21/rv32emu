@@ -121,15 +121,15 @@ endif
 ENABLE_JIT ?= 0
 $(call set-feature, JIT)
 ifeq ($(call has, JIT), 1)
-OBJS_EXT += jit_x64.o 
-ifneq ($(processor), x86_64)
-$(error JIT mode only supports for x64 target currently.)
+OBJS_EXT += jit.o 
+ifneq ($(processor),$(filter $(processor),x86_64 aarch64 arm64))
+$(error JIT mode only supports for x64 and arm64 target currently.)
 endif
 
-src/rv32_jit_template.c:
+src/rv32_jit.c:
 	$(Q)tools/gen-jit-template.py $(CFLAGS) > $@
 
-$(OUT)/jit_x64.o: src/jit_x64.c src/rv32_jit_template.c
+$(OUT)/jit.o: src/jit.c src/rv32_jit.c
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 endif
@@ -235,7 +235,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT) src/rv32_jit_template.c
+	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT) src/rv32_jit.c
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1

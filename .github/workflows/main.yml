@@ -58,6 +58,7 @@ jobs:
         run: |
           make
           make check
+          make ENABLE_JIT=1 clean check
 
   coding-style:
     runs-on: ubuntu-22.04

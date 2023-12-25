@@ -27,7 +27,7 @@ extern struct target_ops gdbstub_ops;
 
 #if RV32_HAS(JIT)
 #include "cache.h"
-#include "jit_x64.h"
+#include "jit.h"
 #endif
 
 /* Shortcuts for comparing each field of specified RISC-V instruction */
@@ -1067,7 +1067,7 @@ void rv_step(riscv_t *rv, int32_t cycles)
                    cache_freq(rv->block_cache, block->pc_start) >= 1024) ||
                   cache_hot(rv->block_cache, block->pc_start))) {
             block->hot = true;
-            block->offset = translate_x64(rv, block);
+            block->offset = jit_translate(rv, block);
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
             prev = NULL;

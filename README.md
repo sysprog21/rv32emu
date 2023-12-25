@@ -81,6 +81,7 @@ The image containing all the necessary tools for development and testing can be 
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
 * `ENABLE_GDBSTUB` : GDB remote debugging support
 * `ENABLE_SDL` : Experimental Display and Event System Calls
+* `ENABLE_JIT` : Experimental JIT compiler
 
 e.g., run `make ENABLE_EXT_F=0` for the build without floating-point support.
 

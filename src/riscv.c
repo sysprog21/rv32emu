@@ -14,7 +14,7 @@
 #include "utils.h"
 #if RV32_HAS(JIT)
 #include "cache.h"
-#include "jit_x64.h"
+#include "jit.h"
 #define CODE_CACHE_SIZE (1024 * 1024)
 #endif
 
@@ -132,7 +132,7 @@ riscv_t *rv_create(const riscv_io_t *io,
     /* initialize the block map */
     block_map_init(&rv->block_map, BLOCK_MAP_CAPACITY_BITS);
 #else
-    rv->jit_state = init_state(CODE_CACHE_SIZE);
+    rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
     rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
 #endif
     /* reset */
@@ -162,7 +162,7 @@ void rv_delete(riscv_t *rv)
 #if !RV32_HAS(JIT)
     block_map_destroy(rv);
 #else
-    destroy_state(rv->jit_state);
+    jit_state_exit(rv->jit_state);
     cache_free(rv->block_cache);
 #endif
     free(rv);

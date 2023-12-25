@@ -110,23 +110,18 @@ def parse_argv(EXT_LIST, SKIP_LIST):
     for ext in EXT_LIST:
         SKIP_LIST += INSN[ext]
 
-
-def remove_comment(str):
-    str = re.sub(r'//[\s|\S]+?\n', "", str)
-    return re.sub(r'/\*[\s|\S]+?\*/\n', "", str)
-
-
 # parse_argv(EXT_LIST, SKIP_LIST)
 # prepare PROLOGUE
 output = ""
 f = open('src/rv32_template.c', 'r')
 lines = f.read()
+# remove_comment
+lines = re.sub(r'/\*[\s|\S]+?\*/', "", lines)
 # remove exception handler
 lines = re.sub(r'RV_EXC[\S]+?\([\S|\s]+?\);\s', "", lines)
 # collect functions
 emulate_funcs = re.findall(r'RVOP\([\s|\S]+?}\)', lines)
-codegen_funcs = re.findall(r'X64\([\s|\S]+?}\)', lines)
-
+codegen_funcs = re.findall(r'GEN\([\s|\S]+?}\)', lines)
 op = []
 impl = []
 for i in range(len(emulate_funcs)):
@@ -136,6 +131,7 @@ for i in range(len(emulate_funcs)):
 f.close()
 
 fields = {"imm", "pc", "rs1", "rs2", "rd", "shamt", "branch_taken", "branch_untaken"}
+temp_regs = {"TMP0", "TMP1", "TMP2"}
 # generate jit template
 for i in range(len(op)):
     if (not SKIP_LIST.count(op[i])):
@@ -149,6 +145,8 @@ for i in range(len(op)):
             for i in range(len(items)):
                 if items[i] in fields:
                     items[i] = "ir->" + items[i]
+                if items[i] in temp_regs:
+                    items[i] = "temp_reg[" + items[i][-1] + "]"
             if items[0] == "alu32_imm":
                 if len(items) == 8:
                     asm = "emit_alu32_imm{}(state, {}, {}, {}, ({}{}_t) {});".format(
@@ -180,27 +178,27 @@ for i in range(len(op)):
                         items[1], items[2])
             elif items[0] == "ld_sext":
                 if (items[3] == "X"):
-                    asm = "emit_load_sext(state, {}, parameter_reg[0], {}, offsetof(struct riscv_internal, X) + 4 * {});".format(
+                    asm = "emit_load_sext(state, {}, parameter_reg[0], {}, offsetof(riscv_t, X) + 4 * {});".format(
                         items[1], items[2], items[4])
                 else:
                     asm = "emit_load_sext(state, {}, {}, {}, {});".format(
                     items[1], items[2],  items[3],  items[4])
             elif items[0] == "ld":
                 if (items[3] == "X"):
-                    asm = "emit_load(state, {}, parameter_reg[0], {}, offsetof(struct riscv_internal, X) + 4 * {});".format(
+                    asm = "emit_load(state, {}, parameter_reg[0], {}, offsetof(riscv_t, X) + 4 * {});".format(
                         items[1], items[2], items[4])
                 else:
                     asm = "emit_load(state, {}, {}, {}, {});".format(
                         items[1], items[2], items[3], items[4])
             elif items[0] == "st_imm":
-                asm = "emit_store_imm32(state, {}, parameter_reg[0], offsetof(struct riscv_internal, X) + 4 * {}, {});".format(
+                asm = "emit_store_imm32(state, {}, parameter_reg[0], offsetof(riscv_t, X) + 4 * {}, {});".format(
                     items[1], items[2], items[3])
             elif items[0] == "st":
                 if (items[3] == "X"):
-                    asm = "emit_store(state, {}, {}, parameter_reg[0], offsetof(struct riscv_internal, X) + 4 * {});".format(
+                    asm = "emit_store(state, {}, {}, parameter_reg[0], offsetof(riscv_t, X) + 4 * {});".format(
                         items[1], items[2], items[4])
                 elif items[3] == "PC" or items[3] == "compressed":
-                    asm = "emit_store(state, {}, {}, parameter_reg[0], offsetof(struct riscv_internal, {}));".format(
+                    asm = "emit_store(state, {}, {}, parameter_reg[0], offsetof(riscv_t, {}));".format(
                         items[1], items[2], items[3])
                 else:
                     asm = "emit_store(state, {}, {}, {}, {});".format(
@@ -219,7 +217,7 @@ for i in range(len(op)):
             elif items[0] == "set_jmp_off":
                 asm = "uint32_t jump_loc = state->offset;"
             elif items[0] == "jmp_off":
-                asm = "emit_jump_target_offset(state, jump_loc + 2, state->offset);"
+                asm = "emit_jump_target_offset(state, JUMP_LOC, state->offset);"
             elif items[0] == "mem":
                 asm = "memory_t *m = ((state_t *) rv->userdata)->mem;"
             elif items[0] == "call":

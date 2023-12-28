@@ -301,7 +301,6 @@ static block_t *block_alloc(riscv_t *rv)
     block_t *block = mpool_alloc(rv->block_mp);
     assert(block);
     block->n_insn = 0;
-    block->predict = NULL;
 #if RV32_HAS(JIT)
     block->translatable = true;
     block->hot = false;
@@ -990,13 +989,6 @@ static block_t *block_find_or_translate(riscv_t *rv)
             mpool_free(rv->block_mp, delete_target);
         }
 #endif
-        /* update the block prediction.
-         * When translating a new block, the block predictor may benefit,
-         * but updating it after finding a particular block may penalize
-         * significantly.
-         */
-        if (prev)
-            prev->predict = next;
     }
 
     return next;
@@ -1016,15 +1008,10 @@ void rv_step(riscv_t *rv, int32_t cycles)
     /* loop until hitting the cycle target */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
         block_t *block;
-        /* try to predict the next block */
-        if (prev && prev->predict && prev->predict->pc_start == rv->PC) {
-            block = prev->predict;
-        } else {
-            /* lookup the next block in block map or translate a new block,
-             * and move onto the next block.
-             */
-            block = block_find_or_translate(rv);
-        }
+        /* lookup the next block in block map or translate a new block,
+         * and move onto the next block.
+         */
+        block = block_find_or_translate(rv);
 
         /* by now, a block should be available */
         assert(block);

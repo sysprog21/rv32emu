@@ -59,7 +59,6 @@ enum {
 typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompased */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
-    struct block *predict;     /**< block prediction */
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
     bool backward;

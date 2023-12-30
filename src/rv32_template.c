@@ -3,12 +3,22 @@
  * specification version 20191213.
  */
 
-/* This file is intended to serve as a template for both interpreter and JIT
- * code generation. To achieve this purpose, a domain-specific language (DSL)
- * is introduced, complemented by a C macro named 'RVOP'. Additionally,
- * a Python script efficiently traces code templates and automatically
- * generates the JIT code generator, thereby eliminating the need for manually
- * writing duplicated code.
+/* This file establishes a low-level instruction execution abstraction layer,
+ * crucial for both the interpreter's instruction dispatching and the
+ * execution of native functions written to memory. The JIT compiler currently
+ * supports only x86-64 (x64) and Aarch64 (Arm64) architectures, which
+ * simplifies the process due to their abundant registers and register-based
+ * calling conventions. It effectively navigates the limitations associated
+ * with self-modifying code.
+ *
+ * To accommodate the specific needs of these platforms, a highly selective
+ * approach in practices and design is adopted. The file is designed as a
+ * foundational template for code generation in both the interpreter and JIT
+ * contexts. To facilitate this, a domain-specific language (DSL) is utilized,
+ * augmented by a C macro named 'RVOP'. Furthermore, a Python script is employed
+ * to convert code templates efficiently, enabling automatic generation of the
+ * JIT code generator and thus eliminating the need for repetitive manual
+ * coding.
  *
  * Example:
  *

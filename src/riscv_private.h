@@ -40,7 +40,7 @@ enum {
     CSR_MIP = 0x344,      /* Machine interrupt pending */
 
     /* low words */
-    CSR_CYCLE = 0xC00, /* Cycle counter for RDCYCLE instruction */
+    CSR_CYCLE = 0xB00, /* Cycle counter for RDCYCLE instruction */
     CSR_TIME = 0xC01,  /* Timer for RDTIME instruction */
     CSR_INSTRET = 0xC02,
 

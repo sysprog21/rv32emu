@@ -192,27 +192,26 @@ cache_t *cache_create(int size_bits)
     cache_t *cache = malloc(sizeof(cache_t));
     if (!cache)
         return NULL;
+
     cache_size_bits = size_bits;
     cache_size = 1 << size_bits;
     for (i = 0; i < THRESHOLD; i++) {
         cache->lists[i] = malloc(sizeof(struct list_head));
-        if (!cache->lists[i]) {
+        if (!cache->lists[i])
             goto free_lists;
-        }
         INIT_LIST_HEAD(cache->lists[i]);
     }
 
     cache->map = malloc(sizeof(hashtable_t));
-    if (!cache->map) {
+    if (!cache->map)
         goto free_lists;
-    }
+
     cache->map->ht_list_head = malloc(cache_size * sizeof(struct hlist_head));
-    if (!cache->map->ht_list_head) {
+    if (!cache->map->ht_list_head)
         goto free_map;
-    }
-    for (uint32_t i = 0; i < cache_size; i++) {
-        INIT_HLIST_HEAD(&cache->map->ht_list_head[i]);
-    }
+
+    for (size_t ii = 0; ii < cache_size; ii++)
+        INIT_HLIST_HEAD(&cache->map->ht_list_head[ii]);
     cache->list_size = 0;
     cache_mp =
         mpool_create(cache_size * sizeof(lfu_entry_t), sizeof(lfu_entry_t));
@@ -229,7 +228,7 @@ free_lists:
     return NULL;
 }
 
-void *cache_get(cache_t *cache, uint32_t key)
+void *cache_get(const cache_t *cache, uint32_t key)
 {
     if (!cache->capacity ||
         hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
@@ -326,7 +325,7 @@ uint32_t cache_freq(struct cache *cache, uint32_t key)
 }
 
 #if RV32_HAS(JIT)
-bool cache_hot(struct cache *cache, uint32_t key)
+bool cache_hot(const struct cache *cache, uint32_t key)
 {
     if (!cache->capacity ||
         hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))

@@ -22,7 +22,7 @@ struct cache *cache_create(int size_bits);
  * @key: the key of the specified entry
  * @return: the specified entry or NULL
  */
-void *cache_get(struct cache *cache, uint32_t key);
+void *cache_get(const struct cache *cache, uint32_t key);
 
 /**
  * cache_put - insert a new entry into the cache
@@ -47,7 +47,7 @@ void cache_free(struct cache *cache);
  * @cache: a pointer points to target cache
  * @key: the key of the specified entry
  */
-bool cache_hot(struct cache *cache, uint32_t key);
+bool cache_hot(const struct cache *cache, uint32_t key);
 #endif
 
 uint32_t cache_freq(struct cache *cache, uint32_t key);

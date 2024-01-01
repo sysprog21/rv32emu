@@ -136,6 +136,7 @@ riscv_t *rv_create(const riscv_io_t *io,
 #else
     rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
     rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
+    assert(rv->block_cache);
 #endif
     /* reset */
     rv_reset(rv, 0U, argc, args);

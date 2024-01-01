@@ -188,40 +188,27 @@ static inline void hlist_del_init(struct hlist_node *n)
 
 cache_t *cache_create(int size_bits)
 {
+    int i;
     cache_t *cache = malloc(sizeof(cache_t));
     if (!cache)
         return NULL;
     cache_size_bits = size_bits;
     cache_size = 1 << size_bits;
-    for (int i = 0; i < THRESHOLD; i++) {
+    for (i = 0; i < THRESHOLD; i++) {
         cache->lists[i] = malloc(sizeof(struct list_head));
         if (!cache->lists[i]) {
-            for (int j = 0; j < i; j++) {
-                free(cache->lists[j]);
-            }
-            return NULL;
+            goto free_lists;
         }
         INIT_LIST_HEAD(cache->lists[i]);
     }
 
     cache->map = malloc(sizeof(hashtable_t));
     if (!cache->map) {
-        for (int i = 0; i < THRESHOLD; i++) {
-            free(cache->lists[i]);
-        }
-        free(cache->lists);
-        free(cache);
-        return NULL;
+        goto free_lists;
     }
     cache->map->ht_list_head = malloc(cache_size * sizeof(struct hlist_head));
     if (!cache->map->ht_list_head) {
-        free(cache->map);
-        for (int i = 0; i < THRESHOLD; i++) {
-            free(cache->lists[i]);
-        }
-        free(cache->lists);
-        free(cache);
-        return NULL;
+        goto free_map;
     }
     for (uint32_t i = 0; i < cache_size; i++) {
         INIT_HLIST_HEAD(&cache->map->ht_list_head[i]);
@@ -231,6 +218,15 @@ cache_t *cache_create(int size_bits)
         mpool_create(cache_size * sizeof(lfu_entry_t), sizeof(lfu_entry_t));
     cache->capacity = cache_size;
     return cache;
+
+free_map:
+    free(cache->map);
+free_lists:
+    for (int j = 0; j < i; j++)
+        free(cache->lists[i]);
+
+    free(cache);
+    return NULL;
 }
 
 void *cache_get(cache_t *cache, uint32_t key)

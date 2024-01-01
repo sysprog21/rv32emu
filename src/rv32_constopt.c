@@ -979,3 +979,19 @@ CONSTOPT(cadd, {
 /* C.SWSP */
 CONSTOPT(cswsp, {})
 #endif
+
+/* RV32FC Standard Extension */
+
+#if RV32_HAS(EXT_F) && RV32_HAS(EXT_C)
+/* C.FLWSP */
+CONSTOPT(cflwsp, {})
+
+/* C.FSWSP */
+CONSTOPT(cfswsp, {})
+
+/* C.FLW */
+CONSTOPT(cflw, {})
+
+/* C.FSW */
+CONSTOPT(cfsw, {})
+#endif

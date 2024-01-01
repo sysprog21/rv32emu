@@ -2272,3 +2272,53 @@ RVOP(
         st, S32, TMP1, TMP0, 0;
     }))
 #endif
+
+#if RV32_HAS(EXT_C) && RV32_HAS(EXT_F)
+/* C.FLWSP */
+RVOP(
+    cflwsp,
+    {
+        const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
+        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
+        rv->F[ir->rd].v = rv->io.mem_read_w(addr);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* C.FSWSP */
+RVOP(
+    cfswsp,
+    {
+        const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
+        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
+        rv->io.mem_write_w(addr, rv->F[ir->rs2].v);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* C.FLW */
+RVOP(
+    cflw,
+    {
+        const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
+        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
+        rv->F[ir->rd].v = rv->io.mem_read_w(addr);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* C.FSW */
+RVOP(
+    cfsw,
+    {
+        const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
+        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
+        rv->io.mem_write_w(addr, rv->F[ir->rs2].v);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+#endif

@@ -38,13 +38,17 @@ extern struct target_ops gdbstub_ops;
 #define IF_imm(i, v) (i->imm == v)
 
 /* RISC-V exception code list */
-#define RV_EXCEPTION_LIST                                       \
-    _(insn_misaligned, 0)  /* Instruction address misaligned */ \
-    _(illegal_insn, 2)     /* Illegal instruction */            \
-    _(breakpoint, 3)       /* Breakpoint */                     \
-    _(load_misaligned, 4)  /* Load address misaligned */        \
-    _(store_misaligned, 6) /* Store/AMO address misaligned */   \
+/* clang-format off */
+#define RV_EXCEPTION_LIST                                          \
+    IIF(RV32_HAS(EXT_C))(,                                         \
+        _(insn_misaligned, 0) /* Instruction address misaligned */ \
+    )                                                              \
+    _(illegal_insn, 2)     /* Illegal instruction */               \
+    _(breakpoint, 3)       /* Breakpoint */                        \
+    _(load_misaligned, 4)  /* Load address misaligned */           \
+    _(store_misaligned, 6) /* Store/AMO address misaligned */      \
     _(ecall_M, 11)         /* Environment call from M-mode */
+/* clang-format on */
 
 enum {
 #define _(type, code) rv_exception_code##type = code,
@@ -344,16 +348,12 @@ static block_t *block_find(const block_map_t *map, const uint32_t addr)
 }
 #endif
 
+#if !RV32_HAS(EXT_C)
 FORCE_INLINE bool insn_is_misaligned(uint32_t pc)
 {
-    return (pc &
-#if RV32_HAS(EXT_C)
-            0x1
-#else
-            0x3
-#endif
-    );
+    return pc & 0x3;
 }
+#endif
 
 /* instruction length information for each RISC-V instruction */
 enum {

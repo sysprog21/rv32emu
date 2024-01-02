@@ -1383,8 +1383,9 @@ RVOP(
     flw,
     {
         /* copy into the float register */
-        const uint32_t data = rv->io.mem_read_w(rv->X[ir->rs1] + ir->imm);
-        rv->F[ir->rd].v = data;
+        const uint32_t addr = rv->X[ir->rs1] + ir->imm;
+        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
+        rv->F[ir->rd].v = rv->io.mem_read_w(addr);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1395,8 +1396,9 @@ RVOP(
     fsw,
     {
         /* copy from float registers */
-        uint32_t data = rv->F[ir->rs2].v;
-        rv->io.mem_write_w(rv->X[ir->rs1] + ir->imm, data);
+        const uint32_t addr = rv->X[ir->rs1] + ir->imm;
+        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
+        rv->io.mem_write_w(addr, rv->F[ir->rs2].v);
     },
     GEN({
         assert; /* FIXME: Implement */

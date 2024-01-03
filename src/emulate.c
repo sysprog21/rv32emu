@@ -548,7 +548,8 @@ FORCE_INLINE bool insn_is_branch(uint8_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch, insn_len, translatable, reg_mask) \
-    IIF(can_branch)(case rv_insn_##inst:, )
+    IIF(can_branch)                                           \
+    (case rv_insn_##inst:, )
         RV_INSN_LIST
 #undef _
         return true;
@@ -561,7 +562,8 @@ FORCE_INLINE bool insn_is_translatable(uint8_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch, insn_len, translatable, reg_mask) \
-    IIF(translatable)(case rv_insn_##inst:, )
+    IIF(translatable)                                         \
+    (case rv_insn_##inst:, )
         RV_INSN_LIST
 #undef _
         return true;

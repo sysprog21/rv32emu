@@ -142,7 +142,9 @@ RVOP(
         if (ir->rd)
             rv->X[ir->rd] = pc + 4;
         /* check instruction misaligned */
+#if !RV32_HAS(EXT_C)
         RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
+#endif
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
@@ -213,7 +215,9 @@ RVOP(
         if (ir->rd)
             rv->X[ir->rd] = pc + 4;
         /* check instruction misaligned */
+#if !RV32_HAS(EXT_C)
         RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
+#endif
 #if !RV32_HAS(JIT)
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
 #endif
@@ -238,51 +242,52 @@ RVOP(
     (type) x cond (type) y
 /* clang-format on */
 
-#define BRANCH_FUNC(type, cond)                                    \
-    const uint32_t pc = PC;                                        \
-    if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) { \
-        is_branch_taken = false;                                   \
-        struct rv_insn *untaken = ir->branch_untaken;              \
-        if (!untaken)                                              \
-            goto nextop;                                           \
-        IIF(RV32_HAS(JIT))                                         \
-        ({                                                         \
-            block_t *block = cache_get(rv->block_cache, PC + 4);   \
-            if (!block) {                                          \
-                ir->branch_untaken = NULL;                         \
-                goto nextop;                                       \
-            }                                                      \
-            untaken = ir->branch_untaken = block->ir_head;         \
-            if (cache_hot(rv->block_cache, PC + 4))                \
-                goto nextop;                                       \
-        }, );                                                      \
-        PC += 4;                                                   \
-        last_pc = PC;                                              \
-        MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);    \
-    }                                                              \
-    is_branch_taken = true;                                        \
-    PC += ir->imm;                                                 \
-    /* check instruction misaligned */                             \
-    RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);                   \
-    struct rv_insn *taken = ir->branch_taken;                      \
-    if (taken) {                                                   \
-        IIF(RV32_HAS(JIT))                                         \
-        ({                                                         \
-            block_t *block = cache_get(rv->block_cache, PC);       \
-            if (!block) {                                          \
-                ir->branch_taken = NULL;                           \
-                goto end_insn;                                     \
-            }                                                      \
-            taken = ir->branch_taken = block->ir_head;             \
-            if (cache_hot(rv->block_cache, PC))                    \
-                goto end_insn;                                     \
-        }, );                                                      \
-        last_pc = PC;                                              \
-        MUST_TAIL return taken->impl(rv, taken, cycle, PC);        \
-    }                                                              \
-    end_insn:                                                      \
-    rv->csr_cycle = cycle;                                         \
-    rv->PC = PC;                                                   \
+#define BRANCH_FUNC(type, cond)                                              \
+    IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                         \
+    if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {           \
+        is_branch_taken = false;                                             \
+        struct rv_insn *untaken = ir->branch_untaken;                        \
+        if (!untaken)                                                        \
+            goto nextop;                                                     \
+        IIF(RV32_HAS(JIT))                                                   \
+        ({                                                                   \
+            block_t *block = cache_get(rv->block_cache, PC + 4);             \
+            if (!block) {                                                    \
+                ir->branch_untaken = NULL;                                   \
+                goto nextop;                                                 \
+            }                                                                \
+            untaken = ir->branch_untaken = block->ir_head;                   \
+            if (cache_hot(rv->block_cache, PC + 4))                          \
+                goto nextop;                                                 \
+        }, );                                                                \
+        PC += 4;                                                             \
+        last_pc = PC;                                                        \
+        MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);              \
+    }                                                                        \
+    is_branch_taken = true;                                                  \
+    PC += ir->imm;                                                           \
+    /* check instruction misaligned */                                       \
+    IIF(RV32_HAS(EXT_C))                                                     \
+    (, RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);) struct rv_insn *taken = \
+        ir->branch_taken;                                                    \
+    if (taken) {                                                             \
+        IIF(RV32_HAS(JIT))                                                   \
+        ({                                                                   \
+            block_t *block = cache_get(rv->block_cache, PC);                 \
+            if (!block) {                                                    \
+                ir->branch_taken = NULL;                                     \
+                goto end_insn;                                               \
+            }                                                                \
+            taken = ir->branch_taken = block->ir_head;                       \
+            if (cache_hot(rv->block_cache, PC))                              \
+                goto end_insn;                                               \
+        }, );                                                                \
+        last_pc = PC;                                                        \
+        MUST_TAIL return taken->impl(rv, taken, cycle, PC);                  \
+    }                                                                        \
+    end_insn:                                                                \
+    rv->csr_cycle = cycle;                                                   \
+    rv->PC = PC;                                                             \
     return true;
 
 /* In RV32I and RV64I, if the branch is taken, set pc = pc + offset, where
@@ -1383,8 +1388,9 @@ RVOP(
     flw,
     {
         /* copy into the float register */
-        const uint32_t data = rv->io.mem_read_w(rv->X[ir->rs1] + ir->imm);
-        rv->F[ir->rd].v = data;
+        const uint32_t addr = rv->X[ir->rs1] + ir->imm;
+        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
+        rv->F[ir->rd].v = rv->io.mem_read_w(addr);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1395,8 +1401,9 @@ RVOP(
     fsw,
     {
         /* copy from float registers */
-        uint32_t data = rv->F[ir->rs2].v;
-        rv->io.mem_write_w(rv->X[ir->rs1] + ir->imm, data);
+        const uint32_t addr = rv->X[ir->rs1] + ir->imm;
+        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
+        rv->io.mem_write_w(addr, rv->F[ir->rs2].v);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1813,7 +1820,6 @@ RVOP(
     {
         rv->X[rv_reg_ra] = PC + 2;
         PC += ir->imm;
-        RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
@@ -1979,7 +1985,6 @@ RVOP(
     cj,
     {
         PC += ir->imm;
-        RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
@@ -2222,7 +2227,6 @@ RVOP(
         const int32_t jump_to = rv->X[ir->rs1];
         rv->X[rv_reg_ra] = PC + 2;
         PC = jump_to;
-        RV_EXC_MISALIGN_HANDLER(PC, insn, true, 0);
 #if !RV32_HAS(JIT)
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
 #endif

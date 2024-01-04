@@ -110,7 +110,7 @@ def parse_argv(EXT_LIST, SKIP_LIST):
     for ext in EXT_LIST:
         SKIP_LIST += INSN[ext]
 
-# parse_argv(EXT_LIST, SKIP_LIST)
+parse_argv(EXT_LIST, SKIP_LIST)
 # prepare PROLOGUE
 output = ""
 f = open('src/rv32_template.c', 'r')
@@ -125,7 +125,7 @@ codegen_funcs = re.findall(r'GEN\([\s|\S]+?}\)', lines)
 op = []
 impl = []
 for i in range(len(emulate_funcs)):
-    op.append(emulate_funcs[i][5:emulate_funcs[i].find(',')])
+    op.append(emulate_funcs[i][5:emulate_funcs[i].find(',')].strip())
     impl.append(codegen_funcs[i])
 
 f.close()

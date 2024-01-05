@@ -39,6 +39,10 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_ACCESS_TOKEN }}
+      - name: Get short commit SHA1
+        shell: bash
+        run: |
+          echo "short_hash=$(git rev-parse --short "$GITHUB_SHA")" >> "$GITHUB_ENV"
       - name: Build and push
         uses: docker/build-push-action@v5
         if: ${{ steps.changed-files.outputs.any_changed == 'true' }}
@@ -46,4 +50,4 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64/v8
           push: ${{ github.event_name == 'push' }}
-          tags: sysprog21/rv32emu:latest
+          tags: sysprog21/rv32emu:latest, sysprog21/rv32emu:${{ env.short_hash }}

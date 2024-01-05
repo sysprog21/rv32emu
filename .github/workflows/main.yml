@@ -34,6 +34,9 @@ jobs:
     - name: JIT test
       run: |
             make ENABLE_JIT=1 clean check
+            make ENABLE_EXT_A=0 ENABLE_JIT=1 clean check
+            make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
+            make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
 
   host-arm64:
     runs-on: ubuntu-22.04
@@ -59,6 +62,9 @@ jobs:
           make
           make check
           make ENABLE_JIT=1 clean check
+          make ENABLE_EXT_A=0 ENABLE_JIT=1 clean check
+          make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
+          make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
 
   coding-style:
     runs-on: ubuntu-22.04

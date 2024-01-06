@@ -603,7 +603,7 @@ RVOP(
  */
 RVOP(
     addi,
-    { rv->X[ir->rd] = (int32_t) (rv->X[ir->rs1]) + ir->imm; },
+    { rv->X[ir->rd] = rv->X[ir->rs1] + ir->imm; },
     GEN({
         ld, S32, TMP0, X, rs1;
         alu32_imm, 32, 0x81, 0, TMP0, imm;
@@ -732,9 +732,7 @@ RVOP(
 /* ADD */
 RVOP(
     add,
-    {
-        rv->X[ir->rd] = (int32_t) (rv->X[ir->rs1]) + (int32_t) (rv->X[ir->rs2]);
-    },
+    { rv->X[ir->rd] = rv->X[ir->rs1] + rv->X[ir->rs2]; },
     GEN({
         ld, S32, TMP0, X, rs1;
         ld, S32, TMP1, X, rs2;
@@ -745,9 +743,7 @@ RVOP(
 /* SUB: Substract */
 RVOP(
     sub,
-    {
-        rv->X[ir->rd] = (int32_t) (rv->X[ir->rs1]) - (int32_t) (rv->X[ir->rs2]);
-    },
+    { rv->X[ir->rd] = rv->X[ir->rs1] - rv->X[ir->rs2]; },
     GEN({
         ld, S32, TMP0, X, rs1;
         ld, S32, TMP1, X, rs2;

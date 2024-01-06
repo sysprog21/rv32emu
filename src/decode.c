@@ -381,6 +381,7 @@ static inline void decode_r4type(rv_insn_t *ir, const uint32_t insn)
     ir->rs1 = decode_rs1(insn);
     ir->rs2 = decode_rs2(insn);
     ir->rs3 = decode_r4type_rs3(insn);
+    ir->rm = decode_funct3(insn);
 }
 #endif
 
@@ -1044,7 +1045,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
      */
 
     /* decode R-type */
-    uint8_t funct3 = decode_funct3(insn);
+    ir->rm = decode_funct3(insn);
     decode_rtype(ir, insn);
 
     /* dispatch from funct7 field */
@@ -1066,7 +1067,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         break;
     case 0b0010000:
         /* dispatch from rm region */
-        switch (funct3) {
+        switch (ir->rm) {
         case 0b000: /* FSGNJ.S */
             ir->opcode = rv_insn_fsgnjs;
             break;
@@ -1093,7 +1094,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         break;
     case 0b0010100:
         /* dispatch from rm region */
-        switch (funct3) {
+        switch (ir->rm) {
         case 0b000: /* FMIN.S */
             ir->opcode = rv_insn_fmins;
             break;
@@ -1106,7 +1107,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         break;
     case 0b1110000:
         /* dispatch from rm region */
-        switch (funct3) {
+        switch (ir->rm) {
         case 0b000: /* FMV.X.W */
             ir->opcode = rv_insn_fmvxw;
             break;
@@ -1119,7 +1120,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         break;
     case 0b1010000:
         /* dispatch from rm region */
-        switch (funct3) {
+        switch (ir->rm) {
         case 0b010: /* FEQ.S */
             ir->opcode = rv_insn_feqs;
             break;

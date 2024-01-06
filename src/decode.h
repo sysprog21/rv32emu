@@ -176,6 +176,13 @@ enum op_field {
         _(cjalr, 1, 2, 1, ENC(rs1, rs2, rd))           \
         _(cadd, 0, 2, 1, ENC(rs1, rs2, rd))            \
         _(cswsp, 0, 2, 1, ENC(rs2))                    \
+        /* RV32FC Instruction */                       \
+        IIF(RV32_HAS(EXT_F))(                          \
+            _(cflwsp, 0, 2, 1, ENC(rd))                \
+            _(cfswsp, 0, 2, 1, ENC(rs2))               \
+            _(cflw, 0, 2, 1, ENC(rs1, rd))             \
+            _(cfsw, 0, 2, 1, ENC(rs1, rs2))            \
+        )                                              \
     )
 /* clang-format on */
 

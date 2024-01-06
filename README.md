@@ -75,7 +75,7 @@ The image containing all the necessary tools for development and testing can be 
 `rv32emu` is configurable, and you can override the below variable(s) to fit your expectations:
 * `ENABLE_EXT_M`: Standard Extension for Integer Multiplication and Division
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
-* `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.F excluded)
+* `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
 * `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence

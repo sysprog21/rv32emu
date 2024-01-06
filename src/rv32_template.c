@@ -1047,7 +1047,12 @@ RVOP(
 /* MUL: Multiply */
 RVOP(
     mul,
-    { rv->X[ir->rd] = (int32_t) rv->X[ir->rs1] * (int32_t) rv->X[ir->rs2]; },
+    {
+        const int64_t multiplicand = (int32_t) rv->X[ir->rs1];
+        const int64_t multiplier = (int32_t) rv->X[ir->rs2];
+        rv->X[ir->rd] =
+            ((uint64_t) (multiplicand * multiplier)) & ((1ULL << 32) - 1);
+    },
     GEN({
         ld, S32, TMP0, X, rs1;
         ld, S32, TMP1, X, rs2;

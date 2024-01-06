@@ -101,17 +101,51 @@ static inline void set_fflag(riscv_t *rv)
     softfloat_exceptionFlags = 0;
 }
 
-static inline void set_rounding_mode(riscv_t *rv)
+static inline void set_dynamic_rounding_mode(riscv_t *rv)
 {
     uint32_t frm = (rv->csr_fcsr >> 5) & (~(1 << 3));
-    if (frm == 0b000)
+    switch (frm) {
+    case 0b000:
         softfloat_roundingMode = softfloat_round_near_even;
-    if (frm == 0b001)
+        break;
+    case 0b001:
         softfloat_roundingMode = softfloat_round_minMag;
-    if (frm == 0b010)
+        break;
+    case 0b010:
         softfloat_roundingMode = softfloat_round_min;
-    if (frm == 0b011)
+        break;
+    case 0b011:
         softfloat_roundingMode = softfloat_round_max;
-    if (frm == 0b100)
+        break;
+    case 0b100:
         softfloat_roundingMode = softfloat_round_near_maxMag;
+        break;
+    default:
+        __UNREACHABLE;
+        break;
+    }
+}
+
+static inline void set_static_rounding_mode(uint8_t rm)
+{
+    switch (rm) {
+    case 0b000:
+        softfloat_roundingMode = softfloat_round_near_even;
+        break;
+    case 0b001:
+        softfloat_roundingMode = softfloat_round_minMag;
+        break;
+    case 0b010:
+        softfloat_roundingMode = softfloat_round_min;
+        break;
+    case 0b011:
+        softfloat_roundingMode = softfloat_round_max;
+        break;
+    case 0b100:
+        softfloat_roundingMode = softfloat_round_near_maxMag;
+        break;
+    default:
+        __UNREACHABLE;
+        break;
+    }
 }

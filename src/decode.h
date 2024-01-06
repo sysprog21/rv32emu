@@ -288,6 +288,20 @@ typedef struct rv_insn {
 #if RV32_HAS(EXT_C)
     uint8_t shamt;
 #endif
+
+#if RV32_HAS(EXT_F)
+    /* Floating-point operations use either a static rounding mode encoded in
+     * the instruction, or a dynamic rounding mode held in frm. A value of 111
+     * in the instruction’s rm field selects the dynamic rounding mode held in
+     * frm. If frm is set to an invalid value (101–111), any subsequent attempt
+     * to execute a floating-point operation with a dynamic rounding mode will
+     * cause an illegal instruction trap. Some instructions that have the rm
+     * field are nevertheless unaffected by the rounding mode; they should have
+     * their rm field set to RNE (000).
+     */
+    uint8_t rm;
+#endif
+
     /* fuse operation */
     int32_t imm2;
     opcode_fuse_t *fuse;

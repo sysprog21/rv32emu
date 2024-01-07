@@ -946,6 +946,8 @@ CONSTOPT(cmv, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
+    } else {
+        info->is_constant[ir->rd] = false;
     }
 })
 

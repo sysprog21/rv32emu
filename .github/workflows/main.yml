@@ -3,7 +3,39 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  detect-code-related-file-changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      has_code_related_changes: ${{ steps.set_has_code_related_changes.outputs.has_code_related_changes }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Test changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: |
+              .ci/**
+              build/**
+              mk/**
+              src/**
+              tests/**
+              tools/**
+              .clang-format
+              Dockerfile
+              Makefile
+      - name: Set has_code_related_changes
+        id: set_has_code_related_changes
+        run: |
+          if [[ ${{ steps.changed-files.outputs.any_changed }} == true ]]; then
+            echo "has_code_related_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_code_related_changes=false" >> $GITHUB_OUTPUT
+          fi
+
   host-x64:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
@@ -39,6 +71,8 @@ jobs:
             make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
 
   host-arm64:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     runs-on: ubuntu-22.04
     steps:
     - name: checkout code
@@ -67,6 +101,8 @@ jobs:
           make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
 
   coding-style:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v4
@@ -76,3 +112,50 @@ jobs:
             .ci/check-newline.sh
             .ci/check-format.sh
       shell: bash
+  
+  compliance-test:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: install-dependencies
+      run: |
+            .ci/riscv-toolchain-install.sh
+      shell: bash
+    - name: architectural test
+      run: |
+            .ci/riscv-tests.sh
+      shell: bash
+  
+  # https://docs.docker.com/build/ci/github-actions/multi-platform/
+  docker-hub-build-and-publish:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        if: ${{ github.event_name == 'push'}}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_ACCESS_TOKEN }}
+      - name: Get short commit SHA1
+        if: ${{ github.event_name == 'push'}}
+        shell: bash
+        run: |
+          echo "short_hash=$(git rev-parse --short "$GITHUB_SHA")" >> "$GITHUB_ENV"
+      - name: Build and push
+        if: ${{ github.event_name == 'push'}}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64/v8
+          tags: sysprog21/rv32emu:latest, sysprog21/rv32emu:${{ env.short_hash }}
+

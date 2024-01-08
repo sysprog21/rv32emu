@@ -233,8 +233,7 @@ CONSTOPT(srai, {
 CONSTOPT(add, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) info->const_val[ir->rs1] +
-                  (int32_t) info->const_val[ir->rs2];
+        ir->imm = info->const_val[ir->rs1] + info->const_val[ir->rs2];
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
@@ -246,8 +245,7 @@ CONSTOPT(add, {
 CONSTOPT(sub, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) info->const_val[ir->rs1] -
-                  (int32_t) info->const_val[ir->rs2];
+        ir->imm = info->const_val[ir->rs1] - info->const_val[ir->rs2];
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
@@ -410,8 +408,9 @@ CONSTOPT(csrrci, { info->is_constant[ir->rd] = false; })
 CONSTOPT(mul, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) info->const_val[ir->rs1] *
-                  (int32_t) info->const_val[ir->rs2];
+        const int64_t multiplicand = (int32_t) info->const_val[ir->rs1];
+        const int64_t multiplier = (int32_t) info->const_val[ir->rs2];
+        ir->imm = ((uint64_t) (multiplicand * multiplier)) & ((1ULL << 32) - 1);
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];

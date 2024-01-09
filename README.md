@@ -299,10 +299,10 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 
 * [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)
 * [Writing a RISC-V Emulator in Rust](https://book.rvemu.app/)
+* [Bare metal C on my RISC-V toy CPU](https://florian.noeding.com/posts/risc-v-toy-cpu/cpu-from-scratch/)
 * [Juraj's RISC-V note](https://jborza.com/tags/riscv/)
 * [libriscv: RISC-V userspace emulator library](https://github.com/fwsGonzo/libriscv)
 * [GUI-VP: RISC-V based Virtual Prototype (VP) for graphical application development](https://github.com/ics-jku/GUI-VP)
 * [LupV: an education-friendly RISC-V based system emulator](https://gitlab.com/luplab/lupv)
-* [yutongshen/RISC-V-Simulator](https://github.com/yutongshen/RISC-V-Simulator)
 * [mini-rv32ima](https://github.com/cnlohr/mini-rv32ima) / [video: Writing a Really Tiny RISC-V Emulator](https://youtu.be/YT5vB3UqU_E)
 * [RVVM](https://github.com/LekKit/RVVM)

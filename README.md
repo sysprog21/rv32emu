@@ -68,7 +68,11 @@ The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](do
 
 ### Docker image
 
-The image containing all the necessary tools for development and testing can be executed by `docker run -it sysprog21/rv32emu:latest`. It works for both x86-64 and aarch64 (Apple's M1 chip) machines.
+The image containing the `rv32emu` binary can be run by executing `docker run -it sysprog21/rv32emu:latest`. 
+
+The image containing all the necessary development toolchains can be built by `docker build -t rv32emu-dev -f docker/Dockerfile-dev .`.
+
+It works for both x86-64 and aarch64 (Apple's M1 chip) machines.
 
 ### Customization
 

@@ -1496,14 +1496,14 @@ static void translate_chained_block(struct jit_state *state,
     offset_map_insert(state, block->pc_start);
     translate(state, rv, block);
     rv_insn_t *ir = block->ir_tail;
-    if (ir->branch_untaken && !set_has(set, ir->pc + 4)) {
-        block_t *block1 = cache_get(rv->block_cache, ir->pc + 4);
-        if (block1 && block1->translatable)
+    if (ir->branch_untaken && !set_has(set, ir->branch_untaken->pc)) {
+        block_t *block1 = cache_get(rv->block_cache, ir->branch_untaken->pc);
+        if (block1->translatable)
             translate_chained_block(state, rv, block1, set);
     }
-    if (ir->branch_taken && !set_has(set, ir->pc + ir->imm)) {
-        block_t *block1 = cache_get(rv->block_cache, ir->pc + ir->imm);
-        if (block1 && block1->translatable)
+    if (ir->branch_taken && !set_has(set, ir->branch_taken->pc)) {
+        block_t *block1 = cache_get(rv->block_cache, ir->branch_taken->pc);
+        if (block1->translatable)
             translate_chained_block(state, rv, block1, set);
     }
 }

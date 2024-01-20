@@ -27,10 +27,6 @@ static struct mpool *cache_mp;
 /* hash function for the cache */
 HASH_FUNC_IMPL(cache_hash, cache_size_bits, cache_size)
 
-struct list_head {
-    struct list_head *prev, *next;
-};
-
 struct hlist_head {
     struct hlist_node *first;
 };
@@ -57,64 +53,6 @@ typedef struct cache {
     hashtable_t *map;
     uint32_t capacity;
 } cache_t;
-
-static inline void INIT_LIST_HEAD(struct list_head *head)
-{
-    head->next = head;
-    head->prev = head;
-}
-
-static inline int list_empty(const struct list_head *head)
-{
-    return (head->next == head);
-}
-
-static inline void list_add(struct list_head *node, struct list_head *head)
-{
-    struct list_head *next = head->next;
-
-    next->prev = node;
-    node->next = next;
-    node->prev = head;
-    head->next = node;
-}
-
-static inline void list_del(struct list_head *node)
-{
-    struct list_head *next = node->next;
-    struct list_head *prev = node->prev;
-
-    next->prev = prev;
-    prev->next = next;
-}
-
-static inline void list_del_init(struct list_head *node)
-{
-    list_del(node);
-    INIT_LIST_HEAD(node);
-}
-
-#define list_entry(node, type, member) container_of(node, type, member)
-
-#define list_first_entry(head, type, member) \
-    list_entry((head)->next, type, member)
-
-#define list_last_entry(head, type, member) \
-    list_entry((head)->prev, type, member)
-
-#ifdef __HAVE_TYPEOF
-#define list_for_each_entry_safe(entry, safe, head, member)                \
-    for (entry = list_entry((head)->next, __typeof__(*entry), member),     \
-        safe = list_entry(entry->member.next, __typeof__(*entry), member); \
-         &entry->member != (head); entry = safe,                           \
-        safe = list_entry(safe->member.next, __typeof__(*entry), member))
-#else
-#define list_for_each_entry_safe(entry, safe, head, member, type) \
-    for (entry = list_entry((head)->next, type, member),          \
-        safe = list_entry(entry->member.next, type, member);      \
-         &entry->member != (head);                                \
-         entry = safe, safe = list_entry(safe->member.next, type, member))
-#endif
 
 #define INIT_HLIST_HEAD(ptr) ((ptr)->first = NULL)
 

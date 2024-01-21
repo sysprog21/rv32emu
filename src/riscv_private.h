@@ -12,6 +12,7 @@
 #endif
 #include "decode.h"
 #include "riscv.h"
+#include "utils.h"
 #if RV32_HAS(JIT)
 #include "cache.h"
 #endif
@@ -59,7 +60,6 @@ enum {
 typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompased */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
-    struct block *predict;     /**< block prediction */
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
     bool backward;
@@ -68,8 +68,16 @@ typedef struct block {
     uint32_t offset;
     bool
         translatable; /**< Determine the block has RV32AF insturctions or not */
+    struct list_head list;
 #endif
 } block_t;
+
+#if RV32_HAS(JIT)
+typedef struct {
+    block_t *block;
+    struct list_head list;
+} chain_entry_t;
+#endif
 
 typedef struct {
     uint32_t block_capacity; /**< max number of entries in the block map */
@@ -117,6 +125,7 @@ struct riscv_internal {
     block_map_t block_map; /**< basic block map */
 #else
     struct cache *block_cache;
+    struct mpool *chain_entry_mp;
 #endif
     struct mpool *block_mp, *block_ir_mp;
     /* print exit code on syscall_exit */

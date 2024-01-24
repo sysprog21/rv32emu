@@ -449,7 +449,10 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
 
     /* decode I-type */
     decode_itype(ir, insn);
-
+    int a0,a1,a2;
+    a0 = ir->rd;
+    a1 = ir->rs1;
+    a2 = ir->imm;
     /* nop can be implemented as "addi x0, x0, 0".
      * Any integer computational instruction writing into "x0" is NOP.
      */
@@ -462,6 +465,17 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
     switch (decode_funct3(insn)) {
     case 0: /* ADDI: Add Immediate */
         ir->opcode = rv_insn_addi;
+        if(a0==12 && a1==12){ir->opcode = rv_insn_addi012012;}
+        else if(a0==13 && a1==13){ir->opcode = rv_insn_addi013013;}
+        else if(a0==13 && a1==8){ir->opcode = rv_insn_addi01308;}
+        else if(a0==14 && a1==14){ir->opcode = rv_insn_addi014014;}
+        else if(a0==15 && a1==12){ir->opcode = rv_insn_addi015012;}
+        else if(a0==15 && a1==15){ir->opcode = rv_insn_addi015015;}
+        else if(a0==8 && a1==14){ir->opcode = rv_insn_addi08014;}
+        else if(a2==0){ir->opcode = rv_insn_mv;}
+        else if(a1==0){ir->opcode = rv_insn_li;}
+        else if(a0==a1 && a2==1){ir->opcode = rv_insn_inc;}
+        else if(a0==a1 && a2==-1){ir->opcode = rv_insn_dec;}
         break;
     case 1: /* SLLI: Shift Left Logical */
         ir->opcode = rv_insn_slli;
@@ -721,14 +735,28 @@ static inline bool op_branch(rv_insn_t *ir, const uint32_t insn)
 
     /* decode B-type */
     decode_btype(ir, insn);
+    int a1,a2;
+    a1 = ir->rs1;
+    a2 = ir->rs2;
 
     /* dispatch from funct3 field */
     switch (decode_funct3(insn)) {
     case 0: /* BEQ: Branch if Equal */
         ir->opcode = rv_insn_beq;
+        if(a1==14 && a2==0){ir->opcode = rv_insn_beq01400;}
+        else if(a1==14 && a2==10){ir->opcode = rv_insn_beq014010;}
+        else if(a1==14 && a2==13){ir->opcode = rv_insn_beq014013;}
+        else if(a1==15 && a2==0){ir->opcode = rv_insn_beq01500;}
+        else if(a1==15 && a2==14){ir->opcode = rv_insn_beq015014;}
+        else if(a1==8 && a2==0){ir->opcode = rv_insn_beq0800;}
         break;
     case 1: /* BNE: Branch if Not Equal */
         ir->opcode = rv_insn_bne;
+        if(a1==14 && a2==0){ir->opcode = rv_insn_bne01400;}
+        else if(a1==14 && a2==13){ir->opcode = rv_insn_bne014013;}
+        else if(a1==14 && a2==23){ir->opcode = rv_insn_bne014023;}
+        else if(a1==15 && a2==13){ir->opcode = rv_insn_bne015013;}
+        else if(a1==25 && a2==14){ir->opcode = rv_insn_bne025014;}  
         break;
     case 4: /* BLT: Branch if Less Than */
         ir->opcode = rv_insn_blt;

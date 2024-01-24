@@ -285,6 +285,55 @@ RVOP(
     rv->PC = PC;                                                             \
     return true;
 
+
+#define BRANCH_FUNC_SPEC(type, cond, rs1, rs2)                                              \
+    IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                         \
+    if (BRANCH_COND(type, rv->X[rs1], rv->X[rs2], cond)) {           \
+        is_branch_taken = false;                                             \
+        struct rv_insn *untaken = ir->branch_untaken;                        \
+        if (!untaken)                                                        \
+            goto nextop;                                                     \
+        IIF(RV32_HAS(JIT))                                                   \
+        ({                                                                   \
+            block_t *block = cache_get(rv->block_cache, PC + 4);             \
+            if (!block) {                                                    \
+                ir->branch_untaken = NULL;                                   \
+                goto nextop;                                                 \
+            }                                                                \
+            untaken = ir->branch_untaken = block->ir_head;                   \
+            if (cache_hot(rv->block_cache, PC + 4))                          \
+                goto nextop;                                                 \
+        }, );                                                                \
+        PC += 4;                                                             \
+        last_pc = PC;                                                        \
+        MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);              \
+    }                                                                        \
+    is_branch_taken = true;                                                  \
+    PC += ir->imm;                                                           \
+    /* check instruction misaligned */                                       \
+    IIF(RV32_HAS(EXT_C))                                                     \
+    (, RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);) struct rv_insn *taken = \
+        ir->branch_taken;                                                    \
+    if (taken) {                                                             \
+        IIF(RV32_HAS(JIT))                                                   \
+        ({                                                                   \
+            block_t *block = cache_get(rv->block_cache, PC);                 \
+            if (!block) {                                                    \
+                ir->branch_taken = NULL;                                     \
+                goto end_insn;                                               \
+            }                                                                \
+            taken = ir->branch_taken = block->ir_head;                       \
+            if (cache_hot(rv->block_cache, PC))                              \
+                goto end_insn;                                               \
+        }, );                                                                \
+        last_pc = PC;                                                        \
+        MUST_TAIL return taken->impl(rv, taken, cycle, PC);                  \
+    }                                                                        \
+    end_insn:                                                                \
+    rv->csr_cycle = cycle;                                                   \
+    rv->PC = PC;                                                             \
+    return true;
+
 /* In RV32I and RV64I, if the branch is taken, set pc = pc + offset, where
  * offset is a multiple of two; else do nothing. The offset is 13 bits long.
  *
@@ -326,6 +375,13 @@ RVOP(
         exit;
     }))
 
+RVOP(beq01400,{ BRANCH_FUNC_SPEC(uint32_t, !=, 14 ,0); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(beq014010,{ BRANCH_FUNC_SPEC(uint32_t, !=, 14 ,10); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(beq014013,{ BRANCH_FUNC_SPEC(uint32_t, !=, 14 ,13); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(beq01500,{ BRANCH_FUNC_SPEC(uint32_t, !=, 15 ,0); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(beq015014,{ BRANCH_FUNC_SPEC(uint32_t, !=, 15 ,14); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(beq0800,{ BRANCH_FUNC_SPEC(uint32_t, !=, 8 ,0); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+
 /* BNE: Branch if Not Equal */
 RVOP(
     bne,
@@ -350,6 +406,12 @@ RVOP(
         st, S32, TMP0, PC;
         exit;
     }))
+
+RVOP(bne01400,{ BRANCH_FUNC_SPEC(uint32_t, ==, 14 ,0); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(bne014013,{ BRANCH_FUNC_SPEC(uint32_t, ==, 14 ,13); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(bne014023,{ BRANCH_FUNC_SPEC(uint32_t, ==, 14 ,23); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(bne015013,{ BRANCH_FUNC_SPEC(uint32_t, ==, 15 ,13); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+RVOP(bne025014,{ BRANCH_FUNC_SPEC(uint32_t, ==, 25 ,14); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
 
 /* BLT: Branch if Less Than */
 RVOP(
@@ -604,6 +666,18 @@ RVOP(
         alu32_imm, 32, 0x81, 0, TMP0, imm;
         st, S32, TMP0, X, rd;
     }))
+
+RVOP(addi012012,{rv->X[12] = (int32_t) (rv->X[12]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(addi013013,{rv->X[13] = (int32_t) (rv->X[13]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(addi01308,{rv->X[13] = (int32_t) (rv->X[8]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(addi014014,{rv->X[14] = (int32_t) (rv->X[14]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(addi015012,{rv->X[15] = (int32_t) (rv->X[12]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(addi015015,{rv->X[15] = (int32_t) (rv->X[15]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(addi08014,{rv->X[8] = (int32_t) (rv->X[14]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(li,{rv->X[ir->rd] = (ir->imm);},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(mv,{rv->X[ir->rd] = rv->X[ir->rs1];},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
+RVOP(inc,{ rv->X[ir->rd] = rv->X[ir->rs1] + 1; },GEN({ld, S32, TMP0, X, rs1;alu32_imm, 32, 0x81, 0, TMP0, imm;st, S32, TMP0, X, rd;}))
+RVOP(dec,{ rv->X[ir->rd] = rv->X[ir->rs1] -1; },GEN({ld, S32, TMP0, X, rs1;alu32_imm, 32, 0x81, 0, TMP0, imm;st, S32, TMP0, X, rd;}))
 
 /* SLTI place the value 1 in register rd if register rs1 is less than the
  * signextended immediate when both are treated as signed numbers, else 0 is

@@ -60,13 +60,36 @@ CONSTOPT(jalr, {
         ir->opcode = rv_insn_jal;                                   \
         ir->impl = dispatch_table[ir->opcode];                      \
     }
+
+#define OPT_BRANCH_FUNC_SPEC(type, cond, rs1, rs2)                                 \
+    if (info->is_constant[rs1] && info->is_constant[rs2]) { \
+        if ((type) info->const_val[rs1] cond                    \
+            (type) info->const_val[rs2])                        \
+            ir->imm = 4;                                            \
+        ir->opcode = rv_insn_jal;                                   \
+        ir->impl = dispatch_table[ir->opcode];                      \
+    }
+
 /* clang-format on */
 
 /* BEQ: Branch if Equal */
 CONSTOPT(beq, { OPT_BRANCH_FUNC(uint32_t, !=); })
 
+CONSTOPT(beq01400, { OPT_BRANCH_FUNC_SPEC(uint32_t, !=, 14, 0); })
+CONSTOPT(beq014010, { OPT_BRANCH_FUNC_SPEC(uint32_t, !=, 14, 10); })
+CONSTOPT(beq014013, { OPT_BRANCH_FUNC_SPEC(uint32_t, !=, 14, 13); })
+CONSTOPT(beq01500, { OPT_BRANCH_FUNC_SPEC(uint32_t, !=, 15, 0); })
+CONSTOPT(beq015014, { OPT_BRANCH_FUNC_SPEC(uint32_t, !=, 15, 14); })
+CONSTOPT(beq0800, { OPT_BRANCH_FUNC_SPEC(uint32_t, !=, 8, 0); })
+
 /* BNE: Branch if Not Equal */
 CONSTOPT(bne, { OPT_BRANCH_FUNC(uint32_t, ==); })
+
+CONSTOPT(bne01400, { OPT_BRANCH_FUNC_SPEC(uint32_t, ==, 14, 0); })
+CONSTOPT(bne014013, { OPT_BRANCH_FUNC_SPEC(uint32_t, ==, 14, 13); })
+CONSTOPT(bne014023, { OPT_BRANCH_FUNC_SPEC(uint32_t, ==, 14, 23); })
+CONSTOPT(bne015013, { OPT_BRANCH_FUNC_SPEC(uint32_t, ==, 15, 13); })
+CONSTOPT(bne025014, { OPT_BRANCH_FUNC_SPEC(uint32_t, ==, 25, 14); })
 
 /* BLT: Branch if Less Than */
 CONSTOPT(blt, { OPT_BRANCH_FUNC(int32_t, >=); })
@@ -119,6 +142,18 @@ CONSTOPT(addi, {
     } else
         info->is_constant[ir->rd] = false;
 })
+
+CONSTOPT(addi012012, {if (info->is_constant[12]) {ir->imm += info->const_val[12];info->is_constant[12] = true;info->const_val[12] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[12] = false;}	})
+CONSTOPT(addi013013, {if (info->is_constant[13]) {ir->imm += info->const_val[13];info->is_constant[13] = true;info->const_val[13] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[13] = false;}	})
+CONSTOPT(addi01308, {if (info->is_constant[8]) {ir->imm += info->const_val[8];info->is_constant[13] = true;info->const_val[13] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[13] = false;}	})
+CONSTOPT(addi014014, {if (info->is_constant[14]) {ir->imm += info->const_val[14];info->is_constant[14] = true;info->const_val[14] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[14] = false;}	})
+CONSTOPT(addi015012, {if (info->is_constant[12]) {ir->imm += info->const_val[12];info->is_constant[15] = true;info->const_val[15] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[15] = false;}	})
+CONSTOPT(addi015015, {if (info->is_constant[15]) {ir->imm += info->const_val[15];info->is_constant[15] = true;info->const_val[15] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[15] = false;}	})
+CONSTOPT(addi08014, {if (info->is_constant[14]) {ir->imm += info->const_val[14];info->is_constant[8] = true;info->const_val[8] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[8] = false;}	})
+CONSTOPT(mv, {if (info->is_constant[ir->rs1]) {ir->imm += info->const_val[ir->rs1];info->is_constant[ir->rd] = true;info->const_val[ir->rd] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[ir->rd] = false;}})
+CONSTOPT(li, {if (info->is_constant[ir->rs1]) {ir->imm += info->const_val[ir->rs1];info->is_constant[ir->rd] = true;info->const_val[ir->rd] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[ir->rd] = false;}})
+CONSTOPT(inc, {if (info->is_constant[ir->rs1]) {ir->imm += info->const_val[ir->rs1];info->is_constant[ir->rd] = true;info->const_val[ir->rd] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[ir->rd] = false;}})
+CONSTOPT(dec, {if (info->is_constant[ir->rs1]) {ir->imm += info->const_val[ir->rs1];info->is_constant[ir->rd] = true;info->const_val[ir->rd] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[ir->rd] = false;}})
 
 /* SLTI place the value 1 in register rd if register rs1 is less than the
  * signextended immediate when both are treated as signed numbers, else 0 is

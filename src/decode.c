@@ -449,10 +449,10 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
 
     /* decode I-type */
     decode_itype(ir, insn);
-    int a0,a1,a2;
-    a0 = ir->rd;
-    a1 = ir->rs1;
-    a2 = ir->imm;
+    int rd,rs1,imm;
+    rd = ir->rd;
+    rs1 = ir->rs1;
+    imm = ir->imm;
     /* nop can be implemented as "addi x0, x0, 0".
      * Any integer computational instruction writing into "x0" is NOP.
      */
@@ -465,24 +465,24 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
     switch (decode_funct3(insn)) {
     case 0: /* ADDI: Add Immediate */
         ir->opcode = rv_insn_addi;
-        if(a0==10 && a1==10){ir->opcode = rv_insn_addi010010;}
-        else if(a0==10 && a1==2){ir->opcode = rv_insn_addi01002;}
-        else if(a0==11 && a1==10){ir->opcode = rv_insn_addi011010;}
-        else if(a0==11 && a1==11){ir->opcode = rv_insn_addi011011;}
-        else if(a0==11 && a1==2){ir->opcode = rv_insn_addi01102;}
-        else if(a0==14 && a1==11){ir->opcode = rv_insn_addi014011;}
-        else if(a0==19 && a1==19){ir->opcode = rv_insn_addi019019;}
-        else if(a0==2 && a1==2){ir->opcode = rv_insn_addi0202;}
-        else if(a0==12 && a1==12){ir->opcode = rv_insn_addi012012;}
-        else if(a0==13 && a1==13){ir->opcode = rv_insn_addi013013;}
-        else if(a0==13 && a1==8){ir->opcode = rv_insn_addi01308;}
-        else if(a0==14 && a1==14){ir->opcode = rv_insn_addi014014;}
-        else if(a0==15 && a1==15){ir->opcode = rv_insn_addi015015;}
-        else if(a0==8 && a1==14){ir->opcode = rv_insn_addi08014;}
-        else if(a2==0){ir->opcode = rv_insn_mv;}
-        else if(a1==0){ir->opcode = rv_insn_li;}
-        else if(a0==a1 && a2==1){ir->opcode = rv_insn_inc;}
-        else if(a0==a1 && a2==-1){ir->opcode = rv_insn_dec;}
+        if(rd==10 && rs1==10){ir->opcode = rv_insn_addi010010;}
+        else if(rd==10 && rs1==2){ir->opcode = rv_insn_addi01002;}
+        else if(rd==11 && rs1==10){ir->opcode = rv_insn_addi011010;}
+        else if(rd==11 && rs1==11){ir->opcode = rv_insn_addi011011;}
+        else if(rd==11 && rs1==2){ir->opcode = rv_insn_addi01102;}
+        else if(rd==14 && rs1==11){ir->opcode = rv_insn_addi014011;}
+        else if(rd==19 && rs1==19){ir->opcode = rv_insn_addi019019;}
+        else if(rd==2 && rs1==2){ir->opcode = rv_insn_addi0202;}
+        else if(rd==12 && rs1==12){ir->opcode = rv_insn_addi012012;}
+        else if(rd==13 && rs1==13){ir->opcode = rv_insn_addi013013;}
+        else if(rd==13 && rs1==8){ir->opcode = rv_insn_addi01308;}
+        else if(rd==14 && rs1==14){ir->opcode = rv_insn_addi014014;}
+        else if(rd==15 && rs1==15){ir->opcode = rv_insn_addi015015;}
+        else if(rd==8 && rs1==14){ir->opcode = rv_insn_addi08014;}
+        else if(imm==0){ir->opcode = rv_insn_mv;}
+        else if(rs1==0){ir->opcode = rv_insn_li;}
+        else if(rd==rs1 && imm==1){ir->opcode = rv_insn_inc;}
+        else if(rd==rs1 && imm==-1){ir->opcode = rv_insn_dec;}
         break;
     case 1: /* SLLI: Shift Left Logical */
         ir->opcode = rv_insn_slli;

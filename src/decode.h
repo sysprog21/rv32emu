@@ -81,28 +81,24 @@ enum op_field {
     _(hret, 0, 4, 0, ENC(rs1, rd))                     \
     _(mret, 1, 4, 0, ENC(rs1, rd))                     \
     /* RISC-V Specialized Instruction */                \
+    _(addi010010, 0, 4, 1, ENC(rs1, rd))                     \
+    _(addi01002, 0, 4, 1, ENC(rs1, rd))                     \
+    _(addi011010, 0, 4, 1, ENC(rs1, rd))                     \
+    _(addi011011, 0, 4, 1, ENC(rs1, rd))                     \
+    _(addi01102, 0, 4, 1, ENC(rs1, rd))                     \
+    _(addi014011, 0, 4, 1, ENC(rs1, rd))                     \
+    _(addi019019, 0, 4, 1, ENC(rs1, rd))                     \
+    _(addi0202, 0, 4, 1, ENC(rs1, rd))                     \
     _(addi012012, 0, 4, 1, ENC(rs1, rd))                     \
     _(addi013013, 0, 4, 1, ENC(rs1, rd))                     \
     _(addi01308, 0, 4, 1, ENC(rs1, rd))                     \
     _(addi014014, 0, 4, 1, ENC(rs1, rd))                     \
-    _(addi015012, 0, 4, 1, ENC(rs1, rd))                     \
     _(addi015015, 0, 4, 1, ENC(rs1, rd))                     \
     _(addi08014, 0, 4, 1, ENC(rs1, rd))                     \
     _(mv, 0, 4, 1, ENC(rs1, rd))                     \
     _(li, 0, 4, 1, ENC(rs1, rd))                     \
     _(inc, 0, 4, 1, ENC(rs1, rd))                     \
     _(dec, 0, 4, 1, ENC(rs1, rd))                     \
-    _(beq01400, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(beq014010, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(beq014013, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(beq01500, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(beq015014, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(beq0800, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(bne01400, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(bne014013, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(bne014023, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(bne015013, 1, 4, 1, ENC(rs1, rs2))                     \
-    _(bne025014, 1, 4, 1, ENC(rs1, rs2))                     \
     /* RV32 Zifencei Standard Extension */             \
     IIF(RV32_HAS(Zifencei))(                           \
         _(fencei, 1, 4, 0, ENC(rs1, rd))               \

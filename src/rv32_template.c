@@ -614,7 +614,6 @@ RVOP(addi01102,{rv->X[11] = (int32_t) (rv->X[2]) + ir->imm;},X64({ld, S32, RAX, 
 RVOP(addi014011,{rv->X[14] = (int32_t) (rv->X[11]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
 RVOP(addi019019,{rv->X[19] = (int32_t) (rv->X[19]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
 RVOP(addi0202,{rv->X[2] = (int32_t) (rv->X[2]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
-
 RVOP(addi012012,{rv->X[12] = (int32_t) (rv->X[12]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
 RVOP(addi013013,{rv->X[13] = (int32_t) (rv->X[13]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))
 RVOP(addi01308,{rv->X[13] = (int32_t) (rv->X[8]) + ir->imm;},X64({ld, S32, RAX, X, rs1;alu32_imm, 32, 0x81, 0, RAX, imm;st, S32, RAX, X, rd;}))

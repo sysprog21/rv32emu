@@ -129,7 +129,6 @@ CONSTOPT(addi01102, {if (info->is_constant[2]) {ir->imm += info->const_val[2];in
 CONSTOPT(addi014011, {if (info->is_constant[11]) {ir->imm += info->const_val[11];info->is_constant[14] = true;info->const_val[14] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[14] = false;}	})
 CONSTOPT(addi019019, {if (info->is_constant[19]) {ir->imm += info->const_val[19];info->is_constant[19] = true;info->const_val[19] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[19] = false;}	})
 CONSTOPT(addi0202, {if (info->is_constant[2]) {ir->imm += info->const_val[2];info->is_constant[2] = true;info->const_val[2] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[2] = false;}	})
-
 CONSTOPT(addi012012, {if (info->is_constant[12]) {ir->imm += info->const_val[12];info->is_constant[12] = true;info->const_val[12] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[12] = false;}	})
 CONSTOPT(addi013013, {if (info->is_constant[13]) {ir->imm += info->const_val[13];info->is_constant[13] = true;info->const_val[13] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[13] = false;}	})
 CONSTOPT(addi01308, {if (info->is_constant[8]) {ir->imm += info->const_val[8];info->is_constant[13] = true;info->const_val[13] = ir->imm;ir->opcode = rv_insn_lui;ir->impl = dispatch_table[ir->opcode];} else{info->is_constant[13] = false;}	})

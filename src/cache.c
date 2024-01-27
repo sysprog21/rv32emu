@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -273,5 +274,17 @@ bool cache_hot(const struct cache *cache, uint32_t key)
             return true;
     }
     return false;
+}
+void cache_profile(const struct cache *cache,
+                   FILE *output_file,
+                   prof_func_t func)
+{
+    assert(func);
+    for (int i = 0; i < THRESHOLD; i++) {
+        lfu_entry_t *entry, *safe;
+        list_for_each_entry_safe (entry, safe, cache->lists[i], list) {
+            func(entry->value, entry->frequency, output_file);
+        }
+    }
 }
 #endif

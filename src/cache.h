@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 /* Currently, THRESHOLD is set to identify hot spots. Once the using frequency
  * for a block exceeds the THRESHOLD, the tier-1 JIT compiler process is
@@ -55,6 +56,11 @@ void cache_free(struct cache *cache);
  * @key: the key of the specified entry
  */
 bool cache_hot(const struct cache *cache, uint32_t key);
+
+typedef void (*prof_func_t)(void *, uint32_t, FILE *);
+void cache_profile(const struct cache *cache,
+                   FILE *output_file,
+                   prof_func_t func);
 #endif
 
 uint32_t cache_freq(const struct cache *cache, uint32_t key);

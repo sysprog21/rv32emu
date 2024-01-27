@@ -37,10 +37,14 @@ static const char *opt_prog_name = "a.out";
 /* target argc and argv */
 static int prog_argc;
 static char **prog_args;
-static const char *optstr = "tgqmhd:a:";
+static const char *optstr = "tgqmhpd:a:";
 
 /* enable misaligned memory access */
 static bool opt_misaligned = false;
+
+/* dump profiling data */
+static bool opt_prof_data = false;
+static char *prof_out_file;
 
 #define MEMIO(op) on_mem_##op
 #define IO_HANDLER_IMPL(type, op, RW)                                     \
@@ -108,6 +112,7 @@ static void print_usage(const char *filename)
             "  -a [filename] : dump signature to the given file, "
             "required by arch-test test\n"
             "  -m : enable misaligned memory access\n"
+            "  -p : generate profiling data\n"
             "  -h : show this message\n",
             filename);
 }
@@ -137,6 +142,9 @@ static bool parse_args(int argc, char **args)
         case 'm':
             opt_misaligned = true;
             break;
+        case 'p':
+            opt_prof_data = true;
+            break;
         case 'd':
             opt_dump_regs = true;
             registers_out_file = optarg;
@@ -158,6 +166,12 @@ static bool parse_args(int argc, char **args)
      */
     prog_args = &args[optind];
     opt_prog_name = prog_args[0];
+    if (opt_prof_data) {
+        char *prog_name = malloc(strlen(opt_prog_name) - 11);
+        strncpy(prog_name, opt_prog_name + 8, strlen(opt_prog_name) - 12);
+        prof_out_file = malloc(strlen(opt_prog_name) + 1);
+        sprintf(prof_out_file, "./prof/%s.prof", prog_name);
+    }
     return true;
 }
 
@@ -264,6 +278,8 @@ int main(int argc, char **args)
     if (opt_arch_test)
         dump_test_signature(elf);
 
+    if (opt_prof_data)
+        rv_profile(rv, prof_out_file);
     /* finalize the RISC-V runtime */
     elf_delete(elf);
     rv_delete(rv);

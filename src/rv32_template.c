@@ -150,7 +150,7 @@ RVOP(
 #if RV32_HAS(JIT)
             cache_get(rv->block_cache, PC, true);
             if (!set_add(&pc_set, PC))
-                loop = true;
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -251,7 +251,7 @@ RVOP(
         ({                                                                   \
             cache_get(rv->block_cache, PC + 4, true);                        \
             if (!set_add(&pc_set, PC + 4))                                   \
-                loop = true;                                                 \
+                has_loops = true;                                            \
             if (cache_hot(rv->block_cache, PC + 4))                          \
                 goto nextop;                                                 \
         }, );                                                                \
@@ -270,7 +270,7 @@ RVOP(
         ({                                                                   \
             cache_get(rv->block_cache, PC, true);                            \
             if (!set_add(&pc_set, PC))                                       \
-                loop = true;                                                 \
+                has_loops = true;                                            \
             if (cache_hot(rv->block_cache, PC))                              \
                 goto end_insn;                                               \
         }, );                                                                \
@@ -1857,7 +1857,7 @@ RVOP(
 #if RV32_HAS(JIT)
             cache_get(rv->block_cache, PC, true);
             if (!set_add(&pc_set, PC))
-                loop = true;
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2020,7 +2020,7 @@ RVOP(
 #if RV32_HAS(JIT)
             cache_get(rv->block_cache, PC, true);
             if (!set_add(&pc_set, PC))
-                loop = true;
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2055,7 +2055,7 @@ RVOP(
 #if RV32_HAS(JIT)
             cache_get(rv->block_cache, PC + 2, true);
             if (!set_add(&pc_set, PC + 2))
-                loop = true;
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC + 2))
                 goto nextop;
 #endif
@@ -2070,7 +2070,7 @@ RVOP(
 #if RV32_HAS(JIT)
             cache_get(rv->block_cache, PC, true);
             if (!set_add(&pc_set, PC))
-                loop = true;
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2114,7 +2114,7 @@ RVOP(
 #if RV32_HAS(JIT)
             cache_get(rv->block_cache, PC + 2, true);
             if (!set_add(&pc_set, PC + 2))
-                loop = true;
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC + 2))
                 goto nextop;
 #endif
@@ -2129,7 +2129,7 @@ RVOP(
 #if RV32_HAS(JIT)
             cache_get(rv->block_cache, PC, true);
             if (!set_add(&pc_set, PC))
-                loop = true;
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif

@@ -305,7 +305,7 @@ static block_t *block_alloc(riscv_t *rv)
     block->translatable = true;
     block->hot = false;
     block->backward = false;
-    block->loop = false;
+    block->has_loops = false;
     INIT_LIST_HEAD(&block->list);
 #endif
     return block;
@@ -386,7 +386,7 @@ static uint32_t last_pc = 0;
 
 #if RV32_HAS(JIT)
 static set_t pc_set;
-static bool loop = false;
+static bool has_loops = false;
 #endif
 
 /* Interpreter-based execution path */
@@ -634,8 +634,10 @@ static void block_translate(riscv_t *rv, block_t *block)
 #endif
         /* stop on branch */
         if (insn_is_branch(ir->opcode)) {
+#if RV32_HAS(JIT)
             if (ir->imm < 0)
                 block->backward = true;
+#endif
             if (ir->opcode == rv_insn_jalr
 #if RV32_HAS(EXT_C)
                 || ir->opcode == rv_insn_cjalr || ir->opcode == rv_insn_cjr
@@ -1054,10 +1056,10 @@ static bool runtime_profiler(riscv_t *rv, block_t *block)
     uint32_t freq = cache_freq(rv->block_cache, block->pc_start);
     /* to profile the block after chaining, the block should be executed first
      */
-    if (freq >= 2 && (block->backward || block->loop))
+    if (unlikely(freq >= 2 && (block->backward || block->has_loops)))
         return true;
     /* using frequency exceeds predetermined threshold */
-    if (freq == THRESHOLD)
+    if (unlikely(freq == THRESHOLD))
         return true;
     return false;
 }
@@ -1148,7 +1150,7 @@ void rv_step(riscv_t *rv, int32_t cycles)
             continue;
         }
         set_reset(&pc_set);
-        loop = false;
+        has_loops = false;
 #endif
         /* execute the block by interpreter */
         const rv_insn_t *ir = block->ir_head;
@@ -1158,8 +1160,8 @@ void rv_step(riscv_t *rv, int32_t cycles)
             break;
         }
 #if RV32_HAS(JIT)
-        if (loop && !block->loop)
-            block->loop = true;
+        if (has_loops && !block->has_loops)
+            block->has_loops = true;
 #endif
         prev = block;
     }

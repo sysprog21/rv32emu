@@ -231,7 +231,9 @@ For example, if you want to read the register x10 (a0), then run the following c
 $ build/rv32emu -d - -q out.elf | jq .x10
 ```
 
-## RISC-V Instructions/Registers Usage Statistics
+## Usage Statistics
+
+### RISC-V Instructions/Registers
 
 This is a static analysis tool for assessing the usage of RV32 instructions/registers
 in a given target program.
@@ -255,21 +257,27 @@ _Example Instructions Histogram_
 _Example Registers Histogram_
 ![Registers Hisrogram Example](docs/histogram-reg.png)
 
-## RISC-V Basic Block Usage Statistics
+### Basic Block
 
-To install [lolviz](https://github.com/parrt/lolviz)
+To install [lolviz](https://github.com/parrt/lolviz), use the following command:
 ```shell
 $ pip install lolviz
 ```
-For macOS users, installing might be required:
+
+For macOS users, it might be necessary to install additional dependencies:
 ```shell
 $ brew install graphviz
 ```
-First, user need to crate the directory `prof` and build profiling data through executing `rv32emu`
 
+First, users need to create a directory named prof and then build the profiling data by executing `rv32emu`.
+This can be done as follows:
 ```shell
-$ ./build/rv32emu -p ./build/[test_program].elf
-$ ./tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
+$ build/rv32emu -p build/[test_program].elf
+```
+
+To analyze the profiling data, use the `rv_profiler` tool with the desired options:
+```shell
+$ tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
 ```
 
 ## Contributing

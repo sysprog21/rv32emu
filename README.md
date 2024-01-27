@@ -255,6 +255,23 @@ _Example Instructions Histogram_
 _Example Registers Histogram_
 ![Registers Hisrogram Example](docs/histogram-reg.png)
 
+## RISC-V Basic Block Usage Statistics
+
+To install [lolviz](https://github.com/parrt/lolviz)
+```shell
+$ pip install lolviz
+```
+For macOS users, installing might be required:
+```shell
+$ brew install graphviz
+```
+First, user need to crate the directory `prof` and build profiling data through executing `rv32emu`
+
+```shell
+$ ./build/rv32emu -p ./build/[test_program].elf
+$ ./tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.

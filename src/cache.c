@@ -6,20 +6,13 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "cache.h"
 #include "mpool.h"
 #include "utils.h"
-
-/* Currently, THRESHOLD is set to identify hot spots. Once the using frequency
- * for a block exceeds the THRESHOLD, the tier-1 JIT compiler process is
- * triggered.
- * FIXME: Implement effective  profiler to detect hot spots, instead of simply
- * relying on THRESHOLD.
- */
-#define THRESHOLD 4096
 
 static uint32_t cache_size, cache_size_bits;
 static struct mpool *cache_mp;
@@ -166,7 +159,7 @@ free_lists:
     return NULL;
 }
 
-void *cache_get(const cache_t *cache, uint32_t key)
+void *cache_get(const cache_t *cache, uint32_t key, bool update)
 {
     if (!cache->capacity ||
         hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
@@ -192,7 +185,7 @@ void *cache_get(const cache_t *cache, uint32_t key)
      * code. The generated C code is then compiled into machine code by the
      * target compiler.
      */
-    if (entry->frequency < THRESHOLD) {
+    if (update && entry->frequency < THRESHOLD) {
         list_del_init(&entry->list);
         list_add(&entry->list, cache->lists[entry->frequency++]);
     }
@@ -242,7 +235,7 @@ void cache_free(cache_t *cache)
     free(cache);
 }
 
-uint32_t cache_freq(struct cache *cache, uint32_t key)
+uint32_t cache_freq(const struct cache *cache, uint32_t key)
 {
     if (!cache->capacity ||
         hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
@@ -281,5 +274,17 @@ bool cache_hot(const struct cache *cache, uint32_t key)
             return true;
     }
     return false;
+}
+void cache_profile(const struct cache *cache,
+                   FILE *output_file,
+                   prof_func_t func)
+{
+    assert(func);
+    for (int i = 0; i < THRESHOLD; i++) {
+        lfu_entry_t *entry, *safe;
+        list_for_each_entry_safe (entry, safe, cache->lists[i], list) {
+            func(entry->value, entry->frequency, output_file);
+        }
+    }
 }
 #endif

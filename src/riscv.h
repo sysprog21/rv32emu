@@ -227,6 +227,8 @@ state_t *state_new(void);
 /* delete a state */
 void state_delete(state_t *s);
 
+void rv_profile(riscv_t *rv, char *out_file_path);
+
 #ifdef __cplusplus
 };
 #endif

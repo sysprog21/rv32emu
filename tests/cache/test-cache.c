@@ -25,7 +25,7 @@ static void split(char **arr, char *str, const char *del)
 
 /* Commands of test-cache
  * 1. NEW: cache_create(8), the cache size is set to 256.
- * 2. GET key: cache_get(cache, key)
+ * 2. GET key: cache_get(cache, key, true)
  * 3. PUT key val: cache_put(cache, key, val)
  * 4. FREE: cache_free(cache, free)
  */
@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
         split(arr, line, " ");
         if (!strcmp(arr[0], "GET")) {
             key = (int) strtol(arr[1], &ptr, 10);
-            ans = cache_get(cache, key);
+            ans = cache_get(cache, key, true);
             print_value(ans);
         } else if (!strcmp(arr[0], "PUT")) {
             key = (int) strtol(arr[1], &ptr, 10);

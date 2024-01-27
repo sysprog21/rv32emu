@@ -164,3 +164,43 @@ char *sanitize_path(const char *input)
 
     return ret;
 }
+
+HASH_FUNC_IMPL(set_hash, SET_SIZE_BITS, 1 << SET_SIZE_BITS);
+
+void set_reset(set_t *set)
+{
+    memset(set, 0, sizeof(set_t));
+}
+
+/**
+ * set_add - insert a new element into the set
+ * @set: a pointer points to target set
+ * @key: the key of the inserted entry
+ */
+bool set_add(set_t *set, uint32_t key)
+{
+    const uint32_t index = set_hash(key);
+    uint8_t count = 0;
+    while (set->table[index][count]) {
+        if (set->table[index][count++] == key)
+            return false;
+    }
+
+    set->table[index][count] = key;
+    return true;
+}
+
+/**
+ * set_has - check whether the element exist in the set or not
+ * @set: a pointer points to target set
+ * @key: the key of the inserted entry
+ */
+bool set_has(set_t *set, uint32_t key)
+{
+    const uint32_t index = set_hash(key);
+    for (uint8_t count = 0; set->table[index][count]; count++) {
+        if (set->table[index][count] == key)
+            return true;
+    }
+    return false;
+}

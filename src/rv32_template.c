@@ -148,6 +148,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -246,12 +249,9 @@ RVOP(
             goto nextop;                                                     \
         IIF(RV32_HAS(JIT))                                                   \
         ({                                                                   \
-            block_t *block = cache_get(rv->block_cache, PC + 4);             \
-            if (!block) {                                                    \
-                ir->branch_untaken = NULL;                                   \
-                goto nextop;                                                 \
-            }                                                                \
-            untaken = ir->branch_untaken = block->ir_head;                   \
+            cache_get(rv->block_cache, PC + 4, true);                        \
+            if (!set_add(&pc_set, PC + 4))                                   \
+                has_loops = true;                                            \
             if (cache_hot(rv->block_cache, PC + 4))                          \
                 goto nextop;                                                 \
         }, );                                                                \
@@ -268,12 +268,9 @@ RVOP(
     if (taken) {                                                             \
         IIF(RV32_HAS(JIT))                                                   \
         ({                                                                   \
-            block_t *block = cache_get(rv->block_cache, PC);                 \
-            if (!block) {                                                    \
-                ir->branch_taken = NULL;                                     \
-                goto end_insn;                                               \
-            }                                                                \
-            taken = ir->branch_taken = block->ir_head;                       \
+            cache_get(rv->block_cache, PC, true);                            \
+            if (!set_add(&pc_set, PC))                                       \
+                has_loops = true;                                            \
             if (cache_hot(rv->block_cache, PC))                              \
                 goto end_insn;                                               \
         }, );                                                                \
@@ -1858,6 +1855,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2018,6 +2018,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2050,6 +2053,9 @@ RVOP(
             if (!untaken)
                 goto nextop;
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC + 2, true);
+            if (!set_add(&pc_set, PC + 2))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC + 2))
                 goto nextop;
 #endif
@@ -2062,6 +2068,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2103,6 +2112,9 @@ RVOP(
             if (!untaken)
                 goto nextop;
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC + 2, true);
+            if (!set_add(&pc_set, PC + 2))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC + 2))
                 goto nextop;
 #endif
@@ -2115,6 +2127,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif

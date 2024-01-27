@@ -617,7 +617,7 @@ RVOP(
         cmp_imm, TMP0, imm;
         st_imm, S32, rd, 1;
         set_jmp_off;
-        jcc, 0x82;
+        jcc, 0x8c;
         st_imm, S32, rd, 0;
         jmp_off;
     }))
@@ -771,7 +771,7 @@ RVOP(
         cmp, TMP1, TMP0;
         st_imm, S32, rd, 1;
         set_jmp_off;
-        jcc, 0x82;
+        jcc, 0x8c;
         st_imm, S32, rd, 0;
         jmp_off;
     }))

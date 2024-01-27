@@ -950,7 +950,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
     block_t *next = block_find(map, rv->PC);
 #else
     /* lookup the next block in the block cache */
-    block_t *next = (block_t *) cache_get(rv->block_cache, rv->PC);
+    block_t *next = (block_t *) cache_get(rv->block_cache, rv->PC, true);
 #endif
 
     if (!next) {
@@ -986,7 +986,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
             rv_insn_t *taken = delete_target->ir_tail->branch_taken,
                       *untaken = delete_target->ir_tail->branch_untaken;
             if (taken && taken->pc != delete_target->pc_start) {
-                block_t *target = cache_get(rv->block_cache, taken->pc);
+                block_t *target = cache_get(rv->block_cache, taken->pc, false);
                 bool flag = false;
                 list_for_each_entry_safe (entry, safe, &target->list, list) {
                     if (entry->block == delete_target) {
@@ -998,7 +998,8 @@ static block_t *block_find_or_translate(riscv_t *rv)
                 assert(flag);
             }
             if (untaken && untaken->pc != delete_target->pc_start) {
-                block_t *target = cache_get(rv->block_cache, untaken->pc);
+                block_t *target =
+                    cache_get(rv->block_cache, untaken->pc, false);
                 assert(target);
                 bool flag = false;
                 list_for_each_entry_safe (entry, safe, &target->list, list) {
@@ -1056,7 +1057,7 @@ void rv_step(riscv_t *rv, int32_t cycles)
 #if !RV32_HAS(JIT)
             prev = block_find(&rv->block_map, last_pc);
 #else
-            prev = cache_get(rv->block_cache, last_pc);
+            prev = cache_get(rv->block_cache, last_pc, false);
 #endif
         }
         /* lookup the next block in block map or translate a new block,

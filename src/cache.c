@@ -166,7 +166,7 @@ free_lists:
     return NULL;
 }
 
-void *cache_get(const cache_t *cache, uint32_t key)
+void *cache_get(const cache_t *cache, uint32_t key, bool update)
 {
     if (!cache->capacity ||
         hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))
@@ -192,7 +192,7 @@ void *cache_get(const cache_t *cache, uint32_t key)
      * code. The generated C code is then compiled into machine code by the
      * target compiler.
      */
-    if (entry->frequency < THRESHOLD) {
+    if (update && entry->frequency < THRESHOLD) {
         list_del_init(&entry->list);
         list_add(&entry->list, cache->lists[entry->frequency++]);
     }
@@ -242,7 +242,7 @@ void cache_free(cache_t *cache)
     free(cache);
 }
 
-uint32_t cache_freq(struct cache *cache, uint32_t key)
+uint32_t cache_freq(const struct cache *cache, uint32_t key)
 {
     if (!cache->capacity ||
         hlist_empty(&cache->map->ht_list_head[cache_hash(key)]))

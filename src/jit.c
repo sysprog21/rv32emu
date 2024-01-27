@@ -1163,60 +1163,6 @@ static void muldivmod(struct jit_state *state,
 }
 #endif /* RV32_HAS(EXT_M) */
 
-#define SET_SIZE_BITS 10
-#define SET_SIZE (1 << SET_SIZE_BITS)
-#define SET_SLOTS_SIZE 32
-HASH_FUNC_IMPL(set_hash, SET_SIZE_BITS, 1 << SET_SIZE_BITS);
-
-/* The set consists of SET_SIZE buckets, with each bucket containing
- * SET_SLOTS_SIZE slots.
- */
-typedef struct {
-    uint32_t table[SET_SIZE][SET_SLOTS_SIZE];
-} set_t;
-
-/**
- * set_reset - clear a set
- * @set: a pointer points to target set
- */
-static inline void set_reset(set_t *set)
-{
-    memset(set, 0, sizeof(set_t));
-}
-
-/**
- * set_add - insert a new element into the set
- * @set: a pointer points to target set
- * @key: the key of the inserted entry
- */
-static bool set_add(set_t *set, uint32_t key)
-{
-    const uint32_t index = set_hash(key);
-    uint8_t count = 0;
-    while (set->table[index][count]) {
-        if (set->table[index][count++] == key)
-            return false;
-    }
-
-    set->table[index][count] = key;
-    return true;
-}
-
-/**
- * set_has - check whether the element exist in the set or not
- * @set: a pointer points to target set
- * @key: the key of the inserted entry
- */
-static bool set_has(set_t *set, uint32_t key)
-{
-    const uint32_t index = set_hash(key);
-    for (uint8_t count = 0; set->table[index][count]; count++) {
-        if (set->table[index][count] == key)
-            return true;
-    }
-    return false;
-}
-
 static void prepare_translate(struct jit_state *state)
 {
 #if defined(__x86_64__)

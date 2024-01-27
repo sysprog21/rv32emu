@@ -13,14 +13,6 @@
 #include "mpool.h"
 #include "utils.h"
 
-/* Currently, THRESHOLD is set to identify hot spots. Once the using frequency
- * for a block exceeds the THRESHOLD, the tier-1 JIT compiler process is
- * triggered.
- * FIXME: Implement effective  profiler to detect hot spots, instead of simply
- * relying on THRESHOLD.
- */
-#define THRESHOLD 4096
-
 static uint32_t cache_size, cache_size_bits;
 static struct mpool *cache_mp;
 

@@ -8,6 +8,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Currently, THRESHOLD is set to identify hot spots. Once the using frequency
+ * for a block exceeds the THRESHOLD, the tier-1 JIT compiler process is
+ * triggered.
+ */
+#define THRESHOLD 4096
+
 struct cache;
 
 /** cache_create - crate a new cache

@@ -992,7 +992,7 @@ RVOP(
     csrrc,
     {
         uint32_t tmp = csr_csrrc(
-            rv, ir->imm, (ir->rs1 == rv_reg_zero) ? ~0U : rv->X[ir->rs1]);
+            rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1]);
         rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
     },
     GEN({

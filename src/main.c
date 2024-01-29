@@ -3,6 +3,9 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
+#include <libgen.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,7 +35,7 @@ static char *signature_out_file;
 static bool opt_quiet_outputs = false;
 
 /* target executable */
-static const char *opt_prog_name = "a.out";
+static char *opt_prog_name = "a.out";
 
 /* target argc and argv */
 static int prog_argc;
@@ -166,11 +169,21 @@ static bool parse_args(int argc, char **args)
      */
     prog_args = &args[optind];
     opt_prog_name = prog_args[0];
+
     if (opt_prof_data) {
-        char *prog_name = malloc(strlen(opt_prog_name) - 11);
-        strncpy(prog_name, opt_prog_name + 8, strlen(opt_prog_name) - 12);
-        prof_out_file = malloc(strlen(opt_prog_name) + 1);
-        sprintf(prof_out_file, "./prof/%s.prof", prog_name);
+        char cwd_path[PATH_MAX] = {0};
+        assert(getcwd(cwd_path, PATH_MAX));
+
+        char rel_path[PATH_MAX] = {0};
+        memcpy(rel_path, args[0], strlen(args[0]) - 7 /* strlen("rv32emu")*/);
+
+        char *prog_basename = basename(opt_prog_name);
+        prof_out_file = malloc(strlen(cwd_path) + 1 + strlen(rel_path) +
+                               strlen(prog_basename) + 5 + 1);
+        assert(prof_out_file);
+
+        sprintf(prof_out_file, "%s/%s%s.prof", cwd_path, rel_path,
+                prog_basename);
     }
     return true;
 }

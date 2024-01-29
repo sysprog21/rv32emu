@@ -14,7 +14,7 @@ class Block:
 def printTable(table):
     col_widths = getLongestWordLength(table)
     if len(table):
-        if len(table[0]) == 9: 
+        if len(table[0]) == 9:
             print("PC_start".rjust(col_widths[0]), end=' ')
             print("PC_end".rjust(col_widths[0]), end=' ')
             print("frequency".rjust(col_widths[0]), end=' ')
@@ -95,7 +95,7 @@ parser.add_argument('--graph-ir', type=str,
                     help='visualize graph IR')
 args = parser.parse_args()
 
-f = open(f'prof/{args.filename}.prof', 'r')
+f = open(f'build/{args.filename}.prof', 'r')
 fileds = f.readline()
 raw_datas = f.read().split("\n")
 profile_datas = []
@@ -104,13 +104,13 @@ for data in raw_datas:
     if len(tmp) == 9:
         d = {
             "PC_start": tmp[0].strip(),
-            "PC_end": tmp[1].strip(), 
-            "frequency": tmp[2].strip(), 
+            "PC_end": tmp[1].strip(),
+            "frequency": tmp[2].strip(),
             "hot": tmp[3].strip(),
-            "backward": tmp[4].strip(), 
-            "loop": tmp[5].strip(), 
-            "untaken": tmp[6].strip(), 
-            "taken": tmp[7].strip(), 
+            "backward": tmp[4].strip(),
+            "loop": tmp[5].strip(),
+            "untaken": tmp[6].strip(),
+            "taken": tmp[7].strip(),
             "IR_list": tmp[8].strip(),
         }
         profile_datas.append(d)
@@ -118,9 +118,9 @@ for data in raw_datas:
     elif len(tmp) == 5:
         d = {
             "PC_start": tmp[0].strip(),
-            "PC_end": tmp[1].strip(), 
-            "untaken": tmp[2].strip(), 
-            "taken": tmp[3].strip(), 
+            "PC_end": tmp[1].strip(),
+            "untaken": tmp[2].strip(),
+            "taken": tmp[3].strip(),
             "IR_list": tmp[4].strip(),
         }
         profile_datas.append(d)

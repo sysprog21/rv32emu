@@ -148,6 +148,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -246,12 +249,9 @@ RVOP(
             goto nextop;                                                     \
         IIF(RV32_HAS(JIT))                                                   \
         ({                                                                   \
-            block_t *block = cache_get(rv->block_cache, PC + 4);             \
-            if (!block) {                                                    \
-                ir->branch_untaken = NULL;                                   \
-                goto nextop;                                                 \
-            }                                                                \
-            untaken = ir->branch_untaken = block->ir_head;                   \
+            cache_get(rv->block_cache, PC + 4, true);                        \
+            if (!set_add(&pc_set, PC + 4))                                   \
+                has_loops = true;                                            \
             if (cache_hot(rv->block_cache, PC + 4))                          \
                 goto nextop;                                                 \
         }, );                                                                \
@@ -268,12 +268,9 @@ RVOP(
     if (taken) {                                                             \
         IIF(RV32_HAS(JIT))                                                   \
         ({                                                                   \
-            block_t *block = cache_get(rv->block_cache, PC);                 \
-            if (!block) {                                                    \
-                ir->branch_taken = NULL;                                     \
-                goto end_insn;                                               \
-            }                                                                \
-            taken = ir->branch_taken = block->ir_head;                       \
+            cache_get(rv->block_cache, PC, true);                            \
+            if (!set_add(&pc_set, PC))                                       \
+                has_loops = true;                                            \
             if (cache_hot(rv->block_cache, PC))                              \
                 goto end_insn;                                               \
         }, );                                                                \
@@ -285,7 +282,6 @@ RVOP(
     rv->PC = PC;                                                             \
     return true;
 
-
 #define BRANCH_FUNC_SPEC(type, cond, rs1, rs2)                                              \
     IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                         \
     if (BRANCH_COND(type, rv->X[rs1], rv->X[rs2], cond)) {           \
@@ -295,12 +291,9 @@ RVOP(
             goto nextop;                                                     \
         IIF(RV32_HAS(JIT))                                                   \
         ({                                                                   \
-            block_t *block = cache_get(rv->block_cache, PC + 4);             \
-            if (!block) {                                                    \
-                ir->branch_untaken = NULL;                                   \
-                goto nextop;                                                 \
-            }                                                                \
-            untaken = ir->branch_untaken = block->ir_head;                   \
+            cache_get(rv->block_cache, PC + 4, true);                        \
+            if (!set_add(&pc_set, PC + 4))                                   \
+                has_loops = true;                                            \
             if (cache_hot(rv->block_cache, PC + 4))                          \
                 goto nextop;                                                 \
         }, );                                                                \
@@ -317,12 +310,9 @@ RVOP(
     if (taken) {                                                             \
         IIF(RV32_HAS(JIT))                                                   \
         ({                                                                   \
-            block_t *block = cache_get(rv->block_cache, PC);                 \
-            if (!block) {                                                    \
-                ir->branch_taken = NULL;                                     \
-                goto end_insn;                                               \
-            }                                                                \
-            taken = ir->branch_taken = block->ir_head;                       \
+            cache_get(rv->block_cache, PC, true);                            \
+            if (!set_add(&pc_set, PC))                                       \
+                has_loops = true;                                            \
             if (cache_hot(rv->block_cache, PC))                              \
                 goto end_insn;                                               \
         }, );                                                                \
@@ -377,9 +367,9 @@ RVOP(
 
 RVOP(beq01400,{ BRANCH_FUNC_SPEC(uint32_t, !=, 14 ,0); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
 RVOP(beq014012,{ BRANCH_FUNC_SPEC(uint32_t, !=, 14 ,12); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
-
 RVOP(beq01500,{ BRANCH_FUNC_SPEC(uint32_t, !=, 15 ,0); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
 RVOP(beq015014,{ BRANCH_FUNC_SPEC(uint32_t, !=, 15 ,14); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+
 
 /* BNE: Branch if Not Equal */
 RVOP(
@@ -410,10 +400,10 @@ RVOP(bne01400,{ BRANCH_FUNC_SPEC(uint32_t, ==, 14 ,0); },GEN({ld, S32, TMP0, X, 
 RVOP(bne012013,{ BRANCH_FUNC_SPEC(uint32_t, ==, 12 ,13); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
 RVOP(bne01900,{ BRANCH_FUNC_SPEC(uint32_t, ==, 19 ,0); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
 RVOP(bne0507,{ BRANCH_FUNC_SPEC(uint32_t, ==, 5 ,7); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
-
 RVOP(bne014013,{ BRANCH_FUNC_SPEC(uint32_t, ==, 14 ,13); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
 RVOP(bne014023,{ BRANCH_FUNC_SPEC(uint32_t, ==, 14 ,23); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
 RVOP(bne025014,{ BRANCH_FUNC_SPEC(uint32_t, ==, 25 ,14); },GEN({ld, S32, TMP0, X, rs1;ld, S32, TMP1, X, rs2;cmp, TMP1, TMP0;set_jmp_off;jcc, 0x84;cond, branch_untaken;jmp, pc, 4;end;ld_imm, TMP0, pc, 4;st, S32, TMP0, PC;exit;jmp_off;cond, branch_taken;jmp, pc, imm;end;ld_imm, TMP0, pc, imm;st, S32, TMP0, PC;exit;}))
+
 
 /* BLT: Branch if Less Than */
 RVOP(
@@ -700,11 +690,10 @@ RVOP(
         cmp_imm, TMP0, imm;
         st_imm, S32, rd, 1;
         set_jmp_off;
-        jcc, 0x82;
+        jcc, 0x8c;
         st_imm, S32, rd, 0;
         jmp_off;
     }))
-
 
 /* SLTIU places the value 1 in register rd if register rs1 is less than the
  * immediate when both are treated as unsigned numbers, else 0 is written to rd.
@@ -753,7 +742,6 @@ RVOP(
         alu32_imm, 32, 0x81, 4, TMP0, imm;
         st, S32, TMP0, X, rd;
     }))
-
 
 FORCE_INLINE void shift_func(riscv_t *rv, const rv_insn_t *ir)
 {
@@ -856,7 +844,7 @@ RVOP(
         cmp, TMP1, TMP0;
         st_imm, S32, rd, 1;
         set_jmp_off;
-        jcc, 0x82;
+        jcc, 0x8c;
         st_imm, S32, rd, 0;
         jmp_off;
     }))
@@ -1080,7 +1068,7 @@ RVOP(
     csrrc,
     {
         uint32_t tmp = csr_csrrc(
-            rv, ir->imm, (ir->rs1 == rv_reg_zero) ? ~0U : rv->X[ir->rs1]);
+            rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1]);
         rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
     },
     GEN({
@@ -1943,6 +1931,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2103,6 +2094,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2135,6 +2129,9 @@ RVOP(
             if (!untaken)
                 goto nextop;
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC + 2, true);
+            if (!set_add(&pc_set, PC + 2))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC + 2))
                 goto nextop;
 #endif
@@ -2147,6 +2144,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif
@@ -2188,6 +2188,9 @@ RVOP(
             if (!untaken)
                 goto nextop;
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC + 2, true);
+            if (!set_add(&pc_set, PC + 2))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC + 2))
                 goto nextop;
 #endif
@@ -2200,6 +2203,9 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
+            cache_get(rv->block_cache, PC, true);
+            if (!set_add(&pc_set, PC))
+                has_loops = true;
             if (cache_hot(rv->block_cache, PC))
                 goto end_insn;
 #endif

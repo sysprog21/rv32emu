@@ -35,7 +35,7 @@ Features:
 ## Build and Verify
 
 `rv32emu` relies on certain third-party packages for full functionality and access to all its features.
-To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/) 
+To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/)
 and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
 * macOS: `brew install sdl2 sdl2_mixer`
 * Ubuntu Linux / Debian: `sudo apt install libsdl2-dev libsdl2-mixer-dev`
@@ -269,7 +269,7 @@ For macOS users, it might be necessary to install additional dependencies:
 $ brew install graphviz
 ```
 
-First, users need to create a directory named prof and then build the profiling data by executing `rv32emu`.
+Build the profiling data by executing `rv32emu`.
 This can be done as follows:
 ```shell
 $ build/rv32emu -p build/[test_program].elf

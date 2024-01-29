@@ -99,6 +99,17 @@ enum op_field {
     _(li, 0, 4, 1, ENC(rs1, rd))                     \
     _(inc, 0, 4, 1, ENC(rs1, rd))                     \
     _(dec, 0, 4, 1, ENC(rs1, rd))                     \
+    _(beq01400, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(beq014012, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(beq01500, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(beq015014, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(bne012013, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(bne01900, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(bne0507, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(bne01400, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(bne014013, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(bne014023, 1, 4, 1, ENC(rs1, rs2))                     \
+    _(bne025014, 1, 4, 1, ENC(rs1, rs2))                     \
     /* RV32 Zifencei Standard Extension */             \
     IIF(RV32_HAS(Zifencei))(                           \
         _(fencei, 1, 4, 0, ENC(rs1, rd))               \

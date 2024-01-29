@@ -325,3 +325,96 @@ void state_delete(state_t *s)
     memory_delete(s->mem);
     free(s);
 }
+
+static const char *insn_name_table[] = {
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
+    [rv_insn_##inst] = #inst,
+    RV_INSN_LIST
+#undef _
+#define _(inst) [rv_insn_##inst] = #inst,
+        FUSE_INSN_LIST
+#undef _
+};
+
+#if RV32_HAS(JIT)
+void profile(block_t *block, uint32_t freq, FILE *output_file)
+{
+    fprintf(output_file, "%#-9x|", block->pc_start);
+    fprintf(output_file, "%#-8x|", block->pc_end);
+    fprintf(output_file, " %-10u|", freq);
+    fprintf(output_file, " %-5s |", block->hot ? "true" : "false");
+    fprintf(output_file, " %-8s |", block->backward ? "true" : "false");
+    fprintf(output_file, " %-6s |", block->has_loops ? "true" : "false");
+    rv_insn_t *taken = block->ir_tail->branch_taken,
+              *untaken = block->ir_tail->branch_untaken;
+    if (untaken)
+        fprintf(output_file, "%#-9x|", untaken->pc);
+    else
+        fprintf(output_file, "%-9s|", "NULL");
+    if (taken)
+        fprintf(output_file, "%#-8x|", taken->pc);
+    else
+        fprintf(output_file, "%-8s|", "NULL");
+    rv_insn_t *ir = block->ir_head;
+    while (1) {
+        assert(ir);
+        fprintf(output_file, "%s", insn_name_table[ir->opcode]);
+        if (!ir->next)
+            break;
+        ir = ir->next;
+        fprintf(output_file, " - ");
+    }
+    fprintf(output_file, "\n");
+}
+#endif
+
+void rv_profile(riscv_t *rv, char *out_file_path)
+{
+    if (!out_file_path) {
+        fprintf(stderr, "Profiling data output file is NULL.\n");
+        return;
+    }
+    FILE *f = fopen(out_file_path, "w");
+    if (!f) {
+        fprintf(stderr, "Cannot open profiling data output file.\n");
+        return;
+    }
+#if RV32_HAS(JIT)
+    fprintf(f,
+            "PC start |PC end  | frequency |  hot  | backward |  loop  | "
+            "untaken | taken  "
+            "| IR "
+            "list \n");
+    cache_profile(rv->block_cache, f, (prof_func_t) profile);
+#else
+    fprintf(f, "PC start |PC end  | untaken | taken  | IR list \n");
+    block_map_t *map = &rv->block_map;
+    for (uint32_t i = 0; i < map->block_capacity; i++) {
+        block_t *block = map->map[i];
+        if (!block)
+            continue;
+        fprintf(f, "%#-9x|", block->pc_start);
+        fprintf(f, "%#-8x|", block->pc_end);
+        rv_insn_t *taken = block->ir_tail->branch_taken,
+                  *untaken = block->ir_tail->branch_untaken;
+        if (untaken)
+            fprintf(f, "%#-9x|", untaken->pc);
+        else
+            fprintf(f, "%-9s|", "NULL");
+        if (taken)
+            fprintf(f, "%#-8x|", taken->pc);
+        else
+            fprintf(f, "%-8s|", "NULL");
+        rv_insn_t *ir = block->ir_head;
+        while (1) {
+            assert(ir);
+            fprintf(f, "%s", insn_name_table[ir->opcode]);
+            if (!ir->next)
+                break;
+            ir = ir->next;
+            fprintf(f, " - ");
+        }
+        fprintf(f, "\n");
+    }
+#endif
+}

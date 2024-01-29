@@ -3,6 +3,9 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
+#include <libgen.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,15 +35,19 @@ static char *signature_out_file;
 static bool opt_quiet_outputs = false;
 
 /* target executable */
-static const char *opt_prog_name = "a.out";
+static char *opt_prog_name = "a.out";
 
 /* target argc and argv */
 static int prog_argc;
 static char **prog_args;
-static const char *optstr = "tgqmhd:a:";
+static const char *optstr = "tgqmhpd:a:";
 
 /* enable misaligned memory access */
 static bool opt_misaligned = false;
+
+/* dump profiling data */
+static bool opt_prof_data = false;
+static char *prof_out_file;
 
 #define MEMIO(op) on_mem_##op
 #define IO_HANDLER_IMPL(type, op, RW)                                     \
@@ -108,6 +115,7 @@ static void print_usage(const char *filename)
             "  -a [filename] : dump signature to the given file, "
             "required by arch-test test\n"
             "  -m : enable misaligned memory access\n"
+            "  -p : generate profiling data\n"
             "  -h : show this message\n",
             filename);
 }
@@ -137,6 +145,9 @@ static bool parse_args(int argc, char **args)
         case 'm':
             opt_misaligned = true;
             break;
+        case 'p':
+            opt_prof_data = true;
+            break;
         case 'd':
             opt_dump_regs = true;
             registers_out_file = optarg;
@@ -158,6 +169,22 @@ static bool parse_args(int argc, char **args)
      */
     prog_args = &args[optind];
     opt_prog_name = prog_args[0];
+
+    if (opt_prof_data) {
+        char cwd_path[PATH_MAX] = {0};
+        assert(getcwd(cwd_path, PATH_MAX));
+
+        char rel_path[PATH_MAX] = {0};
+        memcpy(rel_path, args[0], strlen(args[0]) - 7 /* strlen("rv32emu")*/);
+
+        char *prog_basename = basename(opt_prog_name);
+        prof_out_file = malloc(strlen(cwd_path) + 1 + strlen(rel_path) +
+                               strlen(prog_basename) + 5 + 1);
+        assert(prof_out_file);
+
+        sprintf(prof_out_file, "%s/%s%s.prof", cwd_path, rel_path,
+                prog_basename);
+    }
     return true;
 }
 
@@ -264,6 +291,8 @@ int main(int argc, char **args)
     if (opt_arch_test)
         dump_test_signature(elf);
 
+    if (opt_prof_data)
+        rv_profile(rv, prof_out_file);
     /* finalize the RISC-V runtime */
     elf_delete(elf);
     rv_delete(rv);

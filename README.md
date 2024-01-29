@@ -35,7 +35,7 @@ Features:
 ## Build and Verify
 
 `rv32emu` relies on certain third-party packages for full functionality and access to all its features.
-To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/) 
+To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/)
 and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
 * macOS: `brew install sdl2 sdl2_mixer`
 * Ubuntu Linux / Debian: `sudo apt install libsdl2-dev libsdl2-mixer-dev`
@@ -231,7 +231,9 @@ For example, if you want to read the register x10 (a0), then run the following c
 $ build/rv32emu -d - -q out.elf | jq .x10
 ```
 
-## RISC-V Instructions/Registers Usage Statistics
+## Usage Statistics
+
+### RISC-V Instructions/Registers
 
 This is a static analysis tool for assessing the usage of RV32 instructions/registers
 in a given target program.
@@ -254,6 +256,29 @@ _Example Instructions Histogram_
 
 _Example Registers Histogram_
 ![Registers Hisrogram Example](docs/histogram-reg.png)
+
+### Basic Block
+
+To install [lolviz](https://github.com/parrt/lolviz), use the following command:
+```shell
+$ pip install lolviz
+```
+
+For macOS users, it might be necessary to install additional dependencies:
+```shell
+$ brew install graphviz
+```
+
+Build the profiling data by executing `rv32emu`.
+This can be done as follows:
+```shell
+$ build/rv32emu -p build/[test_program].elf
+```
+
+To analyze the profiling data, use the `rv_profiler` tool with the desired options:
+```shell
+$ tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
+```
 
 ## Contributing
 

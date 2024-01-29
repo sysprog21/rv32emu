@@ -62,12 +62,13 @@ typedef struct block {
     uint32_t pc_start, pc_end; /**< address range of the basic block */
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
-    bool backward;
 #if RV32_HAS(JIT)
-    bool hot; /**< Determine the block is hotspot or not */
+    bool backward; /**< Determine the block has backward jump or not */
+    bool hot;      /**< Determine the block is hotspot or not */
     uint32_t offset;
     bool
         translatable; /**< Determine the block has RV32AF insturctions or not */
+    bool has_loops;   /**< Determine the block has loop or not */
     struct list_head list;
 #endif
 } block_t;

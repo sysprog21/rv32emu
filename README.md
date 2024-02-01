@@ -298,10 +298,10 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `chacha20.elf` : See [tests/chacha20](tests/chacha20)
 * `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark) [RV32M]
 * `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
-* `donut.elf` : See [donut](tests/donut.c)
+* `donut.elf` : See [donut.c](tests/donut.c)
 * `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
-* `fcalc.elf` : See [fcalc](tests/fcalc.c)
-* `hamilton.elf` : See [hamilton](tests/hamilton.c)
+* `fcalc.elf` : See [fcalc.c](tests/fcalc.c)
+* `hamilton.elf` : See [hamilton.c](tests/hamilton.c)
 * `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
 * `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)
 * `lena.elf`: See [tests/lena.c](tests/lena.c)
@@ -318,6 +318,7 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `rvsim.elf` : See [tests/rvsim.c](tests/rvsim.c)
 * `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
 * `smolnes.elf` : See [tests/smolnes](tests/smolnes.c) [RV32M]
+* `spirograph.elf` : See [tests/spirograph.c](tests/spirograph.c)
 * `stream.elf` : See [tests/stream](tests/stream.c) [RV32MF]
 
 ## Reference

@@ -125,7 +125,7 @@ RV_EXCEPTION_LIST
  */
 #define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)       \
     IIF(IO)                                                           \
-    (if (!rv->io.allow_misalign && unlikely(addr & (mask_or_pc))),    \
+    (if (!PRIV(rv)->allow_misalign && unlikely(addr & (mask_or_pc))), \
      if (unlikely(insn_is_misaligned(PC))))                           \
     {                                                                 \
         rv->compressed = compress;                                    \
@@ -1182,7 +1182,7 @@ void ecall_handler(riscv_t *rv)
 
 void memset_handler(riscv_t *rv)
 {
-    memory_t *m = ((state_t *) rv->userdata)->mem;
+    memory_t *m = PRIV(rv)->mem;
     memset((char *) m->mem_base + rv->X[rv_reg_a0], rv->X[rv_reg_a1],
            rv->X[rv_reg_a2]);
     rv->PC = rv->X[rv_reg_ra] & ~1U;
@@ -1190,7 +1190,7 @@ void memset_handler(riscv_t *rv)
 
 void memcpy_handler(riscv_t *rv)
 {
-    memory_t *m = ((state_t *) rv->userdata)->mem;
+    memory_t *m = PRIV(rv)->mem;
     memcpy((char *) m->mem_base + rv->X[rv_reg_a0],
            (char *) m->mem_base + rv->X[rv_reg_a1], rv->X[rv_reg_a2]);
     rv->PC = rv->X[rv_reg_ra] & ~1U;

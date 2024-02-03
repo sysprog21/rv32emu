@@ -10,6 +10,7 @@
 #include <sys/time.h>
 
 #include "riscv.h"
+#include "riscv_private.h"
 #include "utils.h"
 
 #define PREALLOC_SIZE 4096
@@ -53,12 +54,12 @@ enum {
     O_ACCMODE = 3,
 };
 
-static int find_free_fd(state_t *s)
+static int find_free_fd(vm_attr_t *attr)
 {
     for (int i = 3;; ++i) {
         map_iter_t it;
-        map_find(s->fd_map, &it, &i);
-        if (map_at_end(s->fd_map, &it))
+        map_find(attr->fd_map, &it, &i);
+        if (map_at_end(attr->fd_map, &it))
             return i;
     }
 }
@@ -80,7 +81,7 @@ static const char *get_mode_str(uint32_t flags, uint32_t mode UNUSED)
 static uint8_t tmp[PREALLOC_SIZE];
 static void syscall_write(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     /* _write(fde, buffer, count) */
     riscv_word_t fd = rv_get_reg(rv, rv_reg_a0);
@@ -89,12 +90,12 @@ static void syscall_write(riscv_t *rv)
 
     /* lookup the file descriptor */
     map_iter_t it;
-    map_find(s->fd_map, &it, &fd);
+    map_find(attr->fd_map, &it, &fd);
     uint32_t total_write = 0;
 
     while (count > PREALLOC_SIZE) {
-        memory_read(s->mem, tmp, buffer + total_write, PREALLOC_SIZE);
-        if (!map_at_end(s->fd_map, &it)) {
+        memory_read(attr->mem, tmp, buffer + total_write, PREALLOC_SIZE);
+        if (!map_at_end(attr->fd_map, &it)) {
             /* write out the data */
             FILE *handle = map_iter_value(&it, FILE *);
             size_t written = fwrite(tmp, 1, PREALLOC_SIZE, handle);
@@ -105,8 +106,8 @@ static void syscall_write(riscv_t *rv)
         } else
             goto error_handler;
     }
-    memory_read(s->mem, tmp, buffer + total_write, count);
-    if (!map_at_end(s->fd_map, &it)) {
+    memory_read(attr->mem, tmp, buffer + total_write, count);
+    if (!map_at_end(attr->fd_map, &it)) {
         /* write out the data */
         FILE *handle = map_iter_value(&it, FILE *);
         size_t written = fwrite(tmp, 1, count, handle);
@@ -128,13 +129,15 @@ error_handler:
 
 static void syscall_exit(riscv_t *rv)
 {
+    /*
+     * simply halt cpu and save exit code
+     *
+     * the application decides the usage of exit code
+     */
     rv_halt(rv);
 
-    /* To avoid mixing with JSON output */
-    if (rv_enables_to_output_exit_code(rv)) {
-        riscv_word_t code = rv_get_reg(rv, rv_reg_a0);
-        fprintf(stdout, "inferior exit code %d\n", (int) code);
-    }
+    vm_attr_t *attr = PRIV(rv);
+    attr->exit_code = rv_get_reg(rv, rv_reg_a0);
 }
 
 /* brk(increment)
@@ -144,15 +147,15 @@ static void syscall_exit(riscv_t *rv)
  */
 static void syscall_brk(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     /* get the increment parameter */
     riscv_word_t increment = rv_get_reg(rv, rv_reg_a0);
     if (increment)
-        s->break_addr = increment;
+        attr->break_addr = increment;
 
     /* return new break address */
-    rv_set_reg(rv, rv_reg_a0, s->break_addr);
+    rv_set_reg(rv, rv_reg_a0, attr->break_addr);
 }
 
 static void syscall_gettimeofday(riscv_t *rv)
@@ -207,21 +210,21 @@ static void syscall_clock_gettime(riscv_t *rv)
 
 static void syscall_close(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     /* _close(fd); */
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
 
     if (fd >= 3) { /* lookup the file descriptor */
         map_iter_t it;
-        map_find(s->fd_map, &it, &fd);
-        if (!map_at_end(s->fd_map, &it)) {
+        map_find(attr->fd_map, &it, &fd);
+        if (!map_at_end(attr->fd_map, &it)) {
             if (fclose(map_iter_value(&it, FILE *))) {
                 /* error */
                 rv_set_reg(rv, rv_reg_a0, -1);
                 return;
             }
-            map_erase(s->fd_map, &it);
+            map_erase(attr->fd_map, &it);
 
             /* success */
             rv_set_reg(rv, rv_reg_a0, 0);
@@ -238,7 +241,7 @@ static void syscall_close(riscv_t *rv)
  */
 static void syscall_lseek(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     /* _lseek(fd, offset, whence); */
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
@@ -247,8 +250,8 @@ static void syscall_lseek(riscv_t *rv)
 
     /* find the file descriptor */
     map_iter_t it;
-    map_find(s->fd_map, &it, &fd);
-    if (map_at_end(s->fd_map, &it)) {
+    map_find(attr->fd_map, &it, &fd);
+    if (map_at_end(attr->fd_map, &it)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
@@ -267,7 +270,7 @@ static void syscall_lseek(riscv_t *rv)
 
 static void syscall_read(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     /* _read(fd, buf, count); */
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
@@ -276,8 +279,8 @@ static void syscall_read(riscv_t *rv)
 
     /* lookup the file */
     map_iter_t it;
-    map_find(s->fd_map, &it, &fd);
-    if (map_at_end(s->fd_map, &it)) {
+    map_find(attr->fd_map, &it, &fd);
+    if (map_at_end(attr->fd_map, &it)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
@@ -289,14 +292,14 @@ static void syscall_read(riscv_t *rv)
 
     while (count > PREALLOC_SIZE) {
         size_t r = fread(tmp, 1, PREALLOC_SIZE, handle);
-        memory_write(s->mem, buf + total_read, tmp, r);
+        memory_write(attr->mem, buf + total_read, tmp, r);
         count -= r;
         total_read += r;
         if (r != PREALLOC_SIZE)
             break;
     }
     size_t r = fread(tmp, 1, count, handle);
-    memory_write(s->mem, buf + total_read, tmp, r);
+    memory_write(attr->mem, buf + total_read, tmp, r);
     total_read += r;
     if (total_read != rv_get_reg(rv, rv_reg_a2) && ferror(handle)) {
         /* error */
@@ -314,7 +317,7 @@ static void syscall_fstat(riscv_t *rv UNUSED)
 
 static void syscall_open(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     /* _open(name, flags, mode); */
     uint32_t name = rv_get_reg(rv, rv_reg_a0);
@@ -323,8 +326,8 @@ static void syscall_open(riscv_t *rv)
 
     /* read name from runtime memory */
     char name_str[256] = {'\0'};
-    uint32_t read =
-        memory_read_str(s->mem, (uint8_t *) name_str, name, sizeof(name_str));
+    uint32_t read = memory_read_str(attr->mem, (uint8_t *) name_str, name,
+                                    sizeof(name_str));
     if (read > sizeof(name_str)) {
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
@@ -343,10 +346,10 @@ static void syscall_open(riscv_t *rv)
         return;
     }
 
-    const int fd = find_free_fd(s); /* find a free file descriptor */
+    const int fd = find_free_fd(attr); /* find a free file descriptor */
 
     /* insert into the file descriptor map */
-    map_insert(s->fd_map, (void *) &fd, &handle);
+    map_insert(attr->fd_map, (void *) &fd, &handle);
 
     /* return the file descriptor */
     rv_set_reg(rv, rv_reg_a0, fd);
@@ -376,4 +379,12 @@ void syscall_handler(riscv_t *rv)
         fprintf(stderr, "unknown syscall %d\n", (int) syscall);
         break;
     }
+
+    /*
+     * save return code
+     *
+     * the application decides the usage of the return code
+     */
+    vm_attr_t *attr = PRIV(rv);
+    attr->error = rv_get_reg(rv, rv_reg_a0);
 }

@@ -17,7 +17,7 @@ typedef struct {
     uint64_t mem_size;
 } memory_t;
 
-memory_t *memory_new(void);
+memory_t *memory_new(uint32_t size);
 void memory_delete(memory_t *m);
 
 /* read a C-style string from memory */

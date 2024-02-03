@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "io.h"
 #include "map.h"
@@ -143,22 +144,19 @@ typedef struct {
     riscv_on_ebreak on_ebreak;
     riscv_on_memset on_memset;
     riscv_on_memcpy on_memcpy;
-    /* enable misaligned memory access */
-    bool allow_misalign;
 } riscv_io_t;
 
+/* run emulation */
+void rv_run(riscv_t *rv);
+
 /* create a RISC-V emulator */
-riscv_t *rv_create(const riscv_io_t *io,
-                   riscv_user_t user_data,
-                   int argc,
-                   char **args,
-                   bool output_exit_code);
+riscv_t *rv_create(const riscv_io_t *io, riscv_user_t attr);
 
 /* delete a RISC-V emulator */
 void rv_delete(riscv_t *rv);
 
 /* reset the RISC-V processor */
-void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args);
+void rv_reset(riscv_t *rv, riscv_word_t pc);
 
 #if RV32_HAS(GDBSTUB)
 /* Run the RISC-V emulator as gdbstub */
@@ -168,9 +166,6 @@ void rv_debug(riscv_t *rv);
 /* step the RISC-V emulator */
 void rv_step(riscv_t *rv, int32_t cycles);
 
-/* get RISC-V user data bound to an emulator */
-riscv_user_t rv_userdata(riscv_t *rv);
-
 /* set the program counter of a RISC-V emulator */
 bool rv_set_pc(riscv_t *rv, riscv_word_t pc);
 
@@ -179,6 +174,14 @@ riscv_word_t rv_get_pc(riscv_t *rv);
 
 /* set a register of the RISC-V emulator */
 void rv_set_reg(riscv_t *rv, uint32_t reg, riscv_word_t in);
+
+typedef struct {
+    int fd;
+    FILE *file;
+} fd_stream_pair_t;
+
+/* remap standard stream to other stream */
+void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size);
 
 /* get a register of the RISC-V emulator */
 riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg);
@@ -207,27 +210,97 @@ void rv_halt(riscv_t *rv);
 /* return the halt state */
 bool rv_has_halted(riscv_t *rv);
 
-/* return the flag of outputting exit code */
-bool rv_enables_to_output_exit_code(riscv_t *rv);
+enum {
+    /* run and trace instructions and print them out during emulation */
+    RV_RUN_TRACE = 1,
 
-/* state structure passed to the runtime */
+    /* run as gdbstub during emulation */
+    RV_RUN_GDBSTUB = 2,
+
+    /* run and profile relationship of blocks and save to prof_output_file
+       during emulation */
+    RV_RUN_PROFILE = 4,
+};
+
 typedef struct {
+    char *elf_program;
+} vm_user_t;
+
+typedef union {
+    vm_user_t *user;
+    /* TODO: system emulator stuff */
+} vm_data_t;
+
+typedef struct {
+    /* vm memory object */
     memory_t *mem;
+
+    /*
+     * max memory size is 2^32 - 1 bytes
+     *
+     * it is for portable on both 32-bit and 64-bit platforms. In this way,
+     * emulator can access any segment of the memory on either platform.
+     */
+    uint32_t mem_size;
+
+    /* vm main stack size */
+    uint32_t stack_size;
+
+    /*
+     * To deal with the RV32 ABI for accessing args list,
+     * offset of args data have to be saved.
+     *
+     * args_offset_size is the memory size to store the offset
+     */
+    uint32_t args_offset_size;
+
+    /* arguments of emulation program */
+    int argc;
+    char **argv;
+    /* FIXME: rv32emu cannot access envp yet */
+
+    /* emulation program exit code */
+    int exit_code;
+
+    /* emulation program error code */
+    int error;
+
+    /* TODO: for logging feature */
+    int log_level;
+
+    /* userspace or system emulation data */
+    vm_data_t data;
+
+    /* number of cycle(instruction) in a rv_step call*/
+    int cycle_per_step;
+
+    /* allow misaligned memory access */
+    bool allow_misalign;
+
+    /*
+     * run flag, it is the bitwise OR from
+     * RV_RUN_TRACE, RV_RUN_GDBSTUB, and RV_RUN_PROFILE
+     */
+    uint8_t run_flag;
+
+    /* profiling output file if RV_RUN_PROFILE is set in run_flag */
+    char *profile_output_file;
+
+    /*
+     * set by rv_create during initialization
+     *
+     * use rv_remap_stdstream to overwrite them
+     */
+    int fd_stdin;
+    int fd_stdout;
+    int fd_stderr;
+
+    /* vm file descriptor map: int -> (FILE *) */
+    map_t fd_map;
 
     /* the data segment break address */
     riscv_word_t break_addr;
-
-    /* file descriptor map: int -> (FILE *) */
-    map_t fd_map;
-} state_t;
-
-/* create a state */
-state_t *state_new(void);
-
-/* delete a state */
-void state_delete(state_t *s);
-
-void rv_profile(riscv_t *rv, char *out_file_path);
+} vm_attr_t;
 
 #ifdef __cplusplus
 };

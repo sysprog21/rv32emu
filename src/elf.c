@@ -259,12 +259,8 @@ bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)
  * Finding data for section headers:
  *   File start + section_header.offset -> section Data
  */
-bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem)
+bool elf_load(elf_t *e, memory_t *mem)
 {
-    /* set the entry point */
-    if (!rv_set_pc(rv, e->hdr->e_entry))
-        return false;
-
     /* loop over all of the program headers */
     for (int p = 0; p < e->hdr->e_phnum; ++p) {
         /* find next program header */

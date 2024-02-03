@@ -17,6 +17,8 @@
 #include "cache.h"
 #endif
 
+#define PRIV(x) ((vm_attr_t *) x->data)
+
 /* CSRs */
 enum {
     /* floating point */
@@ -100,7 +102,7 @@ struct riscv_internal {
     riscv_word_t PC;
 
     /* user provided data */
-    riscv_user_t userdata;
+    riscv_user_t data;
 
 #if RV32_HAS(EXT_F)
     /* float registers */
@@ -129,8 +131,7 @@ struct riscv_internal {
     struct mpool *chain_entry_mp;
 #endif
     struct mpool *block_mp, *block_ir_mp;
-    /* print exit code on syscall_exit */
-    bool output_exit_code;
+
     void *jit_state;
 #if RV32_HAS(GDBSTUB)
     /* gdbstub instance */

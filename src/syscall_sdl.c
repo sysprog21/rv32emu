@@ -17,6 +17,7 @@
 #include <SDL_mixer.h>
 
 #include "riscv.h"
+#include "riscv_private.h"
 
 /* The DSITMBK sound effect in DOOM1.WAD uses a sample rate of 22050, but since
  * the game is played in single-player mode, it is acceptable to stick with
@@ -149,10 +150,10 @@ static submission_queue_t submission_queue = {
 
 static submission_t submission_pop(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv);
+    vm_attr_t *attr = PRIV(rv);
     submission_t submission;
     memory_read(
-        s->mem, (void *) &submission,
+        attr->mem, (void *) &submission,
         submission_queue.base + submission_queue.start * sizeof(submission_t),
         sizeof(submission_t));
     ++submission_queue.start;
@@ -162,16 +163,17 @@ static submission_t submission_pop(riscv_t *rv)
 
 static void event_push(riscv_t *rv, event_t event)
 {
-    state_t *s = rv_userdata(rv);
-    memory_write(s->mem, event_queue.base + event_queue.end * sizeof(event_t),
+    vm_attr_t *attr = PRIV(rv);
+    memory_write(attr->mem,
+                 event_queue.base + event_queue.end * sizeof(event_t),
                  (void *) &event, sizeof(event_t));
     ++event_queue.end;
     event_queue.end &= queues_capacity - 1;
 
     uint32_t count;
-    memory_read(s->mem, (void *) &count, event_count, sizeof(uint32_t));
+    memory_read(attr->mem, (void *) &count, event_count, sizeof(uint32_t));
     count += 1;
-    memory_write(s->mem, event_count, (void *) &count, sizeof(uint32_t));
+    memory_write(attr->mem, event_count, (void *) &count, sizeof(uint32_t));
 }
 
 static inline uint32_t round_pow2(uint32_t x)
@@ -279,7 +281,7 @@ static bool check_sdl(riscv_t *rv, int width, int height)
 
 void syscall_draw_frame(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     /* draw_frame(base, width, height) */
     const uint32_t screen = rv_get_reg(rv, rv_reg_a0);
@@ -294,7 +296,7 @@ void syscall_draw_frame(riscv_t *rv)
     void *pixels_ptr;
     if (SDL_LockTexture(texture, NULL, &pixels_ptr, &pitch))
         exit(-1);
-    memory_read(s->mem, pixels_ptr, screen, width * height * 4);
+    memory_read(attr->mem, pixels_ptr, screen, width * height * 4);
     SDL_UnlockTexture(texture);
 
     int actual_width, actual_height;
@@ -677,13 +679,14 @@ static void *music_handler(void *arg)
 
 static void play_sfx(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     const uint32_t sfxinfo_addr = (uint32_t) rv_get_reg(rv, rv_reg_a1);
     int volume = rv_get_reg(rv, rv_reg_a2);
 
     sfxinfo_t sfxinfo;
-    memory_read(s->mem, (uint8_t *) &sfxinfo, sfxinfo_addr, sizeof(sfxinfo_t));
+    memory_read(attr->mem, (uint8_t *) &sfxinfo, sfxinfo_addr,
+                sizeof(sfxinfo_t));
 
     /* The data and size in the application must be positioned in the first two
      * fields of the structure. This ensures emulator compatibility with
@@ -692,7 +695,7 @@ static void play_sfx(riscv_t *rv)
     uint32_t sfx_data_offset = *((uint32_t *) &sfxinfo);
     uint32_t sfx_data_size = *(uint32_t *) ((uint32_t *) &sfxinfo + 1);
     uint8_t sfx_data[SFX_SAMPLE_SIZE];
-    memory_read(s->mem, sfx_data, sfx_data_offset,
+    memory_read(attr->mem, sfx_data, sfx_data_offset,
                 sizeof(uint8_t) * sfx_data_size);
 
     sound_t sfx = {
@@ -705,14 +708,14 @@ static void play_sfx(riscv_t *rv)
 
 static void play_music(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     const uint32_t musicinfo_addr = (uint32_t) rv_get_reg(rv, rv_reg_a1);
     int volume = rv_get_reg(rv, rv_reg_a2);
     int looping = rv_get_reg(rv, rv_reg_a3);
 
     musicinfo_t musicinfo;
-    memory_read(s->mem, (uint8_t *) &musicinfo, musicinfo_addr,
+    memory_read(attr->mem, (uint8_t *) &musicinfo, musicinfo_addr,
                 sizeof(musicinfo_t));
 
     /* The data and size in the application must be positioned in the first two
@@ -722,7 +725,7 @@ static void play_music(riscv_t *rv)
     uint32_t music_data_offset = *((uint32_t *) &musicinfo);
     uint32_t music_data_size = *(uint32_t *) ((uint32_t *) &musicinfo + 1);
     uint8_t music_data[MUSIC_MAX_SIZE];
-    memory_read(s->mem, music_data, music_data_offset, music_data_size);
+    memory_read(attr->mem, music_data, music_data_offset, music_data_size);
 
     sound_t music = {
         .data = music_data,

@@ -74,35 +74,10 @@ IO_HANDLER_IMPL(byte, write_b, W)
 #undef R
 #undef W
 
-/* run: printing out an instruction trace */
-static void run_and_trace(riscv_t *rv, elf_t *elf)
-{
-    const uint32_t cycles_per_step = 1;
-
-    for (; !rv_has_halted(rv);) { /* run until the flag is done */
-        /* trace execution */
-        uint32_t pc = rv_get_pc(rv);
-        const char *sym = elf_find_symbol(elf, pc);
-        printf("%08x  %s\n", pc, (sym ? sym : ""));
-
-        /* step instructions */
-        rv_step(rv, cycles_per_step);
-    }
-}
-
-static void run(riscv_t *rv)
-{
-    const uint32_t cycles_per_step = 100;
-    for (; !rv_has_halted(rv);) { /* run until the flag is done */
-        /* step instructions */
-        rv_step(rv, cycles_per_step);
-    }
-}
-
 static void print_usage(const char *filename)
 {
     fprintf(stderr,
-            "RV32I[MA] Emulator which loads an ELF file to execute.\n"
+            "RV32I[MACF] Emulator which loads an ELF file to execute.\n"
             "Usage: %s [options] [filename] [arguments]\n"
             "Options:\n"
             "  -t : print executable trace\n"
@@ -188,8 +163,11 @@ static bool parse_args(int argc, char **args)
     return true;
 }
 
-static void dump_test_signature(elf_t *elf)
+static void dump_test_signature(const char *prog_name)
 {
+    elf_t *elf = elf_new();
+    assert(elf && elf_open(elf, prog_name));
+
     uint32_t start = 0, end = 0;
     const struct Elf32_Sym *sym;
     FILE *f = fopen(signature_out_file, "w");
@@ -212,7 +190,12 @@ static void dump_test_signature(elf_t *elf)
         fprintf(f, "%08x\n", memory_read_w(addr));
 
     fclose(f);
+    elf_delete(elf);
 }
+
+#define MEM_SIZE 0xFFFFFFFFULL  /* 2^32 - 1 */
+#define STACK_SIZE 0x1000       /* 4096 */
+#define ARGS_OFFSET_SIZE 0x1000 /* 4096 */
 
 int main(int argc, char **args)
 {
@@ -221,12 +204,28 @@ int main(int argc, char **args)
         return 1;
     }
 
-    /* open the ELF file from the file system */
-    elf_t *elf = elf_new();
-    if (!elf_open(elf, opt_prog_name)) {
-        fprintf(stderr, "Unable to open ELF file '%s'\n", opt_prog_name);
-        return 1;
-    }
+    int run_flag = 0;
+    run_flag |= opt_trace;
+#if RV32_HAS(GDBSTUB)
+    run_flag |= opt_gdbstub << 1;
+#endif
+    run_flag |= opt_prof_data << 2;
+
+    vm_attr_t attr = {
+        .mem_size = MEM_SIZE,
+        .stack_size = STACK_SIZE,
+        .args_offset_size = ARGS_OFFSET_SIZE,
+        .argc = prog_argc,
+        .argv = prog_args,
+        .log_level = 0,
+        .run_flag = run_flag,
+        .profile_output_file = prof_out_file,
+        .data.user = malloc(sizeof(vm_user_t)),
+        .cycle_per_step = 100,
+        .allow_misalign = opt_misaligned,
+    };
+    assert(attr.data.user);
+    attr.data.user->elf_program = opt_prog_name;
 
     /* install the I/O handlers for the RISC-V runtime */
     const riscv_io_t io = {
@@ -246,42 +245,16 @@ int main(int argc, char **args)
         .on_ebreak = ebreak_handler,
         .on_memcpy = memcpy_handler,
         .on_memset = memset_handler,
-        .allow_misalign = opt_misaligned,
     };
 
-    state_t *state = state_new();
-
-    /* find the start of the heap */
-    const struct Elf32_Sym *end;
-    if ((end = elf_get_symbol(elf, "_end")))
-        state->break_addr = end->st_value;
-
     /* create the RISC-V runtime */
-    riscv_t *rv =
-        rv_create(&io, state, prog_argc, prog_args, !opt_quiet_outputs);
+    riscv_t *rv = rv_create(&io, &attr);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
         return 1;
     }
 
-    /* load the ELF file into the memory abstraction */
-    if (!elf_load(elf, rv, state->mem)) {
-        fprintf(stderr, "Unable to load ELF file '%s'\n", args[1]);
-        return 1;
-    }
-
-    /* run based on the specified mode */
-    if (opt_trace) {
-        run_and_trace(rv, elf);
-    }
-#if RV32_HAS(GDBSTUB)
-    else if (opt_gdbstub) {
-        rv_debug(rv);
-    }
-#endif
-    else {
-        run(rv);
-    }
+    rv_run(rv);
 
     /* dump registers as JSON */
     if (opt_dump_regs)
@@ -289,14 +262,11 @@ int main(int argc, char **args)
 
     /* dump test result in test mode */
     if (opt_arch_test)
-        dump_test_signature(elf);
+        dump_test_signature(opt_prog_name);
 
-    if (opt_prof_data)
-        rv_profile(rv, prof_out_file);
     /* finalize the RISC-V runtime */
-    elf_delete(elf);
     rv_delete(rv);
-    state_delete(state);
 
+    printf("inferior exit code %d\n", attr.exit_code);
     return 0;
 }

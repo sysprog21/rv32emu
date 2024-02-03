@@ -219,7 +219,7 @@ for i in range(len(op)):
             elif items[0] == "jmp_off":
                 asm = "emit_jump_target_offset(state, JUMP_LOC, state->offset);"
             elif items[0] == "mem":
-                asm = "memory_t *m = ((state_t *) rv->userdata)->mem;"
+                asm = "memory_t *m = PRIV(rv)->mem;"
             elif items[0] == "call":
                 asm = "emit_call(state, (intptr_t) rv->io.on_{});".format(
                     items[1])

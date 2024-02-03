@@ -8,6 +8,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if !defined(_WIN32) && !defined(_WIN64)
+#include <unistd.h>
+#define FILENO(x) fileno(x)
+#else
+#define FILENO(x) _fileno(x)
+#define STDIN_FILENO FILENO(stdin)
+#define STDOUT_FILENO FILENO(stdout)
+#define STDERR_FILENO FILENO(stderr)
+#endif
+
+#include "elf.h"
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -63,12 +74,6 @@ static void block_map_destroy(riscv_t *rv)
 }
 #endif
 
-riscv_user_t rv_userdata(riscv_t *rv)
-{
-    assert(rv);
-    return rv->userdata;
-}
-
 bool rv_set_pc(riscv_t *rv, riscv_word_t pc)
 {
     assert(rv);
@@ -105,13 +110,55 @@ riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg)
     return ~0U;
 }
 
-riscv_t *rv_create(const riscv_io_t *io,
-                   riscv_user_t userdata,
-                   int argc,
-                   char **args,
-                   bool output_exit_code)
+/*
+ * Remap standard stream
+ *
+ * @rv: riscv
+ * @fsp: a list of pair of mapping from fd to FILE *
+ * @fsp_size: list size
+ *
+ * Note: fd inside fsp should be 0 or 1 or 2 only
+ *
+ */
+void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
 {
-    assert(io);
+    assert(rv);
+
+    vm_attr_t *attr = PRIV(rv);
+    assert(attr && attr->fd_map);
+
+    for (uint32_t i = 0; i < fsp_size; i++) {
+        int fd = fsp[i].fd;
+        FILE *file = fsp[i].file;
+
+        if (!file)
+            continue;
+        if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO)
+            continue;
+
+        /* check if standard stream refered by fd exists or not */
+        map_iter_t it;
+        map_find(attr->fd_map, &it, &fd);
+        if (it.node) /* found, remove first */
+            map_erase(attr->fd_map, &it);
+        map_insert(attr->fd_map, &fd, &file);
+
+        /* store new fd to make the vm_attr_t consistent */
+        int new_fd = FILENO(file);
+        assert(new_fd != -1);
+
+        if (fd == STDIN_FILENO)
+            attr->fd_stdin = new_fd;
+        else if (fd == STDOUT_FILENO)
+            attr->fd_stdout = new_fd;
+        else
+            attr->fd_stderr = new_fd;
+    }
+}
+
+riscv_t *rv_create(const riscv_io_t *io, riscv_user_t rv_attr)
+{
+    assert(io && rv_attr);
 
     riscv_t *rv = calloc(1, sizeof(riscv_t));
     assert(rv);
@@ -119,10 +166,48 @@ riscv_t *rv_create(const riscv_io_t *io,
     /* copy over the IO interface */
     memcpy(&rv->io, io, sizeof(riscv_io_t));
 
-    /* copy over the userdata */
-    rv->userdata = userdata;
+    /* copy over the attr */
+    rv->data = rv_attr;
 
-    rv->output_exit_code = output_exit_code;
+    vm_attr_t *attr = PRIV(rv);
+    attr->mem = memory_new(attr->mem_size);
+    assert(attr->mem);
+
+    /* reset */
+    rv_reset(rv, 0U);
+
+    if (attr->data.user) {
+        elf_t *elf = elf_new();
+        assert(elf && elf_open(elf, (attr->data.user)->elf_program));
+
+        const struct Elf32_Sym *end;
+        if ((end = elf_get_symbol(elf, "_end")))
+            attr->break_addr = end->st_value;
+
+        assert(elf_load(elf, attr->mem));
+
+        /* set the entry pc */
+        const struct Elf32_Ehdr *hdr = get_elf_header(elf);
+        assert(rv_set_pc(rv, hdr->e_entry));
+
+        elf_delete(elf);
+    } else {
+        /* TODO: system emulator */
+    }
+
+    /*
+     * default standard stream
+     *
+     * rv_remap_stdstream can be called to overwrite them
+     */
+    attr->fd_map = map_init(int, FILE *, map_cmp_int);
+    rv_remap_stdstream(rv,
+                       (fd_stream_pair_t[]){
+                           {STDIN_FILENO, stdin},
+                           {STDOUT_FILENO, stdout},
+                           {STDERR_FILENO, stderr},
+                       },
+                       3);
 
     /* create block and IRs memory pool */
     rv->block_mp = mpool_create(sizeof(block_t) << BLOCK_MAP_CAPACITY_BITS,
@@ -141,10 +226,63 @@ riscv_t *rv_create(const riscv_io_t *io,
     rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
     assert(rv->block_cache);
 #endif
-    /* reset */
-    rv_reset(rv, 0U, argc, args);
 
     return rv;
+}
+
+static void rv_run_and_trace(riscv_t *rv)
+{
+    assert(rv);
+
+    vm_attr_t *attr = PRIV(rv);
+    assert(attr && attr->data.user && attr->data.user->elf_program);
+
+    const char *prog_name = attr->data.user->elf_program;
+    elf_t *elf = elf_new();
+    assert(elf && elf_open(elf, prog_name));
+    const uint32_t cycles_per_step = 1;
+
+    for (; !rv_has_halted(rv);) { /* run until the flag is done */
+        /* trace execution */
+        uint32_t pc = rv_get_pc(rv);
+        const char *sym = elf_find_symbol(elf, pc);
+        printf("%08x  %s\n", pc, (sym ? sym : ""));
+
+        rv_step(rv, cycles_per_step); /* step instructions */
+    }
+
+    elf_delete(elf);
+}
+
+#if RV32_HAS(GDBSTUB)
+/* Run the RISC-V emulator as gdbstub */
+void rv_debug(riscv_t *rv);
+#endif
+
+void rv_profile(riscv_t *rv, char *out_file_path);
+
+void rv_run(riscv_t *rv)
+{
+    assert(rv);
+
+    vm_attr_t *attr = PRIV(rv);
+    assert(attr && attr->data.user && attr->data.user->elf_program);
+
+    if (attr->run_flag & RV_RUN_TRACE)
+        rv_run_and_trace(rv);
+#if RV32_HAS(GDBSTUB)
+    else if (attr->run_flag & RV_RUN_GDBSTUB)
+        rv_debug(rv);
+#endif
+    else {                                     /* default main loop */
+        for (; !rv_has_halted(rv);)            /* run until the flag is done */
+            rv_step(rv, attr->cycle_per_step); /* step instructions */
+    }
+
+    if (attr->run_flag & RV_RUN_PROFILE) {
+        assert(attr->profile_output_file);
+        rv_profile(rv, attr->profile_output_file);
+    }
 }
 
 void rv_halt(riscv_t *rv)
@@ -157,15 +295,13 @@ bool rv_has_halted(riscv_t *rv)
     return rv->halt;
 }
 
-bool rv_enables_to_output_exit_code(riscv_t *rv)
-{
-    return rv->output_exit_code;
-}
-
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
 #if !RV32_HAS(JIT)
+    vm_attr_t *attr = PRIV(rv);
+    map_delete(attr->fd_map);
+    memory_delete(attr->mem);
     block_map_destroy(rv);
 #else
     mpool_destroy(rv->chain_entry_mp);
@@ -175,16 +311,22 @@ void rv_delete(riscv_t *rv)
     free(rv);
 }
 
-void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
+void rv_reset(riscv_t *rv, riscv_word_t pc)
 {
     assert(rv);
     memset(rv->X, 0, sizeof(uint32_t) * N_RV_REGS);
+
+    vm_attr_t *attr = PRIV(rv);
+    int argc = attr->argc;
+    char **args = attr->argv;
+    memory_t *mem = attr->mem;
 
     /* set the reset address */
     rv->PC = pc;
 
     /* set the default stack pointer */
-    rv->X[rv_reg_sp] = DEFAULT_STACK_ADDR;
+    rv->X[rv_reg_sp] =
+        attr->mem_size - attr->stack_size - attr->args_offset_size;
 
     /* Store 'argc' and 'args' of the target program in 'state->mem'. Thus,
      * we can use an offset trick to emulate 32/64-bit target programs on
@@ -218,17 +360,15 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
      * TODO: access to envp
      */
 
-    state_t *s = rv_userdata(rv);
-
     /* copy args to RAM */
     uintptr_t args_size = (1 + argc + 1) * sizeof(uint32_t);
-    uintptr_t args_bottom = DEFAULT_ARGS_ADDR;
+    uintptr_t args_bottom = attr->mem_size - attr->stack_size;
     uintptr_t args_top = args_bottom - args_size;
     args_top &= 16;
 
     /* argc */
     uintptr_t *args_p = (uintptr_t *) args_top;
-    memory_write(s->mem, (uintptr_t) args_p, (void *) &argc, sizeof(int));
+    memory_write(mem, (uintptr_t) args_p, (void *) &argc, sizeof(int));
     args_p++;
 
     /* args */
@@ -240,7 +380,7 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
     for (int i = 0; i < argc; i++) {
         const char *arg = args[i];
         args_len = strlen(arg);
-        memory_write(s->mem, (uintptr_t) args_p, (void *) arg,
+        memory_write(mem, (uintptr_t) args_p, (void *) arg,
                      (args_len + 1) * sizeof(uint8_t));
         args_space[args_space_idx++] = args_len + 1;
         args_p = (uintptr_t *) ((uintptr_t) args_p + args_len + 1);
@@ -257,8 +397,8 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
 
     /* argc */
     uintptr_t *sp = (uintptr_t *) stack_top;
-    memory_write(s->mem, (uintptr_t) sp,
-                 (void *) (s->mem->mem_base + (uintptr_t) args_p), sizeof(int));
+    memory_write(mem, (uintptr_t) sp,
+                 (void *) (mem->mem_base + (uintptr_t) args_p), sizeof(int));
     args_p++;
     /* keep argc and args[0] within one word due to RV32 ABI */
     sp = (uintptr_t *) ((uint32_t *) sp + 1);
@@ -266,12 +406,11 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
     /* args */
     for (int i = 0; i < argc; i++) {
         uintptr_t offset = (uintptr_t) args_p;
-        memory_write(s->mem, (uintptr_t) sp, (void *) &offset,
-                     sizeof(uintptr_t));
+        memory_write(mem, (uintptr_t) sp, (void *) &offset, sizeof(uintptr_t));
         args_p = (uintptr_t *) ((uintptr_t) args_p + args_space[i]);
         sp = (uintptr_t *) ((uint32_t *) sp + 1);
     }
-    memory_fill(s->mem, (uintptr_t) sp, sizeof(uint32_t), 0);
+    memory_fill(mem, (uintptr_t) sp, sizeof(uint32_t), 0);
 
     /* reset sp pointing to argc */
     rv->X[rv_reg_sp] = stack_top;
@@ -299,31 +438,6 @@ void rv_reset(riscv_t *rv, riscv_word_t pc, int argc, char **args)
 #endif
 
     rv->halt = false;
-}
-
-state_t *state_new(void)
-{
-    state_t *s = malloc(sizeof(state_t));
-    assert(s);
-    s->mem = memory_new();
-    s->break_addr = 0;
-
-    s->fd_map = map_init(int, FILE *, map_cmp_int);
-    FILE *files[] = {stdin, stdout, stderr};
-    for (size_t i = 0; i < ARRAYS_SIZE(files); i++)
-        map_insert(s->fd_map, &i, &files[i]);
-
-    return s;
-}
-
-void state_delete(state_t *s)
-{
-    if (!s)
-        return;
-
-    map_delete(s->fd_map);
-    memory_delete(s->mem);
-    free(s);
 }
 
 static const char *insn_name_table[] = {

@@ -11,11 +11,6 @@ CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
 
-# Set the default stack pointer
-CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFE000
-# Set the default args starting address
-CFLAGS += -D DEFAULT_ARGS_ADDR=0xFFFFF000
-
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)
@@ -121,7 +116,7 @@ endif
 ENABLE_JIT ?= 0
 $(call set-feature, JIT)
 ifeq ($(call has, JIT), 1)
-OBJS_EXT += jit.o 
+OBJS_EXT += jit.o
 ifneq ($(processor),$(filter $(processor),x86_64 aarch64 arm64))
 $(error JIT mode only supports for x64 and arm64 target currently.)
 endif

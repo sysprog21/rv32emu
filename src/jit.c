@@ -39,6 +39,7 @@
 #include "io.h"
 #include "jit.h"
 #include "riscv.h"
+#include "riscv_private.h"
 #include "utils.h"
 
 #define JIT_CLS_MASK 0x07
@@ -1284,7 +1285,7 @@ static void do_fuse2(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 
 static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 {
-    memory_t *m = ((state_t *) rv->userdata)->mem;
+    memory_t *m = PRIV(rv)->mem;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         emit_load(state, S32, parameter_reg[0], temp_reg[0],
@@ -1300,7 +1301,7 @@ static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 
 static void do_fuse4(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 {
-    memory_t *m = ((state_t *) rv->userdata)->mem;
+    memory_t *m = PRIV(rv)->mem;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         emit_load(state, S32, parameter_reg[0], temp_reg[0],

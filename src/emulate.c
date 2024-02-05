@@ -1210,4 +1210,7 @@ void dump_registers(riscv_t *rv, char *out_file_path)
         fprintf(f, "  \"x%d\": %u%s\n", i, rv->X[i], comma);
     }
     fprintf(f, "}\n");
+
+    if (out_file_path[0] != '-')
+        fclose(f);
 }

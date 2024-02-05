@@ -300,8 +300,7 @@ bool elf_open(elf_t *e, const char *input)
 #if HAVE_MMAP
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
-        free(path);
-        return false;
+        goto free_path;
     }
 
     /* get file size */
@@ -314,17 +313,14 @@ bool elf_open(elf_t *e, const char *input)
      */
     e->raw_data = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (e->raw_data == MAP_FAILED) {
-        release(e);
-        free(path);
-        return false;
+        goto free_fd;
     }
     close(fd);
 
 #else  /* fallback to standard I/O text stream */
     FILE *f = fopen(path, "rb");
     if (!f) {
-        free(path);
-        return false;
+        goto free_path;
     }
 
     /* get file size */
@@ -332,9 +328,7 @@ bool elf_open(elf_t *e, const char *input)
     e->raw_size = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (e->raw_size == 0) {
-        fclose(f);
-        free(path);
-        return false;
+        goto free_fd;
     }
 
     /* allocate memory */
@@ -346,9 +340,7 @@ bool elf_open(elf_t *e, const char *input)
     const size_t r = fread(e->raw_data, 1, e->raw_size, f);
     fclose(f);
     if (r != e->raw_size) {
-        release(e);
-        free(path);
-        return false;
+        goto free_path;
     }
 #endif /* HAVE_MMAP */
 
@@ -357,13 +349,24 @@ bool elf_open(elf_t *e, const char *input)
 
     /* check it is a valid ELF file */
     if (!is_valid(e)) {
-        release(e);
-        free(path);
-        return false;
+        goto free_path;
     }
 
     free(path);
     return true;
+
+free_fd:
+#if HAVE_MMAP
+    close(fd);
+#else
+    close(f);
+#endif
+
+free_path:
+    free(path);
+
+    release(e);
+    return false;
 }
 
 struct Elf32_Ehdr *get_elf_header(elf_t *e)

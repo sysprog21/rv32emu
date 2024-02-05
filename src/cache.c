@@ -153,7 +153,7 @@ free_map:
     free(cache->map);
 free_lists:
     for (int j = 0; j < i; j++)
-        free(cache->lists[i]);
+        free(cache->lists[j]);
 
     free(cache);
     return NULL;

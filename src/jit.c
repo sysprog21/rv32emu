@@ -1481,6 +1481,7 @@ out:
 struct jit_state *jit_state_init(size_t size)
 {
     struct jit_state *state = malloc(sizeof(struct jit_state));
+    assert(state);
     state->offset = 0;
     state->size = size;
     state->buf = mmap(0, size, PROT_READ | PROT_WRITE | PROT_EXEC,

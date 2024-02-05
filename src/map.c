@@ -156,7 +156,7 @@ static void rb_insert(map_t rb, map_node_t *node)
             pathp[1].node = rb_node_get_right(pathp->node);
             break;
         default:
-            /* igore duplicate key */
+            /* ignore duplicate key */
             __UNREACHABLE;
             break;
         }

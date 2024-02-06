@@ -451,7 +451,7 @@ static const char *insn_name_table[] = {
 };
 
 #if RV32_HAS(JIT)
-void profile(block_t *block, uint32_t freq, FILE *output_file)
+static void profile(block_t *block, uint32_t freq, FILE *output_file)
 {
     fprintf(output_file, "%#-9x|", block->pc_start);
     fprintf(output_file, "%#-8x|", block->pc_end);

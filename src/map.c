@@ -290,7 +290,8 @@ static void rb_remove(map_t rb, map_node_t *node)
                     rb_node_set_right(pathp[-1].node, left);
             }
             return;
-        } else if (pathp == path) {
+        }
+        if (pathp == path) {
             /* the tree only contained one node */
             rb->root = NULL;
             return;

@@ -14,6 +14,7 @@
 #include "utils.h"
 
 #define PREALLOC_SIZE 4096
+
 /* newlib is a portable (not RISC-V specific) C library, which implements
  * printf(3) and other functions described in C standards. Some system calls
  * should be provided in conjunction with newlib.
@@ -106,6 +107,7 @@ static void syscall_write(riscv_t *rv)
         } else
             goto error_handler;
     }
+
     memory_read(attr->mem, tmp, buffer + total_write, count);
     if (!map_at_end(attr->fd_map, &it)) {
         /* write out the data */
@@ -117,9 +119,11 @@ static void syscall_write(riscv_t *rv)
     } else
         goto error_handler;
     assert(total_write == rv_get_reg(rv, rv_reg_a2));
+
     /* return number of bytes written */
     rv_set_reg(rv, rv_reg_a0, total_write);
     return;
+
     /* read the string being printed */
 error_handler:
     /* error */
@@ -129,9 +133,7 @@ error_handler:
 
 static void syscall_exit(riscv_t *rv)
 {
-    /*
-     * simply halt cpu and save exit code
-     *
+    /* simply halt cpu and save exit code.
      * the application decides the usage of exit code
      */
     rv_halt(rv);

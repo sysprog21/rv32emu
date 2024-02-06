@@ -299,9 +299,8 @@ bool elf_open(elf_t *e, const char *input)
 
 #if HAVE_MMAP
     int fd = open(path, O_RDONLY);
-    if (fd < 0) {
+    if (fd < 0)
         goto free_path;
-    }
 
     /* get file size */
     struct stat st;
@@ -312,24 +311,21 @@ bool elf_open(elf_t *e, const char *input)
      * The beginning of the file is ELF header.
      */
     e->raw_data = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (e->raw_data == MAP_FAILED) {
+    if (e->raw_data == MAP_FAILED)
         goto free_fd;
-    }
     close(fd);
 
 #else  /* fallback to standard I/O text stream */
     FILE *f = fopen(path, "rb");
-    if (!f) {
+    if (!f)
         goto free_path;
-    }
 
     /* get file size */
     fseek(f, 0, SEEK_END);
     e->raw_size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (e->raw_size == 0) {
+    if (!e->raw_size)
         goto free_fd;
-    }
 
     /* allocate memory */
     free(e->raw_data);
@@ -339,18 +335,16 @@ bool elf_open(elf_t *e, const char *input)
     /* read data into memory */
     const size_t r = fread(e->raw_data, 1, e->raw_size, f);
     fclose(f);
-    if (r != e->raw_size) {
+    if (r != e->raw_size)
         goto free_path;
-    }
 #endif /* HAVE_MMAP */
 
     /* point to the header */
     e->hdr = (const struct Elf32_Ehdr *) e->raw_data;
 
     /* check it is a valid ELF file */
-    if (!is_valid(e)) {
+    if (!is_valid(e))
         goto free_path;
-    }
 
     free(path);
     return true;

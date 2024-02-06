@@ -49,6 +49,7 @@ void block_map_clear(riscv_t *rv)
         block_t *block = map->map[i];
         if (!block)
             continue;
+
         uint32_t idx;
         rv_insn_t *ir, *next;
         for (idx = 0, ir = block->ir_head; idx < block->n_insn;
@@ -110,15 +111,13 @@ riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg)
     return ~0U;
 }
 
-/*
- * Remap standard stream
+/* Remap standard stream
  *
  * @rv: riscv
  * @fsp: a list of pair of mapping from fd to FILE *
  * @fsp_size: list size
  *
  * Note: fd inside fsp should be 0 or 1 or 2 only
- *
  */
 void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
 {
@@ -195,9 +194,7 @@ riscv_t *rv_create(const riscv_io_t *io, riscv_user_t rv_attr)
         /* TODO: system emulator */
     }
 
-    /*
-     * default standard stream
-     *
+    /* default standard stream.
      * rv_remap_stdstream can be called to overwrite them
      */
     attr->fd_map = map_init(int, FILE *, map_cmp_int);
@@ -274,7 +271,8 @@ void rv_run(riscv_t *rv)
     else if (attr->run_flag & RV_RUN_GDBSTUB)
         rv_debug(rv);
 #endif
-    else {                                     /* default main loop */
+    else {
+        /* default main loop */
         for (; !rv_has_halted(rv);)            /* run until the flag is done */
             rv_step(rv, attr->cycle_per_step); /* step instructions */
     }

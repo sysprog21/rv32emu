@@ -59,8 +59,7 @@ void rv_gettimeofday(struct timeval *tv)
     tv->tv_usec = tv_usec;
 }
 
-/*
- * TODO: Clarify newlib's handling of time units.
+/* TODO: Clarify newlib's handling of time units.
  * It appears that newlib is using millisecond resolution for time manipulation,
  * while clock_gettime expects nanoseconds in the timespec struct.
  * Further investigation are needed.

@@ -24,11 +24,7 @@ void rv_clock_gettime(struct timespec *tp);
         return (val * 0x61C88647 >> (32 - size_bits)) & ((size) - (1)); \
     }
 
-/*
- * Reference:
- * https://cs.opensource.google/go/go/+/refs/tags/go1.21.4:src/path/path.go;l=51
- *
- * sanitize_path returns the shortest path name equivalent to path
+/* sanitize_path returns the shortest path name equivalent to path
  * by purely lexical processing. It applies the following rules
  * iteratively until no further processing can be done:
  *
@@ -47,6 +43,9 @@ void rv_clock_gettime(struct timespec *tp);
  * See also Rob Pike, “Lexical File Names in Plan 9 or
  * Getting Dot-Dot Right,”
  * https://9p.io/sys/doc/lexnames.html
+ *
+ * Reference:
+ * https://cs.opensource.google/go/go/+/refs/tags/go1.21.4:src/path/path.go;l=51
  */
 char *sanitize_path(const char *input);
 
@@ -84,8 +83,7 @@ static inline void list_add(struct list_head *node, struct list_head *head)
 
 static inline void list_del(struct list_head *node)
 {
-    struct list_head *next = node->next;
-    struct list_head *prev = node->prev;
+    struct list_head *next = node->next, *prev = node->prev;
 
     next->prev = prev;
     prev->next = next;

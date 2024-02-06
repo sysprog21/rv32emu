@@ -32,9 +32,7 @@ enum {
     EI_NIDENT = 16,
 };
 
-/*
- * Section Types
- */
+/* Section Types */
 enum {
     SHT_NULL = 0,     /* Section header table entry unused */
     SHT_PROGBITS = 1, /* Program data */
@@ -55,9 +53,7 @@ enum {
     SHT_HIUSER = 0xffffffff, /* End of application-specific */
 };
 
-/*
- * Section Attribute Flags
- */
+/* Section Attribute Flags */
 enum {
     SHF_WRITE = 0x1,
     SHF_ALLOC = 0x2,

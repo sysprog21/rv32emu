@@ -758,9 +758,8 @@ static void divmod(struct jit_state *state,
      * instruction already returns 0 when dividing by zero.
      */
     emit_dataproc_2source(state, is64, DP2_UDIV, div_dest, rn, rm);
-    if (mod) {
+    if (mod)
         emit_dataproc_3source(state, is64, DP3_MSUB, rd, rm, div_dest, rn);
-    }
 }
 #endif
 

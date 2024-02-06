@@ -630,11 +630,15 @@ static void *sfx_handler(void *arg)
     if (chan == -1)
         return NULL;
 
-    if (*ptr & 0x3) /* Doom, multiplied by 8 because sfx->volume's max is 15 */
+    if (*ptr & 0x3) {
+        /* Doom, multiplied by 8 because sfx->volume's max is 15 */
         Mix_Volume(chan, sfx->volume * 8);
-    else /* Quake, + 1 mod by 128 because sfx->volume's max is 255 and
-            Mix_Volume's max is 128 */
+    } else {
+        /* Quake, + 1 mod by 128 because sfx->volume's max is 255 and
+         * Mix_Volume's max is 128.
+         */
         Mix_Volume(chan, (sfx->volume + 1) % 128);
+    }
 
     return NULL;
 }

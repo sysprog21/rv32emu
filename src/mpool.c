@@ -30,13 +30,13 @@ typedef struct mpool {
 
 static void *mem_arena(size_t sz)
 {
+    void *p;
 #if HAVE_MMAP
-    void *p =
-        mmap(0, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    p = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (p == MAP_FAILED)
         return NULL;
 #else
-    void *p = malloc(sz);
+    p = malloc(sz);
     if (!p)
         return NULL;
 #endif
@@ -81,9 +81,11 @@ static void *mpool_extend(mpool_t *mp)
     char *p = mem_arena(pool_size);
     if (!p)
         return NULL;
+
     area_t *new_area = malloc(sizeof(area_t));
     if (!new_area)
         return NULL;
+
     new_area->mapped = p;
     new_area->next = NULL;
     size_t chunk_count = pool_size / (sizeof(memchunk_t) + mp->chunk_size);
@@ -95,12 +97,13 @@ static void *mpool_extend(mpool_t *mp)
         cur = cur->next;
     }
     mp->chunk_count += chunk_count;
+
     /* insert new mapped */
     area_t *cur_area = &mp->area;
-    while (cur_area->next) {
+    while (cur_area->next)
         cur_area = cur_area->next;
-    }
     cur_area->next = new_area;
+
     return p;
 }
 
@@ -108,6 +111,7 @@ void *mpool_alloc(mpool_t *mp)
 {
     if (!mp->chunk_count && !(mpool_extend(mp)))
         return NULL;
+
     char *ptr = (char *) mp->free_chunk_head + sizeof(memchunk_t);
     mp->free_chunk_head = mp->free_chunk_head->next;
     mp->chunk_count--;
@@ -118,6 +122,7 @@ void *mpool_calloc(mpool_t *mp)
 {
     if (!mp->chunk_count && !(mpool_extend(mp)))
         return NULL;
+
     char *ptr = (char *) mp->free_chunk_head + sizeof(memchunk_t);
     mp->free_chunk_head = mp->free_chunk_head->next;
     mp->chunk_count--;

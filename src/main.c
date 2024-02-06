@@ -150,7 +150,7 @@ static bool parse_args(int argc, char **args)
         assert(getcwd(cwd_path, PATH_MAX));
 
         char rel_path[PATH_MAX] = {0};
-        memcpy(rel_path, args[0], strlen(args[0]) - 7 /* strlen("rv32emu")*/);
+        memcpy(rel_path, args[0], strlen(args[0]) - 7 /* strlen("rv32emu") */);
 
         char *prog_basename = basename(opt_prog_name);
         prof_out_file = malloc(strlen(cwd_path) + 1 + strlen(rel_path) +

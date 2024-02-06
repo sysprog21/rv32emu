@@ -53,7 +53,8 @@ static int rv_read_mem(void *args, size_t addr, size_t len, void *val)
     for (size_t i = 0; i < len; i++) {
         /* FIXME: This is implemented as a simple workaround for reading
          * an invalid address. We may have to do error handling in the
-         * mem_read_* function directly. */
+         * mem_read_* function directly.
+         */
         *((uint8_t *) val + i) = rv->io.mem_read_b(addr + i);
     }
 

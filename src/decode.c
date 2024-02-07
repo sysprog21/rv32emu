@@ -465,6 +465,8 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
         break;
     case 1: /* SLLI: Shift Left Logical */
         ir->opcode = rv_insn_slli;
+        if (unlikely(ir->imm & (1 << 5)))
+            return false;
         break;
     case 2: /* SLTI: Set on Less Than Immediate */
         ir->opcode = rv_insn_slti;
@@ -482,6 +484,8 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = (ir->imm & ~0x1f)
                          ? rv_insn_srai  /* SRAI: Shift Right Arithmetic */
                          : rv_insn_srli; /* SRLI: Shift Right Logical */
+        if (unlikely(ir->imm & (1 << 5)))
+            return false;
         break;
     case 6: /* ORI: OR Immediate */
         ir->opcode = rv_insn_ori;

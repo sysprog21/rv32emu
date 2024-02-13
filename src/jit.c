@@ -928,38 +928,6 @@ static inline void emit_store(struct jit_state *state,
 #endif
 }
 
-/* Store imm to [dst + offset] */
-static inline void emit_store_imm32(struct jit_state *state,
-                                    enum operand_size size,
-                                    int dst,
-                                    int32_t offset,
-                                    int32_t imm)
-{
-#if defined(__x86_64__)
-    if (size == S16)
-        emit1(state, 0x66); /* 16-bit override */
-    emit1(state, size == S8 ? 0xc6 : 0xc7);
-    emit_modrm_and_displacement(state, 0, dst, offset);
-    switch (size) {
-    case S32:
-        emit4(state, imm);
-        break;
-    case S16:
-        emit2(state, imm);
-        break;
-    case S8:
-        emit1(state, imm);
-        break;
-    default:
-        __UNREACHABLE;
-        break;
-    }
-#elif defined(__aarch64__)
-    emit_load_imm(state, R10, imm);
-    emit_store(state, size, R10, dst, offset);
-#endif
-}
-
 static inline void emit_jmp(struct jit_state *state, uint32_t target_pc)
 {
 #if defined(__x86_64__)

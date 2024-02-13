@@ -131,7 +131,7 @@ for i in range(len(emulate_funcs)):
 f.close()
 
 fields = {"imm", "pc", "rs1", "rs2", "rd", "shamt", "branch_taken", "branch_untaken"}
-temp_regs = {"TMP0", "TMP1", "TMP2"}
+virt_regs = {"VR0", "VR1", "VR2"}
 # generate jit template
 for i in range(len(op)):
     if (not SKIP_LIST.count(op[i])):
@@ -145,9 +145,11 @@ for i in range(len(op)):
             for i in range(len(items)):
                 if items[i] in fields:
                     items[i] = "ir->" + items[i]
-                if items[i] in temp_regs:
-                    items[i] = "temp_reg[" + items[i][-1] + "]"
-            if items[0] == "alu32_imm":
+                if items[i] in virt_regs:
+                    items[i] = "vm_reg[" + items[i][-1] + "]"
+                if items[i] == "TMP":
+                    items[i] = "temp_reg"   
+            if items[0] == "alu32imm":
                 if len(items) == 8:
                     asm = "emit_alu32_imm{}(state, {}, {}, {}, ({}{}_t) {});".format(
                         items[1], items[2], items[3], items[4], items[5], items[6], items[7])
@@ -157,7 +159,7 @@ for i in range(len(op)):
                 else:
                     asm = "emit_alu32_imm{}(state, {}, {}, {}, {});".format(
                         items[1], items[2], items[3], items[4], items[5])
-            elif items[0] == "alu64_imm":
+            elif items[0] == "alu64imm":
                 asm = "emit_alu64_imm{}(state, {}, {}, {}, {});".format(
                     items[1], items[2], items[3], items[4], items[5])
             elif items[0] == "alu64":
@@ -166,7 +168,7 @@ for i in range(len(op)):
             elif items[0] == "alu32":
                 asm = "emit_alu32(state, {}, {}, {});".format(
                     items[1], items[2], items[3])
-            elif items[0] == "ld_imm":
+            elif items[0] == "ldimm":
                 if items[2] == "mem":
                     asm = "emit_load_imm(state, {}, (intptr_t) (m->mem_base + ir->imm));".format(
                         items[1])
@@ -176,13 +178,21 @@ for i in range(len(op)):
                 else:
                     asm = "emit_load_imm(state, {}, {});".format(
                         items[1], items[2])
-            elif items[0] == "ld_sext":
+            elif items[0] == "lds":
                 if (items[3] == "X"):
                     asm = "emit_load_sext(state, {}, parameter_reg[0], {}, offsetof(riscv_t, X) + 4 * {});".format(
                         items[1], items[2], items[4])
                 else:
                     asm = "emit_load_sext(state, {}, {}, {}, {});".format(
                     items[1], items[2],  items[3],  items[4])
+            elif items[0] == "rald":
+                asm = "{} = ra_load(state, {});".format(items[1], items[2])
+            elif items[0] == "rald2":
+                asm = "ra_load2(state, {}, {});".format(items[1], items[2])
+            elif items[0] == "rald2s":
+                asm = "ra_load2_sext(state, {}, {}, {}, {});".format(items[1], items[2], items[3], items[4])
+            elif items[0] == "map":
+                asm = "{} = map_reg(state, {});".format(items[1], items[2])
             elif items[0] == "ld":
                 if (items[3] == "X"):
                     asm = "emit_load(state, {}, parameter_reg[0], {}, offsetof(riscv_t, X) + 4 * {});".format(
@@ -190,9 +200,6 @@ for i in range(len(op)):
                 else:
                     asm = "emit_load(state, {}, {}, {}, {});".format(
                         items[1], items[2], items[3], items[4])
-            elif items[0] == "st_imm":
-                asm = "emit_store_imm32(state, {}, parameter_reg[0], offsetof(riscv_t, X) + 4 * {}, {});".format(
-                    items[1], items[2], items[3])
             elif items[0] == "st":
                 if (items[3] == "X"):
                     asm = "emit_store(state, {}, {}, parameter_reg[0], offsetof(riscv_t, X) + 4 * {});".format(
@@ -203,10 +210,13 @@ for i in range(len(op)):
                 else:
                     asm = "emit_store(state, {}, {}, {}, {});".format(
                         items[1], items[2], items[3], items[4])
+            elif items[0] == "mov":
+                asm = "emit_mov(state, {}, {});".format(
+                    items[1], items[2])
             elif items[0] == "cmp":
                 asm = "emit_cmp32(state, {}, {});".format(
                     items[1], items[2])
-            elif items[0] == "cmp_imm":
+            elif items[0] == "cmpimm":
                 asm = "emit_cmp_imm32(state, {}, {});".format(
                     items[1], items[2])
             elif items[0] == "jmp":
@@ -214,9 +224,9 @@ for i in range(len(op)):
                     items[1], items[2])
             elif items[0] == "jcc":
                 asm = "emit_jcc_offset(state, {});".format(items[1])
-            elif items[0] == "set_jmp_off":
+            elif items[0] == "setjmpoff":
                 asm = "uint32_t jump_loc = state->offset;"
-            elif items[0] == "jmp_off":
+            elif items[0] == "jmpoff":
                 asm = "emit_jump_target_offset(state, JUMP_LOC, state->offset);"
             elif items[0] == "mem":
                 asm = "memory_t *m = PRIV(rv)->mem;"
@@ -235,9 +245,13 @@ for i in range(len(op)):
                 asm = "muldivmod(state, {}, {}, {}, {});".format(
                     items[1], items[2], items[3], items[4])
             elif items[0] == "cond":
+                if items[1] == "regneq":
+                    items[1] = "vm_reg[0] != vm_reg[1]"
                 asm = "if({})".format(items[1]) + "{"
             elif items[0] == "end":
                 asm = "}"
+            elif items[0] == "break":
+                asm = "store_back(state);"
             elif items[0] == "assert":
                 asm = "assert(NULL);"
             output += asm + "\n"

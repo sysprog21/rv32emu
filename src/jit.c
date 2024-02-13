@@ -145,6 +145,7 @@ typedef enum {
     LS_LDRSHW = 0x40c00000U,  // 0100_0000_1100_0000_0000_0000_0000_0000
     LS_STRW = 0x80000000U,    // 1000_0000_0000_0000_0000_0000_0000_0000
     LS_LDRW = 0x80400000U,    // 1000_0000_0100_0000_0000_0000_0000_0000
+    LS_LDRSW = 0x80800000U,   // 1000_0000_1000_0000_0000_0000_0000_0000
     LS_STRX = 0xc0000000U,    // 1100_0000_0000_0000_0000_0000_0000_0000
     LS_LDRX = 0xc0400000U,    // 1100_0000_0100_0000_0000_0000_0000_0000
     /* LoadStorePairOpcode */
@@ -187,21 +188,6 @@ enum {
 };
 #endif
 
-enum vm_reg {
-    VM_REG_0 = 0,
-    VM_REG_1,
-    VM_REG_2,
-    VM_REG_3,
-    VM_REG_4,
-    VM_REG_5,
-    VM_REG_6,
-    VM_REG_7,
-    VM_REG_8,
-    VM_REG_9,
-    VM_REG_10,
-    N_VM_REGS,
-};
-
 enum operand_size {
     S8,
     S16,
@@ -219,18 +205,17 @@ enum operand_size {
 #if defined(_WIN32)
 static const int nonvolatile_reg[] = {RBP, RBX, RDI, RSI, R13, R14, R15};
 static const int parameter_reg[] = {RCX, RDX, R8, R9};
-#define RCX_ALT R10
 static const int register_map[] = {
     RAX, R10, RDX, R8, R9, R14, R15, RDI, RSI, RBX, RBP,
 };
+static int temp_reg = RCX;
 #else
-#define RCX_ALT R9
 static const int nonvolatile_reg[] = {RBP, RBX, R13, R14, R15};
 static const int parameter_reg[] = {RDI, RSI, RDX, RCX, R8, R9};
-static const int temp_reg[] = {RAX, RBX, RCX};
 static const int register_map[] = {
-    RAX, RDI, RSI, RDX, R9, R8, RBX, R13, R14, R15, RBP,
+    RAX, RBX, RDX, R8, R9, R10, R11, R13, R14, R15,
 };
+static int temp_reg = RCX;
 #endif
 #elif defined(__aarch64__)
 /* callee_reg - this must be a multiple of two because of how we save the stack
@@ -238,7 +223,7 @@ static const int register_map[] = {
 static const int callee_reg[] = {R19, R20, R21, R22, R23, R24, R25, R26};
 /* parameter_reg (Caller saved registers) */
 static const int parameter_reg[] = {R0, R1, R2, R3, R4};
-static const int temp_reg[] = {R6, R7, R8};
+static int temp_reg = R8;
 
 /*  Register assignments:
  *  Arm64       Usage
@@ -250,19 +235,10 @@ static const int temp_reg[] = {R6, R7, R8};
  */
 
 static const int register_map[] = {
-    R5,                      /* result */
-    R0,  R1,  R2,  R3,  R4,  /* parameters */
-    R19, R20, R21, R22, R23, /* callee-saved */
+    R5, R6, R7, R9, R11, R12, R13, R14, R15, R16, R17, R18, R26,
 };
 static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm);
 #endif
-
-/* Return the register for the given JIT register */
-static int map_register(int r)
-{
-    assert(r < N_VM_REGS);
-    return register_map[r % N_VM_REGS];
-}
 
 static inline void offset_map_insert(struct jit_state *state, int32_t target_pc)
 {
@@ -365,13 +341,15 @@ static inline void emit_basic_rex(struct jit_state *state,
 
 static inline void emit_push(struct jit_state *state, int r)
 {
-    emit_basic_rex(state, 0, 0, r);
+    if (r & 8)
+        emit_basic_rex(state, 0, 0, r);
     emit1(state, 0x50 | (r & 7));
 }
 
 static inline void emit_pop(struct jit_state *state, int r)
 {
-    emit_basic_rex(state, 0, 0, r);
+    if (r & 8)
+        emit_basic_rex(state, 0, 0, r);
     emit1(state, 0x58 | (r & 7));
 }
 
@@ -591,7 +569,8 @@ static inline void emit_alu32(struct jit_state *state, int op, int src, int dst)
      * The MR encoding is utilized when a choice is available. The 'src' is
      * often used as an opcode extension.
      */
-    emit_basic_rex(state, 0, src, dst);
+    if (src & 8 || dst & 8)
+        emit_basic_rex(state, 0, src, dst);
     emit1(state, op);
     emit_modrm_reg2reg(state, src, dst);
 #elif defined(__aarch64__)
@@ -613,11 +592,11 @@ static inline void emit_alu32(struct jit_state *state, int op, int src, int dst)
         break;
     case 0xd3:
         if (src == 4) /* SLL */
-            emit_dataproc_2source(state, false, DP2_LSLV, dst, dst, R8);
+            emit_dataproc_2source(state, false, DP2_LSLV, dst, dst, temp_reg);
         else if (src == 5) /* SRL */
-            emit_dataproc_2source(state, false, DP2_LSRV, dst, dst, R8);
+            emit_dataproc_2source(state, false, DP2_LSRV, dst, dst, temp_reg);
         else if (src == 7) /* SRA */
-            emit_dataproc_2source(state, false, DP2_ASRV, dst, dst, R8);
+            emit_dataproc_2source(state, false, DP2_ASRV, dst, dst, temp_reg);
         break;
     default:
         __UNREACHABLE;
@@ -652,7 +631,7 @@ static inline void emit_alu32_imm32(struct jit_state *state,
         break;
     case 6:
         emit_load_imm(state, R10, imm);
-        emit_logical_register(state, false, LOG_EOR, dst, src, R10);
+        emit_logical_register(state, false, LOG_EOR, dst, dst, R10);
         break;
     default:
         __UNREACHABLE;
@@ -726,13 +705,19 @@ static inline void emit_alu64_imm8(struct jit_state *state,
 #endif
 }
 
-#if defined(__x86_64__)
 /* Register to register mov */
 static inline void emit_mov(struct jit_state *state, int src, int dst)
 {
+#if defined(__x86_64__)
     emit_alu64(state, 0x89, src, dst);
+#elif defined(__aarch64__)
+    emit_load_imm(state, R10, 0);
+    emit_addsub_register(state, false, AS_ADD, dst, src, R10);
+#endif
 }
 
+
+#if defined(__x86_64__)
 /* REX.W prefix, ModRM byte, and 32-bit immediate */
 static inline void emit_alu64_imm32(struct jit_state *state,
                                     int op,
@@ -824,6 +809,8 @@ static inline void emit_load(struct jit_state *state,
                              int32_t offset)
 {
 #if defined(__x86_64__)
+    if (src & 8 || dst & 8)
+        emit_basic_rex(state, 0, dst, src);
     if (size == S8 || size == S16) {
         /* movzx */
         emit1(state, 0x0f);
@@ -860,6 +847,8 @@ static inline void emit_load_sext(struct jit_state *state,
 {
 #if defined(__x86_64__)
     if (size == S8 || size == S16) {
+        if (src & 8 || dst & 8)
+            emit_basic_rex(state, 0, dst, src);
         /* movsx */
         emit1(state, 0x0f);
         emit1(state, size == S8 ? 0xbe : 0xbf);
@@ -876,6 +865,9 @@ static inline void emit_load_sext(struct jit_state *state,
         break;
     case S16:
         emit_loadstore_imm(state, LS_LDRSHW, dst, src, offset);
+        break;
+    case S32:
+        emit_loadstore_imm(state, LS_LDRSW, dst, src, offset);
         break;
     default:
         __UNREACHABLE;
@@ -914,6 +906,8 @@ static inline void emit_store(struct jit_state *state,
 #if defined(__x86_64__)
     if (size == S16)
         emit1(state, 0x66); /* 16-bit override */
+    if (src & 8 || dst & 8 || size == S8)
+        emit_rex(state, 0, !!(src & 8), 0, !!(dst & 8));
     emit1(state, size == S8 ? 0x88 : 0x89);
     emit_modrm_and_displacement(state, src, dst, offset);
 #elif defined(__aarch64__)
@@ -995,10 +989,7 @@ static inline void emit_call(struct jit_state *state, intptr_t target)
     emit_movewide_imm(state, true, temp_imm_reg, target);
     emit_uncond_branch_reg(state, BR_BLR, temp_imm_reg);
 
-    int dest = map_register(0);
-    if (dest != R0) {
-        emit_logical_register(state, true, LOG_ORR, dest, RZ, R0);
-    }
+    emit_logical_register(state, true, LOG_ORR, R5, RZ, R0);
 
     emit_loadstore_imm(state, LS_LDRX, R30, SP, 0);
     emit_addsub_imm(state, true, AS_ADD, SP, SP, stack_movement);
@@ -1181,7 +1172,7 @@ static void prepare_translate(struct jit_state *state)
         emit_alu64_imm32(state, 0x81, 5, RSP, 0x8);
 
     /* Set JIT R10 (the way to access the frame in JIT) to match RSP. */
-    emit_mov(state, RSP, map_register(VM_REG_10));
+    emit_mov(state, RSP, RBP);
 
     /* Allocate stack space */
     emit_alu64_imm32(state, 0x81, 5, RSP, STACK_SIZE);
@@ -1199,12 +1190,8 @@ static void prepare_translate(struct jit_state *state)
     /* Epilogue */
     state->exit_loc = state->offset;
 
-    /* Move register 0 into rax */
-    if (map_register(VM_REG_0) != RAX)
-        emit_mov(state, map_register(VM_REG_0), RAX);
-
     /* Deallocate stack space by restoring RSP from JIT R10. */
-    emit_mov(state, map_register(VM_REG_10), RSP);
+    emit_mov(state, RBP, RSP);
 
     if (!(ARRAYS_SIZE(nonvolatile_reg) % 2))
         emit_alu64_imm32(state, 0x81, 0, RSP, 0x8);
@@ -1235,11 +1222,6 @@ static void prepare_translate(struct jit_state *state)
     /* Epilogue */
     state->exit_loc = state->offset;
 
-    /* Move register 0 into R0 */
-    if (map_register(0) != R0) {
-        emit_logical_register(state, true, LOG_ORR, R0, RZ, map_register(0));
-    }
-
     /* Restore callee-saved registers).  */
     for (size_t i = 0; i < ARRAYS_SIZE(callee_reg); i += 2) {
         emit_loadstorepair_imm(state, LSP_LDPX, callee_reg[i],
@@ -1249,6 +1231,146 @@ static void prepare_translate(struct jit_state *state)
     emit_addsub_imm(state, true, AS_ADD, SP, SP, state->stack_size);
     emit_uncond_branch_reg(state, BR_RET, R30);
 #endif
+}
+
+
+static int n_reg =
+    ARRAYS_SIZE(register_map); /* the number of avavliable host register */
+static int count = 0;
+static int reg_table[32];
+static int vm_reg[3] = {0};
+
+static void reset_reg()
+{
+    count = 0;
+    for (int i = 0; i < 32; i++) {
+        reg_table[i] = -1;
+    }
+}
+
+static void store_back(struct jit_state *state)
+{
+    for (int i = 0; i < 32; i++) {
+        if (reg_table[i] != -1) {
+            emit_store(state, S32, reg_table[i], parameter_reg[0],
+                       offsetof(riscv_t, X) + 4 * i);
+        }
+    }
+}
+
+FORCE_INLINE void store_back_target(struct jit_state *state, int target_reg)
+{
+    for (int i = 0; i < 32; i++) {
+        if (reg_table[i] == target_reg) {
+            reg_table[i] = -1;
+            emit_store(state, S32, target_reg, parameter_reg[0],
+                       offsetof(riscv_t, X) + 4 * i);
+            return;
+        }
+    }
+}
+
+static int map_reg(struct jit_state *state, int reg_number)
+{
+    int target_reg = -1;
+    if (reg_table[reg_number] != -1)
+        return reg_table[reg_number];
+    count = (count + 1) % n_reg;
+    target_reg = register_map[count];
+    store_back_target(state, target_reg);
+    reg_table[reg_number] = target_reg;
+    return target_reg;
+}
+
+static int ra_load(struct jit_state *state, int reg_number)
+{
+    if (reg_table[reg_number] != -1)
+        return reg_table[reg_number];
+    count = (count + 1) % n_reg;
+    int target_reg = register_map[count];
+    store_back_target(state, target_reg);
+    reg_table[reg_number] = target_reg;
+    emit_load(state, S32, parameter_reg[0], reg_table[reg_number],
+              offsetof(riscv_t, X) + 4 * reg_number);
+    return target_reg;
+}
+
+static void ra_load2(struct jit_state *state, int reg_number1, int reg_number2)
+{
+    if (reg_number1 == reg_number2) {
+        vm_reg[1] = vm_reg[0] = ra_load(state, reg_number1);
+        return;
+    }
+    vm_reg[0] = reg_table[reg_number1];
+    vm_reg[1] = reg_table[reg_number2];
+    if (vm_reg[0] == -1) {
+        while (vm_reg[0] == -1 || vm_reg[0] == vm_reg[1]) {
+            count = (count + 1) % n_reg;
+            vm_reg[0] = register_map[count];
+        }
+        store_back_target(state, vm_reg[0]);
+        reg_table[reg_number1] = vm_reg[0];
+        emit_load(state, S32, parameter_reg[0], reg_table[reg_number1],
+                  offsetof(riscv_t, X) + 4 * reg_number1);
+    }
+    if (vm_reg[1] == -1) {
+        while (vm_reg[1] == -1 || vm_reg[0] == vm_reg[1]) {
+            count = (count + 1) % n_reg;
+            vm_reg[1] = register_map[count];
+        }
+        store_back_target(state, vm_reg[1]);
+        reg_table[reg_number2] = vm_reg[1];
+        emit_load(state, S32, parameter_reg[0], reg_table[reg_number2],
+                  offsetof(riscv_t, X) + 4 * reg_number2);
+    }
+}
+
+static void ra_load2_sext(struct jit_state *state,
+                          int reg_number1,
+                          int reg_number2,
+                          bool sext1,
+                          bool sext2)
+{
+    vm_reg[0] = reg_table[reg_number1];
+    vm_reg[1] = reg_table[reg_number2];
+    if (vm_reg[0] == -1) {
+        while (vm_reg[0] == -1 || vm_reg[0] == vm_reg[1]) {
+            count = (count + 1) % n_reg;
+            vm_reg[0] = register_map[count];
+        }
+        store_back_target(state, vm_reg[0]);
+        reg_table[reg_number1] = vm_reg[0];
+        if (sext1)
+            emit_load_sext(state, S32, parameter_reg[0], reg_table[reg_number1],
+                           offsetof(riscv_t, X) + 4 * reg_number1);
+        else
+            emit_load(state, S32, parameter_reg[0], reg_table[reg_number1],
+                      offsetof(riscv_t, X) + 4 * reg_number1);
+    } else if (sext1) {
+        emit_store(state, S32, reg_table[reg_number1], parameter_reg[0],
+                   offsetof(riscv_t, X) + 4 * reg_number1);
+        emit_load_sext(state, S32, parameter_reg[0], reg_table[reg_number1],
+                       offsetof(riscv_t, X) + 4 * reg_number1);
+    }
+    if (vm_reg[1] == -1) {
+        while (vm_reg[1] == -1 || vm_reg[1] == vm_reg[0]) {
+            count = (count + 1) % n_reg;
+            vm_reg[1] = register_map[count];
+        }
+        store_back_target(state, vm_reg[1]);
+        reg_table[reg_number2] = vm_reg[1];
+        if (sext2)
+            emit_load_sext(state, S32, parameter_reg[0], reg_table[reg_number2],
+                           offsetof(riscv_t, X) + 4 * reg_number2);
+        else
+            emit_load(state, S32, parameter_reg[0], reg_table[reg_number2],
+                      offsetof(riscv_t, X) + 4 * reg_number2);
+    } else if (sext2) {
+        emit_store(state, S32, reg_table[reg_number2], parameter_reg[0],
+                   offsetof(riscv_t, X) + 4 * reg_number2);
+        emit_load_sext(state, S32, parameter_reg[0], reg_table[reg_number2],
+                       offsetof(riscv_t, X) + 4 * reg_number2);
+    }
 }
 
 #define GEN(inst, code)                                                       \
@@ -1264,22 +1386,20 @@ static void do_fuse1(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
-        emit_load_imm(state, temp_reg[0], fuse[i].imm);
-        emit_store(state, S32, temp_reg[0], parameter_reg[0],
-                   offsetof(riscv_t, X) + 4 * fuse[i].rd);
+        vm_reg[0] = map_reg(state, fuse[i].rd);
+        emit_load_imm(state, vm_reg[0], fuse[i].imm);
     }
 }
 
 static void do_fuse2(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
-    emit_load_imm(state, temp_reg[0], ir->imm);
-    emit_store(state, S32, temp_reg[0], parameter_reg[0],
-               offsetof(riscv_t, X) + 4 * ir->rd);
-    emit_load(state, S32, parameter_reg[0], temp_reg[1],
-              offsetof(riscv_t, X) + 4 * ir->rs1);
-    emit_alu32(state, 0x01, temp_reg[1], temp_reg[0]);
-    emit_store(state, S32, temp_reg[0], parameter_reg[0],
-               offsetof(riscv_t, X) + 4 * ir->rs2);
+    vm_reg[0] = map_reg(state, ir->rd);
+    emit_load_imm(state, vm_reg[0], ir->imm);
+    emit_mov(state, vm_reg[0], temp_reg);
+    vm_reg[1] = ra_load(state, ir->rs1);
+    vm_reg[2] = map_reg(state, ir->rs2);
+    emit_mov(state, vm_reg[1], vm_reg[2]);
+    emit_alu32(state, 0x01, temp_reg, vm_reg[2]);
 }
 
 static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
@@ -1287,14 +1407,11 @@ static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     memory_t *m = PRIV(rv)->mem;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
-        emit_load(state, S32, parameter_reg[0], temp_reg[0],
-                  offsetof(riscv_t, X) + 4 * fuse[i].rs1);
-        emit_load_imm(state, temp_reg[1],
-                      (intptr_t) (m->mem_base + fuse[i].imm));
-        emit_alu64(state, 0x01, temp_reg[1], temp_reg[0]);
-        emit_load(state, S32, parameter_reg[0], temp_reg[1],
-                  offsetof(riscv_t, X) + 4 * fuse[i].rs2);
-        emit_store(state, S32, temp_reg[1], temp_reg[0], 0);
+        vm_reg[0] = ra_load(state, fuse[i].rs1);
+        emit_load_imm(state, temp_reg, (intptr_t) (m->mem_base + fuse[i].imm));
+        emit_alu64(state, 0x01, vm_reg[0], temp_reg);
+        vm_reg[1] = ra_load(state, fuse[i].rs2);
+        emit_store(state, S32, vm_reg[1], temp_reg, 0);
     }
 }
 
@@ -1303,31 +1420,28 @@ static void do_fuse4(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     memory_t *m = PRIV(rv)->mem;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
-        emit_load(state, S32, parameter_reg[0], temp_reg[0],
-                  offsetof(riscv_t, X) + 4 * fuse[i].rs1);
-        emit_load_imm(state, temp_reg[1],
-                      (intptr_t) (m->mem_base + fuse[i].imm));
-        emit_alu64(state, 0x01, temp_reg[1], temp_reg[0]);
-        emit_load(state, S32, temp_reg[0], temp_reg[1], 0);
-        emit_store(state, S32, temp_reg[1], parameter_reg[0],
-                   offsetof(riscv_t, X) + 4 * fuse[i].rd);
+        vm_reg[0] = ra_load(state, fuse[i].rs1);
+        emit_load_imm(state, temp_reg, (intptr_t) (m->mem_base + fuse[i].imm));
+        emit_alu64(state, 0x01, vm_reg[0], temp_reg);
+        vm_reg[1] = map_reg(state, fuse[i].rd);
+        emit_load(state, S32, temp_reg, vm_reg[1], 0);
     }
 }
 
 static void do_fuse5(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
-    emit_load_imm(state, temp_reg[0], ir->pc + 4);
-    emit_store(state, S32, temp_reg[0], parameter_reg[0],
-               offsetof(riscv_t, PC));
+    store_back(state);
+    emit_load_imm(state, temp_reg, ir->pc + 4);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_call(state, (intptr_t) rv->io.on_memset);
     emit_exit(&(*state));
 }
 
 static void do_fuse6(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
-    emit_load_imm(state, temp_reg[0], ir->pc + 4);
-    emit_store(state, S32, temp_reg[0], parameter_reg[0],
-               offsetof(riscv_t, PC));
+    store_back(state);
+    emit_load_imm(state, temp_reg, ir->pc + 4);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_call(state, (intptr_t) rv->io.on_memcpy);
     emit_exit(&(*state));
 }
@@ -1338,25 +1452,25 @@ static void do_fuse7(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
     for (int i = 0; i < ir->imm2; i++) {
         switch (fuse[i].opcode) {
         case rv_insn_slli:
-            emit_load(state, S32, parameter_reg[0], temp_reg[0],
-                      offsetof(riscv_t, X) + 4 * fuse[i].rs1);
-            emit_alu32_imm8(state, 0xc1, 4, temp_reg[0], fuse[i].imm & 0x1f);
-            emit_store(state, S32, temp_reg[0], parameter_reg[0],
-                       offsetof(riscv_t, X) + 4 * fuse[i].rd);
+            vm_reg[0] = ra_load(state, fuse[i].rs1);
+            vm_reg[1] = map_reg(state, fuse[i].rd);
+            if (vm_reg[0] != vm_reg[1])
+                emit_mov(state, vm_reg[0], vm_reg[1]);
+            emit_alu32_imm8(state, 0xc1, 4, vm_reg[1], fuse[i].imm & 0x1f);
             break;
         case rv_insn_srli:
-            emit_load(state, S32, parameter_reg[0], temp_reg[0],
-                      offsetof(riscv_t, X) + 4 * fuse[i].rs1);
-            emit_alu32_imm8(state, 0xc1, 5, temp_reg[0], fuse[i].imm & 0x1f);
-            emit_store(state, S32, temp_reg[0], parameter_reg[0],
-                       offsetof(riscv_t, X) + 4 * fuse[i].rd);
+            vm_reg[0] = ra_load(state, fuse[i].rs1);
+            vm_reg[1] = map_reg(state, fuse[i].rd);
+            if (vm_reg[0] != vm_reg[1])
+                emit_mov(state, vm_reg[0], vm_reg[1]);
+            emit_alu32_imm8(state, 0xc1, 5, vm_reg[1], fuse[i].imm & 0x1f);
             break;
         case rv_insn_srai:
-            emit_load(state, S32, parameter_reg[0], temp_reg[0],
-                      offsetof(riscv_t, X) + 4 * fuse[i].rs1);
-            emit_alu32_imm8(state, 0xc1, 7, temp_reg[0], fuse[i].imm & 0x1f);
-            emit_store(state, S32, temp_reg[0], parameter_reg[0],
-                       offsetof(riscv_t, X) + 4 * fuse[i].rd);
+            vm_reg[0] = ra_load(state, fuse[i].rs1);
+            vm_reg[1] = map_reg(state, fuse[i].rd);
+            if (vm_reg[0] != vm_reg[1])
+                emit_mov(state, vm_reg[0], vm_reg[1]);
+            emit_alu32_imm8(state, 0xc1, 7, vm_reg[1], fuse[i].imm & 0x1f);
             break;
         default:
             __UNREACHABLE;
@@ -1386,6 +1500,7 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
 {
     uint32_t idx;
     rv_insn_t *ir, *next;
+    reset_reg();
     for (idx = 0, ir = block->ir_head; idx < block->n_insn; idx++, ir = next) {
         next = ir->next;
         ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
@@ -1467,7 +1582,6 @@ uint32_t jit_translate(riscv_t *rv, block_t *block)
     set_t set;
     set_reset(&set);
     translate_chained_block(&(*state), rv, block, &set);
-
     if (state->offset == state->size) {
         printf("Target buffer too small\n");
         goto out;

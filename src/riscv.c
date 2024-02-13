@@ -26,7 +26,7 @@
 #if RV32_HAS(JIT)
 #include "cache.h"
 #include "jit.h"
-#define CODE_CACHE_SIZE (1024 * 1024)
+#define CODE_CACHE_SIZE (4 * 1024 * 1024)
 #endif
 
 #define BLOCK_IR_MAP_CAPACITY_BITS 10

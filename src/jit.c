@@ -276,11 +276,6 @@ static inline void emit1(struct jit_state *state, uint8_t x)
     emit_bytes(state, &x, sizeof(x));
 }
 
-static inline void emit2(struct jit_state *state, uint16_t x)
-{
-    emit_bytes(state, &x, sizeof(x));
-}
-
 static inline void emit4(struct jit_state *state, uint32_t x)
 {
     emit_bytes(state, &x, sizeof(x));

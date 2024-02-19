@@ -328,7 +328,7 @@ static void syscall_open(riscv_t *rv)
     uint32_t mode = rv_get_reg(rv, rv_reg_a2);
 
     /* read name from runtime memory */
-    const size_t name_len = strlen(attr->mem->mem_base + name);
+    const size_t name_len = strlen((char *) attr->mem->mem_base + name);
     char *name_str = malloc(name_len + 1);
     assert(name_str);
     name_str[name_len] = '\0';

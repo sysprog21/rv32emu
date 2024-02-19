@@ -20,12 +20,6 @@ typedef struct {
 memory_t *memory_new(uint32_t size);
 void memory_delete(memory_t *m);
 
-/* read a C-style string from memory */
-uint32_t memory_read_str(const memory_t *m,
-                         uint8_t *dst,
-                         uint32_t addr,
-                         uint32_t max);
-
 /* read an instruction from memory */
 uint32_t memory_ifetch(uint32_t addr);
 

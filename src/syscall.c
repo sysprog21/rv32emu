@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 
 #include "riscv.h"
@@ -84,7 +85,7 @@ static void syscall_write(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
 
-    /* _write(fde, buffer, count) */
+    /* _write(fd, buffer, count) */
     riscv_word_t fd = rv_get_reg(rv, rv_reg_a0);
     riscv_word_t buffer = rv_get_reg(rv, rv_reg_a1);
     riscv_word_t count = rv_get_reg(rv, rv_reg_a2);
@@ -327,13 +328,11 @@ static void syscall_open(riscv_t *rv)
     uint32_t mode = rv_get_reg(rv, rv_reg_a2);
 
     /* read name from runtime memory */
-    char name_str[256] = {'\0'};
-    uint32_t read = memory_read_str(attr->mem, (uint8_t *) name_str, name,
-                                    sizeof(name_str));
-    if (read > sizeof(name_str)) {
-        rv_set_reg(rv, rv_reg_a0, -1);
-        return;
-    }
+    const size_t name_len = strlen(attr->mem->mem_base + name);
+    char *name_str = malloc(name_len + 1);
+    assert(name_str);
+    name_str[name_len] = '\0';
+    memory_read(attr->mem, (uint8_t *) name_str, name, name_len);
 
     /* open the file */
     const char *mode_str = get_mode_str(flags, mode);
@@ -347,6 +346,8 @@ static void syscall_open(riscv_t *rv)
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
+
+    free(name_str);
 
     const int fd = find_free_fd(attr); /* find a free file descriptor */
 

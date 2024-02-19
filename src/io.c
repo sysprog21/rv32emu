@@ -61,16 +61,6 @@ void memory_read(const memory_t *mem,
     memcpy(dst, mem->mem_base + addr, size);
 }
 
-uint32_t memory_read_str(const memory_t *mem,
-                         uint8_t *dst,
-                         uint32_t addr,
-                         uint32_t max)
-{
-    char *d = (char *) dst;
-    char *s = (char *) mem->mem_base + addr;
-    return strlen(strncpy(d, s, max));
-}
-
 uint32_t memory_ifetch(uint32_t addr)
 {
     return *(const uint32_t *) (data_memory_base + addr);

@@ -254,6 +254,8 @@ for i in range(len(op)):
                 asm = "store_back(state);"
             elif items[0] == "assert":
                 asm = "assert(NULL);"
+            elif items[0] == "predict":
+                asm = "parse_branch_history_table(state, ir);"
             output += asm + "\n"
         output += "})\n"
 

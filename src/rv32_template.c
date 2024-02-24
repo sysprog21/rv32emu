@@ -107,6 +107,11 @@
  * |                                | store the result into dst.             |
  * | cond, src;                     | set condition if (src)                 |
  * | end;                           | set the end of condition if (src)      |
+ * | predict;                       | parse the branch table of indirect     |
+ * |                                | jump and search the jump target with   |
+ * |                                | maxiumal frequency. Then, comparing    |
+ * |                                | and jumping to the target if the       |
+ * |                                | program counter matches.               |
  * | break;                         | In the end of a basic block, we need   |
  * |                                | to store all VM register value to rv   |
  * |                                | data, becasue the register allocation  |
@@ -197,6 +202,7 @@ RVOP(
  * recorded. Additionally, the C code generator can reference the branch history
  * table to link he indirect jump targets.
  */
+#if !RV32_HAS(JIT)
 #define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                               \
     /* lookup branch history table */                                         \
     for (int i = 0; i < HISTORY_SIZE; i++) {                                  \
@@ -213,7 +219,33 @@ RVOP(
         ir->branch_table->idx = (ir->branch_table->idx + 1) % HISTORY_SIZE;   \
         MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC); \
     }
-
+#else
+#define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                               \
+    block_t *block = cache_get(rv->block_cache, PC, true);                    \
+    if (block) {                                                              \
+        for (int i = 0; i < HISTORY_SIZE; i++) {                              \
+            if (ir->branch_table->PC[i] == PC) {                              \
+                ir->branch_table->times[i]++;                                 \
+                MUST_TAIL return block->ir_head->impl(rv, block->ir_head,     \
+                                                      cycle, PC);             \
+            }                                                                 \
+        }                                                                     \
+        /* update branch history table */                                     \
+        int min_idx = 0;                                                      \
+        for (int i = 0; i < HISTORY_SIZE; i++) {                              \
+            if (!ir->branch_table->times[i]) {                                \
+                min_idx = i;                                                  \
+                break;                                                        \
+            } else if (ir->branch_table->times[min_idx] >                     \
+                       ir->branch_table->times[i]) {                          \
+                min_idx = i;                                                  \
+            }                                                                 \
+        }                                                                     \
+        ir->branch_table->times[min_idx] = 1;                                 \
+        ir->branch_table->PC[min_idx] = PC;                                   \
+        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC); \
+    }
+#endif
 /* The indirect jump instruction JALR uses the I-type encoding. The target
  * address is obtained by adding the sign-extended 12-bit I-immediate to the
  * register rs1, then setting the least-significant bit of the result to zero.
@@ -234,9 +266,7 @@ RVOP(
 #if !RV32_HAS(EXT_C)
         RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
 #endif
-#if !RV32_HAS(JIT)
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
-#endif
         rv->csr_cycle = cycle;
         rv->PC = PC;
         return true;
@@ -250,8 +280,9 @@ RVOP(
         mov, VR1, TMP;
         alu32imm, 32, 0x81, 0, TMP, imm;
         alu32imm, 32, 0x81, 4, TMP, ~1U;
-        st, S32, TMP, PC;
         break;
+        predict;
+        st, S32, TMP, PC;
         exit;
     }))
 
@@ -2252,9 +2283,7 @@ RVOP(
     cjr,
     {
         PC = rv->X[ir->rs1];
-#if !RV32_HAS(JIT)
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
-#endif
         rv->csr_cycle = cycle;
         rv->PC = PC;
         return true;
@@ -2262,8 +2291,9 @@ RVOP(
     GEN({
         rald, VR0, rs1;
         mov, VR0, TMP;
-        st, S32, TMP, PC;
         break;
+        predict;
+        st, S32, TMP, PC;
         exit;
     }))
 
@@ -2305,9 +2335,7 @@ RVOP(
         const int32_t jump_to = rv->X[ir->rs1];
         rv->X[rv_reg_ra] = PC + 2;
         PC = jump_to;
-#if !RV32_HAS(JIT)
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
-#endif
         rv->csr_cycle = cycle;
         rv->PC = PC;
         return true;
@@ -2317,8 +2345,9 @@ RVOP(
         ldimm, VR0, pc, 2;
         rald, VR1, rs1;
         mov, VR1, TMP;
-        st, S32, TMP, PC;
         break;
+        predict;
+        st, S32, TMP, PC;
         exit;
     }))
 

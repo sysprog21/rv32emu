@@ -139,6 +139,8 @@ typedef struct {
     riscv_mem_write_s mem_write_s;
     riscv_mem_write_b mem_write_b;
 
+    /* TODO: add peripheral I/O interfaces */
+
     /* system */
     riscv_on_ecall on_ecall;
     riscv_on_ebreak on_ebreak;
@@ -150,7 +152,7 @@ typedef struct {
 void rv_run(riscv_t *rv);
 
 /* create a RISC-V emulator */
-riscv_t *rv_create(const riscv_io_t *io, riscv_user_t attr);
+riscv_t *rv_create(riscv_user_t attr);
 
 /* delete a RISC-V emulator */
 void rv_delete(riscv_t *rv);

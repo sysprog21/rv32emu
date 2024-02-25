@@ -278,9 +278,13 @@ typedef struct {
 
 #define HISTORY_SIZE 16
 typedef struct {
-    uint8_t idx;
     uint32_t PC[HISTORY_SIZE];
+#if !RV32_HAS(JIT)
+    uint8_t idx;
     struct rv_insn *target[HISTORY_SIZE];
+#else
+    uint32_t times[HISTORY_SIZE];
+#endif
 } branch_history_table_t;
 
 typedef struct rv_insn {

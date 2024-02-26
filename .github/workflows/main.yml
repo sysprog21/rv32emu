@@ -57,8 +57,8 @@ jobs:
       run: |
             make distclean ENABLE_EXT_M=0 check
             make distclean ENABLE_EXT_A=0 check
-            make distclean ENABLE_EXT_C=0 check
             make distclean ENABLE_EXT_F=0 check
+            make distclean ENABLE_EXT_C=0 check
             make distclean ENABLE_SDL=0 check
     - name: gdbstub test
       run: |
@@ -67,8 +67,8 @@ jobs:
       run: |
             make ENABLE_JIT=1 clean check
             make ENABLE_EXT_A=0 ENABLE_JIT=1 clean check
-            make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
             make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
+            make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
 
   host-arm64:
     needs: [detect-code-related-file-changes]
@@ -97,8 +97,8 @@ jobs:
           make check
           make ENABLE_JIT=1 clean check
           make ENABLE_EXT_A=0 ENABLE_JIT=1 clean check
-          make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
           make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
+          make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
 
   coding-style:
     needs: [detect-code-related-file-changes]

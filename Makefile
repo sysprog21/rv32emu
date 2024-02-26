@@ -35,14 +35,6 @@ CFLAGS += $(CFLAGS_NO_CET)
 
 OBJS_EXT :=
 
-# Control and Status Register (CSR)
-ENABLE_Zicsr ?= 1
-$(call set-feature, Zicsr)
-
-# Instruction-Fetch Fence
-ENABLE_Zifencei ?= 1
-$(call set-feature, Zifencei)
-
 # Integer Multiplication and Division instructions
 ENABLE_EXT_M ?= 1
 $(call set-feature, EXT_M)
@@ -50,10 +42,6 @@ $(call set-feature, EXT_M)
 # Atomic Instructions
 ENABLE_EXT_A ?= 1
 $(call set-feature, EXT_A)
-
-# Compressed extension instructions
-ENABLE_EXT_C ?= 1
-$(call set-feature, EXT_C)
 
 # Single-precision floating point instructions
 ENABLE_EXT_F ?= 1
@@ -73,6 +61,18 @@ $(OUT)/decode.o $(OUT)/riscv.o: $(SOFTFLOAT_LIB)
 LDFLAGS += $(SOFTFLOAT_LIB)
 LDFLAGS += -lm
 endif
+
+# Compressed extension instructions
+ENABLE_EXT_C ?= 1
+$(call set-feature, EXT_C)
+
+# Control and Status Register (CSR)
+ENABLE_Zicsr ?= 1
+$(call set-feature, Zicsr)
+
+# Instruction-Fetch Fence
+ENABLE_Zifencei ?= 1
+$(call set-feature, Zifencei)
 
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1

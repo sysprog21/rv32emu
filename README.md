@@ -1,4 +1,4 @@
-# RISC-V RV32I[MACF] emulator
+# RISC-V RV32I[MAFC] emulator
 ![GitHub Actions](https://github.com/sysprog21/rv32emu/actions/workflows/main.yml/badge.svg)
 ```
                        /--===============------\
@@ -24,7 +24,7 @@ a focus on efficiency and readability.
 
 Features:
 * Fast interpreter for executing the RV32 ISA
-* Comprehensive support for RV32I and M, A, C, F extensions
+* Comprehensive support for RV32I and M, A, F, C extensions
 * Memory-efficient design
 * Built-in ELF loader
 * Implementation of commonly used newlib system calls
@@ -75,8 +75,8 @@ The image containing all the necessary tools for development and testing can be 
 `rv32emu` is configurable, and you can override the below variable(s) to fit your expectations:
 * `ENABLE_EXT_M`: Standard Extension for Integer Multiplication and Division
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
-* `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
 * `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
+* `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
 * `ENABLE_GDBSTUB` : GDB remote debugging support

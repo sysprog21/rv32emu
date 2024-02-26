@@ -17,14 +17,14 @@
 #define RV32_FEATURE_EXT_A 1
 #endif
 
-/* Standard Extension for Compressed Instructions */
-#ifndef RV32_FEATURE_EXT_C
-#define RV32_FEATURE_EXT_C 1
-#endif
-
 /* Standard Extension for Single-Precision Floating Point Instructions */
 #ifndef RV32_FEATURE_EXT_F
 #define RV32_FEATURE_EXT_F 1
+#endif
+
+/* Standard Extension for Compressed Instructions */
+#ifndef RV32_FEATURE_EXT_C
+#define RV32_FEATURE_EXT_C 1
 #endif
 
 /* Control and Status Register (CSR) */

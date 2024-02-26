@@ -467,9 +467,6 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 #if RV32_HAS(EXT_C)
     rv->csr_misa |= MISA_C;
 #endif
-#if RV32_HAS(EXT_M)
-    rv->csr_misa |= MISA_M;
-#endif
 #if RV32_HAS(EXT_F)
     rv->csr_misa |= MISA_F;
     /* reset float registers */
@@ -477,6 +474,10 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
         rv->F[i].v = 0;
     rv->csr_fcsr = 0;
 #endif
+#if RV32_HAS(EXT_M)
+    rv->csr_misa |= MISA_M;
+#endif
+
 
     rv->halt = false;
 }

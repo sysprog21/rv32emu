@@ -548,7 +548,7 @@ static map_node_t *map_create_node(void *key,
                                    size_t ksize,
                                    size_t vsize)
 {
-    map_node_t *node = malloc(sizeof(map_node_t));
+    map_node_t *node = calloc(1, sizeof(map_node_t));
     assert(node);
 
     /* allocate memory for the keys and data */

@@ -80,6 +80,7 @@ enum {
     KEY_EVENT = 0,
     MOUSE_MOTION_EVENT = 1,
     MOUSE_BUTTON_EVENT = 2,
+    QUIT_EVENT = 3,
 };
 
 typedef struct {
@@ -88,7 +89,7 @@ typedef struct {
 } key_event_t;
 
 typedef struct {
-    int32_t xrel, yrel;
+    int32_t x, y, xrel, yrel;
 } mouse_motion_t;
 
 typedef struct {
@@ -114,14 +115,23 @@ typedef struct {
 
 enum {
     RELATIVE_MODE_SUBMISSION = 0,
+    WINDOW_TITLE_SUBMISSION = 1,
 };
+
+typedef struct {
+    uint8_t enabled;
+} mouse_submission_t;
+
+typedef struct {
+    uint32_t title;
+    uint32_t size;
+} title_submission_t;
 
 typedef struct {
     uint32_t type;
     union {
-        union {
-            uint8_t enabled;
-        } mouse;
+        mouse_submission_t mouse;
+        title_submission_t title;
     };
 } submission_t;
 
@@ -227,9 +237,13 @@ static bool check_sdl(riscv_t *rv, int width, int height)
     SDL_Event event;
     while (SDL_PollEvent(&event)) { /* Run event handler */
         switch (event.type) {
-        case SDL_QUIT:
-            rv_halt(rv);
+        case SDL_QUIT: {
+            event_t new_event = {
+                .type = QUIT_EVENT,
+            };
+            event_push(rv, new_event);
             return false;
+        }
         case SDL_KEYDOWN:
         case SDL_KEYUP: {
             if (event.key.repeat)
@@ -250,6 +264,8 @@ static bool check_sdl(riscv_t *rv, int width, int height)
                 .type = MOUSE_MOTION_EVENT,
             };
             mouse_motion_t mouse_motion = {
+                .x = event.motion.x,
+                .y = event.motion.y,
                 .xrel = event.motion.xrel,
                 .yrel = event.motion.yrel,
             };
@@ -337,6 +353,17 @@ void syscall_submit_queue(riscv_t *rv)
         switch (submission.type) {
         case RELATIVE_MODE_SUBMISSION:
             SDL_SetRelativeMouseMode(submission.mouse.enabled);
+            break;
+        case WINDOW_TITLE_SUBMISSION:
+            char *title = malloc(submission.title.size + 1);
+            if (unlikely(!title))
+                return;
+
+            memory_read(PRIV(rv)->mem, (uint8_t *) title,
+                        submission.title.title, submission.title.size);
+            title[submission.title.size] = 0;
+
+            SDL_SetWindowTitle(window, title);
             break;
         }
     }

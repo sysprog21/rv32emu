@@ -69,6 +69,10 @@ jobs:
             make ENABLE_EXT_A=0 ENABLE_JIT=1 clean check
             make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
             make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
+    - name: undefined behavior test
+      run: |
+            make ENABLE_UBSAN=1 clean check
+            make ENABLE_JIT=1 ENABLE_UBSAN=1 clean check
 
   host-arm64:
     needs: [detect-code-related-file-changes]

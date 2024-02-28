@@ -554,37 +554,67 @@ CONSTOPT(remu, {
 #if RV32_HAS(EXT_A)
 
 /* LR.W: Load Reserved */
-CONSTOPT(lrw, {})
+CONSTOPT(lrw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* SC.W: Store Conditional */
 CONSTOPT(scw, {})
 
 /* AMOSWAP.W: Atomic Swap */
-CONSTOPT(amoswapw, {})
+CONSTOPT(amoswapw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOADD.W: Atomic ADD */
-CONSTOPT(amoaddw, {})
+CONSTOPT(amoaddw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOXOR.W: Atomic XOR */
-CONSTOPT(amoxorw, {})
+CONSTOPT(amoxorw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOAND.W: Atomic AND */
-CONSTOPT(amoandw, {})
+CONSTOPT(amoandw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOOR.W: Atomic OR */
-CONSTOPT(amoorw, {})
+CONSTOPT(amoorw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOMIN.W: Atomic MIN */
-CONSTOPT(amominw, {})
+CONSTOPT(amominw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOMAX.W: Atomic MAX */
-CONSTOPT(amomaxw, {})
+CONSTOPT(amomaxw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOMINU.W */
-CONSTOPT(amominuw, {})
+CONSTOPT(amominuw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOMAXU.W */
-CONSTOPT(amomaxuw, {})
+CONSTOPT(amomaxuw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 #endif /* RV32_HAS(EXT_A) */
 
 /* RV32F Standard Extension */

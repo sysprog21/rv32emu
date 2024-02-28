@@ -95,6 +95,12 @@ INSN = {
         "cadd",
         "cswsp",
     ],
+    "EXT_FC": [
+        "cflwsp",
+        "cfswsp",
+        "cflw",
+        "cfsw",
+    ],
 }
 EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C"]
 SKIP_LIST = []
@@ -109,6 +115,8 @@ def parse_argv(EXT_LIST, SKIP_LIST):
                 EXT_LIST.remove(ext)
     for ext in EXT_LIST:
         SKIP_LIST += INSN[ext]
+    if "EXT_F" in EXT_LIST or "EXT_C" in EXT_LIST:
+        SKIP_LIST += INSN["EXT_FC"]
 
 parse_argv(EXT_LIST, SKIP_LIST)
 # prepare PROLOGUE

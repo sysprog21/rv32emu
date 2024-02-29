@@ -11,6 +11,24 @@ Use your best judgment, and feel free to propose changes to this document in a p
 This project uses GitHub Issues to track ongoing development, discuss project plans, and keep track of bugs.
 Be sure to search for existing issues before you create another one.
 
+Initially, it is advisable to create an issue on GitHub for bug reports, feature requests,
+or substantial pull requests, as this offers a platform for discussion with both the community and project maintainers.
+
+Engaging in a conversation through a GitHub issue before making a contribution is crucial to ensure the acceptance of your work.
+We aim to prevent situations where significant effort is expended on a pull request that might not align with the project's design principles.
+For example, it might turn out that the feature you propose is more suited as an independent module that complements this project,
+in which case we would recommend that direction.
+
+For minor corrections, such as typo fixes, small refactoring, or updates to documentation/comments,
+filing an issue is not typically necessary.
+What constitutes a "minor" fix involves discretion; however, examples include:
+- Correcting spelling mistakes
+- Minor code refactoring
+- Updating or editing documentation and comments
+
+Nevertheless, there may be instances where, upon reviewing your pull requests,
+we might request an issue to be filed to facilitate discussion on broader design considerations.
+
 Visit our [Issues page on GitHub](https://github.com/sysprog21/rv32emu/issues) to search and submit.
 
 ## Coding Convention
@@ -21,6 +39,10 @@ However, participation requires adherence to fundamental ground rules:
   While there is some flexibility in basic style, it is crucial to stick to the current coding standards.
   Complex algorithmic constructs without proper comments will not be accepted.
 * External pull requests should include thorough documentation in the pull request comments for consideration.
+* When composing documentation, code comments, and other materials in English,
+  please adhere to the American English (`en_US`) dialect.
+  This variant should be considered the standard for all documentation efforts.
+  For instance, opt for "initialize" over "initialise" and "color" rather than "colour".
 
 Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 12 or later.
 

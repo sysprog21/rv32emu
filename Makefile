@@ -136,6 +136,12 @@ ifeq ("$(CC_IS_EMCC)", "1")
 CFLAGS += -mtail-call
 endif
 
+ENABLE_UBSAN ?= 0
+ifeq ("$(ENABLE_UBSAN)", "1")
+CFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
+LDFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
+endif
+
 $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-stack-check -fno-stack-protector
 
 # Clear the .DEFAULT_GOAL special variable, so that the following turns

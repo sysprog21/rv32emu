@@ -11,6 +11,14 @@ CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
 
+ENABLE_VALGRIND ?= 0
+ifeq ("$(ENABLE_UBSAN)", "1")
+# according to gcc's man page: "If you use multiple -O options, with or without level numbers, the last such option is the one that is effective."
+# In order to use Valgrind, we need to compile with -g
+CFLAGS += -g
+LDFLAGS += -g
+endif
+
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)

@@ -85,7 +85,7 @@ jobs:
     - name: install-dependencies
       run: |
             sudo apt-get update -q -y
-            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev
+            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev valgrind
             .ci/riscv-toolchain-install.sh
             wget https://apt.llvm.org/llvm.sh
             sudo chmod +x ./llvm.sh
@@ -119,6 +119,16 @@ jobs:
       run: |
             make clean && make ENABLE_UBSAN=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
+    - name: valgrind check (without JIT)
+      run: |
+            make clean && make ENABLE_SDL=0 ENABLE_JIT=0 ENABLE_VALGRIND=1
+            valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./build/rv32emu ./build/hello.elf 
+            valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./build/rv32emu ./build/aes.elf 
+    - name: valgrind check (with JIT)
+      run: |
+            make clean && make ENABLE_SDL=0 ENABLE_JIT=1 ENABLE_VALGRIND=1
+            valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./build/rv32emu ./build/hello.elf 
+            valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./build/rv32emu ./build/aes.elf 
 
   host-arm64:
     needs: [detect-code-related-file-changes]

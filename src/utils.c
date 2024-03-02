@@ -81,7 +81,8 @@ char *sanitize_path(const char *input)
         return NULL;
 
     /* After sanitization, the new path will only be shorter than the original
-     * one. Thus, we can reuse the space */
+     * one. Thus, we can reuse the space.
+     */
     if (n == 0) {
         ret[0] = '.';
         return ret;
@@ -93,8 +94,8 @@ char *sanitize_path(const char *input)
      * reading from path; r is index of next byte to process -> path[r]
      * writing to buf; w is index of next byte to write -> ret[strlen(ret)]
      * dotdot is index in buf where .. must stop, either because:
-     *   a) it is the leading slash;
-     *   b) it is a leading ../../.. prefix.
+     *   (a) it is the leading slash;
+     *   (b) it is a leading ../../.. prefix.
      */
     size_t w = 0, r = 0;
     size_t dotdot = 0;

@@ -237,10 +237,8 @@ typedef struct {
     /* vm memory object */
     memory_t *mem;
 
-    /*
-     * max memory size is 2^32 - 1 bytes
-     *
-     * it is for portable on both 32-bit and 64-bit platforms. In this way,
+    /* max memory size is 2^32 - 1 bytes.
+     * It is for portable on both 32-bit and 64-bit platforms. In this way,
      * emulator can access any segment of the memory on either platform.
      */
     uint32_t mem_size;
@@ -248,8 +246,7 @@ typedef struct {
     /* vm main stack size */
     uint32_t stack_size;
 
-    /*
-     * To deal with the RV32 ABI for accessing args list,
+    /* To deal with the RV32 ABI for accessing args list,
      * offset of args data have to be saved.
      *
      * args_offset_size is the memory size to store the offset
@@ -259,7 +256,7 @@ typedef struct {
     /* arguments of emulation program */
     int argc;
     char **argv;
-    /* FIXME: rv32emu cannot access envp yet */
+    /* FIXME: cannot access envp yet */
 
     /* emulation program exit code */
     int exit_code;
@@ -279,8 +276,7 @@ typedef struct {
     /* allow misaligned memory access */
     bool allow_misalign;
 
-    /*
-     * run flag, it is the bitwise OR from
+    /* run flag, it is the bitwise OR from
      * RV_RUN_TRACE, RV_RUN_GDBSTUB, and RV_RUN_PROFILE
      */
     uint8_t run_flag;
@@ -288,14 +284,10 @@ typedef struct {
     /* profiling output file if RV_RUN_PROFILE is set in run_flag */
     char *profile_output_file;
 
-    /*
-     * set by rv_create during initialization
-     *
+    /* set by rv_create during initialization.
      * use rv_remap_stdstream to overwrite them
      */
-    int fd_stdin;
-    int fd_stdout;
-    int fd_stderr;
+    int fd_stdin, fd_stdout, fd_stderr;
 
     /* vm file descriptor map: int -> (FILE *) */
     map_t fd_map;

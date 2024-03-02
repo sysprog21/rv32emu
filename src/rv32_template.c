@@ -246,6 +246,7 @@ RVOP(
         MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC); \
     }
 #endif
+
 /* The indirect jump instruction JALR uses the I-type encoding. The target
  * address is obtained by adding the sign-extended 12-bit I-immediate to the
  * register rs1, then setting the least-significant bit of the result to zero.

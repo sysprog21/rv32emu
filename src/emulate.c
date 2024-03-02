@@ -410,7 +410,7 @@ static bool has_loops = false;
 #include "rv32_template.c"
 #undef RVOP
 
-/* multiple lui */
+/* multiple LUI */
 static bool do_fuse1(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 {
     cycle += ir->imm2;
@@ -1050,12 +1050,13 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #if RV32_HAS(JIT)
 static bool runtime_profiler(riscv_t *rv, block_t *block)
 {
-    /* Based on our observation, a high percentage of true hotspots involve high
-     * using frequency, loops or backward jumps. Therefore, we believe our
-     * profiler can use three indices to detect hotspots */
-    uint32_t freq = cache_freq(rv->block_cache, block->pc_start);
-    /* to profile the block after chaining, the block should be executed first
+    /* Based on our observations, a significant number of true hotspots are
+     * characterized by high usage frequency, including loops or backward
+     * jumps. Consequently, we posit that our profiler could effectively
+     * identify hotspots using three key indicators.
      */
+    uint32_t freq = cache_freq(rv->block_cache, block->pc_start);
+    /* To profile a block after chaining, it must first be executed. */
     if (unlikely(freq >= 2 && (block->backward || block->has_loops)))
         return true;
     /* using frequency exceeds predetermined threshold */

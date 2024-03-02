@@ -132,45 +132,45 @@ typedef enum {
     AS_SUB = 2,
     AS_SUBS = 3,
     /* LogicalOpcode */
-    LOG_AND = 0x00000000U,  // 0000_0000_0000_0000_0000_0000_0000_0000
-    LOG_ORR = 0x20000000U,  // 0010_0000_0000_0000_0000_0000_0000_0000
-    LOG_ORN = 0x20200000U,  // 0010_0000_0010_0000_0000_0000_0000_0000
-    LOG_EOR = 0x40000000U,  // 0100_0000_0000_0000_0000_0000_0000_0000
+    LOG_AND = 0x00000000U, /* 0000_0000_0000_0000_0000_0000_0000_0000 */
+    LOG_ORR = 0x20000000U, /* 0010_0000_0000_0000_0000_0000_0000_0000 */
+    LOG_ORN = 0x20200000U, /* 0010_0000_0010_0000_0000_0000_0000_0000 */
+    LOG_EOR = 0x40000000U, /* 0100_0000_0000_0000_0000_0000_0000_0000 */
     /* LoadStoreOpcode */
-    LS_STRB = 0x00000000U,    // 0000_0000_0000_0000_0000_0000_0000_0000
-    LS_LDRB = 0x00400000U,    // 0000_0000_0100_0000_0000_0000_0000_0000
-    LS_LDRSBW = 0x00c00000U,  // 0000_0000_1100_0000_0000_0000_0000_0000
-    LS_STRH = 0x40000000U,    // 0100_0000_0000_0000_0000_0000_0000_0000
-    LS_LDRH = 0x40400000U,    // 0100_0000_0100_0000_0000_0000_0000_0000
-    LS_LDRSHW = 0x40c00000U,  // 0100_0000_1100_0000_0000_0000_0000_0000
-    LS_STRW = 0x80000000U,    // 1000_0000_0000_0000_0000_0000_0000_0000
-    LS_LDRW = 0x80400000U,    // 1000_0000_0100_0000_0000_0000_0000_0000
-    LS_LDRSW = 0x80800000U,   // 1000_0000_1000_0000_0000_0000_0000_0000
-    LS_STRX = 0xc0000000U,    // 1100_0000_0000_0000_0000_0000_0000_0000
-    LS_LDRX = 0xc0400000U,    // 1100_0000_0100_0000_0000_0000_0000_0000
+    LS_STRB = 0x00000000U,   /* 0000_0000_0000_0000_0000_0000_0000_0000 */
+    LS_LDRB = 0x00400000U,   /* 0000_0000_0100_0000_0000_0000_0000_0000 */
+    LS_LDRSBW = 0x00c00000U, /* 0000_0000_1100_0000_0000_0000_0000_0000 */
+    LS_STRH = 0x40000000U,   /* 0100_0000_0000_0000_0000_0000_0000_0000 */
+    LS_LDRH = 0x40400000U,   /* 0100_0000_0100_0000_0000_0000_0000_0000 */
+    LS_LDRSHW = 0x40c00000U, /* 0100_0000_1100_0000_0000_0000_0000_0000 */
+    LS_STRW = 0x80000000U,   /* 1000_0000_0000_0000_0000_0000_0000_0000 */
+    LS_LDRW = 0x80400000U,   /* 1000_0000_0100_0000_0000_0000_0000_0000 */
+    LS_LDRSW = 0x80800000U,  /* 1000_0000_1000_0000_0000_0000_0000_0000 */
+    LS_STRX = 0xc0000000U,   /* 1100_0000_0000_0000_0000_0000_0000_0000 */
+    LS_LDRX = 0xc0400000U,   /* 1100_0000_0100_0000_0000_0000_0000_0000 */
     /* LoadStorePairOpcode */
-    LSP_STPX = 0xa9000000U,  // 1010_1001_0000_0000_0000_0000_0000_0000
-    LSP_LDPX = 0xa9400000U,  // 1010_1001_0100_0000_0000_0000_0000_0000
+    LSP_STPX = 0xa9000000U, /* 1010_1001_0000_0000_0000_0000_0000_0000 */
+    LSP_LDPX = 0xa9400000U, /* 1010_1001_0100_0000_0000_0000_0000_0000 */
     /* UnconditionalBranchOpcode */
-    BR_BR = 0xd61f0000U,   // 1101_0110_0001_1111_0000_0000_0000_0000
-    BR_BLR = 0xd63f0000U,  // 1101_0110_0011_1111_0000_0000_0000_0000
-    BR_RET = 0xd65f0000U,  // 1101_0110_0101_1111_0000_0000_0000_0000
+    BR_BR = 0xd61f0000U,  /* 1101_0110_0001_1111_0000_0000_0000_0000 */
+    BR_BLR = 0xd63f0000U, /* 1101_0110_0011_1111_0000_0000_0000_0000 */
+    BR_RET = 0xd65f0000U, /* 1101_0110_0101_1111_0000_0000_0000_0000 */
     /* UnconditionalBranchImmediateOpcode */
-    UBR_B = 0x14000000U,  // 0001_0100_0000_0000_0000_0000_0000_0000
+    UBR_B = 0x14000000U, /* 0001_0100_0000_0000_0000_0000_0000_0000 */
     /* ConditionalBranchImmediateOpcode */
     BR_Bcond = 0x54000000U,
     /* DP2Opcode */
-    DP2_UDIV = 0x1ac00800U,  // 0001_1010_1100_0000_0000_1000_0000_0000
-    DP2_LSLV = 0x1ac02000U,  // 0001_1010_1100_0000_0010_0000_0000_0000
-    DP2_LSRV = 0x1ac02400U,  // 0001_1010_1100_0000_0010_0100_0000_0000
-    DP2_ASRV = 0x1ac02800U,  // 0001_1010_1100_0000_0010_1000_0000_0000
+    DP2_UDIV = 0x1ac00800U, /* 0001_1010_1100_0000_0000_1000_0000_0000 */
+    DP2_LSLV = 0x1ac02000U, /* 0001_1010_1100_0000_0010_0000_0000_0000 */
+    DP2_LSRV = 0x1ac02400U, /* 0001_1010_1100_0000_0010_0100_0000_0000 */
+    DP2_ASRV = 0x1ac02800U, /* 0001_1010_1100_0000_0010_1000_0000_0000 */
     /* DP3Opcode */
-    DP3_MADD = 0x1b000000U,  // 0001_1011_0000_0000_0000_0000_0000_0000
-    DP3_MSUB = 0x1b008000U,  // 0001_1011_0000_0000_1000_0000_0000_0000
+    DP3_MADD = 0x1b000000U, /* 0001_1011_0000_0000_0000_0000_0000_0000 */
+    DP3_MSUB = 0x1b008000U, /* 0001_1011_0000_0000_1000_0000_0000_0000 */
     /* MoveWideOpcode */
-    MW_MOVN = 0x12800000U,  // 0001_0010_1000_0000_0000_0000_0000_0000
-    MW_MOVZ = 0x52800000U,  // 0101_0010_1000_0000_0000_0000_0000_0000
-    MW_MOVK = 0x72800000U,  // 0111_0010_1000_0000_0000_0000_0000_0000
+    MW_MOVN = 0x12800000U, /* 0001_0010_1000_0000_0000_0000_0000_0000 */
+    MW_MOVZ = 0x52800000U, /* 0101_0010_1000_0000_0000_0000_0000_0000 */
+    MW_MOVK = 0x72800000U, /* 0111_0010_1000_0000_0000_0000_0000_0000 */
 } a64opcode_t;
 
 enum condition {
@@ -219,21 +219,21 @@ static int temp_reg = RCX;
 #endif
 #elif defined(__aarch64__)
 /* callee_reg - this must be a multiple of two because of how we save the stack
- * later on. */
+ * later on.
+ */
 static const int callee_reg[] = {R19, R20, R21, R22, R23, R24, R25, R26};
 /* parameter_reg (Caller saved registers) */
 static const int parameter_reg[] = {R0, R1, R2, R3, R4};
 static int temp_reg = R8;
 
-/*  Register assignments:
- *  Arm64       Usage
- *   r0 - r4     Function parameters, caller-saved
- *   r6 - r8     Temp - used for storing calculated value during execution
- *   r19 - r23   Callee-saved registers
- *   r24         Temp - used for generating 32-bit immediates
- *   r25         Temp - used for modulous calculations
+/* Register assignments:
+ * Arm64       Usage
+ *   r0 - r4   Function parameters, caller-saved
+ *   r6 - r8   Temp - used for storing calculated value during execution
+ *   r19 - r23 Callee-saved registers
+ *   r24       Temp - used for generating 32-bit immediates
+ *   r25       Temp - used for modulous calculations
  */
-
 static const int register_map[] = {
     R5, R6, R7, R9, R11, R12, R13, R14, R15, R16, R17, R18, R26,
 };
@@ -435,7 +435,8 @@ static inline void emit_movewide_imm(struct jit_state *state,
     }
 
     /* Iterate over 16-bit elements of imm, outputting an appropriate move
-     * instruction.  */
+     * instruction.
+     */
     bool invert = (count0000 < countffff);
     a64opcode_t op = invert ? MW_MOVN : MW_MOVZ;
     uint64_t skip_pattern = invert ? 0xffff : 0;
@@ -453,9 +454,8 @@ static inline void emit_movewide_imm(struct jit_state *state,
     }
 
     /* Tidy up for the case imm = 0 or imm == -1.  */
-    if (op != MW_MOVK) {
+    if (op != MW_MOVK)
         emit_a64(state, sz(is64) | op | (0 << 21) | (0 << 5) | rd);
-    }
 }
 
 /* [ARM-A]: C4.1.66: Load/store register (unscaled immediate).  */
@@ -527,7 +527,7 @@ static void update_branch_imm(struct jit_state *state,
     memcpy(&insn, state->buf + offset, sizeof(uint32_t));
     if ((insn & 0xfe000000U) == 0x54000000U /* Conditional branch immediate. */
         || (insn & 0x7e000000U) ==
-               0x34000000U) { /* Compare and branch immediate.  */
+               0x34000000U) { /* Compare and branch immediate. */
         assert((imm >> 19) == INT64_C(-1) || (imm >> 19) == 0);
         insn |= (imm & 0x7ffff) << 5;
     } else if ((insn & 0x7c000000U) == 0x14000000U) {
@@ -1206,9 +1206,8 @@ static int vm_reg[3] = {0};
 static void reset_reg()
 {
     count = 0;
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 32; i++)
         reg_table[i] = -1;
-    }
 }
 
 static void store_back(struct jit_state *state)

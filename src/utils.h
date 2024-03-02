@@ -57,6 +57,8 @@ static inline uintptr_t align_up(uintptr_t sz, size_t alignment)
     return (((sz + mask) / alignment) * alignment);
 }
 
+/* Linux-like List API */
+
 struct list_head {
     struct list_head *prev, *next;
 };
@@ -68,7 +70,7 @@ static inline void INIT_LIST_HEAD(struct list_head *head)
 
 static inline bool list_empty(const struct list_head *head)
 {
-    return (head->next == head);
+    return head->next == head;
 }
 
 static inline void list_add(struct list_head *node, struct list_head *head)

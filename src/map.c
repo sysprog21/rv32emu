@@ -558,7 +558,7 @@ static map_node_t *map_create_node(void *key,
 
     /* copy over the key and values.
      * If the parameter passed in is NULL, make the element blank instead of
-     * a segfault.
+     * a segmentation fault.
      */
     if (!key)
         memset(node->key, 0, ksize);

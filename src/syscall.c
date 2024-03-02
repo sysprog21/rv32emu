@@ -383,9 +383,7 @@ void syscall_handler(riscv_t *rv)
         break;
     }
 
-    /*
-     * save return code
-     *
+    /* save return code.
      * the application decides the usage of the return code
      */
     vm_attr_t *attr = PRIV(rv);

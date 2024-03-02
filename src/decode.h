@@ -201,7 +201,9 @@ enum op_field {
     _(fuse7)
 
 /* clang-format off */
-/* IR list */
+/* IR (intermediate representation) is exclusively represented by RISC-V
+ * instructions, yet it is executed at a lower cost.
+ */
 enum {
 #define _(inst, can_branch, insn_len, translatable, reg_mask) rv_insn_##inst,
     RV_INSN_LIST
@@ -325,22 +327,22 @@ typedef struct rv_insn {
      * optimization enables the self-recursive function to reuse the same
      * function stack frame.
      *
-     * The @next member indicates the next intermediate representation
-     * (IR) or is NULL if it is the final instruction in a basic block. The
-     * @impl member facilitates the direct invocation of the next instruction
-     * emulation without the need to compute the jump address. By utilizing
-     * these two members, all instruction emulations can be rewritten into a
-     * self-recursive version, enabling the compiler to leverage TCO.
+     * The @next member indicates the next IR or is NULL if it is the final
+     * instruction in a basic block. The @impl member facilitates the direct
+     * invocation of the next instruction emulation without the need to compute
+     * the jump address. By utilizing these two members, all instruction
+     * emulations can be rewritten into a self-recursive version, enabling the
+     * compiler to leverage TCO.
      */
     struct rv_insn *next;
     bool (*impl)(riscv_t *, const struct rv_insn *, uint64_t, uint32_t);
 
     /* Two pointers, 'branch_taken' and 'branch_untaken', are employed to
      * avoid the overhead associated with aggressive memory copying. Instead
-     * of copying the entire intermediate representation (IR) array, these
-     * pointers indicate the first IR of the first basic block in the path of
-     * the taken and untaken branches. This allows for direct jumping to the
-     * specific IR array without the need for additional copying.
+     * of copying the entire IR array, these pointers indicate the first IR
+     * of the first basic block in the path of the taken and untaken branches.
+     * This allows for direct jumping to the specific IR array without the
+     * need for additional copying.
      */
     struct rv_insn *branch_taken, *branch_untaken;
     branch_history_table_t *branch_table;

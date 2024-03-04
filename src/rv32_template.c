@@ -1321,7 +1321,8 @@ GEN({
 RVOP(
     lrw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         /* skip registration of the 'reservation set'
          * FIXME: uimplemented
          */
@@ -1348,7 +1349,8 @@ RVOP(
 RVOP(
     amoswapw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         rv->io.mem_write_s(ir->rs1, rv->X[ir->rs2]);
     },
     GEN({
@@ -1359,7 +1361,8 @@ RVOP(
 RVOP(
     amoaddw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         const int32_t res = (int32_t) rv->X[ir->rd] + (int32_t) rv->X[ir->rs2];
         rv->io.mem_write_s(ir->rs1, res);
     },
@@ -1371,7 +1374,8 @@ RVOP(
 RVOP(
     amoxorw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         const int32_t res = rv->X[ir->rd] ^ rv->X[ir->rs2];
         rv->io.mem_write_s(ir->rs1, res);
     },
@@ -1383,7 +1387,8 @@ RVOP(
 RVOP(
     amoandw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         const int32_t res = rv->X[ir->rd] & rv->X[ir->rs2];
         rv->io.mem_write_s(ir->rs1, res);
     },
@@ -1395,7 +1400,8 @@ RVOP(
 RVOP(
     amoorw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         const int32_t res = rv->X[ir->rd] | rv->X[ir->rs2];
         rv->io.mem_write_s(ir->rs1, res);
     },
@@ -1407,7 +1413,8 @@ RVOP(
 RVOP(
     amominw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         const int32_t a = rv->X[ir->rd];
         const int32_t b = rv->X[ir->rs2];
         const uint32_t res = a < b ? rv->X[ir->rd] : rv->X[ir->rs2];
@@ -1421,7 +1428,8 @@ RVOP(
 RVOP(
     amomaxw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         const int32_t a = rv->X[ir->rd];
         const int32_t b = rv->X[ir->rs2];
         const uint32_t res = a > b ? rv->X[ir->rd] : rv->X[ir->rs2];
@@ -1435,7 +1443,8 @@ RVOP(
 RVOP(
     amominuw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         const uint32_t ures =
             rv->X[ir->rd] < rv->X[ir->rs2] ? rv->X[ir->rd] : rv->X[ir->rs2];
         rv->io.mem_write_s(ir->rs1, ures);
@@ -1448,7 +1457,8 @@ RVOP(
 RVOP(
     amomaxuw,
     {
-        rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+        if (ir->rd)
+            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
         const uint32_t ures =
             rv->X[ir->rd] > rv->X[ir->rs2] ? rv->X[ir->rd] : rv->X[ir->rs2];
         rv->io.mem_write_s(ir->rs1, ures);

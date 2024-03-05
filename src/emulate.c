@@ -755,6 +755,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
          */
         if (IF_imm(ir, 15) && IF_rd(ir, t1) && IF_rs1(ir, zero)) {
             next_ir = ir->next;
+            assert(next_ir);
             if (IF_insn(next_ir, addi) && IF_rd(next_ir, a4) &&
                 IF_rs1(next_ir, a0) && IF_rs2(next_ir, zero)) {
                 next_ir = next_ir->next;
@@ -770,6 +771,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
             }
         } else if (IF_imm(ir, 0) && IF_rd(ir, t1) && IF_rs1(ir, a0)) {
             next_ir = ir->next;
+            assert(next_ir);
             if (IF_insn(next_ir, beq) && IF_rs1(next_ir, a2) &&
                 IF_rs2(next_ir, zero)) {
                 if (IF_imm(next_ir, 20) && detect_memset(rv, 1)) {
@@ -795,6 +797,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
          */
         if (IF_rd(ir, a5) && IF_rs1(ir, a0) && IF_rs2(ir, a1)) {
             next_ir = ir->next;
+            assert(next_ir);
             if (IF_insn(next_ir, andi) && IF_imm(next_ir, 3) &&
                 IF_rd(next_ir, a5) && IF_rs1(next_ir, a5)) {
                 next_ir = next_ir->next;
@@ -833,6 +836,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
     rv_insn_t *ir;
     for (i = 0, ir = block->ir_head; i < block->n_insn - 1;
          i++, ir = ir->next) {
+        assert(ir);
         rv_insn_t *next_ir = NULL;
         int32_t count = 0;
         switch (ir->opcode) {

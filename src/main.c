@@ -206,8 +206,8 @@ int main(int argc, char **args)
     riscv_t *rv = rv_create(&attr);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
-        free(attr.data.user);
-        return 1;
+        attr.exit_code = 1;
+        goto end;
     }
 
     rv_run(rv);
@@ -224,6 +224,9 @@ int main(int argc, char **args)
     rv_delete(rv);
 
     printf("inferior exit code %d\n", attr.exit_code);
+
+end:
     free(attr.data.user);
-    return 0;
+    free(prof_out_file);
+    return attr.exit_code;
 }

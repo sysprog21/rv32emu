@@ -127,12 +127,23 @@ jobs:
     - name: set up scan-build  
       run: |
             sudo apt-get update -q -y
-            sudo apt-get install -q -y clang clang-tools libsdl2-dev libsdl2-mixer-dev
+            sudo apt-get install -q -y clang clang-tools
       shell: bash
     - name: run scan-build without JIT
       run: make clean && make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
     - name: run scan-build with JIT
       run: make clean && make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
+  
+  static-analysis-infer:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    runs-on: sysprog21/infer:latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: run infer without JIT
+      run: infer --fail-on-issue -- make ENABLE_SDL=0 ENABLE_LTO=0 ENABLE_EXT_F=0 ENABLE_JIT=0
+    - name: run infer with JIT
+      run: infer --fail-on-issue -- make ENABLE_SDL=0 ENABLE_LTO=0 ENABLE_EXT_F=0 ENABLE_JIT=1
 
   compliance-test:
     needs: [detect-code-related-file-changes]

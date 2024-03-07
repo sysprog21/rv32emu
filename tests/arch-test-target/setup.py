@@ -15,6 +15,9 @@ def setup_testlist(riscv_device):
     if 'M' in riscv_device:
         misa |= constants.misa_M
         ISA += 'M'
+    if 'A' in riscv_device:
+        misa |= constants.misa_A
+        ISA += 'A'
     if 'F' in riscv_device:
         misa |= constants.misa_F
         ISA += 'F'
@@ -55,7 +58,7 @@ def setup_config():
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--riscv_device', help='the ISA will test',
-                        default='IMCZicsrZifencei')
+                        default='IMACZicsrZifencei')
     args = parser.parse_args()
 
     setup_testlist(args.riscv_device)

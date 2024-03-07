@@ -6,6 +6,7 @@ refname = 'sail_cSim'
 root = os.path.abspath(os.path.dirname(__file__))
 cwd = os.getcwd()
 
+misa_A = (1 << 0)
 misa_C = (1 << 2)
 misa_F = (1 << 5)
 misa_M = (1 << 12)

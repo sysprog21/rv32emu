@@ -3,7 +3,7 @@ ARCH_TEST_SUITE ?= $(ARCH_TEST_DIR)/riscv-test-suite
 export RISCV_TARGET := tests/arch-test-target
 export TARGETDIR := $(shell pwd)
 export WORK := $(TARGETDIR)/build/arch-test
-export RISCV_DEVICE ?= IMCZicsrZifencei
+export RISCV_DEVICE ?= IMACFZicsrZifencei
 
 ifeq ($(RISCV_DEVICE),FCZicsr)
 ARCH_TEST_SUITE := tests/rv32fc-test-suite

@@ -174,15 +174,12 @@ RVOP(
             if (!set_add(&pc_set, PC))
                 has_loops = true;
             if (cache_hot(rv->block_cache, PC))
-                goto end_insn;
+                goto end_op;
 #endif
             last_pc = PC;
             MUST_TAIL return taken->impl(rv, taken, cycle, PC);
         }
-    end_insn:
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+        goto end_op;
     },
     GEN({
         cond, rd;
@@ -226,8 +223,8 @@ RVOP(
         for (int i = 0; i < HISTORY_SIZE; i++) {                              \
             if (ir->branch_table->PC[i] == PC) {                              \
                 ir->branch_table->times[i]++;                                 \
-                MUST_TAIL return block->ir_head->impl(rv, block->ir_head,     \
-                                                      cycle, PC);             \
+                if (cache_hot(rv->block_cache, PC))                           \
+                    goto end_op;                                              \
             }                                                                 \
         }                                                                     \
         /* update branch history table */                                     \
@@ -243,6 +240,8 @@ RVOP(
         }                                                                     \
         ir->branch_table->times[min_idx] = 1;                                 \
         ir->branch_table->PC[min_idx] = PC;                                   \
+        if (cache_hot(rv->block_cache, PC))                                   \
+            goto end_op;                                                      \
         MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC); \
     }
 #endif
@@ -268,9 +267,7 @@ RVOP(
         RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
 #endif
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+        goto end_op;
     },
     GEN({
         cond, rd;
@@ -324,15 +321,12 @@ RVOP(
             if (!set_add(&pc_set, PC))                             \
                 has_loops = true;                                  \
             if (cache_hot(rv->block_cache, PC))                    \
-                goto end_insn;                                     \
+                goto end_op;                                       \
         }, );                                                      \
         last_pc = PC;                                              \
         MUST_TAIL return taken->impl(rv, taken, cycle, PC);        \
     }                                                              \
-    end_insn:                                                      \
-    rv->csr_cycle = cycle;                                         \
-    rv->PC = PC;                                                   \
-    return true;
+    goto end_op;
 
 /* In RV32I and RV64I, if the branch is taken, set pc = pc + offset, where
  * offset is a multiple of two; else do nothing. The offset is 13 bits long.
@@ -1956,15 +1950,12 @@ RVOP(
             if (!set_add(&pc_set, PC))
                 has_loops = true;
             if (cache_hot(rv->block_cache, PC))
-                goto end_insn;
+                goto end_op;
 #endif
             last_pc = PC;
             MUST_TAIL return taken->impl(rv, taken, cycle, PC);
         }
-    end_insn:
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+        goto end_op;
     },
     GEN({
         map, VR0, rv_reg_ra;
@@ -2120,15 +2111,12 @@ RVOP(
             if (!set_add(&pc_set, PC))
                 has_loops = true;
             if (cache_hot(rv->block_cache, PC))
-                goto end_insn;
+                goto end_op;
 #endif
             last_pc = PC;
             MUST_TAIL return taken->impl(rv, taken, cycle, PC);
         }
-    end_insn:
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+        goto end_op;
     },
     GEN({
         break;
@@ -2171,15 +2159,12 @@ RVOP(
             if (!set_add(&pc_set, PC))
                 has_loops = true;
             if (cache_hot(rv->block_cache, PC))
-                goto end_insn;
+                goto end_op;
 #endif
             last_pc = PC;
             MUST_TAIL return taken->impl(rv, taken, cycle, PC);
         }
-    end_insn:
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+        goto end_op;
     },
     GEN({
         rald, VR0, rs1;
@@ -2231,15 +2216,12 @@ RVOP(
             if (!set_add(&pc_set, PC))
                 has_loops = true;
             if (cache_hot(rv->block_cache, PC))
-                goto end_insn;
+                goto end_op;
 #endif
             last_pc = PC;
             MUST_TAIL return taken->impl(rv, taken, cycle, PC);
         }
-    end_insn:
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+        goto end_op;
     },
     GEN({
         rald, VR0, rs1;
@@ -2297,9 +2279,7 @@ RVOP(
     {
         PC = rv->X[ir->rs1];
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+        goto end_op;
     },
     GEN({
         rald, VR0, rs1;
@@ -2349,9 +2329,7 @@ RVOP(
         rv->X[rv_reg_ra] = PC + 2;
         PC = jump_to;
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+        goto end_op;
     },
     GEN({
         map, VR0, rv_reg_ra;

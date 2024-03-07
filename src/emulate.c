@@ -399,12 +399,14 @@ static bool has_loops = false;
     nextop:                                                           \
         PC += __rv_insn_##inst##_len;                                 \
         if (unlikely(RVOP_NO_NEXT(ir))) {                             \
-            rv->csr_cycle = cycle;                                    \
-            rv->PC = PC;                                              \
-            return true;                                              \
+            goto end_op;                                              \
         }                                                             \
         const rv_insn_t *next = ir->next;                             \
         MUST_TAIL return next->impl(rv, next, cycle, PC);             \
+    end_op:                                                           \
+        rv->csr_cycle = cycle;                                        \
+        rv->PC = PC;                                                  \
+        return true;                                                  \
     }
 
 #include "rv32_template.c"

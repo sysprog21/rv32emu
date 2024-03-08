@@ -1363,7 +1363,7 @@ RVOP(
     {
         if (ir->rd)
             rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
-        const int32_t res = (int32_t) rv->X[ir->rd] + (int32_t) rv->X[ir->rs2];
+        const uint32_t res = rv->X[ir->rd] + rv->X[ir->rs2];
         rv->io.mem_write_w(rv->X[ir->rs1], res);
     },
     GEN({
@@ -1376,7 +1376,7 @@ RVOP(
     {
         if (ir->rd)
             rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
-        const int32_t res = rv->X[ir->rd] ^ rv->X[ir->rs2];
+        const uint32_t res = rv->X[ir->rd] ^ rv->X[ir->rs2];
         rv->io.mem_write_w(rv->X[ir->rs1], res);
     },
     GEN({
@@ -1389,7 +1389,7 @@ RVOP(
     {
         if (ir->rd)
             rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
-        const int32_t res = rv->X[ir->rd] & rv->X[ir->rs2];
+        const uint32_t res = rv->X[ir->rd] & rv->X[ir->rs2];
         rv->io.mem_write_w(rv->X[ir->rs1], res);
     },
     GEN({
@@ -1402,7 +1402,7 @@ RVOP(
     {
         if (ir->rd)
             rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
-        const int32_t res = rv->X[ir->rd] | rv->X[ir->rs2];
+        const uint32_t res = rv->X[ir->rd] | rv->X[ir->rs2];
         rv->io.mem_write_w(rv->X[ir->rs1], res);
     },
     GEN({

@@ -1350,8 +1350,8 @@ RVOP(
     amoswapw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
-        rv->io.mem_write_s(ir->rs1, rv->X[ir->rs2]);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
+        rv->io.mem_write_s(rv->X[ir->rs1], rv->X[ir->rs2]);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1362,9 +1362,9 @@ RVOP(
     amoaddw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         const int32_t res = (int32_t) rv->X[ir->rd] + (int32_t) rv->X[ir->rs2];
-        rv->io.mem_write_s(ir->rs1, res);
+        rv->io.mem_write_s(rv->X[ir->rs1], res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1375,9 +1375,9 @@ RVOP(
     amoxorw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         const int32_t res = rv->X[ir->rd] ^ rv->X[ir->rs2];
-        rv->io.mem_write_s(ir->rs1, res);
+        rv->io.mem_write_s(rv->X[ir->rs1], res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1388,9 +1388,9 @@ RVOP(
     amoandw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         const int32_t res = rv->X[ir->rd] & rv->X[ir->rs2];
-        rv->io.mem_write_s(ir->rs1, res);
+        rv->io.mem_write_s(rv->X[ir->rs1], res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1401,9 +1401,9 @@ RVOP(
     amoorw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         const int32_t res = rv->X[ir->rd] | rv->X[ir->rs2];
-        rv->io.mem_write_s(ir->rs1, res);
+        rv->io.mem_write_s(rv->X[ir->rs1], res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1414,11 +1414,11 @@ RVOP(
     amominw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         const int32_t a = rv->X[ir->rd];
         const int32_t b = rv->X[ir->rs2];
         const uint32_t res = a < b ? rv->X[ir->rd] : rv->X[ir->rs2];
-        rv->io.mem_write_s(ir->rs1, res);
+        rv->io.mem_write_s(rv->X[ir->rs1], res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1429,11 +1429,11 @@ RVOP(
     amomaxw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         const int32_t a = rv->X[ir->rd];
         const int32_t b = rv->X[ir->rs2];
         const uint32_t res = a > b ? rv->X[ir->rd] : rv->X[ir->rs2];
-        rv->io.mem_write_s(ir->rs1, res);
+        rv->io.mem_write_s(rv->X[ir->rs1], res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1444,10 +1444,10 @@ RVOP(
     amominuw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         const uint32_t ures =
             rv->X[ir->rd] < rv->X[ir->rs2] ? rv->X[ir->rd] : rv->X[ir->rs2];
-        rv->io.mem_write_s(ir->rs1, ures);
+        rv->io.mem_write_s(rv->X[ir->rs1], ures);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1458,10 +1458,10 @@ RVOP(
     amomaxuw,
     {
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(ir->rs1);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv->X[ir->rs1]);
         const uint32_t ures =
             rv->X[ir->rd] > rv->X[ir->rs2] ? rv->X[ir->rd] : rv->X[ir->rs2];
-        rv->io.mem_write_s(ir->rs1, ures);
+        rv->io.mem_write_s(rv->X[ir->rs1], ures);
     },
     GEN({
         assert; /* FIXME: Implement */

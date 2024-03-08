@@ -228,7 +228,7 @@ typedef struct {
     char *elf_program;
 } vm_user_t;
 
-typedef union {
+typedef struct {
     vm_user_t *user;
     /* TODO: system emulator stuff */
 } vm_data_t;

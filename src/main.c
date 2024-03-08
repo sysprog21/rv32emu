@@ -35,7 +35,7 @@ static char *signature_out_file;
 static bool opt_quiet_outputs = false;
 
 /* target executable */
-static char *opt_prog_name = "a.out";
+static char *opt_prog_name;
 
 /* target argc and argv */
 static int prog_argc;

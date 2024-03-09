@@ -128,7 +128,7 @@ For macOS users, installing `sdiff` might be required:
 $ brew install diffutils
 ```
 
-To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `C`, `Zifencei`, `privilege`.
+To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `A`, `F`, `C`, `Zifencei`, `privilege`.
 ```shell
 $ make arch-test RISCV_DEVICE=I
 ```
@@ -137,10 +137,11 @@ Current progress of this emulator in riscv-arch-test (RV32):
 * Passed Tests
     - `I`: Base Integer Instruction Set
     - `M`: Standard Extension for Integer Multiplication and Division
+    - `A`: Standard Extension for Atomic Instructions
+    - `F` Standard Extension for Single-Precision Floating-Point
     - `C`: Standard Extension for Compressed Instruction
     - `Zifencei`: Instruction-Fetch Fence
     - `privilege`: RISCV Privileged Specification
-    - `F` Standard Extension for Single-Precision Floating-Point
 
 Detail in riscv-arch-test:
 * [RISCOF document](https://riscof.readthedocs.io/en/stable/)

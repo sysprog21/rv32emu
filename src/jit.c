@@ -243,6 +243,7 @@ static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm);
 static inline void offset_map_insert(struct jit_state *state, int32_t target_pc)
 {
     struct offset_map *map_entry = &state->offset_map[state->n_insn++];
+    assert(state->n_insn < MAX_INSNS);
     map_entry->pc = target_pc;
     map_entry->offset = state->offset;
 }
@@ -352,6 +353,7 @@ static inline void emit_jump_target_address(struct jit_state *state,
                                             int32_t target_pc)
 {
     struct jump *jump = &state->jumps[state->n_jumps++];
+    assert(state->n_jumps < MAX_INSNS);
     jump->offset_loc = state->offset;
     jump->target_pc = target_pc;
     emit4(state, 0);
@@ -553,6 +555,7 @@ static inline void emit_jump_target_offset(struct jit_state *state,
                                            uint32_t jump_state_offset)
 {
     struct jump *jump = &state->jumps[state->n_jumps++];
+    assert(state->n_jumps < MAX_INSNS);
     jump->offset_loc = jump_loc;
     jump->target_offset = jump_state_offset;
 }
@@ -930,6 +933,7 @@ static inline void emit_jmp(struct jit_state *state, uint32_t target_pc)
     emit_jump_target_address(state, target_pc);
 #elif defined(__aarch64__)
     struct jump *jump = &state->jumps[state->n_jumps++];
+    assert(state->n_jumps < MAX_INSNS);
     jump->offset_loc = state->offset;
     jump->target_pc = target_pc;
     emit_a64(state, UBR_B);

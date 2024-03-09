@@ -200,7 +200,7 @@ for i in range(len(op)):
             elif items[0] == "rald2s":
                 asm = "ra_load2_sext(state, {}, {}, {}, {});".format(items[1], items[2], items[3], items[4])
             elif items[0] == "map":
-                asm = "{} = map_reg(state, {});".format(items[1], items[2])
+                asm = "{} = map_vm_reg(state, {});".format(items[1], items[2])
             elif items[0] == "ld":
                 if (items[3] == "X"):
                     asm = "emit_load(state, {}, parameter_reg[0], {}, offsetof(riscv_t, X) + 4 * {});".format(

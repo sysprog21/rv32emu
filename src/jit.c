@@ -207,15 +207,17 @@ enum operand_size {
 #if defined(_WIN32)
 static const int nonvolatile_reg[] = {RBP, RBX, RDI, RSI, R13, R14, R15};
 static const int parameter_reg[] = {RCX, RDX, R8, R9};
-static const int register_map[] = {
-    RAX, R10, RDX, R8, R9, R14, R15, RDI, RSI, RBX, RBP,
+static struct host_reg register_map[] = {
+    {RAX, 0}, {R10, 0}, {RDX, 0}, {R8, 0},  {R9, 0},  {R14, 0},
+    {R15, 0}, {RDI, 0}, {RSI, 0}, {RBX, 0}, {RBP, 0},
 };
 static int temp_reg = RCX;
 #else
 static const int nonvolatile_reg[] = {RBP, RBX, R13, R14, R15};
 static const int parameter_reg[] = {RDI, RSI, RDX, RCX, R8, R9};
-static const int register_map[] = {
-    RAX, RBX, RDX, R8, R9, R10, R11, R13, R14, R15,
+static struct host_reg register_map[] = {
+    {RAX, 0}, {RBX, 0}, {RDX, 0}, {R8, 0},  {R9, 0},
+    {R10, 0}, {R11, 0}, {R13, 0}, {R14, 0}, {R15, 0},
 };
 static int temp_reg = RCX;
 #endif
@@ -236,11 +238,26 @@ static int temp_reg = R8;
  *   r24       Temp - used for generating 32-bit immediates
  *   r25       Temp - used for modulous calculations
  */
-static const int register_map[] = {
-    R5, R6, R7, R9, R11, R12, R13, R14, R15, R16, R17, R18, R26,
+static struct host_reg register_map[] = {
+    {R5, 0},  {R6, 0},  {R7, 0},  {R9, 0},  {R11, 0}, {R12, 0}, {R13, 0},
+    {R14, 0}, {R15, 0}, {R16, 0}, {R17, 0}, {R18, 0}, {R26, 0},
 };
-static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm);
 #endif
+
+static const int n_host_regs =
+    ARRAYS_SIZE(register_map); /* the number of avavliable host register */
+
+static inline void set_dirty(int reg_idx, bool is_dirty)
+{
+    for (int i = 0; i < n_host_regs; i++) {
+        /* ignore nonvolatile and parameter registers */
+        if (register_map[i].reg_idx != reg_idx)
+            continue;
+
+        register_map[i].dirty = is_dirty;
+        return;
+    }
+}
 
 static inline void offset_map_insert(struct jit_state *state, int32_t target_pc)
 {
@@ -361,6 +378,8 @@ static inline void emit_jump_target_address(struct jit_state *state,
     emit4(state, 0);
 }
 #elif defined(__aarch64__)
+static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm);
+
 static void emit_a64(struct jit_state *state, uint32_t insn)
 {
     assert(insn != BAD_OPCODE);
@@ -389,6 +408,7 @@ static void emit_addsub_imm(struct jit_state *state,
     const uint32_t imm_op_base = 0x11000000;
     emit_a64(state, sz(is64) | (op << 29) | imm_op_base | (0 << 22) |
                         (imm12 << 10) | (rn << 5) | rd);
+    set_dirty(rd, true);
 }
 
 /* [ARM-A]: C4.1.67: Logical (shifted register).  */
@@ -401,6 +421,7 @@ static void emit_logical_register(struct jit_state *state,
 {
     emit_a64(state, sz(is64) | op | (1 << 27) | (1 << 25) | (rm << 16) |
                         (rn << 5) | rd);
+    set_dirty(rd, true);
 }
 
 /* [ARM-A]: C4.1.67: Add/subtract (shifted register).  */
@@ -414,6 +435,7 @@ static inline void emit_addsub_register(struct jit_state *state,
     const uint32_t reg_op_base = 0x0b000000;
     emit_a64(state,
              sz(is64) | (op << 29) | reg_op_base | (rm << 16) | (rn << 5) | rd);
+    set_dirty(rd, true);
 }
 
 /* [ARM-A]: C4.1.64: Move wide (Immediate).  */
@@ -460,6 +482,8 @@ static inline void emit_movewide_imm(struct jit_state *state,
     /* Tidy up for the case imm = 0 or imm == -1.  */
     if (op != MW_MOVK)
         emit_a64(state, sz(is64) | op | (0 << 21) | (0 << 5) | rd);
+
+    set_dirty(rd, true);
 }
 
 /* [ARM-A]: C4.1.66: Load/store register (unscaled immediate).  */
@@ -506,6 +530,7 @@ static void emit_dataproc_2source(struct jit_state *state,
                                   int rm)
 {
     emit_a64(state, sz(is64) | op | (rm << 16) | (rn << 5) | rd);
+    set_dirty(rd, true);
 }
 
 
@@ -519,6 +544,7 @@ static void emit_dataproc_3source(struct jit_state *state,
                                   int ra)
 {
     emit_a64(state, sz(is64) | op | (rm << 16) | (ra << 10) | (rn << 5) | rd);
+    set_dirty(rd, true);
 }
 
 static void update_branch_imm(struct jit_state *state,
@@ -573,6 +599,8 @@ static inline void emit_alu32(struct jit_state *state, int op, int src, int dst)
         emit_basic_rex(state, 0, src, dst);
     emit1(state, op);
     emit_modrm_reg2reg(state, src, dst);
+
+    set_dirty(dst, true);
 #elif defined(__aarch64__)
     switch (op) {
     case 1: /* ADD */
@@ -681,6 +709,8 @@ static inline void emit_alu64(struct jit_state *state, int op, int src, int dst)
     emit_basic_rex(state, 1, src, dst);
     emit1(state, op);
     emit_modrm_reg2reg(state, src, dst);
+
+    set_dirty(dst, true);
 #elif defined(__aarch64__)
     if (op == 0x01)
         emit_addsub_register(state, true, AS_ADD, dst, dst, src);
@@ -801,7 +831,12 @@ static inline void emit_jcc_offset(struct jit_state *state, int code)
 #endif
 }
 
-/* Load [src + offset] into dst */
+/* Load [src + offset] into dst.
+ *
+ * If the offset is non-zero, it restores the vm register to the host register
+ * from the stack. Otherwise, it is a `read` pseudo instruction that loading
+ * the [src] into destination register.
+ */
 static inline void emit_load(struct jit_state *state,
                              enum operand_size size,
                              int src,
@@ -818,7 +853,8 @@ static inline void emit_load(struct jit_state *state,
     } else if (size == S32) {
         /* mov */
         emit1(state, 0x8b);
-    }
+    } else
+        __UNREACHABLE;
 
     emit_modrm_and_displacement(state, dst, src, offset);
 #elif defined(__aarch64__)
@@ -837,6 +873,8 @@ static inline void emit_load(struct jit_state *state,
         break;
     }
 #endif
+
+    set_dirty(dst, !offset);
 }
 
 static inline void emit_load_sext(struct jit_state *state,
@@ -874,6 +912,8 @@ static inline void emit_load_sext(struct jit_state *state,
         break;
     }
 #endif
+
+    set_dirty(dst, !offset);
 }
 
 /* Load sign-extended immediate into register */
@@ -888,6 +928,8 @@ static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm)
         emit1(state, 0xb8 | (dst & 7));
         emit8(state, imm);
     }
+
+    set_dirty(dst, true);
 #elif defined(__aarch64__)
     if ((int32_t) imm == imm)
         emit_movewide_imm(state, false, dst, imm);
@@ -896,7 +938,12 @@ static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm)
 #endif
 }
 
-/* Store register src to [dst + offset] */
+/* Store register src to [dst + offset].
+ *
+ * If the offset is non-zero, it stores the host register back to the stack
+ * which mapped to the vm register file. Otherwise, it is a `write` pseudo
+ * instruction that writing the content of `src` into [dst].
+ */
 static inline void emit_store(struct jit_state *state,
                               enum operand_size size,
                               int src,
@@ -926,6 +973,9 @@ static inline void emit_store(struct jit_state *state,
         break;
     }
 #endif
+
+    if (offset)
+        set_dirty(src, false);
 }
 
 static inline void emit_jmp(struct jit_state *state, uint32_t target_pc)
@@ -941,6 +991,9 @@ static inline void emit_jmp(struct jit_state *state, uint32_t target_pc)
     emit_a64(state, UBR_B);
 #endif
 }
+
+static inline void save_reg(struct jit_state *, int);
+static inline void unmap_vm_reg(int);
 
 static inline void emit_call(struct jit_state *state, intptr_t target)
 {
@@ -958,6 +1011,8 @@ static inline void emit_call(struct jit_state *state, intptr_t target)
     emit_movewide_imm(state, true, temp_imm_reg, target);
     emit_uncond_branch_reg(state, BR_BLR, temp_imm_reg);
 
+    save_reg(state, R5);
+    unmap_vm_reg(R5);
     emit_logical_register(state, true, LOG_ORR, R5, RZ, R0);
 
     emit_loadstore_imm(state, LS_LDRX, R30, SP, 0);
@@ -978,6 +1033,9 @@ static inline void emit_exit(struct jit_state *state)
 
 /* TODO: muldivmod is incomplete, it does not handle imm or overflow now */
 #if RV32_HAS(EXT_M)
+static inline int find_rv_reg(int);
+static inline void set_reg_table(int, int);
+
 static void muldivmod(struct jit_state *state,
                       uint8_t opcode,
                       int src,
@@ -1004,11 +1062,21 @@ static void muldivmod(struct jit_state *state,
         return;
     }
 
-    if (dst != RAX)
-        emit_push(state, RAX);
+    /* Record the mapping status before the registers are used for other
+     * purposes, and restore the status after popping the registers.
+     */
+    int d1 = register_map[0].dirty, d2 = register_map[2].dirty;
+    int r1 = find_rv_reg(RAX), r2 = find_rv_reg(RDX);
 
-    if (dst != RDX)
+    if (dst != RAX) {
+        unmap_vm_reg(RAX);
+        emit_push(state, RAX);
+    }
+
+    if (dst != RDX) {
+        unmap_vm_reg(RDX);
         emit_push(state, RDX);
+    }
 
     /*  Load the divisor into RCX */
     if (imm)
@@ -1095,11 +1163,17 @@ static void muldivmod(struct jit_state *state,
         if (mod)
             emit_mov(state, RDX, dst);
         emit_pop(state, RDX);
+        register_map[2].dirty = d2;
+        if (r2 != -1)
+            set_reg_table(r2, RDX);
     }
     if (dst != RAX) {
         if (div || mul)
             emit_mov(state, RAX, dst);
         emit_pop(state, RAX);
+        register_map[0].dirty = d1;
+        if (r1 != -1)
+            set_reg_table(r1, RAX);
     }
 #elif defined(__aarch64__)
     switch (opcode) {
@@ -1203,141 +1277,174 @@ static void prepare_translate(struct jit_state *state)
 }
 
 
-static int n_reg =
-    ARRAYS_SIZE(register_map); /* the number of avavliable host register */
 static int count = 0;
 static int reg_table[32];
-static int vm_reg[3] = {0};
+static int vm_reg[3] = {0}; /* enum x64_reg/a64_reg */
 
 static void reset_reg()
 {
     count = 0;
-    for (int i = 0; i < 32; i++)
+    for (int i = 0; i < N_RV_REGS; i++) {
         reg_table[i] = -1;
+    }
+    for (int i = 0; i < n_host_regs; i++) {
+        register_map[i].dirty = 0;
+    }
+}
+
+/* Find the vm register index that mapped to the given host register. */
+static inline int find_rv_reg(int reg_idx)
+{
+    for (int i = 0; i < N_RV_REGS; i++) {
+        if (reg_table[i] == reg_idx)
+            return i;
+    }
+    return -1;
+}
+
+/* Save host register if it is dirty. */
+static inline void save_reg(struct jit_state *state, int reg_idx)
+{
+    for (int i = 0; i < n_host_regs; i++) {
+        /* ignore nonvolatile and parameter registers */
+        if (register_map[i].reg_idx != reg_idx)
+            continue;
+        if (!register_map[i].dirty)
+            continue;
+
+        assert(find_rv_reg(reg_idx) != -1);
+        emit_store(state, S32, reg_idx, parameter_reg[0],
+                   offsetof(riscv_t, X) + 4 * find_rv_reg(reg_idx));
+        register_map[i].dirty = 0;
+        return;
+    }
 }
 
 static void store_back(struct jit_state *state)
 {
-    for (int i = 0; i < 32; i++) {
-        if (reg_table[i] != -1) {
-            emit_store(state, S32, reg_table[i], parameter_reg[0],
-                       offsetof(riscv_t, X) + 4 * i);
-        }
+    for (int i = 0; i < N_RV_REGS; i++) {
+        if (reg_table[i] == -1)
+            continue;
+        save_reg(state, reg_table[i]);
     }
 }
 
-FORCE_INLINE void store_back_target(struct jit_state *state, int target_reg)
+/* Unmap the vm register to the host register. */
+static inline void unmap_vm_reg(int reg_idx)
 {
-    for (int i = 0; i < 32; i++) {
-        if (reg_table[i] == target_reg) {
-            reg_table[i] = -1;
-            emit_store(state, S32, target_reg, parameter_reg[0],
-                       offsetof(riscv_t, X) + 4 * i);
-            return;
-        }
-    }
-}
-
-static int map_reg(struct jit_state *state, int reg_number)
-{
-    int target_reg = -1;
-    if (reg_table[reg_number] != -1)
-        return reg_table[reg_number];
-    count = (count + 1) % n_reg;
-    target_reg = register_map[count];
-    store_back_target(state, target_reg);
-    reg_table[reg_number] = target_reg;
-    return target_reg;
-}
-
-static int ra_load(struct jit_state *state, int reg_number)
-{
-    if (reg_table[reg_number] != -1)
-        return reg_table[reg_number];
-    count = (count + 1) % n_reg;
-    int target_reg = register_map[count];
-    store_back_target(state, target_reg);
-    reg_table[reg_number] = target_reg;
-    emit_load(state, S32, parameter_reg[0], reg_table[reg_number],
-              offsetof(riscv_t, X) + 4 * reg_number);
-    return target_reg;
-}
-
-static void ra_load2(struct jit_state *state, int reg_number1, int reg_number2)
-{
-    if (reg_number1 == reg_number2) {
-        vm_reg[1] = vm_reg[0] = ra_load(state, reg_number1);
+    for (uint32_t i = 0; i < N_RV_REGS; i++) {
+        if (reg_table[i] != reg_idx)
+            continue;
+        reg_table[i] = -1;
         return;
     }
-    vm_reg[0] = reg_table[reg_number1];
-    vm_reg[1] = reg_table[reg_number2];
-    if (vm_reg[0] == -1) {
-        while (vm_reg[0] == -1 || vm_reg[0] == vm_reg[1]) {
-            count = (count + 1) % n_reg;
-            vm_reg[0] = register_map[count];
-        }
-        store_back_target(state, vm_reg[0]);
-        reg_table[reg_number1] = vm_reg[0];
-        emit_load(state, S32, parameter_reg[0], reg_table[reg_number1],
-                  offsetof(riscv_t, X) + 4 * reg_number1);
+}
+
+static inline void set_reg_table(int vm_reg_idx, int reg_idx)
+{
+    reg_table[vm_reg_idx] = reg_idx;
+}
+
+/* Map the vm register to a host register. If the host register file is
+ * exhausted, pick a register and swap it out.
+ */
+static inline int map_vm_reg(struct jit_state *state, int vm_reg_idx)
+{
+    if (reg_table[vm_reg_idx] != -1)
+        return reg_table[vm_reg_idx];
+    count = (count + 1) % n_host_regs;
+    int target_reg = register_map[count].reg_idx;
+    save_reg(state, target_reg);
+    unmap_vm_reg(target_reg);
+    set_reg_table(vm_reg_idx, target_reg);
+    return target_reg;
+}
+
+static int ra_load(struct jit_state *state, int vm_reg_idx)
+{
+    int origin = reg_table[vm_reg_idx];
+    int target_reg = map_vm_reg(state, vm_reg_idx);
+
+    if (origin != target_reg)
+        emit_load(state, S32, parameter_reg[0], target_reg,
+                  offsetof(riscv_t, X) + 4 * vm_reg_idx);
+    return target_reg;
+}
+
+/* Prevent the host register collision while the first vm register has already
+ * been mapped and the second one is going to be mapped to the same host
+ * register and invoke swapping.
+ */
+static inline int map_vm_reg_reserved(struct jit_state *state,
+                                      int vm_reg_idx,
+                                      int reserved_reg_name)
+{
+    if (reg_table[vm_reg_idx] != -1)
+        return reg_table[vm_reg_idx];
+
+    int target_reg;
+    do {
+        count = (count + 1) % n_host_regs;
+        target_reg = register_map[count].reg_idx;
+    } while (target_reg == reserved_reg_name);
+
+    save_reg(state, target_reg);
+    unmap_vm_reg(target_reg);
+    set_reg_table(vm_reg_idx, target_reg);
+    return target_reg;
+}
+
+static void ra_load2(struct jit_state *state, int vm_reg_idx1, int vm_reg_idx2)
+{
+    int origin1 = reg_table[vm_reg_idx1], origin2 = reg_table[vm_reg_idx2];
+
+    if (vm_reg_idx1 == vm_reg_idx2) {
+        vm_reg[0] = vm_reg[1] = map_vm_reg(state, vm_reg_idx1);
+    } else {
+        vm_reg[0] = map_vm_reg(state, vm_reg_idx1);
+        vm_reg[1] = map_vm_reg_reserved(state, vm_reg_idx2, vm_reg[0]);
+        assert(vm_reg[0] != vm_reg[1]);
     }
-    if (vm_reg[1] == -1) {
-        while (vm_reg[1] == -1 || vm_reg[0] == vm_reg[1]) {
-            count = (count + 1) % n_reg;
-            vm_reg[1] = register_map[count];
-        }
-        store_back_target(state, vm_reg[1]);
-        reg_table[reg_number2] = vm_reg[1];
-        emit_load(state, S32, parameter_reg[0], reg_table[reg_number2],
-                  offsetof(riscv_t, X) + 4 * reg_number2);
-    }
+
+    if (origin1 != vm_reg[0])
+        emit_load(state, S32, parameter_reg[0], vm_reg[0],
+                  offsetof(riscv_t, X) + 4 * vm_reg_idx1);
+    if (origin2 != vm_reg[1])
+        emit_load(state, S32, parameter_reg[0], vm_reg[1],
+                  offsetof(riscv_t, X) + 4 * vm_reg_idx2);
 }
 
 static void ra_load2_sext(struct jit_state *state,
-                          int reg_number1,
-                          int reg_number2,
+                          int vm_reg_idx1,
+                          int vm_reg_idx2,
                           bool sext1,
                           bool sext2)
 {
-    vm_reg[0] = reg_table[reg_number1];
-    vm_reg[1] = reg_table[reg_number2];
-    if (vm_reg[0] == -1) {
-        while (vm_reg[0] == -1 || vm_reg[0] == vm_reg[1]) {
-            count = (count + 1) % n_reg;
-            vm_reg[0] = register_map[count];
-        }
-        store_back_target(state, vm_reg[0]);
-        reg_table[reg_number1] = vm_reg[0];
-        if (sext1)
-            emit_load_sext(state, S32, parameter_reg[0], reg_table[reg_number1],
-                           offsetof(riscv_t, X) + 4 * reg_number1);
-        else
-            emit_load(state, S32, parameter_reg[0], reg_table[reg_number1],
-                      offsetof(riscv_t, X) + 4 * reg_number1);
-    } else if (sext1) {
-        emit_store(state, S32, reg_table[reg_number1], parameter_reg[0],
-                   offsetof(riscv_t, X) + 4 * reg_number1);
-        emit_load_sext(state, S32, parameter_reg[0], reg_table[reg_number1],
-                       offsetof(riscv_t, X) + 4 * reg_number1);
+    int origin1 = reg_table[vm_reg_idx1], origin2 = reg_table[vm_reg_idx2];
+
+    if (vm_reg_idx1 == vm_reg_idx2) {
+        vm_reg[0] = vm_reg[1] = map_vm_reg(state, vm_reg_idx1);
+    } else {
+        vm_reg[0] = map_vm_reg(state, vm_reg_idx1);
+        vm_reg[1] = map_vm_reg_reserved(state, vm_reg_idx2, vm_reg[1]);
+        assert(vm_reg[0] != vm_reg[1]);
     }
-    if (vm_reg[1] == -1) {
-        while (vm_reg[1] == -1 || vm_reg[1] == vm_reg[0]) {
-            count = (count + 1) % n_reg;
-            vm_reg[1] = register_map[count];
-        }
-        store_back_target(state, vm_reg[1]);
-        reg_table[reg_number2] = vm_reg[1];
-        if (sext2)
-            emit_load_sext(state, S32, parameter_reg[0], reg_table[reg_number2],
-                           offsetof(riscv_t, X) + 4 * reg_number2);
+
+    if (origin1 != vm_reg[0]) {
+        if (sext1)
+            emit_load_sext(state, S32, parameter_reg[0], vm_reg[0],
+                           offsetof(riscv_t, X) + 4 * vm_reg_idx1);
         else
-            emit_load(state, S32, parameter_reg[0], reg_table[reg_number2],
-                      offsetof(riscv_t, X) + 4 * reg_number2);
-    } else if (sext2) {
-        emit_store(state, S32, reg_table[reg_number2], parameter_reg[0],
-                   offsetof(riscv_t, X) + 4 * reg_number2);
-        emit_load_sext(state, S32, parameter_reg[0], reg_table[reg_number2],
-                       offsetof(riscv_t, X) + 4 * reg_number2);
+            emit_load(state, S32, parameter_reg[0], vm_reg[0],
+                      offsetof(riscv_t, X) + 4 * vm_reg_idx1);
+    }
+    if (origin2 != vm_reg[1]) {
+        if (sext2)
+            emit_load_sext(state, S32, parameter_reg[0], vm_reg[1],
+                           offsetof(riscv_t, X) + 4 * vm_reg_idx2);
+        else
+            emit_load(state, S32, parameter_reg[0], vm_reg[1],
+                      offsetof(riscv_t, X) + 4 * vm_reg_idx2);
     }
 }
 
@@ -1352,8 +1459,10 @@ void parse_branch_history_table(struct jit_state *state, rv_insn_t *ir)
             max_idx = i;
     }
     if (bt->PC[max_idx] && bt->times[max_idx] >= IN_JUMP_THRESHOLD) {
-        emit_load_imm(state, register_map[0], bt->PC[max_idx]);
-        emit_cmp32(state, temp_reg, register_map[0]);
+        save_reg(state, register_map[0].reg_idx);
+        unmap_vm_reg(register_map[0].reg_idx);
+        emit_load_imm(state, register_map[0].reg_idx, bt->PC[max_idx]);
+        emit_cmp32(state, temp_reg, register_map[0].reg_idx);
         uint32_t jump_loc = state->offset;
         emit_jcc_offset(state, 0x85);
         emit_jmp(state, bt->PC[max_idx]);
@@ -1374,18 +1483,18 @@ static void do_fuse1(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
-        vm_reg[0] = map_reg(state, fuse[i].rd);
+        vm_reg[0] = map_vm_reg(state, fuse[i].rd);
         emit_load_imm(state, vm_reg[0], fuse[i].imm);
     }
 }
 
 static void do_fuse2(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
-    vm_reg[0] = map_reg(state, ir->rd);
+    vm_reg[0] = map_vm_reg(state, ir->rd);
     emit_load_imm(state, vm_reg[0], ir->imm);
     emit_mov(state, vm_reg[0], temp_reg);
     vm_reg[1] = ra_load(state, ir->rs1);
-    vm_reg[2] = map_reg(state, ir->rs2);
+    vm_reg[2] = map_vm_reg(state, ir->rs2);
     emit_mov(state, vm_reg[1], vm_reg[2]);
     emit_alu32(state, 0x01, temp_reg, vm_reg[2]);
 }
@@ -1411,7 +1520,7 @@ static void do_fuse4(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
         vm_reg[0] = ra_load(state, fuse[i].rs1);
         emit_load_imm(state, temp_reg, (intptr_t) (m->mem_base + fuse[i].imm));
         emit_alu64(state, 0x01, vm_reg[0], temp_reg);
-        vm_reg[1] = map_reg(state, fuse[i].rd);
+        vm_reg[1] = map_vm_reg(state, fuse[i].rd);
         emit_load(state, S32, temp_reg, vm_reg[1], 0);
     }
 }
@@ -1441,21 +1550,21 @@ static void do_fuse7(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
         switch (fuse[i].opcode) {
         case rv_insn_slli:
             vm_reg[0] = ra_load(state, fuse[i].rs1);
-            vm_reg[1] = map_reg(state, fuse[i].rd);
+            vm_reg[1] = map_vm_reg(state, fuse[i].rd);
             if (vm_reg[0] != vm_reg[1])
                 emit_mov(state, vm_reg[0], vm_reg[1]);
             emit_alu32_imm8(state, 0xc1, 4, vm_reg[1], fuse[i].imm & 0x1f);
             break;
         case rv_insn_srli:
             vm_reg[0] = ra_load(state, fuse[i].rs1);
-            vm_reg[1] = map_reg(state, fuse[i].rd);
+            vm_reg[1] = map_vm_reg(state, fuse[i].rd);
             if (vm_reg[0] != vm_reg[1])
                 emit_mov(state, vm_reg[0], vm_reg[1]);
             emit_alu32_imm8(state, 0xc1, 5, vm_reg[1], fuse[i].imm & 0x1f);
             break;
         case rv_insn_srai:
             vm_reg[0] = ra_load(state, fuse[i].rs1);
-            vm_reg[1] = map_reg(state, fuse[i].rd);
+            vm_reg[1] = map_vm_reg(state, fuse[i].rd);
             if (vm_reg[0] != vm_reg[1])
                 emit_mov(state, vm_reg[0], vm_reg[1]);
             emit_alu32_imm8(state, 0xc1, 7, vm_reg[1], fuse[i].imm & 0x1f);
@@ -1615,6 +1724,7 @@ struct jit_state *jit_state_init(size_t size)
     state->n_blocks = 0;
     assert(state->buf != MAP_FAILED);
     set_reset(&state->set);
+    reset_reg();
     prepare_translate(state);
     state->offset_map = calloc(MAX_BLOCKS, sizeof(struct offset_map));
     state->jumps = calloc(MAX_JUMPS, sizeof(struct jump));

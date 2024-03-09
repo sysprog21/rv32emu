@@ -36,6 +36,11 @@ struct jit_state {
     int n_jumps;
 };
 
+struct host_reg {
+    uint8_t reg_idx : 5; /* index to the host's register file */
+    bool dirty : 1;
+};
+
 struct jit_state *jit_state_init(size_t size);
 void jit_state_exit(struct jit_state *state);
 uint32_t jit_translate(riscv_t *rv, block_t *block);

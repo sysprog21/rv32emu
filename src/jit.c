@@ -1238,11 +1238,10 @@ FORCE_INLINE void store_back_target(struct jit_state *state, int target_reg)
 
 static int map_reg(struct jit_state *state, int reg_number)
 {
-    int target_reg = -1;
     if (reg_table[reg_number] != -1)
         return reg_table[reg_number];
     count = (count + 1) % n_reg;
-    target_reg = register_map[count];
+    int target_reg = register_map[count];
     store_back_target(state, target_reg);
     reg_table[reg_number] = target_reg;
     return target_reg;

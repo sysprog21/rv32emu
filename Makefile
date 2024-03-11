@@ -10,6 +10,7 @@ CONFIG_FILE := $(OUT)/.config
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
+CFLAGS_emcc ?=
 
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
@@ -21,7 +22,14 @@ endif
 endif
 $(call set-feature, LTO)
 ifeq ($(call has, LTO), 1)
-ifeq ("$(CC_IS_GCC)$(CC_IS_EMCC)", "1")
+ifeq ("$(CC_IS_EMCC)", "1")
+ifeq ($(call has, SDL), 1)
+$(warning LTO is not supported to build emscripten-port SDL using emcc.)
+else
+CFLAGS += -flto
+endif
+endif
+ifeq ("$(CC_IS_GCC)", "1")
 CFLAGS += -flto
 endif
 ifeq ("$(CC_IS_CLANG)", "1")
@@ -136,6 +144,13 @@ ifeq ("$(CC_IS_EMCC)", "1")
 CFLAGS += -mtail-call
 endif
 
+# Build emscripten-port SDL
+ifeq ("$(CC_IS_EMCC)", "1")
+ifeq ($(call has, SDL), 1)
+CFLAGS_emcc += -sUSE_SDL=2 -sSDL2_MIXER_FORMATS=wav,mid -sUSE_SDL_MIXER=2
+endif
+endif
+
 ENABLE_UBSAN ?= 0
 ifeq ("$(ENABLE_UBSAN)", "1")
 CFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
@@ -147,6 +162,13 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 # Clear the .DEFAULT_GOAL special variable, so that the following turns
 # to the first target after .DEFAULT_GOAL is not set.
 .DEFAULT_GOAL :=
+
+WEB_FILES += $(BIN).js \
+	     $(BIN).wasm \
+	     $(BIN).worker.js
+ifeq ("$(CC_IS_EMCC)", "1")
+BIN := $(BIN).js
+endif
 
 all: config $(BIN)
 
@@ -167,13 +189,23 @@ OBJS := \
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)
 
+EXPORTED_FUNCS := _main
+ifeq ("$(CC_IS_EMCC)", "1")
+CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
+	       -sALLOW_MEMORY_GROWTH \
+	       -s"EXPORTED_FUNCTIONS=$(EXPORTED_FUNCS)" \
+	       --embed-file build \
+	       -DMEM_SIZE=0x40000000 \
+	       -w
+endif
+
 $(OUT)/%.o: src/%.c
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
 $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
-	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
+	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $^ $(LDFLAGS)
 
 config: $(CONFIG_FILE)
 $(CONFIG_FILE):
@@ -236,7 +268,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT) src/rv32_jit.c
+	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(OUT)/id1

@@ -3,12 +3,33 @@ CC_IS_CLANG :=
 CC_IS_GCC :=
 ifneq ($(shell $(CC) --version | head -n 1 | grep emcc),)
     CC_IS_EMCC := 1
-endif
-ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
-    CC_IS_CLANG := 1
-endif
-ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)
-    CC_IS_GCC := 1
+
+    # see commit 165c1a3 of emscripten
+    MIMALLOC_SUPPORT_SINCE_MAJOR := 3
+    MIMALLOC_SUPPORT_SINCE_MINOR := 1
+    MIMALLOC_SUPPORT_SINCE_PATCH := 50
+    MIMALLOC_UNSUPPORTED_WARNING := mimalloc is supported after version $(MIMALLOC_SUPPORT_SINCE_MAJOR).$(MIMALLOC_SUPPORT_SINCE_MINOR).$(MIMALLOC_SUPPORT_SINCE_PATCH)
+    EMCC_VERSION := $(shell $(CC) --version | head -n 1 | cut -f10 -d ' ')
+    EMCC_MAJOR := $(shell echo $(EMCC_VERSION) | cut -f1 -d.)
+    EMCC_MINOR := $(shell echo $(EMCC_VERSION) | cut -f2 -d.)
+    EMCC_PATCH := $(shell echo $(EMCC_VERSION) | cut -f3 -d.)
+    ifeq ($(shell echo $(EMCC_MAJOR)\>=$(MIMALLOC_SUPPORT_SINCE_MAJOR) | bc), 1)
+        ifeq ($(shell echo $(EMCC_MINOR)\>=$(MIMALLOC_SUPPORT_SINCE_MINOR) | bc), 1)
+            ifeq ($(shell echo $(EMCC_PATCH)\>=$(MIMALLOC_SUPPORT_SINCE_PATCH) | bc), 1)
+                CFLAGS_emcc += -sMALLOC=mimalloc
+            else
+                $(warning $(MIMALLOC_UNSUPPORTED_WARNING))
+            endif
+        else
+            $(warning $(MIMALLOC_UNSUPPORTED_WARNING))
+        endif
+    else
+        $(warning $(MIMALLOC_UNSUPPORTED_WARNING))
+    endif
+else ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
+     CC_IS_CLANG := 1
+else ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)
+     CC_IS_GCC := 1
 endif
 
 CFLAGS_NO_CET :=

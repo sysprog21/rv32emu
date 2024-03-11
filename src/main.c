@@ -168,7 +168,10 @@ static void dump_test_signature(const char *prog_name)
     elf_delete(elf);
 }
 
-#define MEM_SIZE 0xFFFFFFFFULL  /* 2^32 - 1 */
+/* MEM_SIZE shall be defined on different runtime */
+#ifndef MEM_SIZE
+#define MEM_SIZE 0xFFFFFFFFULL /* 2^32 - 1 */
+#endif
 #define STACK_SIZE 0x1000       /* 4096 */
 #define ARGS_OFFSET_SIZE 0x1000 /* 4096 */
 

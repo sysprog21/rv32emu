@@ -276,11 +276,11 @@ static void rv_run_and_trace(riscv_t *rv)
 
     vm_attr_t *attr = PRIV(rv);
     assert(attr && attr->data.user && attr->data.user->elf_program);
+    attr->cycle_per_step = 1;
 
     const char *prog_name = attr->data.user->elf_program;
     elf_t *elf = elf_new();
     assert(elf && elf_open(elf, prog_name));
-    const uint32_t cycles_per_step = 1;
 
     for (; !rv_has_halted(rv);) { /* run until the flag is done */
         /* trace execution */
@@ -288,7 +288,7 @@ static void rv_run_and_trace(riscv_t *rv)
         const char *sym = elf_find_symbol(elf, pc);
         printf("%08x  %s\n", pc, (sym ? sym : ""));
 
-        rv_step(rv, cycles_per_step); /* step instructions */
+        rv_step(rv); /* step instructions */
     }
 
     elf_delete(elf);
@@ -316,8 +316,8 @@ void rv_run(riscv_t *rv)
 #endif
     else {
         /* default main loop */
-        for (; !rv_has_halted(rv);)            /* run until the flag is done */
-            rv_step(rv, attr->cycle_per_step); /* step instructions */
+        for (; !rv_has_halted(rv);) /* run until the flag is done */
+            rv_step(rv);            /* step instructions */
     }
 
     if (attr->run_flag & RV_RUN_PROFILE) {

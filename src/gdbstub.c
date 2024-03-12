@@ -79,13 +79,15 @@ static inline bool rv_is_interrupt(riscv_t *rv)
 static gdb_action_t rv_cont(void *args)
 {
     riscv_t *rv = (riscv_t *) args;
-    const uint32_t cycles_per_step = 1;
+    assert(rv);
+    vm_attr_t *attr = PRIV(rv);
+    attr->cycle_per_step = 1;
 
     for (; !rv_has_halted(rv) && !rv_is_interrupt(rv);) {
         if (breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv)))
             break;
 
-        rv_step(rv, cycles_per_step);
+        rv_step(rv);
     }
 
     /* Clear the interrupt if it's pending */
@@ -97,7 +99,11 @@ static gdb_action_t rv_cont(void *args)
 static gdb_action_t rv_stepi(void *args)
 {
     riscv_t *rv = (riscv_t *) args;
-    rv_step(rv, 1);
+    assert(rv);
+    vm_attr_t *attr = PRIV(rv);
+    attr->cycle_per_step = 1;
+
+    rv_step(rv);
     return ACT_RESUME;
 }
 

@@ -56,7 +56,9 @@
 #define JIT_OP_MOD_REG (JIT_CLS_ALU | JIT_SRC_REG | 0x90)
 
 #define STACK_SIZE 512
-#define MAX_INSNS 1024
+#define MAX_JUMPS 1024
+#define MAX_BLOCKS 8192
+#define IN_JUMP_THRESHOLD 256
 #if defined(__x86_64__)
 #define JUMP_LOC jump_loc + 2
 /* Special values for target_pc in struct jump */
@@ -242,8 +244,8 @@ static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm);
 
 static inline void offset_map_insert(struct jit_state *state, int32_t target_pc)
 {
-    struct offset_map *map_entry = &state->offset_map[state->n_insn++];
-    assert(state->n_insn < MAX_INSNS);
+    struct offset_map *map_entry = &state->offset_map[state->n_blocks++];
+    assert(state->n_blocks < MAX_BLOCKS);
     map_entry->pc = target_pc;
     map_entry->offset = state->offset;
 }
@@ -353,7 +355,7 @@ static inline void emit_jump_target_address(struct jit_state *state,
                                             int32_t target_pc)
 {
     struct jump *jump = &state->jumps[state->n_jumps++];
-    assert(state->n_jumps < MAX_INSNS);
+    assert(state->n_jumps < MAX_JUMPS);
     jump->offset_loc = state->offset;
     jump->target_pc = target_pc;
     emit4(state, 0);
@@ -555,7 +557,7 @@ static inline void emit_jump_target_offset(struct jit_state *state,
                                            uint32_t jump_state_offset)
 {
     struct jump *jump = &state->jumps[state->n_jumps++];
-    assert(state->n_jumps < MAX_INSNS);
+    assert(state->n_jumps < MAX_JUMPS);
     jump->offset_loc = jump_loc;
     jump->target_offset = jump_state_offset;
 }
@@ -933,7 +935,7 @@ static inline void emit_jmp(struct jit_state *state, uint32_t target_pc)
     emit_jump_target_address(state, target_pc);
 #elif defined(__aarch64__)
     struct jump *jump = &state->jumps[state->n_jumps++];
-    assert(state->n_jumps < MAX_INSNS);
+    assert(state->n_jumps < MAX_JUMPS);
     jump->offset_loc = state->offset;
     jump->target_pc = target_pc;
     emit_a64(state, UBR_B);
@@ -1349,7 +1351,7 @@ void parse_branch_history_table(struct jit_state *state, rv_insn_t *ir)
         if (bt->times[max_idx] < bt->times[i])
             max_idx = i;
     }
-    if (bt->PC[max_idx]) {
+    if (bt->PC[max_idx] && bt->times[max_idx] >= IN_JUMP_THRESHOLD) {
         emit_load_imm(state, register_map[0], bt->PC[max_idx]);
         emit_cmp32(state, temp_reg, register_map[0]);
         uint32_t jump_loc = state->offset;
@@ -1511,7 +1513,7 @@ static void resolve_jumps(struct jit_state *state)
 #endif
         else {
             target_loc = jump.offset_loc + sizeof(uint32_t);
-            for (int i = 0; i < state->n_insn; i++) {
+            for (int i = 0; i < state->n_blocks; i++) {
                 if (jump.target_pc == state->offset_map[i].pc) {
                     target_loc = state->offset_map[i].offset;
                     break;
@@ -1533,27 +1535,26 @@ static void resolve_jumps(struct jit_state *state)
 
 static void translate_chained_block(struct jit_state *state,
                                     riscv_t *rv,
-                                    block_t *block,
-                                    set_t *set)
+                                    block_t *block)
 {
-    if (set_has(set, block->pc_start))
+    if (set_has(&state->set, block->pc_start))
         return;
 
-    set_add(set, block->pc_start);
+    set_add(&state->set, block->pc_start);
     offset_map_insert(state, block->pc_start);
     translate(state, rv, block);
     rv_insn_t *ir = block->ir_tail;
-    if (ir->branch_untaken && !set_has(set, ir->branch_untaken->pc)) {
+    if (ir->branch_untaken && !set_has(&state->set, ir->branch_untaken->pc)) {
         block_t *block1 =
             cache_get(rv->block_cache, ir->branch_untaken->pc, false);
         if (block1->translatable)
-            translate_chained_block(state, rv, block1, set);
+            translate_chained_block(state, rv, block1);
     }
-    if (ir->branch_taken && !set_has(set, ir->branch_taken->pc)) {
+    if (ir->branch_taken && !set_has(&state->set, ir->branch_taken->pc)) {
         block_t *block1 =
             cache_get(rv->block_cache, ir->branch_taken->pc, false);
         if (block1->translatable)
-            translate_chained_block(state, rv, block1, set);
+            translate_chained_block(state, rv, block1);
     }
     branch_history_table_t *bt = ir->branch_table;
     if (bt) {
@@ -1564,11 +1565,12 @@ static void translate_chained_block(struct jit_state *state,
             if (bt->times[max_idx] < bt->times[i])
                 max_idx = i;
         }
-        if (bt->PC[max_idx] && !set_has(set, bt->PC[max_idx])) {
+        if (bt->PC[max_idx] && bt->times[max_idx] >= IN_JUMP_THRESHOLD &&
+            !set_has(&state->set, bt->PC[max_idx])) {
             block_t *block1 =
                 cache_get(rv->block_cache, bt->PC[max_idx], false);
             if (block1 && block1->translatable)
-                translate_chained_block(state, rv, block1, set);
+                translate_chained_block(state, rv, block1);
         }
     }
 }
@@ -1576,14 +1578,18 @@ static void translate_chained_block(struct jit_state *state,
 uint32_t jit_translate(riscv_t *rv, block_t *block)
 {
     struct jit_state *state = rv->jit_state;
-    memset(state->offset_map, 0, MAX_INSNS * sizeof(struct offset_map));
-    memset(state->jumps, 0, MAX_INSNS * sizeof(struct jump));
-    state->n_insn = 0;
+    if (set_has(&state->set, block->pc_start)) {
+        for (int i = 0; i < state->n_blocks; i++) {
+            if (block->pc_start == state->offset_map[i].pc) {
+                return state->offset_map[i].offset;
+            }
+        }
+        __UNREACHABLE;
+    }
+    memset(state->jumps, 0, 1024 * sizeof(struct jump));
     state->n_jumps = 0;
     uint32_t entry_loc = state->offset;
-    set_t set;
-    set_reset(&set);
-    translate_chained_block(&(*state), rv, block, &set);
+    translate_chained_block(&(*state), rv, block);
     if (state->offset == state->size) {
         printf("Target buffer too small\n");
         goto out;
@@ -1606,10 +1612,12 @@ struct jit_state *jit_state_init(size_t size)
 #endif
                       ,
                       -1, 0);
+    state->n_blocks = 0;
     assert(state->buf != MAP_FAILED);
+    set_reset(&state->set);
     prepare_translate(state);
-    state->offset_map = calloc(MAX_INSNS, sizeof(struct offset_map));
-    state->jumps = calloc(MAX_INSNS, sizeof(struct jump));
+    state->offset_map = calloc(MAX_BLOCKS, sizeof(struct offset_map));
+    state->jumps = calloc(MAX_JUMPS, sizeof(struct jump));
     return state;
 }
 

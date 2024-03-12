@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "riscv_private.h"
+#include "utils.h"
 
 struct jump {
     uint32_t offset_loc;
@@ -21,6 +22,7 @@ struct offset_map {
 };
 
 struct jit_state {
+    set_t set;
     uint8_t *buf;
     uint32_t offset;
     uint32_t stack_size;
@@ -29,7 +31,7 @@ struct jit_state {
     uint32_t exit_loc;
     uint32_t retpoline_loc;
     struct offset_map *offset_map;
-    int n_insn;
+    int n_blocks;
     struct jump *jumps;
     int n_jumps;
 };

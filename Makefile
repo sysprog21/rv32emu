@@ -84,6 +84,7 @@ $(call set-feature, Zifencei)
 
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
+ifneq ("$(CC_IS_EMCC)", "1")
 ifeq ($(call has, SDL), 1)
 ifeq (, $(shell which sdl2-config))
 $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
@@ -100,6 +101,7 @@ OBJS_EXT += syscall_sdl.o
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs) -pthread
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
+endif
 endif
 
 ENABLE_GDBSTUB ?= 0
@@ -148,6 +150,7 @@ endif
 ifeq ("$(CC_IS_EMCC)", "1")
 ifeq ($(call has, SDL), 1)
 CFLAGS_emcc += -sUSE_SDL=2 -sSDL2_MIXER_FORMATS=wav,mid -sUSE_SDL_MIXER=2
+OBJS_EXT += syscall_sdl.o
 endif
 endif
 

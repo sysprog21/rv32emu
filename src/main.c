@@ -168,12 +168,30 @@ static void dump_test_signature(const char *prog_name)
     elf_delete(elf);
 }
 
+/* CYCLE_PER_STEP shall be defined on different runtime */
+#ifndef CYCLE_PER_STEP
+#define CYCLE_PER_STEP 100
+#endif
 /* MEM_SIZE shall be defined on different runtime */
 #ifndef MEM_SIZE
 #define MEM_SIZE 0xFFFFFFFFULL /* 2^32 - 1 */
 #endif
 #define STACK_SIZE 0x1000       /* 4096 */
 #define ARGS_OFFSET_SIZE 0x1000 /* 4096 */
+
+/* To use rv_halt function in wasm, we have to expose RISC-V instance(rv),
+ * but we can add a layer to not expose the instance and make rv_halt
+ * callable. A small trade-off is that declaring instance as a global
+ * variable. rv_halt is useful when cancelling the main loop of wasm,
+ * see rv_step in emulate.c for more detail
+ */
+riscv_t *rv;
+#ifdef __EMSCRIPTEN__
+void indirect_rv_halt()
+{
+    rv_halt(rv);
+}
+#endif
 
 int main(int argc, char **args)
 {
@@ -199,14 +217,14 @@ int main(int argc, char **args)
         .run_flag = run_flag,
         .profile_output_file = prof_out_file,
         .data.user = malloc(sizeof(vm_user_t)),
-        .cycle_per_step = 100,
+        .cycle_per_step = CYCLE_PER_STEP,
         .allow_misalign = opt_misaligned,
     };
     assert(attr.data.user);
     attr.data.user->elf_program = opt_prog_name;
 
     /* create the RISC-V runtime */
-    riscv_t *rv = rv_create(&attr);
+    rv = rv_create(&attr);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
         attr.exit_code = 1;

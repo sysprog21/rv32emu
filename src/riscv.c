@@ -18,6 +18,10 @@
 #define STDERR_FILENO FILENO(stderr)
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include "elf.h"
 #include "mpool.h"
 #include "riscv.h"
@@ -315,9 +319,13 @@ void rv_run(riscv_t *rv)
         rv_debug(rv);
 #endif
     else {
+#ifdef __EMSCRIPTEN__
+        emscripten_set_main_loop_arg(rv_step, (void *) rv, 0, 1);
+#else
         /* default main loop */
         for (; !rv_has_halted(rv);) /* run until the flag is done */
             rv_step(rv);            /* step instructions */
+#endif
     }
 
     if (attr->run_flag & RV_RUN_PROFILE) {

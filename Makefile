@@ -193,17 +193,31 @@ OBJS := \
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)
 
-EXPORTED_FUNCS := _main
+include mk/external.mk
+
+deps_emcc :=
+ASSETS := assets
+WEB_JS_RESOURCES := $(ASSETS)/js
+EXPORTED_FUNCS := _main,_indirect_rv_halt
 ifeq ("$(CC_IS_EMCC)", "1")
 CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
 	       -sALLOW_MEMORY_GROWTH \
 	       -s"EXPORTED_FUNCTIONS=$(EXPORTED_FUNCS)" \
-	       --embed-file build \
+	       -sSTACK_SIZE=4MB \
+	       -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency \
+	       --embed-file build@/ \
+	       --embed-file build/timidity@/etc/timidity \
 	       -DMEM_SIZE=0x40000000 \
+	       -DCYCLE_PER_STEP=2000000 \
+	       --pre-js $(WEB_JS_RESOURCES)/pre.js \
+	       -O3 \
 	       -w
+
+# used to download all dependencies of elf executable and bundle into single wasm
+deps_emcc += $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
 endif
 
-$(OUT)/%.o: src/%.c
+$(OUT)/%.o: src/%.c $(deps_emcc)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
@@ -259,15 +273,28 @@ misalign: $(BIN)
 	    $(PRINTF) "Failed.\n"; \
 	    fi
 
-include mk/external.mk
-
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)
-doom: $(BIN) $(DOOM_DATA)
-	(cd $(OUT); ../$(BIN) doom.elf)
+doom_action := (cd $(OUT); ../$(BIN) doom.elf)
+ifeq ("$(CC_IS_EMCC)", "1")
+# TODO: check Chrome or Firefox is available and serve python httpd and open the web page
+# TODO: serve and open a web page, show warning if environment not support pthread runtime
+doom_action :=
+endif
+doom_deps += $(DOOM_DATA) $(BIN)
+doom: $(doom_deps)
+	$(doom_action)
+
 ifeq ($(call has, EXT_F), 1)
-quake: $(BIN) $(QUAKE_DATA)
-	(cd $(OUT); ../$(BIN) quake.elf)
+quake_action := (cd $(OUT); ../$(BIN) quake.elf)
+ifeq ("$(CC_IS_EMCC)", "1")
+# TODO: check Chrome or Firefox is available and serve python httpd and open the web page
+# TODO: serve and open a web page, show warning if environment not support pthread runtime
+quake_action :=
+endif
+quake_deps += $(QUAKE_DATA) $(BIN)
+quake: $(quake_deps)
+	$(quake_action)
 endif
 endif
 
@@ -275,6 +302,7 @@ clean:
 	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
+	$(RM) -r $(TIMIDITY_DATA)
 	$(RM) -r $(OUT)/id1
 	$(RM) *.zip
 	$(RM) -r $(OUT)/mini-gdbstub

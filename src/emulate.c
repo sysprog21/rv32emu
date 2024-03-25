@@ -10,6 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #if RV32_HAS(EXT_F)
 #include <math.h>
 #include "softfloat.h"
@@ -1074,9 +1078,11 @@ static bool runtime_profiler(riscv_t *rv, block_t *block)
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 #endif
 
-void rv_step(riscv_t *rv)
+void rv_step(void *arg)
 {
-    assert(rv);
+    assert(arg);
+    riscv_t *rv = arg;
+
     vm_attr_t *attr = PRIV(rv);
     uint32_t cycles = attr->cycle_per_step;
 
@@ -1174,6 +1180,13 @@ void rv_step(riscv_t *rv)
 #endif
         prev = block;
     }
+
+#ifdef __EMSCRIPTEN__
+    if (rv_has_halted(rv)) {
+        emscripten_cancel_main_loop();
+        rv_delete(rv); /* clean up and reuse memory */
+    }
+#endif
 }
 
 void ebreak_handler(riscv_t *rv)

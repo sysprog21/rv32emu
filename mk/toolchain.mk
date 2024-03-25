@@ -4,15 +4,35 @@ CC_IS_GCC :=
 ifneq ($(shell $(CC) --version | head -n 1 | grep emcc),)
     CC_IS_EMCC := 1
 
+    EMCC_VERSION := $(shell $(CC) --version | head -n 1 | cut -f10 -d ' ')
+    EMCC_MAJOR := $(shell echo $(EMCC_VERSION) | cut -f1 -d.)
+    EMCC_MINOR := $(shell echo $(EMCC_VERSION) | cut -f2 -d.)
+    EMCC_PATCH := $(shell echo $(EMCC_VERSION) | cut -f3 -d.)
+
+    # When the emcc version is not 3.1.51, the latest SDL2_mixer library is fetched by emcc and music might not be played in the web browser
+    SDL_MUSIC_PLAY_AT_EMCC_MAJOR := 3
+    SDL_MUSIC_PLAY_AT_EMCC_MINOR := 1
+    SDL_MUSIC_PLAY_AT_EMCC_PATCH := 51
+    SDL_MUSIC_CANNOT_PLAY_WARNING := Video games music might not be played. You may switch emcc to version $(SDL_MUSIC_PLAY_AT_EMCC_MAJOR).$(SDL_MUSIC_PLAY_AT_EMCC_MINOR).$(SDL_MUSIC_PLAY_AT_EMCC_PATCH)
+    ifeq ($(shell echo $(EMCC_MAJOR)\==$(SDL_MUSIC_PLAY_AT_EMCC_MAJOR) | bc), 1)
+        ifeq ($(shell echo $(EMCC_MINOR)\==$(SDL_MUSIC_PLAY_AT_EMCC_MINOR) | bc), 1)
+            ifeq ($(shell echo $(EMCC_PATCH)\==$(SDL_MUSIC_PLAY_AT_EMCC_PATCH) | bc), 1)
+	        # do nothing
+            else
+                $(warning $(SDL_MUSIC_CANNOT_PLAY_WARNING))
+            endif
+        else
+	    $(warning $(SDL_MUSIC_CANNOT_PLAY_WARNING))
+        endif
+    else
+	$(warning $(SDL_MUSIC_CANNOT_PLAY_WARNING))
+    endif
+
     # see commit 165c1a3 of emscripten
     MIMALLOC_SUPPORT_SINCE_MAJOR := 3
     MIMALLOC_SUPPORT_SINCE_MINOR := 1
     MIMALLOC_SUPPORT_SINCE_PATCH := 50
     MIMALLOC_UNSUPPORTED_WARNING := mimalloc is supported after version $(MIMALLOC_SUPPORT_SINCE_MAJOR).$(MIMALLOC_SUPPORT_SINCE_MINOR).$(MIMALLOC_SUPPORT_SINCE_PATCH)
-    EMCC_VERSION := $(shell $(CC) --version | head -n 1 | cut -f10 -d ' ')
-    EMCC_MAJOR := $(shell echo $(EMCC_VERSION) | cut -f1 -d.)
-    EMCC_MINOR := $(shell echo $(EMCC_VERSION) | cut -f2 -d.)
-    EMCC_PATCH := $(shell echo $(EMCC_VERSION) | cut -f3 -d.)
     ifeq ($(shell echo $(EMCC_MAJOR)\>=$(MIMALLOC_SUPPORT_SINCE_MAJOR) | bc), 1)
         ifeq ($(shell echo $(EMCC_MINOR)\>=$(MIMALLOC_SUPPORT_SINCE_MINOR) | bc), 1)
             ifeq ($(shell echo $(EMCC_PATCH)\>=$(MIMALLOC_SUPPORT_SINCE_PATCH) | bc), 1)

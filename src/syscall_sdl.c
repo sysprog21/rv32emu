@@ -708,6 +708,12 @@ static void play_sfx(riscv_t *rv)
         .volume = volume,
     };
     pthread_create(&sfx_thread, NULL, sfx_handler, &sfx);
+    /* FIXME: In web browser runtime, web workers in thread pool do not reap
+     * after sfx_handler return, thus we have to join them. sfx_handler does not
+     * contain infinite loop,so do not worry to be stalled by it */
+#ifdef __EMSCRIPTEN__
+    pthread_join(sfx_thread, NULL);
+#endif
 }
 
 static void play_music(riscv_t *rv)
@@ -738,6 +744,12 @@ static void play_music(riscv_t *rv)
         .volume = volume,
     };
     pthread_create(&music_thread, NULL, music_handler, &music);
+    /* FIXME: In web browser runtime, web workers in thread pool do not reap
+     * after music_handler return, thus we have to join them. music_handler does
+     * not contain infinite loop,so do not worry to be stalled by it */
+#ifdef __EMSCRIPTEN__
+    pthread_join(music_thread, NULL);
+#endif
 }
 
 static void stop_music(riscv_t *rv UNUSED)

@@ -1,0 +1,45 @@
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - closed
+  workflow_dispatch:
+    branches:
+      - main
+
+jobs:
+  wasm-deploy:
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Verify if the JS or HTML file has been modified
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: |
+              assets/html/index.html
+              assets/js/pre.js
+      - name: install emcc
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+            github.event_name == 'workflow_dispatch'}}
+        run: |
+            git clone https://github.com/emscripten-core/emsdk.git
+            cd emsdk
+            git pull
+            git checkout 3.1.51
+            ./emsdk install latest
+            ./emsdk activate latest
+            source ./emsdk_env.sh
+            echo "$PATH" >> $GITHUB_PATH
+        shell: bash
+      - name: build with emcc
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+            github.event_name == 'workflow_dispatch'}}
+        run: |
+            make CC=emcc
+      - name: Test
+        run: |
+            echo "Successfully here"

@@ -1,0 +1,75 @@
+name: Deploy wasm
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - closed
+  workflow_dispatch:
+    branches:
+      - master
+
+jobs:
+  wasm-deploy:
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Verify if the JS or HTML file has been modified
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: |
+              assets/html/index.html
+              assets/js/pre.js
+      - name: install emcc
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+            github.event_name == 'workflow_dispatch'}}
+        run: |
+            git clone https://github.com/emscripten-core/emsdk.git
+            cd emsdk
+            git pull
+            git checkout 3.1.51
+            ./emsdk install latest
+            ./emsdk activate latest
+            source ./emsdk_env.sh
+            echo "$PATH" >> $GITHUB_PATH
+        shell: bash
+      - name: build with emcc and move application files to /tmp
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+            github.event_name == 'workflow_dispatch'}}
+        run: |
+            make CC=emcc ENABLE_GDBSTUB=0 ENABLE_SDL=1
+            mkdir /tmp/rv32emu-demo
+            mv assets/html/index.html /tmp/rv32emu-demo
+            mv assets/js/coi-serviceworker.min.js /tmp/rv32emu-demo
+            mv build/rv32emu.js /tmp/rv32emu-demo
+            mv build/rv32emu.wasm /tmp/rv32emu-demo
+            mv build/rv32emu.worker.js /tmp/rv32emu-demo
+            ls -al /tmp/rv32emu-demo
+      - name: Check out the rv32emu-demo repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal access token.
+          repository: sysprog21/rv32emu-demo
+      - name: Create local changes
+        run: |
+            mv /tmp/rv32emu-demo/index.html .
+            mv /tmp/rv32emu-demo/coi-serviceworker.min.js .
+            mv /tmp/rv32emu-demo/rv32emu.js .
+            mv /tmp/rv32emu-demo/rv32emu.wasm .
+            mv /tmp/rv32emu-demo/rv32emu.worker.js .
+      - name: Commit files
+        run: |
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add --all
+            git commit -m "Add changes"
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          repository: sysprog21/rv32emu-demo
+          github_token: ${{ secrets.RV32EMU_DEMO_TOKEN }}
+          branch: main

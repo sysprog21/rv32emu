@@ -56,7 +56,12 @@
     case x:     \
     case x + 16:
 
-enum { KEY_EVENT = 0, MOUSE_MOTION_EVENT = 1, MOUSE_BUTTON_EVENT = 2 };
+enum {
+    KEY_EVENT = 0,
+    MOUSE_MOTION_EVENT = 1,
+    MOUSE_BUTTON_EVENT = 2,
+    QUIT_EVENT = 3
+};
 
 typedef struct {
     uint32_t keycode;
@@ -64,7 +69,7 @@ typedef struct {
 } key_event_t;
 
 typedef struct {
-    int32_t xrel, yrel;
+    int32_t x, y, xrel, yrel;
 } mouse_motion_t;
 
 typedef struct {
@@ -91,14 +96,22 @@ typedef struct {
 
 event_queue_t event_queue = {.base = NULL, .start = 0, .capacity = 0};
 
-enum { RELATIVE_MODE_SUBMISSION = 0 };
+enum { RELATIVE_MODE_SUBMISSION = 0, WINDOW_TITLE_SUBMISSION = 1 };
+
+typedef struct {
+    uint8_t enabled;
+} mouse_submission_t;
+
+typedef struct {
+    uint32_t title;
+    uint32_t size;
+} title_submission_t;
 
 typedef struct {
     uint32_t type;
     union {
-        union {
-            uint8_t enabled;
-        } mouse;
+        mouse_submission_t mouse;
+        title_submission_t title;
     };
 } submission_t;
 
@@ -850,6 +863,8 @@ int main(int argc, char **argv)
                         }
                         break;
                     }
+                    case QUIT_EVENT:
+                        return 0;
                     }
             }
 

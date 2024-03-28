@@ -1,4 +1,4 @@
-name: Deploy wasm
+name: WebAssembly
 
 on:
   pull_request:

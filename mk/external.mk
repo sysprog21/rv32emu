@@ -23,10 +23,18 @@ QUAKE_DATA_VERIFY = echo "$(strip $$($(T)_DATA_SHA1))  $$@" | $(SHA1SUM) -c
 # Timidity software synthesizer configuration for SDL2_mixer
 TIMIDITY_DATA_URL = http://www.libsdl.org/projects/mixer/timidity/timidity.tar.gz
 TIMIDITY_DATA = $(OUT)/timidity
-TIMIDITY_DATA_SHA1 = cdd30736508d26968222a6414f3beabc3b7a0725
+TIMIDITY_DATA_SHA1 = cf6217a5d824b717ec4a07e15e6c129a4657ca25
 TIMIDITY_DATA_EXTRACT = tar -xf $(notdir $($(T)_DATA_URL)) -C $(OUT)
-TIMIDITY_TMP_FILE = /tmp/timidity_sha1.txt
-TIMIDITY_DATA_VERIFY = echo "$(TIMIDITY_DATA_SHA1)" > $(TIMIDITY_TMP_FILE) | find $(TIMIDITY_DATA) -type f -print0 | sort -z | xargs -0 shasum | shasum | cut -f 1 -d ' '
+TIMIDITY_TMP_FILE1 = /tmp/timidity_sha1.txt
+TIMIDITY_TMP_FILE2 = /tmp/timidity_sha2.txt
+TIMIDITY_DATA_VERIFY = echo "$(TIMIDITY_DATA_SHA1)" > $(TIMIDITY_TMP_FILE1) \
+                     | find $(TIMIDITY_DATA) -type f -print0 \
+                     | sort -z \
+		     | xargs -0 $(SHA1SUM) \
+		     | sort \
+		     | $(SHA1SUM) \
+		     | cut -f 1 -d ' ' > $(TIMIDITY_TMP_FILE2) \
+		       && cmp $(TIMIDITY_TMP_FILE1) $(TIMIDITY_TMP_FILE2)
 
 define download-n-extract
 $($(T)_DATA):
@@ -34,7 +42,7 @@ $($(T)_DATA):
 	$(Q)curl --progress-bar -O -L -C - "$(strip $($(T)_DATA_URL))"
 	$(Q)$($(T)_DATA_EXTRACT)
 	$(Q)$($(T)_DATA_VERIFY)
-	$(Q)$(RM) $(notdir $($(T)_DATA_URL)) $($(T)_TMP_FILE)
+	$(Q)$(RM) $(notdir $($(T)_DATA_URL)) $($(T)_TMP_FILE1) $($(T)_TMP_FILE2)
 endef
 
 EXTERNAL_DATA = DOOM QUAKE TIMIDITY

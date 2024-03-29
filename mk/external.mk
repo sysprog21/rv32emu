@@ -26,7 +26,7 @@ TIMIDITY_DATA = $(OUT)/timidity
 TIMIDITY_DATA_SHA1 = cdd30736508d26968222a6414f3beabc3b7a0725
 TIMIDITY_DATA_EXTRACT = tar -xf $(notdir $($(T)_DATA_URL)) -C $(OUT)
 TIMIDITY_TMP_FILE = /tmp/timidity_sha1.txt
-TIMIDITY_DATA_VERIFY = echo "$(TIMIDITY_DATA_SHA1)" > $(TIMIDITY_TMP_FILE) | find $(TIMIDITY_DATA) -type f -print0 | sort -z | xargs -0 shasum | shasum | cut -f 1 -d ' '
+TIMIDITY_DATA_VERIFY = echo "$(TIMIDITY_DATA_SHA1)" > $(TIMIDITY_TMP_FILE) | find $(TIMIDITY_DATA) -type f -print0 | sort -z | xargs -0 $(SHA1SUM) | $(SHA1SUM) | cut -f 1 -d ' '
 
 define download-n-extract
 $($(T)_DATA):

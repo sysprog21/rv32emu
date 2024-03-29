@@ -256,8 +256,12 @@ for i in range(len(op)):
                 if items[1] == "regneq":
                     items[1] = "vm_reg[0] != vm_reg[1]"
                 asm = "if({})".format(items[1]) + "{"
+            elif items[0] == "else":
+                asm = "} else {"
             elif items[0] == "end":
                 asm = "}"
+            elif items[0] == "pollute":
+                asm = "set_dirty({}, true);".format(items[1])
             elif items[0] == "break":
                 asm = "store_back(state);"
             elif items[0] == "assert":

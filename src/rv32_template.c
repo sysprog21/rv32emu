@@ -2337,6 +2337,8 @@ RVOP(
         map, VR1, rd;
         cond, regneq;
         mov, VR0, VR1;
+        else;
+        pollute, VR1;
         end;
     }))
 

@@ -50,11 +50,15 @@ jobs:
             mv build/rv32emu.worker.js /tmp/rv32emu-demo
             ls -al /tmp/rv32emu-demo
       - name: Check out the rv32emu-demo repo
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+            github.event_name == 'workflow_dispatch'}}
         uses: actions/checkout@v4
         with:
           persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal access token.
           repository: sysprog21/rv32emu-demo
       - name: Create local changes
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+            github.event_name == 'workflow_dispatch'}}
         run: |
             mv /tmp/rv32emu-demo/index.html .
             mv /tmp/rv32emu-demo/coi-serviceworker.min.js .
@@ -62,12 +66,16 @@ jobs:
             mv /tmp/rv32emu-demo/rv32emu.wasm .
             mv /tmp/rv32emu-demo/rv32emu.worker.js .
       - name: Commit files
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+            github.event_name == 'workflow_dispatch'}}
         run: |
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
             git config --local user.name "github-actions[bot]"
             git add --all
             git commit -m "Add changes"
       - name: Push changes
+        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+            github.event_name == 'workflow_dispatch'}}
         uses: ad-m/github-push-action@master
         with:
           repository: sysprog21/rv32emu-demo

@@ -48,7 +48,7 @@ define verify
     $(eval _ := \
 	    $(if $(filter 1,$(COMPRESSED_IS_DIR)), \
 		    ($(eval VERIFIER :=  \
-                | echo $(1) > $(SHA1_FILE1) \
+                echo $(1) > $(SHA1_FILE1) \
                 | find $(2) -type f -print0 \
                 | sort -z \
                 | xargs -0 $(SHA1SUM) \

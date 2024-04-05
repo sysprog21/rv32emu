@@ -350,12 +350,13 @@ void syscall_submit_queue(riscv_t *rv)
     while (count--) {
         submission_t submission = submission_pop(rv);
 
+        char *title;
         switch (submission.type) {
         case RELATIVE_MODE_SUBMISSION:
             SDL_SetRelativeMouseMode(submission.mouse.enabled);
             break;
         case WINDOW_TITLE_SUBMISSION:
-            char *title = malloc(submission.title.size + 1);
+            title = malloc(submission.title.size + 1);
             if (unlikely(!title))
                 return;
 
@@ -364,6 +365,7 @@ void syscall_submit_queue(riscv_t *rv)
             title[submission.title.size] = 0;
 
             SDL_SetWindowTitle(window, title);
+            free(title);
             break;
         }
     }

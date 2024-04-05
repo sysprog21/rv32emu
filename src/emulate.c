@@ -1183,6 +1183,7 @@ void rv_step(void *arg)
 
 #ifdef __EMSCRIPTEN__
     if (rv_has_halted(rv)) {
+        printf("inferior exit code %d\n", attr->exit_code);
         emscripten_cancel_main_loop();
         rv_delete(rv); /* clean up and reuse memory */
     }

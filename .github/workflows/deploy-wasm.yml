@@ -17,15 +17,16 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
-      - name: Verify if the JS or HTML file has been modified
+      - name: Verify if the JS or HTML or ELF executable files has been modified
         id: changed-files
         uses: tj-actions/changed-files@v44
         with:
           files: |
               assets/html/index.html
               assets/js/pre.js
+              build/*.elf
       - name: install emcc
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch'}}
         run: |
             git clone https://github.com/emscripten-core/emsdk.git
@@ -38,7 +39,7 @@ jobs:
             echo "$PATH" >> $GITHUB_PATH
         shell: bash
       - name: build with emcc and move application files to /tmp
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch'}}
         run: |
             make CC=emcc ENABLE_GDBSTUB=0 ENABLE_SDL=1
@@ -50,14 +51,14 @@ jobs:
             mv build/rv32emu.worker.js /tmp/rv32emu-demo
             ls -al /tmp/rv32emu-demo
       - name: Check out the rv32emu-demo repo
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch'}}
         uses: actions/checkout@v4
         with:
           persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal access token.
           repository: sysprog21/rv32emu-demo
       - name: Create local changes
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch'}}
         run: |
             mv /tmp/rv32emu-demo/index.html .
@@ -66,7 +67,7 @@ jobs:
             mv /tmp/rv32emu-demo/rv32emu.wasm .
             mv /tmp/rv32emu-demo/rv32emu.worker.js .
       - name: Commit files
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch'}}
         run: |
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -74,7 +75,7 @@ jobs:
             git add --all
             git commit -m "Add changes"
       - name: Push changes
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch'}}
         uses: ad-m/github-push-action@master
         with:

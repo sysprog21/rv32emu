@@ -1806,7 +1806,6 @@ RVOP(
 RVOP(
     feqs,
     {
-        set_dynamic_rounding_mode(rv);
         uint32_t ret = f32_eq(rv->F[ir->rs1], rv->F[ir->rs2]);
         if (ir->rd)
             rv->X[ir->rd] = ret;
@@ -1823,7 +1822,6 @@ RVOP(
 RVOP(
     flts,
     {
-        set_dynamic_rounding_mode(rv);
         uint32_t ret = f32_lt(rv->F[ir->rs1], rv->F[ir->rs2]);
         if (ir->rd)
             rv->X[ir->rd] = ret;
@@ -1836,7 +1834,6 @@ RVOP(
 RVOP(
     fles,
     {
-        set_dynamic_rounding_mode(rv);
         uint32_t ret = f32_le(rv->F[ir->rs1], rv->F[ir->rs2]);
         if (ir->rd)
             rv->X[ir->rd] = ret;

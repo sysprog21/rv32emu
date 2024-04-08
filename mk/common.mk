@@ -34,6 +34,9 @@ endef
 # Test suite
 PASS_COLOR = \e[32;01m
 NO_COLOR = \e[0m
+GREEN = \033[32m
+YELLOW = \033[33m
+NC = \033[0m
 
 notice = $(PRINTF) "$(PASS_COLOR)$(strip $1)$(NO_COLOR)\n"
 

@@ -11,11 +11,6 @@ CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
 
-# Color
-YELLOW=\033[0;33m
-GREEN=\033[0;32m
-NC=\033[0m
-
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)

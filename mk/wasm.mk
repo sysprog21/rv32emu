@@ -97,7 +97,7 @@ endef
 STATIC_WEB_FILES := $(WEB_HTML_RESOURCES)/index.html \
 		    $(WEB_JS_RESOURCES)/coi-serviceworker.min.js
 
-serve-wasm: $(BIN) check-demo-dir-exist
+start-web: $(BIN) check-demo-dir-exist
 	$(foreach T, $(WEB_FILES), $(call cp-web-file, $(T)))
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(Q)python3 -m http.server --bind $(DEMO_IP) $(DEMO_PORT) --directory $(DEMO_DIR)

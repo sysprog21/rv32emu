@@ -138,7 +138,7 @@ Current progress of this emulator in riscv-arch-test (RV32):
     - `I`: Base Integer Instruction Set
     - `M`: Standard Extension for Integer Multiplication and Division
     - `A`: Standard Extension for Atomic Instructions
-    - `F` Standard Extension for Single-Precision Floating-Point
+    - `F`: Standard Extension for Single-Precision Floating-Point
     - `C`: Standard Extension for Compressed Instruction
     - `Zifencei`: Instruction-Fetch Fence
     - `privilege`: RISCV Privileged Specification

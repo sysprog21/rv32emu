@@ -101,33 +101,13 @@ static inline void set_fflag(riscv_t *rv)
     softfloat_exceptionFlags = 0;
 }
 
-static inline void set_dynamic_rounding_mode(riscv_t *rv)
+static inline void set_rounding_mode(riscv_t *rv, uint8_t rm)
 {
-    uint32_t frm = (rv->csr_fcsr >> 5) & (~(1 << 3));
-    switch (frm) {
-    case 0b000:
-        softfloat_roundingMode = softfloat_round_near_even;
-        break;
-    case 0b001:
-        softfloat_roundingMode = softfloat_round_minMag;
-        break;
-    case 0b010:
-        softfloat_roundingMode = softfloat_round_min;
-        break;
-    case 0b011:
-        softfloat_roundingMode = softfloat_round_max;
-        break;
-    case 0b100:
-        softfloat_roundingMode = softfloat_round_near_maxMag;
-        break;
-    default:
-        __UNREACHABLE;
-        break;
-    }
-}
+    const uint32_t frm = (rv->csr_fcsr >> 5) & (~(1 << 3));
 
-static inline void set_static_rounding_mode(uint8_t rm)
-{
+    if (likely(rm == 0b111))
+        rm = frm;
+
     switch (rm) {
     case 0b000:
         softfloat_roundingMode = softfloat_round_near_even;

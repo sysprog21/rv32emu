@@ -1533,10 +1533,7 @@ RVOP(
 RVOP(
     fmadds,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         rv->F[ir->rd] =
             f32_mulAdd(rv->F[ir->rs1], rv->F[ir->rs2], rv->F[ir->rs3]);
         set_fflag(rv);
@@ -1549,10 +1546,7 @@ RVOP(
 RVOP(
     fmsubs,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         riscv_float_t tmp = rv->F[ir->rs3];
         tmp.v ^= FMASK_SIGN;
         rv->F[ir->rd] = f32_mulAdd(rv->F[ir->rs1], rv->F[ir->rs2], tmp);
@@ -1566,10 +1560,7 @@ RVOP(
 RVOP(
     fnmsubs,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         riscv_float_t tmp = rv->F[ir->rs1];
         tmp.v ^= FMASK_SIGN;
         rv->F[ir->rd] = f32_mulAdd(tmp, rv->F[ir->rs2], rv->F[ir->rs3]);
@@ -1583,10 +1574,7 @@ RVOP(
 RVOP(
     fnmadds,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         riscv_float_t tmp1 = rv->F[ir->rs1];
         riscv_float_t tmp2 = rv->F[ir->rs3];
         tmp1.v ^= FMASK_SIGN;
@@ -1602,10 +1590,7 @@ RVOP(
 RVOP(
     fadds,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         rv->F[ir->rd] = f32_add(rv->F[ir->rs1], rv->F[ir->rs2]);
         set_fflag(rv);
     },
@@ -1617,10 +1602,7 @@ RVOP(
 RVOP(
     fsubs,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         rv->F[ir->rd] = f32_sub(rv->F[ir->rs1], rv->F[ir->rs2]);
         set_fflag(rv);
     },
@@ -1632,10 +1614,7 @@ RVOP(
 RVOP(
     fmuls,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         rv->F[ir->rd] = f32_mul(rv->F[ir->rs1], rv->F[ir->rs2]);
         set_fflag(rv);
     },
@@ -1647,10 +1626,7 @@ RVOP(
 RVOP(
     fdivs,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         rv->F[ir->rd] = f32_div(rv->F[ir->rs1], rv->F[ir->rs2]);
         set_fflag(rv);
     },
@@ -1662,10 +1638,7 @@ RVOP(
 RVOP(
     fsqrts,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         rv->F[ir->rd] = f32_sqrt(rv->F[ir->rs1]);
         set_fflag(rv);
     },
@@ -1758,10 +1731,7 @@ RVOP(
 RVOP(
     fcvtws,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         uint32_t ret = f32_to_i32(rv->F[ir->rs1], softfloat_roundingMode, true);
         if (ir->rd)
             rv->X[ir->rd] = ret;
@@ -1775,10 +1745,7 @@ RVOP(
 RVOP(
     fcvtwus,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         uint32_t ret =
             f32_to_ui32(rv->F[ir->rs1], softfloat_roundingMode, true);
         if (ir->rd)
@@ -1806,7 +1773,6 @@ RVOP(
 RVOP(
     feqs,
     {
-        set_dynamic_rounding_mode(rv);
         uint32_t ret = f32_eq(rv->F[ir->rs1], rv->F[ir->rs2]);
         if (ir->rd)
             rv->X[ir->rd] = ret;
@@ -1823,7 +1789,6 @@ RVOP(
 RVOP(
     flts,
     {
-        set_dynamic_rounding_mode(rv);
         uint32_t ret = f32_lt(rv->F[ir->rs1], rv->F[ir->rs2]);
         if (ir->rd)
             rv->X[ir->rd] = ret;
@@ -1836,7 +1801,6 @@ RVOP(
 RVOP(
     fles,
     {
-        set_dynamic_rounding_mode(rv);
         uint32_t ret = f32_le(rv->F[ir->rs1], rv->F[ir->rs2]);
         if (ir->rd)
             rv->X[ir->rd] = ret;
@@ -1861,10 +1825,7 @@ RVOP(
 RVOP(
     fcvtsw,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         rv->F[ir->rd] = i32_to_f32(rv->X[ir->rs1]);
         set_fflag(rv);
     },
@@ -1876,10 +1837,7 @@ RVOP(
 RVOP(
     fcvtswu,
     {
-        if (likely(ir->rm == 0b111))
-            set_dynamic_rounding_mode(rv);
-        else
-            set_static_rounding_mode(ir->rm);
+        set_rounding_mode(rv, ir->rm);
         rv->F[ir->rd] = ui32_to_f32(rv->X[ir->rs1]);
         set_fflag(rv);
     },

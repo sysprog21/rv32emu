@@ -1252,9 +1252,9 @@ RVOP(rem, {
     const int32_t divisor = rv->X[ir->rs2];
     rv->X[ir->rd] = !divisor ? dividend
                     : (divisor == -1 && rv->X[ir->rs1] == 0x80000000U)
-                        ? 0  : (dividend 
+                        ? 0  : (dividend
                         % divisor);
-}, 
+},
 GEN({
     rald2s, rs1, rs2, true, true;
     map, VR2, rd;
@@ -1274,9 +1274,9 @@ GEN({
 RVOP(remu, {
     const uint32_t udividend = rv->X[ir->rs1];
     const uint32_t udivisor = rv->X[ir->rs2];
-    rv->X[ir->rd] = !udivisor ? udividend : udividend 
+    rv->X[ir->rd] = !udivisor ? udividend : udividend
     % udivisor;
-}, 
+},
 GEN({
     rald2, rs1, rs2;
     map, VR2, rd;

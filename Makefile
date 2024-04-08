@@ -1,4 +1,5 @@
 include mk/common.mk
+include mk/color.mk
 include mk/toolchain.mk
 
 OUT ?= build
@@ -167,7 +168,7 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 # to the first target after .DEFAULT_GOAL is not set.
 .DEFAULT_GOAL :=
 
-WEB_FILES += $(BIN).js \
+WEB_FILES := $(BIN).js \
 	     $(BIN).wasm \
 	     $(BIN).worker.js
 ifeq ("$(CC_IS_EMCC)", "1")
@@ -215,6 +216,69 @@ CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
 
 # used to download all dependencies of elf executable and bundle into single wasm
 deps_emcc += $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
+
+# check browser MAJOR version if supports TCO
+CHROME_MAJOR :=
+CHROME_MAJOR_VERSION_CHECK_CMD :=
+CHROME_SUPPORT_TCO_AT_MAJOR := 112
+CHROME_SUPPORT_TCO_INFO := Chrome supports TCO, you can use Chrome to request the wasm
+CHROME_NO_SUPPORT_TCO_WARNING := Chrome not found or Chrome must have at least version $(CHROME_SUPPORT_TCO_AT_MAJOR) in MAJOR to serve wasm
+
+FIREFOX_MAJOR :=
+FIREFOX_MAJOR_VERSION_CHECK_CMD :=
+FIREFOX_SUPPORT_TCO_AT_MAJOR := 121
+FIREFOX_SUPPORT_TCO_INFO := Firefox supports TCO, you can use Firefox to request the wasm
+FIREFOX_NO_SUPPORT_TCO_WARNING := Firefox not found or Firefox must have at least version $(FIREFOX_SUPPORT_TCO_AT_MAJOR) in MAJOR to serve wasm
+
+# FIXME: for Windows
+ifeq ($(UNAME_S),Darwin)
+    CHROME_MAJOR_VERSION_CHECK_CMD := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version | awk '{print $$3}' | cut -f1 -d.
+    FIREFOX_MAJOR_VERSION_CHECK_CMD := /Applications/Firefox.app/Contents/MacOS/firefox --version | awk '{print $$3}' | cut -f1 -d.
+else ifeq ($(UNAME_S),Linux)
+    CHROME_MAJOR_VERSION_CHECK_CMD := google-chrome --version | awk '{print $$3}' | cut -f1 -d.
+    FIREFOX_MAJOR_VERSION_CHECK_CMD := firefox -v | awk '{print $$3}' | cut -f1 -d.
+endif
+CHROME_MAJOR := $(shell $(CHROME_MAJOR_VERSION_CHECK_CMD))
+FIREFOX_MAJOR := $(shell $(FIREFOX_MAJOR_VERSION_CHECK_CMD))
+
+# Chrome
+ifeq ($(shell echo $(CHROME_MAJOR)\>=$(CHROME_SUPPORT_TCO_AT_MAJOR) | bc), 1)
+    $(info $(shell echo "$(GREEN)$(CHROME_SUPPORT_TCO_INFO)$(NC)"))
+else
+    $(warning $(shell echo "$(YELLOW)$(CHROME_NO_SUPPORT_TCO_WARNING)$(NC)"))
+endif
+
+# Firefox
+ifeq ($(shell echo $(FIREFOX_MAJOR)\>=$(FIREFOX_SUPPORT_TCO_AT_MAJOR) | bc), 1)
+    $(info $(shell echo "$(GREEN)$(FIREFOX_SUPPORT_TCO_INFO)$(NC)"))
+else
+    $(warning $(shell echo "$(YELLOW)$(FIREFOX_NO_SUPPORT_TCO_WARNING)$(NC)"))
+endif
+
+# used to serve wasm locally
+DEMO_DIR := demo
+DEMO_IP := 127.0.0.1
+DEMO_PORT := 8000
+
+# check if demo root directory exists and create it if not
+check-demo-dir-exist:
+	$(Q)if [ ! -d "$(DEMO_DIR)" ]; then \
+		mkdir -p "$(DEMO_DIR)"; \
+	fi
+
+# FIXME: without $(info) generates errors
+define cp-web-file
+    $(Q)cp $(1) $(DEMO_DIR)
+    $(info)
+endef
+
+# WEB_FILES could be cleaned and recompiled, thus do not mix these two files into WEB_FILES
+STATIC_WEB_FILES := assets/html/index.html assets/js/coi-serviceworker.min.js
+
+serve-wasm: $(BIN) check-demo-dir-exist
+	$(foreach T, $(WEB_FILES), $(call cp-web-file, $(T)))
+	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
+	$(Q)python3 -m http.server --bind $(DEMO_IP) $(DEMO_PORT) --directory $(DEMO_DIR)
 endif
 
 $(OUT)/%.o: src/%.c $(deps_emcc)
@@ -304,6 +368,7 @@ distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(TIMIDITY_DATA)
 	$(RM) -r $(OUT)/id1
+	$(RM) -r $(DEMO_DIR)
 	$(RM) *.zip
 	$(RM) -r $(OUT)/mini-gdbstub
 	-$(RM) $(OUT)/.config

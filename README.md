@@ -281,6 +281,35 @@ To analyze the profiling data, use the `rv_profiler` tool with the desired optio
 $ tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
 ```
 
+## WebAssembly Translation
+### Build and run
+`rv32emu` relies on [Emscripten](https://emscripten.org/docs/getting_started/downloads.html) to be compiled to WebAssembly. Thus, the target system should have
+the Emscripten version 3.1.51 installed.
+
+Moreover, `rv32emu` leverages the tail call optimization(TCO) strategy and we have tested the WebAssembly
+execution in Chrome with at least MAJOR 112 and Firefox with at least MAJOR 121 since they supports
+tail call feature. Thus, please check and update your browsers if necessary or install the suitable browsers
+before going further.
+
+Source your Emscripten SDK environment before make. For macOS and Linux user:
+```shell
+$ source ~/emsdk/emsdk_env.sh
+```
+Change the Emscripten SDK environment path if necessary.
+
+At this point, you can build and start a web server service to serve WebAssembly by running:
+```shell
+$ make CC=emcc start-web
+```
+You would see the server's IP:PORT in your terminal. Copy and paste it to the browsers and
+you just access the index page of `rv32emu`.
+
+### Index page
+You would see a dropdown menu which you can use to select the ELF executable. Select one and
+click the Run button to run it.
+
+Alternatively, you may want to view a hosted `rv32emu` [demo page](https://sysprog21.github.io/rv32emu-demo/) since building takes some time.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.

@@ -10,7 +10,6 @@ CONFIG_FILE := $(OUT)/.config
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
-CFLAGS_emcc ?=
 
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
@@ -141,20 +140,6 @@ endif
 # For tail-call elimination, we need a specific set of build flags applied.
 # FIXME: On macOS + Apple Silicon, -fno-stack-protector might have a negative impact.
 
-# Enable tail-call for emcc
-ifeq ("$(CC_IS_EMCC)", "1")
-CFLAGS += -mtail-call
-endif
-
-# Build emscripten-port SDL
-ifeq ("$(CC_IS_EMCC)", "1")
-ifeq ($(call has, SDL), 1)
-CFLAGS_emcc += -sUSE_SDL=2 -sSDL2_MIXER_FORMATS=wav,mid -sUSE_SDL_MIXER=2
-OBJS_EXT += syscall_sdl.o
-LDFLAGS += -pthread
-endif
-endif
-
 ENABLE_UBSAN ?= 0
 ifeq ("$(ENABLE_UBSAN)", "1")
 CFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
@@ -167,14 +152,11 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 # to the first target after .DEFAULT_GOAL is not set.
 .DEFAULT_GOAL :=
 
-WEB_FILES += $(BIN).js \
-	     $(BIN).wasm \
-	     $(BIN).worker.js
-ifeq ("$(CC_IS_EMCC)", "1")
-BIN := $(BIN).js
-endif
-
 all: config $(BIN)
+
+include mk/external.mk
+
+include mk/wasm.mk
 
 OBJS := \
 	map.o \
@@ -192,30 +174,6 @@ OBJS := \
 
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)
-
-include mk/external.mk
-
-deps_emcc :=
-ASSETS := assets
-WEB_JS_RESOURCES := $(ASSETS)/js
-EXPORTED_FUNCS := _main,_indirect_rv_halt
-ifeq ("$(CC_IS_EMCC)", "1")
-CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
-	       -sALLOW_MEMORY_GROWTH \
-	       -s"EXPORTED_FUNCTIONS=$(EXPORTED_FUNCS)" \
-	       -sSTACK_SIZE=4MB \
-	       -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency \
-	       --embed-file build@/ \
-	       --embed-file build/timidity@/etc/timidity \
-	       -DMEM_SIZE=0x40000000 \
-	       -DCYCLE_PER_STEP=2000000 \
-	       --pre-js $(WEB_JS_RESOURCES)/pre.js \
-	       -O3 \
-	       -w
-
-# used to download all dependencies of elf executable and bundle into single wasm
-deps_emcc += $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
-endif
 
 $(OUT)/%.o: src/%.c $(deps_emcc)
 	$(VECHO) "  CC\t$@\n"
@@ -276,22 +234,12 @@ misalign: $(BIN)
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)
 doom_action := (cd $(OUT); ../$(BIN) doom.elf)
-ifeq ("$(CC_IS_EMCC)", "1")
-# TODO: check Chrome or Firefox is available and serve python httpd and open the web page
-# TODO: serve and open a web page, show warning if environment not support pthread runtime
-doom_action :=
-endif
 doom_deps += $(DOOM_DATA) $(BIN)
 doom: $(doom_deps)
 	$(doom_action)
 
 ifeq ($(call has, EXT_F), 1)
 quake_action := (cd $(OUT); ../$(BIN) quake.elf)
-ifeq ("$(CC_IS_EMCC)", "1")
-# TODO: check Chrome or Firefox is available and serve python httpd and open the web page
-# TODO: serve and open a web page, show warning if environment not support pthread runtime
-quake_action :=
-endif
 quake_deps += $(QUAKE_DATA) $(BIN)
 quake: $(quake_deps)
 	$(quake_action)
@@ -304,6 +252,7 @@ distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
 	$(RM) -r $(TIMIDITY_DATA)
 	$(RM) -r $(OUT)/id1
+	$(RM) -r $(DEMO_DIR)
 	$(RM) *.zip
 	$(RM) -r $(OUT)/mini-gdbstub
 	-$(RM) $(OUT)/.config

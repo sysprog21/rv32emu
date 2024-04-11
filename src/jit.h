@@ -38,8 +38,10 @@ struct jit_state {
 };
 
 struct host_reg {
-    uint8_t reg_idx : 5; /* index to the host's register file */
+    uint8_t reg_idx : 5;   /* index to the host's register file */
+    int8_t vm_reg_idx : 6; /* index to the vm register */
     bool dirty : 1;
+    bool alive : 1;
 };
 
 struct jit_state *jit_state_init(size_t size);

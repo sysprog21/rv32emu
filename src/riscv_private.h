@@ -65,8 +65,7 @@ typedef struct block {
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
 #if RV32_HAS(JIT)
-    bool backward; /**< Determine the block has backward jump or not */
-    bool hot;      /**< Determine the block is hotspot or not */
+    bool hot; /**< Determine the block is hotspot or not */
     uint32_t offset;
     bool
         translatable; /**< Determine the block has RV32AF insturctions or not */

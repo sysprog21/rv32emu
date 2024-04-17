@@ -308,7 +308,6 @@ static block_t *block_alloc(riscv_t *rv)
 #if RV32_HAS(JIT)
     block->translatable = true;
     block->hot = false;
-    block->backward = false;
     block->has_loops = false;
     INIT_LIST_HEAD(&block->list);
 #endif
@@ -640,10 +639,6 @@ static void block_translate(riscv_t *rv, block_t *block)
 #endif
         /* stop on branch */
         if (insn_is_branch(ir->opcode)) {
-#if RV32_HAS(JIT)
-            if (ir->imm < 0)
-                block->backward = true;
-#endif
             if (ir->opcode == rv_insn_jalr
 #if RV32_HAS(EXT_C)
                 || ir->opcode == rv_insn_cjalr || ir->opcode == rv_insn_cjr
@@ -1061,13 +1056,13 @@ static block_t *block_find_or_translate(riscv_t *rv)
 static bool runtime_profiler(riscv_t *rv, block_t *block)
 {
     /* Based on our observations, a significant number of true hotspots are
-     * characterized by high usage frequency, including loops or backward
-     * jumps. Consequently, we posit that our profiler could effectively
-     * identify hotspots using three key indicators.
+     * characterized by high usage frequency and including loop. Consequently,
+     * we posit that our profiler could effectively identify hotspots using
+     * three key indicators.
      */
     uint32_t freq = cache_freq(rv->block_cache, block->pc_start);
     /* To profile a block after chaining, it must first be executed. */
-    if (unlikely(freq >= 2 && (block->backward || block->has_loops)))
+    if (unlikely(freq >= 2 && block->has_loops))
         return true;
     /* using frequency exceeds predetermined threshold */
     if (unlikely(freq == THRESHOLD))

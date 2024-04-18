@@ -507,7 +507,6 @@ static void profile(block_t *block, uint32_t freq, FILE *output_file)
     fprintf(output_file, "%#-8x|", block->pc_end);
     fprintf(output_file, " %-10u|", freq);
     fprintf(output_file, " %-5s |", block->hot ? "true" : "false");
-    fprintf(output_file, " %-8s |", block->backward ? "true" : "false");
     fprintf(output_file, " %-6s |", block->has_loops ? "true" : "false");
     rv_insn_t *taken = block->ir_tail->branch_taken,
               *untaken = block->ir_tail->branch_untaken;
@@ -545,10 +544,8 @@ void rv_profile(riscv_t *rv, char *out_file_path)
     }
 #if RV32_HAS(JIT)
     fprintf(f,
-            "PC start |PC end  | frequency |  hot  | backward |  loop  | "
-            "untaken | taken  "
-            "| IR "
-            "list \n");
+            "PC start |PC end  | frequency |  hot  | loop  | untaken | taken | "
+            "IR list \n");
     cache_profile(rv->block_cache, f, (prof_func_t) profile);
 #else
     fprintf(f, "PC start |PC end  | untaken | taken  | IR list \n");

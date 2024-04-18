@@ -350,7 +350,17 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `smolnes.elf` : See [tests/smolnes](tests/smolnes.c) [RV32M]
 * `spirograph.elf` : See [tests/spirograph.c](tests/spirograph.c)
 * `stream.elf` : See [tests/stream](tests/stream.c) [RV32MF]
-
+* `qsort.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `miniz.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `primes.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `sha512.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `numeric_sort.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+* `FP_emulation.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+* `bitfield.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+* `idea.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench) 
+* `assignment.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+* `string_sort.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench) 
+* `huffman.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
 ## Reference
 
 * [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)

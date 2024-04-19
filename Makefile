@@ -148,15 +148,15 @@ endif
 
 $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-stack-check -fno-stack-protector
 
-# Clear the .DEFAULT_GOAL special variable, so that the following turns
-# to the first target after .DEFAULT_GOAL is not set.
-.DEFAULT_GOAL :=
-
-all: config $(BIN)
+# .DEFAULT_GOAL should be set to all since the very first target is not all
+# after including "mk/external.mk"
+.DEFAULT_GOAL := all
 
 include mk/external.mk
 
 include mk/wasm.mk
+
+all: config $(BIN)
 
 OBJS := \
 	map.o \

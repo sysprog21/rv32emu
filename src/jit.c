@@ -272,11 +272,11 @@ static inline void offset_map_insert(struct jit_state *state, int32_t target_pc)
     __builtin___clear_cache((char *) (addr), (char *) (addr) + (size));
 #endif
 
+static bool should_flush = false;
 static void emit_bytes(struct jit_state *state, void *data, uint32_t len)
 {
-    assert(state->offset <= state->size - len);
     if (unlikely((state->offset + len) > state->size)) {
-        state->offset = state->size;
+        should_flush = true;
         return;
     }
 #if defined(__APPLE__) && defined(__aarch64__)
@@ -1274,6 +1274,7 @@ static void prepare_translate(struct jit_state *state)
     emit_addsub_imm(state, true, AS_ADD, SP, SP, state->stack_size);
     emit_uncond_branch_reg(state, BR_RET, R30);
 #endif
+    state->org_size = state->offset;
 }
 
 
@@ -1531,7 +1532,7 @@ static void do_fuse5(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
     emit_load_imm(state, temp_reg, ir->pc + 4);
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_call(state, (intptr_t) rv->io.on_memset);
-    emit_exit(&(*state));
+    emit_exit(state);
 }
 
 static void do_fuse6(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
@@ -1540,7 +1541,7 @@ static void do_fuse6(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
     emit_load_imm(state, temp_reg, ir->pc + 4);
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_call(state, (intptr_t) rv->io.on_memcpy);
-    emit_exit(&(*state));
+    emit_exit(state);
 }
 
 static void do_fuse7(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
@@ -1589,6 +1590,21 @@ static const void *dispatch_table[] = {
 };
 /* clang-format on */
 
+void clear_hot(block_t *block)
+{
+    block->hot = false;
+}
+
+static void code_cache_flush(struct jit_state *state, riscv_t *rv)
+{
+    should_flush = false;
+    state->offset = state->org_size;
+    state->n_blocks = 0;
+    set_reset(&state->set);
+    clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
+    return;
+}
+
 typedef void (*codegen_block_func_t)(struct jit_state *,
                                      riscv_t *,
                                      rv_insn_t *);
@@ -1598,7 +1614,8 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
     uint32_t idx;
     rv_insn_t *ir, *next;
     reset_reg();
-    for (idx = 0, ir = block->ir_head; idx < block->n_insn; idx++, ir = next) {
+    for (idx = 0, ir = block->ir_head; idx < block->n_insn && !should_flush;
+         idx++, ir = next) {
         next = ir->next;
         ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
     }
@@ -1652,6 +1669,8 @@ static void translate_chained_block(struct jit_state *state,
     set_add(&state->set, block->pc_start);
     offset_map_insert(state, block->pc_start);
     translate(state, rv, block);
+    if (unlikely(should_flush))
+        return;
     rv_insn_t *ir = block->ir_tail;
     if (ir->branch_untaken && !set_has(&state->set, ir->branch_untaken->pc)) {
         block_t *block1 =
@@ -1684,28 +1703,29 @@ static void translate_chained_block(struct jit_state *state,
     }
 }
 
-uint32_t jit_translate(riscv_t *rv, block_t *block)
+void jit_translate(riscv_t *rv, block_t *block)
 {
     struct jit_state *state = rv->jit_state;
     if (set_has(&state->set, block->pc_start)) {
         for (int i = 0; i < state->n_blocks; i++) {
             if (block->pc_start == state->offset_map[i].pc) {
-                return state->offset_map[i].offset;
+                block->offset = state->offset_map[i].offset;
+                return;
             }
         }
         __UNREACHABLE;
     }
+restart:
     memset(state->jumps, 0, 1024 * sizeof(struct jump));
     state->n_jumps = 0;
-    uint32_t entry_loc = state->offset;
-    translate_chained_block(&(*state), rv, block);
-    if (state->offset == state->size) {
-        printf("Target buffer too small\n");
-        goto out;
+    block->offset = state->offset;
+    translate_chained_block(state, rv, block);
+    if (unlikely(should_flush)) {
+        code_cache_flush(state, rv);
+        goto restart;
     }
-    resolve_jumps(&(*state));
-out:
-    return entry_loc;
+    resolve_jumps(state);
+    block->hot = true;
 }
 
 struct jit_state *jit_state_init(size_t size)

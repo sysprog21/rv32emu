@@ -61,6 +61,8 @@ typedef void (*prof_func_t)(void *, uint32_t, FILE *);
 void cache_profile(const struct cache *cache,
                    FILE *output_file,
                    prof_func_t func);
+typedef void (*clear_func_t)(void *);
+void clear_cache_hot(const struct cache *cache, clear_func_t func);
 #endif
 
 uint32_t cache_freq(const struct cache *cache, uint32_t key);

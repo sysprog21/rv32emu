@@ -287,4 +287,16 @@ void cache_profile(const struct cache *cache,
         }
     }
 }
+
+void clear_cache_hot(const struct cache *cache, clear_func_t func)
+{
+    assert(cache);
+    assert(func);
+    for (int i = 0; i < THRESHOLD; i++) {
+        lfu_entry_t *entry, *safe;
+        list_for_each_entry_safe (entry, safe, cache->lists[i], list) {
+            func(entry->value);
+        }
+    }
+}
 #endif

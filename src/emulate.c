@@ -1152,8 +1152,7 @@ void rv_step(void *arg)
             continue;
         } /* check if using frequency of block exceed threshold */
         else if (block->translatable && runtime_profiler(rv, block)) {
-            block->hot = true;
-            block->offset = jit_translate(rv, block);
+            jit_translate(rv, block);
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
             prev = NULL;

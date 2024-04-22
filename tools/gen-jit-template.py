@@ -242,7 +242,7 @@ for i in range(len(op)):
                 asm = "emit_call(state, (intptr_t) rv->io.on_{});".format(
                     items[1])
             elif items[0] == "exit":
-                asm = "emit_exit(&(*state));"
+                asm = "emit_exit(state);"
             elif items[0] == "mul":
                 asm = "muldivmod(state, {}, {}, {}, {});".format(
                     items[1], items[2], items[3], items[4])

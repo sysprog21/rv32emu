@@ -208,16 +208,18 @@ enum operand_size {
 static const int nonvolatile_reg[] = {RBP, RBX, RDI, RSI, R13, R14, R15};
 static const int parameter_reg[] = {RCX, RDX, R8, R9};
 static struct host_reg register_map[] = {
-    {RAX, 0}, {R10, 0}, {RDX, 0}, {R8, 0},  {R9, 0},  {R14, 0},
-    {R15, 0}, {RDI, 0}, {RSI, 0}, {RBX, 0}, {RBP, 0},
+    {RAX, -1, 0, 0}, {R10, -1, 0, 0}, {RDX, -1, 0, 0}, {R8, -1, 0, 0},
+    {R9, -1, 0, 0},  {R14, -1, 0, 0}, {R15, -1, 0, 0}, {RDI, -1, 0, 0},
+    {RSI, -1, 0, 0}, {RBX, -1, 0, 0}, {RBP, -1, 0, 0},
 };
 static int temp_reg = RCX;
 #else
 static const int nonvolatile_reg[] = {RBP, RBX, R13, R14, R15};
 static const int parameter_reg[] = {RDI, RSI, RDX, RCX, R8, R9};
 static struct host_reg register_map[] = {
-    {RAX, 0}, {RBX, 0}, {RDX, 0}, {R8, 0},  {R9, 0},
-    {R10, 0}, {R11, 0}, {R13, 0}, {R14, 0}, {R15, 0},
+    {RAX, -1, 0, 0}, {RBX, -1, 0, 0}, {RDX, -1, 0, 0}, {R8, -1, 0, 0},
+    {R9, -1, 0, 0},  {R10, -1, 0, 0}, {R11, -1, 0, 0}, {R13, -1, 0, 0},
+    {R14, -1, 0, 0}, {R15, -1, 0, 0},
 };
 static int temp_reg = RCX;
 #endif
@@ -239,8 +241,10 @@ static int temp_reg = R8;
  *   r25       Temp - used for modulous calculations
  */
 static struct host_reg register_map[] = {
-    {R5, 0},  {R6, 0},  {R7, 0},  {R9, 0},  {R11, 0}, {R12, 0}, {R13, 0},
-    {R14, 0}, {R15, 0}, {R16, 0}, {R17, 0}, {R18, 0}, {R26, 0},
+    {R5, -1, 0, 0},  {R6, -1, 0, 0},  {R7, -1, 0, 0},  {R9, -1, 0, 0},
+    {R11, -1, 0, 0}, {R12, -1, 0, 0}, {R13, -1, 0, 0}, {R14, -1, 0, 0},
+    {R15, -1, 0, 0}, {R16, -1, 0, 0}, {R17, -1, 0, 0}, {R18, -1, 0, 0},
+    {R26, -1, 0, 0},
 };
 #endif
 
@@ -1011,8 +1015,8 @@ static inline void emit_call(struct jit_state *state, intptr_t target)
     emit_movewide_imm(state, true, temp_imm_reg, target);
     emit_uncond_branch_reg(state, BR_BLR, temp_imm_reg);
 
-    save_reg(state, R5);
-    unmap_vm_reg(R5);
+    save_reg(state, 0); /* R5 */
+    unmap_vm_reg(0);    /* R5 */
     emit_logical_register(state, true, LOG_ORR, R5, RZ, R0);
 
     emit_loadstore_imm(state, LS_LDRX, R30, SP, 0);
@@ -1033,9 +1037,6 @@ static inline void emit_exit(struct jit_state *state)
 
 /* TODO: muldivmod is incomplete, it does not handle imm or overflow now */
 #if RV32_HAS(EXT_M)
-static inline int find_rv_reg(int);
-static inline void set_reg_table(int, int);
-
 static void muldivmod(struct jit_state *state,
                       uint8_t opcode,
                       int src,
@@ -1066,15 +1067,15 @@ static void muldivmod(struct jit_state *state,
      * purposes, and restore the status after popping the registers.
      */
     int d1 = register_map[0].dirty, d2 = register_map[2].dirty;
-    int r1 = find_rv_reg(RAX), r2 = find_rv_reg(RDX);
+    int r1 = register_map[0].vm_reg_idx, r2 = register_map[2].vm_reg_idx;
 
     if (dst != RAX) {
-        unmap_vm_reg(RAX);
+        unmap_vm_reg(0); /* RAX */
         emit_push(state, RAX);
     }
 
     if (dst != RDX) {
-        unmap_vm_reg(RDX);
+        unmap_vm_reg(2); /* RDX */
         emit_push(state, RDX);
     }
 
@@ -1163,17 +1164,15 @@ static void muldivmod(struct jit_state *state,
         if (mod)
             emit_mov(state, RDX, dst);
         emit_pop(state, RDX);
+        register_map[2].vm_reg_idx = r2;
         register_map[2].dirty = d2;
-        if (r2 != -1)
-            set_reg_table(r2, RDX);
     }
     if (dst != RAX) {
         if (div || mul)
             emit_mov(state, RAX, dst);
         emit_pop(state, RAX);
+        register_map[0].vm_reg_idx = r1;
         register_map[0].dirty = d1;
-        if (r1 != -1)
-            set_reg_table(r1, RAX);
     }
 #elif defined(__aarch64__)
     switch (opcode) {
@@ -1277,73 +1276,292 @@ static void prepare_translate(struct jit_state *state)
     state->org_size = state->offset;
 }
 
-
-static int count = 0;
-static int reg_table[32];
-static int vm_reg[3] = {0}; /* enum x64_reg/a64_reg */
+static int liveness[N_RV_REGS];
+/* The priority queue of vm registers. The one which has farthest liveness is
+ * first.
+ */
+static uint8_t candidate_queue[N_RV_REGS];
+static int vm_reg[3]; /* enum x64_reg/a64_reg */
 
 static void reset_reg()
 {
-    count = 0;
-    for (int i = 0; i < N_RV_REGS; i++) {
-        reg_table[i] = -1;
-    }
     for (int i = 0; i < n_host_regs; i++) {
-        register_map[i].dirty = 0;
+        register_map[i].vm_reg_idx = -1;
+        register_map[i].dirty = false;
+        register_map[i].alive = false;
     }
-}
-
-/* Find the vm register index that mapped to the given host register. */
-static inline int find_rv_reg(int reg_idx)
-{
-    for (int i = 0; i < N_RV_REGS; i++) {
-        if (reg_table[i] == reg_idx)
-            return i;
-    }
-    return -1;
 }
 
 /* Save host register if it is dirty. */
-static inline void save_reg(struct jit_state *state, int reg_idx)
+static inline void save_reg(struct jit_state *state, int idx)
 {
-    for (int i = 0; i < n_host_regs; i++) {
-        /* ignore nonvolatile and parameter registers */
-        if (register_map[i].reg_idx != reg_idx)
-            continue;
-        if (!register_map[i].dirty)
-            continue;
+    assert(idx > -1 && idx < n_host_regs);
 
-        assert(find_rv_reg(reg_idx) != -1);
-        emit_store(state, S32, reg_idx, parameter_reg[0],
-                   offsetof(riscv_t, X) + 4 * find_rv_reg(reg_idx));
-        register_map[i].dirty = 0;
+    if (!register_map[idx].dirty)
         return;
-    }
+
+    emit_store(state, S32, register_map[idx].reg_idx, parameter_reg[0],
+               offsetof(riscv_t, X) + 4 * register_map[idx].vm_reg_idx);
+    register_map[idx].dirty = 0;
 }
 
 static void store_back(struct jit_state *state)
 {
-    for (int i = 0; i < N_RV_REGS; i++) {
-        if (reg_table[i] == -1)
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx == -1)
             continue;
-        save_reg(state, reg_table[i]);
+        save_reg(state, i);
     }
+}
+
+static inline void liveness_reset()
+{
+    memset(liveness, 0xff, sizeof(liveness));
+}
+
+static inline void candidate_queue_init()
+{
+    for (int i = 0; i < N_RV_REGS; i++) {
+        candidate_queue[i] = i;
+    }
+}
+
+static int liveness_cmp(const void *l, const void *r)
+{
+    return liveness[*(uint8_t *) l] - liveness[*(uint8_t *) r];
+}
+
+/* TODO: this function could be generated by "tools/gen-jit-template.py" */
+static inline void liveness_calc(block_t *block)
+{
+    uint32_t idx;
+    rv_insn_t *ir;
+
+    /* follow the order of operator in "src/rc32_template.c" */
+    for (idx = 0, ir = block->ir_head; idx < block->n_insn;
+         idx++, ir = ir->next) {
+        switch (ir->opcode) {
+        case rv_insn_nop:
+        case rv_insn_lui:
+        case rv_insn_auipc:
+        case rv_insn_jal:
+            break;
+        case rv_insn_jalr:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_beq:
+        case rv_insn_bne:
+        case rv_insn_blt:
+        case rv_insn_bge:
+        case rv_insn_bltu:
+        case rv_insn_bgeu:
+            liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
+            break;
+        case rv_insn_lb:
+        case rv_insn_lh:
+        case rv_insn_lw:
+        case rv_insn_lbu:
+        case rv_insn_lhu:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_sb:
+        case rv_insn_sh:
+        case rv_insn_sw:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_addi:
+        case rv_insn_slti:
+        case rv_insn_sltiu:
+        case rv_insn_xori:
+        case rv_insn_ori:
+        case rv_insn_andi:
+        case rv_insn_slli:
+        case rv_insn_srli:
+        case rv_insn_srai:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_add:
+        case rv_insn_sub:
+        case rv_insn_sll:
+        case rv_insn_slt:
+        case rv_insn_sltu:
+        case rv_insn_xor:
+        case rv_insn_srl:
+        case rv_insn_sra:
+        case rv_insn_or:
+        case rv_insn_and:
+            liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
+            break;
+        case rv_insn_ecall:
+        case rv_insn_ebreak:
+            break;
+#if RV32_HAS(EXT_M)
+        case rv_insn_mul:
+        case rv_insn_mulh:
+        case rv_insn_mulhsu:
+        case rv_insn_mulhu:
+        case rv_insn_div:
+        case rv_insn_divu:
+        case rv_insn_rem:
+        case rv_insn_remu:
+            liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
+            break;
+#endif
+#if RV32_HAS(EXT_C)
+        case rv_insn_caddi4spn:
+            liveness[rv_reg_sp] = idx;
+            break;
+        case rv_insn_clw:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_csw:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_cnop:
+            break;
+        case rv_insn_caddi:
+            liveness[ir->rd] = idx;
+            break;
+        case rv_insn_cjal:
+        case rv_insn_cli:
+        case rv_insn_clui:
+            break;
+        case rv_insn_caddi16sp:
+            liveness[ir->rd] = idx;
+            break;
+        case rv_insn_csrli:
+        case rv_insn_csrai:
+        case rv_insn_candi:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_csub:
+        case rv_insn_cxor:
+        case rv_insn_cor:
+        case rv_insn_cand:
+            liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
+            break;
+        case rv_insn_cj:
+            break;
+        case rv_insn_cbeqz:
+        case rv_insn_cbnez:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_cslli:
+            liveness[ir->rd] = idx;
+            break;
+        case rv_insn_clwsp:
+            liveness[rv_reg_sp] = idx;
+            break;
+        case rv_insn_cjr:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_cmv:
+            liveness[ir->rs2] = idx;
+            break;
+        case rv_insn_cebreak:
+            break;
+        case rv_insn_cjalr:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_cadd:
+            liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
+            break;
+        case rv_insn_cswsp:
+            liveness[rv_reg_sp] = idx;
+            liveness[ir->rs2] = idx;
+            break;
+#endif
+        case rv_insn_fuse1:
+            for (int i = 0; i < ir->imm2; i++) {
+                liveness[ir->fuse[i].rd] = idx;
+            }
+            break;
+        case rv_insn_fuse2:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_fuse3:
+            for (int i = 0; i < ir->imm2; i++) {
+                liveness[ir->fuse[i].rs1] = idx;
+                liveness[ir->fuse[i].rs2] = idx;
+            }
+            break;
+        case rv_insn_fuse4:
+        case rv_insn_fuse7:
+            for (int i = 0; i < ir->imm2; i++) {
+                liveness[ir->fuse[i].rs1] = idx;
+            }
+            break;
+        case rv_insn_fuse5:
+        case rv_insn_fuse6:
+            break;
+        default:
+            __UNREACHABLE;
+        }
+    }
+
+    candidate_queue_init();
+    qsort(candidate_queue, N_RV_REGS, sizeof(uint8_t), liveness_cmp);
+}
+
+static inline void regs_refresh(int idx)
+{
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx == -1)
+            continue;
+        if (liveness[register_map[i].vm_reg_idx] < idx)
+            register_map[i].alive = false;
+    }
+}
+
+/* return the index in the register_map */
+static inline int reg_pick(int reserved)
+{
+    /* pick an available register */
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].reg_idx == reserved)
+            continue;
+        if (!register_map[i].alive)
+            return i;
+    }
+
+    /* If registers are exhausted, pick the one which has farthest liveness. */
+    int idx = -1;
+    for (int i = 0; i < N_RV_REGS; i++) {
+        uint8_t candidate = candidate_queue[i];
+        for (int j = 0; j < n_host_regs; j++) {
+            if (register_map[j].reg_idx == reserved)
+                continue;
+            if (register_map[j].vm_reg_idx == candidate) {
+                idx = j;
+                goto end_pick_reg;
+            }
+        }
+    }
+    __UNREACHABLE;
+
+end_pick_reg:
+    assert(idx > -1 && idx < n_host_regs);
+    return idx;
 }
 
 /* Unmap the vm register to the host register. */
-static inline void unmap_vm_reg(int reg_idx)
+static inline void unmap_vm_reg(int idx)
 {
-    for (uint32_t i = 0; i < N_RV_REGS; i++) {
-        if (reg_table[i] != reg_idx)
-            continue;
-        reg_table[i] = -1;
-        return;
-    }
+    /* check dirty before unmap */
+    assert(idx > -1 && idx < n_host_regs);
+    register_map[idx].vm_reg_idx = -1;
 }
 
-static inline void set_reg_table(int vm_reg_idx, int reg_idx)
+static inline void set_vm_reg(int idx, int vm_reg_idx)
 {
-    reg_table[vm_reg_idx] = reg_idx;
+    assert(idx > -1 && idx < n_host_regs);
+    register_map[idx].vm_reg_idx = vm_reg_idx;
+    register_map[idx].alive = true;
 }
 
 /* Map the vm register to a host register. If the host register file is
@@ -1351,19 +1569,29 @@ static inline void set_reg_table(int vm_reg_idx, int reg_idx)
  */
 static inline int map_vm_reg(struct jit_state *state, int vm_reg_idx)
 {
-    if (reg_table[vm_reg_idx] != -1)
-        return reg_table[vm_reg_idx];
-    count = (count + 1) % n_host_regs;
-    int target_reg = register_map[count].reg_idx;
-    save_reg(state, target_reg);
-    unmap_vm_reg(target_reg);
-    set_reg_table(vm_reg_idx, target_reg);
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx != vm_reg_idx)
+            continue;
+        return register_map[i].reg_idx;
+    }
+
+    int idx = reg_pick(-1);
+    int target_reg = register_map[idx].reg_idx;
+    save_reg(state, idx);
+    unmap_vm_reg(idx);
+    set_vm_reg(idx, vm_reg_idx);
     return target_reg;
 }
 
 static int ra_load(struct jit_state *state, int vm_reg_idx)
 {
-    int origin = reg_table[vm_reg_idx];
+    int origin = -1;
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx != vm_reg_idx)
+            continue;
+        origin = register_map[i].reg_idx;
+    }
+
     int target_reg = map_vm_reg(state, vm_reg_idx);
 
     if (origin != target_reg)
@@ -1378,26 +1606,39 @@ static int ra_load(struct jit_state *state, int vm_reg_idx)
  */
 static inline int map_vm_reg_reserved(struct jit_state *state,
                                       int vm_reg_idx,
-                                      int reserved_reg_name)
+                                      int reserved_reg_idx)
 {
-    if (reg_table[vm_reg_idx] != -1)
-        return reg_table[vm_reg_idx];
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx != vm_reg_idx)
+            continue;
+        return register_map[i].reg_idx;
+    }
 
-    int target_reg;
+    int idx, target_reg;
     do {
-        count = (count + 1) % n_host_regs;
-        target_reg = register_map[count].reg_idx;
-    } while (target_reg == reserved_reg_name);
+        idx = reg_pick(reserved_reg_idx);
+        target_reg = register_map[idx].reg_idx;
+    } while (target_reg == reserved_reg_idx);
 
-    save_reg(state, target_reg);
-    unmap_vm_reg(target_reg);
-    set_reg_table(vm_reg_idx, target_reg);
+    save_reg(state, idx);
+    unmap_vm_reg(idx);
+    set_vm_reg(idx, vm_reg_idx);
     return target_reg;
 }
 
 static void ra_load2(struct jit_state *state, int vm_reg_idx1, int vm_reg_idx2)
 {
-    int origin1 = reg_table[vm_reg_idx1], origin2 = reg_table[vm_reg_idx2];
+    int origin1 = -1, origin2 = -1;
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx != vm_reg_idx1)
+            continue;
+        origin1 = register_map[i].reg_idx;
+    }
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx != vm_reg_idx2)
+            continue;
+        origin2 = register_map[i].reg_idx;
+    }
 
     if (vm_reg_idx1 == vm_reg_idx2) {
         vm_reg[0] = vm_reg[1] = map_vm_reg(state, vm_reg_idx1);
@@ -1421,7 +1662,17 @@ static void ra_load2_sext(struct jit_state *state,
                           bool sext1,
                           bool sext2)
 {
-    int origin1 = reg_table[vm_reg_idx1], origin2 = reg_table[vm_reg_idx2];
+    int origin1 = -1, origin2 = -1;
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx != vm_reg_idx1)
+            continue;
+        origin1 = register_map[i].reg_idx;
+    }
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx != vm_reg_idx2)
+            continue;
+        origin2 = register_map[i].reg_idx;
+    }
 
     if (vm_reg_idx1 == vm_reg_idx2) {
         vm_reg[0] = vm_reg[1] = map_vm_reg(state, vm_reg_idx1);
@@ -1460,8 +1711,8 @@ void parse_branch_history_table(struct jit_state *state, rv_insn_t *ir)
             max_idx = i;
     }
     if (bt->PC[max_idx] && bt->times[max_idx] >= IN_JUMP_THRESHOLD) {
-        save_reg(state, register_map[0].reg_idx);
-        unmap_vm_reg(register_map[0].reg_idx);
+        save_reg(state, 0);
+        unmap_vm_reg(0);
         emit_load_imm(state, register_map[0].reg_idx, bt->PC[max_idx]);
         emit_cmp32(state, temp_reg, register_map[0].reg_idx);
         uint32_t jump_loc = state->offset;
@@ -1614,9 +1865,12 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
     uint32_t idx;
     rv_insn_t *ir, *next;
     reset_reg();
+    liveness_reset();
+    liveness_calc(block);
     for (idx = 0, ir = block->ir_head; idx < block->n_insn && !should_flush;
          idx++, ir = next) {
         next = ir->next;
+        regs_refresh(idx);
         ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
     }
 }

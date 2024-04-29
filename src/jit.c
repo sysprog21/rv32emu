@@ -1338,7 +1338,7 @@ static inline int map_vm_reg(struct jit_state *state, int vm_reg_idx)
         return register_map[i].reg_idx;
     }
 
-    int idx = pick_reg(-1);
+    int idx = reg_pick(-1);
     int target_reg = register_map[idx].reg_idx;
     save_reg(state, idx);
     unmap_vm_reg(idx);
@@ -1379,7 +1379,7 @@ static inline int map_vm_reg_reserved(struct jit_state *state,
 
     int idx, target_reg;
     do {
-        idx = pick_reg(reserved_reg_idx);
+        idx = reg_pick(reserved_reg_idx);
         target_reg = register_map[idx].reg_idx;
     } while (target_reg == reserved_reg_idx);
 
@@ -1628,12 +1628,12 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
     uint32_t idx;
     rv_insn_t *ir, *next;
     reset_reg();
-    reset_liveness();
-    calc_liveness(block);
+    liveness_reset();
+    liveness_calc(block);
     for (idx = 0, ir = block->ir_head; idx < block->n_insn && !should_flush;
          idx++, ir = next) {
         next = ir->next;
-        refresh_regs(idx);
+        regs_refresh(idx);
         ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
     }
 }

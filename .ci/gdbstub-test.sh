@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 
+set -e -u -o pipefail
+
 export PATH=`pwd`/toolchain/riscv/bin:$PATH
 
 GDB=
 prefixes=("${CROSS_COMPILE}" "riscv32-unknown-elf" "riscv-none-elf")
 for prefix in "${prefixes[@]}"; do
     utility=${prefix}-gdb
+    set +e # temporarily disable exit on error
     command -v "${utility}" &> /dev/null
     if [[ $? == 0 ]]; then
         GDB=${utility}
     fi
+    set -e
 done
 
 # Check if GDB is available

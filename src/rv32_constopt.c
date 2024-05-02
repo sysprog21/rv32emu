@@ -233,8 +233,7 @@ CONSTOPT(srai, {
 CONSTOPT(add, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) info->const_val[ir->rs1] +
-                  (int32_t) info->const_val[ir->rs2];
+        ir->imm = info->const_val[ir->rs1] + info->const_val[ir->rs2];
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
@@ -246,8 +245,7 @@ CONSTOPT(add, {
 CONSTOPT(sub, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) info->const_val[ir->rs1] -
-                  (int32_t) info->const_val[ir->rs2];
+        ir->imm = info->const_val[ir->rs1] - info->const_val[ir->rs2];
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
@@ -410,8 +408,9 @@ CONSTOPT(csrrci, { info->is_constant[ir->rd] = false; })
 CONSTOPT(mul, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        ir->imm = (int32_t) info->const_val[ir->rs1] *
-                  (int32_t) info->const_val[ir->rs2];
+        const int64_t multiplicand = (int32_t) info->const_val[ir->rs1];
+        const int64_t multiplier = (int32_t) info->const_val[ir->rs2];
+        ir->imm = ((uint64_t) (multiplicand * multiplier)) & ((1ULL << 32) - 1);
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
@@ -555,37 +554,67 @@ CONSTOPT(remu, {
 #if RV32_HAS(EXT_A)
 
 /* LR.W: Load Reserved */
-CONSTOPT(lrw, {})
+CONSTOPT(lrw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* SC.W: Store Conditional */
 CONSTOPT(scw, {})
 
 /* AMOSWAP.W: Atomic Swap */
-CONSTOPT(amoswapw, {})
+CONSTOPT(amoswapw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOADD.W: Atomic ADD */
-CONSTOPT(amoaddw, {})
+CONSTOPT(amoaddw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOXOR.W: Atomic XOR */
-CONSTOPT(amoxorw, {})
+CONSTOPT(amoxorw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOAND.W: Atomic AND */
-CONSTOPT(amoandw, {})
+CONSTOPT(amoandw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOOR.W: Atomic OR */
-CONSTOPT(amoorw, {})
+CONSTOPT(amoorw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOMIN.W: Atomic MIN */
-CONSTOPT(amominw, {})
+CONSTOPT(amominw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOMAX.W: Atomic MAX */
-CONSTOPT(amomaxw, {})
+CONSTOPT(amomaxw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOMINU.W */
-CONSTOPT(amominuw, {})
+CONSTOPT(amominuw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOMAXU.W */
-CONSTOPT(amomaxuw, {})
+CONSTOPT(amomaxuw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 #endif /* RV32_HAS(EXT_A) */
 
 /* RV32F Standard Extension */
@@ -650,29 +679,50 @@ CONSTOPT(fmaxs, {})
  */
 
 /* FCVT.W.S */
-CONSTOPT(fcvtws, {})
+CONSTOPT(fcvtws, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FCVT.WU.S */
-CONSTOPT(fcvtwus, {})
+CONSTOPT(fcvtwus, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FMV.X.W */
-CONSTOPT(fmvxw, {})
+CONSTOPT(fmvxw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FEQ.S performs a quiet comparison: it only sets the invalid operation
  * exception flag if either input is a signaling NaN.
  */
-CONSTOPT(feqs, {})
+CONSTOPT(feqs, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FLT.S and FLE.S perform what the IEEE 754-2008 standard refers to as
  * signaling comparisons: that is, they set the invalid operation exception
  * flag if either input is NaN.
  */
-CONSTOPT(flts, {})
+CONSTOPT(flts, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
-CONSTOPT(fles, {})
+CONSTOPT(fles, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FCLASS.S */
-CONSTOPT(fclasss, {})
+CONSTOPT(fclasss, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* FCVT.S.W */
 CONSTOPT(fcvtsw, {})
@@ -925,6 +975,8 @@ CONSTOPT(cmv, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
+    } else {
+        info->is_constant[ir->rd] = false;
     }
 })
 
@@ -957,4 +1009,20 @@ CONSTOPT(cadd, {
 
 /* C.SWSP */
 CONSTOPT(cswsp, {})
+#endif
+
+/* RV32FC Standard Extension */
+
+#if RV32_HAS(EXT_F) && RV32_HAS(EXT_C)
+/* C.FLWSP */
+CONSTOPT(cflwsp, {})
+
+/* C.FSWSP */
+CONSTOPT(cfswsp, {})
+
+/* C.FLW */
+CONSTOPT(cflw, {})
+
+/* C.FSW */
+CONSTOPT(cfsw, {})
 #endif

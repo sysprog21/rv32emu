@@ -156,7 +156,7 @@ static void rb_insert(map_t rb, map_node_t *node)
             pathp[1].node = rb_node_get_right(pathp->node);
             break;
         default:
-            /* igore duplicate key */
+            /* ignore duplicate key */
             __UNREACHABLE;
             break;
         }
@@ -290,7 +290,8 @@ static void rb_remove(map_t rb, map_node_t *node)
                     rb_node_set_right(pathp[-1].node, left);
             }
             return;
-        } else if (pathp == path) {
+        }
+        if (pathp == path) {
             /* the tree only contained one node */
             rb->root = NULL;
             return;
@@ -547,7 +548,7 @@ static map_node_t *map_create_node(void *key,
                                    size_t ksize,
                                    size_t vsize)
 {
-    map_node_t *node = malloc(sizeof(map_node_t));
+    map_node_t *node = calloc(1, sizeof(map_node_t));
     assert(node);
 
     /* allocate memory for the keys and data */
@@ -557,7 +558,7 @@ static map_node_t *map_create_node(void *key,
 
     /* copy over the key and values.
      * If the parameter passed in is NULL, make the element blank instead of
-     * a segfault.
+     * a segmentation fault.
      */
     if (!key)
         memset(node->key, 0, ksize);

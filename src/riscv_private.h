@@ -12,6 +12,12 @@
 #endif
 #include "decode.h"
 #include "riscv.h"
+#include "utils.h"
+#if RV32_HAS(JIT)
+#include "cache.h"
+#endif
+
+#define PRIV(x) ((vm_attr_t *) x->data)
 
 /* CSRs */
 enum {
@@ -56,10 +62,24 @@ enum {
 typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompased */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
-    struct block *predict;     /**< block prediction */
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
+#if RV32_HAS(JIT)
+    bool hot; /**< Determine the block is hotspot or not */
+    uint32_t offset;
+    bool
+        translatable; /**< Determine the block has RV32AF insturctions or not */
+    bool has_loops;   /**< Determine the block has loop or not */
+    struct list_head list;
+#endif
 } block_t;
+
+#if RV32_HAS(JIT)
+typedef struct {
+    block_t *block;
+    struct list_head list;
+} chain_entry_t;
+#endif
 
 typedef struct {
     uint32_t block_capacity; /**< max number of entries in the block map */
@@ -81,28 +101,11 @@ struct riscv_internal {
     riscv_word_t PC;
 
     /* user provided data */
-    riscv_user_t userdata;
-
-#if RV32_HAS(GDBSTUB)
-    /* gdbstub instance */
-    gdbstub_t gdbstub;
-
-    bool debug_mode;
-
-    /* GDB instruction breakpoint */
-    breakpoint_map_t breakpoint_map;
-
-    /* The flag to notify interrupt from GDB client: it should
-     * be accessed by atomic operation when starting the GDBSTUB. */
-    bool is_interrupted;
-#endif
+    riscv_user_t data;
 
 #if RV32_HAS(EXT_F)
     /* float registers */
-    union {
-        riscv_float_t F[N_RV_REGS];
-        uint32_t F_int[N_RV_REGS]; /* integer shortcut */
-    };
+    riscv_float_t F[N_RV_REGS];
     uint32_t csr_fcsr;
 #endif
 
@@ -119,11 +122,30 @@ struct riscv_internal {
     uint32_t csr_mip;      /* Machine interrupt pending */
     uint32_t csr_mbadaddr;
 
-    bool compressed;       /**< current instruction is compressed or not */
+    bool compressed; /**< current instruction is compressed or not */
+#if !RV32_HAS(JIT)
     block_map_t block_map; /**< basic block map */
+#else
+    struct cache *block_cache;
+    struct mpool *chain_entry_mp;
+#endif
     struct mpool *block_mp, *block_ir_mp;
-    /* print exit code on syscall_exit */
-    bool output_exit_code;
+
+    void *jit_state;
+#if RV32_HAS(GDBSTUB)
+    /* gdbstub instance */
+    gdbstub_t gdbstub;
+
+    bool debug_mode;
+
+    /* GDB instruction breakpoint */
+    breakpoint_map_t breakpoint_map;
+
+    /* The flag to notify interrupt from GDB client: it should be accessed by
+     * atomic operation when starting the GDBSTUB.
+     */
+    bool is_interrupted;
+#endif
 };
 
 /* sign extend a 16 bit value */

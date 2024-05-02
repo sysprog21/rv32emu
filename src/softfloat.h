@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "riscv.h"
+#include "riscv_private.h"
 
 /* clang-format off */
 enum {
@@ -85,9 +86,46 @@ static inline bool is_nan(uint32_t f)
     return (expn == FMASK_EXPN && frac);
 }
 
-static inline bool is_snan(uint32_t f)
+static inline void set_fflag(riscv_t *rv)
 {
-    const uint32_t expn = f & FMASK_EXPN;
-    const uint32_t frac = f & FMASK_FRAC;
-    return (expn == FMASK_EXPN && frac && !(frac & FMASK_QNAN));
+    if (softfloat_exceptionFlags & softfloat_flag_invalid)
+        rv->csr_fcsr |= FFLAG_INVALID_OP;
+    if (softfloat_exceptionFlags & softfloat_flag_infinite)
+        rv->csr_fcsr |= FFLAG_DIV_BY_ZERO;
+    if (softfloat_exceptionFlags & softfloat_flag_overflow)
+        rv->csr_fcsr |= FFLAG_OVERFLOW;
+    if (softfloat_exceptionFlags & softfloat_flag_underflow)
+        rv->csr_fcsr |= FFLAG_UNDERFLOW;
+    if (softfloat_exceptionFlags & softfloat_flag_inexact)
+        rv->csr_fcsr |= FFLAG_INEXACT;
+    softfloat_exceptionFlags = 0;
+}
+
+static inline void set_rounding_mode(riscv_t *rv, uint8_t rm)
+{
+    const uint32_t frm = (rv->csr_fcsr >> 5) & (~(1 << 3));
+
+    if (likely(rm == 0b111))
+        rm = frm;
+
+    switch (rm) {
+    case 0b000:
+        softfloat_roundingMode = softfloat_round_near_even;
+        break;
+    case 0b001:
+        softfloat_roundingMode = softfloat_round_minMag;
+        break;
+    case 0b010:
+        softfloat_roundingMode = softfloat_round_min;
+        break;
+    case 0b011:
+        softfloat_roundingMode = softfloat_round_max;
+        break;
+    case 0b100:
+        softfloat_roundingMode = softfloat_round_near_maxMag;
+        break;
+    default:
+        __UNREACHABLE;
+        break;
+    }
 }

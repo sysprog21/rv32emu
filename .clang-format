@@ -17,3 +17,13 @@ ForEachMacros:
   - list_for_each_entry
   - list_for_each_entry_safe
   - hlist_for_each_entry
+AttributeMacros:
+  - UNUSED
+  - __ALIGNED
+  - PACKED
+  - MUST_TAIL
+  - FORCE_INLINE
+StatementAttributeLikeMacros:
+  - IIF
+StatementMacros:
+  - __UNREACHABLE

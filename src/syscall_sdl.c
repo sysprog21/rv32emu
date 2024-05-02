@@ -7,6 +7,7 @@
 #error "Do not manage to build this file unless you enable SDL support."
 #endif
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -15,7 +16,8 @@
 #include <SDL.h>
 #include <SDL_mixer.h>
 
-#include "state.h"
+#include "riscv.h"
+#include "riscv_private.h"
 
 /* The DSITMBK sound effect in DOOM1.WAD uses a sample rate of 22050, but since
  * the game is played in single-player mode, it is acceptable to stick with
@@ -78,6 +80,7 @@ enum {
     KEY_EVENT = 0,
     MOUSE_MOTION_EVENT = 1,
     MOUSE_BUTTON_EVENT = 2,
+    QUIT_EVENT = 3,
 };
 
 typedef struct {
@@ -86,7 +89,7 @@ typedef struct {
 } key_event_t;
 
 typedef struct {
-    int32_t xrel, yrel;
+    int32_t x, y, xrel, yrel;
 } mouse_motion_t;
 
 typedef struct {
@@ -112,14 +115,23 @@ typedef struct {
 
 enum {
     RELATIVE_MODE_SUBMISSION = 0,
+    WINDOW_TITLE_SUBMISSION = 1,
 };
+
+typedef struct {
+    uint8_t enabled;
+} mouse_submission_t;
+
+typedef struct {
+    uint32_t title;
+    uint32_t size;
+} title_submission_t;
 
 typedef struct {
     uint32_t type;
     union {
-        union {
-            uint8_t enabled;
-        } mouse;
+        mouse_submission_t mouse;
+        title_submission_t title;
     };
 } submission_t;
 
@@ -148,10 +160,10 @@ static submission_queue_t submission_queue = {
 
 static submission_t submission_pop(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv);
+    vm_attr_t *attr = PRIV(rv);
     submission_t submission;
     memory_read(
-        s->mem, (void *) &submission,
+        attr->mem, (void *) &submission,
         submission_queue.base + submission_queue.start * sizeof(submission_t),
         sizeof(submission_t));
     ++submission_queue.start;
@@ -161,16 +173,17 @@ static submission_t submission_pop(riscv_t *rv)
 
 static void event_push(riscv_t *rv, event_t event)
 {
-    state_t *s = rv_userdata(rv);
-    memory_write(s->mem, event_queue.base + event_queue.end * sizeof(event_t),
+    vm_attr_t *attr = PRIV(rv);
+    memory_write(attr->mem,
+                 event_queue.base + event_queue.end * sizeof(event_t),
                  (void *) &event, sizeof(event_t));
     ++event_queue.end;
     event_queue.end &= queues_capacity - 1;
 
     uint32_t count;
-    memory_read(s->mem, (void *) &count, event_count, sizeof(uint32_t));
+    memory_read(attr->mem, (void *) &count, event_count, sizeof(uint32_t));
     count += 1;
-    memory_write(s->mem, event_count, (void *) &count, sizeof(uint32_t));
+    memory_write(attr->mem, event_count, (void *) &count, sizeof(uint32_t));
 }
 
 static inline uint32_t round_pow2(uint32_t x)
@@ -224,9 +237,13 @@ static bool check_sdl(riscv_t *rv, int width, int height)
     SDL_Event event;
     while (SDL_PollEvent(&event)) { /* Run event handler */
         switch (event.type) {
-        case SDL_QUIT:
-            rv_halt(rv);
+        case SDL_QUIT: {
+            event_t new_event = {
+                .type = QUIT_EVENT,
+            };
+            event_push(rv, new_event);
             return false;
+        }
         case SDL_KEYDOWN:
         case SDL_KEYUP: {
             if (event.key.repeat)
@@ -247,6 +264,8 @@ static bool check_sdl(riscv_t *rv, int width, int height)
                 .type = MOUSE_MOTION_EVENT,
             };
             mouse_motion_t mouse_motion = {
+                .x = event.motion.x,
+                .y = event.motion.y,
                 .xrel = event.motion.xrel,
                 .yrel = event.motion.yrel,
             };
@@ -278,7 +297,7 @@ static bool check_sdl(riscv_t *rv, int width, int height)
 
 void syscall_draw_frame(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     /* draw_frame(base, width, height) */
     const uint32_t screen = rv_get_reg(rv, rv_reg_a0);
@@ -293,7 +312,7 @@ void syscall_draw_frame(riscv_t *rv)
     void *pixels_ptr;
     if (SDL_LockTexture(texture, NULL, &pixels_ptr, &pitch))
         exit(-1);
-    memory_read(s->mem, pixels_ptr, screen, width * height * 4);
+    memory_read(attr->mem, pixels_ptr, screen, width * height * 4);
     SDL_UnlockTexture(texture);
 
     int actual_width, actual_height;
@@ -331,9 +350,22 @@ void syscall_submit_queue(riscv_t *rv)
     while (count--) {
         submission_t submission = submission_pop(rv);
 
+        char *title;
         switch (submission.type) {
         case RELATIVE_MODE_SUBMISSION:
             SDL_SetRelativeMouseMode(submission.mouse.enabled);
+            break;
+        case WINDOW_TITLE_SUBMISSION:
+            title = malloc(submission.title.size + 1);
+            if (unlikely(!title))
+                return;
+
+            memory_read(PRIV(rv)->mem, (uint8_t *) title,
+                        submission.title.title, submission.title.size);
+            title[submission.title.size] = 0;
+
+            SDL_SetWindowTitle(window, title);
+            free(title);
             break;
         }
     }
@@ -421,11 +453,12 @@ static int delta_cnt;
 static uint8_t mus_channel[16];
 
 /* main conversion routine for MUS to MIDI */
-static void convert(void)
+static int convert(void)
 {
     uint8_t data, last, channel;
     uint8_t event[3] = {0};
     int count = 0;
+    uint8_t *midi_data_tmp;
 
     data = *mus_pos++;
     last = data & 0x80;
@@ -477,15 +510,15 @@ static void convert(void)
         break;
 
     case 0x50:
-        return;
+        return 0;
 
     case 0x60:
         mus_end_of_track = 1;
-        return;
+        return 0;
 
     case 0x70:
         mus_pos++;
-        return;
+        return 0;
     }
 
     if (channel == 9)
@@ -495,7 +528,12 @@ static void convert(void)
 
     event[0] |= channel;
 
-    midi_data = realloc(midi_data, midi_size + delta_cnt + count);
+    midi_data_tmp = realloc(midi_data, midi_size + delta_cnt + count);
+    if (unlikely(!midi_data_tmp)) {
+        free(midi_data);
+        return -ENOMEM;
+    }
+    midi_data = midi_data_tmp;
 
     memcpy(midi_data + midi_size, &delta_bytes, delta_cnt);
     midi_size += delta_cnt;
@@ -513,6 +551,8 @@ static void convert(void)
         delta_bytes[0] = 0;
         delta_cnt = 1;
     }
+
+    return 0;
 }
 
 uint8_t *mus2midi(uint8_t *data, int *length)
@@ -521,6 +561,7 @@ uint8_t *mus2midi(uint8_t *data, int *length)
     midi_header_t midi_hdr;
     uint8_t *mid_track_len;
     int track_len;
+    uint8_t *midi_data_tmp;
 
     if (strncmp(mus_hdr->id, magic_mus, 4))
         return NULL;
@@ -537,9 +578,16 @@ uint8_t *mus2midi(uint8_t *data, int *length)
     midi_hdr.ticks =
         bswap16(70); /* 70 ppqn = 140 per second @ tempo = 500000µs (default) */
     midi_data = malloc(midi_size);
+    if (unlikely(!midi_data))
+        return NULL;
     memcpy(midi_data, &midi_hdr, midi_size);
 
-    midi_data = realloc(midi_data, midi_size + 8);
+    midi_data_tmp = realloc(midi_data, midi_size + 8);
+    if (unlikely(!midi_data_tmp)) {
+        free(midi_data);
+        return NULL;
+    }
+    midi_data = midi_data_tmp;
     memcpy(midi_data + midi_size, magic_track, 4);
     midi_size += 4;
     mid_track_len = midi_data + midi_size;
@@ -556,14 +604,25 @@ uint8_t *mus2midi(uint8_t *data, int *length)
         mus_channel[i] = 0;
 
     while (!mus_end_of_track)
-        convert();
+        if (unlikely(convert() < 0))
+            return NULL;
 
     /* a final delta time must be added prior to the end of track event */
-    midi_data = realloc(midi_data, midi_size + delta_cnt);
+    midi_data_tmp = realloc(midi_data, midi_size + delta_cnt);
+    if (unlikely(!midi_data_tmp)) {
+        free(midi_data);
+        return NULL;
+    }
+    midi_data = midi_data_tmp;
     memcpy(midi_data + midi_size, &delta_bytes, delta_cnt);
     midi_size += delta_cnt;
 
-    midi_data = realloc(midi_data, midi_size + 3);
+    midi_data_tmp = realloc(midi_data, midi_size + 3);
+    if (unlikely(!midi_data_tmp)) {
+        free(midi_data);
+        return NULL;
+    }
+    midi_data = midi_data_tmp;
     memcpy(midi_data + midi_size, magic_end_of_track + 1, 3);
     midi_size += 3;
 
@@ -600,11 +659,15 @@ static void *sfx_handler(void *arg)
     if (chan == -1)
         return NULL;
 
-    if (*ptr & 0x3) /* Doom, multiplied by 8 because sfx->volume's max is 15 */
+    if (*ptr & 0x3) {
+        /* Doom, multiplied by 8 because sfx->volume's max is 15 */
         Mix_Volume(chan, sfx->volume * 8);
-    else /* Quake, + 1 mod by 128 because sfx->volume's max is 255 and
-            Mix_Volume's max is 128 */
+    } else {
+        /* Quake, + 1 mod by 128 because sfx->volume's max is 255 and
+         * Mix_Volume's max is 128.
+         */
         Mix_Volume(chan, (sfx->volume + 1) % 128);
+    }
 
     return NULL;
 }
@@ -649,13 +712,14 @@ static void *music_handler(void *arg)
 
 static void play_sfx(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     const uint32_t sfxinfo_addr = (uint32_t) rv_get_reg(rv, rv_reg_a1);
     int volume = rv_get_reg(rv, rv_reg_a2);
 
     sfxinfo_t sfxinfo;
-    memory_read(s->mem, (uint8_t *) &sfxinfo, sfxinfo_addr, sizeof(sfxinfo_t));
+    memory_read(attr->mem, (uint8_t *) &sfxinfo, sfxinfo_addr,
+                sizeof(sfxinfo_t));
 
     /* The data and size in the application must be positioned in the first two
      * fields of the structure. This ensures emulator compatibility with
@@ -664,7 +728,7 @@ static void play_sfx(riscv_t *rv)
     uint32_t sfx_data_offset = *((uint32_t *) &sfxinfo);
     uint32_t sfx_data_size = *(uint32_t *) ((uint32_t *) &sfxinfo + 1);
     uint8_t sfx_data[SFX_SAMPLE_SIZE];
-    memory_read(s->mem, sfx_data, sfx_data_offset,
+    memory_read(attr->mem, sfx_data, sfx_data_offset,
                 sizeof(uint8_t) * sfx_data_size);
 
     sound_t sfx = {
@@ -673,18 +737,24 @@ static void play_sfx(riscv_t *rv)
         .volume = volume,
     };
     pthread_create(&sfx_thread, NULL, sfx_handler, &sfx);
+    /* FIXME: In web browser runtime, web workers in thread pool do not reap
+     * after sfx_handler return, thus we have to join them. sfx_handler does not
+     * contain infinite loop,so do not worry to be stalled by it */
+#ifdef __EMSCRIPTEN__
+    pthread_join(sfx_thread, NULL);
+#endif
 }
 
 static void play_music(riscv_t *rv)
 {
-    state_t *s = rv_userdata(rv); /* access userdata */
+    vm_attr_t *attr = PRIV(rv);
 
     const uint32_t musicinfo_addr = (uint32_t) rv_get_reg(rv, rv_reg_a1);
     int volume = rv_get_reg(rv, rv_reg_a2);
     int looping = rv_get_reg(rv, rv_reg_a3);
 
     musicinfo_t musicinfo;
-    memory_read(s->mem, (uint8_t *) &musicinfo, musicinfo_addr,
+    memory_read(attr->mem, (uint8_t *) &musicinfo, musicinfo_addr,
                 sizeof(musicinfo_t));
 
     /* The data and size in the application must be positioned in the first two
@@ -694,7 +764,7 @@ static void play_music(riscv_t *rv)
     uint32_t music_data_offset = *((uint32_t *) &musicinfo);
     uint32_t music_data_size = *(uint32_t *) ((uint32_t *) &musicinfo + 1);
     uint8_t music_data[MUSIC_MAX_SIZE];
-    memory_read(s->mem, music_data, music_data_offset, music_data_size);
+    memory_read(attr->mem, music_data, music_data_offset, music_data_size);
 
     sound_t music = {
         .data = music_data,
@@ -703,6 +773,12 @@ static void play_music(riscv_t *rv)
         .volume = volume,
     };
     pthread_create(&music_thread, NULL, music_handler, &music);
+    /* FIXME: In web browser runtime, web workers in thread pool do not reap
+     * after music_handler return, thus we have to join them. music_handler does
+     * not contain infinite loop,so do not worry to be stalled by it */
+#ifdef __EMSCRIPTEN__
+    pthread_join(music_thread, NULL);
+#endif
 }
 
 static void stop_music(riscv_t *rv UNUSED)
@@ -719,7 +795,7 @@ static void set_music_volume(riscv_t *rv)
     Mix_VolumeMusic(volume * 8);
 }
 
-static void init_audio()
+static void init_audio(void)
 {
     if (!(SDL_WasInit(-1) & SDL_INIT_AUDIO)) {
         if (SDL_Init(SDL_INIT_AUDIO) != 0) {
@@ -730,6 +806,10 @@ static void init_audio()
 
     /* sfx samples buffer */
     sfx_samples = malloc(SFX_SAMPLE_SIZE);
+    if (unlikely(!sfx_samples)) {
+        fprintf(stderr, "Failed to allocate memory for buffer\n");
+        exit(1);
+    }
 
     /* Initialize SDL2 Mixer */
     if (Mix_Init(MIX_INIT_MID) != MIX_INIT_MID) {

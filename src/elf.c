@@ -3,22 +3,22 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "elf.h"
 #include "io.h"
+#include "utils.h"
 
-#if defined(_WIN32)
-/* fallback to standard I/O text stream */
-#include <stdio.h>
-#else
-/* Assume POSIX-compatible runtime */
-#define USE_MMAP 1
+#if HAVE_MMAP
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#else
+/* fallback to standard I/O text stream */
+#include <stdio.h>
 #endif
 
 enum {
@@ -68,9 +68,10 @@ struct elf_internal {
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
-elf_t *elf_new()
+elf_t *elf_new(void)
 {
     elf_t *e = malloc(sizeof(elf_t));
+    assert(e);
     e->hdr = NULL;
     e->raw_size = 0;
     e->symbols = map_init(int, char *, map_cmp_uint);
@@ -84,7 +85,7 @@ void elf_delete(elf_t *e)
         return;
 
     map_delete(e->symbols);
-#if defined(USE_MMAP)
+#if HAVE_MMAP
     if (e->raw_data)
         munmap(e->raw_data, e->raw_size);
 #else
@@ -96,7 +97,7 @@ void elf_delete(elf_t *e)
 /* release a loaded ELF file */
 static void release(elf_t *e)
 {
-#if !defined(USE_MMAP)
+#if !HAVE_MMAP
     free(e->raw_data);
 #endif
 
@@ -258,12 +259,8 @@ bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)
  * Finding data for section headers:
  *   File start + section_header.offset -> section Data
  */
-bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem)
+bool elf_load(elf_t *e, memory_t *mem)
 {
-    /* set the entry point */
-    if (!rv_set_pc(rv, e->hdr->e_entry))
-        return false;
-
     /* loop over all of the program headers */
     for (int p = 0; p < e->hdr->e_phnum; ++p) {
         /* find next program header */
@@ -290,16 +287,20 @@ bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem)
     return true;
 }
 
-bool elf_open(elf_t *e, const char *path)
+bool elf_open(elf_t *e, const char *input)
 {
     /* free previous memory */
     if (e->raw_data)
         release(e);
 
-#if defined(USE_MMAP)
+    char *path = sanitize_path(input);
+    if (!path)
+        return false;
+
+#if HAVE_MMAP
     int fd = open(path, O_RDONLY);
     if (fd < 0)
-        return false;
+        goto free_path;
 
     /* get file size */
     struct stat st;
@@ -310,80 +311,56 @@ bool elf_open(elf_t *e, const char *path)
      * The beginning of the file is ELF header.
      */
     e->raw_data = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (e->raw_data == MAP_FAILED) {
-        release(e);
-        return false;
-    }
+    if (e->raw_data == MAP_FAILED)
+        goto free_fd;
     close(fd);
 
 #else  /* fallback to standard I/O text stream */
     FILE *f = fopen(path, "rb");
     if (!f)
-        return false;
+        goto free_path;
 
     /* get file size */
     fseek(f, 0, SEEK_END);
     e->raw_size = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (e->raw_size == 0) {
-        fclose(f);
-        return false;
-    }
+    if (!e->raw_size)
+        goto free_fd;
 
     /* allocate memory */
     free(e->raw_data);
     e->raw_data = malloc(e->raw_size);
+    assert(e->raw_data);
 
     /* read data into memory */
     const size_t r = fread(e->raw_data, 1, e->raw_size, f);
     fclose(f);
-    if (r != e->raw_size) {
-        release(e);
-        return false;
-    }
-#endif /* USE_MMAP */
+    if (r != e->raw_size)
+        goto free_path;
+#endif /* HAVE_MMAP */
 
     /* point to the header */
     e->hdr = (const struct Elf32_Ehdr *) e->raw_data;
 
     /* check it is a valid ELF file */
-    if (!is_valid(e)) {
-        release(e);
-        return false;
-    }
+    if (!is_valid(e))
+        goto free_path;
 
+    free(path);
     return true;
-}
 
-struct Elf32_Shdr **get_elf_section_headers(elf_t *e)
-{
-    struct Elf32_Ehdr *elf_hdr = (struct Elf32_Ehdr *) e->hdr;
-    Elf32_Half shnum = elf_hdr->e_shnum;
-    off_t offset = elf_hdr->e_shoff;
-    uint8_t *buf = e->raw_data + offset;
+free_fd:
+#if HAVE_MMAP
+    close(fd);
+#else
+    close(f);
+#endif
 
-    struct Elf32_Shdr **shdrs = malloc(sizeof(struct Elf32_Shdr) * shnum);
-    if (!shdrs)
-        return NULL;
+free_path:
+    free(path);
 
-    for (int i = 0; i < shnum; i++) {
-        struct Elf32_Shdr *shdr = (struct Elf32_Shdr *) shdrs + i;
-        struct Elf32_Shdr *_shdr =
-            (struct Elf32_Shdr *) (buf + sizeof(struct Elf32_Shdr) * i);
-
-        shdr->sh_name = _shdr->sh_name;
-        shdr->sh_type = _shdr->sh_type;
-        shdr->sh_flags = _shdr->sh_flags;
-        shdr->sh_addr = _shdr->sh_addr;
-        shdr->sh_offset = _shdr->sh_offset;
-        shdr->sh_size = _shdr->sh_size;
-        shdr->sh_link = _shdr->sh_link;
-        shdr->sh_info = _shdr->sh_info;
-        shdr->sh_addralign = _shdr->sh_addralign;
-        shdr->sh_entsize = _shdr->sh_entsize;
-    }
-
-    return shdrs;
+    release(e);
+    return false;
 }
 
 struct Elf32_Ehdr *get_elf_header(elf_t *e)

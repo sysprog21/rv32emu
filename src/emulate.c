@@ -10,20 +10,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #if RV32_HAS(EXT_F)
 #include <math.h>
 #include "softfloat.h"
-
-#if defined(__APPLE__)
-static inline int isinff(float x)
-{
-    return __builtin_fabsf(x) == __builtin_inff();
-}
-static inline int isnanf(float x)
-{
-    return x != x;
-}
-#endif
 #endif /* RV32_HAS(EXT_F) */
 
 #if RV32_HAS(GDBSTUB)
@@ -34,8 +27,12 @@ extern struct target_ops gdbstub_ops;
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
-#include "state.h"
 #include "utils.h"
+
+#if RV32_HAS(JIT)
+#include "cache.h"
+#include "jit.h"
+#endif
 
 /* Shortcuts for comparing each field of specified RISC-V instruction */
 #define IF_insn(i, o) (i->opcode == rv_insn_##o)
@@ -45,13 +42,17 @@ extern struct target_ops gdbstub_ops;
 #define IF_imm(i, v) (i->imm == v)
 
 /* RISC-V exception code list */
-#define RV_EXCEPTION_LIST                                       \
-    _(insn_misaligned, 0)  /* Instruction address misaligned */ \
-    _(illegal_insn, 2)     /* Illegal instruction */            \
-    _(breakpoint, 3)       /* Breakpoint */                     \
-    _(load_misaligned, 4)  /* Load address misaligned */        \
-    _(store_misaligned, 6) /* Store/AMO address misaligned */   \
+/* clang-format off */
+#define RV_EXCEPTION_LIST                                          \
+    IIF(RV32_HAS(EXT_C))(,                                         \
+        _(insn_misaligned, 0) /* Instruction address misaligned */ \
+    )                                                              \
+    _(illegal_insn, 2)     /* Illegal instruction */               \
+    _(breakpoint, 3)       /* Breakpoint */                        \
+    _(load_misaligned, 4)  /* Load address misaligned */           \
+    _(store_misaligned, 6) /* Store/AMO address misaligned */      \
     _(ecall_M, 11)         /* Environment call from M-mode */
+/* clang-format on */
 
 enum {
 #define _(type, code) rv_exception_code##type = code,
@@ -128,7 +129,7 @@ RV_EXCEPTION_LIST
  */
 #define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)       \
     IIF(IO)                                                           \
-    (if (!rv->io.allow_misalign && unlikely(addr & (mask_or_pc))),    \
+    (if (!PRIV(rv)->allow_misalign && unlikely(addr & (mask_or_pc))), \
      if (unlikely(insn_is_misaligned(PC))))                           \
     {                                                                 \
         rv->compressed = compress;                                    \
@@ -293,8 +294,10 @@ void rv_debug(riscv_t *rv)
 }
 #endif /* RV32_HAS(GDBSTUB) */
 
+#if !RV32_HAS(JIT)
 /* hash function for the block map */
 HASH_FUNC_IMPL(map_hash, BLOCK_MAP_CAPACITY_BITS, 1 << BLOCK_MAP_CAPACITY_BITS)
+#endif
 
 /* allocate a basic block */
 static block_t *block_alloc(riscv_t *rv)
@@ -302,10 +305,16 @@ static block_t *block_alloc(riscv_t *rv)
     block_t *block = mpool_alloc(rv->block_mp);
     assert(block);
     block->n_insn = 0;
-    block->predict = NULL;
+#if RV32_HAS(JIT)
+    block->translatable = true;
+    block->hot = false;
+    block->has_loops = false;
+    INIT_LIST_HEAD(&block->list);
+#endif
     return block;
 }
 
+#if !RV32_HAS(JIT)
 /* insert a block into block map */
 static void block_insert(block_map_t *map, const block_t *block)
 {
@@ -341,21 +350,18 @@ static block_t *block_find(const block_map_t *map, const uint32_t addr)
     }
     return NULL;
 }
+#endif
 
+#if !RV32_HAS(EXT_C)
 FORCE_INLINE bool insn_is_misaligned(uint32_t pc)
 {
-    return (pc &
-#if RV32_HAS(EXT_C)
-            0x1
-#else
-            0x3
-#endif
-    );
+    return pc & 0x3;
 }
+#endif
 
 /* instruction length information for each RISC-V instruction */
 enum {
-#define _(inst, can_branch, insn_len, reg_mask) \
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
     __rv_insn_##inst##_len = insn_len,
     RV_INSN_LIST
 #undef _
@@ -363,7 +369,7 @@ enum {
 
 /* can-branch information for each RISC-V instruction */
 enum {
-#define _(inst, can_branch, insn_len, reg_mask) \
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
     __rv_insn_##inst##_canbranch = can_branch,
     RV_INSN_LIST
 #undef _
@@ -381,51 +387,35 @@ static bool is_branch_taken = false;
 /* record the program counter of the previous block */
 static uint32_t last_pc = 0;
 
+#if RV32_HAS(JIT)
+static set_t pc_set;
+static bool has_loops = false;
+#endif
+
 /* Interpreter-based execution path */
-#define RVOP(inst, code)                                                    \
-    static bool do_##inst(riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, \
-                          uint32_t PC)                                      \
-    {                                                                       \
-        cycle++;                                                            \
-        code;                                                               \
-    nextop:                                                                 \
-        PC += __rv_insn_##inst##_len;                                       \
-        if (unlikely(RVOP_NO_NEXT(ir))) {                                   \
-            rv->csr_cycle = cycle;                                          \
-            rv->PC = PC;                                                    \
-            return true;                                                    \
-        }                                                                   \
-        const rv_insn_t *next = ir->next;                                   \
-        MUST_TAIL return next->impl(rv, next, cycle, PC);                   \
+#define RVOP(inst, code, asm)                                         \
+    static bool do_##inst(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, \
+                          uint32_t PC)                                \
+    {                                                                 \
+        cycle++;                                                      \
+        code;                                                         \
+    nextop:                                                           \
+        PC += __rv_insn_##inst##_len;                                 \
+        if (unlikely(RVOP_NO_NEXT(ir))) {                             \
+            goto end_op;                                              \
+        }                                                             \
+        const rv_insn_t *next = ir->next;                             \
+        MUST_TAIL return next->impl(rv, next, cycle, PC);             \
+    end_op:                                                           \
+        rv->csr_cycle = cycle;                                        \
+        rv->PC = PC;                                                  \
+        return true;                                                  \
     }
 
 #include "rv32_template.c"
 #undef RVOP
 
-/* FIXME: Add JIT-based execution path */
-
-/* Macro operation fusion */
-
-/* macro operation fusion: convert specific RISC-V instruction patterns
- * into faster and equivalent code
- */
-#define FUSE_INSN_LIST \
-    _(fuse1)           \
-    _(fuse2)           \
-    _(fuse3)           \
-    _(fuse4)           \
-    _(fuse5)           \
-    _(fuse6)           \
-    _(fuse7)
-
-enum {
-    rv_insn_fuse0 = N_RV_INSNS,
-#define _(inst) rv_insn_##inst,
-    FUSE_INSN_LIST
-#undef _
-};
-
-/* multiple lui */
+/* multiple LUI */
 static bool do_fuse1(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 {
     cycle += ir->imm2;
@@ -508,44 +498,28 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 
 /* memset */
 static bool do_fuse5(riscv_t *rv,
-                     const rv_insn_t *ir,
+                     const rv_insn_t *ir UNUSED,
                      uint64_t cycle,
-                     uint32_t PC)
+                     uint32_t PC UNUSED)
 {
     /* FIXME: specify the correct cycle count for memset routine */
     cycle += 2;
-    memory_t *m = ((state_t *) rv->userdata)->mem;
-    memset((char *) m->mem_base + rv->X[rv_reg_a0], rv->X[rv_reg_a1],
-           rv->X[rv_reg_a2]);
-    PC = rv->X[rv_reg_ra] & ~1U;
-    if (unlikely(RVOP_NO_NEXT(ir))) {
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
-    }
-    const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next, cycle, PC);
+    rv->io.on_memset(rv);
+    rv->csr_cycle = cycle;
+    return true;
 }
 
 /* memcpy */
 static bool do_fuse6(riscv_t *rv,
-                     const rv_insn_t *ir,
+                     const rv_insn_t *ir UNUSED,
                      uint64_t cycle,
-                     uint32_t PC)
+                     uint32_t PC UNUSED)
 {
     /* FIXME: specify the correct cycle count for memcpy routine */
     cycle += 2;
-    memory_t *m = ((state_t *) rv->userdata)->mem;
-    memcpy((char *) m->mem_base + rv->X[rv_reg_a0],
-           (char *) m->mem_base + rv->X[rv_reg_a1], rv->X[rv_reg_a2]);
-    PC = rv->X[rv_reg_ra] & ~1U;
-    if (unlikely(RVOP_NO_NEXT(ir))) {
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
-    }
-    const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next, cycle, PC);
+    rv->io.on_memcpy(rv);
+    rv->csr_cycle = cycle;
+    return true;
 }
 
 /* multiple shift immediate */
@@ -571,7 +545,7 @@ static bool do_fuse7(riscv_t *rv,
 /* clang-format off */
 static const void *dispatch_table[] = {
     /* RV32 instructions */
-#define _(inst, can_branch, insn_len, reg_mask) [rv_insn_##inst] = do_##inst,
+#define _(inst, can_branch, insn_len, translatable, reg_mask) [rv_insn_##inst] = do_##inst,
     RV_INSN_LIST
 #undef _
     /* Macro operation fusion instructions */
@@ -584,14 +558,30 @@ static const void *dispatch_table[] = {
 FORCE_INLINE bool insn_is_branch(uint8_t opcode)
 {
     switch (opcode) {
-#define _(inst, can_branch, insn_len, reg_mask) \
-    IIF(can_branch)(case rv_insn_##inst:, )
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
+    IIF(can_branch)                                           \
+    (case rv_insn_##inst:, )
         RV_INSN_LIST
 #undef _
         return true;
     }
     return false;
 }
+
+#if RV32_HAS(JIT)
+FORCE_INLINE bool insn_is_translatable(uint8_t opcode)
+{
+    switch (opcode) {
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
+    IIF(translatable)                                         \
+    (case rv_insn_##inst:, )
+        RV_INSN_LIST
+#undef _
+        return true;
+    }
+    return false;
+}
+#endif
 
 FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
 {
@@ -643,9 +633,22 @@ static void block_translate(riscv_t *rv, block_t *block)
         block->pc_end += is_compressed(insn) ? 2 : 4;
         block->n_insn++;
         prev_ir = ir;
+#if RV32_HAS(JIT)
+        if (!insn_is_translatable(ir->opcode))
+            block->translatable = false;
+#endif
         /* stop on branch */
-        if (insn_is_branch(ir->opcode))
+        if (insn_is_branch(ir->opcode)) {
+            if (ir->opcode == rv_insn_jalr
+#if RV32_HAS(EXT_C)
+                || ir->opcode == rv_insn_cjalr || ir->opcode == rv_insn_cjr
+#endif
+            ) {
+                ir->branch_table = calloc(1, sizeof(branch_history_table_t));
+                assert(ir->branch_table);
+            }
             break;
+        }
 
         ir = mpool_alloc(rv->block_ir_mp);
     }
@@ -669,6 +672,7 @@ static void block_translate(riscv_t *rv, block_t *block)
     if (count > 1) {                                              \
         ir->opcode = IIF(RW)(rv_insn_fuse4, rv_insn_fuse3);       \
         ir->fuse = malloc(count * sizeof(opcode_fuse_t));         \
+        assert(ir->fuse);                                         \
         ir->imm2 = count;                                         \
         memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));              \
         ir->impl = dispatch_table[ir->opcode];                    \
@@ -750,6 +754,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
          */
         if (IF_imm(ir, 15) && IF_rd(ir, t1) && IF_rs1(ir, zero)) {
             next_ir = ir->next;
+            assert(next_ir);
             if (IF_insn(next_ir, addi) && IF_rd(next_ir, a4) &&
                 IF_rs1(next_ir, a0) && IF_rs2(next_ir, zero)) {
                 next_ir = next_ir->next;
@@ -765,18 +770,19 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
             }
         } else if (IF_imm(ir, 0) && IF_rd(ir, t1) && IF_rs1(ir, a0)) {
             next_ir = ir->next;
+            assert(next_ir);
             if (IF_insn(next_ir, beq) && IF_rs1(next_ir, a2) &&
                 IF_rs2(next_ir, zero)) {
                 if (IF_imm(next_ir, 20) && detect_memset(rv, 1)) {
                     ir->opcode = rv_insn_fuse5;
                     ir->impl = dispatch_table[ir->opcode];
-                    remove_next_nth_ir(rv, ir, block, 2);
+                    remove_next_nth_ir(rv, ir, block, 1);
                     return true;
                 }
                 if (IF_imm(next_ir, 28) && detect_memcpy(rv, 1)) {
                     ir->opcode = rv_insn_fuse6;
                     ir->impl = dispatch_table[ir->opcode];
-                    remove_next_nth_ir(rv, ir, block, 2);
+                    remove_next_nth_ir(rv, ir, block, 1);
                     return true;
                 };
             }
@@ -790,6 +796,7 @@ static bool libc_substitute(riscv_t *rv, block_t *block)
          */
         if (IF_rd(ir, a5) && IF_rs1(ir, a0) && IF_rs2(ir, a1)) {
             next_ir = ir->next;
+            assert(next_ir);
             if (IF_insn(next_ir, andi) && IF_imm(next_ir, 3) &&
                 IF_rd(next_ir, a5) && IF_rs1(next_ir, a5)) {
                 next_ir = next_ir->next;
@@ -828,6 +835,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
     rv_insn_t *ir;
     for (i = 0, ir = block->ir_head; i < block->n_insn - 1;
          i++, ir = ir->next) {
+        assert(ir);
         rv_insn_t *next_ir = NULL;
         int32_t count = 0;
         switch (ir->opcode) {
@@ -859,6 +867,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
                 if (count > 1) {
                     ir->opcode = rv_insn_fuse1;
                     ir->fuse = malloc(count * sizeof(opcode_fuse_t));
+                    assert(ir->fuse);
                     ir->imm2 = count;
                     memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
                     ir->impl = dispatch_table[ir->opcode];
@@ -882,6 +891,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
             /* TODO: mixture of SW and LW */
             /* TODO: reorder insturction to match pattern */
         case rv_insn_slli:
+        case rv_insn_srli:
+        case rv_insn_srai:
             count = 1;
             next_ir = ir->next;
             while (1) {
@@ -895,6 +906,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
             }
             if (count > 1) {
                 ir->fuse = malloc(count * sizeof(opcode_fuse_t));
+                assert(ir->fuse);
                 memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
                 ir->opcode = rv_insn_fuse7;
                 ir->imm2 = count;
@@ -923,7 +935,7 @@ typedef struct {
 
 #include "rv32_constopt.c"
 static const void *constopt_table[] = {
-#define _(inst, can_branch, insn_len, reg_mask) \
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
     [rv_insn_##inst] = constopt_##inst,
     RV_INSN_LIST
 #undef _
@@ -945,16 +957,22 @@ static void optimize_constant(riscv_t *rv UNUSED, block_t *block)
 static block_t *prev = NULL;
 static block_t *block_find_or_translate(riscv_t *rv)
 {
+#if !RV32_HAS(JIT)
     block_map_t *map = &rv->block_map;
     /* lookup the next block in the block map */
     block_t *next = block_find(map, rv->PC);
+#else
+    /* lookup the next block in the block cache */
+    block_t *next = (block_t *) cache_get(rv->block_cache, rv->PC, true);
+#endif
 
     if (!next) {
+#if !RV32_HAS(JIT)
         if (map->size * 1.25 > map->block_capacity) {
             block_map_clear(rv);
             prev = NULL;
         }
-
+#endif
         /* allocate a new block */
         next = block_alloc(rv);
         block_translate(rv, next);
@@ -967,41 +985,119 @@ static block_t *block_find_or_translate(riscv_t *rv)
                 /* macro operation fusion */
                 match_pattern(rv, next);
         }
+#if !RV32_HAS(JIT)
         /* insert the block into block map */
         block_insert(&rv->block_map, next);
-
-        /* update the block prediction.
-         * When translating a new block, the block predictor may benefit,
-         * but updating it after finding a particular block may penalize
-         * significantly.
-         */
-        if (prev)
-            prev->predict = next;
+#else
+        /* insert the block into block cache */
+        block_t *delete_target = cache_put(rv->block_cache, rv->PC, &(*next));
+        if (delete_target) {
+            if (prev == delete_target)
+                prev = NULL;
+            chain_entry_t *entry, *safe;
+            /* correctly remove deleted block from its chained block */
+            rv_insn_t *taken = delete_target->ir_tail->branch_taken,
+                      *untaken = delete_target->ir_tail->branch_untaken;
+            if (taken && taken->pc != delete_target->pc_start) {
+                block_t *target = cache_get(rv->block_cache, taken->pc, false);
+                bool flag = false;
+                list_for_each_entry_safe (entry, safe, &target->list, list) {
+                    if (entry->block == delete_target) {
+                        list_del_init(&entry->list);
+                        mpool_free(rv->chain_entry_mp, entry);
+                        flag = true;
+                    }
+                }
+                assert(flag);
+            }
+            if (untaken && untaken->pc != delete_target->pc_start) {
+                block_t *target =
+                    cache_get(rv->block_cache, untaken->pc, false);
+                assert(target);
+                bool flag = false;
+                list_for_each_entry_safe (entry, safe, &target->list, list) {
+                    if (entry->block == delete_target) {
+                        list_del_init(&entry->list);
+                        mpool_free(rv->chain_entry_mp, entry);
+                        flag = true;
+                    }
+                }
+                assert(flag);
+            }
+            /* correctly remove deleted block from the block chained to it */
+            list_for_each_entry_safe (entry, safe, &delete_target->list, list) {
+                if (entry->block == delete_target)
+                    continue;
+                rv_insn_t *target = entry->block->ir_tail;
+                if (target->branch_taken == delete_target->ir_head)
+                    target->branch_taken = NULL;
+                else if (target->branch_untaken == delete_target->ir_head)
+                    target->branch_untaken = NULL;
+                mpool_free(rv->chain_entry_mp, entry);
+            }
+            /* free deleted block */
+            uint32_t idx;
+            rv_insn_t *ir, *next;
+            for (idx = 0, ir = delete_target->ir_head;
+                 idx < delete_target->n_insn; idx++, ir = next) {
+                free(ir->fuse);
+                next = ir->next;
+                mpool_free(rv->block_ir_mp, ir);
+            }
+            mpool_free(rv->block_mp, delete_target);
+        }
+#endif
     }
 
     return next;
 }
 
-void rv_step(riscv_t *rv, int32_t cycles)
+#if RV32_HAS(JIT)
+static bool runtime_profiler(riscv_t *rv, block_t *block)
 {
-    assert(rv);
+    /* Based on our observations, a significant number of true hotspots are
+     * characterized by high usage frequency and including loop. Consequently,
+     * we posit that our profiler could effectively identify hotspots using
+     * three key indicators.
+     */
+    uint32_t freq = cache_freq(rv->block_cache, block->pc_start);
+    /* To profile a block after chaining, it must first be executed. */
+    if (unlikely(freq >= 2 && block->has_loops))
+        return true;
+    /* using frequency exceeds predetermined threshold */
+    if (unlikely(freq == THRESHOLD))
+        return true;
+    return false;
+}
+
+typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
+#endif
+
+void rv_step(void *arg)
+{
+    assert(arg);
+    riscv_t *rv = arg;
+
+    vm_attr_t *attr = PRIV(rv);
+    uint32_t cycles = attr->cycle_per_step;
 
     /* find or translate a block for starting PC */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 
     /* loop until hitting the cycle target */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
-        block_t *block;
-        /* try to predict the next block */
-        if (prev && prev->predict && prev->predict->pc_start == rv->PC) {
-            block = prev->predict;
-        } else {
-            /* lookup the next block in block map or translate a new block,
-             * and move onto the next block.
-             */
-            block = block_find_or_translate(rv);
+        if (prev && prev->pc_start != last_pc) {
+            /* update previous block */
+#if !RV32_HAS(JIT)
+            prev = block_find(&rv->block_map, last_pc);
+#else
+            prev = cache_get(rv->block_cache, last_pc, false);
+#endif
         }
-
+        /* lookup the next block in block map or translate a new block,
+         * and move onto the next block.
+         */
+        block_t *block = block_find_or_translate(rv);
         /* by now, a block should be available */
         assert(block);
 
@@ -1010,35 +1106,82 @@ void rv_step(riscv_t *rv, int32_t cycles)
          * assigned to either the branch_taken or branch_untaken pointer of
          * the previous block.
          */
-        if (prev) {
-            /* update previous block */
-            if (prev->pc_start != last_pc)
-                prev = block_find(&rv->block_map, last_pc);
 
+        if (prev) {
             rv_insn_t *last_ir = prev->ir_tail;
             /* chain block */
             if (!insn_is_unconditional_branch(last_ir->opcode)) {
-                if (is_branch_taken && !last_ir->branch_taken)
+                if (is_branch_taken && !last_ir->branch_taken) {
                     last_ir->branch_taken = block->ir_head;
-                else if (!last_ir->branch_untaken)
+#if RV32_HAS(JIT)
+                    chain_entry_t *new_entry = mpool_alloc(rv->chain_entry_mp);
+                    new_entry->block = prev;
+                    list_add(&new_entry->list, &block->list);
+#endif
+                } else if (!is_branch_taken && !last_ir->branch_untaken) {
                     last_ir->branch_untaken = block->ir_head;
+#if RV32_HAS(JIT)
+                    chain_entry_t *new_entry = mpool_alloc(rv->chain_entry_mp);
+                    new_entry->block = prev;
+                    list_add(&new_entry->list, &block->list);
+#endif
+                }
             } else if (IF_insn(last_ir, jal)
 #if RV32_HAS(EXT_C)
                        || IF_insn(last_ir, cj) || IF_insn(last_ir, cjal)
 #endif
             ) {
-                if (!last_ir->branch_taken)
+                if (!last_ir->branch_taken) {
                     last_ir->branch_taken = block->ir_head;
+#if RV32_HAS(JIT)
+                    chain_entry_t *new_entry = mpool_alloc(rv->chain_entry_mp);
+                    new_entry->block = prev;
+                    list_add(&new_entry->list, &block->list);
+#endif
+                }
             }
         }
         last_pc = rv->PC;
-
-        /* execute the block */
+#if RV32_HAS(JIT)
+        /* execute by tier-1 JIT compiler */
+        struct jit_state *state = rv->jit_state;
+        if (block->hot) {
+            ((exec_block_func_t) state->buf)(
+                rv, (uintptr_t) (state->buf + block->offset));
+            prev = NULL;
+            continue;
+        } /* check if using frequency of block exceed threshold */
+        else if (block->translatable && runtime_profiler(rv, block)) {
+            jit_translate(rv, block);
+            ((exec_block_func_t) state->buf)(
+                rv, (uintptr_t) (state->buf + block->offset));
+            prev = NULL;
+            continue;
+        }
+        set_reset(&pc_set);
+        has_loops = false;
+#endif
+        /* execute the block by interpreter */
         const rv_insn_t *ir = block->ir_head;
-        if (unlikely(!ir->impl(rv, ir, rv->csr_cycle, rv->PC)))
+        if (unlikely(!ir->impl(rv, ir, rv->csr_cycle, rv->PC))) {
+            /* block should not be extended if execption handler invoked */
+            prev = NULL;
             break;
+        }
+#if RV32_HAS(JIT)
+        if (has_loops && !block->has_loops)
+            block->has_loops = true;
+#endif
         prev = block;
     }
+
+#ifdef __EMSCRIPTEN__
+    if (rv_has_halted(rv)) {
+        printf("inferior exit code %d\n", attr->exit_code);
+        emscripten_cancel_main_loop();
+        rv_delete(rv); /* clean up and reuse memory */
+    }
+#endif
 }
 
 void ebreak_handler(riscv_t *rv)
@@ -1052,6 +1195,22 @@ void ecall_handler(riscv_t *rv)
     assert(rv);
     rv_except_ecall_M(rv, 0);
     syscall_handler(rv);
+}
+
+void memset_handler(riscv_t *rv)
+{
+    memory_t *m = PRIV(rv)->mem;
+    memset((char *) m->mem_base + rv->X[rv_reg_a0], rv->X[rv_reg_a1],
+           rv->X[rv_reg_a2]);
+    rv->PC = rv->X[rv_reg_ra] & ~1U;
+}
+
+void memcpy_handler(riscv_t *rv)
+{
+    memory_t *m = PRIV(rv)->mem;
+    memcpy((char *) m->mem_base + rv->X[rv_reg_a0],
+           (char *) m->mem_base + rv->X[rv_reg_a1], rv->X[rv_reg_a2]);
+    rv->PC = rv->X[rv_reg_ra] & ~1U;
 }
 
 void dump_registers(riscv_t *rv, char *out_file_path)
@@ -1068,4 +1227,7 @@ void dump_registers(riscv_t *rv, char *out_file_path)
         fprintf(f, "  \"x%d\": %u%s\n", i, rv->X[i], comma);
     }
     fprintf(f, "}\n");
+
+    if (out_file_path[0] != '-')
+        fclose(f);
 }

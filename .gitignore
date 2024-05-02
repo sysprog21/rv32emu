@@ -5,16 +5,20 @@ quakesw-1.0.6.zip*
 build/id1/
 build/gfx.wad
 build/doomrc
+toolchain/
 
 # built objects
 build/.config
 build/rv32emu
 build/arch-test
 build/mini-gdbstub
+build/softfloat
 build/cache/
 build/map/
+build/path/
 *.o
 *.o.d
 tests/**/*.elf
 tests/arch-test-target/config.ini
 __pycache__/
+src/rv32_jit.c

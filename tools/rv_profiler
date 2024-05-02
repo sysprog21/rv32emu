@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+import sys
+import argparse
+import math
+from lolviz import *
+
+class Block:
+    def __init__(self, PC, IR_list, branch_taken=None, branch_untaken=None):
+        self.PC = PC;
+        self.IR_list = IR_list
+        self.branch_taken = branch_taken
+        self.branch_untaken = branch_untaken
+
+def printTable(table):
+    col_widths = getLongestWordLength(table)
+    if len(table):
+        if len(table[0]) == 9:
+            print("PC_start".rjust(col_widths[0]), end=' ')
+            print("PC_end".rjust(col_widths[0]), end=' ')
+            print("frequency".rjust(col_widths[0]), end=' ')
+            print("hot".rjust(col_widths[0]), end=' ')
+            print("loop".rjust(col_widths[0]), end=' ')
+            print("untaken".rjust(col_widths[0]), end=' ')
+            print("taken".rjust(col_widths[0]), end=' ')
+            print("".rjust(5), end=' ')
+            print("IR_list", end=' ')
+            print()
+            for i in range(len(table)):
+                print(table[i]["PC_start"].rjust(col_widths[i]), end=' ')
+                print(table[i]["PC_end"].rjust(col_widths[i]), end=' ')
+                print(table[i]["frequency"].rjust(col_widths[i]), end=' ')
+                print(table[i]["hot"].rjust(col_widths[i]), end=' ')
+                print(table[i]["loop"].rjust(col_widths[i]), end=' ')
+                print(table[i]["untaken"].rjust(col_widths[i]), end=' ')
+                print(table[i]["taken"].rjust(col_widths[i]), end=' ')
+                print("".rjust(5), end=' ')
+                print(table[i]["IR_list"], end=' ')
+                print()
+        else:
+            print("PC_start".rjust(col_widths[0]), end=' ')
+            print("PC_end".rjust(col_widths[0]), end=' ')
+            print("untaken".rjust(col_widths[0]), end=' ')
+            print("taken".rjust(col_widths[0]), end=' ')
+            print("".rjust(5), end=' ')
+            print("IR_list", end=' ')
+            print()
+            for i in range(len(table)):
+                print(table[i]["PC_start"].rjust(col_widths[i]), end=' ')
+                print(table[i]["PC_end"].rjust(col_widths[i]), end=' ')
+                print(table[i]["untaken"].rjust(col_widths[i]), end=' ')
+                print(table[i]["taken"].rjust(col_widths[i]), end=' ')
+                print("".rjust(5), end=' ')
+                print(table[i]["IR_list"], end=' ')
+                print()
+
+
+def getLongestWordLength(table):
+    return[max([len(item) for item in line]) for line in table]
+
+profile_dict = {}
+block_dict = {}
+pc_set = set()
+def print_graph_IR(pc):
+    if (pc in pc_set):
+        return None;
+    pc_set.add(pc);
+    data = profile_dict[pc]
+    print(data["PC_start"], data["IR_list"])
+    block = Block(data["PC_start"], data["IR_list"])
+    block_dict[pc] = block
+    untaken = None
+    taken = None
+    if data["untaken"] != "NULL":
+        if (data["untaken"] in pc_set):
+            untaken = block_dict[data["untaken"]]
+        else:
+            untaken = print_graph_IR(data["untaken"])
+    if data["taken"] != "NULL":
+        if (data["taken"] in pc_set):
+            taken = block_dict[data["taken"]]
+        else:
+            taken = print_graph_IR(data["taken"])
+    block.branch_untaken = untaken
+    block.branch_taken = taken
+    return block
+
+parser = argparse.ArgumentParser()
+parser.add_argument('filename', type=str,
+                    help='an integer for the accumulator')
+parser.add_argument('--start-address', type=str,
+                    help='start address for profiling data')
+parser.add_argument('--stop-address', type=str,
+                    help='stop address for profiling data')
+parser.add_argument('--graph-ir', type=str,
+                    help='visualize graph IR')
+args = parser.parse_args()
+
+f = open(f'build/{args.filename}.prof', 'r')
+fileds = f.readline()
+raw_datas = f.read().split("\n")
+profile_datas = []
+for data in raw_datas:
+    tmp = data.split("|")
+    if len(tmp) == 9:
+        d = {
+            "PC_start": tmp[0].strip(),
+            "PC_end": tmp[1].strip(),
+            "frequency": tmp[2].strip(),
+            "hot": tmp[3].strip(),
+            "backward": tmp[4].strip(),
+            "loop": tmp[5].strip(),
+            "untaken": tmp[6].strip(),
+            "taken": tmp[7].strip(),
+            "IR_list": tmp[8].strip(),
+        }
+        profile_datas.append(d)
+        profile_dict[d["PC_start"]] = d;
+    elif len(tmp) == 5:
+        d = {
+            "PC_start": tmp[0].strip(),
+            "PC_end": tmp[1].strip(),
+            "untaken": tmp[2].strip(),
+            "taken": tmp[3].strip(),
+            "IR_list": tmp[4].strip(),
+        }
+        profile_datas.append(d)
+        profile_dict[d["PC_start"]] = d;
+
+if  args.start_address or args.stop_address:
+    print_data = []
+    start_address = 0
+    stop_address = math.inf
+    if args.start_address:
+        start_address = int(args.start_address, 16)
+    if args.stop_address:
+        stop_address = int(args.stop_address, 16)
+    for data in profile_datas:
+        pc_start = int(data["PC_start"], 16)
+        pc_end = int(data["PC_end"], 16)
+        if pc_start >= start_address and pc_end <= stop_address:
+            print_data.append(data)
+    printTable(print_data)
+
+if args.graph_ir:
+    block = print_graph_IR(args.graph_ir)
+    g = objviz(block)
+    g.view() # render and show graphviz.files.Source object

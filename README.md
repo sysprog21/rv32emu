@@ -1,4 +1,4 @@
-# RISC-V RV32I[MACF] emulator
+# RISC-V RV32I[MAFC] emulator
 ![GitHub Actions](https://github.com/sysprog21/rv32emu/actions/workflows/main.yml/badge.svg)
 ```
                        /--===============------\
@@ -24,18 +24,18 @@ a focus on efficiency and readability.
 
 Features:
 * Fast interpreter for executing the RV32 ISA
-* Comprehensive support for RV32I and M, A, C extensions
-* Partial support for the F extension
+* Comprehensive support for RV32I and M, A, F, C extensions
 * Memory-efficient design
 * Built-in ELF loader
 * Implementation of commonly used newlib system calls
 * Experimental SDL-based display/event/audio system calls for running video games
 * Support for remote GDB debugging
+* Experimental JIT compiler for performance boost while maintaining a small footprint
 
 ## Build and Verify
 
 `rv32emu` relies on certain third-party packages for full functionality and access to all its features.
-To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/) 
+To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/)
 and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
 * macOS: `brew install sdl2 sdl2_mixer`
 * Ubuntu Linux / Debian: `sudo apt install libsdl2-dev libsdl2-mixer-dev`
@@ -66,17 +66,22 @@ $ make quake
 
 The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](docs/demo.md).
 
+### Docker image
+
+The image containing all the necessary tools for development and testing can be executed by `docker run -it sysprog21/rv32emu:latest`. It works for both x86-64 and aarch64 (Apple's M1 chip) machines.
+
 ### Customization
 
 `rv32emu` is configurable, and you can override the below variable(s) to fit your expectations:
 * `ENABLE_EXT_M`: Standard Extension for Integer Multiplication and Division
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
-* `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.F excluded)
 * `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
+* `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
 * `ENABLE_GDBSTUB` : GDB remote debugging support
 * `ENABLE_SDL` : Experimental Display and Event System Calls
+* `ENABLE_JIT` : Experimental JIT compiler
 
 e.g., run `make ENABLE_EXT_F=0` for the build without floating-point support.
 
@@ -123,7 +128,7 @@ For macOS users, installing `sdiff` might be required:
 $ brew install diffutils
 ```
 
-To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `C`, `Zifencei`, `privilege`.
+To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `A`, `F`, `C`, `Zifencei`, `privilege`.
 ```shell
 $ make arch-test RISCV_DEVICE=I
 ```
@@ -132,17 +137,62 @@ Current progress of this emulator in riscv-arch-test (RV32):
 * Passed Tests
     - `I`: Base Integer Instruction Set
     - `M`: Standard Extension for Integer Multiplication and Division
+    - `A`: Standard Extension for Atomic Instructions
+    - `F`: Standard Extension for Single-Precision Floating-Point
     - `C`: Standard Extension for Compressed Instruction
     - `Zifencei`: Instruction-Fetch Fence
     - `privilege`: RISCV Privileged Specification
-* Unsupported tests (runnable but incomplete)
-    - `F` Standard Extension for Single-Precision Floating-Point
 
 Detail in riscv-arch-test:
 * [RISCOF document](https://riscof.readthedocs.io/en/stable/)
 * [riscv-arch-test repository](https://github.com/riscv-non-isa/riscv-arch-test)
 * [RISC-V Architectural Testing Framework](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/doc/README.adoc)
 * [RISC-V Architecture Test Format Specification](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/spec/TestFormatSpec.adoc)
+
+## Benchmarks
+
+The benchmarks are classified into three categories based on their characteristics:
+| Category                 | Benchmark  | Description |
+| -------------------------| ---------- | ----------- |
+| Computing intensive      | puzzle     | A sliding puzzle where numbered square tiles are arranged randomly with one tile missing, designed for solving the N-puzzle problem. |
+|                          | Pi         | Calculates the millionth digit of π. |
+|                          | miniz      | Compresses and decompresses 8 MiB of data. |
+|                          | primes     | Finds the largest prime number below 33333333. |
+|                          | sha512     | Computes the SHA-512 hash of 64 MiB of data. |
+| I/O intensive            | Richards   | An OS task scheduler simulation benchmark for comparing system implementations. |
+|                          | Dhrystone  | Evaluates string operations, involves frequent memory I/O, and generates the performance metric. |
+| Computing and I/O Hybrid | Mandelbrot | A benchmark based on the Mandelbrot set, which uses fixed-point arithmetic and involves numerous integer operations. |
+|                          | AES        | Includes 23 encryption and decryption algorithms adhering to the Advanced Encryption Standard. |
+|                          | Nqueens    | A puzzle benchmark where n queens are placed on an n × n chessboard without attacking each other, using deep recursion for execution. |
+|                          | qsort      | Sorts an array with 50 million items. |
+
+These benchmarks performed by rv32emu (interpreter-only mode) and [Spike](https://github.com/riscv-software-src/riscv-isa-sim) v1.1.0. Ran on Intel Core i7-11700 CPU running at 2.5 GHz and an Ampere [eMAG](https://en.wikichip.org/wiki/ampere_computing/emag) 8180
+microprocessor equipped with 32 Arm64 cores, capable of speeds up to 3.3 GHz. Both systems ran Ubuntu Linux 22.04.1 LTS. We utilized gcc version 12.3, configured as riscv32-unknown-elf-gcc.
+
+The figures below illustrate the normalized execution time of rv32emu and Spike, where **the shorter indicates better performance**.
+
+_x86-64_
+![](docs/interp-bench-x64.png)
+
+_Arm64_
+![](docs/interp-bench-arm64.png)
+
+### Continuous Benchmarking
+
+Continuous benchmarking is integrated into GitHub Actions,
+allowing the committer and reviewer to examine the comment on benchmark comparisons between
+the pull request commit(s) and the latest commit on the master branch within the conversation.
+This comment is generated by the benchmark CI and provides an opportunity for discussion before merging.
+
+The results of the benchmark will be rendered on a [GitHub page](https://sysprog21.github.io/rv32emu-bench/).
+Check [benchmark-action/github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) for the reference of benchmark CI workflow.
+
+There are several files that have the potential to significantly impact the performance of `rv32emu`, including:
+* `src/decode.c`
+* `src/rv32_template.c`
+* `src/emulate.c`
+
+As a result, any modifications made to these files will trigger the benchmark CI.
 
 ## GDB Remote Debugging
 
@@ -182,7 +232,9 @@ For example, if you want to read the register x10 (a0), then run the following c
 $ build/rv32emu -d - -q out.elf | jq .x10
 ```
 
-## RISC-V Instructions/Registers Usage Statistics
+## Usage Statistics
+
+### RISC-V Instructions/Registers
 
 This is a static analysis tool for assessing the usage of RV32 instructions/registers
 in a given target program.
@@ -206,26 +258,66 @@ _Example Instructions Histogram_
 _Example Registers Histogram_
 ![Registers Hisrogram Example](docs/histogram-reg.png)
 
-## Continuous Benchmarking
+### Basic Block
 
-Continuous benchmarking is integrated into GitHub Actions,
-allowing the committer and reviewer to examine the comment on benchmark comparisons between
-the pull request commit(s) and the latest commit on the master branch within the conversation.
-This comment is generated by the benchmark CI and provides an opportunity for discussion before merging.
+To install [lolviz](https://github.com/parrt/lolviz), use the following command:
+```shell
+$ pip install lolviz
+```
 
-The results of the benchmark will be rendered on a [GitHub page](https://sysprog21.github.io/rv32emu-bench/).
-Check [benchmark-action/github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) for the reference of benchmark CI workflow.
+For macOS users, it might be necessary to install additional dependencies:
+```shell
+$ brew install graphviz
+```
 
-There are several files that have the potential to significantly impact the performance of `rv32emu`, including:
-* `src/decode.c`
-* `src/rv32_template.c`
-* `src/emulate.c`
+Build the profiling data by executing `rv32emu`.
+This can be done as follows:
+```shell
+$ build/rv32emu -p build/[test_program].elf
+```
 
-As a result, any modifications made to these files will trigger the benchmark CI.
+To analyze the profiling data, use the `rv_profiler` tool with the desired options:
+```shell
+$ tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
+```
+
+## WebAssembly Translation
+### Build and run
+`rv32emu` relies on [Emscripten](https://emscripten.org/docs/getting_started/downloads.html) to be compiled to WebAssembly. Thus, the target system should have
+the Emscripten version 3.1.51 installed.
+
+Moreover, `rv32emu` leverages the tail call optimization(TCO) strategy and we have tested the WebAssembly
+execution in Chrome with at least MAJOR 112 and Firefox with at least MAJOR 121 since they supports
+tail call feature. Thus, please check and update your browsers if necessary or install the suitable browsers
+before going further.
+
+Source your Emscripten SDK environment before make. For macOS and Linux user:
+```shell
+$ source ~/emsdk/emsdk_env.sh
+```
+Change the Emscripten SDK environment path if necessary.
+
+At this point, you can build and start a web server service to serve WebAssembly by running:
+```shell
+$ make CC=emcc start-web
+```
+You would see the server's IP:PORT in your terminal. Copy and paste it to the browsers and
+you just access the index page of `rv32emu`.
+
+### Index page
+You would see a dropdown menu which you can use to select the ELF executable. Select one and
+click the Run button to run it.
+
+Alternatively, you may want to view a hosted `rv32emu` [demo page](https://sysprog21.github.io/rv32emu-demo/) since building takes some time.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
+## License
+
+`rv32emu` is available under a permissive MIT-style license.
+Use of this source code is governed by a MIT license that can be found in the [LICENSE](LICENSE) file.
 
 ## External sources
 
@@ -236,8 +328,10 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `chacha20.elf` : See [tests/chacha20](tests/chacha20)
 * `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark) [RV32M]
 * `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
-* `donut.elf` : See [donut](tests/donut.c)
+* `donut.elf` : See [donut.c](tests/donut.c)
 * `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
+* `fcalc.elf` : See [fcalc.c](tests/fcalc.c)
+* `hamilton.elf` : See [hamilton.c](tests/hamilton.c)
 * `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
 * `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)
 * `lena.elf`: See [tests/lena.c](tests/lena.c)
@@ -253,21 +347,28 @@ In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
 * `richards.elf` : See [tests/richards.c](tests/richards.c)
 * `rvsim.elf` : See [tests/rvsim.c](tests/rvsim.c)
 * `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
+* `smolnes.elf` : See [tests/smolnes](tests/smolnes.c) [RV32M]
+* `spirograph.elf` : See [tests/spirograph.c](tests/spirograph.c)
 * `stream.elf` : See [tests/stream](tests/stream.c) [RV32MF]
-
+* `qsort.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `miniz.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `primes.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `sha512.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+* `numeric_sort.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+* `FP_emulation.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+* `bitfield.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+* `idea.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench) 
+* `assignment.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+* `string_sort.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench) 
+* `huffman.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
 ## Reference
 
 * [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)
 * [Writing a RISC-V Emulator in Rust](https://book.rvemu.app/)
+* [Bare metal C on my RISC-V toy CPU](https://florian.noeding.com/posts/risc-v-toy-cpu/cpu-from-scratch/)
 * [Juraj's RISC-V note](https://jborza.com/tags/riscv/)
 * [libriscv: RISC-V userspace emulator library](https://github.com/fwsGonzo/libriscv)
 * [GUI-VP: RISC-V based Virtual Prototype (VP) for graphical application development](https://github.com/ics-jku/GUI-VP)
 * [LupV: an education-friendly RISC-V based system emulator](https://gitlab.com/luplab/lupv)
-* [yutongshen/RISC-V-Simulator](https://github.com/yutongshen/RISC-V-Simulator)
 * [mini-rv32ima](https://github.com/cnlohr/mini-rv32ima) / [video: Writing a Really Tiny RISC-V Emulator](https://youtu.be/YT5vB3UqU_E)
 * [RVVM](https://github.com/LekKit/RVVM)
-
-## License
-
-`rv32emu` is available under a permissive MIT-style license.
-Use of this source code is governed by a MIT license that can be found in the [LICENSE](LICENSE) file.

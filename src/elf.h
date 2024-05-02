@@ -32,9 +32,7 @@ enum {
     EI_NIDENT = 16,
 };
 
-/*
- * Section Types
- */
+/* Section Types */
 enum {
     SHT_NULL = 0,     /* Section header table entry unused */
     SHT_PROGBITS = 1, /* Program data */
@@ -55,9 +53,7 @@ enum {
     SHT_HIUSER = 0xffffffff, /* End of application-specific */
 };
 
-/*
- * Section Attribute Flags
- */
+/* Section Attribute Flags */
 enum {
     SHF_WRITE = 0x1,
     SHF_ALLOC = 0x2,
@@ -129,7 +125,7 @@ struct Elf32_Sym {
 
 typedef struct elf_internal elf_t;
 
-elf_t *elf_new();
+elf_t *elf_new(void);
 void elf_delete(elf_t *e);
 
 /* Open an ELF file from specified path */
@@ -145,13 +141,10 @@ const char *elf_find_symbol(elf_t *e, uint32_t addr);
 bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end);
 
 /* Load the ELF file into a memory abstraction */
-bool elf_load(elf_t *e, riscv_t *rv, memory_t *mem);
+bool elf_load(elf_t *e, memory_t *mem);
 
 /* get the ELF header */
 struct Elf32_Ehdr *get_elf_header(elf_t *e);
 
 /* get the first byte of ELF raw data */
 uint8_t *get_elf_first_byte(elf_t *e);
-
-/* get all of the ELF section headers */
-struct Elf32_Shdr **get_elf_section_headers(elf_t *e);

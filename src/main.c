@@ -3,13 +3,17 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
+#include <libgen.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "elf.h"
-#include "state.h"
+#include "riscv.h"
+#include "utils.h"
 
 /* enable program trace mode */
 static bool opt_trace = false;
@@ -31,70 +35,24 @@ static char *signature_out_file;
 static bool opt_quiet_outputs = false;
 
 /* target executable */
-static const char *opt_prog_name = "a.out";
+static char *opt_prog_name;
 
 /* target argc and argv */
 static int prog_argc;
 static char **prog_args;
-static const char *optstr = "tgqmhd:a:";
+static const char *optstr = "tgqmhpd:a:";
 
 /* enable misaligned memory access */
 static bool opt_misaligned = false;
 
-#define MEMIO(op) on_mem_##op
-#define IO_HANDLER_IMPL(type, op, RW)                                     \
-    static IIF(RW)(                                                       \
-        /* W */ void MEMIO(op)(riscv_word_t addr, riscv_##type##_t data), \
-        /* R */ riscv_##type##_t MEMIO(op)(riscv_word_t addr))            \
-    {                                                                     \
-        IIF(RW)                                                           \
-        (memory_##op(addr, (uint8_t *) &data), return memory_##op(addr)); \
-    }
-
-#define R 0
-#define W 1
-
-IO_HANDLER_IMPL(word, ifetch, R)
-IO_HANDLER_IMPL(word, read_w, R)
-IO_HANDLER_IMPL(half, read_s, R)
-IO_HANDLER_IMPL(byte, read_b, R)
-
-IO_HANDLER_IMPL(word, write_w, W)
-IO_HANDLER_IMPL(half, write_s, W)
-IO_HANDLER_IMPL(byte, write_b, W)
-
-#undef R
-#undef W
-
-/* run: printing out an instruction trace */
-static void run_and_trace(riscv_t *rv, elf_t *elf)
-{
-    const uint32_t cycles_per_step = 1;
-
-    for (; !rv_has_halted(rv);) { /* run until the flag is done */
-        /* trace execution */
-        uint32_t pc = rv_get_pc(rv);
-        const char *sym = elf_find_symbol(elf, pc);
-        printf("%08x  %s\n", pc, (sym ? sym : ""));
-
-        /* step instructions */
-        rv_step(rv, cycles_per_step);
-    }
-}
-
-static void run(riscv_t *rv)
-{
-    const uint32_t cycles_per_step = 100;
-    for (; !rv_has_halted(rv);) { /* run until the flag is done */
-        /* step instructions */
-        rv_step(rv, cycles_per_step);
-    }
-}
+/* dump profiling data */
+static bool opt_prof_data = false;
+static char *prof_out_file;
 
 static void print_usage(const char *filename)
 {
     fprintf(stderr,
-            "RV32I[MA] Emulator which loads an ELF file to execute.\n"
+            "RV32I[MACF] Emulator which loads an ELF file to execute.\n"
             "Usage: %s [options] [filename] [arguments]\n"
             "Options:\n"
             "  -t : print executable trace\n"
@@ -107,6 +65,7 @@ static void print_usage(const char *filename)
             "  -a [filename] : dump signature to the given file, "
             "required by arch-test test\n"
             "  -m : enable misaligned memory access\n"
+            "  -p : generate profiling data\n"
             "  -h : show this message\n",
             filename);
 }
@@ -136,6 +95,9 @@ static bool parse_args(int argc, char **args)
         case 'm':
             opt_misaligned = true;
             break;
+        case 'p':
+            opt_prof_data = true;
+            break;
         case 'd':
             opt_dump_regs = true;
             registers_out_file = optarg;
@@ -157,11 +119,30 @@ static bool parse_args(int argc, char **args)
      */
     prog_args = &args[optind];
     opt_prog_name = prog_args[0];
+
+    if (opt_prof_data) {
+        char cwd_path[PATH_MAX] = {0};
+        assert(getcwd(cwd_path, PATH_MAX));
+
+        char rel_path[PATH_MAX] = {0};
+        memcpy(rel_path, args[0], strlen(args[0]) - 7 /* strlen("rv32emu") */);
+
+        char *prog_basename = basename(opt_prog_name);
+        prof_out_file = malloc(strlen(cwd_path) + 1 + strlen(rel_path) +
+                               strlen(prog_basename) + 5 + 1);
+        assert(prof_out_file);
+
+        sprintf(prof_out_file, "%s/%s%s.prof", cwd_path, rel_path,
+                prog_basename);
+    }
     return true;
 }
 
-static void dump_test_signature(elf_t *elf)
+static void dump_test_signature(const char *prog_name)
 {
+    elf_t *elf = elf_new();
+    assert(elf && elf_open(elf, prog_name));
+
     uint32_t start = 0, end = 0;
     const struct Elf32_Sym *sym;
     FILE *f = fopen(signature_out_file, "w");
@@ -184,7 +165,33 @@ static void dump_test_signature(elf_t *elf)
         fprintf(f, "%08x\n", memory_read_w(addr));
 
     fclose(f);
+    elf_delete(elf);
 }
+
+/* CYCLE_PER_STEP shall be defined on different runtime */
+#ifndef CYCLE_PER_STEP
+#define CYCLE_PER_STEP 100
+#endif
+/* MEM_SIZE shall be defined on different runtime */
+#ifndef MEM_SIZE
+#define MEM_SIZE 0xFFFFFFFFULL /* 2^32 - 1 */
+#endif
+#define STACK_SIZE 0x1000       /* 4096 */
+#define ARGS_OFFSET_SIZE 0x1000 /* 4096 */
+
+/* To use rv_halt function in wasm, we have to expose RISC-V instance(rv),
+ * but we can add a layer to not expose the instance and make rv_halt
+ * callable. A small trade-off is that declaring instance as a global
+ * variable. rv_halt is useful when cancelling the main loop of wasm,
+ * see rv_step in emulate.c for more detail
+ */
+riscv_t *rv;
+#ifdef __EMSCRIPTEN__
+void indirect_rv_halt()
+{
+    rv_halt(rv);
+}
+#endif
 
 int main(int argc, char **args)
 {
@@ -193,65 +200,38 @@ int main(int argc, char **args)
         return 1;
     }
 
-    /* open the ELF file from the file system */
-    elf_t *elf = elf_new();
-    if (!elf_open(elf, opt_prog_name)) {
-        fprintf(stderr, "Unable to open ELF file '%s'\n", opt_prog_name);
-        return 1;
-    }
+    int run_flag = 0;
+    run_flag |= opt_trace;
+#if RV32_HAS(GDBSTUB)
+    run_flag |= opt_gdbstub << 1;
+#endif
+    run_flag |= opt_prof_data << 2;
 
-    /* install the I/O handlers for the RISC-V runtime */
-    const riscv_io_t io = {
-        /* memory read interface */
-        .mem_ifetch = MEMIO(ifetch),
-        .mem_read_w = MEMIO(read_w),
-        .mem_read_s = MEMIO(read_s),
-        .mem_read_b = MEMIO(read_b),
-
-        /* memory write interface */
-        .mem_write_w = MEMIO(write_w),
-        .mem_write_s = MEMIO(write_s),
-        .mem_write_b = MEMIO(write_b),
-
-        /* system */
-        .on_ecall = ecall_handler,
-        .on_ebreak = ebreak_handler,
+    vm_attr_t attr = {
+        .mem_size = MEM_SIZE,
+        .stack_size = STACK_SIZE,
+        .args_offset_size = ARGS_OFFSET_SIZE,
+        .argc = prog_argc,
+        .argv = prog_args,
+        .log_level = 0,
+        .run_flag = run_flag,
+        .profile_output_file = prof_out_file,
+        .data.user = malloc(sizeof(vm_user_t)),
+        .cycle_per_step = CYCLE_PER_STEP,
         .allow_misalign = opt_misaligned,
     };
-
-    state_t *state = state_new();
-
-    /* find the start of the heap */
-    const struct Elf32_Sym *end;
-    if ((end = elf_get_symbol(elf, "_end")))
-        state->break_addr = end->st_value;
+    assert(attr.data.user);
+    attr.data.user->elf_program = opt_prog_name;
 
     /* create the RISC-V runtime */
-    riscv_t *rv =
-        rv_create(&io, state, prog_argc, prog_args, !opt_quiet_outputs);
+    rv = rv_create(&attr);
     if (!rv) {
         fprintf(stderr, "Unable to create riscv emulator\n");
-        return 1;
+        attr.exit_code = 1;
+        goto end;
     }
 
-    /* load the ELF file into the memory abstraction */
-    if (!elf_load(elf, rv, state->mem)) {
-        fprintf(stderr, "Unable to load ELF file '%s'\n", args[1]);
-        return 1;
-    }
-
-    /* run based on the specified mode */
-    if (opt_trace) {
-        run_and_trace(rv, elf);
-    }
-#if RV32_HAS(GDBSTUB)
-    else if (opt_gdbstub) {
-        rv_debug(rv);
-    }
-#endif
-    else {
-        run(rv);
-    }
+    rv_run(rv);
 
     /* dump registers as JSON */
     if (opt_dump_regs)
@@ -259,12 +239,15 @@ int main(int argc, char **args)
 
     /* dump test result in test mode */
     if (opt_arch_test)
-        dump_test_signature(elf);
+        dump_test_signature(opt_prog_name);
 
     /* finalize the RISC-V runtime */
-    elf_delete(elf);
     rv_delete(rv);
-    state_delete(state);
 
-    return 0;
+    printf("inferior exit code %d\n", attr.exit_code);
+
+end:
+    free(attr.data.user);
+    free(prof_out_file);
+    return attr.exit_code;
 }

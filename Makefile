@@ -11,21 +11,23 @@ CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
 
-# Set the default stack pointer
-CFLAGS += -D DEFAULT_STACK_ADDR=0xFFFFE000
-# Set the default args starting address
-CFLAGS += -D DEFAULT_ARGS_ADDR=0xFFFFF000
-
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)
-ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)",)
-$(warning LTO is only supported in clang and gcc.)
+ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)$(CC_IS_EMCC)", "")
+$(warning LTO is only supported in clang, gcc and emcc.)
 override ENABLE_LTO := 0
 endif
 endif
 $(call set-feature, LTO)
 ifeq ($(call has, LTO), 1)
+ifeq ("$(CC_IS_EMCC)", "1")
+ifeq ($(call has, SDL), 1)
+$(warning LTO is not supported to build emscripten-port SDL using emcc.)
+else
+CFLAGS += -flto
+endif
+endif
 ifeq ("$(CC_IS_GCC)", "1")
 CFLAGS += -flto
 endif
@@ -40,14 +42,6 @@ CFLAGS += $(CFLAGS_NO_CET)
 
 OBJS_EXT :=
 
-# Control and Status Register (CSR)
-ENABLE_Zicsr ?= 1
-$(call set-feature, Zicsr)
-
-# Instruction-Fetch Fence
-ENABLE_Zifencei ?= 1
-$(call set-feature, Zifencei)
-
 # Integer Multiplication and Division instructions
 ENABLE_EXT_M ?= 1
 $(call set-feature, EXT_M)
@@ -56,23 +50,40 @@ $(call set-feature, EXT_M)
 ENABLE_EXT_A ?= 1
 $(call set-feature, EXT_A)
 
-# Compressed extension instructions
-ENABLE_EXT_C ?= 1
-$(call set-feature, EXT_C)
-
 # Single-precision floating point instructions
 ENABLE_EXT_F ?= 1
 $(call set-feature, EXT_F)
 ifeq ($(call has, EXT_F), 1)
+AR := ar
+ifeq ("$(CC_IS_EMCC)", "1")
+AR = emar
+endif
+SOFTFLOAT_OUT = $(abspath $(OUT)/softfloat)
+src/softfloat/build/Linux-RISCV-GCC/Makefile:
+	git submodule update --init src/softfloat/
+SOFTFLOAT_LIB := $(SOFTFLOAT_OUT)/softfloat.a
+$(SOFTFLOAT_LIB): src/softfloat/build/Linux-RISCV-GCC/Makefile
+	$(MAKE) -C $(dir $<) BUILD_DIR=$(SOFTFLOAT_OUT) CC=$(CC) AR=$(AR)
+$(OUT)/decode.o $(OUT)/riscv.o: $(SOFTFLOAT_LIB)
+LDFLAGS += $(SOFTFLOAT_LIB)
 LDFLAGS += -lm
 endif
 
-# Enable adaptive replacement cache policy, default is LRU
-ENABLE_ARC ?= 0
-$(call set-feature, ARC)
+# Compressed extension instructions
+ENABLE_EXT_C ?= 1
+$(call set-feature, EXT_C)
+
+# Control and Status Register (CSR)
+ENABLE_Zicsr ?= 1
+$(call set-feature, Zicsr)
+
+# Instruction-Fetch Fence
+ENABLE_Zifencei ?= 1
+$(call set-feature, Zifencei)
 
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
+ifneq ("$(CC_IS_EMCC)", "1") # note that emcc generates port SDL headers/library, so it does not requires system SDL headers/library
 ifeq ($(call has, SDL), 1)
 ifeq (, $(shell which sdl2-config))
 $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
@@ -89,6 +100,7 @@ OBJS_EXT += syscall_sdl.o
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 LDFLAGS += $(shell sdl2-config --libs) -pthread
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
+endif
 endif
 
 ENABLE_GDBSTUB ?= 0
@@ -110,13 +122,39 @@ gdbstub-test: $(BIN)
 	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif
 
+ENABLE_JIT ?= 0
+$(call set-feature, JIT)
+ifeq ($(call has, JIT), 1)
+OBJS_EXT += jit.o
+ifneq ($(processor),$(filter $(processor),x86_64 aarch64 arm64))
+$(error JIT mode only supports for x64 and arm64 target currently.)
+endif
+
+src/rv32_jit.c:
+	$(Q)tools/gen-jit-template.py $(CFLAGS) > $@
+
+$(OUT)/jit.o: src/jit.c src/rv32_jit.c
+	$(VECHO) "  CC\t$@\n"
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+endif
 # For tail-call elimination, we need a specific set of build flags applied.
 # FIXME: On macOS + Apple Silicon, -fno-stack-protector might have a negative impact.
+
+ENABLE_UBSAN ?= 0
+ifeq ("$(ENABLE_UBSAN)", "1")
+CFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
+LDFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
+endif
+
 $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-stack-check -fno-stack-protector
 
-# Clear the .DEFAULT_GOAL special variable, so that the following turns
-# to the first target after .DEFAULT_GOAL is not set.
-.DEFAULT_GOAL :=
+# .DEFAULT_GOAL should be set to all since the very first target is not all
+# after including "mk/external.mk"
+.DEFAULT_GOAL := all
+
+include mk/external.mk
+
+include mk/wasm.mk
 
 all: config $(BIN)
 
@@ -137,13 +175,13 @@ OBJS := \
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps := $(OBJS:%.o=%.o.d)
 
-$(OUT)/%.o: src/%.c
+$(OUT)/%.o: src/%.c $(deps_emcc)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
 $(BIN): $(OBJS)
 	$(VECHO) "  LD\t$@\n"
-	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
+	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $^ $(LDFLAGS)
 
 config: $(CONFIG_FILE)
 $(CONFIG_FILE):
@@ -161,6 +199,7 @@ include mk/tests.mk
 CHECK_ELF_FILES := \
 	hello \
 	puzzle \
+	fcalc
 
 ifeq ($(call has, EXT_M), 1)
 CHECK_ELF_FILES += \
@@ -169,6 +208,7 @@ endif
 
 EXPECTED_hello = Hello World!
 EXPECTED_puzzle = success in 2005 trials
+EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 
 check: $(BIN)
@@ -184,32 +224,38 @@ check: $(BIN)
 
 EXPECTED_aes_sha1 = 1242a6757c8aef23e50b5264f5941a2f4b4a347e  -
 misalign: $(BIN)
-	$(Q)$(PRINTF) "Running aes.elf ... "; 
+	$(Q)$(PRINTF) "Running aes.elf ... ";
 	$(Q)if [ "$(shell $(BIN) -m $(OUT)/aes.elf | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \
 	    fi
 
-include mk/external.mk
-
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)
-doom: $(BIN) $(DOOM_DATA)
-	(cd $(OUT); ../$(BIN) doom.elf)
+doom_action := (cd $(OUT); ../$(BIN) doom.elf)
+doom_deps += $(DOOM_DATA) $(BIN)
+doom: $(doom_deps)
+	$(doom_action)
+
 ifeq ($(call has, EXT_F), 1)
-quake: $(BIN) $(QUAKE_DATA)
-	(cd $(OUT); ../$(BIN) quake.elf)
+quake_action := (cd $(OUT); ../$(BIN) quake.elf)
+quake_deps += $(QUAKE_DATA) $(BIN)
+quake: $(quake_deps)
+	$(quake_action)
 endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(CACHE_OUT)
+	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
+	$(RM) -r $(TIMIDITY_DATA)
 	$(RM) -r $(OUT)/id1
+	$(RM) -r $(DEMO_DIR)
 	$(RM) *.zip
 	$(RM) -r $(OUT)/mini-gdbstub
 	-$(RM) $(OUT)/.config
+	-$(RM) -r $(OUT)/softfloat
 
 -include $(deps)

@@ -17,4 +17,4 @@
 void mt19937_init(uint64_t seed);
 
 /* Generate and extract a 32-bit random number */
-uint64_t mt19937_extract();
+uint64_t mt19937_extract(void);

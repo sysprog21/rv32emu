@@ -3,8 +3,7 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-/*
- * C Implementation for C++ std::map using red-black tree.
+/* C Implementation for C++ std::map using red-black tree.
  *
  * Any data type can be stored in a map, just like std::map.
  * A map instance requires the specification of two file types:

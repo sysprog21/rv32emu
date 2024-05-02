@@ -1,0 +1,20 @@
+FROM ubuntu:22.04 as base
+
+# when using apt install gcc-riscv64-unknown-elf, this will cause "unsupported ISA subset 'z'" during compilation
+# thus, we are building from scratch, following the version here -> https://github.com/sysprog21/rv32emu/blob/master/.ci/riscv-toolchain-install.sh
+# for x86-64, we can optimize this part and take the nightly build directly, but not for aarch64 
+RUN apt-get update && \
+    apt install -y \
+    git autoconf automake autotools-dev curl libmpc-dev libmpfr-dev libgmp-dev gawk build-essential bison flex texinfo gperf libtool patchutils bc zlib1g-dev libexpat-dev && \
+    rm -rf /var/lib/apt/lists/*
+RUN git clone --recursive https://github.com/riscv/riscv-gnu-toolchain
+RUN cd riscv-gnu-toolchain && \
+    git checkout tags/2023.10.06 && \
+    ./configure --prefix=/opt/riscv --with-arch=rv32gc --with-abi=ilp32d && \
+    make -j$(nproc) && \
+    make clean
+
+FROM ubuntu:22.04 as final
+
+# Keep the GNU Toolchain files only
+COPY --from=base /opt/riscv/ /opt/riscv/

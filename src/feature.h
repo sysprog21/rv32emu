@@ -17,14 +17,14 @@
 #define RV32_FEATURE_EXT_A 1
 #endif
 
-/* Standard Extension for Compressed Instructions */
-#ifndef RV32_FEATURE_EXT_C
-#define RV32_FEATURE_EXT_C 1
-#endif
-
 /* Standard Extension for Single-Precision Floating Point Instructions */
 #ifndef RV32_FEATURE_EXT_F
 #define RV32_FEATURE_EXT_F 1
+#endif
+
+/* Standard Extension for Compressed Instructions */
+#ifndef RV32_FEATURE_EXT_C
+#define RV32_FEATURE_EXT_C 1
 #endif
 
 /* Control and Status Register (CSR) */
@@ -47,9 +47,9 @@
 #define RV32_FEATURE_GDBSTUB 0
 #endif
 
-/* Import adaptive replacement cache to manage block */
-#ifndef RV32_FEATURE_ARC
-#define RV32_FEATURE_ARC 0
+/* Experimental just-in-time compiler */
+#ifndef RV32_FEATURE_JIT
+#define RV32_FEATURE_JIT 0
 #endif
 
 /* Feature test macro */

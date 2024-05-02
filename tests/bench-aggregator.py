@@ -3,8 +3,14 @@
 import json
 import subprocess
 
-def run_benchmark(cmd):
-    subprocess.run(cmd, shell=True, check=True)
+def run_benchmark(b):
+    interp = None
+    if "sh" in b:
+        interp = "bash"
+    elif "py" in b:
+        interp = "python3"
+
+    subprocess.run(args=[interp, b], shell=False, check=True)
 
 def load_benchmark(file):
     f = open(file, "r")
@@ -12,15 +18,15 @@ def load_benchmark(file):
 
 # run benchmarks
 benchmarks = [
-    "bash tests/dhrystone.sh",
-    "python3 tests/coremark.py"
+    "tests/dhrystone.sh",
+    "tests/coremark.py"
 ]
 for b in benchmarks:
     run_benchmark(b)
 
 # combine benchmarks output data
 benchmarks_output = [
-    "dhrystone_output.json", 
+    "dhrystone_output.json",
     "coremark_output.json"
 ]
 benchmark_data = [load_benchmark(bo) for bo in benchmarks_output]

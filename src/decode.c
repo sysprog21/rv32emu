@@ -381,6 +381,7 @@ static inline void decode_r4type(rv_insn_t *ir, const uint32_t insn)
     ir->rs1 = decode_rs1(insn);
     ir->rs2 = decode_rs2(insn);
     ir->rs3 = decode_r4type_rs3(insn);
+    ir->rm = decode_funct3(insn);
 }
 #endif
 
@@ -464,6 +465,8 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
         break;
     case 1: /* SLLI: Shift Left Logical */
         ir->opcode = rv_insn_slli;
+        if (unlikely(ir->imm & (1 << 5)))
+            return false;
         break;
     case 2: /* SLTI: Set on Less Than Immediate */
         ir->opcode = rv_insn_slti;
@@ -481,6 +484,8 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = (ir->imm & ~0x1f)
                          ? rv_insn_srai  /* SRAI: Shift Right Arithmetic */
                          : rv_insn_srli; /* SRLI: Shift Right Logical */
+        if (unlikely(ir->imm & (1 << 5)))
+            return false;
         break;
     case 6: /* ORI: OR Immediate */
         ir->opcode = rv_insn_ori;
@@ -1031,7 +1036,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
      * FSGNJN.S  0010000 rs2   rs1 001 rd 1010011
      * FSGNJX.S  0010000 rs2   rs1 010 rd 1010011
      * FCVT.W.S  1100000 00000 rs1 rm  rd 1010011
-     * FCVT.W.S  1100000 00000 rs1 rm  rd 1010011
+     * FCVT.WU.S 1100000 00001 rs1 rm  rd 1010011
      * FMIN.S    0010100 rs2   rs1 000 rd 1010011
      * FMAX.S    0010100 rs2   rs1 001 rd 1010011
      * FMV.X.W   1110000 00000 rs1 000 rd 1010011
@@ -1044,7 +1049,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
      */
 
     /* decode R-type */
-    uint8_t funct3 = decode_funct3(insn);
+    ir->rm = decode_funct3(insn);
     decode_rtype(ir, insn);
 
     /* dispatch from funct7 field */
@@ -1066,7 +1071,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         break;
     case 0b0010000:
         /* dispatch from rm region */
-        switch (funct3) {
+        switch (ir->rm) {
         case 0b000: /* FSGNJ.S */
             ir->opcode = rv_insn_fsgnjs;
             break;
@@ -1086,14 +1091,14 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         case 0b00000: /* FCVT.W.S */
             ir->opcode = rv_insn_fcvtws;
             break;
-        case 0b00001: /* FCVT.W.S */
+        case 0b00001: /* FCVT.WU.S */
             ir->opcode = rv_insn_fcvtwus;
             break;
         }
         break;
     case 0b0010100:
         /* dispatch from rm region */
-        switch (funct3) {
+        switch (ir->rm) {
         case 0b000: /* FMIN.S */
             ir->opcode = rv_insn_fmins;
             break;
@@ -1106,7 +1111,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         break;
     case 0b1110000:
         /* dispatch from rm region */
-        switch (funct3) {
+        switch (ir->rm) {
         case 0b000: /* FMV.X.W */
             ir->opcode = rv_insn_fmvxw;
             break;
@@ -1119,7 +1124,7 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         break;
     case 0b1010000:
         /* dispatch from rm region */
-        switch (funct3) {
+        switch (ir->rm) {
         case 0b010: /* FEQ.S */
             ir->opcode = rv_insn_feqs;
             break;
@@ -1668,15 +1673,92 @@ static inline bool op_cbnez(rv_insn_t *ir, const uint32_t insn)
 #define op_cbnez OP_UNIMP
 #endif /* RV32_HAS(EXT_C) */
 
-/* TODO: RV32C.F support */
-#define op_cfldsp OP_UNIMP
-#define op_cflwsp OP_UNIMP
-#define op_cfswsp OP_UNIMP
-#define op_cfsdsp OP_UNIMP
-#define op_cfld OP_UNIMP
-#define op_cflw OP_UNIMP
+#if RV32_HAS(EXT_C) && RV32_HAS(EXT_F)
+/* C.FLWSP: CI-format
+ *  15    13  12   11   7 6   2 1  0
+ * | funct3 | imm |  rd  | imm | op |
+ */
+static inline bool op_cflwsp(rv_insn_t *ir, const uint32_t insn)
+{
+    /* inst    funct3 imm     rd    imm           op
+     * -------+------+-------+-----+-------------+--
+     * C.FLWSP 001    uimm[5] rd    uimm[4:2|7:6] 10
+     */
+    uint16_t tmp = 0;
+    tmp |= (insn & 0x70) >> 2;
+    tmp |= (insn & 0x0c) << 4;
+    tmp |= (insn & 0x1000) >> 7;
+    ir->imm = tmp;
+    ir->rd = c_decode_rd(insn);
+    ir->opcode = rv_insn_cflwsp;
+    return true;
+}
+
+/* C.FSWSP: CSS-Format
+ *  15    13 12    7 6   2 1  0
+ * | funct3 |  imm  | rs2 | op |
+ */
+static inline bool op_cfswsp(rv_insn_t *ir, const uint32_t insn)
+{
+    /* inst    funct3 imm           rs2 op
+     * -------+------+-------------+---+--
+     * C.FSWSP 111    uimm[5:2|7:6] rs2 10
+     */
+    ir->imm = (insn & 0x1e00) >> 7 | (insn & 0x180) >> 1;
+    ir->rs2 = c_decode_rs2(insn);
+    ir->opcode = rv_insn_cfswsp;
+    return true;
+}
+
+/* C.FLW: CL-format
+ *  15    13 12   10 9    7 6   5 4   2 1  0
+ * | funct3 |  imm  | rs1' | imm | rd' | op |
+ */
+static inline bool op_cflw(rv_insn_t *ir, const uint32_t insn)
+{
+    /* inst  funct3 imm       rs1' imm       rd' op
+     * -----+------+---------+----+---------+---+--
+     * C.FLW 010    uimm[5:3] rs1' uimm[7:6] rd' 00
+     */
+    uint16_t tmp = 0;
+    tmp |= (insn & 0b0000000001000000) >> 4;
+    tmp |= (insn & FC_IMM_12_10) >> 7;
+    tmp |= (insn & 0b0000000000100000) << 1;
+    ir->imm = tmp;
+    ir->rd = c_decode_rdc(insn) | 0x08;
+    ir->rs1 = c_decode_rs1c(insn) | 0x08;
+    ir->opcode = rv_insn_cflw;
+    return true;
+}
+
+/* C.FSW: CS-format
+ *  15    13 12   10 9    7 6   5 4    2 1  0
+ * | funct3 |  imm  | rs1' | imm | rs2' | op |
+ */
+static inline bool op_cfsw(rv_insn_t *ir, const uint32_t insn)
+{
+    /* inst  funct3 imm       rs1' imm       rs2' op
+     * -----+------+---------+----+---------+----+--
+     * C.FSW 110    uimm[5:3] rs1' uimm[2|6] rs2' 00
+     */
+    uint32_t tmp = 0;
+    /*               ....xxxx....xxxx     */
+    tmp |= (insn & 0b0000000001000000) >> 4;
+    tmp |= (insn & FC_IMM_12_10) >> 7;
+    tmp |= (insn & 0b0000000000100000) << 1;
+    ir->imm = tmp;
+    ir->rs1 = c_decode_rs1c(insn) | 0x08;
+    ir->rs2 = c_decode_rs2c(insn) | 0x08;
+    ir->opcode = rv_insn_cfsw;
+    return true;
+}
+
+#else /* !(RV32_HAS(EXT_C) && RV32_HAS(EXT_F)) */
 #define op_cfsw OP_UNIMP
-#define op_cfsd OP_UNIMP
+#define op_cflw OP_UNIMP
+#define op_cfswsp OP_UNIMP
+#define op_cflwsp OP_UNIMP
+#endif /* RV32_HAS(EXT_C) && RV32_HAS(EXT_F) */
 
 /* handler for all unimplemented opcodes */
 static inline bool op_unimp(rv_insn_t *ir UNUSED, uint32_t insn UNUSED)
@@ -1710,11 +1792,11 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
     static const decode_t rvc_jump_table[] = {
     //  00             01             10          11
         OP(caddi4spn), OP(caddi),     OP(cslli),  OP(unimp),  // 000
-        OP(cfld),      OP(cjal),      OP(cfldsp), OP(unimp),  // 001
+        OP(unimp),      OP(cjal),      OP(unimp), OP(unimp),  // 001
         OP(clw),       OP(cli),       OP(clwsp),  OP(unimp),  // 010
         OP(cflw),      OP(clui),      OP(cflwsp), OP(unimp),  // 011
         OP(unimp),     OP(cmisc_alu), OP(ccr),    OP(unimp),  // 100
-        OP(cfsd),      OP(cj),        OP(cfsdsp), OP(unimp),  // 101
+        OP(unimp),      OP(cj),        OP(unimp), OP(unimp),  // 101
         OP(csw),       OP(cbeqz),     OP(cswsp),  OP(unimp),  // 110
         OP(cfsw),      OP(cbnez),     OP(cfswsp), OP(unimp),  // 111
     };

@@ -3,10 +3,12 @@ HIST_BIN := $(OUT)/rv_histogram
 # FIXME: riscv.o and map.o are dependencies of 'elf.o', not 'rv_histogram'.
 HIST_OBJS := \
 	riscv.o \
+	utils.o \
 	map.o \
 	elf.o \
 	decode.o \
 	mpool.o \
+	utils.o \
 	rv_histogram.o
 
 HIST_OBJS := $(addprefix $(OUT)/, $(HIST_OBJS))

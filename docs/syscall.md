@@ -138,9 +138,10 @@ The user must pass a continuous memory chunk that contains two tightly packed qu
 
 An event entry is made up of a 32-bit value representing the event's type and a `union` buffer containing the event's parameters.
 
-* `KEY_EVENT`: Either a key is pressed or released. Its value buffer is made up of a 32-bit universal key code and an 8-bit state flag; if the corresponding character of the pressed key is not printable, the bit right after the most significant bit is set; for example, the "a" key's corresponding character is printable, so its keycode is the ASCII code of the "a" character, which is `0x61`. However, because the left shift key doesn't have a corresponding printable key, its hexadecimal value is `0x400000E1`, with the 31 bit is set.
-* `MOUSE_MOTION_EVENT`: The cursor is moved during the current frame. This event contains two signed integer value, which is the delta of x position and y position respectively. If the relative mouse mode is enabled, the mouse movement will never be 0 because the cursor is wrapped within the canvas and is repeated whenever the cursor reaches the border.
+* `KEY_EVENT`: Either a key is pressed or released. Its value buffer is made up of a 32-bit universal key code and an 8-bit state flag; if the corresponding character of the pressed key is not printable, the bit right after the most significant bit is set; for example, the "a" key's corresponding character is printable, so its keycode is the ASCII code of the "a" character, which is `0x61`. However, because the left shift key doesn't have a corresponding printable key, its hexadecimal value is `0x400000E1`, with the 31th bit set.
+* `MOUSE_MOTION_EVENT`: The cursor is moved between the previous and the current frames. This event contains the current mouse position and how it differs from the last frame. If the relative mouse mode is enabled, the cursor is wrapped within the canvas and repeated whenever the cursor reaches the border.
 * `MOUSE_BUTTON_EVENT`: The state of a mouse button has been changed. Its value buffer contains a 8-bit button value(1 is left, 2 is middle, 3 is right and so on) and an 8-bit boolean flag that indicates whether the mouse button is pressed.
+* `QUIT_EVENT`: The program is requested to exit. Typically, the hosted program destroys the created objects and terminates when this event occurs.
 
 ### `submit_queue` - Notify the emulator a submission has been pushed into the submission queue
 
@@ -155,6 +156,7 @@ To inform the emulator that a batch of submissions should be processed, the appl
 The submission entry is structured similarly to an event entry, with a 32-bit type field and an associated dynamic-sized value buffer whose width depends on the type of submission.
 
 * `RELATIVE_MODE_SUBMISSION`: Enable or disable the mouse relative mode. If the mouse relative mode is enabled, the mouse cursor is wrapped within the window border, it's associated with an 8-bit wide boolean value that indicates whether the relative mouse mode should be enbled.
+* `WINDOW_TITLE_SUBMISSION`: Change the title of the SDL window. If the title is not specified, it will be `rv32emu` by default.
 
 ### `control_audio` - control the behavior of music and sound effect(sfx)
 

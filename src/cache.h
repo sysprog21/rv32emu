@@ -17,7 +17,7 @@
 
 struct cache;
 
-/** cache_create - crate a new cache
+/** cache_create - create a new cache
  * @size_bits: cache size is 2^size_bits
  * @return: a pointer points to new cache
  */

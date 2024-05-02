@@ -36,7 +36,7 @@
         _(setup_queue,      0xC0DE)  \
         _(submit_queue,     0xFEED)  \
         _(setup_audio,      0xBABE)  \
-        _(control_audio,    0xD00D), \
+        _(control_audio,    0xD00D)  \
     )
 /* clang-format on */
 

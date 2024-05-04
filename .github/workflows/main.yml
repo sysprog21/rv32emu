@@ -55,24 +55,24 @@ jobs:
             make tool
     - name: diverse configurations
       run: |
-            make distclean ENABLE_EXT_M=0 check
-            make distclean ENABLE_EXT_A=0 check
-            make distclean ENABLE_EXT_F=0 check
-            make distclean ENABLE_EXT_C=0 check
-            make distclean ENABLE_SDL=0 check
+            make distclean && make ENABLE_EXT_M=0 check
+            make distclean && make ENABLE_EXT_A=0 check
+            make distclean && make ENABLE_EXT_F=0 check
+            make distclean && make ENABLE_EXT_C=0 check
+            make distclean && make ENABLE_SDL=0 check
     - name: gdbstub test
       run: |
             make distclean ENABLE_GDBSTUB=1 gdbstub-test
     - name: JIT test
       run: |
-            make ENABLE_JIT=1 clean check
-            make ENABLE_EXT_A=0 ENABLE_JIT=1 clean check
-            make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
-            make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
+            make clean && make ENABLE_JIT=1 check
+            make clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check
+            make clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check
+            make clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check
     - name: undefined behavior test
       run: |
-            make ENABLE_UBSAN=1 clean check
-            make ENABLE_JIT=1 ENABLE_UBSAN=1 clean check
+            make clean && make ENABLE_UBSAN=1 check
+            make clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check
 
   host-arm64:
     needs: [detect-code-related-file-changes]
@@ -99,10 +99,10 @@ jobs:
         run: |
           make
           make check
-          make ENABLE_JIT=1 clean check
-          make ENABLE_EXT_A=0 ENABLE_JIT=1 clean check
-          make ENABLE_EXT_F=0 ENABLE_JIT=1 clean check
-          make ENABLE_EXT_C=0 ENABLE_JIT=1 clean check
+          make clean && make ENABLE_JIT=1 check
+          make clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check
+          make clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check
+          make clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check
 
   coding-style:
     needs: [detect-code-related-file-changes]

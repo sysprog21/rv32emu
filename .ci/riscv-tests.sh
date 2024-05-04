@@ -10,11 +10,4 @@ set -x
 export PATH=`pwd`/toolchain/riscv/bin:$PATH
 
 make clean
-make arch-test RISCV_DEVICE=I || exit 1
-make arch-test RISCV_DEVICE=IM  || exit 1
-make arch-test RISCV_DEVICE=IC || exit 1
-make arch-test RISCV_DEVICE=FCZicsr || exit 1
-make arch-test RISCV_DEVICE=IZifencei || exit 1
-make arch-test RISCV_DEVICE=IZicsr || exit 1
-make arch-test RISCV_DEVICE=FZicsr || exit 1
-make arch-test RISCV_DEVICE=IMA || exit 1
+make arch-test RISCV_DEVICE=IMAFCZicsrZifencei || exit 1

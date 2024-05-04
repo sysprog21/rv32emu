@@ -49,30 +49,30 @@ jobs:
       run: make
     - name: check + tests
       run: |
-            make check
-            make tests
-            make misalign
-            make tool
+            make check -j$(nproc)
+            make tests -j$(nproc)
+            make misalign -j$(nproc)
+            make tool -j$(nproc)
     - name: diverse configurations
       run: |
-            make distclean && make ENABLE_EXT_M=0 check
-            make distclean && make ENABLE_EXT_A=0 check
-            make distclean && make ENABLE_EXT_F=0 check
-            make distclean && make ENABLE_EXT_C=0 check
-            make distclean && make ENABLE_SDL=0 check
+            make distclean && make ENABLE_EXT_M=0 check -j$(nproc)
+            make distclean && make ENABLE_EXT_A=0 check -j$(nproc)
+            make distclean && make ENABLE_EXT_F=0 check -j$(nproc)
+            make distclean && make ENABLE_EXT_C=0 check -j$(nproc)
+            make distclean && make ENABLE_SDL=0 check -j$(nproc)
     - name: gdbstub test
       run: |
             make distclean ENABLE_GDBSTUB=1 gdbstub-test
     - name: JIT test
       run: |
-            make clean && make ENABLE_JIT=1 check
-            make clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check
-            make clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check
-            make clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check
+            make clean && make ENABLE_JIT=1 check -j$(nproc)
+            make clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
+            make clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
+            make clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
     - name: undefined behavior test
       run: |
-            make clean && make ENABLE_UBSAN=1 check
-            make clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check
+            make clean && make ENABLE_UBSAN=1 check -j$(nproc)
+            make clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
 
   host-arm64:
     needs: [detect-code-related-file-changes]
@@ -97,12 +97,12 @@ jobs:
           git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
         # Append custom commands here
         run: |
-          make
-          make check
-          make clean && make ENABLE_JIT=1 check
-          make clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check
-          make clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check
-          make clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check
+          make -j$(nproc)
+          make check -j$(nproc)
+          make clean && make ENABLE_JIT=1 check -j$(nproc)
+          make clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
+          make clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
+          make clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
 
   coding-style:
     needs: [detect-code-related-file-changes]

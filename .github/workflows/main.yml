@@ -130,9 +130,9 @@ jobs:
             sudo apt-get install -q -y clang clang-tools libsdl2-dev libsdl2-mixer-dev
       shell: bash
     - name: run scan-build without JIT
-      run: make clean && make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
+      run: make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
     - name: run scan-build with JIT
-      run: make clean && make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
+      run: make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
 
   compliance-test:
     needs: [detect-code-related-file-changes]

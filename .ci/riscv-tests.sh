@@ -11,3 +11,4 @@ export PATH=`pwd`/toolchain/riscv/bin:$PATH
 
 make clean
 make arch-test RISCV_DEVICE=IMAFCZicsrZifencei || exit 1
+make arch-test RISCV_DEVICE=FCZicsr || exit 1

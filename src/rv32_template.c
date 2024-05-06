@@ -1349,7 +1349,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
@@ -1365,7 +1365,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
@@ -1382,7 +1382,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
@@ -1399,7 +1399,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
@@ -1416,7 +1416,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
@@ -1433,7 +1433,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
@@ -1452,7 +1452,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
@@ -1471,7 +1471,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
@@ -1488,7 +1488,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv->X[ir->rs1]);
+        const uint32_t value1 = rv->io.mem_read_w(addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;

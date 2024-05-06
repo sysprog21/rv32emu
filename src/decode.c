@@ -951,7 +951,7 @@ static inline bool op_amo(rv_insn_t *ir, const uint32_t insn)
     case 0b00000: /* AMOADD.W: Atomic ADD */
         ir->opcode = rv_insn_amoaddw;
         break;
-    case 0b00100: /* AMOXOR.W: Atomix XOR */
+    case 0b00100: /* AMOXOR.W: Atomic XOR */
         ir->opcode = rv_insn_amoxorw;
         break;
     case 0b01100: /* AMOAND.W: Atomic AND */

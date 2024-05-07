@@ -109,12 +109,12 @@
  * | end;                           | set the end of condition if (src)      |
  * | predict;                       | parse the branch table of indirect     |
  * |                                | jump and search the jump target with   |
- * |                                | maxiumal frequency. Then, comparing    |
+ * |                                | maximal frequency. Then, comparing    |
  * |                                | and jumping to the target if the       |
  * |                                | program counter matches.               |
  * | break;                         | In the end of a basic block, we need   |
  * |                                | to store all VM register value to rv   |
- * |                                | data, becasue the register allocation  |
+ * |                                | data, because the register allocation  |
  * |                                | is only applied on a basic block.      |
  */
 

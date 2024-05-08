@@ -802,7 +802,7 @@ RVOP(
         alu32, 0x01, TMP, VR2;
     }))
 
-/* SUB: Substract */
+/* SUB: Subtract */
 RVOP(
     sub,
     { rv->X[ir->rd] = rv->X[ir->rs1] - rv->X[ir->rs2]; },
@@ -1320,7 +1320,7 @@ RVOP(
         if (ir->rd)
             rv->X[ir->rd] = rv->io.mem_read_w(addr);
         /* skip registration of the 'reservation set'
-         * FIXME: uimplemented
+         * FIXME: unimplemented
          */
     },
     GEN({

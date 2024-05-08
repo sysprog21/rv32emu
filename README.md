@@ -253,10 +253,10 @@ The tool includes two optional options:
 * `-r`: output usage of registers(default is usage of instructions)
 
 _Example Instructions Histogram_
-![Instructions Hisrogram Example](docs/histogram-insn.png)
+![Instructions Histogram Example](docs/histogram-insn.png)
 
 _Example Registers Histogram_
-![Registers Hisrogram Example](docs/histogram-reg.png)
+![Registers Histogram Example](docs/histogram-reg.png)
 
 ### Basic Block
 

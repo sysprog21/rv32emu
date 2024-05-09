@@ -201,11 +201,6 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     }
 }
 
-FORCE_INLINE bool csr_is_writable(uint32_t csr)
-{
-    return csr < 0xc00;
-}
-
 /* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
  * zero-extends the value to XLEN bits, and then writes it to register rd.
@@ -224,8 +219,8 @@ static uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
     if (csr == CSR_FFLAGS)
         out &= FFLAG_MASK;
 #endif
-    if (csr_is_writable(csr))
-        *c = val;
+
+    *c = val;
 
     return out;
 }
@@ -242,8 +237,8 @@ static uint32_t csr_csrrs(riscv_t *rv, uint32_t csr, uint32_t val)
     if (csr == CSR_FFLAGS)
         out &= FFLAG_MASK;
 #endif
-    if (csr_is_writable(csr))
-        *c |= val;
+
+    *c |= val;
 
     return out;
 }
@@ -263,8 +258,9 @@ static uint32_t csr_csrrc(riscv_t *rv, uint32_t csr, uint32_t val)
     if (csr == CSR_FFLAGS)
         out &= FFLAG_MASK;
 #endif
-    if (csr_is_writable(csr))
-        *c &= ~val;
+
+    *c &= ~val;
+
     return out;
 }
 #endif

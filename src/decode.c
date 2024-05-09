@@ -788,6 +788,11 @@ static inline bool op_jal(rv_insn_t *ir, const uint32_t insn)
     return true;
 }
 
+FORCE_INLINE bool csr_is_writable(const uint32_t csr)
+{
+    return csr < 0xc00;
+}
+
 /* SYSTEM: I-type
  *  31       20 19   15 14    12 11   7 6      0
  * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
@@ -886,6 +891,8 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
     default: /* illegal instruction */
         return false;
     }
+    if (!csr_is_writable(ir->imm) && ir->rs1 != rv_reg_zero)
+        return false;
     return true;
 }
 

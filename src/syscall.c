@@ -267,8 +267,15 @@ static void syscall_lseek(riscv_t *rv)
         return;
     }
 
+    long pos = ftell(handle);
+    if (pos == -1) {
+        /* error */
+        rv_set_reg(rv, rv_reg_a0, -1);
+        return;
+    }
+
     /* success */
-    rv_set_reg(rv, rv_reg_a0, 0);
+    rv_set_reg(rv, rv_reg_a0, pos);
 }
 
 static void syscall_read(riscv_t *rv)

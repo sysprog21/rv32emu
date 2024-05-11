@@ -604,13 +604,11 @@ static void block_translate(riscv_t *rv, block_t *block)
     block->pc_start = block->pc_end = rv->PC;
 
     rv_insn_t *prev_ir = NULL;
-    rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
+    rv_insn_t *ir = mpool_calloc(rv->block_ir_mp);
     block->ir_head = ir;
 
     /* translate the basic block */
     while (true) {
-        memset(ir, 0, sizeof(rv_insn_t));
-
         if (prev_ir)
             prev_ir->next = ir;
 
@@ -646,7 +644,7 @@ static void block_translate(riscv_t *rv, block_t *block)
             break;
         }
 
-        ir = mpool_alloc(rv->block_ir_mp);
+        ir = mpool_calloc(rv->block_ir_mp);
     }
 
     assert(prev_ir);

@@ -107,25 +107,26 @@ static void *mpool_extend(mpool_t *mp)
     return p;
 }
 
-void *mpool_alloc(mpool_t *mp)
+FORCE_INLINE void *mpool_alloc_helper(mpool_t *mp)
 {
-    if (!mp->chunk_count && !(mpool_extend(mp)))
-        return NULL;
-
     char *ptr = (char *) mp->free_chunk_head + sizeof(memchunk_t);
     mp->free_chunk_head = mp->free_chunk_head->next;
     mp->chunk_count--;
     return ptr;
 }
 
+void *mpool_alloc(mpool_t *mp)
+{
+    if (!mp->chunk_count && !(mpool_extend(mp)))
+        return NULL;
+    return mpool_alloc_helper(mp);
+}
+
 void *mpool_calloc(mpool_t *mp)
 {
     if (!mp->chunk_count && !(mpool_extend(mp)))
         return NULL;
-
-    char *ptr = (char *) mp->free_chunk_head + sizeof(memchunk_t);
-    mp->free_chunk_head = mp->free_chunk_head->next;
-    mp->chunk_count--;
+    char *ptr = mpool_alloc_helper(mp);
     memset(ptr, 0, mp->chunk_size);
     return ptr;
 }

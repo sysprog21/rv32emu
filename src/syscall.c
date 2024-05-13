@@ -23,23 +23,26 @@
  * system call: name, number
  */
 /* clang-format off */
-#define SUPPORTED_SYSCALLS           \
-    _(close,                57)      \
-    _(lseek,                62)      \
-    _(read,                 63)      \
-    _(write,                64)      \
-    _(fstat,                80)      \
-    _(exit,                 93)      \
-    _(gettimeofday,         169)     \
-    _(brk,                  214)     \
-    _(clock_gettime,        403)     \
-    _(open,                 1024)    \
-    IIF(RV32_HAS(SDL))(              \
-        _(draw_frame,       0xBEEF)  \
-        _(setup_queue,      0xC0DE)  \
-        _(submit_queue,     0xFEED)  \
-        _(setup_audio,      0xBABE)  \
-        _(control_audio,    0xD00D)  \
+#define SUPPORTED_SYSCALLS                 \
+    _(close,                57)            \
+    _(lseek,                62)            \
+    _(read,                 63)            \
+    _(write,                64)            \
+    _(fstat,                80)            \
+    _(exit,                 93)            \
+    _(gettimeofday,         169)           \
+    _(brk,                  214)           \
+    _(clock_gettime,        403)           \
+    _(open,                 1024)          \
+    _(sbi_base,             0x10)          \
+    _(sbi_timer,            0x54494D45)    \
+    _(sbi_rst,              0x53525354)    \
+    IIF(RV32_HAS(SDL))(                    \
+        _(draw_frame,       0xBEEF)        \
+        _(setup_queue,      0xC0DE)        \
+        _(submit_queue,     0xFEED)        \
+        _(setup_audio,      0xBABE)        \
+        _(control_audio,    0xD00D)        \
     )
 /* clang-format on */
 
@@ -368,6 +371,94 @@ extern void syscall_submit_queue(riscv_t *rv);
 extern void syscall_setup_audio(riscv_t *rv);
 extern void syscall_control_audio(riscv_t *rv);
 #endif
+
+/* SBI related system calls */
+static void syscall_sbi_timer(riscv_t *rv)
+{
+    vm_attr_t *attr = PRIV(rv);
+    const riscv_word_t fid = rv_get_reg(rv, rv_reg_a6);
+    const riscv_word_t a0 = rv_get_reg(rv, rv_reg_a0);
+    const riscv_word_t a1 = rv_get_reg(rv, rv_reg_a1);
+
+    switch (fid) {
+    case SBI_TIMER_SET_TIMER:
+        attr->timer = (((uint64_t) a1) << 32) | (uint64_t) (a0);
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, 0);
+        break;
+    default:
+        rv_set_reg(rv, rv_reg_a0, SBI_ERR_NOT_SUPPORTED);
+        rv_set_reg(rv, rv_reg_a1, 0);
+        break;
+    }
+}
+
+#define SBI_IMPL_ID 0x999
+#define SBI_IMPL_VERSION 1
+
+static void syscall_sbi_base(riscv_t *rv)
+{
+    const riscv_word_t fid = rv_get_reg(rv, rv_reg_a6);
+
+    switch (fid) {
+    case SBI_BASE_GET_SBI_IMPL_ID:
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, SBI_IMPL_ID);
+        break;
+    case SBI_BASE_GET_SBI_IMPL_VERSION:
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, SBI_IMPL_VERSION);
+        break;
+    case SBI_BASE_GET_MVENDORID:
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, rv->csr_mvendorid);
+        break;
+    case SBI_BASE_GET_MARCHID:
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, rv->csr_marchid);
+        break;
+    case SBI_BASE_GET_MIMPID:
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, rv->csr_mimpid);
+        break;
+    case SBI_BASE_GET_SBI_SPEC_VERSION:
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, (0 << 24) | 3); /* version 0.3 */
+        break;
+    case SBI_BASE_PROBE_EXTENSION: {
+        const riscv_word_t eid = rv_get_reg(rv, rv_reg_a0);
+        bool available =
+            eid == SBI_EID_BASE || eid == SBI_EID_TIMER || eid == SBI_EID_RST;
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, available);
+        break;
+    }
+    default:
+        rv_set_reg(rv, rv_reg_a0, SBI_ERR_NOT_SUPPORTED);
+        rv_set_reg(rv, rv_reg_a1, 0);
+        break;
+    }
+}
+
+static void syscall_sbi_rst(riscv_t *rv)
+{
+    const riscv_word_t fid = rv_get_reg(rv, rv_reg_a6);
+    const riscv_word_t a0 = rv_get_reg(rv, rv_reg_a0);
+    const riscv_word_t a1 = rv_get_reg(rv, rv_reg_a1);
+
+    switch (fid) {
+    case SBI_RST_SYSTEM_RESET:
+        fprintf(stderr, "system reset: type=%u, reason=%u\n", a0, a1);
+        rv_halt(rv);
+        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
+        rv_set_reg(rv, rv_reg_a1, 0);
+        break;
+    default:
+        rv_set_reg(rv, rv_reg_a0, SBI_ERR_NOT_SUPPORTED);
+        rv_set_reg(rv, rv_reg_a1, 0);
+        break;
+    }
+}
 
 void syscall_handler(riscv_t *rv)
 {

@@ -469,6 +469,9 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     rv->csr_cycle = 0;
     rv->csr_mstatus = 0;
     rv->csr_misa |= MISA_SUPER | MISA_USER | MISA_I;
+    rv->csr_mvendorid = RV_MVENDORID;
+    rv->csr_marchid = RV_MARCHID;
+    rv->csr_mimpid = RV_MIMPID;
 #if RV32_HAS(EXT_A)
     rv->csr_misa |= MISA_A;
 #endif

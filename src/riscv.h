@@ -96,6 +96,51 @@ enum {
 #define MSTATUS_MPIE (1 << MSTATUS_MPIE_SHIFT)
 #define MSTATUS_MPP (3 << MSTATUS_MPP_SHIFT)
 
+/*
+ * SBI functions must return a pair of values:
+ *
+ * struct sbiret {
+ *     long error;
+ *     long value;
+ * };
+ *
+ * The error and value field will be set to register a0 and a1 respectively
+ * after the SBI function return. The error field indicate whether the
+ * SBI call is success or not. SBI_SUCCESS indicates success and
+ * SBI_ERR_NOT_SUPPORTED indicates not supported failure. The value field is
+ * the information based on the extension ID(EID) and SBI function ID(FID).
+ *
+ * SBI reference: https://github.com/riscv-non-isa/riscv-sbi-doc
+ *
+ */
+#define SBI_SUCCESS 0
+#define SBI_ERR_NOT_SUPPORTED -2
+
+/*
+ * All of the functions in the base extension must be supported by
+ * all SBI implementations.
+ */
+#define SBI_EID_BASE 0x10
+#define SBI_BASE_GET_SBI_SPEC_VERSION 0
+#define SBI_BASE_GET_SBI_IMPL_ID 1
+#define SBI_BASE_GET_SBI_IMPL_VERSION 2
+#define SBI_BASE_PROBE_EXTENSION 3
+#define SBI_BASE_GET_MVENDORID 4
+#define SBI_BASE_GET_MARCHID 5
+#define SBI_BASE_GET_MIMPID 6
+
+/* Make supervisor to schedule the clock for next timer event. */
+#define SBI_EID_TIMER 0x54494D45
+#define SBI_TIMER_SET_TIMER 0
+
+/* Allows the supervisor to request system-level reboot or shutdown. */
+#define SBI_EID_RST 0x53525354
+#define SBI_RST_SYSTEM_RESET 0
+
+#define RV_MVENDORID 0x12345678
+#define RV_MARCHID ((1ULL << 31) | 1)
+#define RV_MIMPID 1
+
 #define BLOCK_MAP_CAPACITY_BITS 10
 
 /* forward declaration for internal structure */
@@ -294,6 +339,9 @@ typedef struct {
 
     /* the data segment break address */
     riscv_word_t break_addr;
+
+    /* SBI timer */
+    uint64_t timer;
 } vm_attr_t;
 
 #ifdef __cplusplus

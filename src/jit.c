@@ -1964,6 +1964,7 @@ void jit_translate(riscv_t *rv, block_t *block)
         for (int i = 0; i < state->n_blocks; i++) {
             if (block->pc_start == state->offset_map[i].pc) {
                 block->offset = state->offset_map[i].offset;
+                block->hot = true;
                 return;
             }
         }

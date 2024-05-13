@@ -110,16 +110,19 @@ struct riscv_internal {
 #endif
 
     /* csr registers */
-    uint64_t csr_cycle;    /* Machine cycle counter */
-    uint32_t csr_time[2];  /* Performance conter */
-    uint32_t csr_mstatus;  /* Machine status regester */
-    uint32_t csr_mtvec;    /* Machine trap-handler base address */
-    uint32_t csr_misa;     /* ISA and extensions */
-    uint32_t csr_mtval;    /* Machine bad address or instruction */
-    uint32_t csr_mcause;   /* Machine trap cause */
-    uint32_t csr_mscratch; /* Scartch register for machine trap handler */
-    uint32_t csr_mepc;     /* Machine exception program counter */
-    uint32_t csr_mip;      /* Machine interrupt pending */
+    uint64_t csr_cycle;     /* Machine cycle counter */
+    uint32_t csr_time[2];   /* Performance counter */
+    uint32_t csr_mstatus;   /* Machine status register */
+    uint32_t csr_mtvec;     /* Machine trap-handler base address */
+    uint32_t csr_misa;      /* ISA and extensions */
+    uint32_t csr_mtval;     /* Machine bad address or instruction */
+    uint32_t csr_mcause;    /* Machine trap cause */
+    uint32_t csr_mscratch;  /* Scratch register for machine trap handler */
+    uint32_t csr_mepc;      /* Machine exception program counter */
+    uint32_t csr_mip;       /* Machine interrupt pending */
+    uint32_t csr_mvendorid; /* vendor ID */
+    uint32_t csr_marchid;   /* Architecture ID */
+    uint32_t csr_mimpid;    /* Implementation ID */
     uint32_t csr_mbadaddr;
 
     bool compressed; /**< current instruction is compressed or not */

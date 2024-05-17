@@ -11,8 +11,8 @@
 
 static inline int cmp(const void *arg0, const void *arg1)
 {
-    riscv_word_t *a = (riscv_word_t *) arg0, *b = (riscv_word_t *) arg1;
-    return (*a < *b) ? _CMP_LESS : (*a > *b) ? _CMP_GREATER : _CMP_EQUAL;
+    riscv_word_t a = *(riscv_word_t *) arg0, b = *(riscv_word_t *) arg1;
+    return (a < b) ? _CMP_LESS : (a > b) ? _CMP_GREATER : _CMP_EQUAL;
 }
 
 breakpoint_map_t breakpoint_map_new()

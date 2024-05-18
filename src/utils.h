@@ -5,7 +5,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-/* Obtain the system 's notion of the current Greenwich time.
+/* Obtain the system's notion of the current Greenwich time.
  * TODO: manipulate current time zone.
  */
 void rv_gettimeofday(struct timeval *tv);

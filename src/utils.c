@@ -26,13 +26,13 @@
 
 #define MAX_PATH_LEN 1024
 
-static void get_time_info(int32_t *tv_sec, int32_t *tv_usec)
+static void get_time_info(int32_t *tv_sec, int32_t *tv_nsec)
 {
 #if defined(HAVE_POSIX_TIMER)
     struct timespec t;
     clock_gettime(CLOCKID, &t);
     *tv_sec = t.tv_sec;
-    *tv_usec = t.tv_nsec / 1000;
+    *tv_nsec = t.tv_nsec;
 #elif defined(HAVE_MACH_TIMER)
     static mach_timebase_info_data_t info;
     /* If it is the first time running, obtain the timebase. Using denom == 0
@@ -43,28 +43,28 @@ static void get_time_info(int32_t *tv_sec, int32_t *tv_usec)
     /* Hope that the multiplication doesn't overflow. */
     uint64_t nsecs = mach_absolute_time() * info.numer / info.denom;
     *tv_sec = nsecs / 1e9;
-    *tv_usec = (nsecs / 1e3) - (*tv_sec * 1e6);
+    *tv_nsec = nsecs - (*tv_sec * 1e9);
 #else /* low resolution timer */
     clock_t t = clock();
     *tv_sec = t / CLOCKS_PER_SEC;
-    *tv_usec = (t % CLOCKS_PER_SEC) * (1e6 / CLOCKS_PER_SEC);
+    *tv_nsec = (t % CLOCKS_PER_SEC) * (1e9 / CLOCKS_PER_SEC);
 #endif
 }
 
 void rv_gettimeofday(struct timeval *tv)
 {
-    int32_t tv_sec, tv_usec;
-    get_time_info(&tv_sec, &tv_usec);
+    int32_t tv_sec, tv_nsec;
+    get_time_info(&tv_sec, &tv_nsec);
     tv->tv_sec = tv_sec;
-    tv->tv_usec = tv_usec;
+    tv->tv_usec = tv_nsec / 1000;
 }
 
 void rv_clock_gettime(struct timespec *tp)
 {
-    int32_t tv_sec, tv_usec;
-    get_time_info(&tv_sec, &tv_usec);
+    int32_t tv_sec, tv_nsec;
+    get_time_info(&tv_sec, &tv_nsec);
     tp->tv_sec = tv_sec;
-    tp->tv_nsec = tv_usec * 1000; /* Transfer to microseconds */
+    tp->tv_nsec = tv_nsec; /* Transfer to microseconds */
 }
 
 char *sanitize_path(const char *input)

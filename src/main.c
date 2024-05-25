@@ -128,12 +128,13 @@ static bool parse_args(int argc, char **args)
         memcpy(rel_path, args[0], strlen(args[0]) - 7 /* strlen("rv32emu") */);
 
         char *prog_basename = basename(opt_prog_name);
-        prof_out_file = malloc(strlen(cwd_path) + 1 + strlen(rel_path) +
-                               strlen(prog_basename) + 5 + 1);
+        size_t prof_out_file_size = strlen(cwd_path) + 1 + strlen(rel_path) +
+                                    strlen(prog_basename) + 5 + 1;
+        prof_out_file = malloc(prof_out_file_size);
         assert(prof_out_file);
 
-        sprintf(prof_out_file, "%s/%s%s.prof", cwd_path, rel_path,
-                prog_basename);
+        snprintf(prof_out_file, prof_out_file_size, "%s/%s%s.prof", cwd_path,
+                 rel_path, prog_basename);
     }
     return true;
 }

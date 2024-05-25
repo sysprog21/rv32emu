@@ -52,7 +52,7 @@ static char *prof_out_file;
 static void print_usage(const char *filename)
 {
     fprintf(stderr,
-            "RV32I[MACF] Emulator which loads an ELF file to execute.\n"
+            "RV32I[MAFC] Emulator which loads an ELF file to execute.\n"
             "Usage: %s [options] [filename] [arguments]\n"
             "Options:\n"
             "  -t : print executable trace\n"

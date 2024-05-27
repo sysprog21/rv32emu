@@ -826,10 +826,12 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
             break;
         case 0x105: /* WFI: Wait for Interrupt */
         case 0x002: /* URET: return from traps in U-mode */
-        case 0x102: /* SRET: return from traps in S-mode */
         case 0x202: /* HRET: return from traps in H-mode */
-            /* illegal instruciton */
+            /* illegal instruction */
             return false;
+        case 0x102: /* SRET: return from traps in S-mode */
+            ir->opcode = rv_insn_sret;
+            break;
         case 0x302: /* MRET */
             ir->opcode = rv_insn_mret;
             break;

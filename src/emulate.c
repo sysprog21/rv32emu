@@ -492,34 +492,8 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
     MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
-/* memset */
-static bool do_fuse5(riscv_t *rv,
-                     const rv_insn_t *ir UNUSED,
-                     uint64_t cycle,
-                     uint32_t PC UNUSED)
-{
-    /* FIXME: specify the correct cycle count for memset routine */
-    cycle += 2;
-    rv->io.on_memset(rv);
-    rv->csr_cycle = cycle;
-    return true;
-}
-
-/* memcpy */
-static bool do_fuse6(riscv_t *rv,
-                     const rv_insn_t *ir UNUSED,
-                     uint64_t cycle,
-                     uint32_t PC UNUSED)
-{
-    /* FIXME: specify the correct cycle count for memcpy routine */
-    cycle += 2;
-    rv->io.on_memcpy(rv);
-    rv->csr_cycle = cycle;
-    return true;
-}
-
 /* multiple shift immediate */
-static bool do_fuse7(riscv_t *rv,
+static bool do_fuse5(riscv_t *rv,
                      const rv_insn_t *ir,
                      uint64_t cycle,
                      uint32_t PC)
@@ -676,50 +650,6 @@ static void block_translate(riscv_t *rv, block_t *block)
         remove_next_nth_ir(rv, ir, block, count - 1);             \
     }
 
-#include "rv32_libc.h"
-
-static bool detect_memset(riscv_t *rv, size_t type)
-{
-    static const struct rv32libc_impl rv32_memset[] = {
-        {memset0_insn, ARRAYS_SIZE(memset0_insn)},
-        {memset1_insn, ARRAYS_SIZE(memset1_insn)},
-    };
-    assert(type < ARRAYS_SIZE(rv32_memset));
-
-    const uint32_t *memset_insn = rv32_memset[type].insn;
-    const size_t memset_len = rv32_memset[type].len;
-
-    uint32_t tmp_pc = rv->PC;
-    for (uint32_t i = 0; i < memset_len; i++) {
-        const uint32_t insn = rv->io.mem_ifetch(tmp_pc);
-        if (unlikely(insn != memset_insn[i]))
-            return false;
-        tmp_pc += 4;
-    }
-    return true;
-}
-
-static bool detect_memcpy(riscv_t *rv, size_t type)
-{
-    static const struct rv32libc_impl rv32_memcpy[] = {
-        {memcpy0_insn, ARRAYS_SIZE(memcpy0_insn)},
-        {memcpy1_insn, ARRAYS_SIZE(memcpy1_insn)},
-    };
-    assert(type < ARRAYS_SIZE(rv32_memcpy));
-
-    const uint32_t *memcpy_insn = rv32_memcpy[type].insn;
-    const size_t memcpy_len = rv32_memcpy[type].len;
-
-    uint32_t tmp_pc = rv->PC;
-    for (uint32_t i = 0; i < memcpy_len; i++) {
-        const uint32_t insn = rv->io.mem_ifetch(tmp_pc);
-        if (unlikely(insn != memcpy_insn[i]))
-            return false;
-        tmp_pc += 4;
-    }
-    return true;
-}
-
 static inline void remove_next_nth_ir(const riscv_t *rv,
                                       rv_insn_t *ir,
                                       block_t *block,
@@ -733,88 +663,6 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
     if (!ir->next)
         block->ir_tail = ir;
     block->n_insn -= n;
-}
-
-static bool libc_substitute(riscv_t *rv, block_t *block)
-{
-    rv_insn_t *ir = block->ir_head, *next_ir = NULL;
-    switch (ir->opcode) {
-    case rv_insn_addi:
-        /* Compare the target block with the first basic block of memset and
-         * memcpy.
-         * If the two blocks match, extract the instruction sequence starting
-         * from pc_start of the basic block and compare it with the pre-recorded
-         * memset/memcpy instruction sequence.
-         */
-        if (IF_imm(ir, 15) && IF_rd(ir, t1) && IF_rs1(ir, zero)) {
-            next_ir = ir->next;
-            assert(next_ir);
-            if (IF_insn(next_ir, addi) && IF_rd(next_ir, a4) &&
-                IF_rs1(next_ir, a0) && IF_rs2(next_ir, zero)) {
-                next_ir = next_ir->next;
-                if (IF_insn(next_ir, bgeu) && IF_imm(next_ir, 60) &&
-                    IF_rs1(next_ir, t1) && IF_rs2(next_ir, a2)) {
-                    if (detect_memset(rv, 0)) {
-                        ir->opcode = rv_insn_fuse5;
-                        ir->impl = dispatch_table[ir->opcode];
-                        remove_next_nth_ir(rv, ir, block, 2);
-                        return true;
-                    }
-                }
-            }
-        } else if (IF_imm(ir, 0) && IF_rd(ir, t1) && IF_rs1(ir, a0)) {
-            next_ir = ir->next;
-            assert(next_ir);
-            if (IF_insn(next_ir, beq) && IF_rs1(next_ir, a2) &&
-                IF_rs2(next_ir, zero)) {
-                if (IF_imm(next_ir, 20) && detect_memset(rv, 1)) {
-                    ir->opcode = rv_insn_fuse5;
-                    ir->impl = dispatch_table[ir->opcode];
-                    remove_next_nth_ir(rv, ir, block, 1);
-                    return true;
-                }
-                if (IF_imm(next_ir, 28) && detect_memcpy(rv, 1)) {
-                    ir->opcode = rv_insn_fuse6;
-                    ir->impl = dispatch_table[ir->opcode];
-                    remove_next_nth_ir(rv, ir, block, 1);
-                    return true;
-                };
-            }
-        }
-        break;
-    case rv_insn_xor:
-        /* Compare the target block with the first basic block of memcpy, if
-         * two block is match, we would extract the instruction sequence
-         * starting from the pc_start of the basic block and then compare
-         * it with the pre-recorded memcpy instruction sequence.
-         */
-        if (IF_rd(ir, a5) && IF_rs1(ir, a0) && IF_rs2(ir, a1)) {
-            next_ir = ir->next;
-            assert(next_ir);
-            if (IF_insn(next_ir, andi) && IF_imm(next_ir, 3) &&
-                IF_rd(next_ir, a5) && IF_rs1(next_ir, a5)) {
-                next_ir = next_ir->next;
-                if (IF_insn(next_ir, add) && IF_rd(next_ir, a7) &&
-                    IF_rs1(next_ir, a0) && IF_rs2(next_ir, a2)) {
-                    next_ir = next_ir->next;
-                    if (IF_insn(next_ir, bne) && IF_imm(next_ir, 104) &&
-                        IF_rs1(next_ir, a5) && IF_rs2(next_ir, zero)) {
-                        if (detect_memcpy(rv, 0)) {
-                            ir->opcode = rv_insn_fuse6;
-                            ir->impl = dispatch_table[ir->opcode];
-                            remove_next_nth_ir(rv, ir, block, 3);
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        break;
-        /* TODO: Inject other frequently used function calls from the C standard
-         * library.
-         */
-    }
-    return false;
 }
 
 /* Check if instructions in a block match a specific pattern. If they do,
@@ -902,7 +750,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
                 ir->fuse = malloc(count * sizeof(opcode_fuse_t));
                 assert(ir->fuse);
                 memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
-                ir->opcode = rv_insn_fuse7;
+                ir->opcode = rv_insn_fuse5;
                 ir->imm2 = count;
                 ir->impl = dispatch_table[ir->opcode];
                 next_ir = ir->next;
@@ -971,14 +819,13 @@ static block_t *block_find_or_translate(riscv_t *rv)
         next = block_alloc(rv);
         block_translate(rv, next);
 
-        if (!libc_substitute(rv, next)) {
-            optimize_constant(rv, next);
+        optimize_constant(rv, next);
 #if RV32_HAS(GDBSTUB)
-            if (likely(!rv->debug_mode))
+        if (likely(!rv->debug_mode))
 #endif
-                /* macro operation fusion */
-                match_pattern(rv, next);
-        }
+            /* macro operation fusion */
+            match_pattern(rv, next);
+
 #if !RV32_HAS(JIT)
         /* insert the block into block map */
         block_insert(&rv->block_map, next);

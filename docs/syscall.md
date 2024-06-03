@@ -116,7 +116,7 @@ Any other system calls will fail with an "unknown syscall" error.
 
 These system calls are solely for the convenience of accessing the [SDL library](https://www.libsdl.org/) and [SDL2_Mixer](https://wiki.libsdl.org/SDL2_mixer) and are only intended for the presentation of RISC-V graphics applications. They are not present in the ABI interface of POSIX or Linux.
 
-Check the [fenster.h](tests/fenster.h) header, which offers an extremely minimalistic and specific approach to displaying a 2D canvas.
+Check the [fenster.h](../tests/fenster.h) header, which offers an extremely minimalistic and specific approach to displaying a 2D canvas.
 This integrates with rv32emu's SDL-based system calls, significantly enhancing usability and simplifying any future porting efforts.
 
 ### `draw_frame` - Draw a frame around the SDL window

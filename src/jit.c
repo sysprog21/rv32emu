@@ -1491,13 +1491,10 @@ static inline void liveness_calc(block_t *block)
             }
             break;
         case rv_insn_fuse4:
-        case rv_insn_fuse7:
+        case rv_insn_fuse5:
             for (int i = 0; i < ir->imm2; i++) {
                 liveness[ir->fuse[i].rs1] = idx;
             }
-            break;
-        case rv_insn_fuse5:
-        case rv_insn_fuse6:
             break;
         default:
             __UNREACHABLE;
@@ -1778,24 +1775,6 @@ static void do_fuse4(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 }
 
 static void do_fuse5(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
-{
-    store_back(state);
-    emit_load_imm(state, temp_reg, ir->pc + 4);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_call(state, (intptr_t) rv->io.on_memset);
-    emit_exit(state);
-}
-
-static void do_fuse6(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
-{
-    store_back(state);
-    emit_load_imm(state, temp_reg, ir->pc + 4);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_call(state, (intptr_t) rv->io.on_memcpy);
-    emit_exit(state);
-}
-
-static void do_fuse7(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {

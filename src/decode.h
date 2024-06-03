@@ -196,9 +196,7 @@ enum op_field {
     _(fuse2)           \
     _(fuse3)           \
     _(fuse4)           \
-    _(fuse5)           \
-    _(fuse6)           \
-    _(fuse7)
+    _(fuse5)
 
 /* clang-format off */
 /* IR (intermediate representation) is exclusively represented by RISC-V

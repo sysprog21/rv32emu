@@ -560,6 +560,7 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     case rv_insn_ebreak:
     case rv_insn_jal:
     case rv_insn_jalr:
+    case rv_insn_sret:
     case rv_insn_mret:
 #if RV32_HAS(EXT_C)
     case rv_insn_cj:

@@ -246,7 +246,7 @@ enum {
     FR4_FMT      = 0b00000110000000000000000000000000, // R4-type
     FR4_RS3      = 0b11111000000000000000000000000000,
     //               ....xxxx....xxxx....xxxx....xxxx
-    FC_OPCODE    = 0b00000000000000000000000000000011, // compressed-instuction
+    FC_OPCODE    = 0b00000000000000000000000000000011, // compressed-instruction
     FC_FUNC3     = 0b00000000000000001110000000000000,
     //               ....xxxx....xxxx....xxxx....xxxx
     FC_RS1C      = 0b00000000000000000000001110000000,

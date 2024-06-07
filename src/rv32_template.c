@@ -1212,7 +1212,7 @@ RVOP(
         map, VR2, rd;
         mov, VR1, TMP;
         mov, VR0, VR2;
-        div, 0x38, TMP, VR2, 0;
+        div, 0x38, TMP, VR2, 1;
         /* FIXME: handle overflow */
     }))
 
@@ -1260,7 +1260,7 @@ GEN({
     map, VR2, rd;
     mov, VR1, TMP;
     mov, VR0, VR2;
-    mod, 0x98, TMP, VR2, 0;
+    mod, 0x98, TMP, VR2, 1;
     /* FIXME: handle overflow */
 }))
 

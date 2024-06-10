@@ -304,7 +304,9 @@ static block_t *block_alloc(riscv_t *rv)
 #if RV32_HAS(JIT)
     block->translatable = true;
     block->hot = false;
+    block->hot2 = false;
     block->has_loops = false;
+    block->n_invoke = 0;
     INIT_LIST_HEAD(&block->list);
 #endif
     return block;
@@ -911,8 +913,6 @@ static bool runtime_profiler(riscv_t *rv, block_t *block)
         return true;
     return false;
 }
-
-typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 #endif
 
 void rv_step(void *arg)
@@ -985,15 +985,31 @@ void rv_step(void *arg)
         }
         last_pc = rv->PC;
 #if RV32_HAS(JIT)
-        /* execute by tier-1 JIT compiler */
+#if RV32_HAS(T2C)
+        /* executed through the tier-2 JIT compiler */
+        if (block->hot2) {
+            ((exec_t2c_func_t) block->func)(rv);
+            prev = NULL;
+            continue;
+        } /* check if the execution path is strong hotspot */
+        if (block->n_invoke >= THRESHOLD) {
+            t2c_compile(block,
+                        (uint64_t) ((memory_t *) PRIV(rv)->mem)->mem_base);
+            ((exec_t2c_func_t) block->func)(rv);
+            prev = NULL;
+            continue;
+        }
+#endif
+        /* executed through the tier-1 JIT compiler */
         struct jit_state *state = rv->jit_state;
         if (block->hot) {
+            block->n_invoke++;
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
             prev = NULL;
             continue;
-        } /* check if using frequency of block exceed threshold */
-        else if (block->translatable && runtime_profiler(rv, block)) {
+        } /* check if the execution path is potential hotspot */
+        if (block->translatable && runtime_profiler(rv, block)) {
             jit_translate(rv, block);
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));

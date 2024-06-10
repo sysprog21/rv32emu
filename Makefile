@@ -125,7 +125,32 @@ endif
 ENABLE_JIT ?= 0
 $(call set-feature, JIT)
 ifeq ($(call has, JIT), 1)
-OBJS_EXT += jit.o
+OBJS_EXT += jit.o 
+# tier-2 JIT compiler powered LLVM
+LLVM_CONFIG = llvm-config-17
+LLVM_CONFIG := $(shell which $(LLVM_CONFIG))
+ifndef LLVM_CONFIG
+# Try Homebrew on macOS
+LLVM_CONFIG = /opt/homebrew/opt/llvm@17/bin/llvm-config
+LLVM_CONFIG := $(shell which $(LLVM_CONFIG))
+ifdef LLVM_CONFIG
+LDFLAGS += -L/opt/homebrew/opt/llvm@17/lib
+endif
+endif
+ifneq ("$(LLVM_CONFIG)", "")
+ifneq ("$(findstring -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS, "$(shell $(LLVM_CONFIG) --cflags)")", "")
+ENABLE_T2C := 1
+$(call set-feature, T2C)
+OBJS_EXT += t2c.o
+CFLAGS += -g $(shell $(LLVM_CONFIG) --cflags)
+LDFLAGS += $(shell $(LLVM_CONFIG) --libs)
+else
+ENABLE_T2C := 0
+$(call set-feature, T2C)
+$(warning No llvm-config-17 installed. Check llvm-config-17 installation in advance)
+endif
+endif
+
 ifneq ($(processor),$(filter $(processor),x86_64 aarch64 arm64))
 $(error JIT mode only supports for x64 and arm64 target currently.)
 endif
@@ -134,6 +159,10 @@ src/rv32_jit.c:
 	$(Q)tools/gen-jit-template.py $(CFLAGS) > $@
 
 $(OUT)/jit.o: src/jit.c src/rv32_jit.c
+	$(VECHO) "  CC\t$@\n"
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+
+$(OUT)/t2c.o: src/t2c.c src/t2c_template.c
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 endif

@@ -30,7 +30,7 @@ Features:
 * Implementation of commonly used newlib system calls
 * Experimental SDL-based display/event/audio system calls for running video games
 * Support for remote GDB debugging
-* Experimental JIT compiler for performance boost while maintaining a small footprint
+* Tiered JIT compilation for performance boost while maintaining a small footprint
 
 ## Build and Verify
 
@@ -39,6 +39,12 @@ To ensure proper operation, the target system should have the [SDL2 library](htt
 and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
 * macOS: `brew install sdl2 sdl2_mixer`
 * Ubuntu Linux / Debian: `sudo apt install libsdl2-dev libsdl2-mixer-dev`
+
+### JIT compiler
+The tier-2 JIT compiler in `rv32emu` leverages LLVM for powerful optimization. Therefore, the target system must have [`LLVM`](https://llvm.org/) installed, with version 17 recommended. If `LLVM` is not installed, only the tier-1 JIT compiler will be used for performance enhancement.
+
+* macOS: `brew install llvm@17`
+* Ubuntu Linux / Debian: `sudo apt-get install llvm-17`
 
 Build the emulator.
 ```shell

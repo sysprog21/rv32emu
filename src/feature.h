@@ -52,5 +52,10 @@
 #define RV32_FEATURE_JIT 0
 #endif
 
+/* Experimental tier-2 just-in-time compiler */
+#ifndef RV32_FEATURE_T2C
+#define RV32_FEATURE_T2C 0
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x

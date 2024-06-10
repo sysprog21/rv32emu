@@ -65,11 +65,14 @@ typedef struct block {
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
 #if RV32_HAS(JIT)
-    bool hot; /**< Determine the block is hotspot or not */
-    uint32_t offset;
+    bool hot;  /**< Determine the block is potential hotspot or not */
+    bool hot2; /**< Determine the block is strong hotspot or not */
     bool
         translatable; /**< Determine the block has RV32AF insturctions or not */
     bool has_loops;   /**< Determine the block has loop or not */
+    uint32_t offset;  /**< The machine code offset in T1 code cache */
+    uint32_t n_invoke; /**< The invoking times of T1 machine code */
+    void *func;        /**< The function pointer of T2 machine code */
     struct list_head list;
 #endif
 } block_t;

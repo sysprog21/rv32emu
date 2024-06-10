@@ -44,6 +44,9 @@ jobs:
             sudo apt-get update -q -y
             sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev
             .ci/riscv-toolchain-install.sh
+            wget https://apt.llvm.org/llvm.sh
+            sudo chmod +x ./llvm.sh
+            sudo ./llvm.sh 17
       shell: bash
     - name: default build
       run: make
@@ -65,14 +68,14 @@ jobs:
             make distclean ENABLE_GDBSTUB=1 gdbstub-test
     - name: JIT test
       run: |
-            make clean && make ENABLE_JIT=1 check -j$(nproc)
-            make clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
-            make clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
-            make clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
     - name: undefined behavior test
       run: |
             make clean && make ENABLE_UBSAN=1 check -j$(nproc)
-            make clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
 
   host-arm64:
     needs: [detect-code-related-file-changes]
@@ -91,18 +94,21 @@ jobs:
         # No 'sudo' is available
         install: |
           apt-get update -q -y
-          apt-get install -q -y git build-essential libsdl2-dev libsdl2-mixer-dev
+          apt-get install -q -y git build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
           git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x ./llvm.sh
+          ./llvm.sh 17
         # Append custom commands here
         run: |
           make -j$(nproc)
           make check -j$(nproc)
-          make clean && make ENABLE_JIT=1 check -j$(nproc)
-          make clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
-          make clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
-          make clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
+          make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(nproc)
+          make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
+          make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
+          make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
 
   coding-style:
     needs: [detect-code-related-file-changes]
@@ -132,7 +138,8 @@ jobs:
     - name: run scan-build without JIT
       run: make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
     - name: run scan-build with JIT
-      run: make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
+      run: |
+          make ENABLE_JIT=1 distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
 
   compliance-test:
     needs: [detect-code-related-file-changes]

@@ -2,6 +2,7 @@
  * rv32emu is freely redistributable under the MIT License. See the file
  * "LICENSE" for information on usage and redistribution of this file.
  */
+/* An intentional change to trigger the benchmark pipeline */
 
 #include <assert.h>
 #include <stdio.h>

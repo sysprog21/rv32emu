@@ -80,6 +80,7 @@ enum op_field {
     _(sret, 1, 4, 0, ENC(rs1, rd))                     \
     _(hret, 0, 4, 0, ENC(rs1, rd))                     \
     _(mret, 1, 4, 0, ENC(rs1, rd))                     \
+    _(sfencevma, 1, 4, 0, ENC(rs1, rs2, rd))           \
     /* RV32 Zifencei Standard Extension */             \
     IIF(RV32_HAS(Zifencei))(                           \
         _(fencei, 1, 4, 0, ENC(rs1, rd))               \

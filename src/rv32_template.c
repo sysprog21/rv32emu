@@ -1019,6 +1019,20 @@ RVOP(
         assert; /* FIXME: Implement */
     }))
 
+/* SFENCE.VMA: synchronize updates to in-memory memory-management data
+ * structures with current execution
+ */
+RVOP(
+    sfencevma,
+    {
+        PC += 4;
+        /* FIXME: fill real implementations */
+        goto end_op;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
 #if RV32_HAS(Zifencei) /* RV32 Zifencei Standard Extension */
 RVOP(
     fencei,

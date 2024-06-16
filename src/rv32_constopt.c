@@ -374,8 +374,13 @@ CONSTOPT(sret, {})
 /* HRET: return from traps in H-mode */
 CONSTOPT(hret, {})
 
-/* MRET: return from traps in U-mode */
+/* MRET: return from traps in M-mode */
 CONSTOPT(mret, {})
+
+/* SFENCE.VMA: synchronize updates to in-memory memory-management data
+ * structures with current execution
+ */
+CONSTOPT(sfencevma, {})
 
 #if RV32_HAS(Zifencei) /* RV32 Zifencei Standard Extension */
 CONSTOPT(fencei, {})

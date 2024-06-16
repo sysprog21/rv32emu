@@ -305,6 +305,8 @@ T2C_OP(hret, { __UNREACHABLE; })
 
 T2C_OP(mret, { __UNREACHABLE; })
 
+T2C_OP(sfencevma, { __UNREACHABLE; })
+
 #if RV32_HAS(Zifencei)
 T2C_OP(fencei, { __UNREACHABLE; })
 #endif

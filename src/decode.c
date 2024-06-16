@@ -810,12 +810,22 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
      * MRET   001100000010 00000 000    00000 1110011
      */
 
+    /* inst        funct7  rs2 rs1 funct3 rd     opcode
+     * -----------+-------+---+---+------+------+-------
+     * SFENCE.VMA  0001001 rs2 rs1  000   00000  1110011
+     */
+
     /* decode I-type */
     decode_itype(ir, insn);
 
     /* dispatch from funct3 field */
     switch (decode_funct3(insn)) {
     case 0:
+        if ((insn >> 25) == 0b0001001) { /* SFENCE.VMA */
+            ir->opcode = rv_insn_sfencevma;
+            break;
+        }
+
         /* dispatch from imm field */
         switch (ir->imm) {
         case 0: /* ECALL: Environment Call */

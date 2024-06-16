@@ -78,12 +78,12 @@ jobs:
             make ENABLE_JIT=1 clean clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
     - name: valgrind check (without JIT)
       run: |
-            make clean && make ENABLE_SDL=0 ENABLE_JIT=0 ENABLE_VALGRIND=1
+            make clean && make ENABLE_SDL=0 ENABLE_JIT=0 ENABLE_UBSAN=1
             valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./build/rv32emu ./build/hello.elf 
             valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./build/rv32emu ./build/aes.elf 
     - name: valgrind check (with JIT)
       run: |
-            make clean && make ENABLE_SDL=0 ENABLE_JIT=1 ENABLE_VALGRIND=1
+            make clean && make ENABLE_SDL=0 ENABLE_JIT=1 ENABLE_UBSAN=1
             valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./build/rv32emu ./build/hello.elf 
             valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1 ./build/rv32emu ./build/aes.elf 
 

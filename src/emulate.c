@@ -617,6 +617,8 @@ static void block_translate(riscv_t *rv, block_t *block)
             ) {
                 ir->branch_table = calloc(1, sizeof(branch_history_table_t));
                 assert(ir->branch_table);
+                memset(ir->branch_table->PC, -1,
+                       sizeof(uint32_t) * HISTORY_SIZE);
             }
             break;
         }

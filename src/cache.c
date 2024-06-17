@@ -12,6 +12,7 @@
 
 #include "cache.h"
 #include "mpool.h"
+#include "riscv_private.h"
 #include "utils.h"
 
 static uint32_t cache_size, cache_size_bits;
@@ -227,6 +228,26 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
 
 void cache_free(cache_t *cache)
 {
+#if RV32_HAS(JIT)
+    for (int i = 0; i < THRESHOLD; i++) {
+        if (list_empty(cache->lists[i]))
+            continue;
+        lfu_entry_t *delete_target =
+            list_last_entry(cache->lists[i], lfu_entry_t, list);
+        list_del_init(&delete_target->list);
+        hlist_del_init(&delete_target->ht_list);
+        block_t *delete_value = delete_target->value;
+        mpool_free(cache_mp, delete_target);
+        
+        uint32_t idx;
+        rv_insn_t *ir, *next;
+        for (idx = 0, ir = delete_value->ir_head;
+                idx < delete_value->n_insn; idx++, ir = next) {
+            free(ir->fuse);
+            next = ir->next;
+        }
+    }
+#endif
     for (int i = 0; i < THRESHOLD; i++)
         free(cache->lists[i]);
     mpool_destroy(cache_mp);

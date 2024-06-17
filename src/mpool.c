@@ -157,8 +157,7 @@ void mpool_destroy(mpool_t *mp)
         tmp = cur;
         cur = cur->next;
         free(tmp->mapped);
-        if (tmp != &mp->area)
-            free(tmp);
+        free(tmp);
     }
 #endif
     free(mp);

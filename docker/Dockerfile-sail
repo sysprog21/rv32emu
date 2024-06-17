@@ -1,29 +1,27 @@
-# builds the base image of rv32emu (the toolchains)
-# docker build --progress=plain -t sysprog21/rv32emu-base -f Dockerfile-base . 2>&1 | tee build.log
-FROM ubuntu:22.04 as base
+FROM ubuntu:24.04 as base
 
-# the default reference emulator is x86-64-based
-# we need to build it ourselves if we are using it on aarch64
-# https://riscof.readthedocs.io/en/stable/installation.html#install-plugin-models
-# the above commands are modified to match the current build flow as indicated in the Github CI -> https://github.com/riscv/sail-riscv/blob/master/.github/workflows/compile.yml
+# The upstream reference emulator is built for x86-64, and the releases are pretty out of date
+# Thus, we build it ourselves for both x86-64 and aarch64
+# 
+# The following dockerfile commands are modified from references [1][2]
+# Dependencies are pinned at certain versions. Within pinning, the build won't be reproducible
+# [1] https://riscof.readthedocs.io/en/stable/installation.html#install-plugin-models
+# [2] https://github.com/riscv/sail-riscv/blob/master/.github/workflows/compile.yml
 RUN apt-get update && \
     apt install -y opam zlib1g-dev pkg-config libgmp-dev z3 device-tree-compiler && \
     rm -rf /var/lib/apt/lists/*
 RUN opam init --disable-sandboxing -y
-RUN opam switch create ocaml-base-compiler.4.13.1 # opam switch list-available
+RUN opam switch create ocaml-base-compiler.5.2.0 # opam switch list-available
 RUN opam search sail
-# https://opam.ocaml.org/packages/sail/sail.0.16/
-RUN opam install -y sail.0.16 # latest version 0.17.x will cause complication issues for sail-riscv on commit 9547a3
+RUN opam install -y sail.0.17.1
 RUN git clone https://github.com/riscv/sail-riscv.git
-# based on this commit https://github.com/sysprog21/rv32emu/commit/01b00b6f175f57ef39ffd1f4fa6a611891e36df3#diff-3b436c5e32c40ecca4095bdacc1fb69c0759096f86e029238ce34bbe73c6e68f
-# we infer that the sail-riscv binary was taken from commit 9547a30bf84572c458476591b569a95f5232c1c7
 RUN cd sail-riscv && \
-    git checkout 9547a30bf84572c458476591b569a95f5232c1c7 && \
+    git checkout 0e9850fed5bee44346e583f334c6e2a6a25d5cd3 && \
     eval $(opam env) && \
     make && \
     ARCH=RV32 make 
 
-FROM ubuntu:22.04 as final
+FROM ubuntu:24.04 as final
 
 # keep the emulator only
 COPY --from=base /sail-riscv/c_emulator/riscv_sim_RV32 /home/root/riscv_sim_RV32

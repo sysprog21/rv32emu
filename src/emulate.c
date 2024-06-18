@@ -308,6 +308,9 @@ static block_t *block_alloc(riscv_t *rv)
     block->has_loops = false;
     block->n_invoke = 0;
     INIT_LIST_HEAD(&block->list);
+#if RV32_HAS(T2C)
+    block->compiled = false;
+#endif
 #endif
     return block;
 }
@@ -993,13 +996,14 @@ void rv_step(void *arg)
             ((exec_t2c_func_t) block->func)(rv);
             prev = NULL;
             continue;
-        } /* check if the execution path is strong hotspot */
-        if (block->n_invoke >= THRESHOLD) {
-            t2c_compile(block,
-                        (uint64_t) ((memory_t *) PRIV(rv)->mem)->mem_base);
-            ((exec_t2c_func_t) block->func)(rv);
-            prev = NULL;
-            continue;
+        } /* check if invoking times of t1 generated code exceed threshold */
+        else if (!block->compiled && block->n_invoke >= THRESHOLD) {
+            block->compiled = true;
+            queue_entry_t *entry = malloc(sizeof(queue_entry_t));
+            entry->block = block;
+            pthread_mutex_lock(&rv->wait_queue_lock);
+            list_add(&entry->list, &rv->wait_queue);
+            pthread_mutex_unlock(&rv->wait_queue_lock);
         }
 #endif
         /* executed through the tier-1 JIT compiler */

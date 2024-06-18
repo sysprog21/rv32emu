@@ -14,6 +14,9 @@
 #include "riscv.h"
 #include "utils.h"
 #if RV32_HAS(JIT)
+#if RV32_HAS(T2C)
+#include <pthread.h>
+#endif
 #include "cache.h"
 #endif
 
@@ -70,7 +73,10 @@ typedef struct block {
     bool
         translatable; /**< Determine the block has RV32AF insturctions or not */
     bool has_loops;   /**< Determine the block has loop or not */
-    uint32_t offset;  /**< The machine code offset in T1 code cache */
+#if RV32_HAS(T2C)
+    bool compiled; /**< The T2C request is enqueued or not */
+#endif
+    uint32_t offset;   /**< The machine code offset in T1 code cache */
     uint32_t n_invoke; /**< The invoking times of T1 machine code */
     void *func;        /**< The function pointer of T2 machine code */
     struct list_head list;
@@ -82,6 +88,12 @@ typedef struct {
     block_t *block;
     struct list_head list;
 } chain_entry_t;
+#if RV32_HAS(T2C)
+typedef struct {
+    block_t *block;
+    struct list_head list;
+} queue_entry_t;
+#endif
 #endif
 
 typedef struct {
@@ -134,6 +146,11 @@ struct riscv_internal {
 #else
     struct cache *block_cache;
     struct mpool *chain_entry_mp;
+#if RV32_HAS(T2C)
+    struct list_head wait_queue;
+    pthread_mutex_t wait_queue_lock;
+    volatile bool quit; /**< Determine the main thread is terminated or not */
+#endif
 #endif
     struct mpool *block_mp, *block_ir_mp;
 

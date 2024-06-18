@@ -75,7 +75,7 @@ jobs:
     - name: undefined behavior test
       run: |
             make clean && make ENABLE_UBSAN=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
 
   host-arm64:
     needs: [detect-code-related-file-changes]
@@ -134,6 +134,9 @@ jobs:
       run: |
             sudo apt-get update -q -y
             sudo apt-get install -q -y clang clang-tools libsdl2-dev libsdl2-mixer-dev
+            wget https://apt.llvm.org/llvm.sh
+            chmod +x ./llvm.sh
+            sudo ./llvm.sh 17
       shell: bash
     - name: run scan-build without JIT
       run: make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0

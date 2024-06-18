@@ -57,5 +57,11 @@
 #define RV32_FEATURE_T2C 0
 #endif
 
+/* T2C depends on JIT configuration */
+#if !RV32_FEATURE_JIT
+#undef RV32_FEATURE_T2C
+#define RV32_FEATURE_T2C 0
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x

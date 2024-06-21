@@ -907,9 +907,8 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
     default: /* illegal instruction */
         return false;
     }
-    if (!csr_is_writable(ir->imm) && ir->rs1 != rv_reg_zero)
-        return false;
-    return true;
+
+    return csr_is_writable(ir->imm) || (ir->rs1 == rv_reg_zero);
 }
 
 /* MISC-MEM: I-type

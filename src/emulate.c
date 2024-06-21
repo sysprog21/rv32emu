@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -24,6 +25,7 @@ extern struct target_ops gdbstub_ops;
 #endif
 
 #include "decode.h"
+#include "io.h"
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -41,18 +43,22 @@ extern struct target_ops gdbstub_ops;
 #define IF_rs2(i, r) (i->rs2 == rv_reg_##r)
 #define IF_imm(i, v) (i->imm == v)
 
-/* RISC-V exception code list */
+/* RISC-V trap code list */
 /* clang-format off */
-#define RV_TRAP_LIST                                               \
-    IIF(RV32_HAS(EXT_C))(,                                         \
-        _(insn_misaligned, 0) /* Instruction address misaligned */ \
-    )                                                              \
-    _(illegal_insn, 2)     /* Illegal instruction */               \
-    _(breakpoint, 3)       /* Breakpoint */                        \
-    _(load_misaligned, 4)  /* Load address misaligned */           \
-    _(store_misaligned, 6) /* Store/AMO address misaligned */      \
-    IIF(RV32_HAS(SYSTEM))(,                                        \
+#define RV_TRAP_LIST                                                                  \
+    IIF(RV32_HAS(EXT_C))(,                                                            \
+        _(insn_misaligned, 0)              /* Instruction address misaligned */       \
+    )                                                                                 \
+    _(illegal_insn, 2)                     /* Illegal instruction */                  \
+    _(breakpoint, 3)                       /* Breakpoint */                           \
+    _(load_misaligned, 4)                  /* Load address misaligned */              \
+    _(store_misaligned, 6)                 /* Store/AMO address misaligned */         \
+    _(ecall_M, 11)                         /* Environment call from M-mode */         \
+    IIF(RV32_HAS(SYSTEM))(                                                            \
         _(ecall_M, 11)     /* Environment call from M-mode */      \
+        _(pagefault_insn, 12)              /* Instruction page fault */               \
+        _(pagefault_load, 13)              /* Load page fault */                      \
+        _(pagefault_store, 15)             /* Store page fault */                     \
     )
 /* clang-format on */
 
@@ -290,7 +296,16 @@ static uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
         out &= FFLAG_MASK;
 #endif
 
-    *c = val;
+    if (c == &rv->csr_satp) {
+        const uint8_t mode_sv32 = val >> 31;
+        if (mode_sv32)
+            *c = val & MASK(22); /* store ppn */
+        else                     /* bare mode */
+            *c = 0; /* virtual mem addr maps to same physical mem addr directly
+                     */
+    } else {
+        *c = val;
+    }
 
     return out;
 }
@@ -532,7 +547,7 @@ static bool do_fuse3(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->X[fuse[i].rs2]);
+        rv->io.mem_write_w(rv, addr, rv->X[fuse[i].rs2]);
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {
@@ -556,7 +571,7 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        rv->X[fuse[i].rd] = rv->io.mem_read_w(addr);
+        rv->X[fuse[i].rd] = rv->io.mem_read_w(rv, addr);
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {
@@ -657,16 +672,18 @@ static void block_translate(riscv_t *rv, block_t *block)
     block->pc_start = block->pc_end = rv->PC;
 
     rv_insn_t *prev_ir = NULL;
-    rv_insn_t *ir = mpool_calloc(rv->block_ir_mp);
+    rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
     block->ir_head = ir;
 
     /* translate the basic block */
     while (true) {
+        memset(ir, 0, sizeof(rv_insn_t));
+
         if (prev_ir)
             prev_ir->next = ir;
 
         /* fetch the next instruction */
-        const uint32_t insn = rv->io.mem_ifetch(block->pc_end);
+        const uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
@@ -699,7 +716,7 @@ static void block_translate(riscv_t *rv, block_t *block)
             break;
         }
 
-        ir = mpool_calloc(rv->block_ir_mp);
+        ir = mpool_alloc(rv->block_ir_mp);
     }
 
     assert(prev_ir);
@@ -1132,7 +1149,6 @@ static void trap_handler(riscv_t *rv)
     while (rv->is_trapped && !rv_has_halted(rv)) {
         insn = rv->io.mem_ifetch(rv->PC);
         assert(insn);
-
         rv_decode(ir, insn);
         ir->impl = dispatch_table[ir->opcode];
         rv->compressed = is_compressed(insn);
@@ -1140,6 +1156,297 @@ static void trap_handler(riscv_t *rv)
     }
 }
 #endif
+
+static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
+{
+    vm_attr_t *attr = PRIV(rv);
+    const uint32_t nr_pg_max = attr->mem_size / RV_PG_SIZE;
+    return ppn < nr_pg_max;
+}
+
+#define PAGE_TABLE(ppn)                                               \
+    ppn_is_valid(rv, ppn)                                             \
+        ? (uint32_t *) (attr->mem->mem_base + (ppn << (RV_PG_SHIFT))) \
+        : NULL
+
+/* Walk through page tables and get the corresponding PTE by virtual address if
+ * exists
+ * @rv: RISC-V emulator
+ * @addr: virtual address
+ * @return: NULL if a not found or fault else the corresponding PTE
+ */
+static uint32_t *mmu_walk(riscv_t *rv,
+                          const uint32_t addr,
+                          uint32_t *level,
+                          uint32_t **pte_ref)
+{
+    vm_attr_t *attr = PRIV(rv);
+    uint32_t ppn = rv->csr_satp;
+    if (ppn == 0) /* Bare mode */
+        return NULL;
+
+    /* root page table */
+    uint32_t *page_table = PAGE_TABLE(ppn);
+    if (!page_table)
+        return NULL;
+
+    for (int i = 1; i >= 0; i--) {
+        *level = 2 - i;
+        uint32_t vpn =
+            (addr >> RV_PG_SHIFT >> (i * (RV_PG_SHIFT - 2))) & MASK(10);
+        uint32_t *pte = page_table + vpn;
+        *pte_ref = pte;
+
+        /* PTE XWRV bit in order */
+        uint8_t XWRV_bit = (*pte & MASK(4));
+        switch (XWRV_bit) {
+        case 0b0001: /* next level of the page table */
+            ppn = (*pte >> (RV_PG_SHIFT - 2));
+            page_table = PAGE_TABLE(ppn);
+            if (!page_table)
+                return NULL;
+            break;
+        case 0b0011:
+        case 0b0111:
+        case 0b1001:
+        case 0b1011:
+        case 0b1111:
+            ppn = (*pte >> (RV_PG_SHIFT - 2));
+            if (*level == 1 &&
+                unlikely(ppn & MASK(10))) /* misaligned superpage */
+                return NULL;
+            return pte; /* leaf PTE */
+        case 0b0101:
+        case 0b1101:
+            return NULL;
+        }
+    }
+
+    return NULL;
+}
+
+/* Verify the PTE and generate corresponding faults if needed
+ * @op: the operation
+ * @rv: RISC-V emulator
+ * @pte: to be verified pte
+ * @addr: the corresponding virtual address to cause fault
+ * @return: false if a any fault is generated which caused by violating the
+ * access permission else true
+ */
+/* FIXME: handle access fault, addr out of range check */
+#define MMU_FAULT_CHECK(op, rv, pte, addr, access_bits) \
+    mmu_##op##_fault_check(rv, pte, addr, access_bits)
+#define MMU_FAULT_CHECK_IMPL(op, pgfault)                                      \
+    static bool mmu_##op##_fault_check(riscv_t *rv, uint32_t *pte,             \
+                                       uint32_t addr, uint32_t access_bits)    \
+    {                                                                          \
+        if (pte && (!(*pte & PTE_V) || (!(*pte & PTE_R) && (*pte & PTE_W)))) { \
+            rv->is_trapped = true;                                             \
+            rv_trap_##pgfault(rv, addr);                                       \
+            return false;                                                      \
+        }                                                                      \
+        if (pte && (!(*pte & PTE_X) && (access_bits & PTE_X))) {               \
+            rv->is_trapped = true;                                             \
+            rv_trap_##pgfault(rv, addr);                                       \
+            return false;                                                      \
+        }                                                                      \
+        if (pte &&                                                             \
+            ((!(SSTATUS_MXR & rv->csr_sstatus) && !(*pte & PTE_R) &&           \
+              (access_bits & PTE_R)) ||                                        \
+             ((SSTATUS_MXR & rv->csr_sstatus) &&                               \
+              !((*pte & PTE_R) | (*pte & PTE_X)) && (access_bits & PTE_R)))) { \
+            rv->is_trapped = true;                                             \
+            rv_trap_##pgfault(rv, addr);                                       \
+            return false;                                                      \
+        }                                                                      \
+        if (pte && (MSTATUS_MPRV & rv->csr_mstatus &&                          \
+                    rv->priv_mode == RV_PRIV_S_MODE)) {                        \
+            if (!(MSTATUS_SUM & rv->csr_mstatus) && (*pte & PTE_U)) {          \
+                rv->is_trapped = true;                                         \
+                rv_trap_##pgfault(rv, addr);                                   \
+                return false;                                                  \
+            }                                                                  \
+        }                                                                      \
+        /* PTE not found, map it in handler */                                 \
+        if (!pte && rv->csr_satp) {                                            \
+            rv->is_trapped = true;                                             \
+            rv_trap_##pgfault(rv, addr);                                       \
+            return true;                                                       \
+        }                                                                      \
+        /* valid PTE */                                                        \
+        return true;                                                           \
+    }
+
+MMU_FAULT_CHECK_IMPL(ifetch, pagefault_insn)
+MMU_FAULT_CHECK_IMPL(read, pagefault_load)
+MMU_FAULT_CHECK_IMPL(write, pagefault_store)
+
+#define get_ppn_and_offset(ppn, offset)                       \
+    do {                                                      \
+        ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;       \
+        offset = level == 1 ? addr & MASK((RV_PG_SHIFT + 10)) \
+                            : addr & MASK(RV_PG_SHIFT);       \
+    } while (0)
+
+uint32_t mmu_ifetch(riscv_t *rv, const uint32_t addr)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(ifetch, rv, pte, addr, PTE_X);
+    if (unlikely(!ok))
+        return 0;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_ifetch(ppn | offset);
+    }
+    return memory_ifetch(addr);
+}
+
+uint32_t mmu_read_w(riscv_t *rv, const uint32_t addr)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
+    if (unlikely(!ok))
+        return 0;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_read_w(ppn | offset);
+    }
+    return memory_read_w(addr);
+}
+
+uint16_t mmu_read_s(riscv_t *rv, const uint32_t addr)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
+    if (unlikely(!ok))
+        return 0;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_read_s(ppn | offset);
+    }
+    return memory_read_s(addr);
+}
+
+uint8_t mmu_read_b(riscv_t *rv, const uint32_t addr)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
+    if (unlikely(!ok))
+        return 0;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_read_b(ppn | offset);
+    }
+    return memory_read_b(addr);
+}
+
+void mmu_write_w(riscv_t *rv, const uint32_t addr, const uint32_t val)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
+    if (unlikely(!ok))
+        return;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_write_w(ppn | offset, (uint8_t *) &val);
+    }
+    return memory_write_w(addr, (uint8_t *) &val);
+}
+
+void mmu_write_s(riscv_t *rv, const uint32_t addr, const uint16_t val)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
+    if (unlikely(!ok))
+        return;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_write_s(ppn | offset, (uint8_t *) &val);
+    }
+    return memory_write_s(addr, (uint8_t *) &val);
+}
+
+void mmu_write_b(riscv_t *rv, const uint32_t addr, const uint8_t val)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
+    if (unlikely(!ok))
+        return;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_write_b(ppn | offset, (uint8_t *) &val);
+    }
+    return memory_write_b(addr, (uint8_t *) &val);
+}
+
+riscv_io_t mmu_io = {
+    /* memory read interface */
+    .mem_ifetch = mmu_ifetch,
+    .mem_read_w = mmu_read_w,
+    .mem_read_s = mmu_read_s,
+    .mem_read_b = mmu_read_b,
+
+    /* memory write interface */
+    .mem_write_w = mmu_write_w,
+    .mem_write_s = mmu_write_s,
+    .mem_write_b = mmu_write_b,
+
+    /* system services or essential routines */
+    .on_ecall = ecall_handler,
+    .on_ebreak = ebreak_handler,
+    .on_memcpy = memcpy_handler,
+    .on_memset = memset_handler,
+};
+#endif /* SYSTEM */
 
 void ebreak_handler(riscv_t *rv)
 {

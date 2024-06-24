@@ -25,6 +25,8 @@
 
 #define ARRAYS_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
+#define MASK(n) (~((~0U << (n))))
+
 /* Alignment macro */
 #if defined(__GNUC__) || defined(__clang__)
 #define __ALIGNED(x) __attribute__((aligned(x)))

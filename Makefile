@@ -11,6 +11,9 @@ CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
 
+ENABLE_SYSTEM ?= 0
+$(call set-feature, SYSTEM)
+
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)
@@ -134,7 +137,7 @@ endif
 ENABLE_JIT ?= 0
 $(call set-feature, JIT)
 ifeq ($(call has, JIT), 1)
-OBJS_EXT += jit.o 
+OBJS_EXT += jit.o
 # tier-2 JIT compiler powered LLVM
 LLVM_CONFIG = llvm-config-17
 LLVM_CONFIG := $(shell which $(LLVM_CONFIG))

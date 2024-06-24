@@ -78,7 +78,9 @@ enum op_field {
     /* RISC-V Privileged Instruction */                \
     _(wfi, 0, 4, 0, ENC(rs1, rd))                      \
     _(uret, 0, 4, 0, ENC(rs1, rd))                     \
-    _(sret, 1, 4, 0, ENC(rs1, rd))                     \
+    IIF(RV32_HAS(SYSTEM))(                             \
+        _(sret, 1, 4, 0, ENC(rs1, rd))                 \
+    )                                                  \
     _(hret, 0, 4, 0, ENC(rs1, rd))                     \
     _(mret, 1, 4, 0, ENC(rs1, rd))                     \
     _(sfencevma, 1, 4, 0, ENC(rs1, rs2, rd))           \

@@ -188,6 +188,7 @@ RV_TRAP_LIST
         rv->compressed = compress;                                    \
         rv->csr_cycle = cycle;                                        \
         rv->PC = PC;                                                  \
+        rv->is_trapped = true;                                        \
         rv_trap_##type##_misaligned(rv, IIF(IO)(addr, mask_or_pc));   \
         return false;                                                 \
     }

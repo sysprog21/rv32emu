@@ -221,6 +221,9 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->mem = memory_new(attr->mem_size);
     assert(attr->mem);
 
+    /* not being trapped */
+    rv->is_trapped = false;
+
     /* reset */
     rv_reset(rv, 0U);
 

@@ -1007,8 +1007,17 @@ RVOP(
 RVOP(
     sret,
     {
-        /* FIXME: Implement */
-        return false;
+        rv->is_trapped = false;
+        rv->priv_mode = (rv->csr_sstatus & MSTATUS_SPP) >> MSTATUS_SPP_SHIFT;
+        rv->csr_sstatus &= ~(MSTATUS_SPP);
+
+        const uint32_t sstatus_spie =
+            (rv->csr_sstatus & SSTATUS_SPIE) >> SSTATUS_SPIE_SHIFT;
+        rv->csr_sstatus |= (sstatus_spie << SSTATUS_SIE_SHIFT);
+        rv->csr_sstatus |= SSTATUS_SPIE;
+
+        rv->PC = rv->csr_sepc;
+        return true;
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1029,7 +1038,15 @@ RVOP(
 RVOP(
     mret,
     {
-        rv->csr_mstatus = MSTATUS_MPIE;
+        rv->is_trapped = false;
+        rv->priv_mode = (rv->csr_mstatus & MSTATUS_MPP) >> MSTATUS_MPP_SHIFT;
+        rv->csr_mstatus &= ~(MSTATUS_MPP);
+
+        const uint32_t mstatus_mpie =
+            (rv->csr_mstatus & MSTATUS_MPIE) >> MSTATUS_MPIE_SHIFT;
+        rv->csr_mstatus |= (mstatus_mpie << MSTATUS_MIE_SHIFT);
+        rv->csr_mstatus |= MSTATUS_MPIE;
+
         rv->PC = rv->csr_mepc;
         return true;
     },

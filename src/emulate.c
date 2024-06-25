@@ -210,6 +210,10 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_misa);
 
     /* Machine Trap Handling */
+    case CSR_MEDELEG: /* Machine Exception Delegation Register */
+        return (uint32_t *) (&rv->csr_medeleg);
+    case CSR_MIDELEG: /* Machine Interrupt Delegation Register */
+        return (uint32_t *) (&rv->csr_mideleg);
     case CSR_MSCRATCH: /* Machine Scratch Register */
         return (uint32_t *) (&rv->csr_mscratch);
     case CSR_MEPC: /* Machine Exception Program Counter */

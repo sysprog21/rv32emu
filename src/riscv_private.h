@@ -25,9 +25,9 @@
 /* CSRs */
 enum {
     /* floating point */
-    CSR_FFLAGS = 0x001,     /* Floating-point accrued exceptions */
-    CSR_FRM = 0x002,        /* Floating-point dynamic rounding mode */
-    CSR_FCSR = 0x003,       /* Floating-point control and status register */
+    CSR_FFLAGS = 0x001, /* Floating-point accrued exceptions */
+    CSR_FRM = 0x002,    /* Floating-point dynamic rounding mode */
+    CSR_FCSR = 0x003,   /* Floating-point control and status register */
 
     /* Supervisor trap setup */
     CSR_SSTATUS = 0x100,    /* Supervisor status register */
@@ -36,20 +36,20 @@ enum {
     CSR_SCOUNTEREN = 0x106, /* Supervisor counter enable */
 
     /* Supervisor trap handling */
-    CSR_SSCRATCH = 0x140,   /* Supervisor register for machine trap handlers */
-    CSR_SEPC = 0x141,       /* Supervisor exception program counter */
-    CSR_SCAUSE = 0x142,     /* Supervisor trap cause */
-    CSR_STVAL = 0x143,      /* Supervisor bad address or instruction */
-    CSR_SIP = 0x144,        /* Supervisor interrupt pending */
+    CSR_SSCRATCH = 0x140, /* Supervisor register for machine trap handlers */
+    CSR_SEPC = 0x141,     /* Supervisor exception program counter */
+    CSR_SCAUSE = 0x142,   /* Supervisor trap cause */
+    CSR_STVAL = 0x143,    /* Supervisor bad address or instruction */
+    CSR_SIP = 0x144,      /* Supervisor interrupt pending */
 
     /* Supervisor protection and translation */
-    CSR_SATP = 0x180,       /* Supervisor address translation and protection */
+    CSR_SATP = 0x180, /* Supervisor address translation and protection */
 
     /* Machine information registers */
-    CSR_MVENDORID = 0xF11,  /* Vendor ID */
-    CSR_MARCHID = 0xF12,    /* Architecture ID */
-    CSR_MIMPID = 0xF13,     /* Implementation ID */
-    CSR_MHARTID = 0xF14,    /* Hardware thread ID */
+    CSR_MVENDORID = 0xF11, /* Vendor ID */
+    CSR_MARCHID = 0xF12,   /* Architecture ID */
+    CSR_MIMPID = 0xF13,    /* Implementation ID */
+    CSR_MHARTID = 0xF14,   /* Hardware thread ID */
 
     /* Machine trap setup */
     CSR_MSTATUS = 0x300,    /* Machine status register */
@@ -61,15 +61,15 @@ enum {
     CSR_MCOUNTEREN = 0x306, /* Machine counter enable */
 
     /* machine trap handling */
-    CSR_MSCRATCH = 0x340,   /* Scratch register for machine trap handlers */
-    CSR_MEPC = 0x341,       /* Machine exception program counter */
-    CSR_MCAUSE = 0x342,     /* Machine trap cause */
-    CSR_MTVAL = 0x343,      /* Machine bad address or instruction */
-    CSR_MIP = 0x344,        /* Machine interrupt pending */
+    CSR_MSCRATCH = 0x340, /* Scratch register for machine trap handlers */
+    CSR_MEPC = 0x341,     /* Machine exception program counter */
+    CSR_MCAUSE = 0x342,   /* Machine trap cause */
+    CSR_MTVAL = 0x343,    /* Machine bad address or instruction */
+    CSR_MIP = 0x344,      /* Machine interrupt pending */
 
     /* low words */
-    CSR_CYCLE = 0xC00,      /* Cycle counter for RDCYCLE instruction */
-    CSR_TIME = 0xC01,       /* Timer for RDTIME instruction */
+    CSR_CYCLE = 0xC00, /* Cycle counter for RDCYCLE instruction */
+    CSR_TIME = 0xC01,  /* Timer for RDTIME instruction */
     CSR_INSTRET = 0xC02,
 
     /* high words */
@@ -142,22 +142,22 @@ struct riscv_internal {
 #endif
 
     /* csr registers */
-    uint64_t csr_cycle;      /* Machine cycle counter */
-    uint32_t csr_time[2];    /* Performance counter */
-    uint32_t csr_mstatus;    /* Machine status register */
-    uint32_t csr_mtvec;      /* Machine trap-handler base address */
-    uint32_t csr_misa;       /* ISA and extensions */
-    uint32_t csr_mtval;      /* Machine bad address or instruction */
-    uint32_t csr_mcause;     /* Machine trap cause */
-    uint32_t csr_mscratch;   /* Scratch register for machine trap handler */
-    uint32_t csr_mepc;       /* Machine exception program counter */
-    uint32_t csr_mip;        /* Machine interrupt pending */
-    uint32_t csr_mie;        /* Machine interrupt enable */
-    uint32_t csr_mideleg;    /* Machine interrupt delegation register */
-    uint32_t csr_medeleg;    /* Machine exception delegation register */
-    uint32_t csr_mvendorid;  /* vendor ID */
-    uint32_t csr_marchid;    /* Architecture ID */
-    uint32_t csr_mimpid;     /* Implementation ID */
+    uint64_t csr_cycle;     /* Machine cycle counter */
+    uint32_t csr_time[2];   /* Performance counter */
+    uint32_t csr_mstatus;   /* Machine status register */
+    uint32_t csr_mtvec;     /* Machine trap-handler base address */
+    uint32_t csr_misa;      /* ISA and extensions */
+    uint32_t csr_mtval;     /* Machine bad address or instruction */
+    uint32_t csr_mcause;    /* Machine trap cause */
+    uint32_t csr_mscratch;  /* Scratch register for machine trap handler */
+    uint32_t csr_mepc;      /* Machine exception program counter */
+    uint32_t csr_mip;       /* Machine interrupt pending */
+    uint32_t csr_mie;       /* Machine interrupt enable */
+    uint32_t csr_mideleg;   /* Machine interrupt delegation register */
+    uint32_t csr_medeleg;   /* Machine exception delegation register */
+    uint32_t csr_mvendorid; /* vendor ID */
+    uint32_t csr_marchid;   /* Architecture ID */
+    uint32_t csr_mimpid;    /* Implementation ID */
     uint32_t csr_mbadaddr;
 
     uint32_t csr_sstatus;    /* supervisor status register */
@@ -171,7 +171,7 @@ struct riscv_internal {
     uint32_t csr_stval;      /* supervisor trap value register */
     uint32_t csr_satp;       /* supervisor address translation and protection */
 
-    uint32_t priv_mode;      /* U-mode or S-mode or M-mode */
+    uint32_t priv_mode; /* U-mode or S-mode or M-mode */
 
     bool compressed; /**< current instruction is compressed or not */
 #if !RV32_HAS(JIT)

@@ -356,6 +356,12 @@ CONSTOPT(and, {
         info->is_constant[ir->rd] = false;
 })
 
+/*
+ * FENCE: order device I/O and memory accesses as viewed by other
+ * RISC-V harts and external devices or coprocessors
+ */
+CONSTOPT(fence, {})
+
 /* ECALL: Environment Call */
 CONSTOPT(ecall, {})
 

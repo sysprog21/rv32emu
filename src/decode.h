@@ -72,6 +72,7 @@ enum op_field {
     _(sra, 0, 4, 1, ENC(rs1, rs2, rd))                 \
     _(or, 0, 4, 1, ENC(rs1, rs2, rd))                  \
     _(and, 0, 4, 1, ENC(rs1, rs2, rd))                 \
+    _(fence, 1, 4, 0, ENC(rs1, rd))                    \
     _(ecall, 1, 4, 1, ENC(rs1, rd))                    \
     _(ebreak, 1, 4, 1, ENC(rs1, rd))                   \
     /* RISC-V Privileged Instruction */                \

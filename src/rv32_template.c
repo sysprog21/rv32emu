@@ -927,6 +927,21 @@ RVOP(
      }))
 /* clang-format on */
 
+/*
+ * FENCE: order device I/O and memory accesses as viewed by other
+ * RISC-V harts and external devices or coprocessors
+ */
+RVOP(
+    fence,
+    {
+        PC += 4;
+        /* FIXME: fill real implementations */
+        goto end_op;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
 /* ECALL: Environment Call */
 RVOP(
     ecall,

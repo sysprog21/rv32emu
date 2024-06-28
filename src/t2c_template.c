@@ -281,6 +281,8 @@ T2C_OP(and, {
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
+T2C_OP(fence, { __UNREACHABLE; })
+
 T2C_OP(ecall, {
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc,
                              t2c_gen_PC_addr(start, builder, ir));

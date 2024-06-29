@@ -37,6 +37,11 @@ LDFLAGS += -flto=thin
 endif
 endif
 
+# Allow user to config the memory size accordingly
+ifdef CONFIG_MEM_SIZE
+    CFLAGS += -DMEM_SIZE=$(CONFIG_MEM_SIZE)
+endif
+
 # Disable Intel's Control-flow Enforcement Technology (CET)
 CFLAGS += $(CFLAGS_NO_CET)
 

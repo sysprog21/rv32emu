@@ -51,7 +51,13 @@ int main()
      * track) */
     TEST_LOGGER("MISALIGNED STORE TEST PASSED!\n");
 
-    /* misalign instuction fetch */
+    /*
+     * misalign instuction fetch
+     *
+     * MUST disable ENABLE_EXT_C when building rv32emu before running this test
+     * since jalr instruction only check misaligned if lacks of compressed
+     * instruction support
+     */
     misalign_func();
     /* execute the registered trap handler is considered a pass (use gdb to
      * track) */

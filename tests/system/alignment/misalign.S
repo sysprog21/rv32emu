@@ -19,7 +19,7 @@ misalign_func:
 .section .text
 .global _start
 _start:
-    call main	
+    call main
     j exit
 
 # Assume three traps are delegated to supervisor,
@@ -27,19 +27,19 @@ _start:
 .global misalign_trap_handler
 misalign_trap_handler:
     csrr t0, scause
-    
+
     # Check for misaligned instruction fetch
     li t1, CAUSE_MISALIGNED_INSN_FETCH
     beq t0, t1, misaligned_insn_fetch_handler
-    
+
     # Check for misaligned load
     li t1, CAUSE_MISALIGNED_LOAD
     beq t0, t1, misaligned_load_handler
-    
+
     # Check for misaligned store
     li t1, CAUSE_MISALIGNED_STORE
     beq t0, t1, misaligned_store_handler
-    
+
     # If none of the above, exit failed
 fail:
     li a0, 1
@@ -67,4 +67,3 @@ misaligned_store_handler:
     addi t0, t0, 4
     csrw sepc, t0
     sret
-

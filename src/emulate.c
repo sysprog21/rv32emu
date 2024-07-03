@@ -139,7 +139,7 @@ RV_EXCEPTION_LIST
         return false;                                                 \
     }
 
-/* get current time in microsecnds and update csr_time register */
+/* get current time in microseconds and update csr_time register */
 static inline void update_time(riscv_t *rv)
 {
     struct timeval tv;

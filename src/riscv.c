@@ -192,7 +192,7 @@ static pthread_t t2c_thread;
 static void *t2c_runloop(void *arg)
 {
     riscv_t *rv = (riscv_t *) arg;
-    while (rv->quit) {
+    while (!rv->quit) {
         if (!list_empty(&rv->wait_queue)) {
             queue_entry_t *entry =
                 list_last_entry(&rv->wait_queue, queue_entry_t, list);

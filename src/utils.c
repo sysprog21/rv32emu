@@ -64,7 +64,7 @@ void rv_clock_gettime(struct timespec *tp)
     int32_t tv_sec, tv_nsec;
     get_time_info(&tv_sec, &tv_nsec);
     tp->tv_sec = tv_sec;
-    tp->tv_nsec = tv_nsec; /* Transfer to microseconds */
+    tp->tv_nsec = tv_nsec;
 }
 
 char *sanitize_path(const char *input)

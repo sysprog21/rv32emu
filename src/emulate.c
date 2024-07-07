@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <setjmp.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -24,6 +25,7 @@ extern struct target_ops gdbstub_ops;
 #endif
 
 #include "decode.h"
+#include "io.h"
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -41,30 +43,44 @@ extern struct target_ops gdbstub_ops;
 #define IF_rs2(i, r) (i->rs2 == rv_reg_##r)
 #define IF_imm(i, v) (i->imm == v)
 
-/* RISC-V exception code list */
+/* RISC-V trap code list */
 /* clang-format off */
-#define RV_EXCEPTION_LIST                                          \
-    IIF(RV32_HAS(EXT_C))(,                                         \
-        _(insn_misaligned, 0) /* Instruction address misaligned */ \
-    )                                                              \
-    _(illegal_insn, 2)     /* Illegal instruction */               \
-    _(breakpoint, 3)       /* Breakpoint */                        \
-    _(load_misaligned, 4)  /* Load address misaligned */           \
-    _(store_misaligned, 6) /* Store/AMO address misaligned */      \
-    _(ecall_M, 11)         /* Environment call from M-mode */
+#define RV_TRAP_LIST                                                                  \
+    IIF(RV32_HAS(EXT_C))(,                                                            \
+        _(insn_misaligned, 0)              /* Instruction address misaligned */       \
+    )                                                                                 \
+    _(illegal_insn, 2)                     /* Illegal instruction */                  \
+    _(breakpoint, 3)                       /* Breakpoint */                           \
+    _(load_misaligned, 4)                  /* Load address misaligned */              \
+    _(store_misaligned, 6)                 /* Store/AMO address misaligned */         \
+    _(ecall_M, 11)                         /* Environment call from M-mode */         \
+    IIF(RV32_HAS(SYSTEM))(                                                            \
+        _(pagefault_insn, 12)              /* Instruction page fault */               \
+        _(pagefault_load, 13)              /* Load page fault */                      \
+        _(pagefault_store, 15)             /* Store page fault */                     \
+    )
 /* clang-format on */
 
 enum {
-#define _(type, code) rv_exception_code##type = code,
-    RV_EXCEPTION_LIST
+#define _(type, code) rv_trap_code_##type = code,
+    RV_TRAP_LIST
 #undef _
 };
 
-static void rv_exception_default_handler(riscv_t *rv)
+static void rv_trap_default_handler(riscv_t *rv)
 {
     rv->csr_mepc += rv->compressed ? 2 : 4;
     rv->PC = rv->csr_mepc; /* mret */
 }
+
+#if RV32_HAS(SYSTEM)
+static void trap_handler(riscv_t *rv);
+#else
+/* should not be called in non-SYSTEM mode since default trap handler is capable
+ * to handle traps
+ */
+static void trap_handler(riscv_t *rv UNUSED) {}
+#endif
 
 /* When a trap occurs in M-mode, mtval is either initialized to zero or
  * populated with exception-specific details to assist software in managing
@@ -76,49 +92,86 @@ static void rv_exception_default_handler(riscv_t *rv)
  * When a hardware breakpoint is triggered or an exception like address
  * misalignment, access fault, or page fault occurs during an instruction
  * fetch, load, or store operation, mtval is updated with the virtual address
- * that caused the fault. In the case of an illegal instruction trap, mtval
- * might be updated with the first XLEN or ILEN bits of the offending
- * instruction. For all other traps, mtval is simply set to zero. However,
- * it is worth noting that a future standard could redefine how mtval is
- * handled for different types of traps.
+ * that caused the fault. In the case of an illegal instruction trap, mtval *
+ * might be updated with the first XLEN or ILEN bits of the offending *
+ * instruction. For all other traps, mtval is simply set to zero. However, it is
+ * worth noting that a future standard could redefine how mtval is handled for
+ * different types of traps.
  */
-#define EXCEPTION_HANDLER_IMPL(type, code)                                   \
-    static void rv_except_##type(riscv_t *rv, uint32_t mtval)                \
-    {                                                                        \
-        /* mtvec (Machine Trap-Vector Base Address Register)                 \
-         * mtvec[MXLEN-1:2]: vector base address                             \
-         * mtvec[1:0] : vector mode                                          \
-         */                                                                  \
-        const uint32_t base = rv->csr_mtvec & ~0x3;                          \
-        const uint32_t mode = rv->csr_mtvec & 0x3;                           \
-        /* mepc  (Machine Exception Program Counter)                         \
-         * mtval (Machine Trap Value Register)                               \
-         * mcause (Machine Cause Register): store exception code             \
-         * mstatus (Machine Status Register): keep track of and controls the \
-         * hart’s current operating state                                  \
-         */                                                                  \
-        rv->csr_mepc = rv->PC;                                               \
-        rv->csr_mtval = mtval;                                               \
-        rv->csr_mcause = code;                                               \
-        rv->csr_mstatus = MSTATUS_MPP; /* set privilege mode */              \
-        if (!rv->csr_mtvec) {          /* in case CSR is not configured */   \
-            rv_exception_default_handler(rv);                                \
-            return;                                                          \
-        }                                                                    \
-        switch (mode) {                                                      \
-        case 0: /* DIRECT: All exceptions set PC to base */                  \
-            rv->PC = base;                                                   \
-            break;                                                           \
-        /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */    \
-        case 1:                                                              \
-            rv->PC = base + 4 * code;                                        \
-            break;                                                           \
-        }                                                                    \
+static jmp_buf env;
+#define TRAP_HANDLER_IMPL(type, code)                                         \
+    static void rv_trap_##type(riscv_t *rv, uint32_t mtval)                   \
+    {                                                                         \
+        /* m/stvec (Machine/Supervisor Trap-Vector Base Address Register)     \
+         * m/stvec[MXLEN-1:2]: vector base address                            \
+         * m/stvec[1:0] : vector mode                                         \
+         */                                                                   \
+        uint32_t base;                                                        \
+        uint32_t mode;                                                        \
+        /* m/sepc  (Machine/Supervisor Exception Program Counter)             \
+         * m/stval (Machine/Supervisor Trap Value Register)                   \
+         * m/scause (Machine/Supervisor Cause Register): store exception code \
+         * m/sstatus (Machine/Supervisor Status Register): keep track of and  \
+         * controls the hart’s current operating state                      \
+         */                                                                   \
+        /* supervisor */                                                      \
+        if (rv->csr_medeleg & (1U << code) ||                                 \
+            rv->csr_mideleg & (1U << code)) {                                 \
+            const uint32_t sstatus_sie =                                      \
+                (rv->csr_sstatus & SSTATUS_SIE) >> SSTATUS_SIE_SHIFT;         \
+            rv->csr_sstatus |= (sstatus_sie << SSTATUS_SPIE_SHIFT);           \
+            rv->csr_sstatus &= ~(SSTATUS_SIE);                                \
+            rv->csr_sstatus |= (rv->priv_mode << SSTATUS_SPP_SHIFT);          \
+            rv->priv_mode = RV_PRIV_S_MODE;                                   \
+            base = rv->csr_stvec & ~0x3;                                      \
+            mode = rv->csr_stvec & 0x3;                                       \
+            rv->csr_sepc = rv->PC;                                            \
+            rv->csr_stval = mtval;                                            \
+            rv->csr_scause = code;                                            \
+            rv->csr_sstatus |= SSTATUS_SPP; /* set privilege mode */          \
+        } else {                            /* machine */                     \
+            const uint32_t mstatus_mie =                                      \
+                (rv->csr_mstatus & MSTATUS_MIE) >> MSTATUS_MIE_SHIFT;         \
+            rv->csr_mstatus |= (mstatus_mie << MSTATUS_MPIE_SHIFT);           \
+            rv->csr_mstatus &= ~(MSTATUS_MIE);                                \
+            rv->csr_mstatus |= (rv->priv_mode << MSTATUS_MPP_SHIFT);          \
+            rv->priv_mode = RV_PRIV_M_MODE;                                   \
+            base = rv->csr_mtvec & ~0x3;                                      \
+            mode = rv->csr_mtvec & 0x3;                                       \
+            rv->csr_mepc = rv->PC;                                            \
+            rv->csr_mtval = mtval;                                            \
+            rv->csr_mcause = code;                                            \
+            rv->csr_mstatus |= MSTATUS_MPP; /* set privilege mode */          \
+            if (!rv->csr_mtvec) { /* in case CSR is not configured */         \
+                rv_trap_default_handler(rv);                                  \
+                return;                                                       \
+            }                                                                 \
+        }                                                                     \
+        switch (mode) {                                                       \
+        /* DIRECT: All traps set PC to base */                                \
+        case 0:                                                               \
+            rv->PC = base;                                                    \
+            break;                                                            \
+        /* VECTORED: Asynchronous traps set PC to base + 4 * code */          \
+        case 1:                                                               \
+            /* MSB of code is used to indicate whether the trap is interrupt  \
+             * or exception, so it is not considered as the 'real' code */    \
+            rv->PC = base + 4 * (code & MASK(31));                            \
+            break;                                                            \
+        }                                                                     \
+        /* block escaping for trap handling */                                \
+        if (rv->is_trapped) {                                                 \
+            if (setjmp(env) == 0) {                                           \
+                trap_handler(rv);                                             \
+            } else {                                                          \
+                fprintf(stderr, "setjmp failed");                             \
+            }                                                                 \
+        }                                                                     \
     }
 
-/* RISC-V exception handlers */
-#define _(type, code) EXCEPTION_HANDLER_IMPL(type, code)
-RV_EXCEPTION_LIST
+/* RISC-V trap handlers */
+#define _(type, code) TRAP_HANDLER_IMPL(type, code)
+RV_TRAP_LIST
 #undef _
 
 /* wrap load/store and insn misaligned handler
@@ -135,9 +188,10 @@ RV_EXCEPTION_LIST
         rv->compressed = compress;                                    \
         rv->csr_cycle = cycle;                                        \
         rv->PC = PC;                                                  \
-        rv_except_##type##_misaligned(rv, IIF(IO)(addr, mask_or_pc)); \
+        rv_trap_##type##_misaligned(rv, IIF(IO)(addr, mask_or_pc));   \
         return false;                                                 \
     }
+
 
 /* get current time in microsecnds and update csr_time register */
 static inline void update_time(riscv_t *rv)
@@ -164,6 +218,10 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_misa);
 
     /* Machine Trap Handling */
+    case CSR_MEDELEG: /* Machine Exception Delegation Register */
+        return (uint32_t *) (&rv->csr_medeleg);
+    case CSR_MIDELEG: /* Machine Interrupt Delegation Register */
+        return (uint32_t *) (&rv->csr_mideleg);
     case CSR_MSCRATCH: /* Machine Scratch Register */
         return (uint32_t *) (&rv->csr_mscratch);
     case CSR_MEPC: /* Machine Exception Program Counter */
@@ -196,6 +254,26 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     case CSR_FCSR:
         return (uint32_t *) (&rv->csr_fcsr);
 #endif
+    case CSR_SSTATUS:
+        return (uint32_t *) (&rv->csr_sstatus);
+    case CSR_SIE:
+        return (uint32_t *) (&rv->csr_sie);
+    case CSR_STVEC:
+        return (uint32_t *) (&rv->csr_stvec);
+    case CSR_SCOUNTEREN:
+        return (uint32_t *) (&rv->csr_scounteren);
+    case CSR_SSCRATCH:
+        return (uint32_t *) (&rv->csr_sscratch);
+    case CSR_SEPC:
+        return (uint32_t *) (&rv->csr_sepc);
+    case CSR_SCAUSE:
+        return (uint32_t *) (&rv->csr_scause);
+    case CSR_STVAL:
+        return (uint32_t *) (&rv->csr_stval);
+    case CSR_SIP:
+        return (uint32_t *) (&rv->csr_sip);
+    case CSR_SATP:
+        return (uint32_t *) (&rv->csr_satp);
     default:
         return NULL;
     }
@@ -220,7 +298,16 @@ static uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
         out &= FFLAG_MASK;
 #endif
 
-    *c = val;
+    if (c == &rv->csr_satp) {
+        const uint8_t mode_sv32 = val >> 31;
+        if (mode_sv32)
+            *c = val & MASK(22); /* store ppn */
+        else                     /* bare mode */
+            *c = 0; /* virtual mem addr maps to same physical mem addr directly
+                     */
+    } else {
+        *c = val;
+    }
 
     return out;
 }
@@ -377,9 +464,9 @@ enum {
 };
 
 #if RV32_HAS(GDBSTUB)
-#define RVOP_NO_NEXT(ir) (!ir->next | rv->debug_mode)
+#define RVOP_NO_NEXT(ir) (!ir->next | rv->debug_mode | rv->is_trapped)
 #else
-#define RVOP_NO_NEXT(ir) (!ir->next)
+#define RVOP_NO_NEXT(ir) (!ir->next | rv->is_trapped)
 #endif
 
 /* record whether the branch is taken or not during emulation */
@@ -461,7 +548,7 @@ static bool do_fuse3(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->X[fuse[i].rs2]);
+        rv->io.mem_write_w(rv, addr, rv->X[fuse[i].rs2]);
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {
@@ -485,7 +572,7 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        rv->X[fuse[i].rd] = rv->io.mem_read_w(addr);
+        rv->X[fuse[i].rd] = rv->io.mem_read_w(rv, addr);
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {
@@ -584,21 +671,23 @@ static void block_translate(riscv_t *rv, block_t *block)
     block->pc_start = block->pc_end = rv->PC;
 
     rv_insn_t *prev_ir = NULL;
-    rv_insn_t *ir = mpool_calloc(rv->block_ir_mp);
+    rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
     block->ir_head = ir;
 
     /* translate the basic block */
     while (true) {
+        memset(ir, 0, sizeof(rv_insn_t));
+
         if (prev_ir)
             prev_ir->next = ir;
 
         /* fetch the next instruction */
-        const uint32_t insn = rv->io.mem_ifetch(block->pc_end);
+        const uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
             rv->compressed = is_compressed(insn);
-            rv_except_illegal_insn(rv, insn);
+            rv_trap_illegal_insn(rv, insn);
             break;
         }
         ir->impl = dispatch_table[ir->opcode];
@@ -626,7 +715,7 @@ static void block_translate(riscv_t *rv, block_t *block)
             break;
         }
 
-        ir = mpool_calloc(rv->block_ir_mp);
+        ir = mpool_alloc(rv->block_ir_mp);
     }
 
     assert(prev_ir);
@@ -1048,16 +1137,323 @@ void rv_step(void *arg)
 #endif
 }
 
+#if RV32_HAS(SYSTEM)
+static void trap_handler(riscv_t *rv)
+{
+    rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
+    assert(ir);
+
+    uint32_t insn;
+    while (rv->is_trapped) { /* set to false by sret/mret implementation */
+        insn = rv->io.mem_ifetch(rv, rv->PC);
+        rv_decode(ir, insn);
+        ir->impl = dispatch_table[ir->opcode];
+        rv->compressed = is_compressed(insn);
+        ir->impl(rv, ir, rv->csr_cycle, rv->PC);
+    }
+}
+
+static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
+{
+    vm_attr_t *attr = PRIV(rv);
+    const uint32_t nr_pg_max = attr->mem_size / RV_PG_SIZE;
+    return ppn < nr_pg_max;
+}
+
+#define PAGE_TABLE(ppn)                                               \
+    ppn_is_valid(rv, ppn)                                             \
+        ? (uint32_t *) (attr->mem->mem_base + (ppn << (RV_PG_SHIFT))) \
+        : NULL
+
+/* Walk through page tables and get the corresponding PTE by virtual address if
+ * exists
+ * @rv: RISC-V emulator
+ * @addr: virtual address
+ * @return: NULL if a not found or fault else the corresponding PTE
+ */
+static uint32_t *mmu_walk(riscv_t *rv,
+                          const uint32_t addr,
+                          uint32_t *level,
+                          uint32_t **pte_ref)
+{
+    vm_attr_t *attr = PRIV(rv);
+    uint32_t ppn = rv->csr_satp;
+    if (ppn == 0) /* Bare mode */
+        return NULL;
+
+    /* root page table */
+    uint32_t *page_table = PAGE_TABLE(ppn);
+    if (!page_table)
+        return NULL;
+
+    for (int i = 1; i >= 0; i--) {
+        *level = 2 - i;
+        uint32_t vpn =
+            (addr >> RV_PG_SHIFT >> (i * (RV_PG_SHIFT - 2))) & MASK(10);
+        uint32_t *pte = page_table + vpn;
+        *pte_ref = pte;
+
+        /* PTE XWRV bit in order */
+        uint8_t XWRV_bit = (*pte & MASK(4));
+        switch (XWRV_bit) {
+        case 0b0001: /* next level of the page table */
+            ppn = (*pte >> (RV_PG_SHIFT - 2));
+            page_table = PAGE_TABLE(ppn);
+            if (!page_table)
+                return NULL;
+            break;
+        case 0b0011:
+        case 0b0111:
+        case 0b1001:
+        case 0b1011:
+        case 0b1111:
+            ppn = (*pte >> (RV_PG_SHIFT - 2));
+            if (*level == 1 &&
+                unlikely(ppn & MASK(10))) /* misaligned superpage */
+                return NULL;
+            return pte; /* leaf PTE */
+        case 0b0101:
+        case 0b1101:
+            return NULL;
+        }
+    }
+
+    return NULL;
+}
+
+/* Verify the PTE and generate corresponding faults if needed
+ * @op: the operation
+ * @rv: RISC-V emulator
+ * @pte: to be verified pte
+ * @addr: the corresponding virtual address to cause fault
+ * @return: false if a any fault is generated which caused by violating the
+ * access permission else true
+ */
+/* FIXME: handle access fault, addr out of range check */
+#define MMU_FAULT_CHECK(op, rv, pte, addr, access_bits) \
+    mmu_##op##_fault_check(rv, pte, addr, access_bits)
+#define MMU_FAULT_CHECK_IMPL(op, pgfault)                                      \
+    static bool mmu_##op##_fault_check(riscv_t *rv, uint32_t *pte,             \
+                                       uint32_t addr, uint32_t access_bits)    \
+    {                                                                          \
+        if (pte && (!(*pte & PTE_V) || (!(*pte & PTE_R) && (*pte & PTE_W)))) { \
+            rv->is_trapped = true;                                             \
+            rv_trap_##pgfault(rv, addr);                                       \
+            return false;                                                      \
+        }                                                                      \
+        if (pte && (!(*pte & PTE_X) && (access_bits & PTE_X))) {               \
+            rv->is_trapped = true;                                             \
+            rv_trap_##pgfault(rv, addr);                                       \
+            return false;                                                      \
+        }                                                                      \
+        if (pte &&                                                             \
+            ((!(SSTATUS_MXR & rv->csr_sstatus) && !(*pte & PTE_R) &&           \
+              (access_bits & PTE_R)) ||                                        \
+             ((SSTATUS_MXR & rv->csr_sstatus) &&                               \
+              !((*pte & PTE_R) | (*pte & PTE_X)) && (access_bits & PTE_R)))) { \
+            rv->is_trapped = true;                                             \
+            rv_trap_##pgfault(rv, addr);                                       \
+            return false;                                                      \
+        }                                                                      \
+        if (pte && (MSTATUS_MPRV & rv->csr_mstatus &&                          \
+                    rv->priv_mode == RV_PRIV_S_MODE)) {                        \
+            if (!(MSTATUS_SUM & rv->csr_mstatus) && (*pte & PTE_U)) {          \
+                rv->is_trapped = true;                                         \
+                rv_trap_##pgfault(rv, addr);                                   \
+                return false;                                                  \
+            }                                                                  \
+        }                                                                      \
+        /* PTE not found, map it in handler */                                 \
+        if (!pte && rv->csr_satp) {                                            \
+            rv->is_trapped = true;                                             \
+            rv_trap_##pgfault(rv, addr);                                       \
+            return true;                                                       \
+        }                                                                      \
+        /* valid PTE */                                                        \
+        return true;                                                           \
+    }
+
+MMU_FAULT_CHECK_IMPL(ifetch, pagefault_insn)
+MMU_FAULT_CHECK_IMPL(read, pagefault_load)
+MMU_FAULT_CHECK_IMPL(write, pagefault_store)
+
+#define get_ppn_and_offset(ppn, offset)                       \
+    do {                                                      \
+        ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;       \
+        offset = level == 1 ? addr & MASK((RV_PG_SHIFT + 10)) \
+                            : addr & MASK(RV_PG_SHIFT);       \
+    } while (0)
+
+uint32_t mmu_ifetch(riscv_t *rv, const uint32_t addr)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(ifetch, rv, pte, addr, PTE_X);
+    if (unlikely(!ok))
+        return 0;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_ifetch(ppn | offset);
+    }
+    return memory_ifetch(addr);
+}
+
+uint32_t mmu_read_w(riscv_t *rv, const uint32_t addr)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
+    if (unlikely(!ok))
+        return 0;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_read_w(ppn | offset);
+    }
+    return memory_read_w(addr);
+}
+
+uint16_t mmu_read_s(riscv_t *rv, const uint32_t addr)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
+    if (unlikely(!ok))
+        return 0;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_read_s(ppn | offset);
+    }
+    return memory_read_s(addr);
+}
+
+uint8_t mmu_read_b(riscv_t *rv, const uint32_t addr)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
+    if (unlikely(!ok))
+        return 0;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_read_b(ppn | offset);
+    }
+    return memory_read_b(addr);
+}
+
+void mmu_write_w(riscv_t *rv, const uint32_t addr, const uint32_t val)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
+    if (unlikely(!ok))
+        return;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_write_w(ppn | offset, (uint8_t *) &val);
+    }
+    return memory_write_w(addr, (uint8_t *) &val);
+}
+
+void mmu_write_s(riscv_t *rv, const uint32_t addr, const uint16_t val)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
+    if (unlikely(!ok))
+        return;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_write_s(ppn | offset, (uint8_t *) &val);
+    }
+    return memory_write_s(addr, (uint8_t *) &val);
+}
+
+void mmu_write_b(riscv_t *rv, const uint32_t addr, const uint8_t val)
+{
+    uint32_t level;
+    uint32_t *pte_ref;
+    uint32_t *pte = mmu_walk(rv, addr, &level, &pte_ref);
+    bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
+    if (unlikely(!ok))
+        return;
+
+    pte = pte_ref; /* PTE should be valid now */
+
+    if (rv->csr_satp) {
+        uint32_t ppn;
+        uint32_t offset;
+        get_ppn_and_offset(ppn, offset);
+        return memory_write_b(ppn | offset, (uint8_t *) &val);
+    }
+    return memory_write_b(addr, (uint8_t *) &val);
+}
+
+riscv_io_t mmu_io = {
+    /* memory read interface */
+    .mem_ifetch = mmu_ifetch,
+    .mem_read_w = mmu_read_w,
+    .mem_read_s = mmu_read_s,
+    .mem_read_b = mmu_read_b,
+
+    /* memory write interface */
+    .mem_write_w = mmu_write_w,
+    .mem_write_s = mmu_write_s,
+    .mem_write_b = mmu_write_b,
+
+    /* system services or essential routines */
+    .on_ecall = ecall_handler,
+    .on_ebreak = ebreak_handler,
+    .on_memcpy = memcpy_handler,
+    .on_memset = memset_handler,
+};
+#endif /* SYSTEM */
+
 void ebreak_handler(riscv_t *rv)
 {
     assert(rv);
-    rv_except_breakpoint(rv, rv->PC);
+    rv_trap_breakpoint(rv, rv->PC);
 }
 
 void ecall_handler(riscv_t *rv)
 {
     assert(rv);
-    rv_except_ecall_M(rv, 0);
+    rv_trap_ecall_M(rv, 0);
     syscall_handler(rv);
 }
 

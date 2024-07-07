@@ -11,6 +11,11 @@ CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h
 
+ENABLE_SYSTEM ?= 0
+ifeq ($(call has, SYSTEM), 1)
+$(call set-feature, SYSTEM)
+endif
+
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)

@@ -165,8 +165,10 @@ void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
 #define MEMIO(op) on_mem_##op
 #define IO_HANDLER_IMPL(type, op, RW)                                     \
     static IIF(RW)(                                                       \
-        /* W */ void MEMIO(op)(riscv_word_t addr, riscv_##type##_t data), \
-        /* R */ riscv_##type##_t MEMIO(op)(riscv_word_t addr))            \
+        /* W */ void MEMIO(op)(UNUSED riscv_t * rv, riscv_word_t addr,    \
+                               riscv_##type##_t data),                    \
+        /* R */ riscv_##type##_t MEMIO(op)(UNUSED riscv_t * rv,           \
+                                           riscv_word_t addr))            \
     {                                                                     \
         IIF(RW)                                                           \
         (memory_##op(addr, (uint8_t *) &data), return memory_##op(addr)); \
@@ -222,6 +224,9 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->mem = memory_new(attr->mem_size);
     assert(attr->mem);
 
+    /* not being trapped */
+    rv->is_trapped = false;
+
     /* reset */
     rv_reset(rv, 0U);
 
@@ -261,9 +266,30 @@ riscv_t *rv_create(riscv_user_t rv_attr)
             .on_memset = memset_handler,
         };
         memcpy(&rv->io, &io, sizeof(riscv_io_t));
-    } else {
-        /* TODO: system emulator */
     }
+#if RV32_HAS(SYSTEM)
+    else {
+        /* TODO: system emulator */
+        elf_t *elf = elf_new();
+        assert(elf && elf_open(elf, (attr->data.system)->elf_program));
+
+        const struct Elf32_Sym *end;
+        if ((end = elf_get_symbol(elf, "_end")))
+            attr->break_addr = end->st_value;
+
+        assert(elf_load(elf, attr->mem));
+
+        /* set the entry pc */
+        const struct Elf32_Ehdr *hdr = get_elf_header(elf);
+        assert(rv_set_pc(rv, hdr->e_entry));
+
+        elf_delete(elf);
+
+        /* this variable has external linkage to mmu_io defined in emulate.c */
+        extern riscv_io_t mmu_io;
+        memcpy(&rv->io, &mmu_io, sizeof(riscv_io_t));
+    }
+#endif /* SYSTEM */
 
     /* default standard stream.
      * rv_remap_stdstream can be called to overwrite them
@@ -342,7 +368,11 @@ void rv_run(riscv_t *rv)
     assert(rv);
 
     vm_attr_t *attr = PRIV(rv);
+#if RV32_HAS(SYSTEM)
+    assert(attr && attr->data.system && attr->data.system->elf_program);
+#else
     assert(attr && attr->data.user && attr->data.user->elf_program);
+#endif
 
     if (attr->run_flag & RV_RUN_TRACE)
         rv_run_and_trace(rv);
@@ -501,6 +531,9 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     /* reset sp pointing to argc */
     rv->X[rv_reg_sp] = stack_top;
 
+    /* reset privilege mode */
+    rv->priv_mode = RV_PRIV_M_MODE;
+
     /* reset the csrs */
     rv->csr_mtvec = 0;
     rv->csr_cycle = 0;
@@ -525,7 +558,6 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 #if RV32_HAS(EXT_M)
     rv->csr_misa |= MISA_M;
 #endif
-
 
     rv->halt = false;
 }

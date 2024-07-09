@@ -119,10 +119,7 @@
  */
 
 /* Internal */
-RVOP(
-    nop,
-    { rv->X[rv_reg_zero] = 0; },
-    GEN({/* no operation */}))
+RVOP(nop, { rv->X[rv_reg_zero] = 0; }, GEN({/* no operation */}))
 
 /* LUI is used to build 32-bit constants and uses the U-type format. LUI
  * places the U-immediate value in the top 20 bits of the destination
@@ -297,13 +294,14 @@ RVOP(
         if (!untaken)                                              \
             goto nextop;                                           \
         IIF(RV32_HAS(JIT))                                         \
-        ({                                                         \
-            cache_get(rv->block_cache, PC + 4, true);              \
-            if (!set_add(&pc_set, PC + 4))                         \
-                has_loops = true;                                  \
-            if (cache_hot(rv->block_cache, PC + 4))                \
-                goto nextop;                                       \
-        }, );                                                      \
+        (                                                          \
+            {                                                      \
+                cache_get(rv->block_cache, PC + 4, true);          \
+                if (!set_add(&pc_set, PC + 4))                     \
+                    has_loops = true;                              \
+                if (cache_hot(rv->block_cache, PC + 4))            \
+                    goto nextop;                                   \
+            }, );                                                  \
         PC += 4;                                                   \
         last_pc = PC;                                              \
         MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);    \
@@ -316,13 +314,14 @@ RVOP(
     struct rv_insn *taken = ir->branch_taken;                      \
     if (taken) {                                                   \
         IIF(RV32_HAS(JIT))                                         \
-        ({                                                         \
-            cache_get(rv->block_cache, PC, true);                  \
-            if (!set_add(&pc_set, PC))                             \
-                has_loops = true;                                  \
-            if (cache_hot(rv->block_cache, PC))                    \
-                goto end_op;                                       \
-        }, );                                                      \
+        (                                                          \
+            {                                                      \
+                cache_get(rv->block_cache, PC, true);              \
+                if (!set_add(&pc_set, PC))                         \
+                    has_loops = true;                              \
+                if (cache_hot(rv->block_cache, PC))                \
+                    goto end_op;                                   \
+            }, );                                                  \
         last_pc = PC;                                              \
         MUST_TAIL return taken->impl(rv, taken, cycle, PC);        \
     }                                                              \

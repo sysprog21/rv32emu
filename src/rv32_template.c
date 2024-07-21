@@ -982,8 +982,9 @@ RVOP(
 RVOP(
     wfi,
     {
+        PC += 4;
         /* FIXME: Implement */
-        return false;
+        goto end_op;
     },
     GEN({
         assert; /* FIXME: Implement */

@@ -835,6 +835,8 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
             ir->opcode = rv_insn_ebreak;
             break;
         case 0x105: /* WFI: Wait for Interrupt */
+            ir->opcode = rv_insn_wfi;
+            break;
         case 0x002: /* URET: return from traps in U-mode */
         case 0x202: /* HRET: return from traps in H-mode */
             /* illegal instruction */

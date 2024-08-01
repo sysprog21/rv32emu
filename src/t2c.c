@@ -49,15 +49,15 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
     return NULL;
 }
 
-#define T2C_OP(inst, code)                                                \
-    static void t2c_##inst(                                               \
-        LLVMBuilderRef *builder UNUSED, LLVMTypeRef *param_types UNUSED,  \
-        LLVMValueRef start UNUSED, LLVMBasicBlockRef *entry UNUSED,       \
-        LLVMBuilderRef *taken_builder UNUSED,                             \
-        LLVMBuilderRef *untaken_builder UNUSED, uint64_t mem_base UNUSED, \
-        rv_insn_t *ir UNUSED)                                             \
-    {                                                                     \
-        code;                                                             \
+#define T2C_OP(inst, code)                                               \
+    static void t2c_##inst(                                              \
+        LLVMBuilderRef *builder UNUSED, LLVMTypeRef *param_types UNUSED, \
+        LLVMValueRef start UNUSED, LLVMBasicBlockRef *entry UNUSED,      \
+        LLVMBuilderRef *taken_builder UNUSED,                            \
+        LLVMBuilderRef *untaken_builder UNUSED, riscv_t *rv UNUSED,      \
+        uint64_t mem_base UNUSED, rv_insn_t *ir UNUSED)                  \
+    {                                                                    \
+        code;                                                            \
     }
 
 #define T2C_LLVM_GEN_ADDR(reg, rv_member, ir_member)                          \
@@ -135,6 +135,9 @@ FORCE_INLINE void t2c_gen_call_io_func(LLVMValueRef start,
                    &io_param, 1, "");
 }
 
+static LLVMTypeRef t2c_jit_cache_func_type;
+static LLVMTypeRef t2c_jit_cache_struct_type;
+
 #include "t2c_template.c"
 #undef T2C_OP
 
@@ -174,6 +177,7 @@ typedef void (*t2c_codegen_block_func_t)(LLVMBuilderRef *builder UNUSED,
                                          LLVMBasicBlockRef *entry UNUSED,
                                          LLVMBuilderRef *taken_builder UNUSED,
                                          LLVMBuilderRef *untaken_builder UNUSED,
+                                         riscv_t *rv UNUSED,
                                          uint64_t mem_base UNUSED,
                                          rv_insn_t *ir UNUSED);
 
@@ -181,7 +185,7 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                           LLVMTypeRef *param_types UNUSED,
                           LLVMValueRef start,
                           LLVMBasicBlockRef *entry,
-                          uint64_t mem_base,
+                          riscv_t *rv,
                           rv_insn_t *ir,
                           set_t *set,
                           struct LLVM_block_map *map)
@@ -194,7 +198,8 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
 
     while (1) {
         ((t2c_codegen_block_func_t) dispatch_table[ir->opcode])(
-            builder, param_types, start, entry, &tk, &utk, mem_base, ir);
+            builder, param_types, start, entry, &tk, &utk, rv,
+            (uint64_t) ((memory_t *) PRIV(rv)->mem)->mem_base, ir);
         if (!ir->next)
             break;
         ir = ir->next;
@@ -214,8 +219,7 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                 LLVMPositionBuilderAtEnd(untaken_builder, untaken_entry);
                 LLVMBuildBr(utk, untaken_entry);
                 t2c_trace_ebb(&untaken_builder, param_types, start,
-                              &untaken_entry, mem_base, ir->branch_untaken, set,
-                              map);
+                              &untaken_entry, rv, ir->branch_untaken, set, map);
             }
         }
         if (ir->branch_taken) {
@@ -230,13 +234,13 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                 LLVMPositionBuilderAtEnd(taken_builder, taken_entry);
                 LLVMBuildBr(tk, taken_entry);
                 t2c_trace_ebb(&taken_builder, param_types, start, &taken_entry,
-                              mem_base, ir->branch_taken, set, map);
+                              rv, ir->branch_taken, set, map);
             }
         }
     }
 }
 
-void t2c_compile(block_t *block, uint64_t mem_base)
+void t2c_compile(riscv_t *rv, block_t *block)
 {
     LLVMModuleRef module = LLVMModuleCreateWithName("my_module");
     LLVMTypeRef io_members[] = {
@@ -254,6 +258,16 @@ void t2c_compile(block_t *block, uint64_t mem_base)
     LLVMTypeRef param_types[] = {LLVMPointerType(struct_rv, 0)};
     LLVMValueRef start = LLVMAddFunction(
         module, "start", LLVMFunctionType(LLVMVoidType(), param_types, 1, 0));
+
+    LLVMTypeRef t2c_args[1] = {LLVMInt64Type()};
+    t2c_jit_cache_func_type =
+        LLVMFunctionType(LLVMVoidType(), t2c_args, 1, false);
+
+    /* Notice to the alignment */
+    LLVMTypeRef jit_cache_memb[2] = {LLVMInt64Type(),
+                                     LLVMPointerType(LLVMVoidType(), 0)};
+    t2c_jit_cache_struct_type = LLVMStructType(jit_cache_memb, 2, false);
+
     LLVMBasicBlockRef first_block = LLVMAppendBasicBlock(start, "first_block");
     LLVMBuilderRef first_builder = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(first_builder, first_block);
@@ -266,8 +280,8 @@ void t2c_compile(block_t *block, uint64_t mem_base)
     struct LLVM_block_map map;
     map.count = 0;
     /* Translate custon IR into LLVM IR */
-    t2c_trace_ebb(&builder, param_types, start, &entry, mem_base,
-                  block->ir_head, &set, &map);
+    t2c_trace_ebb(&builder, param_types, start, &entry, rv, block->ir_head,
+                  &set, &map);
     /* Offload LLVM IR to LLVM backend */
     char *error = NULL, *triple = LLVMGetDefaultTargetTriple();
     LLVMExecutionEngineRef engine;
@@ -298,5 +312,29 @@ void t2c_compile(block_t *block, uint64_t mem_base)
 
     /* Return the function pointer of T2C generated machine code */
     block->func = (exec_t2c_func_t) LLVMGetPointerToGlobal(engine, start);
+    jit_cache_update(rv->jit_cache, block->pc_start, block->func);
     block->hot2 = true;
+}
+
+struct jit_cache *jit_cache_init()
+{
+    return calloc(N_JIT_CACHE_ENTRIES, sizeof(struct jit_cache));
+}
+
+void jit_cache_exit(struct jit_cache *cache)
+{
+    free(cache);
+}
+
+void jit_cache_update(struct jit_cache *cache, uint32_t pc, void *entry)
+{
+    uint32_t pos = pc & (N_JIT_CACHE_ENTRIES - 1);
+
+    cache[pos].pc = pc;
+    cache[pos].entry = entry;
+}
+
+void jit_cache_clear(struct jit_cache *cache)
+{
+    memset(cache, 0, N_JIT_CACHE_ENTRIES * sizeof(struct jit_cache));
 }

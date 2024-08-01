@@ -155,6 +155,7 @@ struct riscv_internal {
     struct mpool *block_mp, *block_ir_mp;
 
     void *jit_state;
+    void *jit_cache;
 #if RV32_HAS(GDBSTUB)
     /* gdbstub instance */
     gdbstub_t gdbstub;

@@ -199,8 +199,7 @@ static void *t2c_runloop(void *arg)
             pthread_mutex_lock(&rv->wait_queue_lock);
             list_del_init(&entry->list);
             pthread_mutex_unlock(&rv->wait_queue_lock);
-            t2c_compile(entry->block,
-                        (uint64_t) ((memory_t *) PRIV(rv)->mem)->mem_base);
+            t2c_compile(rv, entry->block);
             free(entry);
         }
     }
@@ -291,6 +290,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
         mpool_create(sizeof(chain_entry_t) << BLOCK_IR_MAP_CAPACITY_BITS,
                      sizeof(chain_entry_t));
     rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
+    rv->jit_cache = jit_cache_init();
     rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
     assert(rv->block_cache);
 #if RV32_HAS(T2C)
@@ -392,6 +392,7 @@ void rv_delete(riscv_t *rv)
 #endif
     mpool_destroy(rv->chain_entry_mp);
     jit_state_exit(rv->jit_state);
+    jit_cache_exit(rv->jit_cache);
     cache_free(rv->block_cache);
 #endif
     free(rv);

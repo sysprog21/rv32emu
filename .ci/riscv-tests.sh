@@ -3,7 +3,7 @@
 set -e -u -o pipefail
 
 # Install RISCOF
-python3 -m pip install git+https://github.com/riscv/riscof
+pip3 install git+https://github.com/riscv/riscof.git@d38859f85fe407bcacddd2efcd355ada4683aee4
 
 set -x
 

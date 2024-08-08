@@ -11,3 +11,11 @@
 	url = https://github.com/sysprog21/berkeley-softfloat-3
 	branch = rv32emu
 	shallow = true
+[submodule "tests/ansibench"]
+	path = tests/ansibench
+	url = https://github.com/sysprog21/ansibench
+	shallow = true
+[submodule "tests/rv8-bench"]
+	path = tests/rv8-bench
+	url = https://github.com/sysprog21/rv8-bench
+	shallow = true

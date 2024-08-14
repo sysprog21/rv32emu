@@ -16,6 +16,7 @@ build/softfloat
 build/cache/
 build/map/
 build/path/
+build/bin/
 *.o
 *.o.d
 tests/**/*.elf

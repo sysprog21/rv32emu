@@ -182,7 +182,7 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 .DEFAULT_GOAL := all
 
 include mk/external.mk
-
+include mk/benchmark.mk
 include mk/wasm.mk
 
 all: config $(BIN)

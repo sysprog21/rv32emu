@@ -21,7 +21,7 @@ if [ -z ${GDB} ]; then
     exit 1
 fi
 
-build/rv32emu -g build/puzzle.elf &
+build/rv32emu -g build/bin/riscv32/puzzle &
 PID=$!
 
 # Before starting GDB, we should ensure rv32emu is still running.
@@ -31,9 +31,9 @@ fi
 
 OPTS=
 tmpfile=/tmp/rv32emu-gdbstub.$PID
-breakpoints=(0x10700 0x10800 0x10900)
+breakpoints=(0x10500 0x10600 0x10700)
 bkpt_count=${#breakpoints[@]}
-OPTS+="-ex 'file build/puzzle.elf' "
+OPTS+="-ex 'file build/bin/riscv32/puzzle' "
 OPTS+="-ex 'target remote :1234' "
 for t in ${breakpoints[@]}; do
     OPTS+="-ex 'break *$t' "

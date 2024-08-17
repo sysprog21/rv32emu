@@ -229,25 +229,24 @@ tool: $(TOOLS_BIN)
 include mk/riscv-arch-test.mk
 include mk/tests.mk
 
-CHECK_ELF_FILES := \
-	hello \
-	puzzle \
-	fcalc
+# the prebuilt executables are built for "rv32im"
+CHECK_ELF_FILES :=
 
 ifeq ($(call has, EXT_M), 1)
 CHECK_ELF_FILES += \
+	puzzle \
+	fcalc \
 	pi
 endif
 
-EXPECTED_hello = Hello World!
 EXPECTED_puzzle = success in 2005 trials
 EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 
-check: $(BIN)
+check: $(BIN) build-testbenches
 	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
-	    $(PRINTF) "Running $(e).elf ... "; \
-	    if [ "$(shell $(BIN) $(OUT)/$(e).elf | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
+	    $(PRINTF) "Running $(e) ... "; \
+	    if [ "$(shell $(BIN) $(OUT)/bin/riscv32/$(e) | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \
@@ -255,10 +254,10 @@ check: $(BIN)
 	    fi; \
 	)
 
-EXPECTED_aes_sha1 = 1242a6757c8aef23e50b5264f5941a2f4b4a347e  -
-misalign: $(BIN)
-	$(Q)$(PRINTF) "Running aes.elf ... ";
-	$(Q)if [ "$(shell $(BIN) -m $(OUT)/aes.elf | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
+EXPECTED_aes_sha1 = f9924635666d3d58d5b60c0bde8b986a2a99effb  -
+misalign: $(BIN) build-testbenches
+	$(Q)$(PRINTF) "Running aes ... ";
+	$(Q)if [ "$(shell $(BIN) -m $(OUT)/bin/riscv32/aes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \

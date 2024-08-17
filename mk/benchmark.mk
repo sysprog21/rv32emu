@@ -34,7 +34,7 @@ TESTBENCHES += \
     $(ticks)
 
 ifeq ($(USE_PREBUILT),1)
-  LATEST_RELEASE := $(shell curl -s https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest | grep -Po '(?<="tag_name": ").+(?=",)')
+  LATEST_RELEASE := $(shell wget -qO - https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest | grep -Po '(?<="tag_name": ").+(?=",)')
 endif
 
 .PHONY: build-testbenches benchmark
@@ -45,7 +45,7 @@ benchmark: build-testbenches
 build-testbenches:
 ifeq ($(USE_PREBUILT),1)
 	@echo "Fetching prebuilt executables in \"rv32emu-prebuilt\"..."
-	@curl --progress-bar -L https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz | tar zx -C build
+	@wget -O - https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz | tar zx -C build
 else
 	@$(foreach tb,$(TEST_SUITES), \
 	    git submodule update --init ./tests/$(tb) &&) true

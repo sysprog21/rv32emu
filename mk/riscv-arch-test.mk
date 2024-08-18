@@ -9,7 +9,7 @@ ifeq ($(RISCV_DEVICE),FCZicsr)
 ARCH_TEST_SUITE := tests/rv32fc-test-suite
 endif
 
-arch-test: $(BIN)
+arch-test: $(BIN) artifact
 ifeq ($(CROSS_COMPILE),)
 	$(error GNU Toolchain for RISC-V is required to build architecture tests. Please check package installation)
 endif

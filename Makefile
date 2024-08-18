@@ -239,11 +239,21 @@ CHECK_ELF_FILES += \
 	pi
 endif
 
+EXPECTED_hello = Hello World!
 EXPECTED_puzzle = success in 2005 trials
 EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 
-check: $(BIN) artifact
+check-hello: $(BIN)
+	$(Q)$(PRINTF) "Running hello.elf ..."; \
+	    if [ "$(shell $(BIN) $(OUT)/hello.elf | uniq)" = "$(strip $(EXPECTED_hello)) inferior exit code 0" ]; then \
+	        $(call notice, [OK]); \
+	        else \
+	        $(PRINTF) "Failed.\n"; \
+	        exit 1; \
+	        fi;
+
+check: $(BIN) check-hello artifact
 	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
 	    $(PRINTF) "Running $(e) ... "; \
 	    if [ "$(shell $(BIN) $(OUT)/riscv32/$(e) | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \

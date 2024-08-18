@@ -52,7 +52,7 @@ jobs:
           echo "$PWD/toolchain/bin" >> $GITHUB_PATH
       - name: Build binaries
         run: |
-          make build-artifact USE_PREBUILT=0
+          make artifact USE_PREBUILT=0
       - name: Create tarball
         run: |
           tar -C build -zcf rv32emu-prebuilt.tar.gz linux-x64 riscv32

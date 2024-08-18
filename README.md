@@ -333,13 +333,13 @@ The prebuilt executables are built from GNU/GCC v9 and [xPack GCC v14.2.0-1](htt
 To fetch the prebuilt executables, run the following command:
 
 ```shell
-$ make build-artifact
+$ make artifact
 ```
 
-Or, to compile the executables from the source, run:
+Or, to compile the executables from scratch, run:
 
 ```shell
-$ make build-artifact USE_PREBUILT=0
+$ make artifact USE_PREBUILT=0 [CROSS_COMPILE=<COMPILER_PREFIX>]
 ```
 
 Notice that the RISC-V cross-compiler is required to build the binary.

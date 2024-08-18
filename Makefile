@@ -243,7 +243,7 @@ EXPECTED_puzzle = success in 2005 trials
 EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 
-check: $(BIN) build-artifact
+check: $(BIN) artifact
 	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
 	    $(PRINTF) "Running $(e) ... "; \
 	    if [ "$(shell $(BIN) $(OUT)/riscv32/$(e) | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
@@ -255,7 +255,7 @@ check: $(BIN) build-artifact
 	)
 
 EXPECTED_aes_sha1 = 1242a6757c8aef23e50b5264f5941a2f4b4a347e  -
-misalign: $(BIN) build-artifact
+misalign: $(BIN) artifact
 	$(Q)$(PRINTF) "Running uaes ... ";
 	$(Q)if [ "$(shell $(BIN) -m $(OUT)/riscv32/uaes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
 	    $(call notice, [OK]); \

@@ -38,9 +38,9 @@ ifeq ($(USE_PREBUILT),1)
   LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest -O- | grep -Po '(?<="tag_name": ").+(?=",)')
 endif
 
-.PHONY: build-artifact
+.PHONY: artifact
 
-build-artifact:
+artifact:
 ifeq ($(USE_PREBUILT),1)
 	@echo "Fetching prebuilt executables in \"rv32emu-prebuilt\"..."
 	@wget -q https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build -xz

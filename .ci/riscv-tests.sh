@@ -7,7 +7,7 @@ pip3 install git+https://github.com/riscv/riscof.git@d38859f85fe407bcacddd2efcd3
 
 set -x
 
-export PATH=`pwd`/toolchain/riscv/bin:$PATH
+export PATH=`pwd`/toolchain/bin:$PATH
 
 make clean
 make arch-test RISCV_DEVICE=IMAFCZicsrZifencei || exit 1

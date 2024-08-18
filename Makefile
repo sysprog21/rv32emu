@@ -182,7 +182,7 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 .DEFAULT_GOAL := all
 
 include mk/external.mk
-include mk/benchmark.mk
+include mk/artifact.mk
 include mk/wasm.mk
 
 all: config $(BIN)
@@ -243,10 +243,10 @@ EXPECTED_puzzle = success in 2005 trials
 EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 
-check: $(BIN) build-testbenches
+check: $(BIN) build-artifact
 	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
 	    $(PRINTF) "Running $(e) ... "; \
-	    if [ "$(shell $(BIN) $(OUT)/bin/riscv32/$(e) | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
+	    if [ "$(shell $(BIN) $(OUT)/riscv32/$(e) | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \
@@ -255,9 +255,9 @@ check: $(BIN) build-testbenches
 	)
 
 EXPECTED_aes_sha1 = f9924635666d3d58d5b60c0bde8b986a2a99effb  -
-misalign: $(BIN) build-testbenches
+misalign: $(BIN) build-artifact
 	$(Q)$(PRINTF) "Running aes ... ";
-	$(Q)if [ "$(shell $(BIN) -m $(OUT)/bin/riscv32/aes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
+	$(Q)if [ "$(shell $(BIN) -m $(OUT)/riscv32/aes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \

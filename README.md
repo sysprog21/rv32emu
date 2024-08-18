@@ -333,18 +333,18 @@ The prebuilt executables are built from GNU/GCC v9 and [xPack GCC v14.2.0-1](htt
 To fetch the prebuilt executables, run the following command:
 
 ```shell
-$ make build-testbenches
+$ make build-artifact
 ```
 
 Or, to compile the executables from the source, run:
 
 ```shell
-$ make build-testbenches USE_PREBUILT=0 CROSS_CC=<riscv-cross-compiler>
+$ make build-artifact USE_PREBUILT=0
 ```
 
 Notice that the RISC-V cross-compiler is required to build the binary.
 
-In default, `rv32emu` will download the tarball from GitHub and extract the executables into `build/bin/`.
+In default, `rv32emu` will download the tarball from GitHub and extract the executables into `build/`.
 
 There are still some prebuilt ELF files for testing purpose under `build/`.
 * `cc.elf` : See [tests/cc](tests/cc)

@@ -16,7 +16,8 @@ build/softfloat
 build/cache/
 build/map/
 build/path/
-build/bin/
+build/linux-x64/
+build/riscv32/
 *.o
 *.o.d
 tests/**/*.elf

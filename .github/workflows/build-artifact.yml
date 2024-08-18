@@ -1,0 +1,69 @@
+name: Build artifact
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  detect-files-changed:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: Test files changed
+        id: files-changed
+        uses: tj-actions/changed-files@v44
+        with:
+          fetch_additional_submodule_history: 'true'
+          files: |
+            tests/ansibench/*
+            tests/rv8-bench/*
+            tests/*.c
+      - name: Set alias
+        id: has_files_changed
+        run: |
+          if [[ ${{ steps.files-changed.outputs.any_changed }} == true ]]; then
+            echo "has_files_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_files_changed=false" >> $GITHUB_OUTPUT
+          fi
+    outputs:
+      has_files_changed: ${{ steps.has_files_changed.outputs.has_files_changed }}
+
+  build-artifact:
+    needs: [detect-files-changed]
+    if: ${{ needs.detect-files-changed.outputs.has_files_changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q -y
+          sudo apt-get upgrade -q -y
+          sudo apt-get install -q -y gcc-multilib g++-multilib
+          .ci/riscv-toolchain-install.sh
+          echo "$PWD/toolchain/bin" >> $GITHUB_PATH
+      - name: Build binaries
+        run: |
+          make build-artifact USE_PREBUILT=0
+      - name: Create tarball
+        run: |
+          tar -C build -zcf rv32emu-prebuilt.tar.gz linux-x64 riscv32
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RV32EMU_PREBUILT_TOKEN }}
+        run: |
+          RELEASE_TAG=$(date +'%Y.%m.%d')
+          gh release create $RELEASE_TAG \
+            --repo sysprog21/rv32emu-prebuilt \
+            --title "$RELEASE_TAG""-nightly"
+          gh release upload $RELEASE_TAG \
+            rv32emu-prebuilt.tar.gz \
+            --repo sysprog21/rv32emu-prebuilt

@@ -1,9 +1,9 @@
 USE_PREBUILT ?= 1
 
 CC ?= gcc
-CROSS_CC ?= riscv-none-elf-gcc
+CROSS_COMPILE ?= riscv-none-elf-
 
-BINDIR := $(abspath $(OUT))/bin
+BINDIR := $(abspath $(OUT))
 
 TEST_SUITES += \
     ansibench \
@@ -34,27 +34,23 @@ TESTBENCHES += \
     $(ticks)
 
 ifeq ($(USE_PREBUILT),1)
-  LATEST_RELEASE := $(shell wget -qO - https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest | grep -Po '(?<="tag_name": ").+(?=",)')
+  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest -O- | grep -Po '(?<="tag_name": ").+(?=",)')
 endif
 
-.PHONY: build-testbenches benchmark
+.PHONY: build-artifact
 
-# TODO: generate results automatically
-benchmark: build-testbenches
-
-build-testbenches:
+build-artifact:
 ifeq ($(USE_PREBUILT),1)
 	@echo "Fetching prebuilt executables in \"rv32emu-prebuilt\"..."
-	@wget -O - https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz | tar zx -C build
+	@wget -q https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build -xz
 else
 	@$(foreach tb,$(TEST_SUITES), \
 	    git submodule update --init ./tests/$(tb) &&) true
 	@$(foreach tb,$(TEST_SUITES), \
-	    CC=$(CC) CROSS_CC=$(CROSS_CC) BINDIR=$(BINDIR) \
-		$(MAKE) -C ./tests/$(tb) all &&) true
+		$(MAKE) -C ./tests/$(tb) all BINDIR=$(BINDIR) &&) true
 	@$(foreach tb,$(TESTBENCHES), \
-	    $(CC) -m32 -O2 -Wno-unused-result -o $(BINDIR)/x86_64/$(tb) tests/$(tb).c -lm &&) true
+	    $(CC) -m32 -O2 -Wno-unused-result -o $(BINDIR)/linux-x64/$(tb) tests/$(tb).c -lm &&) true
 	@$(foreach tb,$(TESTBENCHES), \
-	    $(CROSS_CC) -march=rv32im -mabi=ilp32 -O2 -Wno-unused-result -Wno-implicit-function-declaration \
+	    $(CROSS_COMPILE)gcc -march=rv32im -mabi=ilp32 -O2 -Wno-unused-result -Wno-implicit-function-declaration \
 		    -o $(BINDIR)/riscv32/$(tb) tests/$(tb).c -lm -lsemihost &&) true
 endif

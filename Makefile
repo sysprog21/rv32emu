@@ -254,10 +254,10 @@ check: $(BIN) build-artifact
 	    fi; \
 	)
 
-EXPECTED_aes_sha1 = f9924635666d3d58d5b60c0bde8b986a2a99effb  -
+EXPECTED_aes_sha1 = 1242a6757c8aef23e50b5264f5941a2f4b4a347e  -
 misalign: $(BIN) build-artifact
-	$(Q)$(PRINTF) "Running aes ... ";
-	$(Q)if [ "$(shell $(BIN) -m $(OUT)/riscv32/aes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
+	$(Q)$(PRINTF) "Running uaes ... ";
+	$(Q)if [ "$(shell $(BIN) -m $(OUT)/riscv32/uaes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \

@@ -31,7 +31,8 @@ TESTBENCHES += \
     rvsim \
     $(smolnes) \
     spirograph \
-    $(ticks)
+    $(ticks) \
+    uaes
 
 ifeq ($(USE_PREBUILT),1)
   LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest -O- | grep -Po '(?<="tag_name": ").+(?=",)')

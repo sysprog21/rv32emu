@@ -327,36 +327,8 @@ Use of this source code is governed by a MIT license that can be found in the [L
 
 ## External sources
 
-There are some prebuilt executables in [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt) for testing and benchmarking purpose.
-The prebuilt executables are built from GNU/GCC v9 and [xPack GCC v14.2.0-1](https://github.com/xpack-dev-tools/gcc-xpack) under Ubuntu-20.04.
+See [docs/prebuilt.md](docs/prebuilt.md).
 
-To fetch the prebuilt executables, run the following command:
-
-```shell
-$ make artifact
-```
-
-Or, to compile the executables from scratch, run:
-
-```shell
-$ make artifact USE_PREBUILT=0 [CROSS_COMPILE=<COMPILER_PREFIX>]
-```
-
-Notice that the RISC-V cross-compiler is required to build the binary.
-
-In default, `rv32emu` will download the tarball from GitHub and extract the executables into `build/`.
-
-There are still some prebuilt ELF files for testing purpose under `build/`.
-* `cc.elf` : See [tests/cc](tests/cc)
-* `chacha20.elf` : See [tests/chacha20](tests/chacha20)
-* `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
-* `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
-* `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)
-* `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
-* `readelf.elf` : See [tests/readelf](tests/readelf)
-* `rvsim.elf` : See [tests/rvsim.c](tests/rvsim.c)
-* `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
-* `smolnes.elf` : See [tests/smolnes](tests/smolnes.c) [RV32M]
 ## Reference
 
 * [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)

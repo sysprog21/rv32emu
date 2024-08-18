@@ -1,8 +1,6 @@
 # Prebuilt Binaries
 
-There are some prebuilt binaries placed in [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt).
-When invoking testing or benchmarking, the prebuilt binaries will be pulled into `build/linux-x64/` and `build/riscv32/` directory in default.
-The RISC-V binaries are built from [xPack RISC-V GCC toolchain](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack) with `-march=rv32im -mabi=ilp32` options.
+The prebuilt binaries for [rv32emu](https://github.com/sysprog21/rv32emu) are prepared primarily because the [RISC-V Sail Model](https://github.com/riscv/sail-riscv) executable is required for the [RISC-V Architecture Test](https://github.com/riscv-non-isa/riscv-arch-test), and selected RISC-V ELF files are useful for ISA simulation validation and testing. Some of these prebuilt binaries are stored in [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt). During testing or benchmarking, these binaries are automatically downloaded into the `build/linux-x86-softfp/` and `build/riscv32/` directories by default. The RISC-V binaries are compiled using the [xPack RISC-V GCC toolchain](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack) with the options `-march=rv32im -mabi=ilp32`.
 
 To fetch the prebuilt binaries manually, run:
 
@@ -13,18 +11,18 @@ $ make artifact
 Or build the binaries from scratch (the RISC-V cross-compiler is required):
 
 ```shell
-$ make artifact USE_PREBUILT=0 [CROSS_COMPILE=<COMPILER_PREFIX>]
+$ make artifact ENABLE_PREBUILT=0 [CROSS_COMPILE=<COMPILER_PREFIX>]
 ```
 
 The compiler prefix varies according to the used toolchain, such as `riscv-none-elf-`, `riscv32-unknwon-elf-`, etc.
 
 The prebuilt binaries in `rv32emu-prebuilt` are built from the following repositories and resources:
 
-- [ansibench](https://github.com/nfinit/ansibench)
+- [ansibench](https://github.com/sysprog21/ansibench)
     - coremark
     - stream
     - nbench
-- [rv8-bench](https://github.com/michaeljclark/rv8-bench)
+- [rv8-bench](https://github.com/sysprog21/rv8-bench)
     - aes
     - dhrystone
     - miniz
@@ -50,8 +48,6 @@ The prebuilt binaries in `rv32emu-prebuilt` are built from the following reposit
 - `rvsim` : See [tests/rvsim.c](tests/rvsim.c)
 - `spirograph` : See [tests/spirograph.c](tests/spirograph.c)
 - `uaes` : See [tests/uaes.c](tests/uaes.c)
-
----
 
 There are still some prebuilt standalone RISC-V binaries under `build/` directory only for testing purpose:
 

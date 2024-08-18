@@ -1,4 +1,4 @@
-USE_PREBUILT ?= 1
+ENABLE_PREBUILT ?= 1
 
 CC ?= gcc
 CROSS_COMPILE ?= riscv-none-elf-
@@ -16,7 +16,6 @@ TESTBENCHES += \
 	donut \
 	fcalc \
 	hamilton \
-	$(ieee754) \
 	jit \
 	lena \
 	line \
@@ -29,29 +28,41 @@ TESTBENCHES += \
 	qrcode \
 	richards \
 	rvsim \
-	$(smolnes) \
 	spirograph \
-	$(ticks) \
 	uaes
 
-ifeq ($(USE_PREBUILT),1)
+SHELL_HACK := $(shell mkdir -p $(BINDIR)/linux-x86-softfp $(BINDIR)/riscv32)
+
+ifeq ($(call has, PREBUILT), 1)
   LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest -O- | grep -Po '(?<="tag_name": ").+(?=",)')
+else
+  CFLAGS := -m32 -mno-sse -mno-sse2 -msoft-float -O2 -L$(BINDIR)
+  LDFLAGS := -lsoft-fp -lm
+
+  CFLAGS_CROSS := -march=rv32im -mabi=ilp32 -O2
+  LDFLAGS_CROSS := -lm -lsemihost
 endif
 
 .PHONY: artifact
 
 artifact:
-ifeq ($(USE_PREBUILT),1)
-	@echo "Fetching prebuilt executables in \"rv32emu-prebuilt\"..."
-	@wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build -xz
+ifeq ($(call has, PREBUILT), 1)
+	$(Q)$(PRINTF) "Fetching prebuilt executables from \"rv32emu-prebuilt\" ...\n"
+	$(Q)wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build --strip-components=1 -xz
 else
-	@$(foreach tb,$(TEST_SUITES), \
-	    git submodule update --init ./tests/$(tb) &&) true
-	@$(foreach tb,$(TEST_SUITES), \
-		$(MAKE) -C ./tests/$(tb) all BINDIR=$(BINDIR) &&) true
-	@$(foreach tb,$(TESTBENCHES), \
-	    $(CC) -m32 -O2 -Wno-unused-result -o $(BINDIR)/linux-x64/$(tb) tests/$(tb).c -lm &&) true
-	@$(foreach tb,$(TESTBENCHES), \
-	    $(CROSS_COMPILE)gcc -march=rv32im -mabi=ilp32 -O2 -Wno-unused-result -Wno-implicit-function-declaration \
-		    -o $(BINDIR)/riscv32/$(tb) tests/$(tb).c -lm -lsemihost &&) true
+	git submodule update --init ./src/ieeelib $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
+	$(Q)$(MAKE) -C ./src/ieeelib CC=$(CC) CFLAGS="$(CFLAGS)" BINDIR=$(BINDIR)
+	$(Q)for tb in $(TEST_SUITES); do \
+	    CC=$(CC) CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" BINDIR=$(BINDIR)/linux-x86-softfp $(MAKE) -C ./tests/$$tb; \
+	done
+	$(Q)for tb in $(TEST_SUITES); do \
+	    CC=$(CROSS_COMPILE)gcc CFLAGS="$(CFLAGS_CROSS)" LDFLAGS="$(LDFLAGS_CROSS)" BINDIR=$(BINDIR)/riscv32 $(MAKE) -C ./tests/$$tb; \
+	done
+	$(Q)$(PRINTF) "Building standalone testbenches ...\n"
+	$(Q)for tb in $(TESTBENCHES); do \
+	    $(CC) $(CFLAGS) -Wno-unused-result -o $(BINDIR)/linux-x86-softfp/$$tb ./tests/$$tb.c $(LDFLAGS); \
+	done
+	$(Q)for tb in $(TESTBENCHES); do \
+	    $(CROSS_COMPILE)gcc $(CFLAGS_CROSS) -o $(BINDIR)/riscv32/$$tb ./tests/$$tb.c $(LDFLAGS_CROSS); \
+	done
 endif

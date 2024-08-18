@@ -6,33 +6,33 @@ CROSS_COMPILE ?= riscv-none-elf-
 BINDIR := $(abspath $(OUT))
 
 TEST_SUITES += \
-    ansibench \
+	ansibench \
 	rv8-bench
 
 # "ieee754" needs F extension
 # "smolnes", "ticks" have inline assembly and only work in riscv
 TESTBENCHES += \
-    captcha \
-    donut \
-    fcalc \
-    hamilton \
-    $(ieee754) \
-    jit \
-    lena \
-    line \
-    maj2random \
-    mandelbrot \
-    nqueens \
-    nyancat \
-    pi \
-    puzzle \
-    qrcode \
-    richards \
-    rvsim \
-    $(smolnes) \
-    spirograph \
-    $(ticks) \
-    uaes
+	captcha \
+	donut \
+	fcalc \
+	hamilton \
+	$(ieee754) \
+	jit \
+	lena \
+	line \
+	maj2random \
+	mandelbrot \
+	nqueens \
+	nyancat \
+	pi \
+	puzzle \
+	qrcode \
+	richards \
+	rvsim \
+	$(smolnes) \
+	spirograph \
+	$(ticks) \
+	uaes
 
 ifeq ($(USE_PREBUILT),1)
   LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest -O- | grep -Po '(?<="tag_name": ").+(?=",)')

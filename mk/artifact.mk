@@ -43,7 +43,7 @@ endif
 artifact:
 ifeq ($(USE_PREBUILT),1)
 	@echo "Fetching prebuilt executables in \"rv32emu-prebuilt\"..."
-	@wget -q https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build -xz
+	@wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build -xz
 else
 	@$(foreach tb,$(TEST_SUITES), \
 	    git submodule update --init ./tests/$(tb) &&) true

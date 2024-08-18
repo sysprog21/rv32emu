@@ -22,7 +22,7 @@ endef
 
 # $(1): compressed source URL
 define download
-    $(eval _ := $(shell curl --progress-bar -O -L -C - "$(strip $(1))"))
+    $(eval _ := $(shell wget -q --show-progress --continue "$(strip $(1))"))
 endef
 
 # $(1): compressed source(.zip or.gz)

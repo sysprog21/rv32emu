@@ -1864,8 +1864,10 @@ static void code_cache_flush(struct jit_state *state, riscv_t *rv)
     state->offset = state->org_size;
     state->n_blocks = 0;
     set_reset(&state->set);
-    jit_cache_clear(rv->jit_cache);
     clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
+#if RV32_HAS(T2C)
+    jit_cache_clear(rv->jit_cache);
+#endif
     return;
 }
 

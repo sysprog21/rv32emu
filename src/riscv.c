@@ -290,11 +290,11 @@ riscv_t *rv_create(riscv_user_t rv_attr)
         mpool_create(sizeof(chain_entry_t) << BLOCK_IR_MAP_CAPACITY_BITS,
                      sizeof(chain_entry_t));
     rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
-    rv->jit_cache = jit_cache_init();
     rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
     assert(rv->block_cache);
 #if RV32_HAS(T2C)
     rv->quit = false;
+    rv->jit_cache = jit_cache_init();
     /* prepare wait queue. */
     pthread_mutex_init(&rv->wait_queue_lock, NULL);
     INIT_LIST_HEAD(&rv->wait_queue);
@@ -389,10 +389,10 @@ void rv_delete(riscv_t *rv)
     rv->quit = true;
     pthread_join(t2c_thread, NULL);
     pthread_mutex_destroy(&rv->wait_queue_lock);
+    jit_cache_exit(rv->jit_cache);
 #endif
     mpool_destroy(rv->chain_entry_mp);
     jit_state_exit(rv->jit_state);
-    jit_cache_exit(rv->jit_cache);
     cache_free(rv->block_cache);
 #endif
     free(rv);

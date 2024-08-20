@@ -247,11 +247,11 @@ EXPECTED_pi = 3.1415926535897932384626433832795028841971693993751058209749445923
 check-hello: $(BIN)
 	$(Q)$(PRINTF) "Running hello.elf ..."; \
 	    if [ "$(shell $(BIN) $(OUT)/hello.elf | uniq)" = "$(strip $(EXPECTED_hello)) inferior exit code 0" ]; then \
-	        $(call notice, [OK]); \
-	        else \
-	        $(PRINTF) "Failed.\n"; \
-	        exit 1; \
-	        fi;
+	    $(call notice, [OK]); \
+	    else \
+	    $(PRINTF) "Failed.\n"; \
+	    exit 1; \
+	    fi;
 
 check: $(BIN) check-hello artifact
 	$(Q)$(foreach e,$(CHECK_ELF_FILES),\

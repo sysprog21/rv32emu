@@ -1,6 +1,10 @@
 # Prebuilt Binaries
 
-The prebuilt binaries for [rv32emu](https://github.com/sysprog21/rv32emu) are prepared primarily because the [RISC-V Sail Model](https://github.com/riscv/sail-riscv) executable is required for the [RISC-V Architecture Test](https://github.com/riscv-non-isa/riscv-arch-test), and selected RISC-V ELF files are useful for ISA simulation validation and testing. Some of these prebuilt binaries are stored in [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt). During testing or benchmarking, these binaries are automatically downloaded into the `build/linux-x86-softfp/` and `build/riscv32/` directories by default. The RISC-V binaries are compiled using the [xPack RISC-V GCC toolchain](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack) with the options `-march=rv32im -mabi=ilp32`.
+The prebuilt binaries for [rv32emu](https://github.com/sysprog21/rv32emu) are prepared primarily because the [RISC-V Sail Model](https://github.com/riscv/sail-riscv) executable is required for the [RISC-V Architecture Test](https://github.com/riscv-non-isa/riscv-arch-test), and selected RISC-V ELF files are useful for ISA simulation validation and testing.
+Some of these prebuilt binaries are stored in [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt).
+During testing or benchmarking, these binaries are automatically downloaded into the `build/linux-x86-softfp/` and `build/riscv32/` directories by default.
+The RISC-V binaries are compiled using the [xPack RISC-V GCC toolchain](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack) with the options `-march=rv32im -mabi=ilp32`.
+The x86 binaries are compiled by GCC with `-m32 -mno-sse -mno-sse2 -msoft-float` options and use [ieeelib](https://github.com/sysprog21/ieeelib) as the soft-fp library.
 
 To fetch the prebuilt binaries manually, run:
 

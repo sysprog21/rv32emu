@@ -56,7 +56,7 @@ jobs:
           make artifact ENABLE_PREBUILT=0
           mkdir -p /tmp/rv32emu-prebuilt
           mv build/linux-x86-softfp build/riscv32 /tmp/rv32emu-prebuilt
-      - name: Buile Sail model
+      - name: Build Sail model
         run: |
           cd /tmp
           opam init -y --disable-sandboxing

@@ -8,7 +8,7 @@ check_platform
 
 mkdir -p toolchain
 
-if [[ "$#" = 0 ]] || [[ "$1" != "riscv-collab" ]]; then
+if [[ "$#" == "0" ]] || [[ "$1" != "riscv-collab" ]]; then
     GCC_VER=14.2.0-1
     TOOLCHAIN_REPO=https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack
     TOOLCHAIN_URL=${TOOLCHAIN_REPO}/releases/download/v${GCC_VER}/xpack-riscv-none-elf-gcc-${GCC_VER}-linux-x64.tar.gz

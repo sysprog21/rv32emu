@@ -18,7 +18,7 @@ Or build the binaries from scratch (the RISC-V cross-compiler is required):
 $ make artifact ENABLE_PREBUILT=0 [CROSS_COMPILE=<COMPILER_PREFIX>]
 ```
 
-The compiler prefix varies according to the used toolchain, such as `riscv-none-elf-`, `riscv32-unknwon-elf-`, etc.
+The compiler prefix varies according to the used toolchain, such as `riscv-none-elf-`, `riscv32-unknown-elf-`, etc.
 
 The prebuilt binaries in `rv32emu-prebuilt` are built from the following repositories and resources:
 

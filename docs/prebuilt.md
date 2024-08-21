@@ -34,34 +34,34 @@ The prebuilt binaries in `rv32emu-prebuilt` are built from the following reposit
     - primes
     - qsort
     - sha512
-- `captcha` : See [tests/captcha.c](tests/captcha.c)
-- `donut` : See [donut.c](tests/donut.c)
-- `fcalc` : See [fcalc.c](tests/fcalc.c)
-- `hamilton` : See [hamilton.c](tests/hamilton.c)
-- `jit` : See [tests/jit.c](tests/jit.c)
-- `lena`: See [tests/lena.c](tests/lena.c)
-- `line` : See [tests/line.c](tests/line.c)
-- `maj2random` : See [tests/maj2random.c](tests/maj2random.c)
-- `mandelbrot` : See [tests/mandelbrot.c](tests/mandelbrot.c)
-- `nqueens` : See [tests/nqueens.c](tests/nqueens.c)
-- `nyancat` : See [tests/nyancat.c](tests/nyancat.c)
-- `pi` : See [tests/pi.c](tests/pi.c)
-- `puzzle` : See [tests/puzzle.c](tests/puzzle.c)
-- `qrcode` : See [tests/qrcode.c](tests/qrcode.c)
-- `richards` : See [tests/richards.c](tests/richards.c)
-- `rvsim` : See [tests/rvsim.c](tests/rvsim.c)
-- `spirograph` : See [tests/spirograph.c](tests/spirograph.c)
-- `uaes` : See [tests/uaes.c](tests/uaes.c)
+- `captcha` : See [tests/captcha.c](/tests/captcha.c)
+- `donut` : See [tests/donut.c](/tests/donut.c)
+- `fcalc` : See [tests/fcalc.c](/tests/fcalc.c)
+- `hamilton` : See [tests/hamilton.c](/tests/hamilton.c)
+- `jit` : See [tests/jit.c](/tests/jit.c)
+- `lena`: See [tests/lena.c](/tests/lena.c)
+- `line` : See [tests/line.c](/tests/line.c)
+- `maj2random` : See [tests/maj2random.c](/tests/maj2random.c)
+- `mandelbrot` : See [tests/mandelbrot.c](/tests/mandelbrot.c)
+- `nqueens` : See [tests/nqueens.c](/tests/nqueens.c)
+- `nyancat` : See [tests/nyancat.c](/tests/nyancat.c)
+- `pi` : See [tests/pi.c](/tests/pi.c)
+- `puzzle` : See [tests/puzzle.c](/tests/puzzle.c)
+- `qrcode` : See [tests/qrcode.c](/tests/qrcode.c)
+- `richards` : See [tests/richards.c](/tests/richards.c)
+- `rvsim` : See [tests/rvsim.c](/tests/rvsim.c)
+- `spirograph` : See [tests/spirograph.c](/tests/spirograph.c)
+- `uaes` : See [tests/uaes.c](/tests/uaes.c)
 
 There are still some prebuilt standalone RISC-V binaries under `build/` directory only for testing purpose:
 
-- `hello.elf` : See [tests/asm-hello](tests/asm-hello)
-- `cc.elf` : See [tests/cc](tests/cc)
-- `chacha20.elf` : See [tests/chacha20](tests/chacha20)
+- `hello.elf` : See [tests/asm-hello](/tests/asm-hello)
+- `cc.elf` : See [tests/cc](/tests/cc)
+- `chacha20.elf` : See [tests/chacha20](/tests/chacha20)
 - `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
-- `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
+- `ieee754.elf` : See [tests/ieee754.c](/tests/ieee754.c) [RV32F]
 - `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)
 - `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
-- `readelf.elf` : See [tests/readelf](tests/readelf)
-- `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
-- `smolnes.elf` : See [tests/smolnes](tests/smolnes.c) [RV32M]
+- `readelf.elf` : See [tests/readelf](/tests/readelf)
+- `scimark2.elf` : See [tests/scimark2](/tests/scimark2) [RV32MF]
+- `smolnes.elf` : See [tests/smolnes](/tests/smolnes.c) [RV32M]

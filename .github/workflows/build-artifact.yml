@@ -7,16 +7,16 @@ on:
   workflow_dispatch:
 
 jobs:
-  detect-files-changed:
+  detect-file-change:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: 'true'
-      - name: Test files changed
-        id: files-changed
-        uses: tj-actions/changed-files@v44
+      - name: Test file change
+        id: test-file-change
+        uses: tj-actions/changed-files@v45
         with:
           fetch_additional_submodule_history: 'true'
           files: |
@@ -24,19 +24,19 @@ jobs:
             tests/rv8-bench/*
             tests/*.c
       - name: Set alias
-        id: has_files_changed
+        id: has_changed_files
         run: |
-          if [[ ${{ steps.files-changed.outputs.any_modified }} == true ]]; then
-            echo "has_files_changed=true" >> $GITHUB_OUTPUT
+          if [[ ${{ steps.test-file-change.outputs.any_modified }} == true ]]; then
+            echo "has_changed_files=true" >> $GITHUB_OUTPUT
           else
-            echo "has_files_changed=false" >> $GITHUB_OUTPUT
+            echo "has_changed_files=false" >> $GITHUB_OUTPUT
           fi
     outputs:
-      has_files_changed: ${{ steps.has_files_changed.outputs.has_files_changed }}
+      has_changed_files: ${{ steps.has_changed_files.outputs.has_changed_files }}
 
   build-artifact:
-    needs: [detect-files-changed]
-    if: ${{ needs.detect-files-changed.outputs.has_files_changed == 'true' || github.event_name == 'workflow_dispatch' }}
+    needs: [detect-file-change]
+    if: ${{ needs.detect-file-change.outputs.has_changed_files == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository

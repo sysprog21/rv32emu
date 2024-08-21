@@ -327,46 +327,8 @@ Use of this source code is governed by a MIT license that can be found in the [L
 
 ## External sources
 
-In `rv32emu` repository, there are some prebuilt ELF files for testing purpose.
-* `aes.elf` : See [tests/aes.c](tests/aes.c)
-* `captcha.elf` : See [tests/captcha.c](tests/captcha.c)
-* `cc.elf` : See [tests/cc](tests/cc)
-* `chacha20.elf` : See [tests/chacha20](tests/chacha20)
-* `coremark.elf` : See [eembc/coremark](https://github.com/eembc/coremark) [RV32M]
-* `dhrystone.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
-* `donut.elf` : See [donut.c](tests/donut.c)
-* `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
-* `fcalc.elf` : See [fcalc.c](tests/fcalc.c)
-* `hamilton.elf` : See [hamilton.c](tests/hamilton.c)
-* `ieee754.elf` : See [tests/ieee754.c](tests/ieee754.c) [RV32F]
-* `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)
-* `lena.elf`: See [tests/lena.c](tests/lena.c)
-* `line.elf` : See [tests/line.c](tests/line.c) [RV32M]
-* `maj2random.elf` : See [tests/maj2random.c](tests/maj2random.c) [RV32F]
-* `mandelbrot.elf` : See [tests/mandelbrot.c](tests/mandelbrot.c)
-* `nqueens.elf` : See [tests/nqueens.c](tests/nqueens.c)
-* `nyancat.elf` : See [tests/nyancat.c](tests/nyancat.c)
-* `pi.elf` : See [tests/pi.c](tests/pi.c) [RV32M]
-* `qrcode.elf` : See [tests/qrcode.c](tests/qrcode.c)
-* `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
-* `readelf.elf` : See [tests/readelf](tests/readelf)
-* `richards.elf` : See [tests/richards.c](tests/richards.c)
-* `rvsim.elf` : See [tests/rvsim.c](tests/rvsim.c)
-* `scimark2.elf` : See [tests/scimark2](tests/scimark2) [RV32MF]
-* `smolnes.elf` : See [tests/smolnes](tests/smolnes.c) [RV32M]
-* `spirograph.elf` : See [tests/spirograph.c](tests/spirograph.c)
-* `stream.elf` : See [tests/stream](tests/stream.c) [RV32MF]
-* `qsort.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
-* `miniz.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
-* `primes.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
-* `sha512.elf` : See [rv8-bench](https://github.com/michaeljclark/rv8-bench)
-* `numeric_sort.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
-* `FP_emulation.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
-* `bitfield.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
-* `idea.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench) 
-* `assignment.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
-* `string_sort.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench) 
-* `huffman.elf` : See [nbench](https://github.com/nfinit/ansibench/tree/master/nbench)
+See [docs/prebuilt.md](docs/prebuilt.md).
+
 ## Reference
 
 * [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)

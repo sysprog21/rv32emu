@@ -1,0 +1,87 @@
+name: Build artifact
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  detect-file-change:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: Test file change
+        id: test-file-change
+        uses: tj-actions/changed-files@v45
+        with:
+          fetch_additional_submodule_history: 'true'
+          files: |
+            tests/ansibench/*
+            tests/rv8-bench/*
+            tests/*.c
+      - name: Set alias
+        id: has_changed_files
+        run: |
+          if [[ ${{ steps.test-file-change.outputs.any_modified }} == true ]]; then
+            echo "has_changed_files=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_changed_files=false" >> $GITHUB_OUTPUT
+          fi
+    outputs:
+      has_changed_files: ${{ steps.has_changed_files.outputs.has_changed_files }}
+
+  build-artifact:
+    needs: [detect-file-change]
+    if: ${{ needs.detect-file-change.outputs.has_changed_files == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q -y
+          sudo apt-get upgrade -q -y
+          sudo apt-get install -q -y gcc-multilib g++-multilib
+          sudo apt-get install -q -y opam build-essential libgmp-dev z3 pkg-config zlib1g-dev
+          .ci/riscv-toolchain-install.sh
+          echo "$PWD/toolchain/bin" >> $GITHUB_PATH
+      - name: Build binaries
+        run: |
+          make artifact ENABLE_PREBUILT=0
+          mkdir -p /tmp/rv32emu-prebuilt
+          mv build/linux-x86-softfp build/riscv32 /tmp/rv32emu-prebuilt
+      - name: Build Sail model
+        run: |
+          cd /tmp
+          opam init -y --disable-sandboxing
+          opam switch create ocaml-base-compiler.4.06.1
+          opam install sail -y
+          eval $(opam config env)
+          git clone https://github.com/riscv/sail-riscv.git
+          cd sail-riscv
+          git checkout 9547a30bf84572c458476591b569a95f5232c1c7
+          ARCH=RV32 make -j
+          mkdir -p /tmp/rv32emu-prebuilt/sail_cSim
+          mv c_emulator/riscv_sim_RV32 /tmp/rv32emu-prebuilt/sail_cSim
+      - name: Create tarball
+        run: |
+          cd /tmp
+          tar -zcvf rv32emu-prebuilt.tar.gz rv32emu-prebuilt
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RV32EMU_PREBUILT_TOKEN }}
+        run: |
+          RELEASE_TAG=$(date +'%Y.%m.%d')
+          cd /tmp
+          gh release create $RELEASE_TAG \
+            --repo sysprog21/rv32emu-prebuilt \
+            --title "$RELEASE_TAG""-nightly"
+          gh release upload $RELEASE_TAG \
+            rv32emu-prebuilt.tar.gz \
+            --repo sysprog21/rv32emu-prebuilt

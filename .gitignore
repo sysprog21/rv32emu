@@ -16,9 +16,14 @@ build/softfloat
 build/cache/
 build/map/
 build/path/
+build/linux-x86-softfp/
+build/riscv32/
+build/sail_cSim/
+*.a
 *.o
 *.o.d
 tests/**/*.elf
 tests/arch-test-target/config.ini
+tests/arch-test-target/sail_cSim/riscv_sim_RV32
 __pycache__/
 src/rv32_jit.c

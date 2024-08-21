@@ -7,12 +7,12 @@ fib:
     sw s1, 4(sp)
     mv s0, a0
     addi a0, a0, -1
-    la t0, fib
-    jalr ra, 0(t0)
+    la ra, fib
+    jalr ra, 0(ra)
     mv s1, a0
     addi a0, s0, -2
-    la t0, fib
-    jalr ra, 0(t0)
+    la ra, fib
+    jalr ra, 0(ra)
     add a0, s1, a0
     lw ra, 12(sp)
     lw s0, 8(sp)

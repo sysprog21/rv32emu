@@ -270,14 +270,17 @@ RVOP(
         goto end_op;
     },
     GEN({
-        cond, rd;
-        map, VR0, rd;
-        ldimm, VR0, pc, 4;
-        end;
-        rald, VR1, rs1;
-        mov, VR1, TMP;
+        /* The register which stores the indirect address needs to be loaded
+         * first to avoid being overriden by other operation.
+         */
+        rald, VR0, rs1;
+        mov, VR0, TMP;
         alu32imm, 32, 0x81, 0, TMP, imm;
         alu32imm, 32, 0x81, 4, TMP, ~1U;
+        cond, rd;
+        map, VR1, rd;
+        ldimm, VR1, pc, 4;
+        end;
         break;
         predict;
         st, S32, TMP, PC;
@@ -2360,10 +2363,13 @@ RVOP(
         goto end_op;
     },
     GEN({
-        map, VR0, rv_reg_ra;
-        ldimm, VR0, pc, 2;
-        rald, VR1, rs1;
-        mov, VR1, TMP;
+        /* The register which stores the indirect address needs to be loaded
+         * first to avoid being overriden by other operation.
+         */
+        rald, VR0, rs1;
+        mov, VR0, TMP;
+        map, VR1, rv_reg_ra;
+        ldimm, VR1, pc, 2;
         break;
         predict;
         st, S32, TMP, PC;

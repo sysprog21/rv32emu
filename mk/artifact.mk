@@ -34,7 +34,7 @@ TEST_BENCHES += \
 SHELL_HACK := $(shell mkdir -p $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32)
 
 ifeq ($(call has, PREBUILT), 1)
-  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest -O- | grep -Po '(?<="tag_name": ").+(?=",)')
+  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest -O- | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
 else
   # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,
   # we disable the hardware floating-point and the related SIMD operation of x86.

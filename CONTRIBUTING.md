@@ -51,7 +51,7 @@ For maintaining a uniform coding style, execute the command `clang-format -i *.[
 
 ## Coding Style for Modern C
 
-This coding style is a variant of the K&R style.
+This coding style is a variant of the [K&R style](https://en.wikipedia.org/wiki/Indentation_style#K&R).
 Adhere to established practices while being open to innovation.
 Maintain consistency, adopt the latest C standards,
 and embrace modern compilers along with their advanced static analysis capabilities and sanitizers.
@@ -59,7 +59,7 @@ and embrace modern compilers along with their advanced static analysis capabilit
 ### Indentation
 
 In this coding style guide, the use of 4 spaces for indentation instead of tabs is strongly enforced to ensure consistency.
-Consistently apply a single space before and after comparison and assignment operators to maintain readable code.
+Always apply a single space before and after comparison and assignment operators to maintain readable code.
 Additionally, it is crucial to include a single space after every comma.
 e.g.,
 ```c
@@ -69,19 +69,24 @@ for (int i = 0; i < 10; i++) {
 }
 ```
 
+The tab character (ASCII 0x9) should never appear within any source code file.
+When indentation is needed in the source code, align using spaces instead.
+The width of the tab character varies by text editor and programmer preference,
+making consistent visual layout a continual challenge during code reviews and maintenance.
+
 ### Line length
 
-All lines should typically stay within 80 characters, and longer lines should be wrapped.
-There are valid rationales for this practice:
-* It encourages concise code writing by developers.
+All lines should typically remain within 80 characters, with longer lines wrapped as needed.
+This practice is supported by several valid rationales:
+* It encourages developers to write concise code.
 * Smaller portions of information are easier for humans to process.
-* It helps users of vi/vim (and potentially other editors) who use vertical splits.
+* It assists users of vi/vim (and potentially other editors) who use vertical splits.
+* It is especially helpful for those who may want to print code on paper.
 
 ### Comments
 
-Multi-line comments shall have the opening and closing characters
-in a separate line, with the lines containing the content prefixed by a space
-and the `*` characters for alignment, e.g.,
+Multi-line comments should have the opening and closing characters on separate lines,
+with the content lines prefixed by a space and an asterisk (`*`) for alignment, e.g.,
 ```c
 /*
  * This is a multi-line comment.
@@ -90,20 +95,39 @@ and the `*` characters for alignment, e.g.,
 /* One line comment. */
 ```
 
-Use multi-line comments for more elaborative descriptions or before more
-significant logical block of code.
+Use multi-line comments for more elaborate descriptions or before significant logical blocks of code.
 
-Single-line comments shall be written in C89 style:
+Single-line comments should be written in C89 style:
 ```c
     return (uintptr_t) val;  /* return a bitfield */
 ```
 
 Leave two spaces between the statement and the inline comment.
+Avoid commenting out code directly.
+Instead, use `#if 0` ... `#endif` when it is intentional.
+
+All assumptions should be clearly explained in comments.
+Use the following markers to highlight issues and make them searchable:
+* `WARNING`: Alerts a maintainer to the risk of changing this code.
+  e.g., a delay loop counter's terminal value was determined empirically and may need adjustment when the code is ported or the optimization level is tweaked.
+* `NOTE`: Provides descriptive comments about the "why" of a chunk of code,
+  as opposed to the "how" usually included in comments.
+  e.g., a chunk of driver code may deviate from the datasheet due to a known erratum in the chip,
+  or an assumption made by the original programmer is explained.
+* `TODO`: Indicates an area of the code that is still under construction and explains what remains to be done.
+  When appropriate, include an all-caps programmer name or set of initials before the word `TODO`.
+
+Keep the documentation as close to the code as possible.
 
 ### Spacing and brackets
 
-Use one space after the conditional or loop keyword, no spaces around
-their brackets, and one space before the opening curly bracket. e.g.,
+Ensure that the keywords `if`, `while`, `for`, `switch`, and `return` are always followed by a single space when there is additional code on the same line.
+Follow these spacing guidelines:
+* Place one space after the keyword in a conditional or loop.
+* Do not use spaces around the parentheses in conditionals or loops.
+* Insert one space before the opening curly bracket.
+
+For example:
 ```c
 do {
     /* some operations */
@@ -121,38 +145,87 @@ unsigned obj_len = sizeof(obj_t);
 Use brackets to avoid ambiguity and with operators such as `sizeof`,
 but otherwise avoid redundant or excessive brackets.
 
-### Variable names and declarations
-
-- Ensure that functions, variables, and comments are consistently named using English names/text.
-
-- Use descriptive names for global variables and short names for locals.
-Find the right balance between descriptive and succinct.
-
-- Use [snakecase](https://en.wikipedia.org/wiki/Snake_case).
-Do not use "camelcase".
-
-- Do not use Hungarian notation or other unnecessary prefixing or suffixing.
-
-- Use the following spacing for pointers:
+Assignment operators (`=`, `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `~=`, and `!=`) should always have a space before and after them.
+For example:
 ```c
-const char *name;  /* const pointer; '*' with the name and space before it */
-conf_t * const cfg;  /* pointer to a const data; spaces around 'const' */
-const uint8_t * const charmap;  /* const pointer and const data */
-const void * restrict key;  /* const pointer which does not alias */
+count += 1;
 ```
 
-- Local variables of the same type should be declared in the same line.
+Binary operators (`+`, `-`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=`, `==`, `!=`, `<<`, `>>`, `&`, `|`, `^`, `&&`, and `||`) should also be surrounded by spaces.
+For example:
 ```c
-void func(void)
-{
-    char a, b; /* OK */
+current_conf = prev_conf | (1 << START_BIT);
+```
 
-    char a;
-    char b;    /* Incorrect: A variable with char type already exists. */
+Unary operators (`++`, `--`, `!`, and `~`) should be written without spaces between the operator and the operand.
+For example:
+```c
+bonus++;
+if (!play)
+    return STATE_QUITE;
+```
+
+The ternary operator (`?` and `:`) should have spaces on both sides.
+For example:
+```c
+uint32_t max(uint32_t a, uint32_t b)
+{
+    return (a > b) ? a : b;
 }
 ```
 
-- Always include a trailing comma in the last element of structure initialization, including its children, to assist clang-format in correctly formatting structures. However, this can be omitted in very simple and short structures.
+Structure pointer (`->`) and member (`.`) operators should not have surrounding spaces.
+Similarly, array subscript operators (`[` and `]`) and function call parentheses should be written without spaces around them.
+
+### Parentheses
+
+Avoid relying on C’s operator precedence rules, as they may not be immediately clear to those maintaining the code.
+To ensure clarity, always use parentheses to enforce the correct execution order within a sequence of operations,
+or break long statements into multiple lines if necessary.
+
+When using logical AND (`&&`) and logical OR (`||`) operators, each operand should be enclosed in parentheses,
+unless it is a single identifier or constant.
+For example:
+```c
+if ((count > 100) && (detected == false)) {
+    character = C_ASSASSIN;
+}
+```
+
+### Variable names and declarations
+
+Ensure that functions, variables, and comments are consistently named using English words.
+Global variables should have descriptive names, while local variables can have shorter names.
+It is important to strike a balance between being descriptive and concise.
+Each variable's name should clearly reflect its purpose.
+
+Use [snake_case](https://en.wikipedia.org/wiki/Snake_case) for naming conventions,
+and avoid using "camelCase."
+Additionally, do not use Hungarian notation or any other unnecessary prefixes or suffixes.
+
+When declaring pointers, follow these spacing conventions:
+```c
+const char *name;  /* Const pointer; '*' with the name and a space before it */
+conf_t * const cfg;  /* Pointer to const data; spaces around 'const' */
+const uint8_t * const charmap;  /* Const pointer and const data */
+const void * restrict key;  /* Const pointer that does not alias */
+```
+
+Local variables of the same type should be declared on the same line.
+For example:
+```c
+void func(void)
+{
+    char a, b;  /* OK */
+
+    char a;
+    char b;     /* Incorrect: a variable with char type already exists. */
+}
+```
+
+Always include a trailing comma in the last element of a structure initialization,
+including its nested elements, to help `clang-format` correctly format the structure.
+However, this comma can be omitted in very simple and short structures.
 ```c
 typedef struct {
     int width, height;
@@ -189,6 +262,20 @@ typedef struct {
 
 ### Initialization
 
+Do not initialize static and global variables to `0`; the compiler will do this.
+When a variable is declared inside a function, it is not automatically initialized.
+
+```c
+static uint8_t a;  /* Global variable 'a' is set to 0 by the compiler */
+
+void foo()
+{
+    /* 'b' is uninitialized and set to whatever happens to be in memory */
+    uint8_t b;
+    ...
+}
+```
+
 Embrace C99 structure initialization where reasonable, e.g.,
 ```c
 static const crypto_ops_t openssl_ops = {
@@ -206,12 +293,23 @@ static const uint8_t tcp_fsm[TCP_NSTATES][2][TCPFC_COUNT] = {
     [TCPS_CLOSED] = {
         [FLOW_FORW] = {
             /* Handshake (1): initial SYN. */
-            [TCPFC_SYN]	= TCPS_SYN_SENT,
+            [TCPFC_SYN] = TCPS_SYN_SENT,
         },
     },
     ...
 }
 ```
+
+Any pointer variable that does not have an initial address should be explicitly initialized to `NULL`.
+This practice helps prevent undefined behavior caused by dereferencing uninitialized pointers.
+
+In accordance with modern C standards (such as C99 and later), it is preferable to define local variables as needed,
+rather than declaring them all at the beginning of a function.
+Declaring variables close to their first use enhances code readability and helps maintain a clear, logical flow within the function.
+
+Additionally, static analysis tools can be employed to scan the entire source code before each build,
+providing warnings about variables that are used before being properly initialized.
+This helps catch potential bugs early and ensures code quality and safety.
 
 ### Control structures
 
@@ -244,7 +342,16 @@ the semicolon when `for` has expressions:
 
 #### Avoid unnecessary nesting levels
 
-Avoid:
+It is generally preferred to place the shorter clause (measured in lines of code) first in `if` and `else if` statements.
+Long clauses can distract the reader from the core decision-making logic, making the code harder to follow.
+By placing the shorter clause first, the decision path becomes clearer and easier to understand, which can help reduce bugs.
+
+Avoid nesting `if`-`else` statements deeper than two levels.
+Instead, consider using function calls or `switch` statements to simplify the logic and enhance readability.
+Deeply nested `if`-`else` statements often indicate a complex and fragile state machine implementation,
+which can be refactored into a safer and more maintainable structure.
+
+For example, avoid this:
 ```c
 int inspect(obj_t *obj)
 {
@@ -258,19 +365,18 @@ int inspect(obj_t *obj)
 }
 ```
 
-Consider:
+Instead, consider this approach:
 ```c
 int inspect(obj_t *obj)
 {
     if (!cond)
         return -1;
-
     ...
     return 0;
 }
 ```
 
-However, do not make logic more convoluted.
+However, be careful not to make the logic more convoluted in an attempt to simplify nesting.
 
 ### `if` statements
 
@@ -357,6 +463,73 @@ ssize_t hex_write(FILE *stream, const void *buf, size_t len)
 ```
 
 Do not use old style K&R style C definitions.
+
+For function parameters, place one space after each comma, except at the end of a line.
+
+### Function-like Macros
+
+When using function-like macros (parameterized macros), adhere to the following guidelines:
+- Enclose the entire macro body in parentheses.
+- Surround each parameter usage with parentheses.
+- Limit the use of each parameter to no more than once within the macro to avoid unintended side effects.
+- Never include control flow statements (e.g., `return`) within a macro.
+- If the macro involves multiple statements, encapsulate them within a `do`-`while (0)` construct.
+
+For example:
+```c
+#define SET_POINT(p, x, y)  do {    \
+    (p)->px = (x);                  \
+    (p)->py = (y);                  \
+} while (0)
+```
+
+While the extensive use of parentheses, as shown above, helps minimize some risks,
+it cannot prevent issues like unintended double increments from calls such as `MAX(i++, j++)`.
+
+Other risks associated with macros include comparing signed and unsigned data or testing floating-point values.
+Additionally, macros are not visible at runtime, making them impossible to step into with a debugger.
+Therefore, use them with caution.
+
+### Use `const` and `static` effectively
+
+The `static` keyword should be used for any variables that do not need to be accessible outside the module where they are declared.
+This is particularly important for global variables defined in C files.
+Declaring variables and functions as `static` at the module level protects them from external access, reducing coupling between modules and improving encapsulation.
+
+For functions that do not need to be accessible outside the module, use the `static` keyword.
+This is especially important for private functions, where `static` should always be applied.
+
+For example:
+```c
+static bool verify_range(uint16_t x, uint16_t y);
+```
+
+The `const` keyword is essential for several key purposes:
+- Declaring variables that should not change after initialization.
+- Defining fields within a `struct` that must remain immutable, such as those in memory-mapped I/O peripheral registers.
+- Serving as a strongly typed alternative to `#define` for numerical constants.
+
+For example, instead of using:
+```c
+#define MAX_SKILL_LEVEL (100U)
+```
+
+Use:
+```c
+const uint8_t max_skill_level = 100;
+```
+
+Maximizing the use of `const` provides the advantage of compiler-enforced protection against unintended modifications to data that should be read-only,
+thereby enhancing code reliability and safety.
+
+Additionally, when one of your function arguments is a pointer to data that will not be modified within the function,
+you should use the `const` keyword.
+This is particularly useful when comparing a character array with predefined strings without altering the array’s contents.
+
+For example:
+```c
+static bool is_valid_cmd(const char *cmd);
+```
 
 ### Object abstraction
 
@@ -445,12 +618,21 @@ Use `unsigned` for general iterators; use `size_t` for general sizes; use
 `ssize_t` to return a size which may include an error.  Of course, consider
 possible overflows.
 
-Avoid using `uint8_t` or `uint16_t` or other sub-word types for general
-iterators and similar cases, unless programming for micro-controllers or
-other constrained environments.
+Avoid using fixed-width types like `uint8_t`, `uint16_t`, or other smaller integer types for general iterators or similar cases unless there is a specific need for size-constrained operations,
+such as in fixed-width data processing or resource-limited environments.
 
 C has rather peculiar _type promotion rules_ and unnecessary use of sub-word
 types might contribute to a bug once in a while.
+
+Boolean variables should be declared using the `bool` type.
+Non-Boolean values should be converted to Boolean by using relational operators (e.g., `<` or `!=`) rather than by casting.
+
+For example:
+```c
+#include <stdbool.h>
+...
+bool inside = (value < expected_range);
+```
 
 ### Embrace portability
 
@@ -462,24 +644,48 @@ cases where it is appropriate.
 
 #### Types
 
-- Do not assume a particular 32-bit vs 64-bit architecture, e.g., do not
-assume the size of `long` or `unsigned long`.  Use `int64_t` or `uint64_t`
-for the 8-byte integers.
+Do not assume a particular 32-bit or 64-bit architecture; for example, do not assume the size of `long` or `unsigned long`.
+Instead, use `int64_t` or `uint64_t` for 8-byte integers.
 
-- Do not assume `char` is signed; for example, on Arm it is unsigned.
+Fixed-width types, such as `uint32_t`, are particularly useful when memory size is critical,
+as in embedded systems, communication protocols requiring specific data sizes,
+or when interacting with hardware registers that require precise bit-width operations.
+In these scenarios, fixed-width types ensure consistent behavior across different platforms and compilers.
 
-- Use C99 macros for constant prefixes or formatting of the fixed-width
-types.
+Do not assume `char` is signed; for example, on Arm architectures, it is unsigned by default.
+
+Avoid defining bit-fields within signed integer types.
+Additionally, do not use bitwise operators (such as `&`, `|`, `~`, `^`, `<<`, and `>>`) on signed integer data.
+Refrain from combining signed and unsigned integers in comparisons or expressions, as this can lead to unpredictable results.
+
+When using `#define` to declare decimal constants, append a `U` to ensure they are treated as unsigned.
+For example:
+```c
+#define SOME_CONSTANT (6U)
+
+uint16_t unsigned_a = 6;
+int16_t  signed_b = -9;
+if (unsigned_a + signed_b < 4) {
+    /* This block might appear logically correct, as -9 + 6 is -3 */
+    ...
+}
+/* but compilers with 16-bit int may legally interpret it as (0xFFFF – 9) + 6. */
+```
+
+It is important to note that certain aspects of manipulating binary data within signed integer containers are implementation-defined behaviors according to ISO C standards.
+Additionally, mixing signed and unsigned integers can lead to data-dependent results, as demonstrated in the example above.
+
+Use C99 macros for constant prefixes or formatting of the fixed-width types.
 
 Use:
 ```c
-#define	SOME_CONSTANT (UINT64_C(1) << 48)
+#define SOME_CONSTANT (UINT64_C(1) << 48)
 printf("val %" PRIu64 "\n", SOME_CONSTANT);
 ```
 
 Do not use:
 ```c
-#define	SOME_CONSTANT (1ULL << 48)
+#define SOME_CONSTANT (1ULL << 48)
 printf("val %lld\n", SOME_CONSTANT);
 ```
 
@@ -488,6 +694,43 @@ printf("val %lld\n", SOME_CONSTANT);
 Avoid assuming that unaligned access is safe.
 It is not secure on architectures like Arm, POWER, and others.
 Additionally, even on x86, unaligned access can be slower.
+
+#### Structures and Unions
+
+Care should be taken to prevent the compiler from inserting padding bytes within `struct` or `union` types,
+as this can affect memory layout and portability.
+To control padding and alignment, consider using structure packing techniques specific to your compiler.
+
+Additionally, take precautions to ensure that the compiler does not alter the intended order of bits within bit-fields.
+This is particularly important when working with hardware registers or communication protocols where bit order is crucial.
+
+According to the C standard, the layout of structures, including padding and bit-field ordering,
+is implementation-defined, meaning it can vary between different compilers and platforms.
+Therefore, it is essential to verify that the structure's layout meets your expectations, especially when writing portable code.
+
+For example:
+```c
+typedef struct {
+    uint16_t count;         /* offset 0 */
+    uint16_t max_count;     /* offset 2 */
+    uint16_t unused0;       /* offset 4 */
+    uint16_t enable    : 2; /* offset 6 bits 15-14 */
+    uint16_t interrupt : 1; /* offset 6 bit 13     */
+    uint16_t unused1   : 7; /* offset 6 bits 12-6  */
+    uint16_t complete  : 1; /* offset 6 bit 5      */
+    uint16_t unused2   : 4; /* offset 6 bits 4-1   */
+    uint16_t periodic  : 1; /* offset 6 bit 0      */
+} mytimer_t;
+
+/* Preprocessor check of timer register layout byte count. */
+#if (sizeof(mytimer_t) != 8)
+#error mytimer_t struct size incorrect (expected 8 bytes)
+#endif
+```
+
+To enhance portability, use standard-defined types (e.g., `uint16_t`, `uint32_t`) and avoid relying on compiler-specific behavior.
+Where precise control over memory layout is required, such as in embedded systems or when interfacing with hardware,
+always verify the structure size and layout using static assertions or preprocessor checks.
 
 #### Avoid extreme portability
 

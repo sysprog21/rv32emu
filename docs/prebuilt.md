@@ -49,12 +49,14 @@ The prebuilt binaries in `rv32emu-prebuilt` are built from the following reposit
 - `pi` : See [tests/pi.c](/tests/pi.c)
 - `puzzle` : See [tests/puzzle.c](/tests/puzzle.c)
 - `qrcode` : See [tests/qrcode.c](/tests/qrcode.c)
-- `quake` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
 - `richards` : See [tests/richards.c](/tests/richards.c)
 - `rvsim` : See [tests/rvsim.c](/tests/rvsim.c)
-- `scimark2` : See [Scimark 2.0](https://math.nist.gov/scimark2)
 - `spirograph` : See [tests/spirograph.c](/tests/spirograph.c)
 - `uaes` : See [tests/uaes.c](/tests/uaes.c)
+
+To determine performance of the floating point arithmetic, the following RISC-V binaries are built with option `-march=rv32imf`:
+- `quake` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
+- `scimark2` : See [Scimark 2.0](https://math.nist.gov/scimark2)
 
 There are still some prebuilt standalone RISC-V binaries under `build/` directory only for testing purpose:
 

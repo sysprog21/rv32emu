@@ -78,13 +78,13 @@ else
 	$(Q)$(PRINTF) "Building quake ...\n"
 	$(Q)cd ./tests/quake && mkdir -p build && cd build && \
 	    cmake -DCMAKE_TOOLCHAIN_FILE=../port/boards/rv32emu/toolchain.cmake \
-		      -DCROSS_COMPILE=$(CROSS_COMPILE) \
-		      -DCMAKE_BUILD_TYPE=RELEASE -DBOARD_NAME=rv32emu .. && \
+	          -DCROSS_COMPILE=$(CROSS_COMPILE) \
+	          -DCMAKE_BUILD_TYPE=RELEASE -DBOARD_NAME=rv32emu .. && \
 	    make
 	$(Q)cp ./tests/quake/build/port/boards/rv32emu/quake $(BIN_DIR)/riscv32/quake
 endif
 
-scimark2: ieeelib
+scimark2:
 ifeq ($(call has, PREBUILT), 0)
 	$(Q)$(call prologue,"scimark2")
 	$(Q)$(call download,$(SCIMARK2_URL))
@@ -92,10 +92,11 @@ ifeq ($(call has, PREBUILT), 0)
 	$(Q)$(call extract,"./tests/scimark2",$(notdir $(SCIMARK2_URL)))
 	$(Q)$(call epilogue,$(notdir $(SCIMARK2_URL)),$(SHA1_FILE1),$(SHA1_FILE2))
 	$(Q)$(PRINTF) "Building scimark2 ...\n"
-	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CC) CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)"
+	$(Q)$(MAKE) -C ./tests/scimark2 clean && $(RM) ./tests/scimark2/scimark2.o
+	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CC) CFLAGS="-m32 -O2"
 	$(Q)cp ./tests/scimark2/scimark2 $(BIN_DIR)/linux-x86-softfp/scimark2
 	$(Q)$(MAKE) -C ./tests/scimark2 clean && $(RM) ./tests/scimark2/scimark2.o
-	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CROSS_COMPILE)gcc CFLAGS="$(CFLAGS_CROSS)"
+	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CROSS_COMPILE)gcc CFLAGS="-march=rv32imf -mabi=ilp32 -O2"
 	$(Q)cp ./tests/scimark2/scimark2 $(BIN_DIR)/riscv32/scimark2
 endif
 

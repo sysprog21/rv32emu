@@ -20,8 +20,12 @@ jobs:
         with:
           fetch_additional_submodule_history: 'true'
           files: |
-            tests/ansibench/*
-            tests/rv8-bench/*
+            mk/artifact.mk
+            tests/ansibench/**
+            tests/rv8-bench/**
+            tests/doom/**
+            tests/quake/**
+            tests/scimark2/**
             tests/*.c
       - name: Set alias
         id: has_changed_files

@@ -25,14 +25,15 @@ define download
     $(eval _ := $(shell wget -q --show-progress --continue "$(strip $(1))"))
 endef
 
-# $(1): compressed source(.zip or.gz)
+# $(1): destination directory
+# $(2): compressed source(.zip or.gz)
 define extract
-    $(eval COMPRESSED_SUFFIX := $(suffix $(1)))
+    $(eval COMPRESSED_SUFFIX := $(suffix $(2)))
     $(eval COMPRESSED_IS_ZIP := $(filter $(COMPRESSED_SUFFIX),.zip))
     $(eval _ :=  \
         $(if $(COMPRESSED_IS_ZIP), \
-            ($(eval EXTRACTOR := unzip -d $(OUT) $(1))), \
-            ($(eval EXTRACTOR := tar -xf $(1) -C $(OUT))) \
+            ($(eval EXTRACTOR := unzip -d $(1) $(2))), \
+            ($(eval EXTRACTOR := tar -xf $(2) -C $(1))) \
     ))
     $(eval _ := $(shell $(EXTRACTOR)))
 endef
@@ -90,7 +91,7 @@ define download-extract-verify
 $($(T)_DATA):
 	$(Q)$$(call prologue,$$@)
 	$(Q)$$(call download,$(strip $($(T)_DATA_URL)))
-	$(Q)$$(call extract,$(notdir $($(T)_DATA_URL)))
+	$(Q)$$(call extract,$(OUT),$(notdir $($(T)_DATA_URL)))
 	$(Q)$$(call verify,$($(T)_DATA_SHA1), $($(T)_DATA))
 	$(Q)$$(call epilogue,$(notdir $($(T)_DATA_URL)),$(SHA1_FILE1),$(SHA1_FILE2))
 endef

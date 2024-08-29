@@ -23,3 +23,11 @@
 	path = src/ieeelib
 	url = https://github.com/sysprog21/ieeelib
 	shallow = true
+[submodule "tests/doom"]
+	path = tests/doom
+	url = https://github.com/sysprog21/doom_riscv
+	shallow = true
+[submodule "tests/quake"]
+	path = tests/quake
+	url = https://github.com/sysprog21/quake-embedded
+	shallow = true

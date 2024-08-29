@@ -275,15 +275,15 @@ misalign: $(BIN) artifact
 
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)
-doom_action := (cd $(OUT); ../$(BIN) doom.elf)
+doom_action := (cd $(OUT); ../$(BIN) riscv32/doom)
 doom_deps += $(DOOM_DATA) $(BIN)
-doom: $(doom_deps)
+doom: artifact $(doom_deps)
 	$(doom_action)
 
 ifeq ($(call has, EXT_F), 1)
-quake_action := (cd $(OUT); ../$(BIN) quake.elf)
+quake_action := (cd $(OUT); ../$(BIN) riscv32/quake)
 quake_deps += $(QUAKE_DATA) $(BIN)
-quake: $(quake_deps)
+quake: artifact $(quake_deps)
 	$(quake_action)
 endif
 endif

@@ -36,6 +36,7 @@ The prebuilt binaries in `rv32emu-prebuilt` are built from the following reposit
     - sha512
 - `captcha` : See [tests/captcha.c](/tests/captcha.c)
 - `donut` : See [tests/donut.c](/tests/donut.c)
+- `doom` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv)
 - `fcalc` : See [tests/fcalc.c](/tests/fcalc.c)
 - `hamilton` : See [tests/hamilton.c](/tests/hamilton.c)
 - `jit` : See [tests/jit.c](/tests/jit.c)
@@ -53,15 +54,16 @@ The prebuilt binaries in `rv32emu-prebuilt` are built from the following reposit
 - `spirograph` : See [tests/spirograph.c](/tests/spirograph.c)
 - `uaes` : See [tests/uaes.c](/tests/uaes.c)
 
+To determine performance of the floating point arithmetic, the following RISC-V binaries are built with option `-march=rv32imf`:
+- `quake` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
+- `scimark2` : See [Scimark 2.0](https://math.nist.gov/scimark2)
+
 There are still some prebuilt standalone RISC-V binaries under `build/` directory only for testing purpose:
 
 - `hello.elf` : See [tests/asm-hello](/tests/asm-hello)
 - `cc.elf` : See [tests/cc](/tests/cc)
 - `chacha20.elf` : See [tests/chacha20](/tests/chacha20)
-- `doom.elf` : See [sysprog21/doom_riscv](https://github.com/sysprog21/doom_riscv) [RV32M]
 - `ieee754.elf` : See [tests/ieee754.c](/tests/ieee754.c) [RV32F]
 - `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)
-- `quake.elf` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded) [RV32F]
 - `readelf.elf` : See [tests/readelf](/tests/readelf)
-- `scimark2.elf` : See [tests/scimark2](/tests/scimark2) [RV32MF]
 - `smolnes.elf` : See [tests/smolnes](/tests/smolnes.c) [RV32M]

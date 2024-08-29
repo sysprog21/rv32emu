@@ -92,7 +92,6 @@ ifeq ($(call has, PREBUILT), 0)
 	$(Q)$(call extract,"./tests/scimark2",$(notdir $(SCIMARK2_URL)))
 	$(Q)$(call epilogue,$(notdir $(SCIMARK2_URL)),$(SHA1_FILE1),$(SHA1_FILE2))
 	$(Q)$(PRINTF) "Building scimark2 ...\n"
-	$(Q)$(MAKE) -C ./tests/scimark2 clean && $(RM) ./tests/scimark2/scimark2.o
 	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CC) CFLAGS="-m32 -O2"
 	$(Q)cp ./tests/scimark2/scimark2 $(BIN_DIR)/linux-x86-softfp/scimark2
 	$(Q)$(MAKE) -C ./tests/scimark2 clean && $(RM) ./tests/scimark2/scimark2.o

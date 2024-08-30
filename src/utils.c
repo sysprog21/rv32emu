@@ -26,6 +26,19 @@
 
 #define MAX_PATH_LEN 1024
 
+/* Calculate "x * n / d" without unnecessary overflow or loss of precision.
+ *
+ * Reference:
+ * https://elixir.bootlin.com/linux/v6.10.7/source/include/linux/math.h#L121
+ */
+static inline uint64_t mult_frac(uint64_t x, uint64_t n, uint64_t d)
+{
+    const uint64_t q = x / d;
+    const uint64_t r = x % d;
+
+    return q * n + r * n / d;
+}
+
 static void get_time_info(int32_t *tv_sec, int32_t *tv_nsec)
 {
 #if defined(HAVE_POSIX_TIMER)

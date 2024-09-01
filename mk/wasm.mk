@@ -37,8 +37,11 @@ CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
 	       -O3 \
 	       -w
 
+$(DEMO_DIR)/elf_list.js: tools/gen-elf-list-js.py
+	$(Q)tools/gen-elf-list-js.py > $@
+
 # used to download all dependencies of elf executable and bundle into single wasm
-deps_emcc += $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
+deps_emcc += $(DEMO_DIR)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
 
 # check browser MAJOR version if supports TCO
 CHROME_MAJOR :=
@@ -98,7 +101,7 @@ endef
 STATIC_WEB_FILES := $(WEB_HTML_RESOURCES)/index.html \
 		    $(WEB_JS_RESOURCES)/coi-serviceworker.min.js
 
-start-web: $(BIN) check-demo-dir-exist
+start-web: check-demo-dir-exist $(BIN)
 	$(foreach T, $(WEB_FILES), $(call cp-web-file, $(T)))
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(Q)python3 -m http.server --bind $(DEMO_IP) $(DEMO_PORT) --directory $(DEMO_DIR)

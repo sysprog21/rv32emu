@@ -130,40 +130,11 @@ canvas.emscripten { border: 0px none; background-color: black; }
     </div>
     <textarea id="output" rows="8"></textarea>
 
+    <script src="elf_list.js"></script>
     <script type='text/javascript'>
       var statusElement = document.getElementById('status');
       var progressElement = document.getElementById('progress');
       var spinnerElement = document.getElementById('spinner');
-
-      var elfFiles = [
-        "riscv32/doom",
-        "smolnes.elf",
-        "riscv32/quake",
-        "riscv32/coremark",
-        "riscv32/dhrystone",
-        "riscv32/pi",
-        "riscv32/donut",
-        "riscv32/aes",
-        "coro.elf",
-        "riscv32/fcalc",
-        "riscv32/hamilton",
-        "hello.elf",
-        "ieee754.elf",
-        "jit-bf.elf",
-        "riscv32/maj2random",
-        "riscv32/mandelbrot",
-        "riscv32/nqueens",
-        "riscv32/nyancat",
-        "perfcount.elf",
-        "riscv32/qrcode",
-        "readelf.elf",
-        "riscv32/richards",
-        "riscv32/rvsim",
-        "riscv32/scimark2",
-        "riscv32/spirograph",
-        "riscv32/stream",
-      ];
-
       var runButton = document.getElementById("runButton");
       runButton.addEventListener("click", runButtonClickHandler);
 

@@ -81,6 +81,8 @@ $(call set-feature, Zicsr)
 ENABLE_Zifencei ?= 1
 $(call set-feature, Zifencei)
 
+ENABLE_FULL4G ?= 0
+
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
 ifneq ("$(CC_IS_EMCC)", "1") # note that emcc generates port SDL headers/library, so it does not requires system SDL headers/library
@@ -99,10 +101,17 @@ ifeq ($(call has, SDL), 1)
 OBJS_EXT += syscall_sdl.o
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 # 4 GiB of memory is required to run video games.
-$(OUT)/main.o: CFLAGS += -DMEM_SIZE=0xFFFFFFFFULL # 2^{32} - 1
+ENABLE_FULL4G := 1
 LDFLAGS += $(shell sdl2-config --libs) -pthread
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
 endif
+endif
+
+# Full access to a 4 GiB address space, necessitating more memory mapping
+# during emulator initialization.
+$(call set-feature, FULL4G)
+ifeq ($(call has, FULL4G), 1)
+$(OUT)/main.o: CFLAGS += -DMEM_SIZE=0xFFFFFFFFULL # 2^{32} - 1
 endif
 
 ENABLE_GDBSTUB ?= 0

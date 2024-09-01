@@ -95,6 +95,7 @@ The image containing all the necessary tools for development and testing can be 
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
 * `ENABLE_GDBSTUB` : GDB remote debugging support
+* `ENABLE_FULL4G` : Full access to 4 GiB address space
 * `ENABLE_SDL` : Experimental Display and Event System Calls
 * `ENABLE_JIT` : Experimental JIT compiler
 

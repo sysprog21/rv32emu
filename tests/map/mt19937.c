@@ -34,10 +34,10 @@ uint64_t mt19937_extract(void)
         generate_numbers();
 
     uint64_t y = MT[index];
-    y = y ^ (y >> 11);
-    y = y ^ ((y << 7) & 0x9d2c5680ULL);
-    y = y ^ ((y << 15) & 0xefc60000ULL);
-    y = y ^ (y >> 18);
+    y ^= y >> 11;
+    y ^= (y << 7) & 0x9d2c5680ULL;
+    y ^= (y << 15) & 0xefc60000ULL;
+    y ^= y >> 18;
 
     index = (index + 1) % 624;
     return y;

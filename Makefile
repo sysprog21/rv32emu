@@ -98,6 +98,8 @@ $(call set-feature, SDL)
 ifeq ($(call has, SDL), 1)
 OBJS_EXT += syscall_sdl.o
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
+# 4 GiB of memory is required to run video games.
+$(OUT)/main.o: CFLAGS += -DMEM_SIZE=0xFFFFFFFFULL # 2^{32} - 1
 LDFLAGS += $(shell sdl2-config --libs) -pthread
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
 endif

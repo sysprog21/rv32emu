@@ -1,14 +1,15 @@
 CFLAGS_emcc ?=
-deps_emcc :=
+deps_emcc := artifact
 ASSETS := assets
 WEB_HTML_RESOURCES := $(ASSETS)/html
 WEB_JS_RESOURCES := $(ASSETS)/js
 EXPORTED_FUNCS := _main,_indirect_rv_halt
-
-ifeq ("$(CC_IS_EMCC)", "1")
+DEMO_DIR := demo
 WEB_FILES := $(BIN).js \
 	     $(BIN).wasm \
 	     $(BIN).worker.js
+
+ifeq ("$(CC_IS_EMCC)", "1")
 BIN := $(BIN).js
 
 # TCO
@@ -28,6 +29,7 @@ CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
 	       -sSTACK_SIZE=4MB \
 	       -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency \
 	       --embed-file build@/ \
+	       --embed-file build/riscv32@/riscv32 \
 	       --embed-file build/timidity@/etc/timidity \
 	       -DMEM_SIZE=0x40000000 \
 	       -DCYCLE_PER_STEP=2000000 \
@@ -77,7 +79,6 @@ else
 endif
 
 # used to serve wasm locally
-DEMO_DIR := demo
 DEMO_IP := 127.0.0.1
 DEMO_PORT := 8000
 

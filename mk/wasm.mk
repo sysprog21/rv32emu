@@ -7,7 +7,8 @@ EXPORTED_FUNCS := _main,_indirect_rv_halt
 DEMO_DIR := demo
 WEB_FILES := $(BIN).js \
 	     $(BIN).wasm \
-	     $(BIN).worker.js
+	     $(BIN).worker.js \
+             $(OUT)/elf_list.js
 
 ifeq ("$(CC_IS_EMCC)", "1")
 BIN := $(BIN).js
@@ -37,11 +38,11 @@ CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
 	       -O3 \
 	       -w
 
-$(DEMO_DIR)/elf_list.js: tools/gen-elf-list-js.py
+$(OUT)/elf_list.js: tools/gen-elf-list-js.py
 	$(Q)tools/gen-elf-list-js.py > $@
 
 # used to download all dependencies of elf executable and bundle into single wasm
-deps_emcc += $(DEMO_DIR)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
+deps_emcc += $(OUT)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
 
 # check browser MAJOR version if supports TCO
 CHROME_MAJOR :=

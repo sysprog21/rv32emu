@@ -46,6 +46,7 @@ jobs:
             mkdir /tmp/rv32emu-demo
             mv assets/html/index.html /tmp/rv32emu-demo
             mv assets/js/coi-serviceworker.min.js /tmp/rv32emu-demo
+            mv build/elf_list.js /tmp/rv32emu-demo
             mv build/rv32emu.js /tmp/rv32emu-demo
             mv build/rv32emu.wasm /tmp/rv32emu-demo
             mv build/rv32emu.worker.js /tmp/rv32emu-demo
@@ -63,6 +64,7 @@ jobs:
         run: |
             mv /tmp/rv32emu-demo/index.html .
             mv /tmp/rv32emu-demo/coi-serviceworker.min.js .
+            mv /tmp/rv32emu-demo/elf_list.js .
             mv /tmp/rv32emu-demo/rv32emu.js .
             mv /tmp/rv32emu-demo/rv32emu.wasm .
             mv /tmp/rv32emu-demo/rv32emu.worker.js .

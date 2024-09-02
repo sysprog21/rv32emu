@@ -174,8 +174,8 @@ static void dump_test_signature(const char *prog_name)
 #endif
 /* FIXME: MEM_SIZE shall be defined on different runtime */
 #ifndef MEM_SIZE
-/* Allocate 2^{19} - 1 bytes, which is ample for all known benchmarks. */
-#define MEM_SIZE 0x80000
+/* Allocate 2^{19} bytes, which is ample for all selective benchmarks. */
+#define MEM_SIZE 0x80000ULL
 #endif
 #define STACK_SIZE 0x1000       /* 4096 */
 #define ARGS_OFFSET_SIZE 0x1000 /* 4096 */

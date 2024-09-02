@@ -1,6 +1,6 @@
 FROM alpine:3.19 as base_gcc
 
-RUN apk add --update alpine-sdk git curl
+RUN apk add --update alpine-sdk git wget
 
 # copy in the source code
 WORKDIR /home/root/rv32emu

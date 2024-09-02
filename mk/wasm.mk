@@ -1,14 +1,15 @@
 CFLAGS_emcc ?=
-deps_emcc :=
+deps_emcc := artifact
 ASSETS := assets
 WEB_HTML_RESOURCES := $(ASSETS)/html
 WEB_JS_RESOURCES := $(ASSETS)/js
 EXPORTED_FUNCS := _main,_indirect_rv_halt
-
-ifeq ("$(CC_IS_EMCC)", "1")
+DEMO_DIR := demo
 WEB_FILES := $(BIN).js \
 	     $(BIN).wasm \
 	     $(BIN).worker.js
+
+ifeq ("$(CC_IS_EMCC)", "1")
 BIN := $(BIN).js
 
 # TCO
@@ -28,6 +29,7 @@ CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
 	       -sSTACK_SIZE=4MB \
 	       -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency \
 	       --embed-file build@/ \
+	       --embed-file build/riscv32@/riscv32 \
 	       --embed-file build/timidity@/etc/timidity \
 	       -DMEM_SIZE=0x40000000 \
 	       -DCYCLE_PER_STEP=2000000 \
@@ -35,8 +37,11 @@ CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
 	       -O3 \
 	       -w
 
+$(DEMO_DIR)/elf_list.js: tools/gen-elf-list-js.py
+	$(Q)tools/gen-elf-list-js.py > $@
+
 # used to download all dependencies of elf executable and bundle into single wasm
-deps_emcc += $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
+deps_emcc += $(DEMO_DIR)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
 
 # check browser MAJOR version if supports TCO
 CHROME_MAJOR :=
@@ -77,7 +82,6 @@ else
 endif
 
 # used to serve wasm locally
-DEMO_DIR := demo
 DEMO_IP := 127.0.0.1
 DEMO_PORT := 8000
 
@@ -97,7 +101,7 @@ endef
 STATIC_WEB_FILES := $(WEB_HTML_RESOURCES)/index.html \
 		    $(WEB_JS_RESOURCES)/coi-serviceworker.min.js
 
-start-web: $(BIN) check-demo-dir-exist
+start-web: check-demo-dir-exist $(BIN)
 	$(foreach T, $(WEB_FILES), $(call cp-web-file, $(T)))
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(Q)python3 -m http.server --bind $(DEMO_IP) $(DEMO_PORT) --directory $(DEMO_DIR)

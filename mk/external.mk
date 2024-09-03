@@ -40,6 +40,7 @@ endef
 
 # $(1): correct SHA1 value
 # $(2): filename or directory path
+# $(3): (optional) returned result
 #
 # Note:
 # 1. for regular file, $(SHA1SUM) command's -c option generates keyword "FAILED" for indicating an unmatch
@@ -47,8 +48,8 @@ endef
 define verify
     $(eval COMPRESSED_IS_DIR := $(if $(wildcard $(2)/*),1,0))
     $(eval _ := \
-	    $(if $(filter 1,$(COMPRESSED_IS_DIR)), \
-		    ($(eval VERIFIER :=  \
+        $(if $(filter 1,$(COMPRESSED_IS_DIR)), \
+            ($(eval VERIFIER :=  \
                 echo $(1) > $(SHA1_FILE1) \
                 | find $(2) -type f -print0 \
                 | sort -z \
@@ -58,10 +59,13 @@ define verify
                 | cut -f 1 -d ' ' > $(SHA1_FILE2) && cmp $(SHA1_FILE1) $(SHA1_FILE2))), \
             ($(eval VERIFIER := echo "$(strip $(1))  $(strip $(2))" | $(SHA1SUM) -c)) \
     ))
-    $(eval _ := $(shell $(VERIFIER)))
+    $(eval _ := $(shell $(VERIFIER) 2>&1))
     $(eval _ := \
         $(if $(filter FAILED differ:,$(_)), \
-            ($(error $(_))), \
+            ($(if $(3), \
+                $(eval $(3) := 1), \
+                $(error $(_)) \
+            )), \
             (# SHA1 value match, do nothing) \
     ))
 endef
@@ -92,7 +96,7 @@ $($(T)_DATA):
 	$(Q)$$(call prologue,$$@)
 	$(Q)$$(call download,$(strip $($(T)_DATA_URL)))
 	$(Q)$$(call extract,$(OUT),$(notdir $($(T)_DATA_URL)))
-	$(Q)$$(call verify,$($(T)_DATA_SHA1), $($(T)_DATA))
+	$(Q)$$(call verify,$($(T)_DATA_SHA1),$($(T)_DATA))
 	$(Q)$$(call epilogue,$(notdir $($(T)_DATA_URL)),$(SHA1_FILE1),$(SHA1_FILE2))
 endef
 

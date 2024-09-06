@@ -1,5 +1,5 @@
 CFLAGS_emcc ?=
-deps_emcc := artifact
+deps_emcc :=
 ASSETS := assets
 WEB_HTML_RESOURCES := $(ASSETS)/html
 WEB_JS_RESOURCES := $(ASSETS)/js
@@ -42,7 +42,7 @@ $(OUT)/elf_list.js: tools/gen-elf-list-js.py
 	$(Q)tools/gen-elf-list-js.py > $@
 
 # used to download all dependencies of elf executable and bundle into single wasm
-deps_emcc += $(OUT)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
+deps_emcc += artifact $(OUT)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
 
 # check browser MAJOR version if supports TCO
 CHROME_MAJOR :=

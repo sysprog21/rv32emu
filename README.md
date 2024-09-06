@@ -298,11 +298,10 @@ $ tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
 ```
 
 ## WebAssembly Translation
-### Build and run
-`rv32emu` relies on [Emscripten](https://emscripten.org/docs/getting_started/downloads.html) to be compiled to WebAssembly. Thus, the target system should have
-the Emscripten version 3.1.51 installed.
+`rv32emu` relies on [Emscripten](https://emscripten.org/docs/getting_started/downloads.html) to be compiled to WebAssembly.
+Thus, the target system should have the Emscripten version 3.1.51 installed.
 
-Moreover, `rv32emu` leverages the tail call optimization(TCO) strategy and we have tested the WebAssembly
+Moreover, `rv32emu` leverages the tail call optimization (TCO) and we have tested the WebAssembly
 execution in Chrome with at least MAJOR 112 and Firefox with at least MAJOR 121 since they supports
 tail call feature. Thus, please check and update your browsers if necessary or install the suitable browsers
 before going further.
@@ -320,7 +319,6 @@ $ make CC=emcc start-web
 You would see the server's IP:PORT in your terminal. Copy and paste it to the browsers and
 you just access the index page of `rv32emu`.
 
-### Index page
 You would see a dropdown menu which you can use to select the ELF executable. Select one and
 click the Run button to run it.
 
@@ -345,8 +343,8 @@ See [docs/prebuilt.md](docs/prebuilt.md).
 * [Writing a RISC-V Emulator in Rust](https://book.rvemu.app/)
 * [Bare metal C on my RISC-V toy CPU](https://florian.noeding.com/posts/risc-v-toy-cpu/cpu-from-scratch/)
 * [Juraj's RISC-V note](https://jborza.com/tags/riscv/)
-* [libriscv: RISC-V userspace emulator library](https://github.com/fwsGonzo/libriscv)
 * [GUI-VP: RISC-V based Virtual Prototype (VP) for graphical application development](https://github.com/ics-jku/GUI-VP)
 * [LupV: an education-friendly RISC-V based system emulator](https://gitlab.com/luplab/lupv)
 * [mini-rv32ima](https://github.com/cnlohr/mini-rv32ima) / [video: Writing a Really Tiny RISC-V Emulator](https://youtu.be/YT5vB3UqU_E)
 * [RVVM](https://github.com/LekKit/RVVM)
+* [RISCVBox](https://github.com/bane9/RISCVBox)

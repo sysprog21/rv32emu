@@ -48,12 +48,29 @@ else
   LDFLAGS_CROSS := -lm -lsemihost
 endif
 
-.PHONY: artifact scimark2 ieeelib
+.PHONY: artifact fetch-checksum scimark2 ieeelib
 
-artifact: ieeelib scimark2
+artifact: fetch-checksum ieeelib scimark2
 ifeq ($(call has, PREBUILT), 1)
-	$(Q)$(PRINTF) "Fetching prebuilt executables from \"rv32emu-prebuilt\" ...\n"
-	$(Q)wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build --strip-components=1 -xz
+	$(Q)$(PRINTF) "Checking SHA1 of binaries ...\n"
+
+	$(Q)$(eval PREBUILT_X86_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{  print $$2 };'))
+	$(Q)$(eval PREBUILT_RV32_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$2 };'))
+
+	$(Q)$(eval RES := 0)
+	$(Q)$(eval $(foreach FILE,$(PREBUILT_X86_FILENAME), \
+	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{ print $$1 };'),$(BIN_DIR)/linux-x86-softfp/$(FILE),RES) \
+	))
+	$(Q)$(eval $(foreach FILE,$(PREBUILT_RV32_FILENAME), \
+	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$1 };'),$(BIN_DIR)/riscv32/$(FILE),RES) \
+	))
+
+	$(Q)if [ "$(RES)" = "1" ]; then \
+	    $(PRINTF) "$(YELLOW)SHA1 verifications fail! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
+	    wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build --strip-components=1 -xz; \
+	else \
+		$(PRINTF) "$(PASS_COLOR)SHA1 verifications succeed!\n$(NO_COLOR)"; \
+	fi
 else
 	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
 	$(Q)for tb in $(TEST_SUITES); do \
@@ -82,6 +99,16 @@ else
 	          -DCMAKE_BUILD_TYPE=RELEASE -DBOARD_NAME=rv32emu .. && \
 	    make
 	$(Q)cp ./tests/quake/build/port/boards/rv32emu/quake $(BIN_DIR)/riscv32/quake
+
+	$(Q)(cd $(BIN_DIR)/linux-x86-softfp; for fd in *; do $(SHA1SUM) "$$fd"; done) >> $(BIN_DIR)/sha1sum-linux-x86-softfp
+	$(Q)(cd $(BIN_DIR)/riscv32; for fd in *; do $(SHA1SUM) "$$fd"; done) >> $(BIN_DIR)/sha1sum-riscv32
+endif
+
+fetch-checksum:
+ifeq ($(call has, PREBUILT), 1)
+	$(Q)$(PRINTF) "Fetching SHA1 of binaries ...\n"
+	$(Q)wget -q --show-progress -O $(BIN_DIR)/sha1sum-linux-x86-softfp https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-linux-x86-softfp
+	$(Q)wget -q --show-progress -O $(BIN_DIR)/sha1sum-riscv32 https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-riscv32
 endif
 
 scimark2:

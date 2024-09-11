@@ -59,6 +59,8 @@ jobs:
         run: |
           make artifact ENABLE_PREBUILT=0
           mkdir -p /tmp/rv32emu-prebuilt
+          mv build/sha1sum-linux-x86-softfp /tmp
+          mv build/sha1sum-riscv32 /tmp
           mv build/linux-x86-softfp build/riscv32 /tmp/rv32emu-prebuilt
       - name: Build Sail model
         run: |
@@ -88,4 +90,6 @@ jobs:
             --title "$RELEASE_TAG""-nightly"
           gh release upload $RELEASE_TAG \
             rv32emu-prebuilt.tar.gz \
+            sha1sum-linux-x86-softfp \
+            sha1sum-riscv32 \
             --repo sysprog21/rv32emu-prebuilt

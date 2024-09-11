@@ -19,6 +19,7 @@ build/path/
 build/linux-x86-softfp/
 build/riscv32/
 build/sail_cSim/
+build/sha1sum-*
 *.a
 *.o
 *.o.d

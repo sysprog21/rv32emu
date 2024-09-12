@@ -52,7 +52,7 @@ endif
 
 artifact: fetch-checksum ieeelib scimark2
 ifeq ($(call has, PREBUILT), 1)
-	$(Q)$(PRINTF) "Checking SHA1 of binaries ...\n"
+	$(Q)$(PRINTF) "Checking SHA-1 of prebuilt binaries ... "
 
 	$(Q)$(eval PREBUILT_X86_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{  print $$2 };'))
 	$(Q)$(eval PREBUILT_RV32_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$2 };'))
@@ -66,10 +66,10 @@ ifeq ($(call has, PREBUILT), 1)
 	))
 
 	$(Q)if [ "$(RES)" = "1" ]; then \
-	    $(PRINTF) "$(YELLOW)SHA1 verifications fail! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
+	    $(PRINTF) "\n$(YELLOW)SHA-1 verification fails! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
 	    wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build --strip-components=1 -xz; \
 	else \
-		$(PRINTF) "$(PASS_COLOR)SHA1 verifications succeed!\n$(NO_COLOR)"; \
+	    $(call notice, [OK]); \
 	fi
 else
 	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
@@ -106,9 +106,10 @@ endif
 
 fetch-checksum:
 ifeq ($(call has, PREBUILT), 1)
-	$(Q)$(PRINTF) "Fetching SHA1 of binaries ...\n"
-	$(Q)wget -q --show-progress -O $(BIN_DIR)/sha1sum-linux-x86-softfp https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-linux-x86-softfp
-	$(Q)wget -q --show-progress -O $(BIN_DIR)/sha1sum-riscv32 https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-riscv32
+	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ... "
+	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-x86-softfp https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-linux-x86-softfp
+	$(Q)wget -q -O $(BIN_DIR)/sha1sum-riscv32 https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-riscv32
+	$(Q)$(call notice, [OK])
 endif
 
 scimark2:

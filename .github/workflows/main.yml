@@ -49,7 +49,7 @@ jobs:
             sudo ./llvm.sh 17
       shell: bash
     - name: default build
-      run: make
+      run: make -j$(nproc)
     - name: check + tests
       run: |
             make check -j$(nproc)
@@ -65,7 +65,7 @@ jobs:
             make distclean && make ENABLE_SDL=0 check -j$(nproc)
     - name: gdbstub test
       run: |
-            make distclean ENABLE_GDBSTUB=1 gdbstub-test
+            make distclean && make ENABLE_GDBSTUB=1 gdbstub-test -j$(nproc)
     - name: JIT test
       run: |
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(nproc)

@@ -124,8 +124,6 @@ src/mini-gdbstub/Makefile:
 GDBSTUB_LIB := $(GDBSTUB_OUT)/libgdbstub.a
 $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 	$(MAKE) -C $(dir $<) O=$(dir $@)
-# FIXME: track gdbstub dependency properly
-$(OUT)/decode.o: $(GDBSTUB_LIB)
 OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB) -pthread
@@ -217,6 +215,10 @@ deps := $(OBJS:%.o=%.o.d)
 
 ifeq ($(call has, EXT_F), 1)
 $(OBJS): $(SOFTFLOAT_LIB)
+endif
+
+ifeq ($(call has, GDBSTUB), 1)
+$(OBJS): $(GDBSTUB_LIB)
 endif
 
 $(OUT)/%.o: src/%.c $(deps_emcc)

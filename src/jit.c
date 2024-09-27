@@ -4,8 +4,8 @@
  */
 
 /* This JIT implementation has undergone extensive modifications, heavily
- * relying on the ubpf_jit_[x86_64|arm64].[ch] from ubpf. The original
- * ubpf_jit_[x86_64|arm64].[ch] file served as the foundation and source of
+ * relying on the ubpf_jit_[x86_64|arm64].[c|h] from ubpf. The original
+ * ubpf_jit_[x86_64|arm64].[c|h] file served as the foundation and source of
  * inspiration for adapting and tailoring it specifically for this JIT
  * implementation. Therefore, credit and sincere thanks are extended to ubpf for
  * their invaluable work.

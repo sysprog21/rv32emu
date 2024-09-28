@@ -47,7 +47,7 @@ However, participation requires adherence to fundamental ground rules:
 Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 12 or later.
 
 This repository consistently contains an up-to-date `.clang-format` file with rules that match the explained ones.
-For maintaining a uniform coding style, execute the command `clang-format -i *.[ch]`.
+For maintaining a uniform coding style, execute the command `clang-format -i *.{c,h}`.
 
 ## Coding Style for Modern C
 

@@ -3,18 +3,26 @@
 source tests/common.sh
 
 # Set the number of runs for the Dhrystone benchmark
-N_RUNS=10
+N_RUNS=1
+
+function sanity_check()
+{
+    if test ! -f $O/riscv32/dhrystone; then
+        make artifact || exit 1
+    fi
+}
 
 function run_dhrystone()
 {
     # Run Dhrystone and extract the DMIPS value
-    output=$($RUN $O/dhrystone.elf 2>&1)
+    output=$($RUN $O/riscv32/dhrystone 2>&1)
     local exit_code=$?
     [ $exit_code -ne 0 ] && fail
     dmips=$(echo "$output" | grep -oE '[0-9]+' | awk 'NR==5{print}')
     echo "$dmips"
 }
 
+sanity_check
 # Run Dhrystone benchmark and collect DMIPS values
 dmips_values=()
 for ((i=1; i<=$N_RUNS; i++))

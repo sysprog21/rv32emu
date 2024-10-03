@@ -951,7 +951,7 @@ static void doubleBGF128(block_t block)
     {                               /* first: left-shift, then   */
         c |= block[--i] << 1;       /* append the previous MSBit */
         block[i] = (uint8_t) c;
-    }                        /* if first MSBit is carried */
+    } /* if first MSBit is carried */
     block[LAST] ^= c * 0x87; /* .. B ^= 10000111b (B.E.)  */
 }
 #endif
@@ -1132,7 +1132,7 @@ static char padBlock(const uint8_t len, block_t block)
     memset(p, n * (AES_PADDING != 2), n);
     *p ^= '\x80' * (AES_PADDING == 2); /* either PKCS#7 / IEC7816-4 */
 #else
-    if (len)                                /* default (zero) padding    */
+    if (len) /* default (zero) padding    */
     {
         memset(block + len, 0, BLOCKSIZE - len);
     }
@@ -1294,7 +1294,7 @@ char AES_CBC_decrypt(const uint8_t *key,
         xorBlock(iv, y);       /*  IV_next = C              */
         iv = x;
         x += BLOCKSIZE;
-    }        /*  r = 0 unless CTS enabled */
+    } /*  r = 0 unless CTS enabled */
     if (r) { /*  P2 =  Dec(C1) ^ C2       */
         mixThenXor(&rijndaelDecrypt, x, y, x + BLOCKSIZE, r, y + BLOCKSIZE);
         memcpy(y, x + BLOCKSIZE, r);
@@ -1544,7 +1544,7 @@ static void XEX_Cipher(fmix_t cipher,
 
     if (sectid == ~(size_t) 0) {     /* the `i` block is either   */
         memcpy(T, tweak, BLOCKSIZE); /* ..a little-endian number  */
-    }                                /* ..or a byte array.        */
+    } /* ..or a byte array.        */
     else {
         memset(T, 0, BLOCKSIZE);
         copyLVal(T, sectid, 0);
@@ -2537,7 +2537,7 @@ static void modP1305(uint8_t *block, const int ovrfl)
     {
         t += block[i];            /* to get mod, first derive  */
         block[i++] = (uint8_t) t; /* .. B + (5 * q) and then   */
-    }                             /* .. subtract q * (2^130)   */
+    } /* .. subtract q * (2^130)   */
     block[SP - 1] -= 4 * (uint8_t) q;
 }
 

@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 jobs:
   detect-code-related-file-changes:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       has_code_related_changes: ${{ steps.set_has_code_related_changes.outputs.has_code_related_changes }}
     steps:
@@ -36,7 +36,7 @@ jobs:
   host-x64:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
     - name: install-dependencies
@@ -46,7 +46,7 @@ jobs:
             .ci/riscv-toolchain-install.sh
             wget https://apt.llvm.org/llvm.sh
             sudo chmod +x ./llvm.sh
-            sudo ./llvm.sh 17
+            sudo ./llvm.sh 18
       shell: bash
     - name: default build
       run: make -j$(nproc)
@@ -80,14 +80,14 @@ jobs:
   host-arm64:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - name: checkout code
       uses: actions/checkout@v4
     - name: build artifact
       # The GitHub Action for non-x86 CPU
       # https://github.com/uraimo/run-on-arch-action
-      uses: uraimo/run-on-arch-action@v2.7.1
+      uses: uraimo/run-on-arch-action@v2
       with:
         arch: aarch64
         distro: ubuntu22.04
@@ -100,7 +100,7 @@ jobs:
           git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
           wget https://apt.llvm.org/llvm.sh
           chmod +x ./llvm.sh
-          ./llvm.sh 17
+          ./llvm.sh 18
         # Append custom commands here
         run: |
           make -j$(nproc)
@@ -113,12 +113,12 @@ jobs:
   coding-style:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
     - name: coding convention
       run: |
-            sudo apt-get install -q -y clang-format-12
+            sudo apt-get install -q -y clang-format-18
             .ci/check-newline.sh
             .ci/check-format.sh
       shell: bash
@@ -136,7 +136,7 @@ jobs:
             sudo apt-get install -q -y clang clang-tools libsdl2-dev libsdl2-mixer-dev
             wget https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
-            sudo ./llvm.sh 17
+            sudo ./llvm.sh 18
       shell: bash
     - name: run scan-build without JIT
       run: make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
@@ -163,7 +163,7 @@ jobs:
   docker-hub-build-and-publish:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4

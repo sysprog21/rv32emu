@@ -28,7 +28,7 @@ jobs:
       - name: default build
         if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
             github.event_name == 'workflow_dispatch'}}
-        run: make ENABLE_SDL=0
+        run: make ENABLE_SDL=0 all artifact
       - name: Run benchmark
         if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
             github.event_name == 'workflow_dispatch'}}

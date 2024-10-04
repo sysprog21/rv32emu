@@ -44,7 +44,7 @@ However, participation requires adherence to fundamental ground rules:
   This variant should be considered the standard for all documentation efforts.
   For instance, opt for "initialize" over "initialise" and "color" rather than "colour".
 
-Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 12 or later.
+Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 18 or later.
 
 This repository consistently contains an up-to-date `.clang-format` file with rules that match the explained ones.
 For maintaining a uniform coding style, execute the command `clang-format -i *.{c,h}`.

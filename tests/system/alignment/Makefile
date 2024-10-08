@@ -1,9 +1,9 @@
-PREFIX ?= riscv32-unknown-elf-
+PREFIX ?= riscv-none-elf-
 ARCH = -march=rv32izicsr
 LINKER_SCRIPT = linker.ld
 
 DEBUG_CFLAGS = -g
-CFLAGS = -c
+CFLAGS = -c -march=rv32i_zicsr
 LDFLAGS = -T
 EXEC = misalign.elf
 

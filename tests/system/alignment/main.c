@@ -15,9 +15,9 @@
 
 #define TEST_OUTPUT(msg, length) printstr(msg, length)
 
-#define TEST_LOGGER(msg)                 \
-    {                                    \
-        char _msg[] = msg;               \
+#define TEST_LOGGER(msg)                     \
+    {                                        \
+        char _msg[] = msg;                   \
         TEST_OUTPUT(_msg, sizeof(_msg) - 1); \
     }
 

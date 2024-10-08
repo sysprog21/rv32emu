@@ -26,7 +26,7 @@ _start:
 # so handle them using supervisor CSR
 .global misalign_trap_handler
 misalign_trap_handler:
-    csrr t0, scause
+    csrrs t0, scause, 0
 
     # Check for misaligned instruction fetch
     li t1, CAUSE_MISALIGNED_INSN_FETCH
@@ -50,8 +50,8 @@ exit:
     ecall
 
 misaligned_insn_fetch_handler:
-    # simply jump back to caller since no really handling it
-    # since the rest of instruction are also misaligned
+    # Just jump back to the caller as we're not actually handling it,
+    # since the remaining instructions are also misaligned.
     jalr zero, ra, 0
 
 misaligned_load_handler:

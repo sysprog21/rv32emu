@@ -1,9 +1,5 @@
 #define write_csr(reg, val) ({ asm volatile("csrw " #reg ", %0" ::"rK"(val)); })
 
-#define CAUSE_MISALIGNED_INSN_FETCH (1U << 0x0)
-#define CAUSE_MISALIGNED_LOAD (1U << 0x4)
-#define CAUSE_MISALIGNED_STORE (1U << 0x6)
-
 #define printstr(ptr, length)                   \
     do {                                        \
         asm volatile(                           \
@@ -33,34 +29,39 @@ extern void misalign_trap_handler();
 
 int main()
 {
-    /* init s-mode trap handler */
+    /* init S-Mode trap handler */
     write_csr(stvec, misalign_trap_handler);
-    write_csr(medeleg, CAUSE_MISALIGNED_INSN_FETCH | CAUSE_MISALIGNED_LOAD |
-                           CAUSE_MISALIGNED_STORE);
 
     /* misalign load */
     const int x = *misalign_data;
-    /* execute the registered trap handler is considered a pass (use gdb to
-     * track) */
+    /*
+     * executing the registered trap handler is regarded as a pass.
+     * (use gdb to track)
+     */
     TEST_LOGGER("MISALIGNED LOAD TEST PASSED!\n");
 
     /* misalign store */
     char *ptr = (char *) misalign_data;
     *(int *) (ptr + 3) = x + 3;
-    /* execute the registered trap handler is considered a pass (use gdb to
-     * track) */
+    /*
+     * executing the registered trap handler is regarded as a pass.
+     * (use gdb to track)
+     */
     TEST_LOGGER("MISALIGNED STORE TEST PASSED!\n");
 
     /*
      * misalign instuction fetch
      *
-     * MUST disable ENABLE_EXT_C when building rv32emu before running this test
-     * since jalr instruction only check misaligned if lacks of compressed
-     * instruction support
+     * ENABLE_EXT_C must be disabled when building rv32emu before running this
+     * test, as the jalr instruction only checks for misalignment when
+     * compressed instruction support is not enabled
+     *
      */
     misalign_func();
-    /* execute the registered trap handler is considered a pass (use gdb to
-     * track) */
+    /*
+     * executing the registered trap handler is regarded as a pass.
+     * (use gdb to track)
+     */
     TEST_LOGGER("MISALIGNED INSTRUCTION FETCH TEST PASSED!\n");
 
     return 0;

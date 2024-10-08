@@ -199,19 +199,24 @@ RVOP(
 #if !RV32_HAS(JIT)
 #define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                               \
     /* lookup branch history table */                                         \
-    for (int i = 0; i < HISTORY_SIZE; i++) {                                  \
-        if (ir->branch_table->PC[i] == PC) {                                  \
-            MUST_TAIL return ir->branch_table->target[i]->impl(               \
-                rv, ir->branch_table->target[i], cycle, PC);                  \
+    IIF(RV32_HAS(SYSTEM)(if (!rv->is_trapped), ))                             \
+    {                                                                         \
+        for (int i = 0; i < HISTORY_SIZE; i++) {                              \
+            if (ir->branch_table->PC[i] == PC) {                              \
+                MUST_TAIL return ir->branch_table->target[i]->impl(           \
+                    rv, ir->branch_table->target[i], cycle, PC);              \
+            }                                                                 \
         }                                                                     \
-    }                                                                         \
-    block_t *block = block_find(&rv->block_map, PC);                          \
-    if (block) {                                                              \
-        /* update branch history table */                                     \
-        ir->branch_table->PC[ir->branch_table->idx] = PC;                     \
-        ir->branch_table->target[ir->branch_table->idx] = block->ir_head;     \
-        ir->branch_table->idx = (ir->branch_table->idx + 1) % HISTORY_SIZE;   \
-        MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, PC); \
+        block_t *block = block_find(&rv->block_map, PC);                      \
+        if (block) {                                                          \
+            /* update branch history table */                                 \
+            ir->branch_table->PC[ir->branch_table->idx] = PC;                 \
+            ir->branch_table->target[ir->branch_table->idx] = block->ir_head; \
+            ir->branch_table->idx =                                           \
+                (ir->branch_table->idx + 1) % HISTORY_SIZE;                   \
+            MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle,  \
+                                                  PC);                        \
+        }                                                                     \
     }
 #else
 #define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                               \
@@ -1004,12 +1009,13 @@ RVOP(
     }))
 
 /* SRET: return from traps in S-mode */
+#if RV32_HAS(SYSTEM)
 RVOP(
     sret,
     {
         rv->is_trapped = false;
-        rv->priv_mode = (rv->csr_sstatus & MSTATUS_SPP) >> MSTATUS_SPP_SHIFT;
-        rv->csr_sstatus &= ~(MSTATUS_SPP);
+        rv->priv_mode = (rv->csr_sstatus & SSTATUS_SPP) >> SSTATUS_SPP_SHIFT;
+        rv->csr_sstatus &= ~(SSTATUS_SPP);
 
         const uint32_t sstatus_spie =
             (rv->csr_sstatus & SSTATUS_SPIE) >> SSTATUS_SPIE_SHIFT;
@@ -1022,6 +1028,7 @@ RVOP(
     GEN({
         assert; /* FIXME: Implement */
     }))
+#endif
 
 /* HRET: return from traps in H-mode */
 RVOP(
@@ -1038,7 +1045,6 @@ RVOP(
 RVOP(
     mret,
     {
-        rv->is_trapped = false;
         rv->priv_mode = (rv->csr_mstatus & MSTATUS_MPP) >> MSTATUS_MPP_SHIFT;
         rv->csr_mstatus &= ~(MSTATUS_MPP);
 

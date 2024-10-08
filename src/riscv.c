@@ -221,9 +221,6 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->mem = memory_new(attr->mem_size);
     assert(attr->mem);
 
-    /* not being trapped */
-    rv->is_trapped = false;
-
     /* reset */
     rv_reset(rv, 0U);
 
@@ -304,6 +301,20 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     /* activate the background compilation thread. */
     pthread_create(&t2c_thread, NULL, t2c_runloop, rv);
 #endif
+#endif
+
+#if RV32_HAS(SYSTEM)
+    /*
+     * System simulation defaults to S-mode as
+     * it does not rely on M-mode software like OpenSBI.
+     */
+    rv->priv_mode = RV_PRIV_S_MODE;
+
+    /* not being trapped */
+    rv->is_trapped = false;
+#else
+    /* ISA simulation defaults to M-mode */
+    rv->priv_mode = RV_PRIV_M_MODE;
 #endif
 
     return rv;

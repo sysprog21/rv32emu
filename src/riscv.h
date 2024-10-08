@@ -125,7 +125,7 @@ enum {
 #define MSTATUS_TW (1 << MSTATUS_TW_SHIFT)
 #define MSTATUS_TSR (1 << MSTATUS_TSR_SHIFT)
 
-/* A restricted view of mstatus */
+/* sstatus, a restricted view of mstatus */
 #define SSTATUS_SIE_SHIFT 1
 #define SSTATUS_SPIE_SHIFT 5
 #define SSTATUS_UBE_SHIFT 6
@@ -149,6 +149,7 @@ enum {
 #define RV_PRIV_U_MODE 0
 #define RV_PRIV_S_MODE 1
 #define RV_PRIV_M_MODE 3
+#define RV_PRIV_IS_U_OR_S_MODE() (rv->priv_mode <= RV_PRIV_S_MODE)
 
 /*
  * SBI functions must return a pair of values:

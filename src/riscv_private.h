@@ -204,8 +204,10 @@ struct riscv_internal {
     bool is_interrupted;
 #endif
 
-    /* The flag to indicate the current emulation is in a trap */
+#if RV32_HAS(SYSTEM)
+    /* The flag is used to indicate the current emulation is in a trap */
     bool is_trapped;
+#endif
 };
 
 /* sign extend a 16 bit value */

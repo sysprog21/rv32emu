@@ -18,7 +18,7 @@
 #define TEST_LOGGER(msg)                 \
     {                                    \
         char _msg[] = msg;               \
-        TEST_OUTPUT(_msg, sizeof(_msg)); \
+        TEST_OUTPUT(_msg, sizeof(_msg) - 1); \
     }
 
 extern int *misalign_data;

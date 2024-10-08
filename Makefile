@@ -289,6 +289,16 @@ misalign: $(BIN) artifact
 	    $(PRINTF) "Failed.\n"; \
 	    fi
 
+EXPECTED_misalign = MISALIGNED INSTRUCTION FETCH TEST PASSED!
+misalign-in-blk-emu: $(BIN)
+	         $(Q)$(PRINTF) "Running misalign.elf ... "; \
+	             if [ "$(shell $(BIN) tests/system/alignment/misalign.elf | tail -n 2)" = "$(strip $(EXPECTED_misalign)) inferior exit code 0" ]; then \
+	             $(call notice, [OK]); \
+	             else \
+	             $(PRINTF) "Failed.\n"; \
+	             exit 1; \
+	             fi;
+
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)
 doom_action := (cd $(OUT); ../$(BIN) riscv32/doom)

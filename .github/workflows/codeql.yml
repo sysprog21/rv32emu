@@ -1,4 +1,4 @@
-name: "CodeQL"
+name: CodeQL
 
 on:
   push:
@@ -30,6 +30,7 @@ jobs:
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
+        config-file: ./.github/codeql/codeql-config.yml
         languages: ${{ matrix.language }}
         queries: +security-and-quality
 

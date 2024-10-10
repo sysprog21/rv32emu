@@ -45,8 +45,8 @@ The tier-2 JIT compiler in `rv32emu` leverages LLVM for powerful optimization.
 Therefore, the target system must have [`LLVM`](https://llvm.org/) installed, with version 17 recommended.
 If `LLVM` is not installed, only the tier-1 JIT compiler will be used for performance enhancement.
 
-* macOS: `brew install llvm@17`
-* Ubuntu Linux / Debian: `sudo apt-get install llvm-17`
+* macOS: `brew install llvm@18`
+* Ubuntu Linux / Debian: `sudo apt-get install llvm-18`
 
 Build the emulator with experimental JIT compiler:
 ```shell

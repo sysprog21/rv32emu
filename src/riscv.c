@@ -303,6 +303,20 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 #endif
 #endif
 
+#if RV32_HAS(SYSTEM)
+    /*
+     * System simulation defaults to S-mode as
+     * it does not rely on M-mode software like OpenSBI.
+     */
+    rv->priv_mode = RV_PRIV_S_MODE;
+
+    /* not being trapped */
+    rv->is_trapped = false;
+#else
+    /* ISA simulation defaults to M-mode */
+    rv->priv_mode = RV_PRIV_M_MODE;
+#endif
+
     return rv;
 }
 

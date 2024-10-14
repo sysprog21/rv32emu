@@ -203,7 +203,6 @@ RVOP(
     /* lookup branch history table */                                         \
     IIF(RV32_HAS(SYSTEM)(if (!rv->is_trapped), ))                             \
     {                                                                         \
-    if (!rv->is_trapped) {                                                    \
         for (int i = 0; i < HISTORY_SIZE; i++) {                              \
             if (ir->branch_table->PC[i] == PC) {                              \
                 MUST_TAIL return ir->branch_table->target[i]->impl(           \

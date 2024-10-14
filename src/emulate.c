@@ -53,12 +53,11 @@ extern struct target_ops gdbstub_ops;
     _(breakpoint, 3)                       /* Breakpoint */                           \
     _(load_misaligned, 4)                  /* Load address misaligned */              \
     _(store_misaligned, 6)                 /* Store/AMO address misaligned */         \
-    _(ecall_M, 11)                         /* Environment call from M-mode */         \
     IIF(RV32_HAS(SYSTEM))(                                                            \
-        _(ecall_M, 11)     /* Environment call from M-mode */      \
         _(pagefault_insn, 12)              /* Instruction page fault */               \
         _(pagefault_load, 13)              /* Load page fault */                      \
-        _(pagefault_store, 15)             /* Store page fault */                     \
+        _(pagefault_store, 15),            /* Store page fault */                     \
+        _(ecall_M, 11)                     /* Environment call from M-mode */         \
     )
 /* clang-format on */
 
@@ -1147,7 +1146,7 @@ static void trap_handler(riscv_t *rv)
     /* set to false by sret/mret implementation */
     uint32_t insn;
     while (rv->is_trapped && !rv_has_halted(rv)) {
-        insn = rv->io.mem_ifetch(rv->PC);
+        insn = rv->io.mem_ifetch(rv, rv->PC);
         assert(insn);
         rv_decode(ir, insn);
         ir->impl = dispatch_table[ir->opcode];
@@ -1155,7 +1154,6 @@ static void trap_handler(riscv_t *rv)
         ir->impl(rv, ir, rv->csr_cycle, rv->PC);
     }
 }
-#endif
 
 static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
 {

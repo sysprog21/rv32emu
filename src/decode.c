@@ -1791,6 +1791,58 @@ static inline bool op_cfsw(rv_insn_t *ir, const uint32_t insn)
 #define op_cflwsp OP_UNIMP
 #endif /* RV32_HAS(EXT_C) && RV32_HAS(EXT_F) */
 
+/* OP: RVV
+ * opcode is 0x57
+ *  31    26 25 24   20 19   15 14    12 11   7 6      0
+ * | funct6 |vm|  vs2  |  vs1  | funct3 |  vd  | opcode |
+ * 
+ * funct3
+ * | 0 | 0 | 0 | OPIVV | vector-vector    |       N/A
+ * | 0 | 0 | 1 | OPFVV | vector-vector    |       N/A
+ * | 0 | 1 | 0 | OPMVV | vector-vector    |       N/A
+ * | 0 | 1 | 1 | OPIVI | vector-immediate | `imm[4:0]`
+ * | 1 | 0 | 0 | OPIVX | vector-scalar    | GPR `x` register `rs1`
+ * | 1 | 0 | 1 | OPFVF | vector-scalar    | FP `f` register `rs1`
+ * | 1 | 1 | 0 | OPMVX | vector-scalar    | GPR `x` register `rs1`
+ */
+static inline bool op_v(rv_insn_t *ir, const uint32_t insn)
+{
+    uint32_t funct3_mask = 0x7000;
+    switch (insn & funct3_mask) {
+        case 0:
+            return op_ivv(ir, insn);
+            break;
+        case 1:
+            return op_fvv(ir, insn);
+            break;
+        case 2:
+            return op_mvv(ir, insn);
+            break;
+        case 3:
+            return op_ivi(ir, insn);
+            break;
+        case 4:
+            return op_ivx(ir, insn);
+            break;
+        case 5:
+            return op_fvf(ir, insn);
+            break;
+        case 6:
+            return op_mvx(ir, insn);
+            break;
+        default:
+            return false;
+    }
+}
+
+static inline bool op_ivv(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_fvv(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_mvv(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_ivi(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_ivx(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_fvf(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_mvx(rv_insn_t *ir, const uint32_t insn) {}
+
 /* handler for all unimplemented opcodes */
 static inline bool op_unimp(rv_insn_t *ir UNUSED, uint32_t insn UNUSED)
 {
@@ -1811,7 +1863,8 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
     /* RV32 base opcode map */
     /* clang-format off */
     static const decode_t rv_jump_table[] = {
-    //  000         001           010        011           100         101        110        111
+    // insn[4:2]
+    // 000         001           010        011           100         101        110        111         // insn[6:5]
         OP(load),   OP(load_fp),  OP(unimp), OP(misc_mem), OP(op_imm), OP(auipc), OP(unimp), OP(unimp), // 00
         OP(store),  OP(store_fp), OP(unimp), OP(amo),      OP(op),     OP(lui),   OP(unimp), OP(unimp), // 01
         OP(madd),   OP(msub),     OP(nmsub), OP(nmadd),    OP(op_fp),  OP(unimp), OP(unimp), OP(unimp), // 10

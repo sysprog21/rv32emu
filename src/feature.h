@@ -37,6 +37,10 @@
 #define RV32_FEATURE_Zifencei 1
 #endif
 
+#ifndef RV32_FEATURE_RVV
+#define RV32_FEATURE_RVV 1
+#endif
+
 /* Experimental SDL oriented system calls */
 #ifndef RV32_FEATURE_SDL
 #define RV32_FEATURE_SDL 1

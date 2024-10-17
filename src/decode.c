@@ -118,6 +118,16 @@ static inline uint32_t decode_r4type_rs3(const uint32_t insn)
 }
 #endif
 
+#if RV32_HAS(EXT_RVV)
+/* decode RVV vm field
+ * vm = inst[25]
+ */
+static inline uint32_t decode_rvv_vm(const uint32_t insn)
+{
+    return (insn >> 25) & 0x1;
+}
+#endif
+
 #if RV32_HAS(EXT_C)
 enum {
     /* clang-format off */
@@ -1971,6 +1981,183 @@ static inline bool op_cfsw(rv_insn_t *ir, const uint32_t insn)
 #define op_cflwsp OP_UNIMP
 #endif /* RV32_HAS(EXT_C) && RV32_HAS(EXT_F) */
 
+static inline bool op_ivv(rv_insn_t *ir, const uint32_t insn) {
+#define MASK 0xfc00707f
+#define MATCH_VADD_VI 0x3057
+#define MATCH_VAND_VI 0x24003057
+#define MATCH_VMADC_VI 0x46003057
+#define MATCH_VMSEQ_VI 0x60003057
+#define MATCH_VMSGT_VI 0x7c003057
+#define MATCH_VMSGTU_VI 0x78003057
+#define MATCH_VMSLE_VI 0x74003057
+#define MATCH_VMSLEU_VI 0x70003057
+#define MATCH_VMSNE_VI 0x64003057
+#define MATCH_VOR_VI 0x28003057
+#define MATCH_VRGATHER_VI 0x30003057
+#define MATCH_VRSUB_VI 0xc003057
+#define MATCH_VSADD_VI 0x84003057
+#define MATCH_VSADDU_VI 0x80003057
+#define MATCH_VSLIDEDOWN_VI 0x3c003057
+#define MATCH_VSLIDEUP_VI 0x38003057
+#define MATCH_VSLL_VI 0x94003057
+#define MATCH_VSRA_VI 0xa4003057
+#define MATCH_VSRL_VI 0xa0003057
+#define MATCH_VSSRA_VI 0xac003057
+#define MATCH_VSSRL_VI 0xa8003057
+#define MATCH_VXOR_VI 0x2c003057
+
+    ir->rs1 = decode_rs1(insn);
+    ir->rs2 = decode_rs2(insn);
+    ir->vm = decode_rvv_vm(insn);
+    switch (insn & MASK) {
+        case MATCH_VADD_VI:
+        ir->opcode = rv_insn_vadd_vi;
+            break;
+        case MATCH_VAND_VI:
+        ir->opcode = rv_insn_vand_vi;
+            break;
+        case MATCH_VMADC_VI:
+        ir->opcode = rv_insn_vmadc_vi;
+            break;
+        case MATCH_VMSEQ_VI:
+        ir->opcode = rv_insn_vmseq_vi;
+            break;
+        case MATCH_VMSGT_VI:
+        ir->opcode = rv_insn_vmsgt_vi;
+            break;
+        case MATCH_VMSGTU_VI:
+        ir->opcode = rv_insn_vmsgtu_vi;
+            break;
+        case MATCH_VMSLE_VI:
+        ir->opcode = rv_insn_vmsle_vi;
+            break;
+        case MATCH_VMSLEU_VI:
+        ir->opcode = rv_insn_vmsleu_vi;
+            break;
+        case MATCH_VMSNE_VI:
+        ir->opcode = rv_insn_vmsne_vi;
+            break;
+        case MATCH_VOR_VI:
+        ir->opcode = rv_insn_vor_vi;
+            break;
+        case MATCH_VRGATHER_VI:
+        ir->opcode = rv_insn_vrgather_vi;
+            break;
+        case MATCH_VRSUB_VI:
+        ir->opcode = rv_insn_vrsub_vi;
+            break;
+        case MATCH_VSADD_VI:
+        ir->opcode = rv_insn_vsadd_vi;
+            break;
+        case MATCH_VSADDU_VI:
+        ir->opcode = rv_insn_vsaddu_vi;
+            break;
+        case MATCH_VSLIDEDOWN_VI:
+        ir->opcode = rv_insn_vslidedown_vi;
+            break;
+        case MATCH_VSLIDEUP_VI:
+        ir->opcode = rv_insn_vslideup_vi;
+            break;
+        case MATCH_VSLL_VI:
+        ir->opcode = rv_insn_vsll_vi;
+            break;
+        case MATCH_VSRA_VI:
+        ir->opcode = rv_insn_vsra_vi;
+            break;
+        case MATCH_VSRL_VI:
+        ir->opcode = rv_insn_vsrl_vi;
+            break;
+        case MATCH_VSSRA_VI:
+        ir->opcode = rv_insn_vssra_vi;
+            break;
+        case MATCH_VSSRL_VI:
+        ir->opcode = rv_insn_vssrl_vi;
+            break;
+        case MATCH_VXOR_VI:
+        ir->opcode = rv_insn_vxor_vi;
+            break;
+        default:
+            return false;
+    }
+}
+
+static inline bool op_fvv(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_mvv(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_ivi(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_ivx(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_fvf(rv_insn_t *ir, const uint32_t insn) {}
+static inline bool op_mvx(rv_insn_t *ir, const uint32_t insn) {}
+
+/* OP: RVV
+ * opcode is 0x57 for VALU and VCFG 
+ *
+ * VALU format:
+ * 31      26  25   24      20 19      15 14   12 11      7 6     0
+ *  funct6   | vm  |   vs2    |    vs1   | 0 0 0 (funct3) |    vd   |1010111| OP-V (OPIVV)
+ *  funct6   | vm  |   vs2    |    vs1   | 0 0 1 (funct3) |  vd/rd  |1010111| OP-V (OPFVV)
+ *  funct6   | vm  |   vs2    |    vs1   | 0 1 0 (funct3) |  vd/rd  |1010111| OP-V (OPMVV)
+ *  funct6   | vm  |   vs2    | imm[4:0] | 0 1 1 (funct3) |    vd   |1010111| OP-V (OPIVI)
+ *  funct6   | vm  |   vs2    |    rs1   | 1 0 0 (funct3) |    vd   |1010111| OP-V (OPIVX)
+ *  funct6   | vm  |   vs2    |    rs1   | 1 0 1 (funct3) |    vd   |1010111| OP-V (OPFVF)
+ *  funct6   | vm  |   vs2    |    rs1   | 1 1 0 (funct3) |  vd/rd  |1010111| OP-V (OPMVX)
+ *     6        1        5          5        3        5        7
+ * 
+ * Where 'vm' is the bit indicates whether masking is enabled
+ *  see https://github.com/riscv/riscv-v-spec/blob/master/v-spec.adoc#531-mask-encoding
+ * 
+ * VMEM format:
+ * 
+ * 31 29  28  27 26  25  24      20 19       15 14   12 11      7 6     0
+ *  nf | mew| mop | vm |  lumop   |    rs1    | width |    vd   |0000111| VL*  unit-stride
+ *  nf | mew| mop | vm |   rs2    |    rs1    | width |    vd   |0000111| VLS* strided
+ *  nf | mew| mop | vm |   vs2    |    rs1    | width |    vd   |0000111| VLX* indexed
+ *  3     1    2     1      5           5         3         5       7
+ * 
+ * VCFG format:
+ * 
+ *  31 30         25 24      20 19      15 14   12 11      7 6     0
+ * 0 |        zimm[10:0]      |    rs1   | 1 1 1 |    rd   |1010111| vsetvli
+ * 1 |   1|  zimm[ 9:0]       | uimm[4:0]| 1 1 1 |    rd   |1010111| vsetivli
+ * 1 |   000000    |   rs2    |    rs1   | 1 1 1 |    rd   |1010111| vsetvl
+ * 1        6            5          5        3        5        7
+ * 
+ * reference:
+ *   https://github.com/riscv/riscv-isa-manual/blob/main/src/images/wavedrom/valu-format.edn
+ *   https://github.com/riscv/riscv-isa-manual/blob/main/src/images/wavedrom/v-inst-table.edn
+ *   https://observablehq.com/@drom/risc-v-v
+ * 
+ * funct3
+ * | 0 | 0 | 0 | OPIVV | vector-vector    |       N/A
+ * | 0 | 0 | 1 | OPFVV | vector-vector    |       N/A
+ * | 0 | 1 | 0 | OPMVV | vector-vector    |       N/A
+ * | 0 | 1 | 1 | OPIVI | vector-immediate | `imm[4:0]`
+ * | 1 | 0 | 0 | OPIVX | vector-scalar    | GPR `x` register `rs1`
+ * | 1 | 0 | 1 | OPFVF | vector-scalar    | FP `f` register `rs1`
+ * | 1 | 1 | 0 | OPMVX | vector-scalar    | GPR `x` register `rs1`
+ */
+static inline bool op_v(rv_insn_t *ir, const uint32_t insn)
+{
+    uint32_t funct3_mask = 0x7000;
+    switch (insn & funct3_mask) {
+        case 0:
+            return op_ivv(ir, insn);        
+        case 1:
+            return op_fvv(ir, insn);        
+        case 2:
+            return op_mvv(ir, insn);        
+        case 3:
+            return op_ivi(ir, insn);        
+        case 4:
+            return op_ivx(ir, insn);        
+        case 5:
+            return op_fvf(ir, insn);        
+        case 6:
+            return op_mvx(ir, insn);        
+        default:
+            return false;
+    }
+}
+
 /* handler for all unimplemented opcodes */
 static inline bool op_unimp(rv_insn_t *ir UNUSED, uint32_t insn UNUSED)
 {
@@ -1985,13 +2172,22 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
 {
     assert(ir);
 
+#if RV32_HAS(EXT_RVV)
+#define MASK_OPCODE_RVV 0x57
+#define MASK_OPCODE_RVV_VMEM 0x57
+    if (insn & MASK_OPCODE_RVV) {
+        return op_v(ir, insn);
+    }
+#endif
+
 #define OP_UNIMP op_unimp
 #define OP(insn) op_##insn
 
     /* RV32 base opcode map */
     /* clang-format off */
     static const decode_t rv_jump_table[] = {
-    //  000         001           010        011           100         101        110        111
+    // insn[4:2]
+    // 000         001           010        011           100         101        110        111         // insn[6:5]
         OP(load),   OP(load_fp),  OP(unimp), OP(misc_mem), OP(op_imm), OP(auipc), OP(unimp), OP(unimp), // 00
         OP(store),  OP(store_fp), OP(unimp), OP(amo),      OP(op),     OP(lui),   OP(unimp), OP(unimp), // 01
         OP(madd),   OP(msub),     OP(nmsub), OP(nmadd),    OP(op_fp),  OP(unimp), OP(unimp), OP(unimp), // 10

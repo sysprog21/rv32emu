@@ -159,8 +159,10 @@ FORCE_INLINE bool t2c_insn_is_terminal(uint8_t opcode)
     case rv_insn_ecall:
     case rv_insn_ebreak:
     case rv_insn_jalr:
-    case rv_insn_sret:
     case rv_insn_mret:
+#if RV32_HAS(SYSTEM)
+    case rv_insn_sret:
+#endif
 #if RV32_HAS(EXT_C)
     case rv_insn_cjalr:
     case rv_insn_cjr:

@@ -43,7 +43,7 @@ extern struct target_ops gdbstub_ops;
 
 /* RISC-V exception code list */
 /* clang-format off */
-#define RV_EXCEPTION_LIST                                          \
+#define RV_TRAP_LIST                                               \
     IIF(RV32_HAS(EXT_C))(,                                         \
         _(insn_misaligned, 0) /* Instruction address misaligned */ \
     )                                                              \
@@ -51,74 +51,119 @@ extern struct target_ops gdbstub_ops;
     _(breakpoint, 3)       /* Breakpoint */                        \
     _(load_misaligned, 4)  /* Load address misaligned */           \
     _(store_misaligned, 6) /* Store/AMO address misaligned */      \
-    _(ecall_M, 11)         /* Environment call from M-mode */
+    IIF(RV32_HAS(SYSTEM))(,                                        \
+        _(ecall_M, 11)     /* Environment call from M-mode */      \
+    )
 /* clang-format on */
 
 enum {
-#define _(type, code) rv_exception_code##type = code,
-    RV_EXCEPTION_LIST
+#define _(type, code) rv_trap_code_##type = code,
+    RV_TRAP_LIST
 #undef _
 };
 
-static void rv_exception_default_handler(riscv_t *rv)
+static void rv_trap_default_handler(riscv_t *rv)
 {
     rv->csr_mepc += rv->compressed ? 2 : 4;
     rv->PC = rv->csr_mepc; /* mret */
 }
 
-/* When a trap occurs in M-mode, mtval is either initialized to zero or
+/*
+ * Trap might occurs during block emulation. For instance, page fault.
+ * In order to handle trap, we have to escape from block and execute
+ * registered trap handler. This trap_handler function helps to execute
+ * the registered trap handler, PC by PC. Once the trap is handled,
+ * resume the previous execution flow where cause the trap.
+ *
+ * Since the system emulation has not yet included in rv32emu, the page
+ * fault is not practical in current test suite. Instead, we try to
+ * emulate the misaligned handling in the test suite.
+ */
+#if RV32_HAS(SYSTEM)
+static void trap_handler(riscv_t *rv);
+#endif
+
+/* When a trap occurs in M-mode/S-mode, m/stval is either initialized to zero or
  * populated with exception-specific details to assist software in managing
- * the trap. Otherwise, the implementation never modifies mtval, although
+ * the trap. Otherwise, the implementation never modifies m/stval, although
  * software can explicitly write to it. The hardware platform will define
  * which exceptions are required to informatively set mtval and which may
  * consistently set it to zero.
  *
  * When a hardware breakpoint is triggered or an exception like address
  * misalignment, access fault, or page fault occurs during an instruction
- * fetch, load, or store operation, mtval is updated with the virtual address
- * that caused the fault. In the case of an illegal instruction trap, mtval
+ * fetch, load, or store operation, m/stval is updated with the virtual address
+ * that caused the fault. In the case of an illegal instruction trap, m/stval
  * might be updated with the first XLEN or ILEN bits of the offending
- * instruction. For all other traps, mtval is simply set to zero. However,
- * it is worth noting that a future standard could redefine how mtval is
+ * instruction. For all other traps, m/stval is simply set to zero. However,
+ * it is worth noting that a future standard could redefine how m/stval is
  * handled for different types of traps.
+ *
+ * For simplicity and clarity, abstracting stval and mtval into a single
+ * identifier called tval, as both are handled by TRAP_HANDLER_IMPL.
  */
-#define EXCEPTION_HANDLER_IMPL(type, code)                                   \
-    static void rv_except_##type(riscv_t *rv, uint32_t mtval)                \
-    {                                                                        \
-        /* mtvec (Machine Trap-Vector Base Address Register)                 \
-         * mtvec[MXLEN-1:2]: vector base address                             \
-         * mtvec[1:0] : vector mode                                          \
-         */                                                                  \
-        const uint32_t base = rv->csr_mtvec & ~0x3;                          \
-        const uint32_t mode = rv->csr_mtvec & 0x3;                           \
-        /* mepc  (Machine Exception Program Counter)                         \
-         * mtval (Machine Trap Value Register)                               \
-         * mcause (Machine Cause Register): store exception code             \
-         * mstatus (Machine Status Register): keep track of and controls the \
-         * hart’s current operating state                                  \
-         */                                                                  \
-        rv->csr_mepc = rv->PC;                                               \
-        rv->csr_mtval = mtval;                                               \
-        rv->csr_mcause = code;                                               \
-        rv->csr_mstatus = MSTATUS_MPP; /* set privilege mode */              \
-        if (!rv->csr_mtvec) {          /* in case CSR is not configured */   \
-            rv_exception_default_handler(rv);                                \
-            return;                                                          \
-        }                                                                    \
-        switch (mode) {                                                      \
-        case 0: /* DIRECT: All exceptions set PC to base */                  \
-            rv->PC = base;                                                   \
-            break;                                                           \
-        /* VECTORED: Asynchronous interrupts set PC to base + 4 * code */    \
-        case 1:                                                              \
-            rv->PC = base + 4 * code;                                        \
-            break;                                                           \
-        }                                                                    \
+#define TRAP_HANDLER_IMPL(type, code)                                         \
+    static void rv_trap_##type(riscv_t *rv, uint32_t tval)                    \
+    {                                                                         \
+        /* m/stvec (Machine/Supervisor Trap-Vector Base Address Register)     \
+         * m/stvec[MXLEN-1:2]: vector base address                            \
+         * m/stvec[1:0] : vector mode                                         \
+         * m/sepc  (Machine/Supervisor Exception Program Counter)             \
+         * m/stval (Machine/Supervisor Trap Value Register)                   \
+         * m/scause (Machine/Supervisor Cause Register): store exception code \
+         * m/sstatus (Machine/Supervisor Status Register): keep track of and  \
+         * controls the hart’s current operating state                      \
+         */                                                                   \
+        uint32_t base;                                                        \
+        uint32_t mode;                                                        \
+        /* user or supervisor */                                              \
+        if (RV_PRIV_IS_U_OR_S_MODE()) {                                       \
+            const uint32_t sstatus_sie =                                      \
+                (rv->csr_sstatus & SSTATUS_SIE) >> SSTATUS_SIE_SHIFT;         \
+            rv->csr_sstatus |= (sstatus_sie << SSTATUS_SPIE_SHIFT);           \
+            rv->csr_sstatus &= ~(SSTATUS_SIE);                                \
+            rv->csr_sstatus |= (rv->priv_mode << SSTATUS_SPP_SHIFT);          \
+            rv->priv_mode = RV_PRIV_S_MODE;                                   \
+            base = rv->csr_stvec & ~0x3;                                      \
+            mode = rv->csr_stvec & 0x3;                                       \
+            rv->csr_sepc = rv->PC;                                            \
+            rv->csr_stval = tval;                                             \
+            rv->csr_scause = code;                                            \
+        } else { /* machine */                                                \
+            const uint32_t mstatus_mie =                                      \
+                (rv->csr_mstatus & MSTATUS_MIE) >> MSTATUS_MIE_SHIFT;         \
+            rv->csr_mstatus |= (mstatus_mie << MSTATUS_MPIE_SHIFT);           \
+            rv->csr_mstatus &= ~(MSTATUS_MIE);                                \
+            rv->csr_mstatus |= (rv->priv_mode << MSTATUS_MPP_SHIFT);          \
+            rv->priv_mode = RV_PRIV_M_MODE;                                   \
+            base = rv->csr_mtvec & ~0x3;                                      \
+            mode = rv->csr_mtvec & 0x3;                                       \
+            rv->csr_mepc = rv->PC;                                            \
+            rv->csr_mtval = tval;                                             \
+            rv->csr_mcause = code;                                            \
+            if (!rv->csr_mtvec) { /* in case CSR is not configured */         \
+                rv_trap_default_handler(rv);                                  \
+                return;                                                       \
+            }                                                                 \
+        }                                                                     \
+        switch (mode) {                                                       \
+        /* DIRECT: All traps set PC to base */                                \
+        case 0:                                                               \
+            rv->PC = base;                                                    \
+            break;                                                            \
+        /* VECTORED: Asynchronous traps set PC to base + 4 * code */          \
+        case 1:                                                               \
+            /* MSB of code is used to indicate whether the trap is interrupt  \
+             * or exception, so it is not considered as the 'real' code */    \
+            rv->PC = base + 4 * (code & MASK(31));                            \
+            break;                                                            \
+        }                                                                     \
+        IIF(RV32_HAS(SYSTEM))(if (rv->is_trapped) trap_handler(rv);, )        \
     }
 
 /* RISC-V exception handlers */
-#define _(type, code) EXCEPTION_HANDLER_IMPL(type, code)
-RV_EXCEPTION_LIST
+#define _(type, code) TRAP_HANDLER_IMPL(type, code)
+RV_TRAP_LIST
 #undef _
 
 /* wrap load/store and insn misaligned handler
@@ -135,7 +180,8 @@ RV_EXCEPTION_LIST
         rv->compressed = compress;                                    \
         rv->csr_cycle = cycle;                                        \
         rv->PC = PC;                                                  \
-        rv_except_##type##_misaligned(rv, IIF(IO)(addr, mask_or_pc)); \
+        IIF(RV32_HAS(SYSTEM))(rv->is_trapped = true, );               \
+        rv_trap_##type##_misaligned(rv, IIF(IO)(addr, mask_or_pc));   \
         return false;                                                 \
     }
 
@@ -164,6 +210,10 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_misa);
 
     /* Machine Trap Handling */
+    case CSR_MEDELEG: /* Machine Exception Delegation Register */
+        return (uint32_t *) (&rv->csr_medeleg);
+    case CSR_MIDELEG: /* Machine Interrupt Delegation Register */
+        return (uint32_t *) (&rv->csr_mideleg);
     case CSR_MSCRATCH: /* Machine Scratch Register */
         return (uint32_t *) (&rv->csr_mscratch);
     case CSR_MEPC: /* Machine Exception Program Counter */
@@ -196,6 +246,26 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     case CSR_FCSR:
         return (uint32_t *) (&rv->csr_fcsr);
 #endif
+    case CSR_SSTATUS:
+        return (uint32_t *) (&rv->csr_sstatus);
+    case CSR_SIE:
+        return (uint32_t *) (&rv->csr_sie);
+    case CSR_STVEC:
+        return (uint32_t *) (&rv->csr_stvec);
+    case CSR_SCOUNTEREN:
+        return (uint32_t *) (&rv->csr_scounteren);
+    case CSR_SSCRATCH:
+        return (uint32_t *) (&rv->csr_sscratch);
+    case CSR_SEPC:
+        return (uint32_t *) (&rv->csr_sepc);
+    case CSR_SCAUSE:
+        return (uint32_t *) (&rv->csr_scause);
+    case CSR_STVAL:
+        return (uint32_t *) (&rv->csr_stval);
+    case CSR_SIP:
+        return (uint32_t *) (&rv->csr_sip);
+    case CSR_SATP:
+        return (uint32_t *) (&rv->csr_satp);
     default:
         return NULL;
     }
@@ -377,9 +447,10 @@ enum {
 };
 
 #if RV32_HAS(GDBSTUB)
-#define RVOP_NO_NEXT(ir) (!ir->next | rv->debug_mode)
+#define RVOP_NO_NEXT(ir) \
+    (!ir->next | rv->debug_mode IIF(RV32_HAS(SYSTEM))(| rv->is_trapped, ))
 #else
-#define RVOP_NO_NEXT(ir) (!ir->next)
+#define RVOP_NO_NEXT(ir) (!ir->next IIF(RV32_HAS(SYSTEM))(| rv->is_trapped, ))
 #endif
 
 /* record whether the branch is taken or not during emulation */
@@ -565,8 +636,10 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     case rv_insn_ebreak:
     case rv_insn_jal:
     case rv_insn_jalr:
-    case rv_insn_sret:
     case rv_insn_mret:
+#if RV32_HAS(SYSTEM)
+    case rv_insn_sret:
+#endif
 #if RV32_HAS(EXT_C)
     case rv_insn_cj:
     case rv_insn_cjalr:
@@ -598,7 +671,7 @@ static void block_translate(riscv_t *rv, block_t *block)
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
             rv->compressed = is_compressed(insn);
-            rv_except_illegal_insn(rv, insn);
+            rv_trap_illegal_insn(rv, insn);
             break;
         }
         ir->impl = dispatch_table[ir->opcode];
@@ -1048,17 +1121,42 @@ void rv_step(void *arg)
 #endif
 }
 
+#if RV32_HAS(SYSTEM)
+static void trap_handler(riscv_t *rv)
+{
+    rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
+    assert(ir);
+
+    /* set to false by sret/mret implementation */
+    uint32_t insn;
+    while (rv->is_trapped && !rv_has_halted(rv)) {
+        insn = rv->io.mem_ifetch(rv->PC);
+        assert(insn);
+
+        rv_decode(ir, insn);
+        ir->impl = dispatch_table[ir->opcode];
+        rv->compressed = is_compressed(insn);
+        ir->impl(rv, ir, rv->csr_cycle, rv->PC);
+    }
+}
+#endif
+
 void ebreak_handler(riscv_t *rv)
 {
     assert(rv);
-    rv_except_breakpoint(rv, rv->PC);
+    rv_trap_breakpoint(rv, rv->PC);
 }
 
 void ecall_handler(riscv_t *rv)
 {
     assert(rv);
-    rv_except_ecall_M(rv, 0);
+#if RV32_HAS(SYSTEM)
     syscall_handler(rv);
+    rv->PC += 4;
+#else
+    rv_trap_ecall_M(rv, 0);
+    syscall_handler(rv);
+#endif
 }
 
 void memset_handler(riscv_t *rv)

@@ -374,8 +374,10 @@ CONSTOPT(wfi, {})
 /* URET: return from traps in U-mode */
 CONSTOPT(uret, {})
 
+#if RV32_HAS(SYSTEM)
 /* SRET: return from traps in S-mode */
 CONSTOPT(sret, {})
+#endif
 
 /* HRET: return from traps in H-mode */
 CONSTOPT(hret, {})

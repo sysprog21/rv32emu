@@ -841,9 +841,11 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
         case 0x202: /* HRET: return from traps in H-mode */
             /* illegal instruction */
             return false;
+#if RV32_HAS(SYSTEM)
         case 0x102: /* SRET: return from traps in S-mode */
             ir->opcode = rv_insn_sret;
             break;
+#endif
         case 0x302: /* MRET */
             ir->opcode = rv_insn_mret;
             break;

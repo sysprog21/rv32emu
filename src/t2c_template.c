@@ -361,7 +361,9 @@ T2C_OP(wfi, { __UNREACHABLE; })
 
 T2C_OP(uret, { __UNREACHABLE; })
 
+#if RV32_HAS(SYSTEM)
 T2C_OP(sret, { __UNREACHABLE; })
+#endif
 
 T2C_OP(hret, { __UNREACHABLE; })
 

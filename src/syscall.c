@@ -34,9 +34,11 @@
     _(brk,                  214)           \
     _(clock_gettime,        403)           \
     _(open,                 1024)          \
-    _(sbi_base,             0x10)          \
-    _(sbi_timer,            0x54494D45)    \
-    _(sbi_rst,              0x53525354)    \
+    IIF(RV32_HAS(SYSTEM))(                 \
+        _(sbi_base,         0x10)          \
+        _(sbi_timer,        0x54494D45)    \
+        _(sbi_rst,          0x53525354)    \
+    )                                      \
     IIF(RV32_HAS(SDL))(                    \
         _(draw_frame,       0xBEEF)        \
         _(setup_queue,      0xC0DE)        \
@@ -372,6 +374,8 @@ extern void syscall_setup_audio(riscv_t *rv);
 extern void syscall_control_audio(riscv_t *rv);
 #endif
 
+#if RV32_HAS(SYSTEM)
+
 /* SBI related system calls */
 static void syscall_sbi_timer(riscv_t *rv)
 {
@@ -459,6 +463,7 @@ static void syscall_sbi_rst(riscv_t *rv)
         break;
     }
 }
+#endif /* SYSTEM */
 
 void syscall_handler(riscv_t *rv)
 {

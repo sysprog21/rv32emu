@@ -41,18 +41,21 @@ extern struct target_ops gdbstub_ops;
 #define IF_rs2(i, r) (i->rs2 == rv_reg_##r)
 #define IF_imm(i, v) (i->imm == v)
 
-/* RISC-V exception code list */
+/* RISC-V trap code list */
 /* clang-format off */
-#define RV_TRAP_LIST                                               \
-    IIF(RV32_HAS(EXT_C))(,                                         \
-        _(insn_misaligned, 0) /* Instruction address misaligned */ \
-    )                                                              \
-    _(illegal_insn, 2)     /* Illegal instruction */               \
-    _(breakpoint, 3)       /* Breakpoint */                        \
-    _(load_misaligned, 4)  /* Load address misaligned */           \
-    _(store_misaligned, 6) /* Store/AMO address misaligned */      \
-    IIF(RV32_HAS(SYSTEM))(,                                        \
-        _(ecall_M, 11)     /* Environment call from M-mode */      \
+#define RV_TRAP_LIST                                                                  \
+    IIF(RV32_HAS(EXT_C))(,                                                            \
+        _(insn_misaligned, 0)              /* Instruction address misaligned */       \
+    )                                                                                 \
+    _(illegal_insn, 2)                     /* Illegal instruction */                  \
+    _(breakpoint, 3)                       /* Breakpoint */                           \
+    _(load_misaligned, 4)                  /* Load address misaligned */              \
+    _(store_misaligned, 6)                 /* Store/AMO address misaligned */         \
+    IIF(RV32_HAS(SYSTEM))(                                                            \
+        _(pagefault_insn, 12)              /* Instruction page fault */               \
+        _(pagefault_load, 13)              /* Load page fault */                      \
+        _(pagefault_store, 15),            /* Store page fault */                     \
+        _(ecall_M, 11)                     /* Environment call from M-mode */         \
     )
 /* clang-format on */
 
@@ -75,9 +78,7 @@ static void rv_trap_default_handler(riscv_t *rv)
  * the registered trap handler, PC by PC. Once the trap is handled,
  * resume the previous execution flow where cause the trap.
  *
- * Since the system emulation has not yet included in rv32emu, the page
- * fault is not practical in current test suite. Instead, we try to
- * emulate the misaligned handling in the test suite.
+ * Now, rv32emu supports misaligned access and page fault handling.
  */
 #if RV32_HAS(SYSTEM)
 static void trap_handler(riscv_t *rv);
@@ -532,7 +533,7 @@ static bool do_fuse3(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->X[fuse[i].rs2]);
+        rv->io.mem_write_w(rv, addr, rv->X[fuse[i].rs2]);
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {
@@ -556,7 +557,7 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        rv->X[fuse[i].rd] = rv->io.mem_read_w(addr);
+        rv->X[fuse[i].rd] = rv->io.mem_read_w(rv, addr);
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {
@@ -666,7 +667,7 @@ static void block_translate(riscv_t *rv, block_t *block)
             prev_ir->next = ir;
 
         /* fetch the next instruction */
-        const uint32_t insn = rv->io.mem_ifetch(block->pc_end);
+        const uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
@@ -1122,24 +1123,8 @@ void rv_step(void *arg)
 }
 
 #if RV32_HAS(SYSTEM)
-static void trap_handler(riscv_t *rv)
-{
-    rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
-    assert(ir);
-
-    /* set to false by sret/mret implementation */
-    uint32_t insn;
-    while (rv->is_trapped && !rv_has_halted(rv)) {
-        insn = rv->io.mem_ifetch(rv->PC);
-        assert(insn);
-
-        rv_decode(ir, insn);
-        ir->impl = dispatch_table[ir->opcode];
-        rv->compressed = is_compressed(insn);
-        ir->impl(rv, ir, rv->csr_cycle, rv->PC);
-    }
-}
-#endif
+#include "system.c"
+#endif /* SYSTEM */
 
 void ebreak_handler(riscv_t *rv)
 {

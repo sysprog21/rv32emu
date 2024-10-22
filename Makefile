@@ -45,6 +45,10 @@ CFLAGS += $(CFLAGS_NO_CET)
 
 OBJS_EXT :=
 
+ifeq ($(call has, SYSTEM), 1)
+OBJS_EXT += system.o
+endif
+
 # Integer Multiplication and Division instructions
 ENABLE_EXT_M ?= 1
 $(call set-feature, EXT_M)

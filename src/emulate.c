@@ -14,6 +14,10 @@
 #include <emscripten.h>
 #endif
 
+#if RV32_HAS(SYSTEM)
+#include "system.h"
+#endif /* RV32_HAS(SYSTEM) */
+
 #if RV32_HAS(EXT_F)
 #include <math.h>
 #include "softfloat.h"
@@ -71,19 +75,6 @@ static void rv_trap_default_handler(riscv_t *rv)
     rv->PC = rv->csr_mepc; /* mret */
 }
 
-/*
- * Trap might occurs during block emulation. For instance, page fault.
- * In order to handle trap, we have to escape from block and execute
- * registered trap handler. This trap_handler function helps to execute
- * the registered trap handler, PC by PC. Once the trap is handled,
- * resume the previous execution flow where cause the trap.
- *
- * Now, rv32emu supports misaligned access and page fault handling.
- */
-#if RV32_HAS(SYSTEM)
-static void trap_handler(riscv_t *rv);
-#endif
-
 /* When a trap occurs in M-mode/S-mode, m/stval is either initialized to zero or
  * populated with exception-specific details to assist software in managing
  * the trap. Otherwise, the implementation never modifies m/stval, although
@@ -104,7 +95,7 @@ static void trap_handler(riscv_t *rv);
  * identifier called tval, as both are handled by TRAP_HANDLER_IMPL.
  */
 #define TRAP_HANDLER_IMPL(type, code)                                         \
-    static void rv_trap_##type(riscv_t *rv, uint32_t tval)                    \
+    void rv_trap_##type(riscv_t *rv, uint32_t tval)                           \
     {                                                                         \
         /* m/stvec (Machine/Supervisor Trap-Vector Base Address Register)     \
          * m/stvec[MXLEN-1:2]: vector base address                            \
@@ -590,7 +581,7 @@ static bool do_fuse5(riscv_t *rv,
 }
 
 /* clang-format off */
-static const void *dispatch_table[] = {
+const void *dispatch_table[] = {
     /* RV32 instructions */
 #define _(inst, can_branch, insn_len, translatable, reg_mask) [rv_insn_##inst] = do_##inst,
     RV_INSN_LIST
@@ -1121,10 +1112,6 @@ void rv_step(void *arg)
     }
 #endif
 }
-
-#if RV32_HAS(SYSTEM)
-#include "system.c"
-#endif /* SYSTEM */
 
 void ebreak_handler(riscv_t *rv)
 {

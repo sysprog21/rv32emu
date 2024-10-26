@@ -303,6 +303,16 @@ misalign-in-blk-emu: $(BIN)
 	             exit 1; \
 	             fi;
 
+EXPECTED_mmu = STORE PAGE FAULT TEST PASSED!
+mmu-test: $(BIN)
+	$(Q)$(PRINTF) "Running vm.elf ... "; \
+	    if [ "$(shell $(BIN) tests/system/mmu/vm.elf | tail -n 2)" = "$(strip $(EXPECTED_mmu)) inferior exit code 0" ]; then \
+	    $(call notice, [OK]); \
+	    else \
+	    $(PRINTF) "Failed.\n"; \
+	    exit 1; \
+	    fi;
+
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)
 doom_action := (cd $(OUT); ../$(BIN) riscv32/doom)

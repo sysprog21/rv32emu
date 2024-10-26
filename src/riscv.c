@@ -165,8 +165,10 @@ void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
 #define MEMIO(op) on_mem_##op
 #define IO_HANDLER_IMPL(type, op, RW)                                     \
     static IIF(RW)(                                                       \
-        /* W */ void MEMIO(op)(riscv_word_t addr, riscv_##type##_t data), \
-        /* R */ riscv_##type##_t MEMIO(op)(riscv_word_t addr))            \
+        /* W */ void MEMIO(op)(UNUSED riscv_t * rv, riscv_word_t addr,    \
+                               riscv_##type##_t data),                    \
+        /* R */ riscv_##type##_t MEMIO(op)(UNUSED riscv_t * rv,           \
+                                           riscv_word_t addr))            \
     {                                                                     \
         IIF(RW)                                                           \
         (memory_##op(addr, (uint8_t *) &data), return memory_##op(addr)); \
@@ -258,11 +260,40 @@ riscv_t *rv_create(riscv_user_t rv_attr)
             .on_ebreak = ebreak_handler,
             .on_memcpy = memcpy_handler,
             .on_memset = memset_handler,
+            .on_trap = trap_handler,
         };
         memcpy(&rv->io, &io, sizeof(riscv_io_t));
-    } else {
-        /* TODO: system emulator */
     }
+#if RV32_HAS(SYSTEM)
+    else {
+        /*
+         * TODO: system emulator
+         * e.g., kernel image, dtb, rootfs
+         *
+         * The test suite is compiled into a single ELF file, so load it as
+         * an ELF executable, just like a userspace ELF.
+         *
+         */
+        elf_t *elf = elf_new();
+        assert(elf && elf_open(elf, (attr->data.system)->elf_program));
+
+        const struct Elf32_Sym *end;
+        if ((end = elf_get_symbol(elf, "_end")))
+            attr->break_addr = end->st_value;
+
+        assert(elf_load(elf, attr->mem));
+
+        /* set the entry pc */
+        const struct Elf32_Ehdr *hdr = get_elf_header(elf);
+        assert(rv_set_pc(rv, hdr->e_entry));
+
+        elf_delete(elf);
+
+        /* this variable has external linkage to mmu_io defined in system.c */
+        extern riscv_io_t mmu_io;
+        memcpy(&rv->io, &mmu_io, sizeof(riscv_io_t));
+    }
+#endif /* SYSTEM */
 
     /* default standard stream.
      * rv_remap_stdstream can be called to overwrite them
@@ -301,20 +332,6 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     /* activate the background compilation thread. */
     pthread_create(&t2c_thread, NULL, t2c_runloop, rv);
 #endif
-#endif
-
-#if RV32_HAS(SYSTEM)
-    /*
-     * System simulation defaults to S-mode as
-     * it does not rely on M-mode software like OpenSBI.
-     */
-    rv->priv_mode = RV_PRIV_S_MODE;
-
-    /* not being trapped */
-    rv->is_trapped = false;
-#else
-    /* ISA simulation defaults to M-mode */
-    rv->priv_mode = RV_PRIV_M_MODE;
 #endif
 
     return rv;
@@ -356,7 +373,13 @@ void rv_run(riscv_t *rv)
     assert(rv);
 
     vm_attr_t *attr = PRIV(rv);
-    assert(attr && attr->data.user && attr->data.user->elf_program);
+    assert(attr &&
+#if RV32_HAS(SYSTEM)
+           attr->data.system && attr->data.system->elf_program
+#else
+           attr->data.user && attr->data.user->elf_program
+#endif
+    );
 
     if (attr->run_flag & RV_RUN_TRACE)
         rv_run_and_trace(rv);
@@ -516,6 +539,21 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     /* reset sp pointing to argc */
     rv->X[rv_reg_sp] = stack_top;
 
+    /* reset privilege mode */
+#if RV32_HAS(SYSTEM)
+    /*
+     * System simulation defaults to S-mode as
+     * it does not rely on M-mode software like OpenSBI.
+     */
+    rv->priv_mode = RV_PRIV_S_MODE;
+
+    /* not being trapped */
+    rv->is_trapped = false;
+#else
+    /* ISA simulation defaults to M-mode */
+    rv->priv_mode = RV_PRIV_M_MODE;
+#endif
+
     /* reset the csrs */
     rv->csr_mtvec = 0;
     rv->csr_cycle = 0;
@@ -540,7 +578,6 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 #if RV32_HAS(EXT_M)
     rv->csr_misa |= MISA_M;
 #endif
-
 
     rv->halt = false;
 }

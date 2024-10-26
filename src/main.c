@@ -217,12 +217,21 @@ int main(int argc, char **args)
         .log_level = 0,
         .run_flag = run_flag,
         .profile_output_file = prof_out_file,
+#if RV32_HAS(SYSTEM)
+        .data.system = malloc(sizeof(vm_system_t)),
+#else
         .data.user = malloc(sizeof(vm_user_t)),
+#endif
         .cycle_per_step = CYCLE_PER_STEP,
         .allow_misalign = opt_misaligned,
     };
+#if RV32_HAS(SYSTEM)
+    assert(attr.data.system);
+    attr.data.system->elf_program = opt_prog_name;
+#else
     assert(attr.data.user);
     attr.data.user->elf_program = opt_prog_name;
+#endif
 
     /* create the RISC-V runtime */
     rv = rv_create(&attr);

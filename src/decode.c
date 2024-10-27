@@ -1959,7 +1959,7 @@ static inline bool op_mvx(rv_insn_t *ir, const uint32_t insn) {}
 static inline bool op_v(rv_insn_t *ir, const uint32_t insn)
 {
     uint32_t funct3_mask = 0x7000;
-    switch (insn & funct3_mask) {
+    switch ((insn & funct3_mask) >> 7) {
         case 0:
             return op_ivv(ir, insn);        
         case 1:

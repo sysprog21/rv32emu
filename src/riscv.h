@@ -576,6 +576,10 @@ typedef struct {
      */
     uint32_t args_offset_size;
 
+    /* The max bits that RVV a single instruction can process
+     */
+    uint16_t vlen;
+
     /* arguments of emulation program */
     int argc;
     char **argv;

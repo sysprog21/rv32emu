@@ -58,7 +58,7 @@
 
 /* RVV instructions */
 #define RV32_FEATURE_EXT_RVV 1
-#ifndef RV32_FEATURE_EXT_RVV
+// #ifndef RV32_FEATURE_EXT_RVV
 // #define RV32_FEATURE_EXT_RVV 1
 #endif
 

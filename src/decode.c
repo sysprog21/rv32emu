@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include "decode.h"
+#include "encoding.h"
 #include "riscv_private.h"
 
 /* decode rd field
@@ -2138,7 +2139,7 @@ static inline bool op_mvx(rv_insn_t *ir, const uint32_t insn) {}
 static inline bool op_v(rv_insn_t *ir, const uint32_t insn)
 {
     uint32_t funct3_mask = 0x7000;
-    switch (insn & funct3_mask) {
+    switch ((insn & funct3_mask) >> 7) {
         case 0:
             return op_ivv(ir, insn);        
         case 1:
@@ -2155,6 +2156,24 @@ static inline bool op_v(rv_insn_t *ir, const uint32_t insn)
             return op_mvx(ir, insn);        
         default:
             return false;
+    }
+
+    if ((insn & MASK_VSETVLI) == MATCH_VSETVLI) {
+        // vsetvli
+        ir->rd = (insn >> 7) & 0x1f;
+        ir->rs1 = (insn >> 15) & 0x1f;
+        ir->zimm = (insn >> 20) & 0x7ff;
+    } else if ((insn & MASK_VSETIVLI) == MATCH_VSETIVLI) {
+        // vsetivli
+        ir->rd = (insn >> 7) & 0x1f;
+        ir->uimm = (insn >> 15) & 0x1f;
+        ir->zimm = (insn >> 20) & 0x3ff; // zimm[9:0]
+
+    } else if ((insn & MASK_VSETVL) == MATCH_VSETVL) {
+        // vsetvl
+        ir->rd = (insn >> 7) & 0x1f;
+        ir->rs1 = (insn >> 15) & 0x1f;
+        ir->rs2 = (insn >> 20) & 0x1f;
     }
 }
 

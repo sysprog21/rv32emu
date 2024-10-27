@@ -388,6 +388,8 @@ typedef struct rv_insn {
 
 #if RV32_HAS(EXT_RVV)
     uint8_t vm;
+    uint8_t zimm;
+    uint8_t uimm;
 #endif
     /* fuse operation */
     int32_t imm2;

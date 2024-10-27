@@ -135,6 +135,18 @@ struct riscv_internal {
     uint32_t csr_fcsr;
 #endif
 
+#if RV32_HAS(EXT_RVV)
+#define VLEN 128 // FIXME should not use a const and not even here for VLEN
+    uint8_t V1[(VLEN>>3)];
+    uint8_t V2[(VLEN>>3)];
+    uint8_t Vd[(VLEN>>3)];
+    uint8_t vl; /* current vl size */
+    uint8_t lmul;
+    uint8_t sew; /* current sew size */
+    uint8_t zimm;
+    uint8_t uimm;
+#endif
+
     /* csr registers */
     uint64_t csr_cycle;     /* Machine cycle counter */
     uint32_t csr_time[2];   /* Performance counter */

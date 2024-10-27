@@ -1238,6 +1238,7 @@ CONSTOPT(bseti, {
     if (ir->rd)
         info->is_constant[ir->rd] = false;
 })
+#endif
 
 #if RV32_HAS(EXT_RVV)
 CONSTOPT(vadd_vi, {})

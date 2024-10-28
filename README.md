@@ -328,6 +328,19 @@ Alternatively, you may want to view a hosted `rv32emu` [demo page](https://syspr
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
+## Citation
+
+Please see our [VMIL'24](https://2024.splashcon.org/home/vmil-2024) paper, available in the [ACM digital library](https://dl.acm.org/doi/10.1145/3689490.3690399).
+```
+@inproceedings{ncku2024accelerate,
+  title={Accelerate {RISC-V} Instruction Set Simulation by Tiered {JIT} Compilation},
+  author={Chen, Yen-Fu and Chen, Meng-Hung and Huang, Ching-Chun and Tu, Chia-Heng},
+  booktitle={Proceedings of the 16th ACM SIGPLAN International Workshop on Virtual Machines and Intermediate Languages},
+  pages={12--22},
+  year={2024}
+}
+```
+
 ## License
 
 `rv32emu` is available under a permissive MIT-style license.

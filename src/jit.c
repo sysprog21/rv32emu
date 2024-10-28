@@ -15,6 +15,10 @@
  *   https://github.com/iovisor/ubpf/blob/main/vm/ubpf_jit_arm64.c
  */
 
+#if !RV32_HAS(JIT)
+#error "Do not manage to build this file unless you enable JIT support."
+#endif
+
 #if !defined(__x86_64__) && !defined(__aarch64__)
 #error "This implementation is dedicated to x64 and arm64."
 #endif

@@ -266,13 +266,11 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     }
 #if RV32_HAS(SYSTEM)
     else {
-        /*
-         * TODO: system emulator
+        /* TODO: Implement the essential functions for system emulation.
          * e.g., kernel image, dtb, rootfs
          *
          * The test suite is compiled into a single ELF file, so load it as
          * an ELF executable, just like a userspace ELF.
-         *
          */
         elf_t *elf = elf_new();
         assert(elf && elf_open(elf, (attr->data.system)->elf_program));

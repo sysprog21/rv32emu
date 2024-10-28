@@ -3,6 +3,10 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#if !RV32_HAS(SYSTEM)
+#error "Do not manage to build this file unless you enable system support."
+#endif
+
 #include "riscv_private.h"
 
 static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
@@ -153,8 +157,7 @@ MMU_FAULT_CHECK_IMPL(write, pagefault_store)
                             : addr & MASK(RV_PG_SHIFT);       \
     } while (0)
 
-/*
- * The IO handler that operates when the Memory Management Unit (MMU)
+/* The IO handler that operates when the Memory Management Unit (MMU)
  * is enabled during system emulation is responsible for managing
  * input/output operations. These callbacks are designed to implement
  * the riscv_io_t interface, ensuring compatibility and consistency to
@@ -178,9 +181,8 @@ static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t addr)
     uint32_t level;
     uint32_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(ifetch, rv, pte, addr, PTE_X);
-    if (unlikely(!ok)) {
+    if (unlikely(!ok))
         pte = mmu_walk(rv, addr, &level);
-    }
 
     get_ppn_and_offset();
     return memory_ifetch(ppn | offset);
@@ -194,9 +196,8 @@ static uint32_t mmu_read_w(riscv_t *rv, const uint32_t addr)
     uint32_t level;
     uint32_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
-    if (unlikely(!ok)) {
+    if (unlikely(!ok))
         pte = mmu_walk(rv, addr, &level);
-    }
 
     get_ppn_and_offset();
     return memory_read_w(ppn | offset);
@@ -210,9 +211,8 @@ static uint16_t mmu_read_s(riscv_t *rv, const uint32_t addr)
     uint32_t level;
     uint32_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
-    if (unlikely(!ok)) {
+    if (unlikely(!ok))
         pte = mmu_walk(rv, addr, &level);
-    }
 
     get_ppn_and_offset();
     return memory_read_s(ppn | offset);
@@ -226,9 +226,8 @@ static uint8_t mmu_read_b(riscv_t *rv, const uint32_t addr)
     uint32_t level;
     uint32_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
-    if (unlikely(!ok)) {
+    if (unlikely(!ok))
         pte = mmu_walk(rv, addr, &level);
-    }
 
     get_ppn_and_offset();
     return memory_read_b(ppn | offset);
@@ -242,9 +241,8 @@ static void mmu_write_w(riscv_t *rv, const uint32_t addr, const uint32_t val)
     uint32_t level;
     uint32_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
-    if (unlikely(!ok)) {
+    if (unlikely(!ok))
         pte = mmu_walk(rv, addr, &level);
-    }
 
     get_ppn_and_offset();
     memory_write_w(ppn | offset, (uint8_t *) &val);
@@ -258,9 +256,8 @@ static void mmu_write_s(riscv_t *rv, const uint32_t addr, const uint16_t val)
     uint32_t level;
     uint32_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
-    if (unlikely(!ok)) {
+    if (unlikely(!ok))
         pte = mmu_walk(rv, addr, &level);
-    }
 
     get_ppn_and_offset();
     memory_write_s(ppn | offset, (uint8_t *) &val);
@@ -274,9 +271,8 @@ static void mmu_write_b(riscv_t *rv, const uint32_t addr, const uint8_t val)
     uint32_t level;
     uint32_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
-    if (unlikely(!ok)) {
+    if (unlikely(!ok))
         pte = mmu_walk(rv, addr, &level);
-    }
 
     get_ppn_and_offset();
     memory_write_b(ppn | offset, (uint8_t *) &val);

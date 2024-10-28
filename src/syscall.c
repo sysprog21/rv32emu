@@ -375,7 +375,6 @@ extern void syscall_control_audio(riscv_t *rv);
 #endif
 
 #if RV32_HAS(SYSTEM)
-
 /* SBI related system calls */
 static void syscall_sbi_timer(riscv_t *rv)
 {

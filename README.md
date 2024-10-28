@@ -83,7 +83,7 @@ The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](do
 
 ### Docker image
 
-The image containing all the necessary tools for development and testing can be executed by `docker run -it sysprog21/rv32emu:latest`. It works for both x86-64 and aarch64 (Apple's M1 chip) machines.
+The image containing all the necessary tools for development and testing can be executed by `docker run -it sysprog21/rv32emu:latest`. It works for both x86-64 and aarch64 (e.g., Apple's M1 chip) machines.
 
 ### Customization
 
@@ -98,6 +98,7 @@ The image containing all the necessary tools for development and testing can be 
 * `ENABLE_FULL4G` : Full access to 4 GiB address space
 * `ENABLE_SDL` : Experimental Display and Event System Calls
 * `ENABLE_JIT` : Experimental JIT compiler
+* `ENABLE_SYSTEM` : Experimental system emulation, allowing booting Linux kernel
 
 e.g., run `make ENABLE_EXT_F=0` for the build without floating-point support.
 

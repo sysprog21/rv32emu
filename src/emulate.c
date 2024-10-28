@@ -41,130 +41,15 @@ extern struct target_ops gdbstub_ops;
 #define IF_rs2(i, r) (i->rs2 == rv_reg_##r)
 #define IF_imm(i, v) (i->imm == v)
 
-/* RISC-V exception code list */
-/* clang-format off */
-#define RV_TRAP_LIST                                               \
-    IIF(RV32_HAS(EXT_C))(,                                         \
-        _(insn_misaligned, 0) /* Instruction address misaligned */ \
-    )                                                              \
-    _(illegal_insn, 2)     /* Illegal instruction */               \
-    _(breakpoint, 3)       /* Breakpoint */                        \
-    _(load_misaligned, 4)  /* Load address misaligned */           \
-    _(store_misaligned, 6) /* Store/AMO address misaligned */      \
-    IIF(RV32_HAS(SYSTEM))(,                                        \
-        _(ecall_M, 11)     /* Environment call from M-mode */      \
-    )
-/* clang-format on */
-
-enum {
-#define _(type, code) rv_trap_code_##type = code,
-    RV_TRAP_LIST
-#undef _
-};
-
 static void rv_trap_default_handler(riscv_t *rv)
 {
     rv->csr_mepc += rv->compressed ? 2 : 4;
     rv->PC = rv->csr_mepc; /* mret */
 }
 
-/*
- * Trap might occurs during block emulation. For instance, page fault.
- * In order to handle trap, we have to escape from block and execute
- * registered trap handler. This trap_handler function helps to execute
- * the registered trap handler, PC by PC. Once the trap is handled,
- * resume the previous execution flow where cause the trap.
- *
- * Since the system emulation has not yet included in rv32emu, the page
- * fault is not practical in current test suite. Instead, we try to
- * emulate the misaligned handling in the test suite.
- */
 #if RV32_HAS(SYSTEM)
-static void trap_handler(riscv_t *rv);
-#endif
-
-/* When a trap occurs in M-mode/S-mode, m/stval is either initialized to zero or
- * populated with exception-specific details to assist software in managing
- * the trap. Otherwise, the implementation never modifies m/stval, although
- * software can explicitly write to it. The hardware platform will define
- * which exceptions are required to informatively set mtval and which may
- * consistently set it to zero.
- *
- * When a hardware breakpoint is triggered or an exception like address
- * misalignment, access fault, or page fault occurs during an instruction
- * fetch, load, or store operation, m/stval is updated with the virtual address
- * that caused the fault. In the case of an illegal instruction trap, m/stval
- * might be updated with the first XLEN or ILEN bits of the offending
- * instruction. For all other traps, m/stval is simply set to zero. However,
- * it is worth noting that a future standard could redefine how m/stval is
- * handled for different types of traps.
- *
- * For simplicity and clarity, abstracting stval and mtval into a single
- * identifier called tval, as both are handled by TRAP_HANDLER_IMPL.
- */
-#define TRAP_HANDLER_IMPL(type, code)                                         \
-    static void rv_trap_##type(riscv_t *rv, uint32_t tval)                    \
-    {                                                                         \
-        /* m/stvec (Machine/Supervisor Trap-Vector Base Address Register)     \
-         * m/stvec[MXLEN-1:2]: vector base address                            \
-         * m/stvec[1:0] : vector mode                                         \
-         * m/sepc  (Machine/Supervisor Exception Program Counter)             \
-         * m/stval (Machine/Supervisor Trap Value Register)                   \
-         * m/scause (Machine/Supervisor Cause Register): store exception code \
-         * m/sstatus (Machine/Supervisor Status Register): keep track of and  \
-         * controls the hart’s current operating state                      \
-         */                                                                   \
-        uint32_t base;                                                        \
-        uint32_t mode;                                                        \
-        /* user or supervisor */                                              \
-        if (RV_PRIV_IS_U_OR_S_MODE()) {                                       \
-            const uint32_t sstatus_sie =                                      \
-                (rv->csr_sstatus & SSTATUS_SIE) >> SSTATUS_SIE_SHIFT;         \
-            rv->csr_sstatus |= (sstatus_sie << SSTATUS_SPIE_SHIFT);           \
-            rv->csr_sstatus &= ~(SSTATUS_SIE);                                \
-            rv->csr_sstatus |= (rv->priv_mode << SSTATUS_SPP_SHIFT);          \
-            rv->priv_mode = RV_PRIV_S_MODE;                                   \
-            base = rv->csr_stvec & ~0x3;                                      \
-            mode = rv->csr_stvec & 0x3;                                       \
-            rv->csr_sepc = rv->PC;                                            \
-            rv->csr_stval = tval;                                             \
-            rv->csr_scause = code;                                            \
-        } else { /* machine */                                                \
-            const uint32_t mstatus_mie =                                      \
-                (rv->csr_mstatus & MSTATUS_MIE) >> MSTATUS_MIE_SHIFT;         \
-            rv->csr_mstatus |= (mstatus_mie << MSTATUS_MPIE_SHIFT);           \
-            rv->csr_mstatus &= ~(MSTATUS_MIE);                                \
-            rv->csr_mstatus |= (rv->priv_mode << MSTATUS_MPP_SHIFT);          \
-            rv->priv_mode = RV_PRIV_M_MODE;                                   \
-            base = rv->csr_mtvec & ~0x3;                                      \
-            mode = rv->csr_mtvec & 0x3;                                       \
-            rv->csr_mepc = rv->PC;                                            \
-            rv->csr_mtval = tval;                                             \
-            rv->csr_mcause = code;                                            \
-            if (!rv->csr_mtvec) { /* in case CSR is not configured */         \
-                rv_trap_default_handler(rv);                                  \
-                return;                                                       \
-            }                                                                 \
-        }                                                                     \
-        switch (mode) {                                                       \
-        /* DIRECT: All traps set PC to base */                                \
-        case 0:                                                               \
-            rv->PC = base;                                                    \
-            break;                                                            \
-        /* VECTORED: Asynchronous traps set PC to base + 4 * code */          \
-        case 1:                                                               \
-            /* MSB of code is used to indicate whether the trap is interrupt  \
-             * or exception, so it is not considered as the 'real' code */    \
-            rv->PC = base + 4 * (code & MASK(31));                            \
-            break;                                                            \
-        }                                                                     \
-        IIF(RV32_HAS(SYSTEM))(if (rv->is_trapped) trap_handler(rv);, )        \
-    }
-
-/* RISC-V exception handlers */
-#define _(type, code) TRAP_HANDLER_IMPL(type, code)
-RV_TRAP_LIST
-#undef _
+static void __trap_handler(riscv_t *rv);
+#endif /* RV32_HAS(SYSTEM) */
 
 /* wrap load/store and insn misaligned handler
  * @mask_or_pc: mask for load/store and pc for insn misaligned handler.
@@ -180,8 +65,8 @@ RV_TRAP_LIST
         rv->compressed = compress;                                    \
         rv->csr_cycle = cycle;                                        \
         rv->PC = PC;                                                  \
-        IIF(RV32_HAS(SYSTEM))(rv->is_trapped = true, );               \
-        rv_trap_##type##_misaligned(rv, IIF(IO)(addr, mask_or_pc));   \
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, type##_MISALIGNED,           \
+                                     IIF(IO)(addr, mask_or_pc));      \
         return false;                                                 \
     }
 
@@ -531,8 +416,8 @@ static bool do_fuse3(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
      */
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
-        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->X[fuse[i].rs2]);
+        RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
+        rv->io.mem_write_w(rv, addr, rv->X[fuse[i].rs2]);
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {
@@ -555,8 +440,8 @@ static bool do_fuse4(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
      */
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        rv->X[fuse[i].rd] = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        rv->X[fuse[i].rd] = rv->io.mem_read_w(rv, addr);
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {
@@ -666,12 +551,12 @@ static void block_translate(riscv_t *rv, block_t *block)
             prev_ir->next = ir;
 
         /* fetch the next instruction */
-        const uint32_t insn = rv->io.mem_ifetch(block->pc_end);
+        const uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
             rv->compressed = is_compressed(insn);
-            rv_trap_illegal_insn(rv, insn);
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
             break;
         }
         ir->impl = dispatch_table[ir->opcode];
@@ -1122,15 +1007,14 @@ void rv_step(void *arg)
 }
 
 #if RV32_HAS(SYSTEM)
-static void trap_handler(riscv_t *rv)
+static void __trap_handler(riscv_t *rv)
 {
     rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
     assert(ir);
 
-    /* set to false by sret/mret implementation */
-    uint32_t insn;
+    /* set to false by sret implementation */
     while (rv->is_trapped && !rv_has_halted(rv)) {
-        insn = rv->io.mem_ifetch(rv->PC);
+        uint32_t insn = rv->io.mem_ifetch(rv, rv->PC);
         assert(insn);
 
         rv_decode(ir, insn);
@@ -1139,12 +1023,94 @@ static void trap_handler(riscv_t *rv)
         ir->impl(rv, ir, rv->csr_cycle, rv->PC);
     }
 }
-#endif
+#endif /* RV32_HAS(SYSTEM) */
+
+/* When a trap occurs in M-mode/S-mode, m/stval is either initialized to zero or
+ * populated with exception-specific details to assist software in managing
+ * the trap. Otherwise, the implementation never modifies m/stval, although
+ * software can explicitly write to it. The hardware platform will define
+ * which exceptions are required to informatively set mtval and which may
+ * consistently set it to zero.
+ *
+ * When a hardware breakpoint is triggered or an exception like address
+ * misalignment, access fault, or page fault occurs during an instruction
+ * fetch, load, or store operation, m/stval is updated with the virtual address
+ * that caused the fault. In the case of an illegal instruction trap, m/stval
+ * might be updated with the first XLEN or ILEN bits of the offending
+ * instruction. For all other traps, m/stval is simply set to zero. However,
+ * it is worth noting that a future standard could redefine how m/stval is
+ * handled for different types of traps.
+ *
+ */
+static void _trap_handler(riscv_t *rv)
+{
+    /* m/stvec (Machine/Supervisor Trap-Vector Base Address Register)
+     * m/stvec[MXLEN-1:2]: vector base address
+     * m/stvec[1:0] : vector mode
+     * m/sepc  (Machine/Supervisor Exception Program Counter)
+     * m/stval (Machine/Supervisor Trap Value Register)
+     * m/scause (Machine/Supervisor Cause Register): store exception code
+     * m/sstatus (Machine/Supervisor Status Register): keep track of and
+     * controls the hart’s current operating state
+     *
+     * m/stval and m/scause are set in SET_CAUSE_AND_TVAL_THEN_TRAP
+     */
+    uint32_t base;
+    uint32_t mode;
+    uint32_t cause;
+    /* user or supervisor */
+    if (RV_PRIV_IS_U_OR_S_MODE()) {
+        const uint32_t sstatus_sie =
+            (rv->csr_sstatus & SSTATUS_SIE) >> SSTATUS_SIE_SHIFT;
+        rv->csr_sstatus |= (sstatus_sie << SSTATUS_SPIE_SHIFT);
+        rv->csr_sstatus &= ~(SSTATUS_SIE);
+        rv->csr_sstatus |= (rv->priv_mode << SSTATUS_SPP_SHIFT);
+        rv->priv_mode = RV_PRIV_S_MODE;
+        base = rv->csr_stvec & ~0x3;
+        mode = rv->csr_stvec & 0x3;
+        cause = rv->csr_scause;
+        rv->csr_sepc = rv->PC;
+    } else { /* machine */
+        const uint32_t mstatus_mie =
+            (rv->csr_mstatus & MSTATUS_MIE) >> MSTATUS_MIE_SHIFT;
+        rv->csr_mstatus |= (mstatus_mie << MSTATUS_MPIE_SHIFT);
+        rv->csr_mstatus &= ~(MSTATUS_MIE);
+        rv->csr_mstatus |= (rv->priv_mode << MSTATUS_MPP_SHIFT);
+        rv->priv_mode = RV_PRIV_M_MODE;
+        base = rv->csr_mtvec & ~0x3;
+        mode = rv->csr_mtvec & 0x3;
+        cause = rv->csr_mcause;
+        rv->csr_mepc = rv->PC;
+        if (!rv->csr_mtvec) { /* in case CSR is not configured */
+            rv_trap_default_handler(rv);
+            return;
+        }
+    }
+    switch (mode) {
+    /* DIRECT: All traps set PC to base */
+    case 0:
+        rv->PC = base;
+        break;
+    /* VECTORED: Asynchronous traps set PC to base + 4 * code */
+    case 1:
+        /* MSB of code is used to indicate whether the trap is interrupt
+         * or exception, so it is not considered as the 'real' code */
+        rv->PC = base + 4 * (cause & MASK(31));
+        break;
+    }
+    IIF(RV32_HAS(SYSTEM))(if (rv->is_trapped) __trap_handler(rv);, )
+}
+
+void trap_handler(riscv_t *rv)
+{
+    assert(rv);
+    _trap_handler(rv);
+}
 
 void ebreak_handler(riscv_t *rv)
 {
     assert(rv);
-    rv_trap_breakpoint(rv, rv->PC);
+    SET_CAUSE_AND_TVAL_THEN_TRAP(rv, BREAKPOINT, rv->PC);
 }
 
 void ecall_handler(riscv_t *rv)
@@ -1154,7 +1120,7 @@ void ecall_handler(riscv_t *rv)
     syscall_handler(rv);
     rv->PC += 4;
 #else
-    rv_trap_ecall_M(rv, 0);
+    SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ECALL_M, 0);
     syscall_handler(rv);
 #endif
 }

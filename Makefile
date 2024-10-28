@@ -45,6 +45,10 @@ CFLAGS += $(CFLAGS_NO_CET)
 
 OBJS_EXT :=
 
+ifeq ($(call has, SYSTEM), 1)
+OBJS_EXT += system.o
+endif
+
 # Integer Multiplication and Division instructions
 ENABLE_EXT_M ?= 1
 $(call set-feature, EXT_M)
@@ -298,6 +302,16 @@ misalign-in-blk-emu: $(BIN)
 	             $(PRINTF) "Failed.\n"; \
 	             exit 1; \
 	             fi;
+
+EXPECTED_mmu = STORE PAGE FAULT TEST PASSED!
+mmu-test: $(BIN)
+	$(Q)$(PRINTF) "Running vm.elf ... "; \
+	    if [ "$(shell $(BIN) tests/system/mmu/vm.elf | tail -n 2)" = "$(strip $(EXPECTED_mmu)) inferior exit code 0" ]; then \
+	    $(call notice, [OK]); \
+	    else \
+	    $(PRINTF) "Failed.\n"; \
+	    exit 1; \
+	    fi;
 
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)

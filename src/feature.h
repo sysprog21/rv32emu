@@ -63,5 +63,10 @@
 #define RV32_FEATURE_T2C 0
 #endif
 
+/* System */
+#ifndef RV32_FEATURE_SYSTEM
+#define RV32_FEATURE_SYSTEM 0
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x

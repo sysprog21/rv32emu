@@ -162,7 +162,7 @@ RVOP(
             rv->X[ir->rd] = pc + 4;
         /* check instruction misaligned */
 #if !RV32_HAS(EXT_C)
-        RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
+        RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0);
 #endif
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
@@ -266,7 +266,7 @@ RVOP(
             rv->X[ir->rd] = pc + 4;
         /* check instruction misaligned */
 #if !RV32_HAS(EXT_C)
-        RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0);
+        RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0);
 #endif
         LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
         goto end_op;
@@ -318,7 +318,7 @@ RVOP(
     PC += ir->imm;                                                 \
     /* check instruction misaligned */                             \
     IIF(RV32_HAS(EXT_C))                                           \
-    (, RV_EXC_MISALIGN_HANDLER(pc, insn, false, 0););              \
+    (, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););              \
     struct rv_insn *taken = ir->branch_taken;                      \
     if (taken) {                                                   \
         IIF(RV32_HAS(JIT))                                         \
@@ -513,7 +513,7 @@ RVOP(
     lb,
     {
         rv->X[ir->rd] =
-            sign_extend_b(rv->io.mem_read_b(rv->X[ir->rs1] + ir->imm));
+            sign_extend_b(rv->io.mem_read_b(rv, rv->X[ir->rs1] + ir->imm));
     },
     GEN({
         mem;
@@ -529,8 +529,8 @@ RVOP(
     lh,
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(1, load, false, 1);
-        rv->X[ir->rd] = sign_extend_h(rv->io.mem_read_s(addr));
+        RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+        rv->X[ir->rd] = sign_extend_h(rv->io.mem_read_s(rv, addr));
     },
     GEN({
         mem;
@@ -546,8 +546,8 @@ RVOP(
     lw,
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        rv->X[ir->rd] = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
     },
     GEN({
         mem;
@@ -561,7 +561,7 @@ RVOP(
 /* LBU: Load Byte Unsigned */
 RVOP(
     lbu,
-    { rv->X[ir->rd] = rv->io.mem_read_b(rv->X[ir->rs1] + ir->imm); },
+    { rv->X[ir->rd] = rv->io.mem_read_b(rv, rv->X[ir->rs1] + ir->imm); },
     GEN({
         mem;
         rald, VR0, rs1;
@@ -576,8 +576,8 @@ RVOP(
     lhu,
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(1, load, false, 1);
-        rv->X[ir->rd] = rv->io.mem_read_s(addr);
+        RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+        rv->X[ir->rd] = rv->io.mem_read_s(rv, addr);
     },
     GEN({
         mem;
@@ -597,7 +597,7 @@ RVOP(
 /* SB: Store Byte */
 RVOP(
     sb,
-    { rv->io.mem_write_b(rv->X[ir->rs1] + ir->imm, rv->X[ir->rs2]); },
+    { rv->io.mem_write_b(rv, rv->X[ir->rs1] + ir->imm, rv->X[ir->rs2]); },
     GEN({
         mem;
         rald, VR0, rs1;
@@ -612,8 +612,8 @@ RVOP(
     sh,
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(1, store, false, 1);
-        rv->io.mem_write_s(addr, rv->X[ir->rs2]);
+        RV_EXC_MISALIGN_HANDLER(1, STORE, false, 1);
+        rv->io.mem_write_s(rv, addr, rv->X[ir->rs2]);
     },
     GEN({
         mem;
@@ -629,8 +629,8 @@ RVOP(
     sw,
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->X[ir->rs2]);
+        RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
+        rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
     },
     GEN({
         mem;
@@ -1041,7 +1041,7 @@ RVOP(
         assert; /* FIXME: Implement */
     }))
 
-/* MRET: return from traps in U-mode */
+/* MRET: return from traps in M-mode */
 RVOP(
     mret,
     {
@@ -1371,9 +1371,9 @@ RVOP(
     lrw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(addr);
+            rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
         /* skip registration of the 'reservation set'
          * FIXME: unimplemented
          */
@@ -1390,8 +1390,8 @@ RVOP(
          * FIXME: unimplemented
          */
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->X[ir->rs2]);
+        RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
+        rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
         rv->X[ir->rd] = 0;
     },
     GEN({
@@ -1403,12 +1403,12 @@ RVOP(
     amoswapw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
-        rv->io.mem_write_w(addr, value2);
+        rv->io.mem_write_w(rv, addr, value2);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1419,13 +1419,13 @@ RVOP(
     amoaddw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t res = value1 + value2;
-        rv->io.mem_write_w(addr, res);
+        rv->io.mem_write_w(rv, addr, res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1436,13 +1436,13 @@ RVOP(
     amoxorw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t res = value1 ^ value2;
-        rv->io.mem_write_w(addr, res);
+        rv->io.mem_write_w(rv, addr, res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1453,13 +1453,13 @@ RVOP(
     amoandw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t res = value1 & value2;
-        rv->io.mem_write_w(addr, res);
+        rv->io.mem_write_w(rv, addr, res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1470,13 +1470,13 @@ RVOP(
     amoorw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t res = value1 | value2;
-        rv->io.mem_write_w(addr, res);
+        rv->io.mem_write_w(rv, addr, res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1487,15 +1487,15 @@ RVOP(
     amominw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const int32_t a = value1;
         const int32_t b = value2;
         const uint32_t res = a < b ? value1 : value2;
-        rv->io.mem_write_w(addr, res);
+        rv->io.mem_write_w(rv, addr, res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1506,15 +1506,15 @@ RVOP(
     amomaxw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const int32_t a = value1;
         const int32_t b = value2;
         const uint32_t res = a > b ? value1 : value2;
-        rv->io.mem_write_w(addr, res);
+        rv->io.mem_write_w(rv, addr, res);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1525,13 +1525,13 @@ RVOP(
     amominuw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t ures = value1 < value2 ? value1 : value2;
-        rv->io.mem_write_w(addr, ures);
+        rv->io.mem_write_w(rv, addr, ures);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1542,13 +1542,13 @@ RVOP(
     amomaxuw,
     {
         const uint32_t addr = rv->X[ir->rs1];
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t ures = value1 > value2 ? value1 : value2;
-        rv->io.mem_write_w(addr, ures);
+        rv->io.mem_write_w(rv, addr, ures);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1564,8 +1564,8 @@ RVOP(
     {
         /* copy into the float register */
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        rv->F[ir->rd].v = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        rv->F[ir->rd].v = rv->io.mem_read_w(rv, addr);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1577,8 +1577,8 @@ RVOP(
     {
         /* copy from float registers */
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->F[ir->rs2].v);
+        RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
+        rv->io.mem_write_w(rv, addr, rv->F[ir->rs2].v);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1938,8 +1938,8 @@ RVOP(
     clw,
     {
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, load, true, 1);
-        rv->X[ir->rd] = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
+        rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
     },
     GEN({
         mem;
@@ -1959,8 +1959,8 @@ RVOP(
     csw,
     {
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, store, true, 1);
-        rv->io.mem_write_w(addr, rv->X[ir->rs2]);
+        RV_EXC_MISALIGN_HANDLER(3, STORE, true, 1);
+        rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
     },
     GEN({
         mem;
@@ -2312,8 +2312,8 @@ RVOP(
     clwsp,
     {
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, load, true, 1);
-        rv->X[ir->rd] = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
+        rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
     },
     GEN({
         mem;
@@ -2421,8 +2421,8 @@ RVOP(
     cswsp,
     {
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, store, true, 1);
-        rv->io.mem_write_w(addr, rv->X[ir->rs2]);
+        RV_EXC_MISALIGN_HANDLER(3, STORE, true, 1);
+        rv->io.mem_write_w(rv, addr, rv->X[ir->rs2]);
     },
     GEN({
         mem;
@@ -2440,8 +2440,8 @@ RVOP(
     cflwsp,
     {
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        rv->F[ir->rd].v = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        rv->F[ir->rd].v = rv->io.mem_read_w(rv, addr);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -2452,8 +2452,8 @@ RVOP(
     cfswsp,
     {
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->F[ir->rs2].v);
+        RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
+        rv->io.mem_write_w(rv, addr, rv->F[ir->rs2].v);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -2464,8 +2464,8 @@ RVOP(
     cflw,
     {
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, load, false, 1);
-        rv->F[ir->rd].v = rv->io.mem_read_w(addr);
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        rv->F[ir->rd].v = rv->io.mem_read_w(rv, addr);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -2476,8 +2476,8 @@ RVOP(
     cfsw,
     {
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
-        RV_EXC_MISALIGN_HANDLER(3, store, false, 1);
-        rv->io.mem_write_w(addr, rv->F[ir->rs2].v);
+        RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
+        rv->io.mem_write_w(rv, addr, rv->F[ir->rs2].v);
     },
     GEN({
         assert; /* FIXME: Implement */

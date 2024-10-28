@@ -55,7 +55,7 @@ static int rv_read_mem(void *args, size_t addr, size_t len, void *val)
          * an invalid address. We may have to do error handling in the
          * mem_read_* function directly.
          */
-        *((uint8_t *) val + i) = rv->io.mem_read_b(addr + i);
+        *((uint8_t *) val + i) = rv->io.mem_read_b(rv, addr + i);
     }
 
     return err;
@@ -66,7 +66,7 @@ static int rv_write_mem(void *args, size_t addr, size_t len, void *val)
     riscv_t *rv = (riscv_t *) args;
 
     for (size_t i = 0; i < len; i++)
-        rv->io.mem_write_b(addr + i, *((uint8_t *) val + i));
+        rv->io.mem_write_b(rv, addr + i, *((uint8_t *) val + i));
 
     return 0;
 }

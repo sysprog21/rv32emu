@@ -143,16 +143,17 @@ jobs:
     - name: set up scan-build
       run: |
             sudo apt-get update -q -y
-            sudo apt-get install -q -y clang clang-tools libsdl2-dev libsdl2-mixer-dev
+            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev
             wget https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
             sudo ./llvm.sh 18
+            sudo apt-get install -q -y clang-18 clang-tools-18
       shell: bash
     - name: run scan-build without JIT
-      run: make distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
+      run: make distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
     - name: run scan-build with JIT
       run: |
-          make ENABLE_JIT=1 distclean && scan-build -v -o ~/scan-build --status-bugs --use-cc=clang --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
+          make ENABLE_JIT=1 distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
 
   compliance-test:
     needs: [detect-code-related-file-changes]

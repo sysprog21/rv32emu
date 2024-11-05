@@ -56,7 +56,7 @@ The prebuilt binaries in `rv32emu-prebuilt` are built from the following reposit
 
 To determine performance of the floating point arithmetic, the following RISC-V binaries are built with option `-march=rv32imf`:
 - `quake` : See [sysprog21/quake-embedded](https://github.com/sysprog21/quake-embedded)
-- `scimark2` : See [Scimark 2.0](https://math.nist.gov/scimark2)
+- `scimark2` : See [SciMark 2.0](https://math.nist.gov/scimark2)
 
 There are still some prebuilt standalone RISC-V binaries under `build/` directory only for testing purpose:
 

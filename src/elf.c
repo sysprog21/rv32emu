@@ -353,7 +353,7 @@ free_fd:
 #if HAVE_MMAP
     close(fd);
 #else
-    close(f);
+    fclose(f);
 #endif
 
 free_path:

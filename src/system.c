@@ -3,17 +3,14 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-#if !RV32_HAS(SYSTEM)
-#error "Do not manage to build this file unless you enable system support."
-#endif
-
 #include <assert.h>
 
 #include "devices/plic.h"
 #include "devices/uart.h"
 #include "riscv_private.h"
+#include "system.h"
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if !RV32_HAS(ELF_LOADER)
 void emu_update_uart_interrupts(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
@@ -24,84 +21,6 @@ void emu_update_uart_interrupts(riscv_t *rv)
         attr->plic->active &= ~IRQ_UART_BIT;
     plic_update_interrupts(attr->plic);
 }
-
-#define MMIO_R 1
-#define MMIO_W 0
-
-enum SUPPORTED_MMIO {
-    MMIO_PLIC,
-    MMIO_UART,
-};
-
-/* clang-format off */
-#define MMIO_OP(io, rw)                                                             \
-    switch(io){                                                                     \
-        case MMIO_PLIC:                                                             \
-            IIF(rw)( /* read */                                                     \
-                mmio_read_val = plic_read(PRIV(rv)->plic, addr & 0x3FFFFFF); \
-                plic_update_interrupts(PRIV(rv)->plic);                             \
-                return mmio_read_val;                                               \
-                ,    /* write */                                                    \
-                plic_write(PRIV(rv)->plic, addr & 0x3FFFFFF, val);           \
-                plic_update_interrupts(PRIV(rv)->plic);                             \
-                return;                                                             \
-            )                                                                       \
-            break;                                                                  \
-        case MMIO_UART:                                                             \
-            IIF(rw)( /* read */                                                     \
-                mmio_read_val = u8250_read(PRIV(rv)->uart, addr & 0xFFFFF);         \
-                emu_update_uart_interrupts(rv);                                     \
-                return mmio_read_val;                                               \
-                ,    /* write */                                                    \
-                u8250_write(PRIV(rv)->uart, addr & 0xFFFFF, val);                   \
-                emu_update_uart_interrupts(rv);                                     \
-                return;                                                             \
-            )                                                                       \
-            break;                                                                  \
-        default:                                                                    \
-            fprintf(stderr, "unknown MMIO type %d\n", io);                          \
-            break;                                                                  \
-    }
-/* clang-format on */
-
-#define MMIO_READ()                                         \
-    do {                                                    \
-        uint32_t mmio_read_val;                             \
-        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */ \
-            /* 256 regions of 1MiB */                       \
-            switch ((addr >> 20) & MASK(8)) {               \
-            case 0x0:                                       \
-            case 0x2: /* PLIC (0 - 0x3F) */                 \
-                MMIO_OP(MMIO_PLIC, MMIO_R);                 \
-                break;                                      \
-            case 0x40: /* UART */                           \
-                MMIO_OP(MMIO_UART, MMIO_R);                 \
-                break;                                      \
-            default:                                        \
-                __UNREACHABLE;                              \
-                break;                                      \
-            }                                               \
-        }                                                   \
-    } while (0)
-
-#define MMIO_WRITE()                                        \
-    do {                                                    \
-        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */ \
-            /* 256 regions of 1MiB */                       \
-            switch ((addr >> 20) & MASK(8)) {               \
-            case 0x0:                                       \
-            case 0x2: /* PLIC (0 - 0x3F) */                 \
-                MMIO_OP(MMIO_PLIC, MMIO_W);                 \
-                break;                                      \
-            case 0x40: /* UART */                           \
-                MMIO_OP(MMIO_UART, MMIO_W);                 \
-                break;                                      \
-            default:                                        \
-                __UNREACHABLE;                              \
-                break;                                      \
-            }                                               \
-        }                                                   \
-    } while (0)
 #endif
 
 static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
@@ -116,14 +35,7 @@ static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
         ? (uint32_t *) (attr->mem->mem_base + (ppn << (RV_PG_SHIFT))) \
         : NULL
 
-/* Walk through page tables and get the corresponding PTE by virtual address if
- * exists
- * @rv: RISC-V emulator
- * @addr: virtual address
- * @level: the level of which the PTE is located
- * @return: NULL if a not found or fault else the corresponding PTE
- */
-static uint32_t *mmu_walk(riscv_t *rv, const uint32_t addr, uint32_t *level)
+uint32_t *mmu_walk(riscv_t *rv, const uint32_t addr, uint32_t *level)
 {
     vm_attr_t *attr = PRIV(rv);
     uint32_t ppn = rv->csr_satp & MASK(22);
@@ -178,80 +90,70 @@ static uint32_t *mmu_walk(riscv_t *rv, const uint32_t addr, uint32_t *level)
 /* FIXME: handle access fault, addr out of range check */
 #define MMU_FAULT_CHECK(op, rv, pte, addr, access_bits) \
     mmu_##op##_fault_check(rv, pte, addr, access_bits)
-#define MMU_FAULT_CHECK_IMPL(op, pgfault)                                      \
-    static bool mmu_##op##_fault_check(riscv_t *rv, pte_t *pte, uint32_t addr, \
-                                       uint32_t access_bits)                   \
-    {                                                                          \
-        uint32_t scause;                                                       \
-        uint32_t stval = addr;                                                 \
-        switch (access_bits) {                                                 \
-        case PTE_R:                                                            \
-            scause = PAGEFAULT_LOAD;                                           \
-            break;                                                             \
-        case PTE_W:                                                            \
-            scause = PAGEFAULT_STORE;                                          \
-            break;                                                             \
-        case PTE_X:                                                            \
-            scause = PAGEFAULT_INSN;                                           \
-            break;                                                             \
-        default:                                                               \
-            __UNREACHABLE;                                                     \
-            break;                                                             \
-        }                                                                      \
-        if (pte && (!(*pte & PTE_V))) {                                        \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                   \
-            return false;                                                      \
-        }                                                                      \
-        if (!(pte && (*pte & access_bits))) {                                  \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                   \
-            return false;                                                      \
-        }                                                                      \
-        /*                                                                     \
-         * (1) When MXR=0, only loads from pages marked readable (R=1) will    \
-         * succeed.                                                            \
-         *                                                                     \
-         * (2) When MXR=1, loads from pages marked either readable or          \
-         * executable (R=1 or X=1) will succeed.                               \
-         */                                                                    \
-        if (pte && ((!(SSTATUS_MXR & rv->csr_sstatus) && !(*pte & PTE_R) &&    \
-                     (access_bits == PTE_R)) ||                                \
-                    ((SSTATUS_MXR & rv->csr_sstatus) &&                        \
-                     !((*pte & PTE_R) | (*pte & PTE_X)) &&                     \
-                     (access_bits == PTE_R)))) {                               \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                   \
-            return false;                                                      \
-        }                                                                      \
-        /*                                                                     \
-         * When SUM=0, S-mode memory accesses to pages that are accessible by  \
-         * U-mode will fault.                                                  \
-         */                                                                    \
-        if (pte && rv->priv_mode == RV_PRIV_S_MODE &&                          \
-            !(SSTATUS_SUM & rv->csr_sstatus) && (*pte & PTE_U)) {              \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                   \
-            return false;                                                      \
-        }                                                                      \
-        /* PTE not found, map it in handler */                                 \
-        if (!pte) {                                                            \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                   \
-            return false;                                                      \
-        }                                                                      \
-        /* valid PTE */                                                        \
-        return true;                                                           \
+#define MMU_FAULT_CHECK_IMPL(op, pgfault)                                     \
+    bool mmu_##op##_fault_check(riscv_t *rv, pte_t *pte, uint32_t addr,       \
+                                uint32_t access_bits)                         \
+    {                                                                         \
+        uint32_t scause;                                                      \
+        uint32_t stval = addr;                                                \
+        switch (access_bits) {                                                \
+        case PTE_R:                                                           \
+            scause = PAGEFAULT_LOAD;                                          \
+            break;                                                            \
+        case PTE_W:                                                           \
+            scause = PAGEFAULT_STORE;                                         \
+            break;                                                            \
+        case PTE_X:                                                           \
+            scause = PAGEFAULT_INSN;                                          \
+            break;                                                            \
+        default:                                                              \
+            __UNREACHABLE;                                                    \
+            break;                                                            \
+        }                                                                     \
+        if (pte && (!(*pte & PTE_V))) {                                       \
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
+            return false;                                                     \
+        }                                                                     \
+        if (!(pte && (*pte & access_bits))) {                                 \
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
+            return false;                                                     \
+        }                                                                     \
+        /*                                                                    \
+         * (1) When MXR=0, only loads from pages marked readable (R=1) will   \
+         * succeed.                                                           \
+         *                                                                    \
+         * (2) When MXR=1, loads from pages marked either readable or         \
+         * executable (R=1 or X=1) will succeed.                              \
+         */                                                                   \
+        if (pte && ((!(SSTATUS_MXR & rv->csr_sstatus) && !(*pte & PTE_R) &&   \
+                     (access_bits == PTE_R)) ||                               \
+                    ((SSTATUS_MXR & rv->csr_sstatus) &&                       \
+                     !((*pte & PTE_R) | (*pte & PTE_X)) &&                    \
+                     (access_bits == PTE_R)))) {                              \
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
+            return false;                                                     \
+        }                                                                     \
+        /*                                                                    \
+         * When SUM=0, S-mode memory accesses to pages that are accessible by \
+         * U-mode will fault.                                                 \
+         */                                                                   \
+        if (pte && rv->priv_mode == RV_PRIV_S_MODE &&                         \
+            !(SSTATUS_SUM & rv->csr_sstatus) && (*pte & PTE_U)) {             \
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
+            return false;                                                     \
+        }                                                                     \
+        /* PTE not found, map it in handler */                                \
+        if (!pte) {                                                           \
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
+            return false;                                                     \
+        }                                                                     \
+        /* valid PTE */                                                       \
+        return true;                                                          \
     }
 
 MMU_FAULT_CHECK_IMPL(ifetch, pagefault_insn)
 MMU_FAULT_CHECK_IMPL(read, pagefault_load)
 MMU_FAULT_CHECK_IMPL(write, pagefault_store)
-
-#define get_ppn_and_offset()                                  \
-    uint32_t ppn;                                             \
-    uint32_t offset;                                          \
-    do {                                                      \
-        assert(pte);                                          \
-        ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;       \
-        offset = level == 1 ? addr & MASK((RV_PG_SHIFT + 10)) \
-                            : addr & MASK(RV_PG_SHIFT);       \
-    } while (0)
 
 /* The IO handler that operates when the Memory Management Unit (MMU)
  * is enabled during system emulation is responsible for managing

@@ -533,8 +533,37 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     case rv_insn_cebreak:
 #endif
         return true;
+    default:
+        return false;
     }
-    return false;
+}
+
+FORCE_INLINE bool insn_is_direct_branch(uint8_t opcode)
+{
+    switch (opcode) {
+    case rv_insn_jal:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cjal:
+    case rv_insn_cj:
+#endif
+        return true;
+    default:
+        return false;
+    }
+}
+
+FORCE_INLINE bool insn_is_indirect_branch(uint8_t opcode)
+{
+    switch (opcode) {
+    case rv_insn_jalr:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cjalr:
+    case rv_insn_cjr:
+#endif
+        return true;
+    default:
+        return false;
+    }
 }
 
 static void block_translate(riscv_t *rv, block_t *block)
@@ -571,11 +600,7 @@ static void block_translate(riscv_t *rv, block_t *block)
 #endif
         /* stop on branch */
         if (insn_is_branch(ir->opcode)) {
-            if (ir->opcode == rv_insn_jalr
-#if RV32_HAS(EXT_C)
-                || ir->opcode == rv_insn_cjalr || ir->opcode == rv_insn_cjr
-#endif
-            ) {
+            if (insn_is_indirect_branch(ir->opcode)) {
                 ir->branch_table = calloc(1, sizeof(branch_history_table_t));
                 assert(ir->branch_table);
                 memset(ir->branch_table->PC, -1,
@@ -768,95 +793,89 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #if !RV32_HAS(JIT)
     block_map_t *map = &rv->block_map;
     /* lookup the next block in the block map */
-    block_t *next = block_find(map, rv->PC);
+    block_t *next_blk = block_find(map, rv->PC);
 #else
     /* lookup the next block in the block cache */
-    block_t *next = (block_t *) cache_get(rv->block_cache, rv->PC, true);
+    /*
+     * The function "cache_get()" gets the cached block by the given "key (PC)".
+     * In system simulation, the returned block might be dropped because it is
+     * not the one from the current process (by checking SATP CSR register).
+     */
+    block_t *next_blk = (block_t *) cache_get(rv->block_cache, rv->PC, true);
 #endif
 
-    if (!next) {
+    if (next_blk)
+        return next_blk;
+
 #if !RV32_HAS(JIT)
-        if (map->size * 1.25 > map->block_capacity) {
-            block_map_clear(rv);
-            prev = NULL;
-        }
+    /* clear block list if it is going to be filled */
+    if (map->size * 1.25 > map->block_capacity) {
+        block_map_clear(rv);
+        prev = NULL;
+    }
 #endif
-        /* allocate a new block */
-        next = block_alloc(rv);
-        block_translate(rv, next);
+    /* allocate a new block */
+    next_blk = block_alloc(rv);
 
-        optimize_constant(rv, next);
+    block_translate(rv, next_blk);
+
+    optimize_constant(rv, next_blk);
 #if RV32_HAS(GDBSTUB)
-        if (likely(!rv->debug_mode))
+    if (likely(!rv->debug_mode))
 #endif
-            /* macro operation fusion */
-            match_pattern(rv, next);
+        /* macro operation fusion */
+        match_pattern(rv, next_blk);
 
 #if !RV32_HAS(JIT)
-        /* insert the block into block map */
-        block_insert(&rv->block_map, next);
+    /* insert the block into block map */
+    block_insert(&rv->block_map, next_blk);
 #else
-        /* insert the block into block cache */
-        block_t *delete_target = cache_put(rv->block_cache, rv->PC, &(*next));
-        if (delete_target) {
-            if (prev == delete_target)
-                prev = NULL;
-            chain_entry_t *entry, *safe;
-            /* correctly remove deleted block from its chained block */
-            rv_insn_t *taken = delete_target->ir_tail->branch_taken,
-                      *untaken = delete_target->ir_tail->branch_untaken;
-            if (taken && taken->pc != delete_target->pc_start) {
-                block_t *target = cache_get(rv->block_cache, taken->pc, false);
-                bool flag = false;
-                list_for_each_entry_safe (entry, safe, &target->list, list) {
-                    if (entry->block == delete_target) {
-                        list_del_init(&entry->list);
-                        mpool_free(rv->chain_entry_mp, entry);
-                        flag = true;
-                    }
-                }
-                assert(flag);
-            }
-            if (untaken && untaken->pc != delete_target->pc_start) {
-                block_t *target =
-                    cache_get(rv->block_cache, untaken->pc, false);
-                assert(target);
-                bool flag = false;
-                list_for_each_entry_safe (entry, safe, &target->list, list) {
-                    if (entry->block == delete_target) {
-                        list_del_init(&entry->list);
-                        mpool_free(rv->chain_entry_mp, entry);
-                        flag = true;
-                    }
-                }
-                assert(flag);
-            }
-            /* correctly remove deleted block from the block chained to it */
-            list_for_each_entry_safe (entry, safe, &delete_target->list, list) {
-                if (entry->block == delete_target)
-                    continue;
-                rv_insn_t *target = entry->block->ir_tail;
-                if (target->branch_taken == delete_target->ir_head)
-                    target->branch_taken = NULL;
-                else if (target->branch_untaken == delete_target->ir_head)
-                    target->branch_untaken = NULL;
-                mpool_free(rv->chain_entry_mp, entry);
-            }
-            /* free deleted block */
-            uint32_t idx;
-            rv_insn_t *ir, *next;
-            for (idx = 0, ir = delete_target->ir_head;
-                 idx < delete_target->n_insn; idx++, ir = next) {
-                free(ir->fuse);
-                next = ir->next;
-                mpool_free(rv->block_ir_mp, ir);
-            }
-            mpool_free(rv->block_mp, delete_target);
+    list_add(&next_blk->list, &rv->block_list);
+
+    /* insert the block into block cache */
+    block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, &(*next_blk));
+
+    if (!replaced_blk)
+        return next_blk;
+
+    list_del_init(&replaced_blk->list);
+
+    if (prev == replaced_blk)
+        prev = NULL;
+
+    /* remove the connection from parents */
+    rv_insn_t *replaced_blk_entry = replaced_blk->ir_head;
+
+    /* TODO: record parents of each block to avoid traversing all blocks */
+    block_t *entry;
+    list_for_each_entry (entry, &rv->block_list, list) {
+        rv_insn_t *taken = entry->ir_tail->branch_taken,
+                  *untaken = entry->ir_tail->branch_untaken;
+
+        if (taken == replaced_blk_entry) {
+            entry->ir_tail->branch_taken = NULL;
         }
-#endif
+        if (untaken == replaced_blk_entry) {
+            entry->ir_tail->branch_untaken = NULL;
+        }
     }
 
-    return next;
+    /* free IRs in replaced block */
+    for (rv_insn_t *ir = replaced_blk->ir_head, *next_ir; ir != NULL;
+         ir = next_ir) {
+        next_ir = ir->next;
+
+        if (ir->fuse)
+            free(ir->fuse);
+
+        mpool_free(rv->block_ir_mp, ir);
+    }
+
+    mpool_free(rv->block_mp, replaced_blk);
+#endif
+
+    assert(next_blk);
+    return next_blk;
 }
 
 #if RV32_HAS(JIT)
@@ -918,31 +937,12 @@ void rv_step(void *arg)
             if (!insn_is_unconditional_branch(last_ir->opcode)) {
                 if (is_branch_taken && !last_ir->branch_taken) {
                     last_ir->branch_taken = block->ir_head;
-#if RV32_HAS(JIT)
-                    chain_entry_t *new_entry = mpool_alloc(rv->chain_entry_mp);
-                    new_entry->block = prev;
-                    list_add(&new_entry->list, &block->list);
-#endif
                 } else if (!is_branch_taken && !last_ir->branch_untaken) {
                     last_ir->branch_untaken = block->ir_head;
-#if RV32_HAS(JIT)
-                    chain_entry_t *new_entry = mpool_alloc(rv->chain_entry_mp);
-                    new_entry->block = prev;
-                    list_add(&new_entry->list, &block->list);
-#endif
                 }
-            } else if (IF_insn(last_ir, jal)
-#if RV32_HAS(EXT_C)
-                       || IF_insn(last_ir, cj) || IF_insn(last_ir, cjal)
-#endif
-            ) {
+            } else if (insn_is_direct_branch(last_ir->opcode)) {
                 if (!last_ir->branch_taken) {
                     last_ir->branch_taken = block->ir_head;
-#if RV32_HAS(JIT)
-                    chain_entry_t *new_entry = mpool_alloc(rv->chain_entry_mp);
-                    new_entry->block = prev;
-                    list_add(&new_entry->list, &block->list);
-#endif
                 }
             }
         }

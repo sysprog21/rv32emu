@@ -315,9 +315,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     /* initialize the block map */
     block_map_init(&rv->block_map, BLOCK_MAP_CAPACITY_BITS);
 #else
-    rv->chain_entry_mp =
-        mpool_create(sizeof(chain_entry_t) << BLOCK_IR_MAP_CAPACITY_BITS,
-                     sizeof(chain_entry_t));
+    INIT_LIST_HEAD(&rv->block_list);
     rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
     rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
     assert(rv->block_cache);
@@ -426,7 +424,6 @@ void rv_delete(riscv_t *rv)
     pthread_mutex_destroy(&rv->wait_queue_lock);
     jit_cache_exit(rv->jit_cache);
 #endif
-    mpool_destroy(rv->chain_entry_mp);
     jit_state_exit(rv->jit_state);
     cache_free(rv->block_cache);
 #endif

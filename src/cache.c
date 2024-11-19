@@ -196,33 +196,57 @@ void *cache_get(const cache_t *cache, uint32_t key, bool update)
 
 void *cache_put(cache_t *cache, uint32_t key, void *value)
 {
-    void *delete_value = NULL;
     assert(cache->list_size <= cache->capacity);
-    /* check the cache is full or not before adding a new entry */
-    if (cache->list_size == cache->capacity) {
+
+    lfu_entry_t *replaced_entry = NULL, *entry;
+    hlist_for_each_entry (entry, &cache->map->ht_list_head[cache_hash(key)],
+                          ht_list) {
+        if (entry->key != key)
+            continue;
+        /* update the existing cache */
+        if (entry->value != value) {
+            replaced_entry = entry;
+            break;
+        }
+        /* should not put an identical block to cache */
+        assert(NULL);
+        __UNREACHABLE;
+    }
+
+    /* get the entry to be replaced if cache is full */
+    if (!replaced_entry && cache->list_size == cache->capacity) {
         for (int i = 0; i < THRESHOLD; i++) {
             if (list_empty(cache->lists[i]))
                 continue;
-            lfu_entry_t *delete_target =
+            replaced_entry =
                 list_last_entry(cache->lists[i], lfu_entry_t, list);
-            list_del_init(&delete_target->list);
-            hlist_del_init(&delete_target->ht_list);
-            delete_value = delete_target->value;
-            cache->list_size--;
-            mpool_free(cache_mp, delete_target);
             break;
         }
+        assert(replaced_entry);
     }
+
+    void *replaced_value = NULL;
+    if (replaced_entry) {
+        replaced_value = replaced_entry->value;
+        list_del_init(&replaced_entry->list);
+        hlist_del_init(&replaced_entry->ht_list);
+        mpool_free(cache_mp, replaced_entry);
+        cache->list_size--;
+    }
+
     lfu_entry_t *new_entry = mpool_alloc(cache_mp);
+    INIT_LIST_HEAD(&new_entry->list);
+    INIT_HLIST_NODE(&new_entry->ht_list);
     new_entry->key = key;
     new_entry->value = value;
     new_entry->frequency = 0;
     list_add(&new_entry->list, cache->lists[new_entry->frequency++]);
-    cache->list_size++;
     hlist_add_head(&new_entry->ht_list,
                    &cache->map->ht_list_head[cache_hash(key)]);
+    cache->list_size++;
+
     assert(cache->list_size <= cache->capacity);
-    return delete_value;
+    return replaced_value;
 }
 
 void cache_free(cache_t *cache)

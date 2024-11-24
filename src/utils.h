@@ -106,12 +106,22 @@ static inline void list_del_init(struct list_head *node)
     list_entry((head)->prev, type, member)
 
 #ifdef __HAVE_TYPEOF
+#define list_for_each_entry(entry, head, member)                       \
+    for (entry = list_entry((head)->next, __typeof__(*entry), member); \
+         &entry->member != (head);                                     \
+         entry = list_entry(entry->member.next, __typeof__(*entry), member))
+
 #define list_for_each_entry_safe(entry, safe, head, member)                \
     for (entry = list_entry((head)->next, __typeof__(*entry), member),     \
         safe = list_entry(entry->member.next, __typeof__(*entry), member); \
          &entry->member != (head); entry = safe,                           \
         safe = list_entry(safe->member.next, __typeof__(*entry), member))
 #else
+#define list_for_each_entry(entry, head, member, type)   \
+    for (entry = list_entry((head)->next, type, member); \
+         &entry->member != (head);                       \
+         entry = list_entry(entry->member.next, type, member))
+
 #define list_for_each_entry_safe(entry, safe, head, member, type) \
     for (entry = list_entry((head)->next, type, member),          \
         safe = list_entry(entry->member.next, type, member);      \

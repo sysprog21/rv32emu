@@ -100,17 +100,11 @@ typedef struct block {
 #endif
 } block_t;
 
-#if RV32_HAS(JIT)
-typedef struct {
-    block_t *block;
-    struct list_head list;
-} chain_entry_t;
-#if RV32_HAS(T2C)
+#if RV32_HAS(JIT) && RV32_HAS(T2C)
 typedef struct {
     block_t *block;
     struct list_head list;
 } queue_entry_t;
-#endif
 #endif
 
 typedef struct {
@@ -178,7 +172,7 @@ struct riscv_internal {
     block_map_t block_map; /**< basic block map */
 #else
     struct cache *block_cache;
-    struct mpool *chain_entry_mp;
+    struct list_head block_list; /**< list of all translated blocks */
 #if RV32_HAS(T2C)
     struct list_head wait_queue;
     pthread_mutex_t wait_queue_lock;

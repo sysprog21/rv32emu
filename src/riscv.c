@@ -201,7 +201,9 @@ static void *t2c_runloop(void *arg)
             pthread_mutex_lock(&rv->wait_queue_lock);
             list_del_init(&entry->list);
             pthread_mutex_unlock(&rv->wait_queue_lock);
+            pthread_mutex_lock(&rv->cache_lock);
             t2c_compile(rv, entry->block);
+            pthread_mutex_unlock(&rv->cache_lock);
             free(entry);
         }
     }
@@ -324,6 +326,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     rv->jit_cache = jit_cache_init();
     /* prepare wait queue. */
     pthread_mutex_init(&rv->wait_queue_lock, NULL);
+    pthread_mutex_init(&rv->cache_lock, NULL);
     INIT_LIST_HEAD(&rv->wait_queue);
     /* activate the background compilation thread. */
     pthread_create(&t2c_thread, NULL, t2c_runloop, rv);
@@ -422,6 +425,7 @@ void rv_delete(riscv_t *rv)
     rv->quit = true;
     pthread_join(t2c_thread, NULL);
     pthread_mutex_destroy(&rv->wait_queue_lock);
+    pthread_mutex_destroy(&rv->cache_lock);
     jit_cache_exit(rv->jit_cache);
 #endif
     jit_state_exit(rv->jit_state);

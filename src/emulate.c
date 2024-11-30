@@ -832,11 +832,19 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #else
     list_add(&next_blk->list, &rv->block_list);
 
+#if RV32_HAS(T2C)
+    pthread_mutex_lock(&rv->cache_lock);
+#endif
+
     /* insert the block into block cache */
     block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, next_blk);
 
-    if (!replaced_blk)
+    if (!replaced_blk) {
+#if RV32_HAS(T2C)
+        pthread_mutex_unlock(&rv->cache_lock);
+#endif
         return next_blk;
+    }
 
     list_del_init(&replaced_blk->list);
 
@@ -872,6 +880,9 @@ static block_t *block_find_or_translate(riscv_t *rv)
     }
 
     mpool_free(rv->block_mp, replaced_blk);
+#if RV32_HAS(T2C)
+    pthread_mutex_unlock(&rv->cache_lock);
+#endif
 #endif
 
     assert(next_blk);

@@ -31,6 +31,7 @@
  * Reference:
  * https://elixir.bootlin.com/linux/v6.10.7/source/include/linux/math.h#L121
  */
+#if !defined(HAVE_POSIX_TIMER)
 static inline uint64_t mult_frac(uint64_t x, uint64_t n, uint64_t d)
 {
     const uint64_t q = x / d;
@@ -38,6 +39,7 @@ static inline uint64_t mult_frac(uint64_t x, uint64_t n, uint64_t d)
 
     return q * n + r * n / d;
 }
+#endif
 
 static void get_time_info(int32_t *tv_sec, int32_t *tv_nsec)
 {

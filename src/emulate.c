@@ -833,7 +833,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
     list_add(&next_blk->list, &rv->block_list);
 
     /* insert the block into block cache */
-    block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, &(*next_blk));
+    block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, next_blk);
 
     if (!replaced_blk)
         return next_blk;
@@ -891,7 +891,7 @@ static bool runtime_profiler(riscv_t *rv, block_t *block)
     if (unlikely(freq >= 2 && block->has_loops))
         return true;
     /* using frequency exceeds predetermined threshold */
-    if (unlikely(freq == THRESHOLD))
+    if (unlikely(freq >= THRESHOLD))
         return true;
     return false;
 }
@@ -966,6 +966,11 @@ void rv_step(void *arg)
 #endif
         /* executed through the tier-1 JIT compiler */
         struct jit_state *state = rv->jit_state;
+        /*
+         * TODO: We do not explicitly need the translated block. We only need
+         *       the program counter as a key for searching the corresponding
+         *       entry in compiled binary buffer.
+         */
         if (block->hot) {
             block->n_invoke++;
             ((exec_block_func_t) state->buf)(

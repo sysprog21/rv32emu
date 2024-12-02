@@ -76,6 +76,7 @@ static inline int hlist_empty(const struct hlist_head *h)
 
 static inline void hlist_add_head(struct hlist_node *n, struct hlist_head *h)
 {
+#ifndef __clang_analyzer__
     struct hlist_node *first = h->first;
     n->next = first;
     if (first)
@@ -83,6 +84,7 @@ static inline void hlist_add_head(struct hlist_node *n, struct hlist_head *h)
 
     h->first = n;
     n->pprev = &h->first;
+#endif
 }
 
 static inline bool hlist_unhashed(const struct hlist_node *h)

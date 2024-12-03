@@ -36,10 +36,10 @@ OBJS += $(PATH_TEST_OBJS)
 deps += $(PATH_TEST_OBJS:%.o=%.o.d)
 
 CACHE_TEST_ACTIONS := \
-	lfu/cache-new \
-	lfu/cache-put \
-	lfu/cache-get \
-	lfu/cache-lfu-replace
+	cache-new \
+	cache-put \
+	cache-get \
+	cache-replace
 
 CACHE_TEST_OUT = $(addprefix $(CACHE_TEST_OUTDIR)/, $(CACHE_TEST_ACTIONS:%=%.out))
 MAP_TEST_OUT = $(MAP_TEST_TARGET).out

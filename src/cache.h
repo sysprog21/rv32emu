@@ -21,7 +21,7 @@ struct cache;
  * @size_bits: cache size is 2^size_bits
  * @return: a pointer points to new cache
  */
-struct cache *cache_create(int size_bits);
+struct cache *cache_create(uint32_t size_bits);
 
 /**
  * cache_get - retrieve the specified entry from the cache

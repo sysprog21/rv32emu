@@ -175,7 +175,7 @@ struct riscv_internal {
     struct list_head block_list; /**< list of all translated blocks */
 #if RV32_HAS(T2C)
     struct list_head wait_queue;
-    pthread_mutex_t wait_queue_lock;
+    pthread_mutex_t wait_queue_lock, cache_lock;
     volatile bool quit; /**< Determine the main thread is terminated or not */
 #endif
 #endif

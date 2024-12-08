@@ -922,7 +922,6 @@ static inline bool op_misc_mem(rv_insn_t *ir, const uint32_t insn)
      * FENCE   FM[3:0]   pred[3:0]  succ[3:0]  rs1   000     rd   0001111
      * FENCEI            imm[11:0]             rs1   001     rd   0001111
      */
-
     const uint32_t funct3 = decode_funct3(insn);
 
     switch (funct3) {

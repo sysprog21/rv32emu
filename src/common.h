@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #include "feature.h"
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -26,6 +28,53 @@
 #define ARRAYS_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
 #define MASK(n) (~((~0U << (n))))
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+static inline int rv_clz(uint32_t v)
+{
+    uint32_t leading_zero = 0;
+    if (_BitScanReverse(&leading_zero, v))
+        return 31 - leading_zero;
+    return 32; /* undefined behavior */
+}
+#elif defined(__GNUC__) || defined(__clang__)
+static inline int rv_clz(uint32_t v)
+{
+    /*  https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html */
+    /*  If x is 0, the result is undefined. */
+    return __builtin_clz(v);
+}
+#else /* generic implementation */
+static inline int rv_clz(uint32_t v)
+{
+    /* http://graphics.stanford.edu/~seander/bithacks.html#IntegerLogDeBruijn */
+    static const uint8_t mul_debruijn[] = {
+        0, 9,  1,  10, 13, 21, 2,  29, 11, 14, 16, 18, 22, 25, 3, 30,
+        8, 12, 20, 28, 15, 17, 24, 7,  19, 27, 23, 6,  26, 5,  4, 31,
+    };
+
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+
+    return mul_debruijn[(uint32_t) (v * 0x07C4ACDDU) >> 27];
+}
+#endif
+
+/*
+ * Integer log base 2
+ *
+ * The input x must not be zero.
+ * Otherwise, the result is undefined on some platform.
+ *
+ */
+static inline uint8_t ilog2(uint32_t x)
+{
+    return 31 - rv_clz(x);
+}
 
 /* Alignment macro */
 #if defined(__GNUC__) || defined(__clang__)

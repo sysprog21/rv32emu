@@ -302,7 +302,7 @@ int main(int argc, const char *args[])
     used_col = get_used_col();
 
     if (show_reg) {
-        qsort(rv_reg_stats, ARRAYS_SIZE(rv_reg_stats), sizeof(rv_hist_t),
+        qsort(rv_reg_stats, ARRAY_SIZE(rv_reg_stats), sizeof(rv_hist_t),
               ascending_order ? cmp_asc : cmp_dec);
 
         printf("+--------------------------------------+\n");
@@ -311,7 +311,7 @@ int main(int argc, const char *args[])
         find_max_freq(rv_reg_stats, N_RV_REGS);
         print_hist_stats(rv_reg_stats, N_RV_REGS);
     } else {
-        qsort(rv_insn_stats, ARRAYS_SIZE(rv_insn_stats), sizeof(rv_hist_t),
+        qsort(rv_insn_stats, ARRAY_SIZE(rv_insn_stats), sizeof(rv_hist_t),
               ascending_order ? cmp_asc : cmp_dec);
 
         printf("+---------------------------------------------+\n");

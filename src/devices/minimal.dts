@@ -1,0 +1,69 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+    model = "rv32emu";
+
+    aliases {
+        serial0 = "/soc@F0000000/serial@4000000";
+    };
+
+    chosen {
+        bootargs = "earlycon console=ttyS0";
+        stdout-path = "serial0";
+        linux,initrd-start = <0x1f700000>; /* @403 MiB (503 * 1024 * 1024)     */
+        linux,initrd-end = <0x1fefffff>;   /* @511 MiB (511 * 1024 * 1024 - 1) */
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <65000000>;
+        cpu0: cpu@0 {
+            device_type = "cpu";
+            compatible = "riscv";
+            reg = <0>;
+            riscv,isa = "rv32ima";
+            mmu-type = "riscv,sv32";
+            cpu0_intc: interrupt-controller {
+                #interrupt-cells = <1>;
+                #address-cells = <0>;
+                interrupt-controller;
+                compatible = "riscv,cpu-intc";
+            };
+        };
+    };
+
+    sram: memory@0 {
+        device_type = "memory";
+        reg = <0x00000000 0x20000000>;
+        reg-names = "sram0";
+    };
+
+    soc: soc@F0000000 {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "simple-bus";
+        ranges = <0x0 0xF0000000 0x10000000>;
+        interrupt-parent = <&plic0>;
+
+        plic0: interrupt-controller@0 {
+            #interrupt-cells = <1>;
+            #address-cells = <0>;
+            compatible = "sifive,plic-1.0.0";
+            reg = <0x0000000 0x4000000>;
+            interrupt-controller;
+            interrupts-extended = <&cpu0_intc 9>;
+            riscv,ndev = <31>;
+        };
+
+        serial@4000000 {
+            compatible = "ns16550";
+            reg = <0x4000000 0x100000>;
+            interrupts = <1>;
+            no-loopback-test;
+            clock-frequency = <5000000>; /* the baudrate divisor is ignored */
+        };
+    };
+};

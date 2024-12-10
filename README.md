@@ -58,6 +58,34 @@ If you don't want the JIT compilation feature, simply build with the following:
 $ make
 ```
 
+### Experimental system emulation
+Device Tree compiler (dtc) is required. To install it on Debian/Ubuntu Linux, enter the following command:
+```
+$ sudo apt install device-tree-compiler
+```
+For macOS, use the following command:
+```
+$ brew install dtc
+```
+
+#### Build and run system emulation
+Build and run using default images (the default images will be fetched from [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt) before running):
+```shell
+$ make ENABLE_SYSTEM=1 system
+```
+
+Build using run using specified images:
+```shell
+$ make ENABLE_SYSTEM=1
+$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -b <dtb_path>
+```
+
+#### Build Linux image
+An automated build script is provided to compile the RISC-V cross-compiler, Busybox, and Linux kernel from source. Please note that it only supports the Linux host environment. It can be found at tools/build-linux-image.sh.
+```
+$ make build-linux-img
+```
+
 ### Verify with prebuilt RISC-V ELF files
 
 Run sample RV32I[M] programs:
@@ -98,7 +126,7 @@ The image containing all the necessary tools for development and testing can be 
 * `ENABLE_FULL4G` : Full access to 4 GiB address space
 * `ENABLE_SDL` : Experimental Display and Event System Calls
 * `ENABLE_JIT` : Experimental JIT compiler
-* `ENABLE_SYSTEM` : Experimental system emulation, allowing booting Linux kernel
+* `ENABLE_SYSTEM` : Experimental system emulation, allowing booting Linux kernel. To enable this feature, additional features must also be enabled, such as `ENABLE_Zicsr`, `ENABLE_Zifencei`, `ENABLE_EXT_M`, and `ENABLE_EXT_A`. However, by default, when `ENABLE_SYSTEM` is enabled, `ENABLE_Zicsr`, `ENABLE_Zifencei`, `ENABLE_EXT_M`, and `ENABLE_EXT_A` are automatically enabled.
 
 e.g., run `make ENABLE_EXT_F=0` for the build without floating-point support.
 
@@ -145,7 +173,7 @@ For macOS users, installing `sdiff` might be required:
 $ brew install diffutils
 ```
 
-To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `A`, `F`, `C`, `Zifencei`, `privilege`.
+To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `A`, `F`, `C`, `Zifencei`, `privilege`, `SYSTEM`.
 ```shell
 $ make arch-test RISCV_DEVICE=I
 ```

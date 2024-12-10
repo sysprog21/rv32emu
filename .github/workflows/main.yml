@@ -42,7 +42,7 @@ jobs:
     - name: install-dependencies
       run: |
             sudo apt-get update -q -y
-            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev
+            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect
             .ci/riscv-toolchain-install.sh
             echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
             wget https://apt.llvm.org/llvm.sh
@@ -67,11 +67,11 @@ jobs:
     - name: misalignment test in block emulation
       run: |
             make -C tests/system/alignment/
-            make distclean && make ENABLE_EXT_C=0 ENABLE_SYSTEM=1 misalign-in-blk-emu -j$(nproc)
+            make distclean && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 ENABLE_SYSTEM=1 misalign-in-blk-emu -j$(nproc)
     - name: MMU test
       run: |
             make -C tests/system/mmu/
-            make distclean && make ENABLE_SYSTEM=1 mmu-test -j$(nproc)
+            make distclean && make ENABLE_ELF_LOADER=1 ENABLE_SYSTEM=1 mmu-test -j$(nproc)
     - name: gdbstub test
       run: |
             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test -j$(nproc)
@@ -85,6 +85,11 @@ jobs:
       run: |
             make clean && make ENABLE_UBSAN=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
+    - name: boot Linux kernel test
+      run: |
+            make clean && make ENABLE_SYSTEM=1 && make ENABLE_SYSTEM=1 artifact -j$(nproc)
+            .ci/boot-linux.sh
+            make ENABLE_SYSTEM=1 clean
 
   host-arm64:
     needs: [detect-code-related-file-changes]
@@ -119,6 +124,20 @@ jobs:
           make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
           make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
           make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
+
+  # Currently, this environment only for system emulation testing
+  macOS:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: install-dependencies
+      run: |
+            brew install make dtc expect
+    - name: boot Linux kernel test
+      run: |
+            make clean && make ENABLE_SYSTEM=1 && make ENABLE_SYSTEM=1 artifact -j$(sysctl -n hw.logicalcpu)
+            .ci/boot-linux.sh
+            make ENABLE_SYSTEM=1 clean
 
   coding-style:
     needs: [detect-code-related-file-changes]

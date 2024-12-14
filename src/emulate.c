@@ -41,6 +41,13 @@ extern struct target_ops gdbstub_ops;
 #define IF_rs2(i, r) (i->rs2 == rv_reg_##r)
 #define IF_imm(i, v) (i->imm == v)
 
+#if RV32_HAS(SYSTEM)
+static bool need_clear_block_map = false;
+static uint32_t reloc_enable_mmu_jalr_addr;
+static bool reloc_enable_mmu = false;
+bool need_retranslate = false;
+#endif
+
 static void rv_trap_default_handler(riscv_t *rv)
 {
     rv->csr_mepc += rv->compressed ? 2 : 4;
@@ -70,15 +77,12 @@ static void __trap_handler(riscv_t *rv);
         return false;                                                 \
     }
 
-/* get current time in microseconds and update csr_time register */
+/* FIXME: use more precise methods for updating time, e.g., RTC */
+static uint64_t ctr = 0;
 static inline void update_time(riscv_t *rv)
 {
-    struct timeval tv;
-    rv_gettimeofday(&tv);
-
-    uint64_t t = (uint64_t) tv.tv_sec * 1e6 + (uint32_t) tv.tv_usec;
-    rv->csr_time[0] = t & 0xFFFFFFFF;
-    rv->csr_time[1] = t >> 32;
+    rv->csr_time[0] = ctr & 0xFFFFFFFF;
+    rv->csr_time[1] = ctr >> 32;
 }
 
 #if RV32_HAS(Zicsr)
@@ -176,6 +180,20 @@ static uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
 #endif
 
     *c = val;
+
+#if !RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    /*
+     * guestOS's process might have same VA, so block map cannot be reused
+     *
+     * Instead of calling block_map_clear() directly here,
+     * a flag is set to indicate that the block map should be cleared,
+     * and the clearing occurs after the corresponding 'code' of RVOP
+     * has executed. This prevents the 'code' of RVOP from potentially
+     * accessing a NULL ir.
+     */
+    if (c == &rv->csr_satp)
+        need_clear_block_map = true;
+#endif
 
     return out;
 }
@@ -349,18 +367,31 @@ static set_t pc_set;
 static bool has_loops = false;
 #endif
 
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+extern void emu_update_uart_interrupts(riscv_t *rv);
+static uint32_t peripheral_update_ctr = 64;
+#endif
+
 /* Interpreter-based execution path */
 #define RVOP(inst, code, asm)                                         \
     static bool do_##inst(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, \
                           uint32_t PC)                                \
     {                                                                 \
-        cycle++;                                                      \
+        IIF(RV32_HAS(SYSTEM))(ctr++;, ) cycle++;                      \
         code;                                                         \
     nextop:                                                           \
         PC += __rv_insn_##inst##_len;                                 \
-        if (unlikely(RVOP_NO_NEXT(ir))) {                             \
+        IIF(RV32_HAS(SYSTEM))                                         \
+        (IIF(RV32_HAS(JIT))(                                          \
+             , if (unlikely(need_clear_block_map)) {                  \
+                 block_map_clear(rv);                                 \
+                 need_clear_block_map = false;                        \
+                 rv->csr_cycle = cycle;                               \
+                 rv->PC = PC;                                         \
+                 return false;                                        \
+             }), );                                                   \
+        if (unlikely(RVOP_NO_NEXT(ir)))                               \
             goto end_op;                                              \
-        }                                                             \
         const rv_insn_t *next = ir->next;                             \
         MUST_TAIL return next->impl(rv, next, cycle, PC);             \
     end_op:                                                           \
@@ -522,6 +553,7 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     case rv_insn_jal:
     case rv_insn_jalr:
     case rv_insn_mret:
+    case rv_insn_csrrw:
 #if RV32_HAS(SYSTEM)
     case rv_insn_sret:
 #endif
@@ -568,6 +600,7 @@ FORCE_INLINE bool insn_is_indirect_branch(uint8_t opcode)
 
 static void block_translate(riscv_t *rv, block_t *block)
 {
+retranslate:
     block->pc_start = block->pc_end = rv->PC;
 
     rv_insn_t *prev_ir = NULL;
@@ -580,7 +613,17 @@ static void block_translate(riscv_t *rv, block_t *block)
             prev_ir->next = ir;
 
         /* fetch the next instruction */
-        const uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
+        uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
+
+#if RV32_HAS(SYSTEM)
+        if (!insn && need_retranslate) {
+            memset(block, 0, sizeof(block_t));
+            need_retranslate = false;
+            goto retranslate;
+        }
+#endif
+
+        assert(insn);
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
@@ -589,8 +632,7 @@ static void block_translate(riscv_t *rv, block_t *block)
             break;
         }
         ir->impl = dispatch_table[ir->opcode];
-        ir->pc = block->pc_end;
-        /* compute the end of pc */
+        ir->pc = block->pc_end; /* compute the end of pc */
         block->pc_end += is_compressed(insn) ? 2 : 4;
         block->n_insn++;
         prev_ir = ir;
@@ -908,6 +950,14 @@ static bool runtime_profiler(riscv_t *rv, block_t *block)
 }
 #endif
 
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+static bool rv_has_plic_trap(riscv_t *rv)
+{
+    return ((rv->csr_sstatus & SSTATUS_SIE || !rv->priv_mode) &&
+            (rv->csr_sip & rv->csr_sie));
+}
+#endif
+
 void rv_step(void *arg)
 {
     assert(arg);
@@ -921,6 +971,41 @@ void rv_step(void *arg)
 
     /* loop until hitting the cycle target */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+        /* check for any interrupt after every block emulation */
+
+        if (peripheral_update_ctr-- == 0) {
+            peripheral_update_ctr = 64;
+
+            u8250_check_ready(PRIV(rv)->uart);
+            if (PRIV(rv)->uart->in_ready)
+                emu_update_uart_interrupts(rv);
+        }
+
+        if (ctr > attr->timer)
+            rv->csr_sip |= RV_INT_STI;
+        else
+            rv->csr_sip &= ~RV_INT_STI;
+
+        if (rv_has_plic_trap(rv)) {
+            uint32_t intr_applicable = rv->csr_sip & rv->csr_sie;
+            uint8_t intr_idx = ilog2(intr_applicable);
+            switch (intr_idx) {
+            case (SUPERVISOR_SW_INTR & 0xf):
+                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_SW_INTR, 0);
+                break;
+            case (SUPERVISOR_TIMER_INTR & 0xf):
+                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_TIMER_INTR, 0);
+                break;
+            case (SUPERVISOR_EXTERNAL_INTR & 0xf):
+                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
+                break;
+            default:
+                break;
+            }
+        }
+#endif /* RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER) */
+
         if (prev && prev->pc_start != last_pc) {
             /* update previous block */
 #if !RV32_HAS(JIT)
@@ -1025,7 +1110,7 @@ void rv_step(void *arg)
 #if RV32_HAS(SYSTEM)
 static void __trap_handler(riscv_t *rv)
 {
-    rv_insn_t *ir = mpool_alloc(rv->block_ir_mp);
+    rv_insn_t *ir = mpool_calloc(rv->block_ir_mp);
     assert(ir);
 
     /* set to false by sret implementation */
@@ -1034,10 +1119,14 @@ static void __trap_handler(riscv_t *rv)
         assert(insn);
 
         rv_decode(ir, insn);
+        reloc_enable_mmu_jalr_addr = rv->PC;
+
         ir->impl = dispatch_table[ir->opcode];
         rv->compressed = is_compressed(insn);
         ir->impl(rv, ir, rv->csr_cycle, rv->PC);
     }
+
+    prev = NULL;
 }
 #endif /* RV32_HAS(SYSTEM) */
 
@@ -1132,9 +1221,18 @@ void ebreak_handler(riscv_t *rv)
 void ecall_handler(riscv_t *rv)
 {
     assert(rv);
-#if RV32_HAS(SYSTEM)
-    syscall_handler(rv);
+
+#if RV32_HAS(ELF_LOADER)
     rv->PC += 4;
+    syscall_handler(rv);
+#elif RV32_HAS(SYSTEM)
+    if (rv->priv_mode == RV_PRIV_U_MODE) {
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ECALL_U, 0);
+    } else if (rv->priv_mode ==
+               RV_PRIV_S_MODE) { /* trap to SBI syscall handler */
+        rv->PC += 4;
+        syscall_handler(rv);
+    }
 #else
     SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ECALL_M, 0);
     syscall_handler(rv);

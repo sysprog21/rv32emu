@@ -68,5 +68,10 @@
 #define RV32_FEATURE_SYSTEM 0
 #endif
 
+/* Use ELF loader */
+#ifndef RV32_FEATURE_ELF_LOADER
+#define RV32_FEATURE_ELF_LOADER 0
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x

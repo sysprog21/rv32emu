@@ -9,8 +9,16 @@ CONFIG_FILE := $(OUT)/.config
 
 CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
-CFLAGS += -include src/common.h
+CFLAGS += -include src/common.h -Isrc/
 
+# In the system test suite, the executable is an ELF file (e.g., MMU).
+# However, the Linux kernel emulation includes the Image, DT, and
+# root filesystem (rootfs). Therefore, the test suite needs this
+# flag to load the ELF and differentiate it from the kernel emulation.
+ENABLE_ELF_LOADER ?= 0
+$(call set-feature, ELF_LOADER)
+
+# Enable system emulation
 ENABLE_SYSTEM ?= 0
 $(call set-feature, SYSTEM)
 
@@ -45,10 +53,6 @@ CFLAGS += $(CFLAGS_NO_CET)
 
 OBJS_EXT :=
 
-ifeq ($(call has, SYSTEM), 1)
-OBJS_EXT += system.o
-endif
-
 # Integer Multiplication and Division instructions
 ENABLE_EXT_M ?= 1
 $(call set-feature, EXT_M)
@@ -71,7 +75,14 @@ src/softfloat/build/Linux-RISCV-GCC/Makefile:
 SOFTFLOAT_LIB := $(SOFTFLOAT_OUT)/softfloat.a
 $(SOFTFLOAT_LIB): src/softfloat/build/Linux-RISCV-GCC/Makefile
 	$(MAKE) -C $(dir $<) BUILD_DIR=$(SOFTFLOAT_OUT) CC=$(CC) AR=$(AR)
-$(OUT)/decode.o $(OUT)/riscv.o: $(SOFTFLOAT_LIB)
+ifeq ($(call has, SYSTEM), 1)
+DEV_OUT := $(OUT)/devices
+endif
+OBJS_NEED_SOFTFLOAT := $(OUT)/decode.o \
+                       $(OUT)/riscv.o \
+                       $(DEV_OUT)/uart.o \
+                       $(DEV_OUT)/plic.o
+$(OBJS_NEED_SOFTFLOAT): $(SOFTFLOAT_LIB)
 LDFLAGS += $(SOFTFLOAT_LIB)
 LDFLAGS += -lm
 endif
@@ -204,8 +215,9 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 include mk/external.mk
 include mk/artifact.mk
 include mk/wasm.mk
+include mk/system.mk
 
-all: config $(BIN)
+all: config $(BUILD_DTB) $(BIN)
 
 OBJS := \
 	map.o \
@@ -222,7 +234,7 @@ OBJS := \
 	main.o
 
 OBJS := $(addprefix $(OUT)/, $(OBJS))
-deps := $(OBJS:%.o=%.o.d)
+deps += $(OBJS:%.o=%.o.d) # mk/system.mk includes prior this line, so declare deps at there
 
 ifeq ($(call has, EXT_F), 1)
 $(OBJS): $(SOFTFLOAT_LIB)
@@ -236,7 +248,7 @@ $(OUT)/%.o: src/%.c $(deps_emcc)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
-$(BIN): $(OBJS)
+$(BIN): $(OBJS) $(DEV_OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $^ $(LDFLAGS)
 
@@ -333,9 +345,10 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
+	$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
 distclean: clean
-	-$(RM) $(DOOM_DATA) $(QUAKE_DATA)
+	-$(RM) $(DOOM_DATA) $(QUAKE_DATA) $(BUILDROOT_DATA) $(LINUX_DATA)
+	$(RM) -r $(OUT)/linux-image
 	$(RM) -r $(TIMIDITY_DATA)
 	$(RM) -r $(OUT)/id1
 	$(RM) -r $(DEMO_DIR)

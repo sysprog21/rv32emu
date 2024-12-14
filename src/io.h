@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 
+/* main memory */
 typedef struct {
     uint8_t *mem_base;
     uint64_t mem_size;

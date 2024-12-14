@@ -27,6 +27,12 @@ jobs:
             tests/quake/**
             tests/scimark2/**
             tests/*.c
+      - name: Test file change of Linux image
+        id: test-linux-image-version-change
+        uses: tj-actions/changed-files@v45
+        with:
+          files: |
+            mk/external.mk
       - name: Set alias
         id: has_changed_files
         run: |
@@ -35,8 +41,60 @@ jobs:
           else
             echo "has_changed_files=false" >> $GITHUB_OUTPUT
           fi
+          if [[ ${{ steps.test-linux-image-version-change.outputs.any_modified }} == true ]]; then
+            # Determine if the changes are from Buildroot or the Linux version (The Linux might have several patches, so also need to check the SHA value)
+            echo -n $(git --no-pager diff HEAD^ HEAD | grep -e "+BUILDROOT_VERSION" -e "+LINUX_VERSION" -e "+LINUX_DATA_SHA1") >> linux-image-version-change
+            if [[ -s linux-image-version-change ]]; then
+                echo "has_changed_linux_image_version=true" >> $GITHUB_OUTPUT
+            else
+                echo "has_changed_linux_image_version=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_changed_linux_image_version=false" >> $GITHUB_OUTPUT
+          fi
     outputs:
       has_changed_files: ${{ steps.has_changed_files.outputs.has_changed_files }}
+      has_changed_linux_image_version: ${{ steps.has_changed_files.outputs.has_changed_linux_image_version }}
+
+  build-linux-image-artifact:
+    needs: [detect-file-change]
+    if: ${{ needs.detect-file-change.outputs.has_changed_linux_image_version == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q -y
+          sudo apt-get upgrade -q -y
+          sudo apt-get install -q -y build-essential git
+      - name: Build Linux image
+        run: |
+          make build-linux-image
+          make artifact ENABLE_PREBUILT=0 ENABLE_SYSTEM=1
+          mkdir -p /tmp/rv32emu-linux-image-prebuilt/linux-image
+          mv build/linux-image/Image /tmp/rv32emu-linux-image-prebuilt/linux-image
+          mv build/linux-image/rootfs.cpio /tmp/rv32emu-linux-image-prebuilt/linux-image
+          mv build/sha1sum-linux-image /tmp
+      - name: Create tarball
+        run: |
+          cd /tmp
+          tar -zcvf rv32emu-linux-image-prebuilt.tar.gz rv32emu-linux-image-prebuilt
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RV32EMU_PREBUILT_TOKEN }}
+        run: |
+          RELEASE_TAG=$(date +'%Y.%m.%d'-Linux-Image)
+          cd /tmp
+          gh release create $RELEASE_TAG \
+            --repo sysprog21/rv32emu-prebuilt \
+            --title "$RELEASE_TAG""-nightly"
+          gh release upload $RELEASE_TAG \
+            rv32emu-linux-image-prebuilt.tar.gz \
+            sha1sum-linux-image \
+            --repo sysprog21/rv32emu-prebuilt
 
   build-artifact:
     needs: [detect-file-change]
@@ -83,7 +141,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RV32EMU_PREBUILT_TOKEN }}
         run: |
-          RELEASE_TAG=$(date +'%Y.%m.%d')
+          RELEASE_TAG=$(date +'%Y.%m.%d'-ELF)
           cd /tmp
           gh release create $RELEASE_TAG \
             --repo sysprog21/rv32emu-prebuilt \

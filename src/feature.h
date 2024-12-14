@@ -73,5 +73,15 @@
 #define RV32_FEATURE_ELF_LOADER 0
 #endif
 
+/* MOP fusion */
+#ifndef RV32_FEATURE_MOP_FUSION
+#define RV32_FEATURE_MOP_FUSION 1
+#endif
+
+/* Block chaining */
+#ifndef RV32_FEATURE_BLOCK_CHAINING
+#define RV32_FEATURE_BLOCK_CHAINING 1
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x

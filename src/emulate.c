@@ -865,8 +865,10 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #if RV32_HAS(GDBSTUB)
     if (likely(!rv->debug_mode))
 #endif
+#if RV32_HAS(MOP_FUSION)
         /* macro operation fusion */
         match_pattern(rv, next_blk);
+#endif
 
 #if !RV32_HAS(JIT)
     /* insert the block into block map */
@@ -1027,6 +1029,7 @@ void rv_step(void *arg)
          * the previous block.
          */
 
+#if RV32_HAS(BLOCK_CHAINING)
         if (prev) {
             rv_insn_t *last_ir = prev->ir_tail;
             /* chain block */
@@ -1042,6 +1045,7 @@ void rv_step(void *arg)
                 }
             }
         }
+#endif
         last_pc = rv->PC;
 #if RV32_HAS(JIT)
 #if RV32_HAS(T2C)

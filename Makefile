@@ -18,6 +18,14 @@ CFLAGS += -include src/common.h -Isrc/
 ENABLE_ELF_LOADER ?= 0
 $(call set-feature, ELF_LOADER)
 
+# Enable MOP fusion, easier for ablation study
+ENABLE_MOP_FUSION ?= 1
+$(call set-feature, MOP_FUSION)
+
+# Enable block chaining, easier for ablation study
+ENABLE_BLOCK_CHAINING ?= 1
+$(call set-feature, BLOCK_CHAINING)
+
 # Enable system emulation
 ENABLE_SYSTEM ?= 0
 $(call set-feature, SYSTEM)

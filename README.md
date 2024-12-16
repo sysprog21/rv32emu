@@ -42,7 +42,7 @@ and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
 
 ### Experimental JIT compilation
 The tier-2 JIT compiler in `rv32emu` leverages LLVM for powerful optimization.
-Therefore, the target system must have [`LLVM`](https://llvm.org/) installed, with version 17 recommended.
+Therefore, the target system must have [`LLVM`](https://llvm.org/) installed, with version 18 recommended.
 If `LLVM` is not installed, only the tier-1 JIT compiler will be used for performance enhancement.
 
 * macOS: `brew install llvm@18`

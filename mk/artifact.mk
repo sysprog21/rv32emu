@@ -34,10 +34,14 @@ TEST_BENCHES += \
 SCIMARK2_URL := https://math.nist.gov/scimark2/scimark2_1c.zip
 SCIMARK2_SHA1 := de278c5b8cef84ab6dda41855052c7bfef919e36
 
-SHELL_HACK := $(shell mkdir -p $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32)
+SHELL_HACK := $(shell mkdir -p $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32 $(BIN_DIR)/linux-image)
 
 ifeq ($(call has, PREBUILT), 1)
-  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest -O- | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+ifeq ($(call has, SYSTEM), 1)
+  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- | grep '"tag_name"' | grep "Linux-Image" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+else
+  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- | grep '"tag_name"' | grep "ELF" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+endif
 else
   # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,
   # we disable the hardware floating-point and the related SIMD operation of x86.
@@ -53,11 +57,20 @@ endif
 artifact: fetch-checksum ieeelib scimark2
 ifeq ($(call has, PREBUILT), 1)
 	$(Q)$(PRINTF) "Checking SHA-1 of prebuilt binaries ... "
+	$(Q)$(eval RES := 0)
 
+ifeq ($(call has, SYSTEM), 1)
+	$(Q)$(eval PREBUILT_LINUX_IMAGE_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-linux-image | awk '{  print $$2 };'))
+
+	$(Q)$(eval $(foreach FILE,$(PREBUILT_LINUX_IMAGE_FILENAME), \
+	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-image | awk '{ print $$1 };'),$(BIN_DIR)/linux-image/$(FILE),RES) \
+	))
+
+	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-linux-image-prebuilt.tar.gz)
+else
 	$(Q)$(eval PREBUILT_X86_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{  print $$2 };'))
 	$(Q)$(eval PREBUILT_RV32_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$2 };'))
 
-	$(Q)$(eval RES := 0)
 	$(Q)$(eval $(foreach FILE,$(PREBUILT_X86_FILENAME), \
 	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{ print $$1 };'),$(BIN_DIR)/linux-x86-softfp/$(FILE),RES) \
 	))
@@ -65,12 +78,19 @@ ifeq ($(call has, PREBUILT), 1)
 	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$1 };'),$(BIN_DIR)/riscv32/$(FILE),RES) \
 	))
 
+	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt.tar.gz)
+endif
+
 	$(Q)if [ "$(RES)" = "1" ]; then \
 	    $(PRINTF) "\n$(YELLOW)SHA-1 verification fails! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
-	    wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/rv32emu-prebuilt.tar.gz -O- | tar -C build --strip-components=1 -xz; \
+	    wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/$(RV32EMU_PREBUILT_TARBALL) -O- | tar -C build --strip-components=1 -xz; \
 	else \
 	    $(call notice, [OK]); \
 	fi
+else
+ifeq ($(call has, SYSTEM), 1)
+	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) Image >> sha1sum-linux-image)
+	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) rootfs.cpio >> sha1sum-linux-image)
 else
 	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
 	$(Q)for tb in $(TEST_SUITES); do \
@@ -103,17 +123,24 @@ else
 	$(Q)(cd $(BIN_DIR)/linux-x86-softfp; for fd in *; do $(SHA1SUM) "$$fd"; done) >> $(BIN_DIR)/sha1sum-linux-x86-softfp
 	$(Q)(cd $(BIN_DIR)/riscv32; for fd in *; do $(SHA1SUM) "$$fd"; done) >> $(BIN_DIR)/sha1sum-riscv32
 endif
+endif
 
 fetch-checksum:
 ifeq ($(call has, PREBUILT), 1)
 	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ... "
+ifeq ($(call has, SYSTEM), 1)
+	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-image https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-linux-image
+	$(Q)$(call notice, [OK])
+else
 	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-x86-softfp https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-linux-x86-softfp
 	$(Q)wget -q -O $(BIN_DIR)/sha1sum-riscv32 https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-riscv32
 	$(Q)$(call notice, [OK])
 endif
+endif
 
 scimark2:
 ifeq ($(call has, PREBUILT), 0)
+ifeq ($(call has, SYSTEM), 0)
 	$(Q)$(call prologue,"scimark2")
 	$(Q)$(call download,$(SCIMARK2_URL))
 	$(Q)$(call verify,$(SCIMARK2_SHA1),$(notdir $(SCIMARK2_URL)))
@@ -125,6 +152,7 @@ ifeq ($(call has, PREBUILT), 0)
 	$(Q)$(MAKE) -C ./tests/scimark2 clean && $(RM) ./tests/scimark2/scimark2.o
 	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CROSS_COMPILE)gcc CFLAGS="-march=rv32imf -mabi=ilp32 -O2"
 	$(Q)cp ./tests/scimark2/scimark2 $(BIN_DIR)/riscv32/scimark2
+endif
 endif
 
 ieeelib:

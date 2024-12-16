@@ -253,7 +253,7 @@ static struct host_reg register_map[] = {
 #endif
 
 static const int n_host_regs =
-    ARRAYS_SIZE(register_map); /* the number of avavliable host register */
+    ARRAY_SIZE(register_map); /* the number of avavliable host register */
 
 static inline void set_dirty(int reg_idx, bool is_dirty)
 {
@@ -1237,7 +1237,7 @@ static void prepare_translate(struct jit_state *state)
 {
 #if defined(__x86_64__)
     /* Save platform non-volatile registers */
-    for (uint32_t i = 0; i < ARRAYS_SIZE(nonvolatile_reg); i++)
+    for (uint32_t i = 0; i < ARRAY_SIZE(nonvolatile_reg); i++)
         emit_push(state, nonvolatile_reg[i]);
 
     /* Assuming that the stack is 16-byte aligned just before the call
@@ -1247,7 +1247,7 @@ static void prepare_translate(struct jit_state *state)
      * registers were pushed onto the stack during state saving (see above),
      * an additional 8 bytes must be added to regain 16-byte alignment.
      */
-    if (!(ARRAYS_SIZE(nonvolatile_reg) % 2))
+    if (!(ARRAY_SIZE(nonvolatile_reg) % 2))
         emit_alu64_imm32(state, 0x81, 5, RSP, 0x8);
 
     /* Set JIT R10 (the way to access the frame in JIT) to match RSP. */
@@ -1272,17 +1272,17 @@ static void prepare_translate(struct jit_state *state)
     /* Deallocate stack space by restoring RSP from JIT R10. */
     emit_mov(state, RBP, RSP);
 
-    if (!(ARRAYS_SIZE(nonvolatile_reg) % 2))
+    if (!(ARRAY_SIZE(nonvolatile_reg) % 2))
         emit_alu64_imm32(state, 0x81, 0, RSP, 0x8);
 
     /* Restore platform non-volatile registers */
-    for (uint32_t i = 0; i < ARRAYS_SIZE(nonvolatile_reg); i++)
-        emit_pop(state, nonvolatile_reg[ARRAYS_SIZE(nonvolatile_reg) - i - 1]);
+    for (uint32_t i = 0; i < ARRAY_SIZE(nonvolatile_reg); i++)
+        emit_pop(state, nonvolatile_reg[ARRAY_SIZE(nonvolatile_reg) - i - 1]);
 
     /* Return */
     emit1(state, 0xc3);
 #elif defined(__aarch64__)
-    uint32_t register_space = ARRAYS_SIZE(callee_reg) * 8 + 2 * 8;
+    uint32_t register_space = ARRAY_SIZE(callee_reg) * 8 + 2 * 8;
     state->stack_size = align_up(STACK_SIZE + register_space, 16);
     emit_addsub_imm(state, true, AS_SUB, SP, SP, state->stack_size);
 
@@ -1292,7 +1292,7 @@ static void prepare_translate(struct jit_state *state)
     emit_addsub_imm(state, true, AS_ADD, R29, SP, 0);
 
     /* Save callee saved registers */
-    for (size_t i = 0; i < ARRAYS_SIZE(callee_reg); i += 2) {
+    for (size_t i = 0; i < ARRAY_SIZE(callee_reg); i += 2) {
         emit_loadstorepair_imm(state, LSP_STPX, callee_reg[i],
                                callee_reg[i + 1], SP, (i + 2) * 8);
     }
@@ -1302,7 +1302,7 @@ static void prepare_translate(struct jit_state *state)
     state->exit_loc = state->offset;
 
     /* Restore callee-saved registers).  */
-    for (size_t i = 0; i < ARRAYS_SIZE(callee_reg); i += 2) {
+    for (size_t i = 0; i < ARRAY_SIZE(callee_reg); i += 2) {
         emit_loadstorepair_imm(state, LSP_LDPX, callee_reg[i],
                                callee_reg[i + 1], SP, (i + 2) * 8);
     }

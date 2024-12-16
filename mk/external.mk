@@ -21,21 +21,32 @@ define epilogue
 endef
 
 # $(1): compressed source URL
+# if URL contains git command, then use git
 define download
-    $(eval _ := $(shell wget -q --show-progress --continue "$(strip $(1))"))
+    $(eval _ :=  \
+        $(if $(findstring git,$(1)), \
+            ($(eval _ := $(shell $(1)))), \
+            ($(eval _ := $(shell wget -q --show-progress --continue "$(strip $(1))"))) \
+    ))
 endef
 
 # $(1): destination directory
 # $(2): compressed source(.zip or.gz)
+# For Buildroot and Linux kernel, no need to extract
 define extract
     $(eval COMPRESSED_SUFFIX := $(suffix $(2)))
     $(eval COMPRESSED_IS_ZIP := $(filter $(COMPRESSED_SUFFIX),.zip))
-    $(eval _ :=  \
-        $(if $(COMPRESSED_IS_ZIP), \
-            ($(eval EXTRACTOR := unzip -d $(1) $(2))), \
-            ($(eval EXTRACTOR := tar -xf $(2) -C $(1))) \
-    ))
-    $(eval _ := $(shell $(EXTRACTOR)))
+    $(eval _ := \
+        $(if $(findstring git,$(2)), \
+            (# git is used, do nothing), \
+            ($(eval _ :=  \
+                $(if $(COMPRESSED_IS_ZIP), \
+                    ($(eval EXTRACTOR := unzip -d $(1) $(2))), \
+                    ($(eval EXTRACTOR := tar -xf $(2) -C $(1))) \
+            )) \
+            $(eval _ := $(shell $(EXTRACTOR))))
+        ) \
+    )
 endef
 
 # $(1): correct SHA1 value
@@ -51,7 +62,7 @@ define verify
         $(if $(filter 1,$(COMPRESSED_IS_DIR)), \
             ($(eval VERIFIER :=  \
                 echo $(1) > $(SHA1_FILE1) \
-                | find $(2) -type f -print0 \
+                | find $(2) -type f -not -path '*/.git/*' -print0 \
                 | sort -z \
                 | xargs -0 $(SHA1SUM) \
                 | sort \
@@ -91,6 +102,18 @@ TIMIDITY_DATA_URL = http://www.libsdl.org/projects/mixer/timidity/timidity.tar.g
 TIMIDITY_DATA = $(OUT)/timidity
 TIMIDITY_DATA_SHA1 = cf6217a5d824b717ec4a07e15e6c129a4657ca25
 
+# Buildroot
+BUILDROOT_VERSION = 2024.11
+BUILDROOT_DATA = /tmp/buildroot
+BUILDROOT_DATA_URL = git clone https://github.com/buildroot/buildroot $(BUILDROOT_DATA) -b $(BUILDROOT_VERSION) --depth=1
+BUILDROOT_DATA_SHA1 = e678801287ab68369af1731dcf1acc39e4adccff
+
+# Linux kernel
+LINUX_VERSION = linux-6.1.y
+LINUX_DATA = /tmp/linux
+LINUX_DATA_URL = git clone https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git $(LINUX_DATA) -b $(LINUX_VERSION) --depth=1
+LINUX_DATA_SHA1 = 43b6b7fbf9231656d7b65f118445996172250fc0
+
 define download-extract-verify
 $($(T)_DATA):
 	$(Q)$$(call prologue,$$@)
@@ -100,5 +123,5 @@ $($(T)_DATA):
 	$(Q)$$(call epilogue,$(notdir $($(T)_DATA_URL)),$(SHA1_FILE1),$(SHA1_FILE2))
 endef
 
-EXTERNAL_DATA = DOOM QUAKE TIMIDITY
+EXTERNAL_DATA = DOOM QUAKE TIMIDITY BUILDROOT LINUX
 $(foreach T,$(EXTERNAL_DATA),$(eval $(download-extract-verify)))

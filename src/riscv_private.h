@@ -178,11 +178,11 @@ struct riscv_internal {
     pthread_mutex_t wait_queue_lock, cache_lock;
     volatile bool quit; /**< Determine the main thread is terminated or not */
 #endif
+    void *jit_state;
+    void *jit_cache;
 #endif
     struct mpool *block_mp, *block_ir_mp;
 
-    void *jit_state;
-    void *jit_cache;
 #if RV32_HAS(GDBSTUB)
     /* gdbstub instance */
     gdbstub_t gdbstub;

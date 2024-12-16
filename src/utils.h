@@ -24,6 +24,14 @@ void rv_clock_gettime(struct timespec *tp);
         return (val * 0x61C88647 >> (32 - size_bits)) & ((size) - (1)); \
     }
 
+#define HASH_FUNC_IMPL_64(name, size_bits, size)                   \
+    FORCE_INLINE uint64_t name(uint64_t val)                       \
+    {                                                              \
+        /* 0x61c8864680b583eb is 64-bit golden ratio */            \
+        return (val * 0x61c8864680b583ebull >> (64 - size_bits)) & \
+               ((size) - (1));                                     \
+    }
+
 /* sanitize_path returns the shortest path name equivalent to path
  * by purely lexical processing. It applies the following rules
  * iteratively until no further processing can be done:
@@ -133,11 +141,26 @@ static inline void list_del_init(struct list_head *node)
 #define SET_SIZE (1 << SET_SIZE_BITS)
 #define SET_SLOTS_SIZE 32
 
+/*
+ * Use composed key in JIT system simulation. The higher 32 bits stores the
+ * value of supervisor address translation and protection (SATP) register,
+ * and the lower 32 bits stores the program counter (PC) as same as userspace
+ * simulation.
+ */
+#define COMPOSED_KEY(block)                                           \
+    IIF(RV32_HAS(SYSTEM))                                             \
+    (((((uint64_t) block->satp) << 32) | (uint64_t) block->pc_start), \
+     (uint32_t) block->pc_start)
+
 /* The set consists of SET_SIZE buckets, with each bucket containing
  * SET_SLOTS_SIZE slots.
  */
 typedef struct {
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+    uint64_t table[SET_SIZE][SET_SLOTS_SIZE];
+#else
     uint32_t table[SET_SIZE][SET_SLOTS_SIZE];
+#endif
 } set_t;
 
 /**
@@ -151,11 +174,19 @@ void set_reset(set_t *set);
  * @set: a pointer points to target set
  * @key: the key of the inserted entry
  */
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+bool set_add(set_t *set, uint64_t key);
+#else
 bool set_add(set_t *set, uint32_t key);
+#endif
 
 /**
  * set_has - check whether the element exist in the set or not
  * @set: a pointer points to target set
  * @key: the key of the inserted entry
  */
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+bool set_has(set_t *set, uint64_t key);
+#else
 bool set_has(set_t *set, uint32_t key);
+#endif

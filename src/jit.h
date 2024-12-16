@@ -14,11 +14,17 @@ struct jump {
     uint32_t offset_loc;
     uint32_t target_pc;
     uint32_t target_offset;
+#if RV32_HAS(SYSTEM)
+    uint32_t target_satp;
+#endif
 };
 
 struct offset_map {
     uint32_t pc;
     uint32_t offset;
+#if RV32_HAS(SYSTEM)
+    uint32_t satp;
+#endif
 };
 
 struct jit_state {

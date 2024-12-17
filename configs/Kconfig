@@ -151,6 +151,15 @@ config EXT_C
       Enable 16-bit compressed instruction encoding.
       Reduces code size by approximately 25-30%.
 
+config EXT_V
+    bool "V - Vector Extension (experimental, decode only)"
+    default n
+    select EXT_F
+    help
+      Enable RISC-V "V" Vector extension (decode + partial execution).
+      Vector load/store shares its opcode with load_fp/store_fp, so
+      enabling V automatically selects F. VLEN defaults to 128.
+
 comment "Zicsr and Zifencei Extensions"
 
 config Zicsr

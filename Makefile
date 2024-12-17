@@ -58,7 +58,7 @@ deps :=
 # Feature Flags (Kconfig -> RV32_FEATURE_*)
 $(call set-features, ELF_LOADER MOP_FUSION BLOCK_CHAINING LOG_COLOR)
 $(call set-features, SYSTEM GOLDFISH_RTC ARCH_TEST)
-$(call set-features, EXT_M EXT_A EXT_F EXT_C RV32E)
+$(call set-features, EXT_M EXT_A EXT_F EXT_C EXT_V RV32E)
 $(call set-features, Zicsr Zifencei Zba Zbb Zbc Zbs)
 $(call set-features, SDL SDL_MIXER GDBSTUB JIT)
 
@@ -92,6 +92,12 @@ OBJS_NEED_SOFTFLOAT += $(DEV_OUT)/uart.o $(DEV_OUT)/plic.o
 endif
 $(OBJS_NEED_SOFTFLOAT): $(SOFTFLOAT_LIB)
 LDFLAGS += $(SOFTFLOAT_LIB) -lm
+endif
+
+# Extension: Vector
+ifeq ($(CONFIG_EXT_V),y)
+VLEN ?= 128
+CFLAGS += -DVLEN=$(VLEN)
 endif
 
 # Extension: SDL Graphics

@@ -296,6 +296,9 @@ typedef uint32_t riscv_exception_t;
 #if RV32_HAS(EXT_F)
 typedef softfloat_float32_t riscv_float_t;
 #endif
+#if RV32_HAS(EXT_V)
+typedef uint32_t vreg_t[VLEN / 32];
+#endif
 
 /* memory read handlers */
 typedef riscv_word_t (*riscv_mem_ifetch)(riscv_t *rv, riscv_word_t addr);

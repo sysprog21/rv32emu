@@ -3031,3 +3031,4110 @@ RVOP(
     }))
 
 #endif
+
+#if RV32_HAS(EXT_V)
+#define V_NOP                        \
+    for (int i = 0; i < 4; i++) {    \
+        (rv)->V[rv_reg_zero][i] = 0; \
+    }
+
+RVOP(
+    vsetvli,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsetivli,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsetvl,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl1re8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl1re16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl1re32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl1re64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl2re8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl2re16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+RVOP(
+    vl2re32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl2re64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl4re8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl4re16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl4re32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl4re64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl8re8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl8re16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl8re32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl8re64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlm_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg2ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg3ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg4ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg5ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg6ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg7ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg8ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg2ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg3ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg4ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg5ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg6ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg7ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg8ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg2ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg3ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg4ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg5ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg6ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg7ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg8ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg2ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg3ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg4ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg5ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg6ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg7ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg8ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlse8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlse16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlse32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlse64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg2e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg3e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg4e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg5e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg6e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg7e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg8e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg2e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg3e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg4e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg5e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg6e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg7e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg8e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg2e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg3e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg4e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg5e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg6e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg7e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg8e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg2e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg3e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg4e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg5e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg6e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg7e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg8e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg2ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg3ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg4ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg5ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg6ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg7ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg8ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg2ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg3ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg4ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg5ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg6ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg7ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg8ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg2ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg3ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg4ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg5ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg6ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg7ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg8ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg2ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg3ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg4ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg5ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg6ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg7ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg8ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+
+RVOP(
+    vse8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vse16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vse32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vse64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg2e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg3e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg4e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg5e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg6e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg7e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg8e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg2e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg3e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg4e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg5e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg6e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg7e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg8e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg2e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg3e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg4e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg5e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg6e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg7e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg8e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg2e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg3e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg4e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg5e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg6e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg7e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg8e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vs1r_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vs2r_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vs4r_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vs8r_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsm_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg2ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg3ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg4ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg5ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg6ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg7ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg8ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg2ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg3ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg4ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg5ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg6ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg7ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg8ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg2ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg3ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg4ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg5ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg6ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg7ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg8ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg2ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg3ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg4ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg5ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg6ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg7ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg8ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsse8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsse16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsse32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsse64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg2e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg3e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg4e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg5e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg6e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg7e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg8e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg2e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg3e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg4e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg5e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg6e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg7e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg8e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg2e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg3e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg4e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg5e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg6e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg7e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg8e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg2e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg3e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg4e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg5e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg6e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg7e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg8e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg2ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg3ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg4ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg5ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg6ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg7ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg8ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg2ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg3ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg4ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg5ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg6ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg7ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg8ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg2ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg3ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg4ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg5ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg6ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg7ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg8ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg2ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg3ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg4ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg5ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg6ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg7ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg8ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+
+RVOP(
+    vadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vadd_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrsub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrsub_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vminu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vminu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmin_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmin_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmaxu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmaxu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmax_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmax_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vand_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vand_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vand_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vor_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vor_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vor_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vxor_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vxor_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vxor_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrgather_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrgather_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrgather_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslideup_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslideup_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrgatherei16_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslidedown_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslidedown_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vadc_vvm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vadc_vxm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vadc_vim,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadc_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadc_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsbc_vvm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsbc_vxm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsbc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsbc_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmerge_vvm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmerge_vxm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmerge_vim,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmv_v_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmv_v_x,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmv_v_i,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmseq_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmseq_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmseq_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsne_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsne_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsne_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsltu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsltu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmslt_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmslt_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsleu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsleu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsleu_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsle_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsle_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsle_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsgtu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsgtu_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsgt_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsgt_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsaddu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsaddu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsaddu_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsadd_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssubu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssubu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsll_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsll_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsll_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsmul_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsrl_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsrl_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsrl_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsra_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsra_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsra_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssrl_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssrl_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssrl_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssra_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssra_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssra_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsrl_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsrl_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsrl_wi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsra_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsra_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsra_wi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclipu_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclipu_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclipu_wi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclip_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclip_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclip_wi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwredsumu_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwredsum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+
+
+RVOP(
+    vredsum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredand_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredor_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredxor_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredminu_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredmin_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredmaxu_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredmax_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vaaddu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vaaddu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vaadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vaadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vasubu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vasubu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vasub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vasub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslide1up_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslide1down_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vcompress_vm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmandn_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmand_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmor_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmxor_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmorn_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmnand_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmnor_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmxnor_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vdivu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vdivu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vdiv_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vdiv_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vremu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vremu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrem_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrem_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulhu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulhu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmul_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulhsu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulhsu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulh_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulh_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnmsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnmsub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmacc_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnmsac_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwaddu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwaddu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsubu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsubu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwaddu_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwaddu_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwadd_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwadd_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsubu_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsubu_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsub_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsub_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmulu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmulu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmulsu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmulsu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmul_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmacc_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccus_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccsu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccsu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmv_s_x,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmv_x_s,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vcpop_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfirst_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsbf_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsof_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsif_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    viota_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vid_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+
+RVOP(
+    vfadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfadd_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfredusum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfredosum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmin_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmin_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfredmin_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmax_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmax_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfredmax_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnj_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnj_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnjn_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnjn_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnjx_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnjx_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfslide1up_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfslide1down_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmerge_vfm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmv_v_f,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfeq_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfeq_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfle_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfle_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmflt_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmflt_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfne_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfne_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfgt_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfge_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfdiv_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfdiv_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfrdiv_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmul_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfrsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmadd_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmadd_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmacc_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmacc_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmsac_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmsac_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwadd_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwredusum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwredosum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwadd_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwadd_wf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwsub_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwsub_wf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmul_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmacc_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwnmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwnmacc_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmsac_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwnmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwnmsac_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#endif

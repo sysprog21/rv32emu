@@ -11,6 +11,8 @@ CFLAGS = -std=gnu99 -O2 -Wall -Wextra
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h -Isrc/
 
+OBJS_EXT :=
+
 # In the system test suite, the executable is an ELF file (e.g., MMU).
 # However, the Linux kernel emulation includes the Image, DT, and
 # root filesystem (rootfs). Therefore, the test suite needs this
@@ -29,6 +31,9 @@ $(call set-feature, BLOCK_CHAINING)
 # Enable system emulation
 ENABLE_SYSTEM ?= 0
 $(call set-feature, SYSTEM)
+ifeq ($(call has, SYSTEM), 1)
+OBJS_EXT += system.o
+endif
 
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
@@ -58,8 +63,6 @@ endif
 
 # Disable Intel's Control-flow Enforcement Technology (CET)
 CFLAGS += $(CFLAGS_NO_CET)
-
-OBJS_EXT :=
 
 # Integer Multiplication and Division instructions
 ENABLE_EXT_M ?= 1
@@ -185,7 +188,7 @@ ifeq ($(call has, JIT), 1)
         ifeq ("$(CHECK_LLVM_LIBS)", "0")
             OBJS_EXT += t2c.o
             CFLAGS += -g $(shell $(LLVM_CONFIG) --cflags)
-            LDFLAGS += $(shell $(LLVM_CONFIG) --libs)
+            LDFLAGS += $(shell $(LLVM_CONFIG) --libfiles)
         else
             $(error No llvm-config-18 installed. Check llvm-config-18 installation in advance, or use "ENABLE_T2C=0" to disable tier-2 LLVM compiler)
         endif
@@ -193,9 +196,6 @@ ifeq ($(call has, JIT), 1)
     ifneq ($(processor),$(filter $(processor),x86_64 aarch64 arm64))
         $(error JIT mode only supports for x64 and arm64 target currently.)
     endif
-
-src/rv32_jit.c:
-	$(Q)tools/gen-jit-template.py $(CFLAGS) > $@
 
 $(OUT)/jit.o: src/jit.c src/rv32_jit.c
 	$(VECHO) "  CC\t$@\n"
@@ -353,7 +353,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
+	$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT)
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA) $(BUILDROOT_DATA) $(LINUX_DATA)
 	$(RM) -r $(OUT)/linux-image

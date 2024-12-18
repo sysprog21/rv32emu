@@ -42,7 +42,9 @@ extern struct target_ops gdbstub_ops;
 #define IF_imm(i, v) (i->imm == v)
 
 #if RV32_HAS(SYSTEM)
+#if !RV32_HAS(JIT)
 static bool need_clear_block_map = false;
+#endif
 static uint32_t reloc_enable_mmu_jalr_addr;
 static bool reloc_enable_mmu = false;
 bool need_retranslate = false;
@@ -704,6 +706,7 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
  * Strategies are being devised to increase the number of instructions that
  * match the pattern, including possible instruction reordering.
  */
+#if RV32_HAS(MOP_FUSION)
 static void match_pattern(riscv_t *rv, block_t *block)
 {
     uint32_t i;
@@ -795,7 +798,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
         }
     }
 }
-
+#endif
 typedef struct {
     bool is_constant[N_RV_REGS];
     uint32_t const_val[N_RV_REGS];
@@ -838,12 +841,11 @@ static block_t *block_find_or_translate(riscv_t *rv)
     block_t *next_blk = block_find(map, rv->PC);
 #else
     /* lookup the next block in the block cache */
-    /*
-     * The function "cache_get()" gets the cached block by the given "key (PC)".
-     * In system simulation, the returned block might be dropped because it is
-     * not the one from the current process (by checking SATP CSR register).
-     */
     block_t *next_blk = (block_t *) cache_get(rv->block_cache, rv->PC, true);
+#if RV32_HAS(SYSTEM)
+    if (next_blk && next_blk->satp != rv->csr_satp)
+        next_blk = NULL;
+#endif
 #endif
 
     if (next_blk)
@@ -861,12 +863,20 @@ static block_t *block_find_or_translate(riscv_t *rv)
 
     block_translate(rv, next_blk);
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    /*
+     * may be an ifetch fault which changes satp, Do not do this
+     * in "block_alloc()
+     */
+    next_blk->satp = rv->csr_satp;
+#endif
+
     optimize_constant(rv, next_blk);
+
 #if RV32_HAS(GDBSTUB)
     if (likely(!rv->debug_mode))
 #endif
-#if RV32_HAS(MOP_FUSION)
-        /* macro operation fusion */
+#if RV32_HAS(GDBSTUB) || RV32_HAS(MOP_FUSION)
         match_pattern(rv, next_blk);
 #endif
 
@@ -890,8 +900,6 @@ static block_t *block_find_or_translate(riscv_t *rv)
         return next_blk;
     }
 
-    list_del_init(&replaced_blk->list);
-
     if (prev == replaced_blk)
         prev = NULL;
 
@@ -910,6 +918,32 @@ static block_t *block_find_or_translate(riscv_t *rv)
         if (untaken == replaced_blk_entry) {
             entry->ir_tail->branch_untaken = NULL;
         }
+
+        /* upadte JALR LUT */
+        if (!entry->ir_tail->branch_table)
+            continue;
+
+#if 0
+        /*
+         * This branch lookup updating is unused since we get the PC from it and
+         * use function "cache_get()" achieve the branch prediction of T1C.
+         * However, if the structure "branch_table_t" is going to reference the
+         * block directly, this updating is nacessary to avoid to use the freed
+         * blocks.
+         */
+        for (int i = 0; i < HISTORY_SIZE; i++) {
+            if (entry->ir_tail->branch_table->PC[i] == replaced_blk->pc_start) {
+                IIF(RV32_HAS(SYSTEM))
+                (if (entry->ir_tail->branch_table->satp[i] ==
+                     replaced_blk->satp), )
+                {
+                    entry->ir_tail->branch_table->PC[i] =
+                        entry->ir_tail->branch_table->satp[i] =
+                            entry->ir_tail->branch_table->times[i] = 0;
+                }
+            }
+        }
+#endif
     }
 
     /* free IRs in replaced block */
@@ -923,6 +957,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
         mpool_free(rv->block_ir_mp, ir);
     }
 
+    list_del_init(&replaced_blk->list);
     mpool_free(rv->block_mp, replaced_blk);
 #if RV32_HAS(T2C)
     pthread_mutex_unlock(&rv->cache_lock);
@@ -941,6 +976,10 @@ static bool runtime_profiler(riscv_t *rv, block_t *block)
      * we posit that our profiler could effectively identify hotspots using
      * three key indicators.
      */
+#if RV32_HAS(SYSTEM)
+    if (block->satp != rv->csr_satp)
+        return false;
+#endif
     uint32_t freq = cache_freq(rv->block_cache, block->pc_start);
     /* To profile a block after chaining, it must first be executed. */
     if (unlikely(freq >= 2 && block->has_loops))
@@ -1022,15 +1061,21 @@ void rv_step(void *arg)
         block_t *block = block_find_or_translate(rv);
         /* by now, a block should be available */
         assert(block);
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+        assert(block->satp == rv->csr_satp);
+#endif
 
         /* After emulating the previous block, it is determined whether the
          * branch is taken or not. The IR array of the current block is then
          * assigned to either the branch_taken or branch_untaken pointer of
          * the previous block.
          */
-
 #if RV32_HAS(BLOCK_CHAINING)
-        if (prev) {
+        if (prev
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+            && prev->satp == rv->csr_satp
+#endif
+        ) {
             rv_insn_t *last_ir = prev->ir_tail;
             /* chain block */
             if (!insn_is_unconditional_branch(last_ir->opcode)) {
@@ -1048,7 +1093,7 @@ void rv_step(void *arg)
 #endif
         last_pc = rv->PC;
 #if RV32_HAS(JIT)
-#if RV32_HAS(T2C)
+#if RV32_HAS(T2C) && !RV32_HAS(SYSTEM)
         /* executed through the tier-2 JIT compiler */
         if (block->hot2) {
             ((exec_t2c_func_t) block->func)(rv);

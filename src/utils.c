@@ -3,6 +3,7 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -174,7 +175,11 @@ char *sanitize_path(const char *input)
     return ret;
 }
 
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+HASH_FUNC_IMPL_64(set_hash_64, SET_SIZE_BITS, 1 << SET_SIZE_BITS);
+#else
 HASH_FUNC_IMPL(set_hash, SET_SIZE_BITS, 1 << SET_SIZE_BITS);
+#endif
 
 void set_reset(set_t *set)
 {
@@ -186,15 +191,25 @@ void set_reset(set_t *set)
  * @set: a pointer points to target set
  * @key: the key of the inserted entry
  */
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+bool set_add(set_t *set, uint64_t key)
+#else
 bool set_add(set_t *set, uint32_t key)
+#endif
 {
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+    const uint64_t index = set_hash_64(key);
+#else
     const uint32_t index = set_hash(key);
+#endif
+
     uint8_t count = 0;
-    while (set->table[index][count]) {
+    while (count < SET_SLOTS_SIZE && set->table[index][count]) {
         if (set->table[index][count++] == key)
             return false;
     }
 
+    assert(count < SET_SLOTS_SIZE);
     set->table[index][count] = key;
     return true;
 }
@@ -204,10 +219,19 @@ bool set_add(set_t *set, uint32_t key)
  * @set: a pointer points to target set
  * @key: the key of the inserted entry
  */
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+bool set_has(set_t *set, uint64_t key)
+#else
 bool set_has(set_t *set, uint32_t key)
+#endif
 {
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+    const uint64_t index = set_hash_64(key);
+#else
     const uint32_t index = set_hash(key);
-    for (uint8_t count = 0; set->table[index][count]; count++) {
+#endif
+    for (uint8_t count = 0; count < SET_SLOTS_SIZE && set->table[index][count];
+         count++) {
         if (set->table[index][count] == key)
             return true;
     }

@@ -44,7 +44,7 @@ $(OUT)/elf_list.js: tools/gen-elf-list-js.py
 # used to download all dependencies of elf executable and bundle into single wasm
 deps_emcc += artifact $(OUT)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
 
-# check browser MAJOR version if supports TCO
+# check browser version if supports TCO
 CHROME_MAJOR :=
 CHROME_MAJOR_VERSION_CHECK_CMD :=
 CHROME_SUPPORT_TCO_AT_MAJOR := 112
@@ -57,10 +57,21 @@ FIREFOX_SUPPORT_TCO_AT_MAJOR := 121
 FIREFOX_SUPPORT_TCO_INFO := Firefox supports TCO, you can use Firefox to request the wasm
 FIREFOX_NO_SUPPORT_TCO_WARNING := Firefox not found or Firefox must have at least version $(FIREFOX_SUPPORT_TCO_AT_MAJOR) in MAJOR to support TCO in wasm
 
+# Check WebAssembly section at https://webkit.org/blog/16301/webkit-features-in-safari-18-2/
+ifeq ($(UNAME_S),Darwin)
+SAFARI_MAJOR :=
+SAFARI_MINOR :=
+SAFARI_VERSION_CHECK_CMD :=
+SAFARI_SUPPORT_TCO_AT_MAJOR_MINOR := 18.2
+SAFARI_SUPPORT_TCO_INFO := Safari supports TCO, you can use Safari to request the wasm
+SAFARI_NO_SUPPORT_TCO_WARNING := Safari not found or Safari must have at least version $(SAFARI_SUPPORT_TCO_AT_MAJOR_MINOR) to support TCO in wasm
+endif
+
 # FIXME: for Windows
 ifeq ($(UNAME_S),Darwin)
     CHROME_MAJOR_VERSION_CHECK_CMD := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version | awk '{print $$3}' | cut -f1 -d.
     FIREFOX_MAJOR_VERSION_CHECK_CMD := /Applications/Firefox.app/Contents/MacOS/firefox --version | awk '{print $$3}' | cut -f1 -d.
+    SAFARI_VERSION_CHECK_CMD := mdls -name kMDItemVersion /Applications/Safari.app | sed 's/"//g' | awk '{print $$3}'
 else ifeq ($(UNAME_S),Linux)
     CHROME_MAJOR_VERSION_CHECK_CMD := google-chrome --version | awk '{print $$3}' | cut -f1 -d.
     FIREFOX_MAJOR_VERSION_CHECK_CMD := firefox -v | awk '{print $$3}' | cut -f1 -d.
@@ -80,6 +91,19 @@ ifeq ($(shell echo $(FIREFOX_MAJOR)\>=$(FIREFOX_SUPPORT_TCO_AT_MAJOR) | bc), 1)
     $(info $(shell echo "$(GREEN)$(FIREFOX_SUPPORT_TCO_INFO)$(NC)"))
 else
     $(warning $(shell echo "$(YELLOW)$(FIREFOX_NO_SUPPORT_TCO_WARNING)$(NC)"))
+endif
+
+# Safari
+ifeq ($(UNAME_S),Darwin)
+# ignore PATCH because the expression with PATCH(e.g., double dots x.x.x) becomes invalid number for the following bc cmd
+SAFARI_VERSION := $(shell $(SAFARI_VERSION_CHECK_CMD))
+SAFARI_MAJOR := $(shell echo $(SAFARI_VERSION) | cut -f1 -d.)
+SAFARI_MINOR := $(shell echo $(SAFARI_VERSION) | cut -f2 -d.)
+ifeq ($(shell echo "$(SAFARI_MAJOR).$(SAFARI_MINOR)>=$(SAFARI_SUPPORT_TCO_AT_MAJOR_MINOR)" | bc), 1)
+    $(info $(shell echo "$(GREEN)$(SAFARI_SUPPORT_TCO_INFO)$(NC)"))
+else
+    $(warning $(shell echo "$(YELLOW)$(SAFARI_NO_SUPPORT_TCO_WARNING)$(NC)"))
+endif
 endif
 
 # used to serve wasm locally

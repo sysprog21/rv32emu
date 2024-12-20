@@ -333,9 +333,9 @@ $ tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
 Thus, the target system should have the Emscripten version 3.1.51 installed.
 
 Moreover, `rv32emu` leverages the tail call optimization (TCO) and we have tested the WebAssembly
-execution in Chrome with at least MAJOR 112 and Firefox with at least MAJOR 121 since they supports
-tail call feature. Thus, please check and update your browsers if necessary or install the suitable browsers
-before going further.
+execution in Chrome with at least MAJOR 112, Firefox with at least MAJOR 121 and Safari with at least version 18.2
+since they supports tail call feature. Please check your browser version and update if necessary, or install a compatible
+browser before proceeding.
 
 Source your Emscripten SDK environment before make. For macOS and Linux user:
 ```shell

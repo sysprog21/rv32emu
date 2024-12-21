@@ -107,6 +107,10 @@ $(call set-feature, Zicsr)
 ENABLE_Zifencei ?= 1
 $(call set-feature, Zifencei)
 
+# Zba Address generation instructions
+ENABLE_Zba ?= 1
+$(call set-feature, Zba)
+
 ENABLE_FULL4G ?= 0
 
 # Experimental SDL oriented system calls

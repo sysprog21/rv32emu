@@ -665,6 +665,30 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
         break;
 #endif /* RV32_HAS(EXT_M) */
 
+#if RV32_HAS(Zba)
+    /* inst   funct7  rs2 rs1 funct3 rd opcode
+     * ------+-------+---+---+------+--+-------
+     * SH1ADD 0010000 rs2 rs1 010    rd 0110011
+     * SH2ADD 0010000 rs2 rs1 100    rd 0110011
+     * SH3ADD 0010000 rs2 rs1 110    rd 0110011
+     */
+    case 0b0010000:
+        switch (funct3) {
+        case 0b010: /* sh1add */
+            ir->opcode = rv_insn_sh1add;
+            break;
+        case 0b100: /* sh2add */
+            ir->opcode = rv_insn_sh2add;
+            break;
+        case 0b110: /* sh3add */
+            ir->opcode = rv_insn_sh3add;
+            break;
+        default: /* illegal instruction */
+            return false;
+        }
+        break;
+#endif /* RV32_HAS(Zba) */
+
     case 0b0100000:
         switch (funct3) {
         case 0b000: /* SUB: Substract */

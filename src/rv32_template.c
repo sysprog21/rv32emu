@@ -2600,3 +2600,33 @@ RVOP(
         assert; /* FIXME: Implement */
     }))
 #endif
+
+/* RV32Zba Standard Extension */
+
+#if RV32_HAS(Zba)
+
+/* SH1ADD */
+RVOP(
+    sh1add,
+    { rv->X[ir->rd] = (rv->X[ir->rs1] << 1) + rv->X[ir->rs2]; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* SH2ADD */
+RVOP(
+    sh2add,
+    { rv->X[ir->rd] = (rv->X[ir->rs1] << 2) + rv->X[ir->rs2]; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* SH3ADD */
+RVOP(
+    sh3add,
+    { rv->X[ir->rd] = (rv->X[ir->rs1] << 3) + rv->X[ir->rs2]; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#endif

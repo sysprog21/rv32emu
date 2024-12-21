@@ -1039,3 +1039,23 @@ CONSTOPT(cflw, {})
 /* C.FSW */
 CONSTOPT(cfsw, {})
 #endif
+
+#if RV32_HAS(Zba)
+/* SH1ADD */
+CONSTOPT(sh1add, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* SH2ADD */
+CONSTOPT(sh2add, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* SH3ADD */
+CONSTOPT(sh3add, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+#endif

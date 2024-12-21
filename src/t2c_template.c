@@ -793,6 +793,14 @@ T2C_OP(cflw, { __UNREACHABLE; })
 T2C_OP(cfsw, { __UNREACHABLE; })
 #endif
 
+#if RV32_HAS(Zba)
+T2C_OP(sh1add, { __UNREACHABLE; })
+
+T2C_OP(sh2add, { __UNREACHABLE; })
+
+T2C_OP(sh3add, { __UNREACHABLE; })
+#endif
+
 T2C_OP(fuse1, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {

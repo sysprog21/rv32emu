@@ -97,6 +97,12 @@ enum op_field {
         _(csrrsi, 0, 4, 0, ENC(rs1, rd))               \
         _(csrrci, 0, 4, 0, ENC(rs1, rd))               \
     )                                                  \
+    /* RV32 Zba Standard Extension */                  \
+    IIF(RV32_HAS(Zba))(                                \
+        _(sh1add, 0, 4, 0, ENC(rs1, rs2, rd))          \
+        _(sh2add, 0, 4, 0, ENC(rs1, rs2, rd))          \
+        _(sh3add, 0, 4, 0, ENC(rs1, rs2, rd))          \
+    )                                                  \
     /* RV32M Standard Extension */                     \
     IIF(RV32_HAS(EXT_M))(                              \
         _(mul, 0, 4, 1, ENC(rs1, rs2, rd))             \

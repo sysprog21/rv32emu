@@ -111,6 +111,10 @@ $(call set-feature, Zifencei)
 ENABLE_Zba ?= 1
 $(call set-feature, Zba)
 
+# Zbb Basic bit-manipulation
+ENABLE_Zbb ?= 1
+$(call set-feature, Zbb)
+
 ENABLE_FULL4G ?= 0
 
 # Experimental SDL oriented system calls

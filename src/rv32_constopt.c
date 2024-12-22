@@ -1059,3 +1059,113 @@ CONSTOPT(sh3add, {
         info->is_constant[ir->rd] = false;
 })
 #endif
+
+#if RV32_HAS(Zbb)
+/* ANDN */
+CONSTOPT(andn, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ORN */
+CONSTOPT(orn, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* XNOR */
+CONSTOPT(xnor, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CLZ */
+CONSTOPT(clz, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CTZ */
+CONSTOPT(ctz, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CPOP */
+CONSTOPT(cpop, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* MAX */
+CONSTOPT(max, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* MAXU */
+CONSTOPT(maxu, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* MIN */
+CONSTOPT(min, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* MINU */
+CONSTOPT(minu, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* SEXT.B */
+CONSTOPT(sextb, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* SEXT.H */
+CONSTOPT(sexth, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ZEXT.H */
+CONSTOPT(zexth, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ROL */
+CONSTOPT(rol, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ROR */
+CONSTOPT(ror, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* RORI */
+CONSTOPT(rori, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ORCB */
+CONSTOPT(orcb, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* REV8 */
+CONSTOPT(rev8, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+#endif

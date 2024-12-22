@@ -801,6 +801,44 @@ T2C_OP(sh2add, { __UNREACHABLE; })
 T2C_OP(sh3add, { __UNREACHABLE; })
 #endif
 
+#if RV32_HAS(Zbb)
+T2C_OP(andn, { __UNREACHABLE; })
+
+T2C_OP(orn, { __UNREACHABLE; })
+
+T2C_OP(xnor, { __UNREACHABLE; })
+
+T2C_OP(clz, { __UNREACHABLE; })
+
+T2C_OP(ctz, { __UNREACHABLE; })
+
+T2C_OP(cpop, { __UNREACHABLE; })
+
+T2C_OP(max, { __UNREACHABLE; })
+
+T2C_OP(maxu, { __UNREACHABLE; })
+
+T2C_OP(min, { __UNREACHABLE; })
+
+T2C_OP(minu, { __UNREACHABLE; })
+
+T2C_OP(sextb, { __UNREACHABLE; })
+
+T2C_OP(sexth, { __UNREACHABLE; })
+
+T2C_OP(zexth, { __UNREACHABLE; })
+
+T2C_OP(rol, { __UNREACHABLE; })
+
+T2C_OP(ror, { __UNREACHABLE; })
+
+T2C_OP(rori, { __UNREACHABLE; })
+
+T2C_OP(orcb, { __UNREACHABLE; })
+
+T2C_OP(rev8, { __UNREACHABLE; })
+#endif
+
 T2C_OP(fuse1, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {

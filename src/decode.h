@@ -103,6 +103,27 @@ enum op_field {
         _(sh2add, 0, 4, 0, ENC(rs1, rs2, rd))          \
         _(sh3add, 0, 4, 0, ENC(rs1, rs2, rd))          \
     )                                                  \
+    /* RV32 Zbb Standard Extension */                  \
+    IIF(RV32_HAS(Zbb))(                                \
+        _(andn, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(orn, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(xnor, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(clz, 0, 4, 0, ENC(rs1, rd))                  \
+        _(ctz, 0, 4, 0, ENC(rs1, rd))                  \
+        _(cpop, 0, 4, 0, ENC(rs1, rd))                 \
+        _(max, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(maxu, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(min, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(minu, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(sextb, 0, 4, 0, ENC(rs1, rd))                \
+        _(sexth, 0, 4, 0, ENC(rs1, rd))                \
+        _(zexth, 0, 4, 0, ENC(rs1, rd))                \
+        _(rol, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(ror, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(rori, 0, 4, 0, ENC(rs1, rd))                 \
+        _(orcb, 0, 4, 0, ENC(rs1, rd))                 \
+        _(rev8, 0, 4, 0, ENC(rs1, rd))                 \
+    )                                                  \
     /* RV32M Standard Extension */                     \
     IIF(RV32_HAS(EXT_M))(                              \
         _(mul, 0, 4, 1, ENC(rs1, rs2, rd))             \

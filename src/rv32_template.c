@@ -2630,3 +2630,210 @@ RVOP(
     }))
 
 #endif
+
+/* RV32Zbb Standard Extension */
+
+#if RV32_HAS(Zbb)
+
+/* ANDN */
+RVOP(
+    andn,
+    { rv->X[ir->rd] = rv->X[ir->rs1] & (~rv->X[ir->rs2]); },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* ORN */
+RVOP(
+    orn,
+    { rv->X[ir->rd] = rv->X[ir->rs1] | (~rv->X[ir->rs2]); },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* XNOR */
+RVOP(
+    xnor,
+    { rv->X[ir->rd] = ~(rv->X[ir->rs1] ^ rv->X[ir->rs2]); },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* CLZ */
+RVOP(
+    clz,
+    {
+        if (rv->X[ir->rs1])
+            rv->X[ir->rd] = rv_clz(rv->X[ir->rs1]);
+        else
+            rv->X[ir->rd] = 32;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* CTZ */
+RVOP(
+    ctz,
+    {
+        if (rv->X[ir->rs1])
+            rv->X[ir->rd] = rv_ctz(rv->X[ir->rs1]);
+        else
+            rv->X[ir->rd] = 32;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* CPOP */
+RVOP(
+    cpop,
+    { rv->X[ir->rd] = rv_popcount(rv->X[ir->rs1]); },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* MAX */
+RVOP(
+    max,
+    {
+        const int32_t x = rv->X[ir->rs1];
+        const int32_t y = rv->X[ir->rs2];
+        rv->X[ir->rd] = x > y ? rv->X[ir->rs1] : rv->X[ir->rs2];
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* MIN */
+RVOP(
+    min,
+    {
+        const int32_t x = rv->X[ir->rs1];
+        const int32_t y = rv->X[ir->rs2];
+        rv->X[ir->rd] = x < y ? rv->X[ir->rs1] : rv->X[ir->rs2];
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* MAXU */
+RVOP(
+    maxu,
+    {
+        const uint32_t x = rv->X[ir->rs1];
+        const uint32_t y = rv->X[ir->rs2];
+        rv->X[ir->rd] = x > y ? rv->X[ir->rs1] : rv->X[ir->rs2];
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* MINU */
+RVOP(
+    minu,
+    {
+        const uint32_t x = rv->X[ir->rs1];
+        const uint32_t y = rv->X[ir->rs2];
+        rv->X[ir->rd] = x < y ? rv->X[ir->rs1] : rv->X[ir->rs2];
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* SEXT.B */
+RVOP(
+    sextb,
+    {
+        rv->X[ir->rd] = rv->X[ir->rs1] & 0xff;
+        if (rv->X[ir->rs1] & (1U << 7))
+            rv->X[ir->rd] |= 0xffffff00;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* SEXT.H */
+RVOP(
+    sexth,
+    {
+        rv->X[ir->rd] = rv->X[ir->rs1] & 0xffff;
+        if (rv->X[ir->rs1] & (1U << 15))
+            rv->X[ir->rd] |= 0xffff0000;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* ZEXT.H */
+RVOP(
+    zexth,
+    { rv->X[ir->rd] = rv->X[ir->rs1] & 0x0000ffff; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* ROL */
+RVOP(
+    rol,
+    {
+        const unsigned int shamt = rv->X[ir->rs2] & 0b11111;
+        rv->X[ir->rd] =
+            (rv->X[ir->rs1] << shamt) | (rv->X[ir->rs1] >> (32 - shamt));
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* ROR */
+RVOP(
+    ror,
+    {
+        const unsigned int shamt = rv->X[ir->rs2] & 0b11111;
+        rv->X[ir->rd] =
+            (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << (32 - shamt));
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* RORI */
+RVOP(
+    rori,
+    {
+        const unsigned int shamt = ir->imm & 0b11111;
+        rv->X[ir->rd] =
+            (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << (32 - shamt));
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* ORCB */
+RVOP(
+    orcb,
+    {
+        const uint32_t x = rv->X[ir->rs1];
+        rv->X[ir->rd] = 0;
+        for (int i = 0; i < 4; i++)
+            if (x & (0xffu << (i * 8)))
+                rv->X[ir->rd] |= 0xffu << (i * 8);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* REV8 */
+RVOP(
+    rev8,
+    {
+        rv->X[ir->rd] = (((rv->X[ir->rs1] & 0xffU) << 24) |
+                         ((rv->X[ir->rs1] & 0xff00U) << 8) |
+                         ((rv->X[ir->rs1] & 0xff0000U) >> 8) |
+                         ((rv->X[ir->rs1] & 0xff000000U) >> 24));
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#endif

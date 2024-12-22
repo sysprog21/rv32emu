@@ -42,6 +42,11 @@
 #define RV32_FEATURE_Zba 1
 #endif
 
+/* Zbb Basic bit-manipulation */
+#ifndef RV32_FEATURE_Zbb
+#define RV32_FEATURE_Zbb 1
+#endif
+
 /* Experimental SDL oriented system calls */
 #ifndef RV32_FEATURE_SDL
 #define RV32_FEATURE_SDL 1

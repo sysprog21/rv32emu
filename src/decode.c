@@ -486,6 +486,20 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
             return true;
         }
 #endif
+#if RV32_HAS(Zbs)
+        if (ir->imm >> 5 == 0b0100100) { /* bclri */
+            ir->opcode = rv_insn_bclri;
+            return true;
+        }
+        if (ir->imm >> 5 == 0b0110100) { /* binvi */
+            ir->opcode = rv_insn_binvi;
+            return true;
+        }
+        if (ir->imm >> 5 == 0b0010100) { /* bseti */
+            ir->opcode = rv_insn_bseti;
+            return true;
+        }
+#endif
         ir->opcode = rv_insn_slli;
         if (unlikely(ir->imm & (1 << 5)))
             return false;
@@ -511,6 +525,12 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
         }
         if (ir->imm == 0b011010011000) { /* rev8 */
             ir->opcode = rv_insn_rev8;
+            return true;
+        }
+#endif
+#if RV32_HAS(Zbs)
+        if (ir->imm >> 5 == 0b0100100) { /* bexti */
+            ir->opcode = rv_insn_bexti;
             return true;
         }
 #endif
@@ -786,6 +806,31 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = rv_insn_zexth;
         break;
 #endif /* RV32_HAS(Zbb) */
+
+#if RV32_HAS(Zbs)
+    case 0b0100100:
+        switch (funct3) {
+        case 0b001: /* bclr */
+            ir->opcode = rv_insn_bclr;
+            break;
+        case 0b101: /* bext */
+            ir->opcode = rv_insn_bext;
+            break;
+        default: /* illegal instruction */
+            return false;
+        }
+        break;
+    case 0b0110100:
+        if (unlikely(funct3 != 0b001))
+            return false;
+        ir->opcode = rv_insn_binv;
+        break;
+    case 0b0010100:
+        if (unlikely(funct3 != 0b001))
+            return false;
+        ir->opcode = rv_insn_bset;
+        break;
+#endif /* RV32_HAS(Zbs) */
 
     case 0b0100000:
         switch (funct3) {

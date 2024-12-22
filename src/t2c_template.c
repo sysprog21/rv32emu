@@ -847,6 +847,24 @@ T2C_OP(clmulh, { __UNREACHABLE; })
 T2C_OP(clmulr, { __UNREACHABLE; })
 #endif
 
+#if RV32_HAS(Zbs)
+T2C_OP(bclr, { __UNREACHABLE; })
+
+T2C_OP(bclri, { __UNREACHABLE; })
+
+T2C_OP(bext, { __UNREACHABLE; })
+
+T2C_OP(bexti, { __UNREACHABLE; })
+
+T2C_OP(binv, { __UNREACHABLE; })
+
+T2C_OP(binvi, { __UNREACHABLE; })
+
+T2C_OP(bset, { __UNREACHABLE; })
+
+T2C_OP(bseti, { __UNREACHABLE; })
+#endif
+
 T2C_OP(fuse1, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {

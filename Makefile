@@ -119,6 +119,10 @@ $(call set-feature, Zbb)
 ENABLE_Zbc ?= 1
 $(call set-feature, Zbc)
 
+# Zbs Single-bit instructions
+ENABLE_Zbs ?= 1
+$(call set-feature, Zbs)
+
 ENABLE_FULL4G ?= 0
 
 # Experimental SDL oriented system calls

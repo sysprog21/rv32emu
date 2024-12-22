@@ -52,6 +52,11 @@
 #define RV32_FEATURE_Zbc 1
 #endif
 
+/* Zbs Single-bit instructions */
+#ifndef RV32_FEATURE_Zbs
+#define RV32_FEATURE_Zbs 1
+#endif
+
 /* Experimental SDL oriented system calls */
 #ifndef RV32_FEATURE_SDL
 #define RV32_FEATURE_SDL 1

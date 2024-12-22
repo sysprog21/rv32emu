@@ -2885,3 +2885,97 @@ RVOP(
     }))
 
 #endif
+
+/* RV32Zbs Standard Extension */
+
+#if RV32_HAS(Zbs)
+
+/* BCLR */
+RVOP(
+    bclr,
+    {
+        const unsigned int index = rv->X[ir->rs2] & (32 - 1);
+        rv->X[ir->rd] = rv->X[ir->rs1] & (~(1U << index));
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* BCLRI */
+RVOP(
+    bclri,
+    {
+        const unsigned int index = ir->imm & (32 - 1);
+        rv->X[ir->rd] = rv->X[ir->rs1] & (~(1U << index));
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* BEXT */
+RVOP(
+    bext,
+    {
+        const unsigned int index = rv->X[ir->rs2] & (32 - 1);
+        rv->X[ir->rd] = (rv->X[ir->rs1] >> index) & 1;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* BEXTI */
+RVOP(
+    bexti,
+    {
+        const unsigned int index = ir->imm & (32 - 1);
+        rv->X[ir->rd] = (rv->X[ir->rs1] >> index) & 1;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* BINV */
+RVOP(
+    binv,
+    {
+        const unsigned int index = rv->X[ir->rs2] & (32 - 1);
+        rv->X[ir->rd] = rv->X[ir->rs1] ^ (1U << index);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* BINVI */
+RVOP(
+    binvi,
+    {
+        const unsigned int index = ir->imm & (32 - 1);
+        rv->X[ir->rd] = rv->X[ir->rs1] ^ (1U << index);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* BSET */
+RVOP(
+    bset,
+    {
+        const unsigned int index = rv->X[ir->rs2] & (32 - 1);
+        rv->X[ir->rd] = rv->X[ir->rs1] | (1U << index);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* BSETI */
+RVOP(
+    bseti,
+    {
+        const unsigned int index = ir->imm & (32 - 1);
+        rv->X[ir->rd] = rv->X[ir->rs1] | (1U << index);
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#endif

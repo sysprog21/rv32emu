@@ -1189,3 +1189,54 @@ CONSTOPT(clmulr, {
         info->is_constant[ir->rd] = false;
 })
 #endif
+
+#if RV32_HAS(Zbs)
+/* BCLR */
+CONSTOPT(bclr, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BCLRI */
+CONSTOPT(bclri, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BEXT */
+CONSTOPT(bext, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BEXTI */
+CONSTOPT(bexti, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BINV */
+CONSTOPT(binv, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BINVI */
+CONSTOPT(binvi, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BSET */
+CONSTOPT(bset, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BSETI */
+CONSTOPT(bseti, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+#endif

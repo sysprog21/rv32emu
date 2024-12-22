@@ -725,7 +725,7 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
         break;
 #endif /* RV32_HAS(Zba) */
 
-#if RV32_HAS(Zbb)
+#if RV32_HAS(Zbb) || RV32_HAS(Zbc)
     /* inst   funct7  rs2 rs1 funct3 rd opcode
      * ------+-------+---+---+------+--+-------
      * MAX    0000101 rs2 rs1 110    rd 0110011
@@ -737,6 +737,7 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
      */
     case 0b0000101:
         switch (funct3) {
+#if RV32_HAS(Zbb)
         case 0b110: /* max */
             ir->opcode = rv_insn_max;
             break;
@@ -749,10 +750,24 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
         case 0b101: /* minu */
             ir->opcode = rv_insn_minu;
             break;
+#endif
+#if RV32_HAS(Zbc)
+        case 0b001: /*clmul */
+            ir->opcode = rv_insn_clmul;
+            break;
+        case 0b011: /*clmulh */
+            ir->opcode = rv_insn_clmulh;
+            break;
+        case 0b010: /*clmulr */
+            ir->opcode = rv_insn_clmulr;
+            break;
+#endif
         default: /* illegal instruction */
             return false;
         }
         break;
+#endif
+#if RV32_HAS(Zbb)
     case 0b0110000:
         switch (funct3) {
         case 0b001: /* rol */

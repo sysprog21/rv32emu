@@ -115,6 +115,10 @@ $(call set-feature, Zba)
 ENABLE_Zbb ?= 1
 $(call set-feature, Zbb)
 
+# Zbc Carry-less multiplication
+ENABLE_Zbc ?= 1
+$(call set-feature, Zbc)
+
 ENABLE_FULL4G ?= 0
 
 # Experimental SDL oriented system calls

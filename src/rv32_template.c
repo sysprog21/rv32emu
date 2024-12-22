@@ -2837,3 +2837,51 @@ RVOP(
     }))
 
 #endif
+
+/* RV32Zbc Standard Extension */
+
+#if RV32_HAS(Zbc)
+
+/* CLMUL */
+RVOP(
+    clmul,
+    {
+        uint32_t output = 0;
+        for (int i = 0; i < 32; i++)
+            if ((rv->X[ir->rs2] >> i) & 1)
+                output ^= rv->X[ir->rs1] << i;
+        rv->X[ir->rd] = output;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* CLMULH */
+RVOP(
+    clmulh,
+    {
+        uint32_t output = 0;
+        for (int i = 1; i < 32; i++)
+            if ((rv->X[ir->rs2] >> i) & 1)
+                output ^= rv->X[ir->rs1] >> (32 - i);
+        rv->X[ir->rd] = output;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+/* CLMULR */
+RVOP(
+    clmulr,
+    {
+        uint32_t output = 0;
+        for (int i = 0; i < 32; i++)
+            if ((rv->X[ir->rs2] >> i) & 1)
+                output ^= rv->X[ir->rs1] >> (32 - i - 1);
+        rv->X[ir->rd] = output;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#endif

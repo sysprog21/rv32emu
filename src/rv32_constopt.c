@@ -1169,3 +1169,23 @@ CONSTOPT(rev8, {
         info->is_constant[ir->rd] = false;
 })
 #endif
+
+#if RV32_HAS(Zbc)
+/* CLMUL */
+CONSTOPT(clmul, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CLMULH */
+CONSTOPT(clmulh, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CLMULR */
+CONSTOPT(clmulr, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+#endif

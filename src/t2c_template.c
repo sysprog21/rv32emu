@@ -839,6 +839,14 @@ T2C_OP(orcb, { __UNREACHABLE; })
 T2C_OP(rev8, { __UNREACHABLE; })
 #endif
 
+#if RV32_HAS(Zbc)
+T2C_OP(clmul, { __UNREACHABLE; })
+
+T2C_OP(clmulh, { __UNREACHABLE; })
+
+T2C_OP(clmulr, { __UNREACHABLE; })
+#endif
+
 T2C_OP(fuse1, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {

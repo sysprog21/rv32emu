@@ -124,6 +124,12 @@ enum op_field {
         _(orcb, 0, 4, 0, ENC(rs1, rd))                 \
         _(rev8, 0, 4, 0, ENC(rs1, rd))                 \
     )                                                  \
+     /* RV32 Zbc Standard Extension */                 \
+    IIF(RV32_HAS(Zbc))(                                \
+        _(clmul, 0, 4, 0, ENC(rs1, rs2, rd))           \
+        _(clmulh, 0, 4, 0, ENC(rs1, rs2, rd))          \
+        _(clmulr, 0, 4, 0, ENC(rs1, rs2, rd))          \
+    )                                                  \
     /* RV32M Standard Extension */                     \
     IIF(RV32_HAS(EXT_M))(                              \
         _(mul, 0, 4, 1, ENC(rs1, rs2, rd))             \

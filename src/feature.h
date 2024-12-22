@@ -47,6 +47,11 @@
 #define RV32_FEATURE_Zbb 1
 #endif
 
+/* Zbc Carry-less multiplication */
+#ifndef RV32_FEATURE_Zbc
+#define RV32_FEATURE_Zbc 1
+#endif
+
 /* Experimental SDL oriented system calls */
 #ifndef RV32_FEATURE_SDL
 #define RV32_FEATURE_SDL 1

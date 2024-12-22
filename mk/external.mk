@@ -112,7 +112,7 @@ BUILDROOT_DATA_SHA1 = e678801287ab68369af1731dcf1acc39e4adccff
 LINUX_VERSION = linux-6.1.y
 LINUX_DATA = /tmp/linux
 LINUX_DATA_URL = git clone https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git $(LINUX_DATA) -b $(LINUX_VERSION) --depth=1
-LINUX_DATA_SHA1 = 43b6b7fbf9231656d7b65f118445996172250fc0
+LINUX_DATA_SHA1 = a3c5b38dc9ea0029876e12316af593f6a9e474a1
 
 define download-extract-verify
 $($(T)_DATA):

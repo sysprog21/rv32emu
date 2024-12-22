@@ -109,6 +109,26 @@ static inline int rv_ctz(uint32_t v)
 }
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+static inline int rv_popcount(uint32_t v)
+{
+    /* https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html */
+
+    return __builtin_popcount(v);
+}
+#else /* generic implementation */
+static inline int rv_popcount(uint32_t v)
+{
+    /* https://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
+     */
+
+    v -= (v >> 1) & 0x55555555;
+    v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+    v = (v + (v >> 4)) & 0x0f0f0f0f;
+    return (v * 0x01010101) >> 24;
+}
+#endif
+
 /*
  * Integer log base 2
  *

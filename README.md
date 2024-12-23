@@ -24,7 +24,7 @@ a focus on efficiency and readability.
 
 Features:
 * Fast interpreter for executing the RV32 ISA
-* Comprehensive support for RV32I and M, A, F, C extensions
+* Comprehensive support for RV32I and M, A, F, C, Zba, Zbb, Zbc, Zbs extensions
 * Memory-efficient design
 * Built-in ELF loader
 * Implementation of commonly used newlib system calls
@@ -120,6 +120,10 @@ The image containing all the necessary tools for development and testing can be 
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
 * `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
 * `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
+* `ENABLE_Zba`: Standard Extension for Address Generation Instructions
+* `ENABLE_Zbb`: Standard Extension for Basic Bit-Manipulation Instructions
+* `ENABLE_Zbc`: Standard Extension for Carry-Less Multiplication Instructions
+* `ENABLE_Zbs`: Standard Extension for Single-Bit Instructions
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
 * `ENABLE_GDBSTUB` : GDB remote debugging support
@@ -187,6 +191,10 @@ Current progress of this emulator in riscv-arch-test (RV32):
     - `A`: Standard Extension for Atomic Instructions
     - `F`: Standard Extension for Single-Precision Floating-Point
     - `C`: Standard Extension for Compressed Instruction
+    - `Zba`: Standard Extension for Address Generation Instructions
+    - `Zbb`: Standard Extension for Basic Bit-Manipulation
+    - `Zbc`: Standard Extension for Carry-Less Multiplication
+    - `Zbs`: Standard Extension for Single-Bit Instructions
     - `Zifencei`: Instruction-Fetch Fence
     - `privilege`: RISCV Privileged Specification
 

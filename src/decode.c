@@ -464,6 +464,42 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = rv_insn_addi;
         break;
     case 1: /* SLLI: Shift Left Logical */
+#if RV32_HAS(Zbb)
+        if (ir->imm == 0b011000000000) { /* clz */
+            ir->opcode = rv_insn_clz;
+            return true;
+        }
+        if (ir->imm == 0b011000000001) { /* ctz */
+            ir->opcode = rv_insn_ctz;
+            return true;
+        }
+        if (ir->imm == 0b011000000010) { /* cpop */
+            ir->opcode = rv_insn_cpop;
+            return true;
+        }
+        if (ir->imm == 0b011000000100) { /* sext.b */
+            ir->opcode = rv_insn_sextb;
+            return true;
+        }
+        if (ir->imm == 0b011000000101) { /* sext.h */
+            ir->opcode = rv_insn_sexth;
+            return true;
+        }
+#endif
+#if RV32_HAS(Zbs)
+        if (ir->imm >> 5 == 0b0100100) { /* bclri */
+            ir->opcode = rv_insn_bclri;
+            return true;
+        }
+        if (ir->imm >> 5 == 0b0110100) { /* binvi */
+            ir->opcode = rv_insn_binvi;
+            return true;
+        }
+        if (ir->imm >> 5 == 0b0010100) { /* bseti */
+            ir->opcode = rv_insn_bseti;
+            return true;
+        }
+#endif
         ir->opcode = rv_insn_slli;
         if (unlikely(ir->imm & (1 << 5)))
             return false;
@@ -478,6 +514,26 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = rv_insn_xori;
         break;
     case 5:
+#if RV32_HAS(Zbb)
+        if (ir->imm >> 5 == 0b0110000) { /* rori */
+            ir->opcode = rv_insn_rori;
+            return true;
+        }
+        if (ir->imm == 0b001010000111) { /* orc.b */
+            ir->opcode = rv_insn_orcb;
+            return true;
+        }
+        if (ir->imm == 0b011010011000) { /* rev8 */
+            ir->opcode = rv_insn_rev8;
+            return true;
+        }
+#endif
+#if RV32_HAS(Zbs)
+        if (ir->imm >> 5 == 0b0100100) { /* bexti */
+            ir->opcode = rv_insn_bexti;
+            return true;
+        }
+#endif
         /* SLL, SRL, and SRA perform logical left, logical right, and
          * arithmetic right shifts on the value in register rs1.
          */
@@ -665,6 +721,117 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
         break;
 #endif /* RV32_HAS(EXT_M) */
 
+#if RV32_HAS(Zba)
+    /* inst   funct7  rs2 rs1 funct3 rd opcode
+     * ------+-------+---+---+------+--+-------
+     * SH1ADD 0010000 rs2 rs1 010    rd 0110011
+     * SH2ADD 0010000 rs2 rs1 100    rd 0110011
+     * SH3ADD 0010000 rs2 rs1 110    rd 0110011
+     */
+    case 0b0010000:
+        switch (funct3) {
+        case 0b010: /* sh1add */
+            ir->opcode = rv_insn_sh1add;
+            break;
+        case 0b100: /* sh2add */
+            ir->opcode = rv_insn_sh2add;
+            break;
+        case 0b110: /* sh3add */
+            ir->opcode = rv_insn_sh3add;
+            break;
+        default: /* illegal instruction */
+            return false;
+        }
+        break;
+#endif /* RV32_HAS(Zba) */
+
+#if RV32_HAS(Zbb) || RV32_HAS(Zbc)
+    /* inst   funct7  rs2 rs1 funct3 rd opcode
+     * ------+-------+---+---+------+--+-------
+     * MAX    0000101 rs2 rs1 110    rd 0110011
+     * MIN    0000101 rs2 rs1 100    rd 0110011
+     * MAXU   0000101 rs2 rs1 111    rd 0110011
+     * MINU   0000101 rs2 rs1 101    rd 0110011
+     * ROL    0110000 rs2 rs1 001    rd 0110011
+     * ROR    0110000 rs2 rs1 101    rd 0110011
+     */
+    case 0b0000101:
+        switch (funct3) {
+#if RV32_HAS(Zbb)
+        case 0b110: /* max */
+            ir->opcode = rv_insn_max;
+            break;
+        case 0b100: /* min */
+            ir->opcode = rv_insn_min;
+            break;
+        case 0b111: /* maxu */
+            ir->opcode = rv_insn_maxu;
+            break;
+        case 0b101: /* minu */
+            ir->opcode = rv_insn_minu;
+            break;
+#endif
+#if RV32_HAS(Zbc)
+        case 0b001: /*clmul */
+            ir->opcode = rv_insn_clmul;
+            break;
+        case 0b011: /*clmulh */
+            ir->opcode = rv_insn_clmulh;
+            break;
+        case 0b010: /*clmulr */
+            ir->opcode = rv_insn_clmulr;
+            break;
+#endif
+        default: /* illegal instruction */
+            return false;
+        }
+        break;
+#endif
+#if RV32_HAS(Zbb)
+    case 0b0110000:
+        switch (funct3) {
+        case 0b001: /* rol */
+            ir->opcode = rv_insn_rol;
+            break;
+        case 0b101: /* ror */
+            ir->opcode = rv_insn_ror;
+            break;
+        default: /* illegal instruction */
+            return false;
+        }
+        break;
+    case 0b0000100:
+        if (unlikely(ir->rs2))
+            return false;
+        ir->opcode = rv_insn_zexth;
+        break;
+#endif /* RV32_HAS(Zbb) */
+
+#if RV32_HAS(Zbs)
+    case 0b0100100:
+        switch (funct3) {
+        case 0b001: /* bclr */
+            ir->opcode = rv_insn_bclr;
+            break;
+        case 0b101: /* bext */
+            ir->opcode = rv_insn_bext;
+            break;
+        default: /* illegal instruction */
+            return false;
+        }
+        break;
+    case 0b0110100:
+        if (unlikely(funct3 != 0b001))
+            return false;
+        ir->opcode = rv_insn_binv;
+        break;
+    case 0b0010100:
+        if (unlikely(funct3 != 0b001))
+            return false;
+        ir->opcode = rv_insn_bset;
+        break;
+#endif /* RV32_HAS(Zbs) */
+
     case 0b0100000:
         switch (funct3) {
         case 0b000: /* SUB: Substract */
@@ -673,6 +840,18 @@ static inline bool op_op(rv_insn_t *ir, const uint32_t insn)
         case 0b101: /* SRA: Shift Right Arithmetic */
             ir->opcode = rv_insn_sra;
             break;
+#if RV32_HAS(Zbb)
+        case 0b111: /* ANDN */
+            ir->opcode = rv_insn_andn;
+            break;
+        case 0b110: /* ORN */
+            ir->opcode = rv_insn_orn;
+            break;
+        case 0b100: /* XNOR */
+            ir->opcode = rv_insn_xnor;
+            break;
+#endif /* RV32_HAS(Zbb) */
+
         default: /* illegal instruction */
             return false;
         }

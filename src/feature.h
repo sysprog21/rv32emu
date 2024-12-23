@@ -37,6 +37,26 @@
 #define RV32_FEATURE_Zifencei 1
 #endif
 
+/* Zba Address generation instructions */
+#ifndef RV32_FEATURE_Zba
+#define RV32_FEATURE_Zba 1
+#endif
+
+/* Zbb Basic bit-manipulation */
+#ifndef RV32_FEATURE_Zbb
+#define RV32_FEATURE_Zbb 1
+#endif
+
+/* Zbc Carry-less multiplication */
+#ifndef RV32_FEATURE_Zbc
+#define RV32_FEATURE_Zbc 1
+#endif
+
+/* Zbs Single-bit instructions */
+#ifndef RV32_FEATURE_Zbs
+#define RV32_FEATURE_Zbs 1
+#endif
+
 /* Experimental SDL oriented system calls */
 #ifndef RV32_FEATURE_SDL
 #define RV32_FEATURE_SDL 1

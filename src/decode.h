@@ -97,6 +97,50 @@ enum op_field {
         _(csrrsi, 0, 4, 0, ENC(rs1, rd))               \
         _(csrrci, 0, 4, 0, ENC(rs1, rd))               \
     )                                                  \
+    /* RV32 Zba Standard Extension */                  \
+    IIF(RV32_HAS(Zba))(                                \
+        _(sh1add, 0, 4, 0, ENC(rs1, rs2, rd))          \
+        _(sh2add, 0, 4, 0, ENC(rs1, rs2, rd))          \
+        _(sh3add, 0, 4, 0, ENC(rs1, rs2, rd))          \
+    )                                                  \
+    /* RV32 Zbb Standard Extension */                  \
+    IIF(RV32_HAS(Zbb))(                                \
+        _(andn, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(orn, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(xnor, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(clz, 0, 4, 0, ENC(rs1, rd))                  \
+        _(ctz, 0, 4, 0, ENC(rs1, rd))                  \
+        _(cpop, 0, 4, 0, ENC(rs1, rd))                 \
+        _(max, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(maxu, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(min, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(minu, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(sextb, 0, 4, 0, ENC(rs1, rd))                \
+        _(sexth, 0, 4, 0, ENC(rs1, rd))                \
+        _(zexth, 0, 4, 0, ENC(rs1, rd))                \
+        _(rol, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(ror, 0, 4, 0, ENC(rs1, rs2, rd))             \
+        _(rori, 0, 4, 0, ENC(rs1, rd))                 \
+        _(orcb, 0, 4, 0, ENC(rs1, rd))                 \
+        _(rev8, 0, 4, 0, ENC(rs1, rd))                 \
+    )                                                  \
+     /* RV32 Zbc Standard Extension */                 \
+    IIF(RV32_HAS(Zbc))(                                \
+        _(clmul, 0, 4, 0, ENC(rs1, rs2, rd))           \
+        _(clmulh, 0, 4, 0, ENC(rs1, rs2, rd))          \
+        _(clmulr, 0, 4, 0, ENC(rs1, rs2, rd))          \
+    )                                                  \
+    /* RV32 Zbs Standard Extension */                  \
+    IIF(RV32_HAS(Zbs))(                                \
+        _(bclr, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(bclri, 0, 4, 0, ENC(rs1, rs2, rd))           \
+        _(bext, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(bexti, 0, 4, 0, ENC(rs1, rs2, rd))           \
+        _(binv, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(binvi, 0, 4, 0, ENC(rs1, rs2, rd))           \
+        _(bset, 0, 4, 0, ENC(rs1, rs2, rd))            \
+        _(bseti, 0, 4, 0, ENC(rs1, rs2, rd))           \
+    )                                                  \
     /* RV32M Standard Extension */                     \
     IIF(RV32_HAS(EXT_M))(                              \
         _(mul, 0, 4, 1, ENC(rs1, rs2, rd))             \

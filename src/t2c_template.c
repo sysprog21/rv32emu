@@ -793,6 +793,78 @@ T2C_OP(cflw, { __UNREACHABLE; })
 T2C_OP(cfsw, { __UNREACHABLE; })
 #endif
 
+#if RV32_HAS(Zba)
+T2C_OP(sh1add, { __UNREACHABLE; })
+
+T2C_OP(sh2add, { __UNREACHABLE; })
+
+T2C_OP(sh3add, { __UNREACHABLE; })
+#endif
+
+#if RV32_HAS(Zbb)
+T2C_OP(andn, { __UNREACHABLE; })
+
+T2C_OP(orn, { __UNREACHABLE; })
+
+T2C_OP(xnor, { __UNREACHABLE; })
+
+T2C_OP(clz, { __UNREACHABLE; })
+
+T2C_OP(ctz, { __UNREACHABLE; })
+
+T2C_OP(cpop, { __UNREACHABLE; })
+
+T2C_OP(max, { __UNREACHABLE; })
+
+T2C_OP(maxu, { __UNREACHABLE; })
+
+T2C_OP(min, { __UNREACHABLE; })
+
+T2C_OP(minu, { __UNREACHABLE; })
+
+T2C_OP(sextb, { __UNREACHABLE; })
+
+T2C_OP(sexth, { __UNREACHABLE; })
+
+T2C_OP(zexth, { __UNREACHABLE; })
+
+T2C_OP(rol, { __UNREACHABLE; })
+
+T2C_OP(ror, { __UNREACHABLE; })
+
+T2C_OP(rori, { __UNREACHABLE; })
+
+T2C_OP(orcb, { __UNREACHABLE; })
+
+T2C_OP(rev8, { __UNREACHABLE; })
+#endif
+
+#if RV32_HAS(Zbc)
+T2C_OP(clmul, { __UNREACHABLE; })
+
+T2C_OP(clmulh, { __UNREACHABLE; })
+
+T2C_OP(clmulr, { __UNREACHABLE; })
+#endif
+
+#if RV32_HAS(Zbs)
+T2C_OP(bclr, { __UNREACHABLE; })
+
+T2C_OP(bclri, { __UNREACHABLE; })
+
+T2C_OP(bext, { __UNREACHABLE; })
+
+T2C_OP(bexti, { __UNREACHABLE; })
+
+T2C_OP(binv, { __UNREACHABLE; })
+
+T2C_OP(binvi, { __UNREACHABLE; })
+
+T2C_OP(bset, { __UNREACHABLE; })
+
+T2C_OP(bseti, { __UNREACHABLE; })
+#endif
+
 T2C_OP(fuse1, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {

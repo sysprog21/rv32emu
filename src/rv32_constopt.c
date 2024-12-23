@@ -1039,3 +1039,204 @@ CONSTOPT(cflw, {})
 /* C.FSW */
 CONSTOPT(cfsw, {})
 #endif
+
+#if RV32_HAS(Zba)
+/* SH1ADD */
+CONSTOPT(sh1add, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* SH2ADD */
+CONSTOPT(sh2add, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* SH3ADD */
+CONSTOPT(sh3add, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+#endif
+
+#if RV32_HAS(Zbb)
+/* ANDN */
+CONSTOPT(andn, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ORN */
+CONSTOPT(orn, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* XNOR */
+CONSTOPT(xnor, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CLZ */
+CONSTOPT(clz, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CTZ */
+CONSTOPT(ctz, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CPOP */
+CONSTOPT(cpop, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* MAX */
+CONSTOPT(max, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* MAXU */
+CONSTOPT(maxu, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* MIN */
+CONSTOPT(min, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* MINU */
+CONSTOPT(minu, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* SEXT.B */
+CONSTOPT(sextb, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* SEXT.H */
+CONSTOPT(sexth, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ZEXT.H */
+CONSTOPT(zexth, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ROL */
+CONSTOPT(rol, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ROR */
+CONSTOPT(ror, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* RORI */
+CONSTOPT(rori, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* ORCB */
+CONSTOPT(orcb, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* REV8 */
+CONSTOPT(rev8, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+#endif
+
+#if RV32_HAS(Zbc)
+/* CLMUL */
+CONSTOPT(clmul, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CLMULH */
+CONSTOPT(clmulh, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* CLMULR */
+CONSTOPT(clmulr, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+#endif
+
+#if RV32_HAS(Zbs)
+/* BCLR */
+CONSTOPT(bclr, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BCLRI */
+CONSTOPT(bclri, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BEXT */
+CONSTOPT(bext, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BEXTI */
+CONSTOPT(bexti, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BINV */
+CONSTOPT(binv, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BINVI */
+CONSTOPT(binvi, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BSET */
+CONSTOPT(bset, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+/* BSETI */
+CONSTOPT(bseti, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+#endif

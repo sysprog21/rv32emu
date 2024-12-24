@@ -51,12 +51,26 @@ static rv_hist_t rv_reg_stats[] = {
 
 static int cmp_dec(const void *a, const void *b)
 {
-    return ((rv_hist_t *) b)->freq - ((rv_hist_t *) a)->freq;
+    const size_t a_freq = ((rv_hist_t *) a)->freq;
+    const size_t b_freq = ((rv_hist_t *) b)->freq;
+
+    if (a_freq > b_freq)
+        return -1;
+    if (a_freq < b_freq)
+        return 1;
+    return 0;
 }
 
 static int cmp_asc(const void *a, const void *b)
 {
-    return ((rv_hist_t *) a)->freq - ((rv_hist_t *) b)->freq;
+    const size_t a_freq = ((rv_hist_t *) a)->freq;
+    const size_t b_freq = ((rv_hist_t *) b)->freq;
+
+    if (a_freq < b_freq)
+        return -1;
+    if (a_freq > b_freq)
+        return 1;
+    return 0;
 }
 
 /* used to adjust the length of histogram bar */

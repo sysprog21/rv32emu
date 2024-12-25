@@ -48,7 +48,7 @@ CFLAGS += -flto
 endif
 endif
 ifeq ("$(CC_IS_GCC)", "1")
-CFLAGS += -flto
+CFLAGS += -flto=auto
 endif
 ifeq ("$(CC_IS_CLANG)", "1")
 CFLAGS += -flto=thin -fsplit-lto-unit

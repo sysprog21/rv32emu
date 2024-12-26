@@ -332,6 +332,9 @@ typedef struct {
     struct rv_insn *target[HISTORY_SIZE];
 #else
     uint32_t times[HISTORY_SIZE];
+#if RV32_HAS(SYSTEM)
+    uint32_t satp[HISTORY_SIZE];
+#endif
 #endif
 } branch_history_table_t;
 

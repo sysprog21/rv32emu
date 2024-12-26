@@ -4,10 +4,18 @@ ifeq ($(call has, SYSTEM), 1)
 DEV_SRC := src/devices
 
 DTC ?= dtc
-$(OUT)/minimal.dtb: $(DEV_SRC)/minimal.dts
+BUILD_DTB := $(OUT)/minimal.dtb
+$(BUILD_DTB): $(DEV_SRC)/minimal.dts
 	$(VECHO) " DTC\t$@\n"
 	$(Q)$(DTC) $^ -o $@
-BUILD_DTB := $(OUT)/minimal.dtb
+
+BIN_TO_C := $(OUT)/bin2c
+$(BIN_TO_C): tools/bin2c.c
+	$(Q)$(CC) -Wall -o $@ $^
+
+BUILD_DTB2C := src/minimal_dtb.h
+$(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB)
+	$(BIN_TO_C) $(BUILD_DTB) > $(BUILD_DTB2C)
 
 $(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(deps_emcc)
 	$(Q)mkdir -p $(DEV_OUT)
@@ -20,8 +28,8 @@ OBJS_EXT += system.o
 
 # system target execution by using default dependencies
 LINUX_IMAGE_DIR := linux-image
-system_action := ($(BIN) -k $(OUT)/$(LINUX_IMAGE_DIR)/Image -i $(OUT)/$(LINUX_IMAGE_DIR)/rootfs.cpio -b $(OUT)/minimal.dtb)
-system_deps += artifact $(BUILD_DTB) $(BIN)
+system_action := ($(BIN) -k $(OUT)/$(LINUX_IMAGE_DIR)/Image -i $(OUT)/$(LINUX_IMAGE_DIR)/rootfs.cpio)
+system_deps += artifact $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
 system: $(system_deps)
 	$(system_action)
 

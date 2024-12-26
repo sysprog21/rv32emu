@@ -241,7 +241,7 @@ include mk/artifact.mk
 include mk/wasm.mk
 include mk/system.mk
 
-all: config $(BUILD_DTB) $(BIN)
+all: config $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
 
 OBJS := \
 	map.o \
@@ -369,7 +369,7 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
+	$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
 distclean: clean
 	-$(RM) $(DOOM_DATA) $(QUAKE_DATA) $(BUILDROOT_DATA) $(LINUX_DATA)
 	$(RM) -r $(OUT)/linux-image

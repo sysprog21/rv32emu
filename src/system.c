@@ -25,6 +25,17 @@ void emu_update_uart_interrupts(riscv_t *rv)
     plic_update_interrupts(attr->plic);
 }
 
+/*
+ * Linux kernel might create signal frame when returning from trap
+ * handling, which modifies the SEPC CSR. Thus, the fault instruction
+ * cannot always redo. For example, invalid memory access causes SIGSEGV.
+ */
+extern bool need_handle_signal;
+#define CHECK_PENDING_SIGNAL(rv, signal_flag)              \
+    do {                                                   \
+        signal_flag = (rv->csr_sepc != rv->last_csr_sepc); \
+    } while (0)
+
 #define MMIO_R 1
 #define MMIO_W 0
 
@@ -297,8 +308,14 @@ static uint32_t mmu_read_w(riscv_t *rv, const uint32_t addr)
     uint32_t level;
     pte_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
-    if (unlikely(!ok))
+    if (unlikely(!ok)) {
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+        CHECK_PENDING_SIGNAL(rv, need_handle_signal);
+        if (need_handle_signal)
+            return 0;
+#endif
         pte = mmu_walk(rv, addr, &level);
+    }
 
     {
         get_ppn_and_offset();
@@ -323,8 +340,14 @@ static uint16_t mmu_read_s(riscv_t *rv, const uint32_t addr)
     uint32_t level;
     pte_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
-    if (unlikely(!ok))
+    if (unlikely(!ok)) {
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+        CHECK_PENDING_SIGNAL(rv, need_handle_signal);
+        if (need_handle_signal)
+            return 0;
+#endif
         pte = mmu_walk(rv, addr, &level);
+    }
 
     get_ppn_and_offset();
     return memory_read_s(ppn | offset);
@@ -338,8 +361,14 @@ static uint8_t mmu_read_b(riscv_t *rv, const uint32_t addr)
     uint32_t level;
     pte_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(read, rv, pte, addr, PTE_R);
-    if (unlikely(!ok))
+    if (unlikely(!ok)) {
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+        CHECK_PENDING_SIGNAL(rv, need_handle_signal);
+        if (need_handle_signal)
+            return 0;
+#endif
         pte = mmu_walk(rv, addr, &level);
+    }
 
     {
         get_ppn_and_offset();
@@ -364,8 +393,14 @@ static void mmu_write_w(riscv_t *rv, const uint32_t addr, const uint32_t val)
     uint32_t level;
     pte_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
-    if (unlikely(!ok))
+    if (unlikely(!ok)) {
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+        CHECK_PENDING_SIGNAL(rv, need_handle_signal);
+        if (need_handle_signal)
+            return;
+#endif
         pte = mmu_walk(rv, addr, &level);
+    }
 
     {
         get_ppn_and_offset();
@@ -390,8 +425,14 @@ static void mmu_write_s(riscv_t *rv, const uint32_t addr, const uint16_t val)
     uint32_t level;
     pte_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
-    if (unlikely(!ok))
+    if (unlikely(!ok)) {
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+        CHECK_PENDING_SIGNAL(rv, need_handle_signal);
+        if (need_handle_signal)
+            return;
+#endif
         pte = mmu_walk(rv, addr, &level);
+    }
 
     get_ppn_and_offset();
     memory_write_s(ppn | offset, (uint8_t *) &val);
@@ -405,8 +446,14 @@ static void mmu_write_b(riscv_t *rv, const uint32_t addr, const uint8_t val)
     uint32_t level;
     pte_t *pte = mmu_walk(rv, addr, &level);
     bool ok = MMU_FAULT_CHECK(write, rv, pte, addr, PTE_W);
-    if (unlikely(!ok))
+    if (unlikely(!ok)) {
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+        CHECK_PENDING_SIGNAL(rv, need_handle_signal);
+        if (need_handle_signal)
+            return;
+#endif
         pte = mmu_walk(rv, addr, &level);
+    }
 
     {
         get_ppn_and_offset();

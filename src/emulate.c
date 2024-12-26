@@ -46,6 +46,7 @@ static bool need_clear_block_map = false;
 static uint32_t reloc_enable_mmu_jalr_addr;
 static bool reloc_enable_mmu = false;
 bool need_retranslate = false;
+bool need_handle_signal = false;
 #endif
 
 static void rv_trap_default_handler(riscv_t *rv)
@@ -379,8 +380,12 @@ static uint32_t peripheral_update_ctr = 64;
     {                                                                 \
         IIF(RV32_HAS(SYSTEM))(ctr++;, ) cycle++;                      \
         code;                                                         \
-    nextop:                                                           \
-        PC += __rv_insn_##inst##_len;                                 \
+        IIF(RV32_HAS(SYSTEM))                                         \
+        (                                                             \
+            if (need_handle_signal) {                                 \
+                need_handle_signal = false;                           \
+                return true;                                          \
+            }, ) nextop : PC += __rv_insn_##inst##_len;               \
         IIF(RV32_HAS(SYSTEM))                                         \
         (IIF(RV32_HAS(JIT))(                                          \
              , if (unlikely(need_clear_block_map)) {                  \
@@ -1219,6 +1224,9 @@ static void _trap_handler(riscv_t *rv)
         mode = rv->csr_stvec & 0x3;
         cause = rv->csr_scause;
         rv->csr_sepc = rv->PC;
+#if RV32_HAS(SYSTEM)
+        rv->last_csr_sepc = rv->csr_sepc;
+#endif
     } else { /* machine */
         const uint32_t mstatus_mie =
             (rv->csr_mstatus & MSTATUS_MIE) >> MSTATUS_MIE_SHIFT;

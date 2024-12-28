@@ -862,12 +862,9 @@ static block_t *block_find_or_translate(riscv_t *rv)
     block_translate(rv, next_blk);
 
     optimize_constant(rv, next_blk);
-#if RV32_HAS(GDBSTUB)
-    if (likely(!rv->debug_mode))
-#endif
 #if RV32_HAS(MOP_FUSION)
-        /* macro operation fusion */
-        match_pattern(rv, next_blk);
+    /* macro operation fusion */
+    match_pattern(rv, next_blk);
 #endif
 
 #if !RV32_HAS(JIT)
@@ -958,6 +955,41 @@ static bool rv_has_plic_trap(riscv_t *rv)
     return ((rv->csr_sstatus & SSTATUS_SIE || !rv->priv_mode) &&
             (rv->csr_sip & rv->csr_sie));
 }
+
+static void rv_check_interrupt(riscv_t *rv)
+{
+    vm_attr_t *attr = PRIV(rv);
+    if (peripheral_update_ctr-- == 0) {
+        peripheral_update_ctr = 64;
+
+        u8250_check_ready(PRIV(rv)->uart);
+        if (PRIV(rv)->uart->in_ready)
+            emu_update_uart_interrupts(rv);
+    }
+
+    if (ctr > attr->timer)
+        rv->csr_sip |= RV_INT_STI;
+    else
+        rv->csr_sip &= ~RV_INT_STI;
+
+    if (rv_has_plic_trap(rv)) {
+        uint32_t intr_applicable = rv->csr_sip & rv->csr_sie;
+        uint8_t intr_idx = ilog2(intr_applicable);
+        switch (intr_idx) {
+        case (SUPERVISOR_SW_INTR & 0xf):
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_SW_INTR, 0);
+            break;
+        case (SUPERVISOR_TIMER_INTR & 0xf):
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_TIMER_INTR, 0);
+            break;
+        case (SUPERVISOR_EXTERNAL_INTR & 0xf):
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
+            break;
+        default:
+            break;
+        }
+    }
+}
 #endif
 
 void rv_step(void *arg)
@@ -975,38 +1007,8 @@ void rv_step(void *arg)
     while (rv->csr_cycle < cycles_target && !rv->halt) {
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
         /* check for any interrupt after every block emulation */
-
-        if (peripheral_update_ctr-- == 0) {
-            peripheral_update_ctr = 64;
-
-            u8250_check_ready(PRIV(rv)->uart);
-            if (PRIV(rv)->uart->in_ready)
-                emu_update_uart_interrupts(rv);
-        }
-
-        if (ctr > attr->timer)
-            rv->csr_sip |= RV_INT_STI;
-        else
-            rv->csr_sip &= ~RV_INT_STI;
-
-        if (rv_has_plic_trap(rv)) {
-            uint32_t intr_applicable = rv->csr_sip & rv->csr_sie;
-            uint8_t intr_idx = ilog2(intr_applicable);
-            switch (intr_idx) {
-            case (SUPERVISOR_SW_INTR & 0xf):
-                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_SW_INTR, 0);
-                break;
-            case (SUPERVISOR_TIMER_INTR & 0xf):
-                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_TIMER_INTR, 0);
-                break;
-            case (SUPERVISOR_EXTERNAL_INTR & 0xf):
-                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
-                break;
-            default:
-                break;
-            }
-        }
-#endif /* RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER) */
+        rv_check_interrupt(rv);
+#endif
 
         if (prev && prev->pc_start != last_pc) {
             /* update previous block */
@@ -1109,6 +1111,43 @@ void rv_step(void *arg)
         rv_delete(rv); /* clean up and reuse memory */
     }
 #endif
+}
+
+void rv_step_debug(void *arg)
+{
+    assert(arg);
+    riscv_t *rv = arg;
+
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    rv_check_interrupt(rv);
+#endif
+
+retranslate:
+    /* fetch the next instruction */
+    rv_insn_t ir;
+    memset(&ir, 0, sizeof(rv_insn_t));
+
+    uint32_t insn = rv->io.mem_ifetch(rv, rv->PC);
+#if RV32_HAS(SYSTEM)
+    if (!insn && need_retranslate) {
+        need_retranslate = false;
+        goto retranslate;
+    }
+#endif
+    assert(insn);
+
+    /* decode the instruction */
+    if (!rv_decode(&ir, insn)) {
+        rv->compressed = is_compressed(insn);
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
+        return;
+    }
+
+    ir.impl = dispatch_table[ir.opcode];
+    ir.pc = rv->PC;
+    ir.next = NULL;
+    ir.impl(rv, &ir, rv->csr_cycle, rv->PC);
+    return;
 }
 
 #if RV32_HAS(SYSTEM)

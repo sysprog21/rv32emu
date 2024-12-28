@@ -239,10 +239,6 @@ static void map_file(char **ram_loc, const char *name)
     if (*ram_loc == MAP_FAILED)
         goto cleanup;
 #else
-    /* calloc and load data to a memory region */
-    *ram_loc = calloc(st.st_size, sizeof(uint8_t));
-    if (!*ram_loc)
-        goto cleanup;
     if (read(fd, *ram_loc, st.st_size) != st.st_size) {
         free(*ram_loc);
         goto cleanup;

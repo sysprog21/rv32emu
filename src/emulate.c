@@ -402,7 +402,7 @@ static uint32_t peripheral_update_ctr = 64;
 
 #include "rv32_template.c"
 #if RV32_HAS(EXT_RVV)
-#include "rv32_rvv_template.c"
+#include "rv32_vector.c"
 #endif
 #undef RVOP
 

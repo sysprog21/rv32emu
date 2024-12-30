@@ -195,30 +195,30 @@ enum op_field {
         _(fcvtswu, 0, 4, 0, ENC(rs1, rs2, rd))         \
         _(fmvwx, 0, 4, 0, ENC(rs1, rs2, rd))           \
     )                                                  \
-    IIF(RV32_HAS(EXT_RVV))(                          \
-            _(vadd_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vand_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vmadc_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vmseq_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vmsgt_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vmsgtu_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vmsle_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vmsleu_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vmsne_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vor_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vrgather_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vrsub_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vsadd_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vsaddu_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vslidedown_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vslideup_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vsll_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vsra_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vsrl_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vssra_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vssrl_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-            _(vxor_vi, 0, 4, 0, ENC(r1, r2, rd))                \
-        ) \
+    IIF(RV32_HAS(EXT_RVV))(                            \
+            _(vadd_vi, 0, 4, 0, ENC(r1, r2, rd))       \
+            _(vand_vi, 0, 4, 0, ENC(r1, r2, rd))       \
+            _(vmadc_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vmseq_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vmsgt_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vmsgtu_vi, 0, 4, 0, ENC(r1, r2, rd))     \
+            _(vmsle_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vmsleu_vi, 0, 4, 0, ENC(r1, r2, rd))     \
+            _(vmsne_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vor_vi, 0, 4, 0, ENC(r1, r2, rd))        \
+            _(vrgather_vi, 0, 4, 0, ENC(r1, r2, rd))   \
+            _(vrsub_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vsadd_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vsaddu_vi, 0, 4, 0, ENC(r1, r2, rd))     \
+            _(vslidedown_vi, 0, 4, 0, ENC(r1, r2, rd)) \
+            _(vslideup_vi, 0, 4, 0, ENC(r1, r2, rd))   \
+            _(vsll_vi, 0, 4, 0, ENC(r1, r2, rd))       \
+            _(vsra_vi, 0, 4, 0, ENC(r1, r2, rd))       \
+            _(vsrl_vi, 0, 4, 0, ENC(r1, r2, rd))       \
+            _(vssra_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vssrl_vi, 0, 4, 0, ENC(r1, r2, rd))      \
+            _(vxor_vi, 0, 4, 0, ENC(r1, r2, rd))       \
+    )                                              \
     /* RV32C Standard Extension */                     \
     IIF(RV32_HAS(EXT_C))(                              \
         _(caddi4spn, 0, 2, 1, ENC(rd))                 \

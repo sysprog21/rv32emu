@@ -136,10 +136,10 @@ struct riscv_internal {
 #endif
 
 #if RV32_HAS(EXT_RVV)
-#define VLEN 128 // FIXME should not use a const and not even here for VLEN
-    uint8_t V1[(VLEN>>3)];
-    uint8_t V2[(VLEN>>3)];
-    uint8_t Vd[(VLEN>>3)];
+#define VLEN 128  // FIXME should not use a const and not even here for VLEN
+    uint8_t V1[(VLEN >> 3)];
+    uint8_t V2[(VLEN >> 3)];
+    uint8_t Vd[(VLEN >> 3)];
     uint8_t vl; /* current vl size */
     uint8_t lmul;
     uint8_t sew; /* current sew size */

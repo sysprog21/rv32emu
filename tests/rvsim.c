@@ -39,6 +39,7 @@ enum { MAX_STEPS = 100 };  // TODO: make this a command-line argument
 #define EXT_F 0
 #define EXT_D 0
 #define EXT_C 1
+#define EXT_RVV 1
 
 #define OPCODE_LIST_RV32I                                     \
     X(0x0000007f, 0x00000037, FMT_U, MNEM_LUI, "lui")         \

@@ -1122,11 +1122,12 @@ void rv_step_debug(void *arg)
     rv_check_interrupt(rv);
 #endif
 
-retranslate:
-    /* fetch the next instruction */
     rv_insn_t ir;
+
+retranslate:
     memset(&ir, 0, sizeof(rv_insn_t));
 
+    /* fetch the next instruction */
     uint32_t insn = rv->io.mem_ifetch(rv, rv->PC);
 #if RV32_HAS(SYSTEM)
     if (!insn && need_retranslate) {

@@ -201,6 +201,12 @@ struct riscv_internal {
 #if RV32_HAS(SYSTEM)
     /* The flag is used to indicate the current emulation is in a trap */
     bool is_trapped;
+
+    /*
+     * The flag that stores the SEPC CSR at the trap point for corectly
+     * executing signal handler.
+     */
+    uint32_t last_csr_sepc;
 #endif
 };
 

@@ -404,6 +404,20 @@ typedef void (*riscv_mem_write_s)(riscv_t *rv,
 typedef void (*riscv_mem_write_b)(riscv_t *rv,
                                   riscv_word_t addr,
                                   riscv_byte_t data);
+#if RV32_HAS(SYSTEM)
+/*
+ * VA2PA handler
+ * The MMU walkers and fault checkers are defined in system.c
+ * Thus, exporting this handler through function pointer
+ * preserves the encapsulation of MMU translation.
+ *
+ * ifetch do not leverage this translation because basic block
+ * might be retranslated and the corresponding PTE is NULL.
+ */
+typedef riscv_word_t (*riscv_mem_translate_t)(riscv_t *rv,
+                                              riscv_word_t vaddr,
+                                              bool rw);
+#endif
 
 /* system instruction handlers */
 typedef void (*riscv_on_ecall)(riscv_t *rv);
@@ -424,7 +438,9 @@ typedef struct {
     riscv_mem_write_s mem_write_s;
     riscv_mem_write_b mem_write_b;
 
-    /* TODO: add peripheral I/O interfaces */
+#if RV32_HAS(SYSTEM)
+    riscv_mem_translate_t mem_translate;
+#endif
 
     /* system */
     riscv_on_ecall on_ecall;

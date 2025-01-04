@@ -107,8 +107,28 @@ INSN = {
         "sh2add",
         "sh1add",
     ],
+    "Zbb": [
+        "rev8",
+        "orcb",
+        "rori",
+        "ror",
+        "rol",
+        "zexth",
+        "sexth",
+        "sextb",
+        "minu",
+        "maxu",
+        "min",
+        "max",
+        "cpop",
+        "ctz",
+        "clz",
+        "xnor",
+        "orn",
+        "andn",
+    ],
 }
-EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C", "SYSTEM", "Zba"]
+EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C", "SYSTEM", "Zba", "Zbb"]
 SKIP_LIST = []
 # check enabled extension in Makefile
 

@@ -127,8 +127,13 @@ INSN = {
         "orn",
         "andn",
     ],
+    "Zbc": [
+        "clmulr",
+        "clmulh",
+        "clmul",
+    ],
 }
-EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C", "SYSTEM", "Zba", "Zbb"]
+EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C", "SYSTEM", "Zba", "Zbb", "Zbc"]
 SKIP_LIST = []
 # check enabled extension in Makefile
 

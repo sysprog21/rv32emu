@@ -101,8 +101,9 @@ INSN = {
         "cflw",
         "cfsw",
     ],
+    "SYSTEM": ["sret"],
 }
-EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C"]
+EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C", "SYSTEM"]
 SKIP_LIST = []
 # check enabled extension in Makefile
 

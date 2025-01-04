@@ -15,7 +15,7 @@ INSN = {
         "csrrw",
         "csrrs",
         "csrrc",
-        "csrrw",
+        "csrrwi",
         "csrrsi",
         "csrrci"],
     "EXT_M": [

@@ -558,7 +558,9 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     case rv_insn_jal:
     case rv_insn_jalr:
     case rv_insn_mret:
+#if RV32_HAS(Zicsr)
     case rv_insn_csrrw:
+#endif
 #if RV32_HAS(SYSTEM)
     case rv_insn_sret:
 #endif

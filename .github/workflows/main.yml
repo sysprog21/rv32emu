@@ -86,6 +86,7 @@ jobs:
             make distclean && make ENABLE_Zba=0 check -j$(nproc)
             make distclean && make ENABLE_Zbb=0 check -j$(nproc)
             make distclean && make ENABLE_Zbc=0 check -j$(nproc)
+            make distclean && make ENABLE_Zbs=0 check -j$(nproc)
     - name: misalignment test in block emulation
       env:
         CC: ${{ steps.install_cc.outputs.cc }}

@@ -1,6 +1,9 @@
 # Peripherals for system emulation
 ifeq ($(call has, SYSTEM), 1)
 
+CFLAGS += -Isrc/dtc/libfdt
+LIBFDT_HACK := $(shell git submodule update --init src/dtc)
+
 DEV_SRC := src/devices
 
 DTC ?= dtc
@@ -25,6 +28,7 @@ DEV_OBJS := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c
 deps := $(DEV_OBJS:%.o=%.o.d)
 
 OBJS_EXT += system.o
+OBJS_EXT += dtc/libfdt/fdt.o dtc/libfdt/fdt_ro.o dtc/libfdt/fdt_rw.o
 
 # system target execution by using default dependencies
 LINUX_IMAGE_DIR := linux-image

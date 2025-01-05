@@ -42,7 +42,7 @@ static char *opt_prog_name;
 /* target argc and argv */
 static int prog_argc;
 static char **prog_args;
-static const char *optstr = "tgqmhpd:a:k:i:";
+static const char *optstr = "tgqmhpd:a:k:i:b:";
 
 /* enable misaligned memory access */
 static bool opt_misaligned = false;
@@ -55,6 +55,7 @@ static char *prof_out_file;
 /* Linux kernel data */
 static char *opt_kernel_img;
 static char *opt_rootfs_img;
+static char *opt_bootargs;
 #endif
 
 static void print_usage(const char *filename)
@@ -72,6 +73,7 @@ static void print_usage(const char *filename)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
             "  -k <image> : use <image> as kernel image\n"
             "  -i <image> : use <image> as rootfs\n"
+            "  -b <bootargs> : use customized <bootargs> for the kernel\n"
 #endif
             "  -d [filename]: dump registers as JSON to the "
             "given file or `-` (STDOUT)\n"
@@ -110,6 +112,10 @@ static bool parse_args(int argc, char **args)
             break;
         case 'i':
             opt_rootfs_img = optarg;
+            emu_argc++;
+            break;
+        case 'b':
+            opt_bootargs = optarg;
             emu_argc++;
             break;
 #endif
@@ -257,6 +263,7 @@ int main(int argc, char **args)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     attr.data.system.kernel = opt_kernel_img;
     attr.data.system.initrd = opt_rootfs_img;
+    attr.data.system.bootargs = opt_bootargs;
 #else
     attr.data.user.elf_program = opt_prog_name;
 #endif

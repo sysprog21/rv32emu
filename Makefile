@@ -269,6 +269,7 @@ $(OBJS): $(GDBSTUB_LIB)
 endif
 
 $(OUT)/%.o: src/%.c $(deps_emcc)
+	$(Q)mkdir -p $(shell dirname $@)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 

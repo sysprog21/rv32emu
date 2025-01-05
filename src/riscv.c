@@ -14,6 +14,7 @@
 
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
 #include <termios.h>
+#include "dtc/libfdt/libfdt.h"
 #endif
 
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -259,11 +260,61 @@ fail:
     exit(EXIT_FAILURE);
 }
 
-static void load_dtb(char **ram_loc)
+#define ALIGN_FDT(x) (((x) + (FDT_TAGSIZE) - 1) & ~((FDT_TAGSIZE) - 1))
+static char *realloc_property(char *fdt,
+                              int nodeoffset,
+                              const char *name,
+                              int newlen)
+{
+    int delta = 0;
+    int oldlen = 0;
+
+    if (!fdt_get_property(fdt, nodeoffset, name, &oldlen))
+        /* strings + property header */
+        delta = sizeof(struct fdt_property) + strlen(name) + 1;
+
+    if (newlen > oldlen)
+        /* actual value in off_struct */
+        delta += ALIGN_FDT(newlen) - ALIGN_FDT(oldlen);
+
+    int new_sz = fdt_totalsize(fdt) + delta;
+    /* Assume the pre-allocated RAM is enough here, so we
+     * don't realloc any memory for fdt */
+    fdt_open_into(fdt, fdt, new_sz);
+    return fdt;
+}
+
+static void load_dtb(char **ram_loc, char *bootargs)
 {
 #include "minimal_dtb.h"
-    memcpy(*ram_loc, minimal, sizeof(minimal));
-    *ram_loc += sizeof(minimal);
+    char *blob = *ram_loc;
+    char *buf;
+    size_t len;
+    int node, err;
+    int totalsize;
+
+    memcpy(blob, minimal, sizeof(minimal));
+
+    if (bootargs) {
+        node = fdt_path_offset(blob, "/chosen");
+        assert(node > 0);
+
+        len = strlen(bootargs) + 1;
+        buf = malloc(len);
+        assert(buf);
+        memcpy(buf, bootargs, len - 1);
+        buf[len] = 0;
+        err = fdt_setprop(blob, node, "bootargs", buf, len + 1);
+        if (err == -FDT_ERR_NOSPACE) {
+            blob = realloc_property(blob, node, "bootargs", len);
+            err = fdt_setprop(blob, node, "bootargs", buf, len);
+        }
+        free(buf);
+        assert(!err);
+    }
+
+    totalsize = fdt_totalsize(blob);
+    *ram_loc += totalsize;
     return;
 }
 
@@ -418,7 +469,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 
     uint32_t dtb_addr = attr->mem->mem_size - (1 * 1024 * 1024);
     ram_loc = ((char *) attr->mem->mem_base) + dtb_addr;
-    load_dtb(&ram_loc);
+    load_dtb(&ram_loc, attr->data.system.bootargs);
     /*
      * Load optional initrd image at last 8 MiB before the dtb region to
      * prevent kernel from overwritting it

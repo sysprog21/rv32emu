@@ -31,3 +31,7 @@
 	path = tests/quake
 	url = https://github.com/sysprog21/quake-embedded
 	shallow = true
+[submodule "src/dtc"]
+	path = src/dtc
+	url = https://git.kernel.org/pub/scm/utils/dtc/dtc.git
+	shallow = true

@@ -80,6 +80,7 @@ jobs:
             make distclean && make ENABLE_EXT_F=0 check -j$(nproc)
             make distclean && make ENABLE_EXT_C=0 check -j$(nproc)
             make distclean && make ENABLE_SDL=0 check -j$(nproc)
+            make distclean && make ENABLE_Zicsr=0 check -j$(nproc)
     - name: misalignment test in block emulation
       env:
         CC: ${{ steps.install_cc.outputs.cc }}

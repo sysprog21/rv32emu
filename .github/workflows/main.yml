@@ -106,6 +106,7 @@ jobs:
             make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check -j$(nproc)
     - name: undefined behavior test
       run: |
             make clean && make ENABLE_UBSAN=1 check -j$(nproc)

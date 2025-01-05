@@ -666,6 +666,7 @@ retranslate:
     block->ir_tail->next = NULL;
 }
 
+#if RV32_HAS(MOP_FUSION)
 #define COMBINE_MEM_OPS(RW)                                       \
     next_ir = ir->next;                                           \
     count = 1;                                                    \
@@ -705,7 +706,6 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
     block->n_insn -= n;
 }
 
-#if RV32_HAS(MOP_FUSION)
 /* Check if instructions in a block match a specific pattern. If they do,
  * rewrite them as fused instructions.
  *

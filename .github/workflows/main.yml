@@ -82,6 +82,7 @@ jobs:
             make distclean && make ENABLE_SDL=0 check -j$(nproc)
             make distclean && make ENABLE_Zicsr=0 check -j$(nproc)
             make distclean && make ENABLE_MOP_FUSION=0 check -j$(nproc)
+            make distclean && make ENABLE_BLOCK_CHAINING=0 check -j$(nproc)
     - name: misalignment test in block emulation
       env:
         CC: ${{ steps.install_cc.outputs.cc }}

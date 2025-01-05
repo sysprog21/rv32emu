@@ -705,6 +705,7 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
     block->n_insn -= n;
 }
 
+#if RV32_HAS(MOP_FUSION)
 /* Check if instructions in a block match a specific pattern. If they do,
  * rewrite them as fused instructions.
  *
@@ -802,6 +803,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
         }
     }
 }
+#endif
 
 typedef struct {
     bool is_constant[N_RV_REGS];

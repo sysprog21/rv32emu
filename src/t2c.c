@@ -74,8 +74,10 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
 T2C_LLVM_GEN_ADDR(rs1, X, ir->rs1);
 T2C_LLVM_GEN_ADDR(rs2, X, ir->rs2);
 T2C_LLVM_GEN_ADDR(rd, X, ir->rd);
+#if RV32_HAS(EXT_C)
 T2C_LLVM_GEN_ADDR(ra, X, rv_reg_ra);
 T2C_LLVM_GEN_ADDR(sp, X, rv_reg_sp);
+#endif
 T2C_LLVM_GEN_ADDR(PC, PC, 0);
 
 #define T2C_LLVM_GEN_STORE_IMM32(builder, val, addr) \

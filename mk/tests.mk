@@ -83,7 +83,7 @@ $(CACHE_TEST_OUT): $(CACHE_TEST_TARGET)
 
 $(CACHE_TEST_TARGET): $(CACHE_TEST_OBJS)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ -o $@
+	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
 
 $(CACHE_TEST_OUTDIR)/%.o: $(CACHE_TEST_SRCDIR)/%.c
 	$(VECHO) "  CC\t$@\n"
@@ -95,7 +95,7 @@ $(MAP_TEST_OUT): $(MAP_TEST_TARGET)
 
 $(MAP_TEST_TARGET): $(MAP_TEST_OBJS)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ -o $@
+	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
 
 $(MAP_TEST_OUTDIR)/%.o: $(MAP_TEST_SRCDIR)/%.c
 	$(VECHO) "  CC\t$@\n"
@@ -107,7 +107,7 @@ $(PATH_TEST_OUT): $(PATH_TEST_TARGET)
 
 $(PATH_TEST_TARGET): $(PATH_TEST_OBJS)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ -o $@
+	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
 
 $(PATH_TEST_OUTDIR)/%.o: $(PATH_TEST_SRCDIR)/%.c
 	$(VECHO) "  CC\t$@\n"

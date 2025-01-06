@@ -725,6 +725,7 @@ static inline void emit_alu64(struct jit_state *state, int op, int src, int dst)
 #endif
 }
 
+#if RV32_HAS(EXT_M)
 static inline void emit_alu64_imm8(struct jit_state *state,
                                    int op,
                                    int src UNUSED,
@@ -742,6 +743,7 @@ static inline void emit_alu64_imm8(struct jit_state *state,
     }
 #endif
 }
+#endif
 
 /* Register to register mov */
 static inline void emit_mov(struct jit_state *state, int src, int dst)

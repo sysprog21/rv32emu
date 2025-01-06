@@ -374,42 +374,45 @@ static uint32_t peripheral_update_ctr = 64;
 #endif
 
 /* Interpreter-based execution path */
-#define RVOP(inst, code, asm)                                         \
-    static bool do_##inst(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, \
-                          uint32_t PC)                                \
-    {                                                                 \
-        IIF(RV32_HAS(SYSTEM))(ctr++;, ) cycle++;                      \
-        code;                                                         \
-        IIF(RV32_HAS(SYSTEM))                                         \
-        (                                                             \
-            if (need_handle_signal) {                                 \
-                need_handle_signal = false;                           \
-                return true;                                          \
-            }, ) nextop : PC += __rv_insn_##inst##_len;               \
-        IIF(RV32_HAS(SYSTEM))                                         \
-        (IIF(RV32_HAS(JIT))(                                          \
-             , if (unlikely(need_clear_block_map)) {                  \
-                 block_map_clear(rv);                                 \
-                 need_clear_block_map = false;                        \
-                 rv->csr_cycle = cycle;                               \
-                 rv->PC = PC;                                         \
-                 return false;                                        \
-             }), );                                                   \
-        if (unlikely(RVOP_NO_NEXT(ir)))                               \
-            goto end_op;                                              \
-        const rv_insn_t *next = ir->next;                             \
-        MUST_TAIL return next->impl(rv, next, cycle, PC);             \
-    end_op:                                                           \
-        rv->csr_cycle = cycle;                                        \
-        rv->PC = PC;                                                  \
-        return true;                                                  \
+#define RVOP(inst, code, asm)                                               \
+    static bool do_##inst(riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, \
+                          uint32_t PC)                                      \
+    {                                                                       \
+        IIF(RV32_HAS(SYSTEM))(ctr++;, ) cycle++;                            \
+        code;                                                               \
+        IIF(RV32_HAS(SYSTEM))                                               \
+        (                                                                   \
+            if (need_handle_signal) {                                       \
+                need_handle_signal = false;                                 \
+                return true;                                                \
+            }, ) nextop : PC += __rv_insn_##inst##_len;                     \
+        IIF(RV32_HAS(SYSTEM))                                               \
+        (IIF(RV32_HAS(JIT))(                                                \
+             , if (unlikely(need_clear_block_map)) {                        \
+                 block_map_clear(rv);                                       \
+                 need_clear_block_map = false;                              \
+                 rv->csr_cycle = cycle;                                     \
+                 rv->PC = PC;                                               \
+                 return false;                                              \
+             }), );                                                         \
+        if (unlikely(RVOP_NO_NEXT(ir)))                                     \
+            goto end_op;                                                    \
+        const rv_insn_t *next = ir->next;                                   \
+        MUST_TAIL return next->impl(rv, next, cycle, PC);                   \
+    end_op:                                                                 \
+        rv->csr_cycle = cycle;                                              \
+        rv->PC = PC;                                                        \
+        return true;                                                        \
     }
 
 #include "rv32_template.c"
 #undef RVOP
 
 /* multiple LUI */
-static bool do_fuse1(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
+static bool do_fuse1(riscv_t *rv,
+                     const rv_insn_t *ir,
+                     uint64_t cycle,
+                     uint32_t PC)
 {
     cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
@@ -426,7 +429,10 @@ static bool do_fuse1(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 }
 
 /* LUI + ADD */
-static bool do_fuse2(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
+static bool do_fuse2(riscv_t *rv,
+                     const rv_insn_t *ir,
+                     uint64_t cycle,
+                     uint32_t PC)
 {
     cycle += 2;
     rv->X[ir->rd] = ir->imm;
@@ -442,7 +448,10 @@ static bool do_fuse2(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 }
 
 /* multiple SW */
-static bool do_fuse3(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
+static bool do_fuse3(riscv_t *rv,
+                     const rv_insn_t *ir,
+                     uint64_t cycle,
+                     uint32_t PC)
 {
     cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
@@ -466,7 +475,10 @@ static bool do_fuse3(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
 }
 
 /* multiple LW */
-static bool do_fuse4(riscv_t *rv, rv_insn_t *ir, uint64_t cycle, uint32_t PC)
+static bool do_fuse4(riscv_t *rv,
+                     const rv_insn_t *ir,
+                     uint64_t cycle,
+                     uint32_t PC)
 {
     cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;

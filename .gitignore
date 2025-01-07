@@ -20,6 +20,8 @@ build/linux-x86-softfp/
 build/riscv32/
 build/sail_cSim/
 build/sha1sum-*
+build/bin2c
+build/minimal.dtb
 *.a
 *.o
 *.o.d
@@ -29,3 +31,4 @@ tests/arch-test-target/sail_cSim/riscv_sim_RV32
 tests/scimark2/
 __pycache__/
 src/rv32_jit.c
+src/minimal_dtb.h

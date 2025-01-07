@@ -77,7 +77,7 @@ $ make ENABLE_SYSTEM=1 system
 Build using run using specified images:
 ```shell
 $ make ENABLE_SYSTEM=1
-$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -b <dtb_path>
+$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path>
 ```
 
 #### Build Linux image

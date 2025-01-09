@@ -3038,26 +3038,166 @@ RVOP(
         (rv)->V[rv_reg_zero][i] = 0; \
     }
 
+#define VREG_U32_COUNT ((VLEN) >> (5))
+/*
+ * Vector Configuration-Setting Instructions
+ *
+ * These instructions set the vector CSRs, specifically csr_vl and csr_vtype.
+ * The CSRs can only be updated using vset{i}vl{i} instructions. The current
+ * implementation does not support vma and vta.
+ *
+ * The value VLMAX = (LMUL * VLEN) / SEW represents the maximum number of
+ * elements that can be processed by a single vector instruction given the
+ * current SEW and LMUL.
+ *
+ * Constraints on Setting vl:
+ *  - vl = AVL if AVL ≤ VLMAX
+ *  - ceil(AVL / 2) ≤ vl ≤ VLMAX if AVL < 2 * VLMAX
+ *  - vl = VLMAX if AVL ≥ 2 * VLMAX
+ *
+ * +------------+------+--------------+
+ * | vlmul[2:0] | LMUL |    VLMAX     |
+ * +------------+------+--------------+
+ * |    1 0 0   |  -   |       -      |
+ * |    1 0 1   | 1/8  |  VLEN/SEW/8  |
+ * |    1 1 0   | 1/4  |  VLEN/SEW/4  |
+ * |    1 1 1   | 1/2  |  VLEN/SEW/2  |
+ * |    0 0 0   |  1   |  VLEN/SEW    |
+ * |    0 0 1   |  2   |  2*VLEN/SEW  |
+ * |    0 1 0   |  4   |  4*VLEN/SEW  |
+ * |    0 1 1   |  8   |  8*VLEN/SEW  |
+ * +------------+------+--------------+
+ *
+ * LMUL determines how vector registers are grouped. Since VL controls the
+ * number of processed elements (based on SEW) and is derived from VLMAX,
+ * LMUL's primary role is setting VLMAX. This implementation computes VLMAX
+ * directly, avoiding fractional LMUL values (e.g., 1/2, 1/4, 1/8).
+ *
+ * Mapping of rd, rs1, and AVL value effects on vl:
+ * +-----+-----+------------------+----------------------------------+
+ * | rd  | rs1 |    AVL value     |         Effect on vl             |
+ * +-----+-----+------------------+----------------------------------+
+ * |  -  | !x0 | Value in x[rs1]  | Normal stripmining               |
+ * | !x0 |  x0 | ~0               | Set vl to VLMAX                  |
+ * |  x0 |  x0 | Value in vl reg  | Keep existing vl                 |
+ * +-----+-----+------------------+----------------------------------+
+ *
+ * +------------+----------+
+ * | vsew[2:0]  |   SEW    |
+ * +------------+----------+
+ * |    0 0 0   |     8    |
+ * |    0 0 1   |    16    |
+ * |    0 1 0   |    32    |
+ * |    0 1 1   |    64    |
+ * |    1 X X   | Reserved |
+ * +------------+----------+
+ */
+
+#define vl_setting(vlmax_, rs1, vl)    \
+    if ((rs1) <= vlmax_) {             \
+        (vl) = (rs1);                  \
+    } else if ((rs1) < (2 * vlmax_)) { \
+        (vl) = vlmax_;                 \
+    } else {                           \
+        (vl) = vlmax_;                 \
+    }
+
 RVOP(
     vsetvli,
-    { V_NOP; },
+    {
+        uint8_t v_lmul = ir->zimm & 0b111;
+        uint8_t v_sew = (ir->zimm >> 3) & 0b111;
+
+        if (v_lmul == 4 || v_sew >= 4) {
+            /* Illegal setting */
+            rv->csr_vl = 0;
+            rv->csr_vtype = 0x80000000;
+            return true;
+        }
+        uint16_t vlmax = (v_lmul < 4)
+                             ? ((1 << v_lmul) * VLEN) >> (3 + v_sew)
+                             : (VLEN >> (3 + v_sew) >> (3 - (v_lmul - 5)));
+        if (ir->rs1) {
+            vl_setting(vlmax, rv->X[ir->rs1], rv->csr_vl);
+            rv->csr_vtype = ir->zimm;
+        } else {
+            if (!ir->rd) {
+                rv->csr_vtype = ir->zimm;
+            } else {
+                rv->csr_vl = vlmax;
+                rv->csr_vtype = ir->zimm;
+            }
+        }
+        rv->X[ir->rd] = rv->csr_vl;
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))
 
 RVOP(
     vsetivli,
-    { V_NOP; },
+    {
+        uint8_t v_lmul = ir->zimm & 0b111;
+        uint8_t v_sew = (ir->zimm >> 3) & 0b111;
+
+        if (v_lmul == 4 || v_sew >= 4) {
+            /* Illegal setting */
+            rv->csr_vl = 0;
+            rv->csr_vtype = 0x80000000;
+            return true;
+        }
+        uint16_t vlmax = (v_lmul < 4)
+                             ? ((1 << v_lmul) * VLEN) >> (3 + v_sew)
+                             : (VLEN >> (3 + v_sew) >> (3 - (v_lmul - 5)));
+        if (ir->rs1) {
+            vl_setting(vlmax, ir->rs1, rv->csr_vl);
+            rv->csr_vtype = ir->zimm;
+        } else {
+            if (!ir->rd) {
+                rv->csr_vtype = ir->zimm;
+            } else {
+                rv->csr_vl = vlmax;
+                rv->csr_vtype = ir->zimm;
+            }
+        }
+        rv->X[ir->rd] = rv->csr_vl;
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))
 
 RVOP(
     vsetvl,
-    { V_NOP; },
+    {
+        uint8_t v_lmul = rv->X[ir->rs2] & 0b111;
+        uint8_t v_sew = (rv->X[ir->rs2] >> 3) & 0b111;
+
+        if (v_lmul == 4 || v_sew >= 4) {
+            /* Illegal setting */
+            rv->csr_vl = 0;
+            rv->csr_vtype = 0x80000000;
+            return true;
+        }
+        uint16_t vlmax = (v_lmul < 4)
+                             ? ((1 << v_lmul) * VLEN) >> (3 + v_sew)
+                             : (VLEN >> (3 + v_sew) >> (3 - (v_lmul - 5)));
+        if (rv->X[ir->rs1]) {
+            vl_setting(vlmax, rv->X[ir->rs1], rv->csr_vl);
+            rv->csr_vtype = rv->X[ir->rs2];
+        } else {
+            if (!ir->rd) {
+                rv->csr_vtype = rv->X[ir->rs2];
+            } else {
+                rv->csr_vl = vlmax;
+                rv->csr_vtype = rv->X[ir->rs2];
+            }
+        }
+        rv->X[ir->rd] = rv->csr_vl;
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))
+#undef vl_setting
 
 RVOP(
     vle8_v,

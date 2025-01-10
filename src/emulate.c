@@ -42,7 +42,9 @@ extern struct target_ops gdbstub_ops;
 #define IF_imm(i, v) (i->imm == v)
 
 #if RV32_HAS(SYSTEM)
+#if !RV32_HAS(JIT)
 static bool need_clear_block_map = false;
+#endif
 static uint32_t reloc_enable_mmu_jalr_addr;
 static bool reloc_enable_mmu = false;
 bool need_retranslate = false;

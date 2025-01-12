@@ -3201,21 +3201,126 @@ RVOP(
 
 RVOP(
     vle8_v,
-    { V_NOP; },
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl - cnt >= 4;) {
+                i %= VREG_U32_COUNT;
+                /* Set illegal when trying to access vector register that is
+                 * larger then 31.
+                 */
+                assert(ir->vd + j < 32);
+                /* Process full 32-bit words */
+                rv->V[ir->vd + j][i] = 0;
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr);
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr + 1) << 8;
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr + 2) << 16;
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr + 3) << 24;
+                cnt += 4;
+                i++;
+
+                /* Move to next vector register after filling VLEN */
+                if (!(cnt % (VREG_U32_COUNT << 2))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+            /* Clear corresponding bits of eews */
+            if (rv->csr_vl % 4) {
+                rv->V[ir->vd + j][i] %= 0xFFFFFFFF << ((rv->csr_vl % 4) << 3);
+            }
+            /* Handle eews that is narrower then a word */
+            for (uint32_t cnt = 0; cnt < (rv->csr_vl % 4); cnt++) {
+                assert(ir->vd + j < 32); /* Illegal */
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr + cnt)
+                                        << (cnt << 3);
+            }
+        }
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))
 
 RVOP(
     vle16_v,
-    { V_NOP; },
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl - cnt >= 2;) {
+                i %= VREG_U32_COUNT;
+                assert(ir->vd + j < 32);
+                /* Process full 32-bit words */
+                rv->V[ir->vd + j][i] = 0;
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_s(rv, addr);
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_s(rv, addr + 2) << 16;
+                cnt += 2;
+                i++;
+
+                /* Move to next vector register after filling VLEN */
+                if (!(cnt % (VREG_U32_COUNT << 1))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+            if (rv->csr_vl % 2) {
+                assert(ir->vd + j < 32); /* Illegal */
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_s(rv, addr);
+            }
+        }
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))
 
 RVOP(
     vle32_v,
-    { V_NOP; },
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl > cnt;) {
+                i %= VREG_U32_COUNT;
+                assert(ir->vd + j < 32);
+                rv->V[ir->vd + j][i] = rv->io.mem_read_w(rv, addr);
+                cnt += 1;
+                i++;
+
+                if (!(cnt % VREG_U32_COUNT)) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+        }
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))
@@ -4440,21 +4545,120 @@ RVOP(
 
 RVOP(
     vse8_v,
-    { V_NOP; },
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl - cnt >= 4;) {
+                i %= VREG_U32_COUNT;
+                /* Set illegal when trying to access vector register that is
+                 * larger then 31.
+                 */
+                assert(ir->vs3 + j < 32);
+                uint32_t tmp = rv->V[ir->vs3 + j][i];
+                /* Process full 32-bit words */
+                rv->io.mem_write_b(rv, addr, (tmp) & 0xff);
+                rv->io.mem_write_b(rv, addr + 1, (tmp >> 8) & 0xff);
+                rv->io.mem_write_b(rv, addr + 2, (tmp >> 16) & 0xff);
+                rv->io.mem_write_b(rv, addr + 3, (tmp >> 24) & 0xff);
+                cnt += 4;
+                i++;
+
+                /* Move to next vector register after filling VLEN */
+                if (!(cnt % (VREG_U32_COUNT << 2))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+            /* Handle eews that is narrower then a word */
+            for (uint32_t cnt = 0; cnt < (rv->csr_vl % 4); cnt++) {
+                assert(ir->vs3 + j < 32); /* Illegal */
+                uint8_t tmp = (rv->V[ir->vs3 + j][i] >> (cnt << 3)) & 0xff;
+                rv->io.mem_write_b(rv, addr + cnt, tmp);
+            }
+        }
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))
 
 RVOP(
     vse16_v,
-    { V_NOP; },
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl - cnt >= 2;) {
+                i %= VREG_U32_COUNT;
+                assert(ir->vs3 + j < 32);
+                uint32_t tmp = rv->V[ir->vs3 + j][i];
+                /* Process full 32-bit words */
+                rv->io.mem_write_s(rv, addr, (tmp) & 0xffff);
+                rv->io.mem_write_s(rv, addr + 2, (tmp >> 16) & 0xffff);
+                cnt += 2;
+                i++;
+
+                if (!(cnt % (VREG_U32_COUNT << 1))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+            if (rv->csr_vl % 2) {
+                rv->io.mem_write_s(rv, addr, rv->V[ir->vs3 + j][i] & 0xffff);
+            }
+        }
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))
 
 RVOP(
     vse32_v,
-    { V_NOP; },
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl > cnt;) {
+                i %= VREG_U32_COUNT;
+                assert(ir->vs3 + j < 32);
+                rv->io.mem_write_w(rv, addr, rv->V[ir->vs3 + j][i]);
+                cnt += 1;
+                i++;
+
+                if (!(cnt % (VREG_U32_COUNT))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+        }
+    },
     GEN({
         assert; /* FIXME: Implement */
     }))

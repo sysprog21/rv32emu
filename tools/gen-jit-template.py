@@ -15,7 +15,7 @@ INSN = {
         "csrrw",
         "csrrs",
         "csrrc",
-        "csrrw",
+        "csrrwi",
         "csrrsi",
         "csrrci"],
     "EXT_M": [
@@ -101,8 +101,49 @@ INSN = {
         "cflw",
         "cfsw",
     ],
+    "SYSTEM": ["sret"],
+    "Zba": [
+        "sh3add",
+        "sh2add",
+        "sh1add",
+    ],
+    "Zbb": [
+        "rev8",
+        "orcb",
+        "rori",
+        "ror",
+        "rol",
+        "zexth",
+        "sexth",
+        "sextb",
+        "minu",
+        "maxu",
+        "min",
+        "max",
+        "cpop",
+        "ctz",
+        "clz",
+        "xnor",
+        "orn",
+        "andn",
+    ],
+    "Zbc": [
+        "clmulr",
+        "clmulh",
+        "clmul",
+    ],
+    "Zbs": [
+        "bseti",
+        "bset",
+        "binvi",
+        "binv",
+        "bexti",
+        "bext",
+        "bclri",
+        "bclr",
+    ],
 }
-EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C"]
+EXT_LIST = ["Zifencei", "Zicsr", "EXT_M", "EXT_A", "EXT_F", "EXT_C", "SYSTEM", "Zba", "Zbb", "Zbc", "Zbs"]
 SKIP_LIST = []
 # check enabled extension in Makefile
 

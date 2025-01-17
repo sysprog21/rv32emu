@@ -725,6 +725,7 @@ static inline void emit_alu64(struct jit_state *state, int op, int src, int dst)
 #endif
 }
 
+#if RV32_HAS(EXT_M)
 static inline void emit_alu64_imm8(struct jit_state *state,
                                    int op,
                                    int src UNUSED,
@@ -742,6 +743,7 @@ static inline void emit_alu64_imm8(struct jit_state *state,
     }
 #endif
 }
+#endif
 
 /* Register to register mov */
 static inline void emit_mov(struct jit_state *state, int src, int dst)
@@ -1690,6 +1692,7 @@ static void ra_load2(struct jit_state *state, int vm_reg_idx1, int vm_reg_idx2)
                   offsetof(riscv_t, X) + 4 * vm_reg_idx2);
 }
 
+#if RV32_HAS(EXT_M)
 static void ra_load2_sext(struct jit_state *state,
                           int vm_reg_idx1,
                           int vm_reg_idx2,
@@ -1733,6 +1736,7 @@ static void ra_load2_sext(struct jit_state *state,
                       offsetof(riscv_t, X) + 4 * vm_reg_idx2);
     }
 }
+#endif
 
 void parse_branch_history_table(struct jit_state *state, rv_insn_t *ir)
 {

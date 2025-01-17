@@ -36,6 +36,10 @@ jobs:
   host-x64:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
@@ -49,47 +53,95 @@ jobs:
             sudo chmod +x ./llvm.sh
             sudo ./llvm.sh 18
       shell: bash
+    - name: Install compiler
+      id: install_cc
+      uses: rlalik/setup-cpp-compiler@master
+      with:
+        compiler: ${{ matrix.compiler }}
     - name: default build
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
       run: make -j$(nproc)
+      if: ${{ always() }}
     - name: check + tests
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
       run: |
+            make clean
             make check -j$(nproc)
             make tests -j$(nproc)
             make misalign -j$(nproc)
             make tool -j$(nproc)
+      if: ${{ always() }}
     - name: diverse configurations
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean && make ENABLE_EXT_M=0 check -j$(nproc)
             make distclean && make ENABLE_EXT_A=0 check -j$(nproc)
             make distclean && make ENABLE_EXT_F=0 check -j$(nproc)
             make distclean && make ENABLE_EXT_C=0 check -j$(nproc)
             make distclean && make ENABLE_SDL=0 check -j$(nproc)
+            make distclean && make ENABLE_Zicsr=0 check -j$(nproc)
+            make distclean && make ENABLE_MOP_FUSION=0 check -j$(nproc)
+            make distclean && make ENABLE_BLOCK_CHAINING=0 check -j$(nproc)
+            make distclean && make ENABLE_Zba=0 check -j$(nproc)
+            make distclean && make ENABLE_Zbb=0 check -j$(nproc)
+            make distclean && make ENABLE_Zbc=0 check -j$(nproc)
+            make distclean && make ENABLE_Zbs=0 check -j$(nproc)
+            make distclean && make ENABLE_Zifencei=0 check -j$(nproc)
+      if: ${{ always() }}
     - name: misalignment test in block emulation
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/alignment/
             make distclean && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 ENABLE_SYSTEM=1 misalign-in-blk-emu -j$(nproc)
+      if: ${{ always() }}
     - name: MMU test
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/mmu/
             make distclean && make ENABLE_ELF_LOADER=1 ENABLE_SYSTEM=1 mmu-test -j$(nproc)
+      if: ${{ always() }}
     - name: gdbstub test
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test -j$(nproc)
+      if: ${{ always() }}
     - name: JIT test
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_EXT_M=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_Zbc=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_Zbs=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_Zicsr=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_Zifencei=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check -j$(nproc)
+      if: ${{ always() }}
     - name: undefined behavior test
       run: |
             make clean && make ENABLE_UBSAN=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
+      if: ${{ always() }}
     - name: boot Linux kernel test
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make clean && make ENABLE_SYSTEM=1 && make ENABLE_SYSTEM=1 artifact -j$(nproc)
             .ci/boot-linux.sh
             make ENABLE_SYSTEM=1 clean
+      if: ${{ always() }}
 
   host-arm64:
     needs: [detect-code-related-file-changes]

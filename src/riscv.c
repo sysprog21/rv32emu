@@ -621,8 +621,10 @@ bool rv_has_halted(riscv_t *rv)
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
-#if !RV32_HAS(JIT)
+#if !RV32_HAS(JIT) || (RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER))
     vm_attr_t *attr = PRIV(rv);
+#endif
+#if !RV32_HAS(JIT)
     map_delete(attr->fd_map);
     memory_delete(attr->mem);
     block_map_destroy(rv);

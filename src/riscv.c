@@ -467,7 +467,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     char *ram_loc = (char *) attr->mem->mem_base;
     map_file(&ram_loc, attr->data.system.kernel);
 
-    uint32_t dtb_addr = attr->mem->mem_size - (1 * 1024 * 1024);
+    uint32_t dtb_addr = attr->mem->mem_size - DTB_SIZE;
     ram_loc = ((char *) attr->mem->mem_base) + dtb_addr;
     load_dtb(&ram_loc, attr->data.system.bootargs);
     /*
@@ -475,7 +475,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
      * prevent kernel from overwritting it
      */
     if (attr->data.system.initrd) {
-        uint32_t initrd_addr = dtb_addr - (8 * 1024 * 1024);
+        uint32_t initrd_addr = dtb_addr - INITRD_SIZE;
         ram_loc = ((char *) attr->mem->mem_base) + initrd_addr;
         map_file(&ram_loc, attr->data.system.initrd);
     }

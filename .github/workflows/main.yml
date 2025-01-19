@@ -46,7 +46,7 @@ jobs:
     - name: install-dependencies
       run: |
             sudo apt-get update -q -y
-            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect
+            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc
             .ci/riscv-toolchain-install.sh
             echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
             wget https://apt.llvm.org/llvm.sh
@@ -161,7 +161,7 @@ jobs:
         # No 'sudo' is available
         install: |
           apt-get update -q -y
-          apt-get install -q -y git build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg
+          apt-get install -q -y git build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
           git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub

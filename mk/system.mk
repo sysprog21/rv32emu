@@ -10,7 +10,7 @@ DTC ?= dtc
 BUILD_DTB := $(OUT)/minimal.dtb
 $(BUILD_DTB): $(DEV_SRC)/minimal.dts
 	$(VECHO) " DTC\t$@\n"
-	$(Q)$(DTC) $^ -o $@
+	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef $(CFLAGS_dt) $^ | $(DTC) - > $@
 
 BIN_TO_C := $(OUT)/bin2c
 $(BIN_TO_C): tools/bin2c.c

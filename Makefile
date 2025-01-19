@@ -30,6 +30,34 @@ $(call set-feature, BLOCK_CHAINING)
 ENABLE_SYSTEM ?= 0
 $(call set-feature, SYSTEM)
 
+# Definition that bridges:
+#   Device Tree(initrd, memory range)
+#   src/io.c(memory init)
+#   src/riscv.c(system emulation layout init)
+ifeq ($(call has, SYSTEM), 1)
+ifeq ($(call has, ELF_LOADER), 0)
+MiB = 1024*1024
+MEM_START ?= 0
+MEM_SIZE ?= 512 # unit in MiB
+DTB_SIZE ?= 1 # unit in MiB
+INITRD_SIZE ?= 8 # unit in MiB
+
+compute_size = $(shell echo "obase=16; ibase=10; $(1)*$(MiB)" | bc)
+REAL_MEM_SIZE = $(call compute_size, $(MEM_SIZE))
+REAL_DTB_SIZE = $(call compute_size, $(DTB_SIZE))
+REAL_INITRD_SIZE = $(call compute_size, $(INITRD_SIZE))
+
+CFLAGS_dt += -DMEM_START=0x$(MEM_START) \
+             -DMEM_END=0x$(shell echo "obase=16; ibase=16; $(MEM_START)+$(REAL_MEM_SIZE)" | bc) \
+             -DINITRD_START=0x$(shell echo "obase=16; ibase=16; \
+                              $(REAL_MEM_SIZE) - $(call compute_size, ($(INITRD_SIZE)+$(DTB_SIZE)))" | bc) \
+             -DINITRD_END=0x$(shell echo "obase=16; ibase=16; \
+                            $(REAL_MEM_SIZE) - $(call compute_size, $(DTB_SIZE)) - 1" | bc)
+
+CFLAGS += -DMEM_SIZE=0x$(REAL_MEM_SIZE) -DDTB_SIZE=0x$(REAL_DTB_SIZE) -DINITRD_SIZE=0x$(REAL_INITRD_SIZE)
+endif
+endif
+
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)
@@ -146,6 +174,14 @@ $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 ENABLE_FULL4G := 1
 LDFLAGS += $(shell sdl2-config --libs) -pthread
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
+endif
+endif
+
+# If SYSTEM is enabled and ELF_LOADER is not, then skip FULL4G bacause guestOS
+# has dedicated memory mapping range.
+ifeq ($(call has, SYSTEM), 1)
+ifeq ($(call has, ELF_LOADER), 0)
+override ENABLE_FULL4G := 0
 endif
 endif
 

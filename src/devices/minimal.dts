@@ -12,8 +12,8 @@
     chosen {
         bootargs = "earlycon console=ttyS0";
         stdout-path = "serial0";
-        linux,initrd-start = <0x1f700000>; /* @403 MiB (503 * 1024 * 1024)     */
-        linux,initrd-end = <0x1fefffff>;   /* @511 MiB (511 * 1024 * 1024 - 1) */
+        linux,initrd-start = <INITRD_START>;
+        linux,initrd-end = <INITRD_END>;
     };
 
     cpus {
@@ -37,7 +37,7 @@
 
     sram: memory@0 {
         device_type = "memory";
-        reg = <0x00000000 0x20000000>;
+        reg = <MEM_START MEM_END>;
         reg-names = "sram0";
     };
 

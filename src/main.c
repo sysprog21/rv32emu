@@ -226,12 +226,6 @@ void indirect_rv_halt()
 }
 #endif
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
-/* forcely undefine MEM_SIZE to prevent any define in Makefile */
-#undef MEM_SIZE
-#define MEM_SIZE 512 * 1024 * 1024
-#endif
-
 int main(int argc, char **args)
 {
     if (argc == 1 || !parse_args(argc, args)) {

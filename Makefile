@@ -343,7 +343,7 @@ EXPECTED_pi = 3.1415926535897932384626433832795028841971693993751058209749445923
 
 check-hello: $(BIN)
 	$(Q)$(PRINTF) "Running hello.elf ... "; \
-	    if [ "$(shell $(BIN) $(OUT)/hello.elf | uniq)" = "$(strip $(EXPECTED_hello)) inferior exit code 0" ]; then \
+	    if [ "$(shell LC_ALL=C $(BIN) $(OUT)/hello.elf | uniq)" = "$(strip $(EXPECTED_hello)) inferior exit code 0" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \
@@ -353,7 +353,7 @@ check-hello: $(BIN)
 check: $(BIN) check-hello artifact
 	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
 	    $(PRINTF) "Running $(e) ... "; \
-	    if [ "$(shell $(BIN) $(OUT)/riscv32/$(e) | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
+	    if [ "$(shell LC_ALL=C $(BIN) $(OUT)/riscv32/$(e) | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \
@@ -364,7 +364,7 @@ check: $(BIN) check-hello artifact
 EXPECTED_aes_sha1 = 1242a6757c8aef23e50b5264f5941a2f4b4a347e  -
 misalign: $(BIN) artifact
 	$(Q)$(PRINTF) "Running uaes ... ";
-	$(Q)if [ "$(shell $(BIN) -m $(OUT)/riscv32/uaes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
+	$(Q)if [ "$(shell LC_ALL=C $(BIN) -m $(OUT)/riscv32/uaes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \
@@ -373,7 +373,7 @@ misalign: $(BIN) artifact
 EXPECTED_misalign = MISALIGNED INSTRUCTION FETCH TEST PASSED!
 misalign-in-blk-emu: $(BIN)
 	         $(Q)$(PRINTF) "Running misalign.elf ... "; \
-	             if [ "$(shell $(BIN) tests/system/alignment/misalign.elf | tail -n 2)" = "$(strip $(EXPECTED_misalign)) inferior exit code 0" ]; then \
+	             if [ "$(shell LC_ALL=C $(BIN) tests/system/alignment/misalign.elf | tail -n 2)" = "$(strip $(EXPECTED_misalign)) inferior exit code 0" ]; then \
 	             $(call notice, [OK]); \
 	             else \
 	             $(PRINTF) "Failed.\n"; \
@@ -383,7 +383,7 @@ misalign-in-blk-emu: $(BIN)
 EXPECTED_mmu = STORE PAGE FAULT TEST PASSED!
 mmu-test: $(BIN)
 	$(Q)$(PRINTF) "Running vm.elf ... "; \
-	    if [ "$(shell $(BIN) tests/system/mmu/vm.elf | tail -n 2)" = "$(strip $(EXPECTED_mmu)) inferior exit code 0" ]; then \
+	    if [ "$(shell LC_ALL=C $(BIN) tests/system/mmu/vm.elf | tail -n 2)" = "$(strip $(EXPECTED_mmu)) inferior exit code 0" ]; then \
 	    $(call notice, [OK]); \
 	    else \
 	    $(PRINTF) "Failed.\n"; \
@@ -392,13 +392,13 @@ mmu-test: $(BIN)
 
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)
-doom_action := (cd $(OUT); ../$(BIN) riscv32/doom)
+doom_action := (cd $(OUT); LC_ALL=C ../$(BIN) riscv32/doom)
 doom_deps += $(DOOM_DATA) $(BIN)
 doom: artifact $(doom_deps)
 	$(doom_action)
 
 ifeq ($(call has, EXT_F), 1)
-quake_action := (cd $(OUT); ../$(BIN) riscv32/quake)
+quake_action := (cd $(OUT); LC_ALL=C ../$(BIN) riscv32/quake)
 quake_deps += $(QUAKE_DATA) $(BIN)
 quake: artifact $(quake_deps)
 	$(quake_action)

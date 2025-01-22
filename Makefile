@@ -195,7 +195,7 @@ endif
 # during emulator initialization.
 $(call set-feature, FULL4G)
 ifeq ($(call has, FULL4G), 1)
-$(OUT)/main.o: CFLAGS += -DMEM_SIZE=0xFFFFFFFFULL # 2^{32} - 1
+CFLAGS += -DMEM_SIZE=0xFFFFFFFFULL # 2^{32} - 1
 endif
 
 ENABLE_GDBSTUB ?= 0

@@ -15,6 +15,7 @@
 #if RV32_HAS(SYSTEM)
 #include "devices/plic.h"
 #include "devices/uart.h"
+#include "devices/virtio.h"
 #endif /* RV32_HAS(SYSTEM) */
 
 #if RV32_HAS(EXT_F)
@@ -459,6 +460,7 @@ typedef struct {
     char *kernel;
     char *initrd;
     char *bootargs;
+    char *vblk_device;
 } vm_system_t;
 #endif /* RV32_HAS(SYSTEM) */
 
@@ -478,6 +480,10 @@ typedef struct {
 
     /* plic object */
     plic_t *plic;
+
+    /* virtio-blk device */
+    uint32_t *disk;
+    virtio_blk_state_t *vblk;
 #endif /* RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER) */
 
     /* vm memory object */

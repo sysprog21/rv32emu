@@ -24,7 +24,7 @@ a focus on efficiency and readability.
 
 Features:
 * Fast interpreter for executing the RV32 ISA
-* Comprehensive support for RV32I and M, A, F, C, Zba, Zbb, Zbc, Zbs extensions
+* Comprehensive support for RV32I, RV32E and M, A, F, C, Zba, Zbb, Zbc, Zbs extensions
 * Memory-efficient design
 * Built-in ELF loader
 * Implementation of commonly used newlib system calls
@@ -116,6 +116,7 @@ The image containing all the necessary tools for development and testing can be 
 ### Customization
 
 `rv32emu` is configurable, and you can override the below variable(s) to fit your expectations:
+* `ENABLE_RV32E`: RV32E Base Integer Instruction Set
 * `ENABLE_EXT_M`: Standard Extension for Integer Multiplication and Division
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
 * `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
@@ -187,6 +188,7 @@ $ make arch-test RISCV_DEVICE=I
 Current progress of this emulator in riscv-arch-test (RV32):
 * Passed Tests
     - `I`: Base Integer Instruction Set
+    - `E`: RV32E Base Integer Instruction Set
     - `M`: Standard Extension for Integer Multiplication and Division
     - `A`: Standard Extension for Atomic Instructions
     - `F`: Standard Extension for Single-Precision Floating-Point

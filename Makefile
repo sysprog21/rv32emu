@@ -127,6 +127,10 @@ endif
 ENABLE_EXT_C ?= 1
 $(call set-feature, EXT_C)
 
+# RV32E Base Integer Instruction Set
+ENABLE_RV32E ?= 0
+$(call set-feature, RV32E)
+
 # Control and Status Register (CSR)
 ENABLE_Zicsr ?= 1
 $(call set-feature, Zicsr)

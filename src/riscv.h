@@ -33,6 +33,7 @@
 extern "C" {
 #endif
 
+/* clang-format off */
 #define RV_REGS_LIST                                   \
     _(zero) /* hard-wired zero, ignoring any writes */ \
     _(ra)   /* return address */                       \
@@ -50,22 +51,25 @@ extern "C" {
     _(a3)                                              \
     _(a4)                                              \
     _(a5)                                              \
-    _(a6)                                              \
-    _(a7)                                              \
-    _(s2) /* saved register */                         \
-    _(s3)                                              \
-    _(s4)                                              \
-    _(s5)                                              \
-    _(s6)                                              \
-    _(s7)                                              \
-    _(s8)                                              \
-    _(s9)                                              \
-    _(s10)                                             \
-    _(s11)                                             \
-    _(t3) /* temporary register */                     \
-    _(t4)                                              \
-    _(t5)                                              \
-    _(t6)
+    IIF(RV32_HAS(RV32E))(,                             \
+        _(a6)                                          \
+        _(a7)                                          \
+        _(s2) /* saved register */                     \
+        _(s3)                                          \
+        _(s4)                                          \
+        _(s5)                                          \
+        _(s6)                                          \
+        _(s7)                                          \
+        _(s8)                                          \
+        _(s9)                                          \
+        _(s10)                                         \
+        _(s11)                                         \
+        _(t3) /* temporary register */                 \
+        _(t4)                                          \
+        _(t5)                                          \
+        _(t6)                                          \
+    )
+/* clang-format on */
 
 /* RISC-V registers (mnemonics, ABI names)
  *
@@ -117,6 +121,7 @@ enum SV32_PTE_PERM {
 #define MISA_SUPER (1 << ('S' - 'A'))
 #define MISA_USER (1 << ('U' - 'A'))
 #define MISA_I (1 << ('I' - 'A'))
+#define MISA_E (1 << ('E' - 'A'))
 #define MISA_M (1 << ('M' - 'A'))
 #define MISA_A (1 << ('A' - 'A'))
 #define MISA_F (1 << ('F' - 'A'))

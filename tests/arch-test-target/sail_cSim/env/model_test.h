@@ -13,11 +13,19 @@
 /* clang-format on */
 
 // RV_COMPLIANCE_HALT
+#ifndef RV32E
 #define RVMODEL_HALT   \
     li x1, 1;          \
     write_tohost:      \
     sw x1, tohost, t5; \
     j write_tohost;
+#else
+#define RVMODEL_HALT    \
+    li x1, 1;           \
+    write_tohost:       \
+    sw x1, tohost, x15; \
+    j write_tohost;
+#endif
 
 #define RVMODEL_BOOT
 

@@ -13,10 +13,17 @@
 /* clang-format on */
 
 // RV_COMPLIANCE_HALT
+#ifndef RV32E
 #define RVMODEL_HALT \
     add a7, x0, 93;  \
     add a0, x0, 0;   \
     ecall
+#else
+#define RVMODEL_HALT \
+    add t0, x0, 93;  \
+    add a0, x0, 0;   \
+    ecall
+#endif
 
 #define RVMODEL_BOOT
 

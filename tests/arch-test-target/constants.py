@@ -8,7 +8,9 @@ cwd = os.getcwd()
 
 misa_A = (1 << 0)
 misa_C = (1 << 2)
+misa_E = (1 << 4)
 misa_F = (1 << 5)
+misa_I = (1 << 8)
 misa_M = (1 << 12)
 
 config_temp = '''[RISCOF]

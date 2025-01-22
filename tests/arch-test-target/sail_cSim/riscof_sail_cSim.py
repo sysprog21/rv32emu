@@ -52,9 +52,15 @@ class sail_cSim(pluginTemplate):
         ispec = utils.load_yaml(isa_yaml)['hart0']
         self.xlen = ('64' if 64 in ispec['supported_xlen'] else '32')
         self.isa = 'rv' + self.xlen
-        self.compile_cmd = self.compile_cmd+' -mabi='+('lp64 ' if 64 in ispec['supported_xlen'] else 'ilp32 ')
+        if 'E' not in ispec['ISA']:
+            self.compile_cmd = self.compile_cmd+' -mabi='+('lp64 ' if 64 in ispec['supported_xlen'] else 'ilp32 ')
+        else:
+            self.compile_cmd = self.compile_cmd+' -mabi='+('lp64e ' if 64 in ispec['supported_xlen'] else 'ilp32e ')
+            self.compile_cmd += "-D RV32E "
         if "I" in ispec["ISA"]:
             self.isa += 'i'
+        if "E" in ispec["ISA"]:
+            self.isa += 'e'
         if "M" in ispec["ISA"]:
             self.isa += 'm'
         if "C" in ispec["ISA"]:

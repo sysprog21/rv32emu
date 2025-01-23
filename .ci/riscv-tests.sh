@@ -22,3 +22,7 @@ make ENABLE_EXT_M=1 ENABLE_EXT_A=1 ENABLE_EXT_F=1 ENABLE_EXT_C=1 \
 make arch-test RISCV_DEVICE=IMAFCZicsrZifencei $PARALLEL || exit 1
 make arch-test RISCV_DEVICE=FCZicsr $PARALLEL || exit 1
 make arch-test RISCV_DEVICE=IMZbaZbbZbcZbs $PARALLEL || exit 1
+
+make distclean
+make ENABLE_RV32E=1 ENABLE_FULL4G=1 $PARALLEL
+make arch-test RISCV_DEVICE=E $PARALLEL || exit 1

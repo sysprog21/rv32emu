@@ -3,7 +3,7 @@ import argparse
 import ruamel.yaml
 
 # setup the ISA config file
-def setup_testlist(riscv_device):
+def setup_testlist(riscv_device, hw_data_misaligned_support):
     # ISA config file path
     ispec = constants.root + '/rv32emu/rv32emu_isa.yaml'
     misa = 0x40000000
@@ -51,6 +51,9 @@ def setup_testlist(riscv_device):
             raise SystemExit(1)
 
     file['hart0']['ISA'] = ISA
+    file['hart0']['hw_data_misaligned_support'] = (
+        True if hw_data_misaligned_support == "1" else False
+    )
     file['hart0']['misa']['reset-val'] = misa
 
     with open(ispec, 'w+') as outfile:
@@ -73,7 +76,12 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--riscv_device', help='the ISA will test',
                         default='IMACZicsrZifencei')
+    parser.add_argument(
+        "--hw_data_misaligned_support",
+        help="whether the hardware data misalgnment is implemented or not",
+        default="1",
+    )
     args = parser.parse_args()
 
-    setup_testlist(args.riscv_device)
+    setup_testlist(args.riscv_device, args.hw_data_misaligned_support)
     setup_config()

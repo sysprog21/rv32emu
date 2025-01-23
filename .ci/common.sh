@@ -2,12 +2,19 @@
 check_platform()
 {
     MACHINE_TYPE=`uname -m`
-    if [ ${MACHINE_TYPE} != 'x86_64' ]; then
-        exit 1
-    fi
-
     OS_TYPE=`uname -s`
-    if [ ${OS_TYPE} != 'Linux' ]; then
-        exit 1
-    fi
+
+    case "${MACHINE_TYPE}/${OS_TYPE}" in
+        x86_64/Linux | aarch64/Linux)
+            ;;
+        Arm64/Darwin)
+            echo "Apple Silicon is not supported yet"
+            exit 1
+            ;;
+        *)
+            echo "Unsupported platform: ${MACHINE_TYPE}/${OS_TYPE}"
+            exit 1
+            ;;
+    esac
+
 }

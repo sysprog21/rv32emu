@@ -20,8 +20,9 @@ ifeq ($(CROSS_COMPILE),)
 	$(error GNU Toolchain for RISC-V is required to build architecture tests. Please check package installation)
 endif
 	git submodule update --init $(dir $(ARCH_TEST_DIR))
-	$(Q)cp $(OUT)/sail_cSim/riscv_sim_RV32 tests/arch-test-target/sail_cSim/riscv_sim_RV32
-	$(Q)python3 -B $(RISCV_TARGET)/setup.py --riscv_device=$(RISCV_DEVICE)
+	$(Q)cp $(OUT)/rv32emu-prebuilt-sail-$(HOST_PLATFORM) tests/arch-test-target/sail_cSim/riscv_sim_RV32
+	$(Q)chmod +x tests/arch-test-target/sail_cSim/riscv_sim_RV32
+	$(Q)python3 -B $(RISCV_TARGET)/setup.py --riscv_device=$(RISCV_DEVICE) --hw_data_misaligned_support=$(hw_data_misaligned_support)
 	$(Q)riscof run --work-dir=$(WORK) \
 			--config=$(RISCV_TARGET)/config.ini \
 			--suite=$(ARCH_TEST_SUITE) \

@@ -39,9 +39,12 @@ SHELL_HACK := $(shell mkdir -p $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32 $(
 ifeq ($(call has, PREBUILT), 1)
 ifeq ($(call has, SYSTEM), 1)
   LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- | grep '"tag_name"' | grep "Linux-Image" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+else ifeq ($(call has, ARCH_TEST), 1)
+  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- | grep '"tag_name"' | grep "sail" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
 else
   LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- | grep '"tag_name"' | grep "ELF" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
 endif
+  PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
 else
   # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,
   # we disable the hardware floating-point and the related SIMD operation of x86.
@@ -67,6 +70,14 @@ ifeq ($(call has, SYSTEM), 1)
 	))
 
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-linux-image-prebuilt.tar.gz)
+else ifeq ($(call has, ARCH_TEST), 1)
+	$(Q)$(eval PREBUILT_SAIL_FILENAME := $(shell cat $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha | awk '{  print $$2 };'))
+
+	$(Q)$(eval $(foreach FILE,$(PREBUILT_SAIL_FILENAME), \
+	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha | awk '{ print $$1 };'),$(BIN_DIR)/$(FILE),RES) \
+	))
+
+	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt-sail-$(HOST_PLATFORM))
 else
 	$(Q)$(eval PREBUILT_X86_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{  print $$2 };'))
 	$(Q)$(eval PREBUILT_RV32_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$2 };'))
@@ -81,12 +92,21 @@ else
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt.tar.gz)
 endif
 
+ifeq ($(call has, ARCH_TEST), 1)
 	$(Q)if [ "$(RES)" = "1" ]; then \
-	    $(PRINTF) "\n$(YELLOW)SHA-1 verification fails! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
-	    wget -q --show-progress https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/$(RV32EMU_PREBUILT_TARBALL) -O- | tar -C build --strip-components=1 -xz; \
+	    $(PRINTF) "\n$(YELLOW)SHA-1 verification failed! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
+	    wget -q --show-progress $(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL) -O build/$(RV32EMU_PREBUILT_TARBALL);\
 	else \
 	    $(call notice, [OK]); \
 	fi
+else
+	$(Q)if [ "$(RES)" = "1" ]; then \
+	    $(PRINTF) "\n$(YELLOW)SHA-1 verification failed! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
+	    wget -q --show-progress $(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL) -O- | tar -C build --strip-components=1 -xz; \
+	else \
+	    $(call notice, [OK]); \
+	fi
+endif
 else
 ifeq ($(call has, SYSTEM), 1)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/Image >> sha1sum-linux-image)
@@ -127,13 +147,15 @@ endif
 
 fetch-checksum:
 ifeq ($(call has, PREBUILT), 1)
-	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ... "
+	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ...\n"
 ifeq ($(call has, SYSTEM), 1)
-	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-image https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-linux-image
+	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-image $(PREBUILT_BLOB_URL)/sha1sum-linux-image
 	$(Q)$(call notice, [OK])
+else ifeq ($(call has, ARCH_TEST), 1)
+	$(Q)wget -q -O $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha $(PREBUILT_BLOB_URL)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha
 else
-	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-x86-softfp https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-linux-x86-softfp
-	$(Q)wget -q -O $(BIN_DIR)/sha1sum-riscv32 https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)/sha1sum-riscv32
+	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-x86-softfp $(PREBUILT_BLOB_URL)/sha1sum-linux-x86-softfp
+	$(Q)wget -q -O $(BIN_DIR)/sha1sum-riscv32 $(PREBUILT_BLOB_URL)/sha1sum-riscv32
 	$(Q)$(call notice, [OK])
 endif
 endif

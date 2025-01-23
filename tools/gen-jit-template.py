@@ -218,14 +218,21 @@ for i in range(len(op)):
                 asm = "emit_alu32(state, {}, {}, {});".format(
                     items[1], items[2], items[3])
             elif items[0] == "ldimm":
-                if items[2] == "mem":
-                    asm = "emit_load_imm(state, {}, (intptr_t) (m->mem_base + ir->imm));".format(
-                        items[1])
-                elif len(items) == 4:
+                if len(items) == 4:
                     asm = "emit_load_imm(state, {}, {} + {});".format(
                         items[1], items[2], items[3])
                 else:
                     asm = "emit_load_imm(state, {}, {});".format(
+                        items[1], items[2])
+            elif items[0] == "ldimms":
+                if items[2] == "mem":
+                    asm = "emit_load_imm_sext(state, {}, (intptr_t) (m->mem_base + ir->imm));".format(
+                        items[1])
+                elif len(items) == 4:
+                    asm = "emit_load_imm_sext(state, {}, {} + {});".format(
+                        items[1], items[2], items[3])
+                else:
+                    asm = "emit_load_imm_sext(state, {}, {});".format(
                         items[1], items[2])
             elif items[0] == "lds":
                 if (items[3] == "X"):

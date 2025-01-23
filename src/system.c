@@ -17,7 +17,7 @@
 #define W 0
 
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
-void emu_update_uart_interrupts(riscv_t *rv)
+static void emu_update_uart_interrupts(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
     u8250_update_interrupts(attr->uart);

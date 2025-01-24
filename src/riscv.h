@@ -89,70 +89,8 @@ enum {
 };
 /* clang-format on */
 
-#define MISA_SUPER (1 << ('S' - 'A'))
-#define MISA_USER (1 << ('U' - 'A'))
-#define MISA_I (1 << ('I' - 'A'))
-#define MISA_M (1 << ('M' - 'A'))
-#define MISA_A (1 << ('A' - 'A'))
-#define MISA_F (1 << ('F' - 'A'))
-#define MISA_C (1 << ('C' - 'A'))
-
-/* The mstatus register keeps track of and controls the hart’s current operating
- * state */
-#define MSTATUS_SIE_SHIFT 1
-#define MSTATUS_MIE_SHIFT 3
-#define MSTATUS_SPIE_SHIFT 5
-#define MSTATUS_UBE_SHIFT 6
-#define MSTATUS_MPIE_SHIFT 7
-#define MSTATUS_SPP_SHIFT 8
-#define MSTATUS_MPP_SHIFT 11
-#define MSTATUS_MPRV_SHIFT 17
-#define MSTATUS_SUM_SHIFT 18
-#define MSTATUS_MXR_SHIFT 18
-#define MSTATUS_TVM_SHIFT 20
-#define MSTATUS_TW_SHIFT 21
-#define MSTATUS_TSR_SHIFT 22
-#define MSTATUS_SIE (1 << MSTATUS_SIE_SHIFT)
-#define MSTATUS_MIE (1 << MSTATUS_MIE_SHIFT)
-#define MSTATUS_SPIE (1 << MSTATUS_SPIE_SHIFT)
-#define MSTATUS_UBE (1 << MSTATUS_UBE_SHIFT)
-#define MSTATUS_MPIE (1 << MSTATUS_MPIE_SHIFT)
-#define MSTATUS_SPP (1 << MSTATUS_SPP_SHIFT)
-#define MSTATUS_MPP (3 << MSTATUS_MPP_SHIFT)
-#define MSTATUS_MPRV (1 << MSTATUS_MPRV_SHIFT)
-#define MSTATUS_SUM (1 << MSTATUS_SUM_SHIFT)
-#define MSTATUS_MXR (1 << MSTATUS_MXR_SHIFT)
-#define MSTATUS_TVM (1 << MSTATUS_TVM_SHIFT)
-#define MSTATUS_TW (1 << MSTATUS_TW_SHIFT)
-#define MSTATUS_TSR (1 << MSTATUS_TSR_SHIFT)
-
-/* A restricted view of mstatus */
-#define SSTATUS_SIE_SHIFT 1
-#define SSTATUS_SPIE_SHIFT 5
-#define SSTATUS_UBE_SHIFT 6
-#define SSTATUS_SPP_SHIFT 8
-#define SSTATUS_SUM_SHIFT 18
-#define SSTATUS_MXR_SHIFT 19
-#define SSTATUS_SIE (1 << SSTATUS_SIE_SHIFT)
-#define SSTATUS_SPIE (1 << SSTATUS_SPIE_SHIFT)
-#define SSTATUS_UBE (1 << SSTATUS_UBE_SHIFT)
-#define SSTATUS_SPP (1 << SSTATUS_SPP_SHIFT)
-#define SSTATUS_SUM (1 << SSTATUS_SUM_SHIFT)
-#define SSTATUS_MXR (1 << SSTATUS_MXR_SHIFT)
-
-#define SIP_SSIP_SHIFT 1
-#define SIP_STIP_SHIFT 5
-#define SIP_SEIP_SHIFT 9
-#define SIP_SSIP (1 << SIP_SSIP_SHIFT)
-#define SIP_STIP (1 << SIP_STIP_SHIFT)
-#define SIP_SEIP (1 << SIP_SEIP_SHIFT)
-
 #define RV_PG_SHIFT 12
 #define RV_PG_SIZE (1 << RV_PG_SHIFT)
-
-#define RV_PRIV_U_MODE 0
-#define RV_PRIV_S_MODE 1
-#define RV_PRIV_M_MODE 3
 
 typedef uint32_t pte_t;
 #define PTE_V (1U)
@@ -175,56 +113,19 @@ enum SV32_PTE_PERM {
     RESRV_PAGE1 = 0b0101,
     RESRV_PAGE2 = 0b1101,
 };
-#define RV_INT_STI_SHIFT 5
-#define RV_INT_STI (1 << RV_INT_STI_SHIFT)
+
+#define MISA_SUPER (1 << ('S' - 'A'))
+#define MISA_USER (1 << ('U' - 'A'))
+#define MISA_I (1 << ('I' - 'A'))
+#define MISA_M (1 << ('M' - 'A'))
+#define MISA_A (1 << ('A' - 'A'))
+#define MISA_F (1 << ('F' - 'A'))
+#define MISA_C (1 << ('C' - 'A'))
 
 /*
- * SBI functions must return a pair of values:
- *
- * struct sbiret {
- *     long error;
- *     long value;
- * };
- *
- * The error and value field will be set to register a0 and a1 respectively
- * after the SBI function return. The error field indicate whether the
- * SBI call is success or not. SBI_SUCCESS indicates success and
- * SBI_ERR_NOT_SUPPORTED indicates not supported failure. The value field is
- * the information based on the extension ID(EID) and SBI function ID(FID).
- *
- * SBI reference: https://github.com/riscv-non-isa/riscv-sbi-doc
- *
+ * The mstatus register keeps track of and controls the hart’s
+ * current operating state
  */
-#define SBI_SUCCESS 0
-#define SBI_ERR_NOT_SUPPORTED -2
-
-/*
- * All of the functions in the base extension must be supported by
- * all SBI implementations.
- */
-#define SBI_EID_BASE 0x10
-#define SBI_BASE_GET_SBI_SPEC_VERSION 0
-#define SBI_BASE_GET_SBI_IMPL_ID 1
-#define SBI_BASE_GET_SBI_IMPL_VERSION 2
-#define SBI_BASE_PROBE_EXTENSION 3
-#define SBI_BASE_GET_MVENDORID 4
-#define SBI_BASE_GET_MARCHID 5
-#define SBI_BASE_GET_MIMPID 6
-
-/* Make supervisor to schedule the clock for next timer event. */
-#define SBI_EID_TIMER 0x54494D45
-#define SBI_TIMER_SET_TIMER 0
-
-/* Allows the supervisor to request system-level reboot or shutdown. */
-#define SBI_EID_RST 0x53525354
-#define SBI_RST_SYSTEM_RESET 0
-
-#define RV_MVENDORID 0x12345678
-#define RV_MARCHID ((1ULL << 31) | 1)
-#define RV_MIMPID 1
-
-/* The mstatus register keeps track of and controls the hart’s current operating
- * state */
 #define MSTATUS_SIE_SHIFT 1
 #define MSTATUS_MIE_SHIFT 3
 #define MSTATUS_SPIE_SHIFT 5
@@ -265,7 +166,6 @@ enum SV32_PTE_PERM {
 #define SSTATUS_SPP (1 << SSTATUS_SPP_SHIFT)
 #define SSTATUS_SUM (1 << SSTATUS_SUM_SHIFT)
 #define SSTATUS_MXR (1 << SSTATUS_MXR_SHIFT)
-
 #define SIP_SSIP_SHIFT 1
 #define SIP_STIP_SHIFT 5
 #define SIP_SEIP_SHIFT 9
@@ -277,6 +177,13 @@ enum SV32_PTE_PERM {
 #define RV_PRIV_S_MODE 1
 #define RV_PRIV_M_MODE 3
 #define RV_PRIV_IS_U_OR_S_MODE() (rv->priv_mode <= RV_PRIV_S_MODE)
+
+#define RV_MVENDORID 0x12345678
+#define RV_MARCHID ((1ULL << 31) | 1)
+#define RV_MIMPID 1
+
+#define RV_INT_STI_SHIFT 5
+#define RV_INT_STI (1 << RV_INT_STI_SHIFT)
 
 /* clang-format off */
 enum TRAP_CODE {
@@ -344,7 +251,6 @@ enum TRAP_CODE {
  * the information based on the extension ID(EID) and SBI function ID(FID).
  *
  * SBI reference: https://github.com/riscv-non-isa/riscv-sbi-doc
- *
  */
 #define SBI_SUCCESS 0
 #define SBI_ERR_NOT_SUPPORTED -2
@@ -369,10 +275,6 @@ enum TRAP_CODE {
 /* Allows the supervisor to request system-level reboot or shutdown. */
 #define SBI_EID_RST 0x53525354
 #define SBI_RST_SYSTEM_RESET 0
-
-#define RV_MVENDORID 0x12345678
-#define RV_MARCHID ((1ULL << 31) | 1)
-#define RV_MIMPID 1
 
 #define BLOCK_MAP_CAPACITY_BITS 10
 

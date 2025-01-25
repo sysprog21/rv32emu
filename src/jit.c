@@ -386,7 +386,9 @@ static inline void emit_jump_target_address(struct jit_state *state,
     emit4(state, 0);
 }
 #elif defined(__aarch64__)
-static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm);
+static inline void emit_load_imm(struct jit_state *state,
+                                 int dst,
+                                 uint32_t imm);
 
 static void emit_a64(struct jit_state *state, uint32_t insn)
 {
@@ -947,10 +949,7 @@ static inline void emit_load_imm(struct jit_state *state, int dst, uint32_t imm)
 
     set_dirty(dst, true);
 #elif defined(__aarch64__)
-    if ((int32_t) imm == imm)
-        emit_movewide_imm(state, false, dst, imm);
-    else
-        emit_movewide_imm(state, true, dst, imm);
+    emit_movewide_imm(state, true, dst, imm);
 #endif
 }
 
@@ -978,17 +977,11 @@ static inline void emit_load_imm_sext(struct jit_state *state,
 #endif
 }
 
-/* Store register src to [dst + offset].
- *
- * If the offset is non-zero, it stores the host register back to the stack
- * which mapped to the vm register file. Otherwise, it is a `write` pseudo
- * instruction that writing the content of `src` into [dst].
- */
-static inline void emit_store(struct jit_state *state,
-                              enum operand_size size,
-                              int src,
-                              int dst,
-                              int32_t offset)
+static inline bool jit_store_x0(struct jit_state *state,
+                                enum operand_size size,
+                                int src,
+                                int dst,
+                                int32_t offset)
 {
     for (int i = 0; i < n_host_regs; i++) {
         if (register_map[i].reg_idx != src)
@@ -996,6 +989,7 @@ static inline void emit_store(struct jit_state *state,
         if (register_map[i].vm_reg_idx != 0)
             continue;
 
+#if defined(__x86_64__)
         /* if src is x0, write 0x0 into destination */
         if (size == S16)
             emit1(state, 0x66); /* 16-bit override */
@@ -1019,9 +1013,43 @@ static inline void emit_store(struct jit_state *state,
             assert(NULL);
             __UNREACHABLE;
         }
+#elif defined(__aarch64__)
+        switch (size) {
+        case S8:
+            emit_loadstore_imm(state, LS_STRB, RZ, dst, offset);
+            break;
+        case S16:
+            emit_loadstore_imm(state, LS_STRH, RZ, dst, offset);
+            break;
+        case S32:
+            emit_loadstore_imm(state, LS_STRW, RZ, dst, offset);
+            break;
+        default:
+            assert(NULL);
+            __UNREACHABLE;
+        }
+#endif
         set_dirty(src, false);
-        return;
+        return true;
     }
+    return false;
+}
+
+/* Store register src to [dst + offset].
+ *
+ * If the offset is non-zero, it stores the host register back to the stack
+ * which mapped to the vm register file. Otherwise, it is a `write` pseudo
+ * instruction that writing the content of `src` into [dst].
+ */
+static inline void emit_store(struct jit_state *state,
+                              enum operand_size size,
+                              int src,
+                              int dst,
+                              int32_t offset)
+{
+    if (jit_store_x0(state, size, src, dst, offset))
+        return;
+
 #if defined(__x86_64__)
     if (size == S16)
         emit1(state, 0x66); /* 16-bit override */
@@ -1041,8 +1069,8 @@ static inline void emit_store(struct jit_state *state,
         emit_loadstore_imm(state, LS_STRW, src, dst, offset);
         break;
     default:
+        assert(NULL);
         __UNREACHABLE;
-        break;
     }
 #endif
 

@@ -46,7 +46,7 @@ jobs:
     - name: install-dependencies
       run: |
             sudo apt-get update -q -y
-            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc
+            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
             .ci/riscv-toolchain-install.sh
             echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
             wget https://apt.llvm.org/llvm.sh

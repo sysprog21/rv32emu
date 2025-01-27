@@ -152,16 +152,18 @@ jobs:
       uses: actions/checkout@v4
     - name: build artifact
       # The GitHub Action for non-x86 CPU
-      # https://github.com/uraimo/run-on-arch-action
-      uses: uraimo/run-on-arch-action@v2
+      uses: allinurl/run-on-arch-action@master
+      # FIXME: gcc build fails on Aarch64/Linux hosts
+      env:
+        CC: clang
       with:
-        arch: none
-        distro: none
-        base_image: "--platform=linux/arm64 arm64v8/ubuntu:22.04"
+        arch: aarch64
+        distro: ubuntu24.04
         # No 'sudo' is available
         install: |
           apt-get update -q -y
-          apt-get install -q -y git build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
+          apt-get dist-upgrade -q -y
+          apt-get install -q -y make git clang libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
           git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub

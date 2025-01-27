@@ -6,12 +6,18 @@ import ruamel.yaml
 def setup_testlist(riscv_device):
     # ISA config file path
     ispec = constants.root + '/rv32emu/rv32emu_isa.yaml'
-    misa = 0x40000100
-    ISA = 'RV32I'
+    misa = 0x40000000
+    ISA = 'RV32'
 
     if not riscv_device:
         raise AssertionError('There is not any ISA.')
 
+    if 'E' in riscv_device:
+        misa |= constants.misa_E
+        ISA += 'E'
+    else:
+        misa |= constants.misa_I
+        ISA += 'I'
     if 'M' in riscv_device:
         misa |= constants.misa_M
         ISA += 'M'

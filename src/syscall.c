@@ -466,8 +466,12 @@ static void syscall_sbi_rst(riscv_t *rv)
 
 void syscall_handler(riscv_t *rv)
 {
-    /* get the syscall number */
+/* get the syscall number */
+#if !RV32_HAS(RV32E)
     riscv_word_t syscall = rv_get_reg(rv, rv_reg_a7);
+#else
+    riscv_word_t syscall = rv_get_reg(rv, rv_reg_t0);
+#endif
 
     switch (syscall) { /* dispatch system call */
 #define _(name, number)     \

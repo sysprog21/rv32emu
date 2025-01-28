@@ -7,7 +7,9 @@ BIN := $(OUT)/rv32emu
 CONFIG_FILE := $(OUT)/.config
 -include $(CONFIG_FILE)
 
-CFLAGS = -std=gnu99 -O2 -Wall -Wextra -Werror
+OPT_LEVEL ?= -O2
+
+CFLAGS = -std=gnu99 $(OPT_LEVEL) -Wall -Wextra -Werror
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h -Isrc/
 

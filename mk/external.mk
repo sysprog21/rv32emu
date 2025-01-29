@@ -68,7 +68,7 @@ define verify
                 | sort \
                 | $(SHA1SUM) \
                 | cut -f 1 -d ' ' > $(SHA1_FILE2) && cmp $(SHA1_FILE1) $(SHA1_FILE2))), \
-            ($(eval VERIFIER := echo "$(strip $(1))  $(strip $(2))" | $(SHA1SUM) -c)) \
+            ($(eval VERIFIER := (ls $(2) >/dev/null 2>&1 || echo FAILED) && echo "$(strip $(1))  $(strip $(2))" | $(SHA1SUM) -c -)) \
     ))
     $(eval _ := $(shell $(VERIFIER) 2>&1))
     $(eval _ := \

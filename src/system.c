@@ -118,8 +118,6 @@ enum SUPPORTED_MMIO {
     } while (0)
 #endif
 
-uint32_t ppn;
-uint32_t offset;
 static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
 {
     vm_attr_t *attr = PRIV(rv);
@@ -139,7 +137,7 @@ static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
  * @level: the level of which the PTE is located
  * @return: NULL if a not found or fault else the corresponding PTE
  */
-uint32_t *mmu_walk(riscv_t *rv, const uint32_t vaddr, uint32_t *level)
+pte_t *mmu_walk(riscv_t *rv, const uint32_t vaddr, uint32_t *level)
 {
     vm_attr_t *attr = PRIV(rv);
     uint32_t ppn = rv->csr_satp & MASK(22);
@@ -259,6 +257,8 @@ MMU_FAULT_CHECK_IMPL(ifetch, pagefault_insn)
 MMU_FAULT_CHECK_IMPL(read, pagefault_load)
 MMU_FAULT_CHECK_IMPL(write, pagefault_store)
 
+uint32_t ppn;
+uint32_t offset;
 #define get_ppn_and_offset()                                   \
     do {                                                       \
         assert(pte);                                           \

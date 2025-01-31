@@ -12,7 +12,6 @@
 #include <unistd.h>
 
 #include "uart.h"
-
 /* Emulate 8250 (plain, without loopback mode support) */
 
 #define U8250_INTR_THRE 1
@@ -66,9 +65,21 @@ static uint8_t u8250_handle_in(u8250_state_t *uart)
     if (value == 1) {           /* start of heading (Ctrl-a) */
         if (getchar() == 120) { /* keyboard x */
             printf("\n");       /* end emulator with newline */
-            exit(0);
+            exit(EXIT_SUCCESS);
         }
     }
+
+#if RV32_HAS(SDL) && RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    /*
+     * The guestOS may repeatedly open and close the SDL window,
+     * and the user could close the application by pressing the ctrl-c key.
+     * Need to trap the ctrl-c key and ensure the SDL window and
+     * SDL mixer are destroyed properly.
+     */
+    extern void sdl_video_audio_cleanup();
+    if (value == 3) /* ctrl-c */
+        sdl_video_audio_cleanup();
+#endif
 
     return value;
 }

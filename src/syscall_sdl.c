@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <SDL.h>
@@ -36,6 +37,42 @@
 
 /* Max size of sound is around 18000 bytes */
 #define SFX_SAMPLE_SIZE 32768
+
+#define R 1
+#define W 0
+
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#define get_offset_by_addr(addr) (addr) & (MASK(RV_PG_SHIFT))
+static uint32_t offset;
+static uint32_t curr_page_data_size;
+static uint32_t remain_size;
+static uint32_t curr_offset;
+static uint32_t curr_data_size;
+
+#define GET_DATA_FROM_RANDOM_PAGE(source_vaddr, dest)                    \
+    do {                                                                 \
+        while (remain_size > 0) {                                        \
+            uint32_t screen_addr =                                       \
+                rv->io.mem_translate(rv, source_vaddr + curr_offset, R); \
+            offset = get_offset_by_addr(screen_addr);                    \
+            curr_page_data_size = RV_PG_SIZE - offset;                   \
+            curr_data_size = remain_size <= curr_page_data_size          \
+                                 ? remain_size                           \
+                                 : curr_page_data_size;                  \
+            memory_read(attr->mem, dest + curr_offset, screen_addr,      \
+                        sizeof(uint8_t) * curr_data_size);               \
+            remain_size -= curr_data_size;                               \
+            curr_offset += curr_data_size;                               \
+        }                                                                \
+    } while (0)
+
+#define GET_VIDEO_DATA_FROM_RANDOM_PAGE(source_vaddr, dest) \
+    GET_DATA_FROM_RANDOM_PAGE(source_vaddr, dest)
+#define GET_SFX_DATA_FROM_RANDOM_PAGE(source_vaddr, dest) \
+    GET_DATA_FROM_RANDOM_PAGE(source_vaddr, dest)
+#define GET_MUSIC_DATA_FROM_RANDOM_PAGE(source_vaddr, dest) \
+    GET_DATA_FROM_RANDOM_PAGE(source_vaddr, dest)
+#endif
 
 /* sound-related request type */
 enum {
@@ -65,6 +102,11 @@ static Mix_Chunk *sfx_chunk;
 static uint8_t *sfx_samples;
 static uint32_t nr_sfx_samples;
 static int chan;
+
+/* Used to properly destroy audio, compatible to process VM emulation */
+static bool audio_init = false;
+static bool sfx_thread_init = false;
+static bool music_thread_init = false;
 
 typedef struct {
     void *data;
@@ -181,9 +223,9 @@ static void event_push(riscv_t *rv, event_t event)
     event_queue.end &= queues_capacity - 1;
 
     uint32_t count;
-    memory_read(attr->mem, (void *) &count, event_count, sizeof(uint32_t));
+    count = rv->io.mem_read_w(rv, event_count);
     count += 1;
-    memory_write(attr->mem, event_count, (void *) &count, sizeof(uint32_t));
+    rv->io.mem_write_w(rv, event_count, count);
 }
 
 static inline uint32_t round_pow2(uint32_t x)
@@ -213,7 +255,7 @@ static bool check_sdl(riscv_t *rv, int width, int height)
     if (!window) { /* check if video has been initialized. */
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
             fprintf(stderr, "Failed to call SDL_Init()\n");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
         window = SDL_CreateWindow("rv32emu", SDL_WINDOWPOS_UNDEFINED,
                                   SDL_WINDOWPOS_UNDEFINED, width, height,
@@ -221,7 +263,7 @@ static bool check_sdl(riscv_t *rv, int width, int height)
         if (!window) {
             fprintf(stderr, "Window could not be created! SDL_Error: %s\n",
                     SDL_GetError());
-            exit(1);
+            exit(EXIT_FAILURE);
         }
 
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC);
@@ -307,12 +349,26 @@ void syscall_draw_frame(riscv_t *rv)
     if (!check_sdl(rv, width, height))
         return;
 
-    /* read directly into video memory */
+    uint32_t total_size = width * height * 4;
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    static uint8_t tmp_buf[256 * RV_PG_SIZE];
+    uint8_t *tmp_buf_ptr = &tmp_buf[0];
+    uint32_t screen_vaddr = screen;
+    remain_size = total_size;
+    curr_offset = 0;
+    memset(tmp_buf_ptr, 0, sizeof(tmp_buf));
+
+    GET_VIDEO_DATA_FROM_RANDOM_PAGE(screen_vaddr, tmp_buf_ptr);
+#endif
     int pitch = 0;
     void *pixels_ptr;
     if (SDL_LockTexture(texture, NULL, &pixels_ptr, &pitch))
-        exit(-1);
-    memory_read(attr->mem, pixels_ptr, screen, width * height * 4);
+        exit(EXIT_FAILURE);
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    memcpy(pixels_ptr, tmp_buf_ptr, total_size);
+#else
+    memory_read(attr->mem, pixels_ptr, screen, total_size);
+#endif
     SDL_UnlockTexture(texture);
 
     int actual_width, actual_height;
@@ -324,13 +380,34 @@ void syscall_draw_frame(riscv_t *rv)
 
 void syscall_setup_queue(riscv_t *rv)
 {
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    /*
+     * The guestOS might exit and execute the SDL-based program again
+     * thus clearing the queue is required to avoid using the
+     * access the old events.
+     */
+    event_queue.base = event_queue.end = 0;
+    submission_queue.base = submission_queue.start = 0;
+#endif
+
     /* setup_queue(base, capacity, event_count) */
     uint32_t base = rv_get_reg(rv, rv_reg_a0);
     queues_capacity = rv_get_reg(rv, rv_reg_a1);
     event_count = rv_get_reg(rv, rv_reg_a2);
 
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    uint32_t submission_queue_addr =
+        rv->io.mem_translate(rv, base + sizeof(event_t) * queues_capacity, R);
+
+    uint32_t event_queue_addr = rv->io.mem_translate(rv, base, R);
+
+    /* now the bases are the gPA and host can access directly */
+    event_queue.base = event_queue_addr;
+    submission_queue.base = submission_queue_addr;
+#else
     event_queue.base = base;
     submission_queue.base = base + sizeof(event_t) * queues_capacity;
+#endif
     queues_capacity = round_pow2(queues_capacity);
 }
 
@@ -360,8 +437,14 @@ void syscall_submit_queue(riscv_t *rv)
             if (unlikely(!title))
                 return;
 
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+            uint32_t addr = rv->io.mem_translate(rv, submission.title.title, R);
+            memory_read(PRIV(rv)->mem, (uint8_t *) title, addr,
+                        submission.title.size);
+#else
             memory_read(PRIV(rv)->mem, (uint8_t *) title,
                         submission.title.title, submission.title.size);
+#endif
             title[submission.title.size] = 0;
 
             SDL_SetWindowTitle(window, title);
@@ -718,6 +801,22 @@ static void play_sfx(riscv_t *rv)
     int volume = rv_get_reg(rv, rv_reg_a2);
 
     sfxinfo_t sfxinfo;
+    uint8_t sfx_data[SFX_SAMPLE_SIZE];
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    uint32_t addr = rv->io.mem_translate(rv, sfxinfo_addr, R);
+    memory_read(attr->mem, (uint8_t *) &sfxinfo, addr, sizeof(sfxinfo_t));
+
+    uint32_t sfx_data_offset =
+        *((uint32_t *) ((uint8_t *) attr->mem->mem_base + addr));
+    uint32_t sfx_data_size =
+        *(uint32_t *) ((uint8_t *) attr->mem->mem_base + addr + 4);
+    uint32_t sfx_data_vaddr = sfx_data_offset;
+    uint8_t *sfx_data_ptr = &sfx_data[0];
+    remain_size = sfx_data_size;
+    curr_offset = 0;
+
+    GET_SFX_DATA_FROM_RANDOM_PAGE(sfx_data_vaddr, sfx_data_ptr);
+#else
     memory_read(attr->mem, (uint8_t *) &sfxinfo, sfxinfo_addr,
                 sizeof(sfxinfo_t));
 
@@ -727,9 +826,9 @@ static void play_sfx(riscv_t *rv)
      */
     uint32_t sfx_data_offset = *((uint32_t *) &sfxinfo);
     uint32_t sfx_data_size = *(uint32_t *) ((uint32_t *) &sfxinfo + 1);
-    uint8_t sfx_data[SFX_SAMPLE_SIZE];
     memory_read(attr->mem, sfx_data, sfx_data_offset,
                 sizeof(uint8_t) * sfx_data_size);
+#endif
 
     sound_t sfx = {
         .data = sfx_data,
@@ -737,6 +836,7 @@ static void play_sfx(riscv_t *rv)
         .volume = volume,
     };
     pthread_create(&sfx_thread, NULL, sfx_handler, &sfx);
+    sfx_thread_init = true;
     /* FIXME: In web browser runtime, web workers in thread pool do not reap
      * after sfx_handler return, thus we have to join them. sfx_handler does not
      * contain infinite loop,so do not worry to be stalled by it */
@@ -754,6 +854,26 @@ static void play_music(riscv_t *rv)
     int looping = rv_get_reg(rv, rv_reg_a3);
 
     musicinfo_t musicinfo;
+    uint8_t music_data[MUSIC_MAX_SIZE];
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    uint32_t addr = rv->io.mem_translate(rv, musicinfo_addr, R);
+    memory_read(attr->mem, (uint8_t *) &musicinfo, addr, sizeof(musicinfo_t));
+
+    /* The data and size in the application must be positioned in the first two
+     * fields of the structure. This ensures emulator compatibility with
+     * various applications when accessing different musicinfo_t instances.
+     */
+    uint32_t music_data_offset =
+        *((uint32_t *) ((uint8_t *) attr->mem->mem_base + addr));
+    uint32_t music_data_size =
+        *(uint32_t *) ((uint8_t *) attr->mem->mem_base + addr + 4);
+    uint32_t music_data_vaddr = music_data_offset;
+    uint8_t *music_data_ptr = &music_data[0];
+    remain_size = music_data_size;
+    curr_offset = 0;
+
+    GET_MUSIC_DATA_FROM_RANDOM_PAGE(music_data_vaddr, music_data_ptr);
+#else
     memory_read(attr->mem, (uint8_t *) &musicinfo, musicinfo_addr,
                 sizeof(musicinfo_t));
 
@@ -763,8 +883,8 @@ static void play_music(riscv_t *rv)
      */
     uint32_t music_data_offset = *((uint32_t *) &musicinfo);
     uint32_t music_data_size = *(uint32_t *) ((uint32_t *) &musicinfo + 1);
-    uint8_t music_data[MUSIC_MAX_SIZE];
     memory_read(attr->mem, music_data, music_data_offset, music_data_size);
+#endif
 
     sound_t music = {
         .data = music_data,
@@ -773,6 +893,7 @@ static void play_music(riscv_t *rv)
         .volume = volume,
     };
     pthread_create(&music_thread, NULL, music_handler, &music);
+    music_thread_init = true;
     /* FIXME: In web browser runtime, web workers in thread pool do not reap
      * after music_handler return, thus we have to join them. music_handler does
      * not contain infinite loop,so do not worry to be stalled by it */
@@ -781,7 +902,7 @@ static void play_music(riscv_t *rv)
 #endif
 }
 
-static void stop_music(riscv_t *rv UNUSED)
+static void stop_music()
 {
     if (Mix_PlayingMusic())
         Mix_HaltMusic();
@@ -800,7 +921,7 @@ static void init_audio(void)
     if (!(SDL_WasInit(-1) & SDL_INIT_AUDIO)) {
         if (SDL_Init(SDL_INIT_AUDIO) != 0) {
             fprintf(stderr, "Failed to call SDL_Init()\n");
-            exit(1);
+            exit(EXIT_FAILURE);
         }
     }
 
@@ -808,29 +929,69 @@ static void init_audio(void)
     sfx_samples = malloc(SFX_SAMPLE_SIZE);
     if (unlikely(!sfx_samples)) {
         fprintf(stderr, "Failed to allocate memory for buffer\n");
-        exit(1);
+        exit(EXIT_FAILURE);
     }
 
     /* Initialize SDL2 Mixer */
     if (Mix_Init(MIX_INIT_MID) != MIX_INIT_MID) {
         fprintf(stderr, "Mix_Init failed: %s\n", Mix_GetError());
-        exit(1);
+        exit(EXIT_FAILURE);
     }
     if (Mix_OpenAudio(SAMPLE_RATE, AUDIO_U8, CHANNEL_USED, CHUNK_SIZE) == -1) {
         fprintf(stderr, "Mix_OpenAudio failed: %s\n", Mix_GetError());
         Mix_Quit();
-        exit(1);
+        exit(EXIT_FAILURE);
     }
+    audio_init = true;
 }
 
-static void shutdown_audio(riscv_t *rv)
+static void shutdown_audio()
 {
-    stop_music(rv);
-    Mix_HaltChannel(-1);
+    /*
+     * sfx_thread and music_thread might contain invalid identifiers.
+     * Additionally, there is no built-in method to verify the validity
+     * of a pthread_t type. Therefore, the sfx_thread_init and music_thread_init
+     * flags are used for validation, ensuring that pthread_join always operates
+     * on a valid pthread_t identifier.
+     */
+
+    if (music_thread_init) {
+        stop_music();
+        pthread_join(music_thread, NULL);
+        Mix_FreeMusic(mid);
+        free(music_midi_data);
+        music_midi_data = NULL;
+    }
+
+    if (sfx_thread_init) {
+        pthread_join(sfx_thread, NULL);
+        Mix_HaltChannel(-1);
+        Mix_FreeChunk(sfx_chunk);
+        free(sfx_samples);
+        sfx_samples = NULL;
+    }
+
     Mix_CloseAudio();
     Mix_Quit();
-    free(music_midi_data);
-    free(sfx_samples);
+
+    audio_init = sfx_thread_init = music_thread_init = false;
+}
+
+void sdl_video_audio_cleanup()
+{
+    if (window) {
+        SDL_DestroyWindow(window);
+        window = NULL;
+    }
+    /*
+     * The sfx_or_music_thread_init flag might not be set if a quick ctrl-c
+     * occurs while the audio configuration is being initialized. Therefore,
+     * need to destroy the audio settings by checking audio_init flag.
+     */
+    bool sfx_or_music_thread_init = sfx_thread_init | music_thread_init;
+    if (sfx_or_music_thread_init || (!sfx_or_music_thread_init && audio_init))
+        shutdown_audio();
+    SDL_Quit();
 }
 
 void syscall_setup_audio(riscv_t *rv)
@@ -843,7 +1004,7 @@ void syscall_setup_audio(riscv_t *rv)
         init_audio();
         break;
     case SHUTDOWN_AUDIO:
-        shutdown_audio(rv);
+        shutdown_audio();
         break;
     default:
         fprintf(stderr, "unknown sound request\n");
@@ -867,7 +1028,7 @@ void syscall_control_audio(riscv_t *rv)
         set_music_volume(rv);
         break;
     case STOP_MUSIC:
-        stop_music(rv);
+        stop_music();
         break;
     default:
         fprintf(stderr, "unknown sound control request\n");

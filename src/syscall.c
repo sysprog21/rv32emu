@@ -132,9 +132,20 @@ error_handler:
     rv_set_reg(rv, rv_reg_a0, -1);
 }
 
-
 static void syscall_exit(riscv_t *rv)
 {
+#if RV32_HAS(SDL) && RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    /*
+     * The guestOS may repeatedly open and close the SDL window,
+     * and the user could close the application using the application’s
+     * built-in exit function. Need to trap the built-in exit and
+     * ensure the SDL window and SDL mixer are destroyed properly.
+     */
+    extern void sdl_video_audio_cleanup();
+    sdl_video_audio_cleanup();
+    return;
+#endif
+
     /* simply halt cpu and save exit code.
      * the application decides the usage of exit code
      */

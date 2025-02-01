@@ -80,6 +80,12 @@ $ make ENABLE_SYSTEM=1
 $ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path>
 ```
 
+Build with a larger INITRD_SIZE (e.g., 64 MiB) to run SDL-oriented application because the default 8 MiB is insufficient for SDL-oriented application artifacts:
+```shell
+$ make system ENABLE_SYSTEM=1 ENABLE_SDL=1 INITRD_SIZE=64
+```
+Once login the guestOS, run `doom-riscv` or `quake` or `smolnes`. To terminate SDL-oriented applications, use the built-in exit utility, ctrl-c or the SDL window close button(X).
+
 #### Build Linux image
 An automated build script is provided to compile the RISC-V cross-compiler, Busybox, and Linux kernel from source. Please note that it only supports the Linux host environment. It can be found at tools/build-linux-image.sh.
 ```

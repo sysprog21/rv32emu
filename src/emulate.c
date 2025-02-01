@@ -1299,7 +1299,22 @@ void ecall_handler(riscv_t *rv)
     syscall_handler(rv);
 #elif RV32_HAS(SYSTEM)
     if (rv->priv_mode == RV_PRIV_U_MODE) {
-        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ECALL_U, 0);
+        switch (rv_get_reg(
+            rv,
+            rv_reg_a7)) { /* trap guestOS's SDL-oriented application syscall */
+        case 0xBEEF:
+        case 0xC0DE:
+        case 0xFEED:
+        case 0xBABE:
+        case 0xD00D:
+        case 93:
+            syscall_handler(rv);
+            rv->PC += 4;
+            break;
+        default:
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ECALL_U, 0);
+            break;
+        }
     } else if (rv->priv_mode ==
                RV_PRIV_S_MODE) { /* trap to SBI syscall handler */
         rv->PC += 4;

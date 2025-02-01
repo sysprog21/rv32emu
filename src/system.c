@@ -11,6 +11,7 @@
 
 #include "devices/plic.h"
 #include "devices/uart.h"
+#include "devices/virtio.h"
 #include "riscv_private.h"
 
 #define R 1
@@ -28,6 +29,15 @@ void emu_update_uart_interrupts(riscv_t *rv)
     plic_update_interrupts(attr->plic);
 }
 
+static void emu_update_vblk_interrupts(riscv_t *rv)
+{
+    vm_attr_t *attr = PRIV(rv);
+    if (attr->vblk->interrupt_status)
+        attr->plic->active |= IRQ_VBLK_BIT;
+    else
+        attr->plic->active &= ~IRQ_VBLK_BIT;
+    plic_update_interrupts(attr->plic);
+}
 /*
  * Linux kernel might create signal frame when returning from trap
  * handling, which modifies the SEPC CSR. Thus, the fault instruction
@@ -45,6 +55,7 @@ extern bool need_handle_signal;
 enum SUPPORTED_MMIO {
     MMIO_PLIC,
     MMIO_UART,
+    MMIO_VIRTIOBLK,
 };
 
 /* clang-format off */
@@ -72,6 +83,17 @@ enum SUPPORTED_MMIO {
                 return;                                                             \
             )                                                                       \
             break;                                                                  \
+        case MMIO_VIRTIOBLK:                                                        \
+            IIF(rw)( /* read */                                                     \
+                mmio_read_val = virtio_blk_read(PRIV(rv)->vblk, addr & 0xFFFFF);    \
+                emu_update_vblk_interrupts(rv);                                     \
+                return mmio_read_val;                                               \
+                ,    /* write */                                                    \
+                virtio_blk_write(PRIV(rv)->vblk, addr & 0xFFFFF, val);              \
+                emu_update_vblk_interrupts(rv);                                     \
+                return;                                                             \
+            )                                                                       \
+            break;                                                                  \
         default:                                                                    \
             fprintf(stderr, "unknown MMIO type %d\n", io);                          \
             break;                                                                  \
@@ -91,6 +113,9 @@ enum SUPPORTED_MMIO {
             case 0x40: /* UART */                           \
                 MMIO_OP(MMIO_UART, MMIO_R);                 \
                 break;                                      \
+            case 0x42: /* Virtio-blk */                     \
+                MMIO_OP(MMIO_VIRTIOBLK, MMIO_R);            \
+                break;                                      \
             default:                                        \
                 __UNREACHABLE;                              \
                 break;                                      \
@@ -109,6 +134,9 @@ enum SUPPORTED_MMIO {
                 break;                                      \
             case 0x40: /* UART */                           \
                 MMIO_OP(MMIO_UART, MMIO_W);                 \
+                break;                                      \
+            case 0x42: /* Virtio-blk */                     \
+                MMIO_OP(MMIO_VIRTIOBLK, MMIO_W);            \
                 break;                                      \
             default:                                        \
                 __UNREACHABLE;                              \

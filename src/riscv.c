@@ -502,6 +502,11 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->uart->in_fd = attr->fd_stdin;
     attr->uart->out_fd = attr->fd_stdout;
 
+    /* setup virtio-blk */
+    attr->vblk = vblk_new();
+    attr->vblk->ram = (uint32_t *) attr->mem->mem_base;
+    attr->disk = virtio_blk_init(attr->vblk, attr->data.system.vblk_device);
+
     capture_keyboard_input();
 #endif /* !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)) */
 
@@ -642,6 +647,7 @@ void rv_delete(riscv_t *rv)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     u8250_delete(attr->uart);
     plic_delete(attr->plic);
+    vblk_delete(attr->vblk);
 #endif
     free(rv);
 }

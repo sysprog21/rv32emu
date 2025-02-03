@@ -462,7 +462,7 @@ static void syscall_sbi_rst(riscv_t *rv)
 
     switch (fid) {
     case SBI_RST_SYSTEM_RESET:
-        fprintf(stderr, "system reset: type=%u, reason=%u\n", a0, a1);
+        rv_log_info("System reset: type=%u, reason=%u", a0, a1);
         rv_halt(rv);
         rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
         rv_set_reg(rv, rv_reg_a1, 0);
@@ -492,7 +492,7 @@ void syscall_handler(riscv_t *rv)
         SUPPORTED_SYSCALLS
 #undef _
     default:
-        fprintf(stderr, "unknown syscall %d\n", (int) syscall);
+        rv_log_fatal("Unknown syscall: %d", (int) syscall);
         break;
     }
 

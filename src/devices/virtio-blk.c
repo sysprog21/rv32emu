@@ -190,7 +190,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
         virtio_blk_write_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
         break;
     default:
-        fprintf(stderr, "unsupported virtio-blk operation!\n");
+        rv_log_error("Unsupported virtio-blk operation");
         *status = VIRTIO_BLK_S_UNSUPP;
         return -1;
     }
@@ -215,7 +215,7 @@ static void virtio_queue_notify_handler(virtio_blk_state_t *vblk, int index)
     /* Check for new buffers */
     uint16_t new_avail = ram[queue->queue_avail] >> 16;
     if (new_avail - queue->last_avail > (uint16_t) queue->queue_num) {
-        fprintf(stderr, "size check fail\n");
+        rv_log_error("Size check fail");
         return virtio_blk_set_fail(vblk);
     }
 
@@ -374,9 +374,8 @@ void virtio_blk_write(virtio_blk_state_t *vblk, uint32_t addr, uint32_t value)
 uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
 {
     if (vblk_dev_cnt >= VBLK_DEV_CNT_MAX) {
-        fprintf(stderr,
-                "Exceeded the number of virtio-blk devices that can be "
-                "allocated.\n");
+        rv_log_error(
+            "Exceeded the number of virtio-blk devices that can be allocated");
         exit(EXIT_FAILURE);
     }
 
@@ -394,7 +393,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
     /* Open disk file */
     int disk_fd = open(disk_file, O_RDWR);
     if (disk_fd < 0) {
-        fprintf(stderr, "could not open %s\n", disk_file);
+        rv_log_error("Could not open %s", disk_file);
         exit(EXIT_FAILURE);
     }
 
@@ -408,16 +407,12 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
 #if HAVE_MMAP
     disk_mem = mmap(NULL, VBLK_PRIV(vblk)->disk_size, PROT_READ | PROT_WRITE,
                     MAP_SHARED, disk_fd, 0);
-    if (disk_mem == MAP_FAILED) {
-        fprintf(stderr, "Could not map disk\n");
-        return NULL;
-    }
+    if (disk_mem == MAP_FAILED)
+        goto err;
 #else
     disk_mem = malloc(VBLK_PRIV(vblk)->disk_size);
-    if (!disk_mem) {
-        fprintf(stderr, "Could not map disk\n");
-        return NULL;
-    }
+    if (!disk_mem)
+        goto err;
 #endif
     assert(!(((uintptr_t) disk_mem) & 0b11));
     close(disk_fd);
@@ -427,6 +422,10 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
         (VBLK_PRIV(vblk)->disk_size - 1) / DISK_BLK_SIZE + 1;
 
     return disk_mem;
+
+err:
+    rv_log_error("Could not map disk %s", disk_file);
+    return NULL;
 }
 
 virtio_blk_state_t *vblk_new()

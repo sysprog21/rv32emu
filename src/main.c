@@ -61,31 +61,31 @@ static char *opt_virtio_blk_img;
 
 static void print_usage(const char *filename)
 {
-    fprintf(stderr,
-            "RV32I[MAFC] Emulator which loads an ELF file to execute.\n"
-            "Usage: %s [options] [filename] [arguments]\n"
-            "Options:\n"
+    rv_log_error(
+        "\nRV32I[MAFC] Emulator which loads an ELF file to execute.\n"
+        "Usage: %s [options] [filename] [arguments]\n"
+        "Options:\n"
 #if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
-            "  -t : print executable trace\n"
+        "  -t : print executable trace\n"
 #endif
 #if RV32_HAS(GDBSTUB)
-            "  -g : allow remote GDB connections (as gdbstub)\n"
+        "  -g : allow remote GDB connections (as gdbstub)\n"
 #endif
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
-            "  -k <image> : use <image> as kernel image\n"
-            "  -i <image> : use <image> as rootfs\n"
-            "  -x vblk:<image> : use <image> as virtio-blk disk image\n"
-            "  -b <bootargs> : use customized <bootargs> for the kernel\n"
+        "  -k <image> : use <image> as kernel image\n"
+        "  -i <image> : use <image> as rootfs\n"
+        "  -x vblk:<image> : use <image> as virtio-blk disk image\n"
+        "  -b <bootargs> : use customized <bootargs> for the kernel\n"
 #endif
-            "  -d [filename]: dump registers as JSON to the "
-            "given file or `-` (STDOUT)\n"
-            "  -q : Suppress outputs other than `dump-registers`\n"
-            "  -a [filename] : dump signature to the given file, "
-            "required by arch-test test\n"
-            "  -m : enable misaligned memory access\n"
-            "  -p : generate profiling data\n"
-            "  -h : show this message\n",
-            filename);
+        "  -d [filename]: dump registers as JSON to the "
+        "given file or `-` (STDOUT)\n"
+        "  -q : Suppress outputs other than `dump-registers`\n"
+        "  -a [filename] : dump signature to the given file, "
+        "required by arch-test test\n"
+        "  -m : enable misaligned memory access\n"
+        "  -p : generate profiling data\n"
+        "  -h : show this message",
+        filename);
 }
 
 static bool parse_args(int argc, char **args)
@@ -188,7 +188,8 @@ static void dump_test_signature(const char *prog_name)
     const struct Elf32_Sym *sym;
     FILE *f = fopen(signature_out_file, "w");
     if (!f) {
-        fprintf(stderr, "Cannot open signature output file.\n");
+        rv_log_fatal("Cannot open signature output file: %s",
+                     signature_out_file);
         return;
     }
 
@@ -257,7 +258,7 @@ int main(int argc, char **args)
         .args_offset_size = ARGS_OFFSET_SIZE,
         .argc = prog_argc,
         .argv = prog_args,
-        .log_level = 0,
+        .log_level = LOG_TRACE,
         .run_flag = run_flag,
         .profile_output_file = prof_out_file,
         .cycle_per_step = CYCLE_PER_STEP,
@@ -275,10 +276,11 @@ int main(int argc, char **args)
     /* create the RISC-V runtime */
     rv = rv_create(&attr);
     if (!rv) {
-        fprintf(stderr, "Unable to create riscv emulator\n");
+        rv_log_fatal("Unable to create riscv emulator");
         attr.exit_code = 1;
         goto end;
     }
+    rv_log_info("RISC-V emulator is created and ready to run");
 
     rv_run(rv);
 
@@ -292,8 +294,7 @@ int main(int argc, char **args)
 
     /* finalize the RISC-V runtime */
     rv_delete(rv);
-
-    printf("inferior exit code %d\n", attr.exit_code);
+    rv_log_info("RISC-V emulator is destroyed");
 
 end:
     free(prof_out_file);

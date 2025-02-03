@@ -28,6 +28,10 @@ $(call set-feature, MOP_FUSION)
 ENABLE_BLOCK_CHAINING ?= 1
 $(call set-feature, BLOCK_CHAINING)
 
+# Enable logging with color
+ENABLE_LOG_COLOR ?= 1
+$(call set-feature, LOG_COLOR)
+
 # Enable system emulation
 ENABLE_SYSTEM ?= 0
 $(call set-feature, SYSTEM)
@@ -293,6 +297,7 @@ OBJS := \
 	syscall.o \
 	emulate.o \
 	riscv.o \
+	log.o \
 	elf.o \
 	cache.o \
 	mpool.o \

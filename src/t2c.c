@@ -294,9 +294,7 @@ void t2c_compile(riscv_t *rv, block_t *block)
     LLVMInitializeNativeTarget();
     LLVMInitializeNativeAsmPrinter();
     if (LLVMGetTargetFromTriple(triple, &target, &error) != 0) {
-        fprintf(stderr,
-                "failed to create "
-                "Target\n");
+        rv_log_fatal("Failed to create target");
         abort();
     }
     LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
@@ -308,9 +306,7 @@ void t2c_compile(riscv_t *rv, block_t *block)
                   pb_option);
 
     if (LLVMCreateExecutionEngineForModule(&engine, module, &error) != 0) {
-        fprintf(stderr,
-                "failed to create "
-                "execution engine\n");
+        rv_log_fatal("Failed to create execution engine");
         abort();
     }
 

@@ -352,54 +352,48 @@ EXPECTED_puzzle = success in 2005 trials
 EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 
+LOG_FILTER=sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'
+
+define exec
+$(eval OUTPUT_FILE := $(shell mktemp))
+$(eval _ := $(shell LC_ALL=C $(BIN) $(1) $(2) > $(OUTPUT_FILE)))
+$(eval RC := $(.SHELLSTATUS))
+endef
+
+# $(1): rv32emu's extra CLI parameter
+# $(2): ELF executable
+# $(3): ELF executable name
+# $(4): extra command in the pipeline
+# $(5): expected output
+define check-test
+$(call exec, $(1), $(2))
+$(Q)$(PRINTF) "Running $(3) ... "; \
+if [ 0 -eq $(RC) ] && [ "$(strip $(shell cat $(OUTPUT_FILE) | $(LOG_FILTER) | $(4)))" = "$(strip $(5))" ]; then \
+    $(call notice, [OK]); \
+else \
+    $(PRINTF) "Failed.\n"; \
+    exit 1; \
+fi; \
+$(RM) $(OUTPUT_FILE)
+endef
+
 check-hello: $(BIN)
-	$(Q)$(PRINTF) "Running hello.elf ... "; \
-	    if [ "$(shell LC_ALL=C $(BIN) $(OUT)/hello.elf | uniq)" = "$(strip $(EXPECTED_hello)) inferior exit code 0" ]; then \
-	    $(call notice, [OK]); \
-	    else \
-	    $(PRINTF) "Failed.\n"; \
-	    exit 1; \
-	    fi;
+	$(call check-test, , $(OUT)/hello.elf, hello.elf, uniq, $(EXPECTED_hello))
 
 check: $(BIN) check-hello artifact
-	$(Q)$(foreach e,$(CHECK_ELF_FILES),\
-	    $(PRINTF) "Running $(e) ... "; \
-	    if [ "$(shell LC_ALL=C $(BIN) $(OUT)/riscv32/$(e) | uniq)" = "$(strip $(EXPECTED_$(e))) inferior exit code 0" ]; then \
-	    $(call notice, [OK]); \
-	    else \
-	    $(PRINTF) "Failed.\n"; \
-	    exit 1; \
-	    fi; \
-	)
+	$(Q)$(foreach e, $(CHECK_ELF_FILES), $(call check-test, , $(OUT)/riscv32/$(e), $(e), uniq, $(EXPECTED_$(e))))
 
-EXPECTED_aes_sha1 = 1242a6757c8aef23e50b5264f5941a2f4b4a347e  -
+EXPECTED_aes_sha1 = 89169ec034bec1c6bb2c556b26728a736d350ca3  -
 misalign: $(BIN) artifact
-	$(Q)$(PRINTF) "Running uaes ... ";
-	$(Q)if [ "$(shell LC_ALL=C $(BIN) -m $(OUT)/riscv32/uaes | $(SHA1SUM))" = "$(EXPECTED_aes_sha1)" ]; then \
-	    $(call notice, [OK]); \
-	    else \
-	    $(PRINTF) "Failed.\n"; \
-	    fi
+	$(call check-test, -m, $(OUT)/riscv32/uaes, uaes.elf, $(SHA1SUM), $(EXPECTED_aes_sha1))
 
 EXPECTED_misalign = MISALIGNED INSTRUCTION FETCH TEST PASSED!
 misalign-in-blk-emu: $(BIN)
-	         $(Q)$(PRINTF) "Running misalign.elf ... "; \
-	             if [ "$(shell LC_ALL=C $(BIN) tests/system/alignment/misalign.elf | tail -n 2)" = "$(strip $(EXPECTED_misalign)) inferior exit code 0" ]; then \
-	             $(call notice, [OK]); \
-	             else \
-	             $(PRINTF) "Failed.\n"; \
-	             exit 1; \
-	             fi;
+	$(call check-test, , tests/system/alignment/misalign.elf, misalign.elf, tail -n 1, $(EXPECTED_misalign))
 
 EXPECTED_mmu = STORE PAGE FAULT TEST PASSED!
 mmu-test: $(BIN)
-	$(Q)$(PRINTF) "Running vm.elf ... "; \
-	    if [ "$(shell LC_ALL=C $(BIN) tests/system/mmu/vm.elf | tail -n 2)" = "$(strip $(EXPECTED_mmu)) inferior exit code 0" ]; then \
-	    $(call notice, [OK]); \
-	    else \
-	    $(PRINTF) "Failed.\n"; \
-	    exit 1; \
-	    fi;
+	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1, $(EXPECTED_mmu))
 
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)

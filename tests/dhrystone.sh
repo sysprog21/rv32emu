@@ -18,7 +18,7 @@ function run_dhrystone()
     output=$($RUN $O/riscv32/dhrystone 2>&1)
     local exit_code=$?
     [ $exit_code -ne 0 ] && fail
-    dmips=$(echo "$output" | grep -oE '[0-9]+' | awk 'NR==5{print}')
+    dmips=$(echo "$output" | grep -Po '[0-9]+(?= DMIPS)' | awk '{print}')
     echo "$dmips"
 }
 

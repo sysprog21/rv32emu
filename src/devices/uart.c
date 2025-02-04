@@ -47,7 +47,7 @@ void u8250_check_ready(u8250_state_t *uart)
 static void u8250_handle_out(u8250_state_t *uart, uint8_t value)
 {
     if (write(uart->out_fd, &value, 1) < 1)
-        fprintf(stderr, "failed to write UART output: %s\n", strerror(errno));
+        rv_log_error("Failed to write UART output: %s", strerror(errno));
 }
 
 static uint8_t u8250_handle_in(u8250_state_t *uart)
@@ -58,13 +58,13 @@ static uint8_t u8250_handle_in(u8250_state_t *uart)
         return value;
 
     if (read(uart->in_fd, &value, 1) < 0)
-        fprintf(stderr, "failed to read UART input: %s\n", strerror(errno));
+        rv_log_error("Failed to read UART input: %s", strerror(errno));
     uart->in_ready = false;
     u8250_check_ready(uart);
 
     if (value == 1) {           /* start of heading (Ctrl-a) */
         if (getchar() == 120) { /* keyboard x */
-            printf("\n");       /* end emulator with newline */
+            rv_log_info("RISC-V emulator is destroyed");
             exit(EXIT_SUCCESS);
         }
     }

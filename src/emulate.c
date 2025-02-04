@@ -1131,7 +1131,6 @@ void rv_step(void *arg)
 
 #ifdef __EMSCRIPTEN__
     if (rv_has_halted(rv)) {
-        printf("inferior exit code %d\n", attr->exit_code);
         emscripten_cancel_main_loop();
         rv_delete(rv); /* clean up and reuse memory */
     }
@@ -1346,7 +1345,7 @@ void dump_registers(riscv_t *rv, char *out_file_path)
 {
     FILE *f = out_file_path[0] == '-' ? stdout : fopen(out_file_path, "w");
     if (!f) {
-        fprintf(stderr, "Cannot open registers output file.\n");
+        rv_log_error("Cannot open registers output file");
         return;
     }
 

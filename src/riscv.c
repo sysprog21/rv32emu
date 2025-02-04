@@ -164,9 +164,10 @@ void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
 
         if (fd == STDIN_FILENO)
             attr->fd_stdin = new_fd;
-        else if (fd == STDOUT_FILENO)
+        else if (fd == STDOUT_FILENO) {
             attr->fd_stdout = new_fd;
-        else
+            rv_log_set_stdout_stream(file);
+        } else
             attr->fd_stderr = new_fd;
     }
 }
@@ -256,7 +257,7 @@ static void map_file(char **ram_loc, const char *name)
 cleanup:
     close(fd);
 fail:
-    fprintf(stderr, "Error: %s\n", strerror(errno));
+    rv_log_fatal("map_file() %s failed: %s", name, strerror(errno));
     exit(EXIT_FAILURE);
 }
 
@@ -400,6 +401,8 @@ riscv_t *rv_create(riscv_user_t rv_attr)
      * default standard stream.
      * rv_remap_stdstream() can be called to overwrite them
      *
+     * The logging stdout stream will be remapped as well
+     *
      */
     attr->fd_map = map_init(int, FILE *, map_cmp_int);
     rv_remap_stdstream(rv,
@@ -410,9 +413,25 @@ riscv_t *rv_create(riscv_user_t rv_attr)
                        },
                        3);
 
+    /* set the log level to TRACE, everything is captured */
+    rv_log_set_level(attr->log_level);
+    rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
+
+    /* enable the log */
+    rv_log_set_quiet(false);
+
 #if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
     elf_t *elf = elf_new();
-    assert(elf && elf_open(elf, attr->data.user.elf_program));
+    assert(elf);
+
+    if (!elf_open(elf, attr->data.user.elf_program)) {
+        rv_log_fatal("elf_open() failed");
+        map_delete(attr->fd_map);
+        memory_delete(attr->mem);
+        free(rv);
+        exit(EXIT_FAILURE);
+    }
+    rv_log_info("%s ELF loaded", attr->data.user.elf_program);
 
     const struct Elf32_Sym *end;
     if ((end = elf_get_symbol(elf, "_end")))
@@ -466,10 +485,12 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 
     char *ram_loc = (char *) attr->mem->mem_base;
     map_file(&ram_loc, attr->data.system.kernel);
+    rv_log_info("Kernel loaded");
 
     uint32_t dtb_addr = attr->mem->mem_size - DTB_SIZE;
     ram_loc = ((char *) attr->mem->mem_base) + dtb_addr;
     load_dtb(&ram_loc, attr->data.system.bootargs);
+    rv_log_info("DTB loaded");
     /*
      * Load optional initrd image at last 8 MiB before the dtb region to
      * prevent kernel from overwritting it
@@ -478,6 +499,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
         uint32_t initrd_addr = dtb_addr - INITRD_SIZE;
         ram_loc = ((char *) attr->mem->mem_base) + initrd_addr;
         map_file(&ram_loc, attr->data.system.initrd);
+        rv_log_info("Rootfs loaded");
     }
 
     /* this variable has external linkage to mmu_io defined in system.c */
@@ -559,7 +581,7 @@ static void rv_run_and_trace(riscv_t *rv)
         /* trace execution */
         uint32_t pc = rv_get_pc(rv);
         const char *sym = elf_find_symbol(elf, pc);
-        printf("%08x  %s\n", pc, (sym ? sym : ""));
+        rv_log_trace("%08x  %s", pc, (sym ? sym : ""));
 
         rv_step(rv); /* step instructions */
     }
@@ -848,12 +870,12 @@ static void profile(block_t *block, uint32_t freq, FILE *output_file)
 void rv_profile(riscv_t *rv, char *out_file_path)
 {
     if (!out_file_path) {
-        fprintf(stderr, "Profiling data output file is NULL.\n");
+        rv_log_warn("Profiling data output file is NULL");
         return;
     }
     FILE *f = fopen(out_file_path, "w");
     if (!f) {
-        fprintf(stderr, "Cannot open profiling data output file.\n");
+        rv_log_error("Cannot open profiling data output file");
         return;
     }
 #if RV32_HAS(JIT)

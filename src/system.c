@@ -95,7 +95,7 @@ enum SUPPORTED_MMIO {
             )                                                                       \
             break;                                                                  \
         default:                                                                    \
-            fprintf(stderr, "unknown MMIO type %d\n", io);                          \
+            rv_log_error("Unknown MMIO type %d", io);                          \
             break;                                                                  \
     }
 /* clang-format on */

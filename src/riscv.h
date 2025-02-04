@@ -10,6 +10,7 @@
 #include <stdio.h>
 
 #include "io.h"
+#include "log.h"
 #include "map.h"
 
 #if RV32_HAS(SYSTEM)
@@ -516,7 +517,7 @@ typedef struct {
     /* emulation program error code */
     int error;
 
-    /* TODO: for logging feature */
+    /* log level */
     int log_level;
 
     /* userspace or system emulation data */

@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "feature.h"
+#include "log.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #define UNUSED __attribute__((unused))

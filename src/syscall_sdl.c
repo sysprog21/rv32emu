@@ -254,15 +254,15 @@ static bool check_sdl(riscv_t *rv, int width, int height)
 {
     if (!window) { /* check if video has been initialized. */
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
-            fprintf(stderr, "Failed to call SDL_Init()\n");
+            rv_log_fatal("Failed to call SDL_Init()");
             exit(EXIT_FAILURE);
         }
         window = SDL_CreateWindow("rv32emu", SDL_WINDOWPOS_UNDEFINED,
                                   SDL_WINDOWPOS_UNDEFINED, width, height,
                                   SDL_WINDOW_RESIZABLE);
         if (!window) {
-            fprintf(stderr, "Window could not be created! SDL_Error: %s\n",
-                    SDL_GetError());
+            rv_log_fatal("Window could not be created! SDL_Error: %s",
+                         SDL_GetError());
             exit(EXIT_FAILURE);
         }
 
@@ -764,19 +764,19 @@ static void *music_handler(void *arg)
 
     music_midi_data = mus2midi(music->data, (int *) &music->size);
     if (!music_midi_data) {
-        fprintf(stderr, "mus2midi failed\n");
+        rv_log_error("mus2midi() failed");
         return NULL;
     }
 
     SDL_RWops *rwops = SDL_RWFromMem(music_midi_data, music->size);
     if (!rwops) {
-        fprintf(stderr, "SDL_RWFromMem failed: %s\n", SDL_GetError());
+        rv_log_error("SDL_RWFromMem failed: %s", SDL_GetError());
         return NULL;
     }
 
     mid = Mix_LoadMUSType_RW(rwops, MUS_MID, SDL_TRUE);
     if (!mid) {
-        fprintf(stderr, "Mix_LoadMUSType_RW failed: %s\n", Mix_GetError());
+        rv_log_error("Mix_LoadMUSType_RW failed: %s", Mix_GetError());
         return NULL;
     }
 
@@ -786,7 +786,7 @@ static void *music_handler(void *arg)
     Mix_VolumeMusic(music->volume * 8);
 
     if (Mix_PlayMusic(mid, looping) == -1) {
-        fprintf(stderr, "Mix_PlayMusic failed: %s\n", Mix_GetError());
+        rv_log_error("Mix_PlayMusic failed: %s", Mix_GetError());
         return NULL;
     }
 
@@ -920,7 +920,7 @@ static void init_audio(void)
 {
     if (!(SDL_WasInit(-1) & SDL_INIT_AUDIO)) {
         if (SDL_Init(SDL_INIT_AUDIO) != 0) {
-            fprintf(stderr, "Failed to call SDL_Init()\n");
+            rv_log_fatal("Failed to call SDL_Init()");
             exit(EXIT_FAILURE);
         }
     }
@@ -928,17 +928,17 @@ static void init_audio(void)
     /* sfx samples buffer */
     sfx_samples = malloc(SFX_SAMPLE_SIZE);
     if (unlikely(!sfx_samples)) {
-        fprintf(stderr, "Failed to allocate memory for buffer\n");
+        rv_log_fatal("Failed to allocate memory for buffer");
         exit(EXIT_FAILURE);
     }
 
     /* Initialize SDL2 Mixer */
     if (Mix_Init(MIX_INIT_MID) != MIX_INIT_MID) {
-        fprintf(stderr, "Mix_Init failed: %s\n", Mix_GetError());
+        rv_log_fatal("Mix_Init failed: %s", Mix_GetError());
         exit(EXIT_FAILURE);
     }
     if (Mix_OpenAudio(SAMPLE_RATE, AUDIO_U8, CHANNEL_USED, CHUNK_SIZE) == -1) {
-        fprintf(stderr, "Mix_OpenAudio failed: %s\n", Mix_GetError());
+        rv_log_fatal("Mix_OpenAudio failed: %s", Mix_GetError());
         Mix_Quit();
         exit(EXIT_FAILURE);
     }
@@ -1007,7 +1007,7 @@ void syscall_setup_audio(riscv_t *rv)
         shutdown_audio();
         break;
     default:
-        fprintf(stderr, "unknown sound request\n");
+        rv_log_error("Unknown sound request: %d", request);
         break;
     }
 }
@@ -1031,7 +1031,7 @@ void syscall_control_audio(riscv_t *rv)
         stop_music();
         break;
     default:
-        fprintf(stderr, "unknown sound control request\n");
+        rv_log_error("Unknown sound control request: %d", request);
         break;
     }
 }

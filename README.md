@@ -155,6 +155,7 @@ The image containing all the necessary tools for development and testing can be 
 * `ENABLE_SYSTEM`: Experimental system emulation, allowing booting Linux kernel. To enable this feature, additional features must also be enabled. However, by default, when `ENABLE_SYSTEM` is enabled, CSR, fence, integer multiplication/division, and atomic Instructions are automatically enabled
 * `ENABLE_MOP_FUSION` : Macro-operation fusion
 * `ENABLE_BLOCK_CHAINING` : Block chaining of translated blocks
+* `ENABLE_LOG_COLOR` : Logging with colors (default)
 
 e.g., run `make ENABLE_EXT_F=0` for the build without floating-point support.
 

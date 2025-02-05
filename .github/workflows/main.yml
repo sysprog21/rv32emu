@@ -259,7 +259,6 @@ jobs:
         # No 'sudo' is available
         install: |
           apt-get update -q -y
-          apt-get dist-upgrade -q -y
           apt-get install -q -y make git clang python3 python3-pip build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat

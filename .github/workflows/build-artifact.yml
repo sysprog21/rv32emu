@@ -110,7 +110,6 @@ jobs:
           sudo apt-get update -q -y
           sudo apt-get upgrade -q -y
           sudo apt-get install -q -y gcc-multilib g++-multilib
-          sudo apt-get install -q -y opam build-essential libgmp-dev z3 pkg-config zlib1g-dev
           .ci/riscv-toolchain-install.sh
           echo "$PWD/toolchain/bin" >> $GITHUB_PATH
       - name: Build binaries
@@ -120,19 +119,6 @@ jobs:
           mv build/sha1sum-linux-x86-softfp /tmp
           mv build/sha1sum-riscv32 /tmp
           mv build/linux-x86-softfp build/riscv32 /tmp/rv32emu-prebuilt
-      - name: Build Sail model
-        run: |
-          cd /tmp
-          opam init -y --disable-sandboxing
-          opam switch create ocaml-base-compiler.4.06.1
-          opam install sail -y
-          eval $(opam config env)
-          git clone https://github.com/riscv/sail-riscv.git
-          cd sail-riscv
-          git checkout 9547a30bf84572c458476591b569a95f5232c1c7
-          ARCH=RV32 make -j
-          mkdir -p /tmp/rv32emu-prebuilt/sail_cSim
-          mv c_emulator/riscv_sim_RV32 /tmp/rv32emu-prebuilt/sail_cSim
       - name: Create tarball
         run: |
           cd /tmp

@@ -68,7 +68,8 @@
  * |                 src, dst, imm; | store the result into dst.             |
  * | alu[32|64], op, src, dst;      | Do ALU operation on src and dst and    |
  * |                                | store the result into dst.             |
- * | ldimm, dst, imm;               | Load immediate into dst.               |
+ * | ldimm, dst, imm32;             | Load immediate into dst. (zero-extend) |
+ * | ldimms, dst, imm;              | Load immediate into dst.               |
  * | lds, size, src, dst,           | Load data of a specified size from     |
  * |          offset;               | memory and sign-extend it into the dst,|
  * |                                | using the memory address calculated as |
@@ -601,7 +602,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         map, VR1, rd;
         lds, S8, TMP, VR1, 0;
@@ -618,7 +619,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         map, VR1, rd;
         lds, S16, TMP, VR1, 0;
@@ -635,7 +636,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         map, VR1, rd;
         ld, S32, TMP, VR1, 0;
@@ -651,7 +652,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         map, VR1, rd;
         ld, S8, TMP, VR1, 0;
@@ -668,7 +669,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         map, VR1, rd;
         ld, S16, TMP, VR1, 0;
@@ -690,7 +691,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         rald, VR1, rs2;
         st, S8, VR1, TMP, 0;
@@ -707,7 +708,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         rald, VR1, rs2;
         st, S16, VR1, TMP, 0;
@@ -724,7 +725,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         rald, VR1, rs2;
         st, S32, VR1, TMP, 0;
@@ -2034,7 +2035,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         map, VR1, rd;
         ld, S32, TMP, VR1, 0;
@@ -2055,7 +2056,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rs1;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         rald, VR1, rs2;
         st, S32, VR1, TMP, 0;
@@ -2443,7 +2444,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rv_reg_sp;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         map, VR1, rd;
         ld, S32, TMP, VR1, 0;
@@ -2552,7 +2553,7 @@ RVOP(
     GEN({
         mem;
         rald, VR0, rv_reg_sp;
-        ldimm, TMP, mem;
+        ldimms, TMP, mem;
         alu64, 0x01, VR0, TMP;
         rald, VR1, rs2;
         st, S32, VR1, TMP, 0;

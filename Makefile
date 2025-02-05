@@ -64,6 +64,9 @@ CFLAGS += -DMEM_SIZE=0x$(REAL_MEM_SIZE) -DDTB_SIZE=0x$(REAL_DTB_SIZE) -DINITRD_S
 endif
 endif
 
+ENABLE_ARCH_TEST ?= 0
+$(call set-feature, ARCH_TEST)
+
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)

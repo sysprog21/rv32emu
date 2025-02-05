@@ -955,7 +955,10 @@ static block_t *block_find_or_translate(riscv_t *rv)
     return next_blk;
 }
 
-#if RV32_HAS(JIT)
+/* We disable profiler to make sure every guest instructions be translated by
+ * JIT compiler in architecture test.
+ */
+#if RV32_HAS(JIT) && !RV32_HAS(ARCH_TEST)
 static bool runtime_profiler(riscv_t *rv, block_t *block)
 {
     /* Based on our observations, a significant number of true hotspots are
@@ -1105,7 +1108,11 @@ void rv_step(void *arg)
             prev = NULL;
             continue;
         } /* check if the execution path is potential hotspot */
-        if (block->translatable && runtime_profiler(rv, block)) {
+        if (block->translatable
+#if !RV32_HAS(ARCH_TEST)
+            && runtime_profiler(rv, block)
+#endif
+        ) {
             jit_translate(rv, block);
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));

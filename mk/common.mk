@@ -5,6 +5,15 @@ else
     PRINTF = env printf
 endif
 
+UNAME_M := $(shell uname -m)
+ifeq ($(UNAME_M),x86_64)
+    HOST_PLATFORM := x86
+else ifeq ($(UNAME_M),aarch64)
+    HOST_PLATFORM := aarch64
+else
+    $(error Unsupported platform.)
+endif
+
 # Control the build verbosity
 # 'make V=1' equals to 'make VERBOSE=1'
 ifeq ("$(origin V)", "command line")

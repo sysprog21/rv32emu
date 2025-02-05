@@ -386,7 +386,9 @@ static inline void emit_jump_target_address(struct jit_state *state,
     emit4(state, 0);
 }
 #elif defined(__aarch64__)
-static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm);
+static inline void emit_load_imm(struct jit_state *state,
+                                 int dst,
+                                 uint32_t imm);
 
 static void emit_a64(struct jit_state *state, uint32_t insn)
 {
@@ -773,7 +775,7 @@ static inline void emit_alu64_imm32(struct jit_state *state,
 static inline void emit_cmp_imm32(struct jit_state *state, int dst, int32_t imm)
 {
 #if defined(__x86_64__)
-    emit_alu64_imm32(state, 0x81, 7, dst, imm);
+    emit_alu32_imm32(state, 0x81, 7, dst, imm);
 #elif defined(__aarch64__)
     emit_load_imm(state, R10, imm);
     emit_addsub_register(state, false, AS_SUBS, RZ, dst, R10);
@@ -823,6 +825,10 @@ static inline void emit_jcc_offset(struct jit_state *state, int code)
 #endif
 }
 
+static inline void emit_load_imm(struct jit_state *state,
+                                 int dst,
+                                 uint32_t imm);
+
 /* Load [src + offset] into dst.
  *
  * If the offset is non-zero, it restores the vm register to the host register
@@ -835,6 +841,18 @@ static inline void emit_load(struct jit_state *state,
                              int dst,
                              int32_t offset)
 {
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].reg_idx != dst)
+            continue;
+        if (register_map[i].vm_reg_idx != 0)
+            continue;
+
+        /* if dst is x0, load 0x0 into host register */
+        emit_load_imm(state, dst, 0x0);
+        set_dirty(dst, true);
+        return;
+    }
+
 #if defined(__x86_64__)
     if (src & 8 || dst & 8)
         emit_basic_rex(state, 0, dst, src);
@@ -875,6 +893,18 @@ static inline void emit_load_sext(struct jit_state *state,
                                   int dst,
                                   int32_t offset)
 {
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].reg_idx != dst)
+            continue;
+        if (register_map[i].vm_reg_idx != 0)
+            continue;
+
+        /* if dst is x0, load 0x0 into host register */
+        emit_load_imm(state, dst, 0x0);
+        set_dirty(dst, true);
+        return;
+    }
+
 #if defined(__x86_64__)
     if (size == S8 || size == S16) {
         if (src & 8 || dst & 8)
@@ -908,8 +938,25 @@ static inline void emit_load_sext(struct jit_state *state,
     set_dirty(dst, !offset);
 }
 
+/* Load 32-bit immediate into register (zero-extend) */
+static inline void emit_load_imm(struct jit_state *state, int dst, uint32_t imm)
+{
+#if defined(__x86_64__)
+    if (dst & 8)
+        emit_basic_rex(state, 0, 0, dst);
+    emit1(state, 0xb8 | (dst & 7));
+    emit4(state, imm);
+
+    set_dirty(dst, true);
+#elif defined(__aarch64__)
+    emit_movewide_imm(state, true, dst, imm);
+#endif
+}
+
 /* Load sign-extended immediate into register */
-static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm)
+static inline void emit_load_imm_sext(struct jit_state *state,
+                                      int dst,
+                                      int64_t imm)
 {
 #if defined(__x86_64__)
     if ((int32_t) imm == imm)
@@ -930,6 +977,64 @@ static inline void emit_load_imm(struct jit_state *state, int dst, int64_t imm)
 #endif
 }
 
+static inline bool jit_store_x0(struct jit_state *state,
+                                enum operand_size size,
+                                int src,
+                                int dst,
+                                int32_t offset)
+{
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].reg_idx != src)
+            continue;
+        if (register_map[i].vm_reg_idx != 0)
+            continue;
+
+#if defined(__x86_64__)
+        /* if src is x0, write 0x0 into destination */
+        if (size == S16)
+            emit1(state, 0x66); /* 16-bit override */
+        if (dst & 8)
+            emit_rex(state, 0, 0, 0, !!(dst & 8));
+        emit1(state, size == S8 ? 0xc6 : 0xc7);
+        emit1(state, 0x80 | (dst & 0x7));
+        emit4(state, offset);
+        switch (size) {
+        case S8:
+            emit1(state, 0x0);
+            break;
+        case S16:
+            emit1(state, 0x0);
+            emit1(state, 0x0);
+            break;
+        case S32:
+            emit4(state, 0x0);
+            break;
+        default:
+            assert(NULL);
+            __UNREACHABLE;
+        }
+#elif defined(__aarch64__)
+        switch (size) {
+        case S8:
+            emit_loadstore_imm(state, LS_STRB, RZ, dst, offset);
+            break;
+        case S16:
+            emit_loadstore_imm(state, LS_STRH, RZ, dst, offset);
+            break;
+        case S32:
+            emit_loadstore_imm(state, LS_STRW, RZ, dst, offset);
+            break;
+        default:
+            assert(NULL);
+            __UNREACHABLE;
+        }
+#endif
+        set_dirty(src, false);
+        return true;
+    }
+    return false;
+}
+
 /* Store register src to [dst + offset].
  *
  * If the offset is non-zero, it stores the host register back to the stack
@@ -942,6 +1047,9 @@ static inline void emit_store(struct jit_state *state,
                               int dst,
                               int32_t offset)
 {
+    if (jit_store_x0(state, size, src, dst, offset))
+        return;
+
 #if defined(__x86_64__)
     if (size == S16)
         emit1(state, 0x66); /* 16-bit override */
@@ -961,8 +1069,8 @@ static inline void emit_store(struct jit_state *state,
         emit_loadstore_imm(state, LS_STRW, src, dst, offset);
         break;
     default:
+        assert(NULL);
         __UNREACHABLE;
-        break;
     }
 #endif
 
@@ -990,7 +1098,7 @@ static inline void unmap_vm_reg(int);
 static inline void emit_call(struct jit_state *state, intptr_t target)
 {
 #if defined(__x86_64__)
-    emit_load_imm(state, RAX, target);
+    emit_load_imm_sext(state, RAX, target);
     /* callq *%rax */
     emit1(state, 0xff);
     /* ModR/M byte: b11010000b = xd0, rax is register 0 */
@@ -1129,7 +1237,7 @@ static void muldivmod(struct jit_state *state,
 
     if (div || mod) {
         if (sign) {
-            emit_load_imm(state, RDX, -1);
+            emit_load_imm_sext(state, RDX, -1);
             /* compare divisor with -1 for overflow checking */
             emit_cmp32(state, RDX, RCX);
             /* Save the result of the comparision */
@@ -1165,7 +1273,7 @@ static void muldivmod(struct jit_state *state,
 
         if (div) {
             /* Set the dividend to zero if the divisor was zero. */
-            emit_load_imm(state, RCX, -1);
+            emit_load_imm_sext(state, RCX, -1);
 
             /* Store 0 in RAX if the divisor was zero. */
             /* Use conditional move to avoid a branch. */
@@ -1795,7 +1903,8 @@ static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         vm_reg[0] = ra_load(state, fuse[i].rs1);
-        emit_load_imm(state, temp_reg, (intptr_t) (m->mem_base + fuse[i].imm));
+        emit_load_imm_sext(state, temp_reg,
+                           (intptr_t) (m->mem_base + fuse[i].imm));
         emit_alu64(state, 0x01, vm_reg[0], temp_reg);
         vm_reg[1] = ra_load(state, fuse[i].rs2);
         emit_store(state, S32, vm_reg[1], temp_reg, 0);
@@ -1808,7 +1917,8 @@ static void do_fuse4(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         vm_reg[0] = ra_load(state, fuse[i].rs1);
-        emit_load_imm(state, temp_reg, (intptr_t) (m->mem_base + fuse[i].imm));
+        emit_load_imm_sext(state, temp_reg,
+                           (intptr_t) (m->mem_base + fuse[i].imm));
         emit_alu64(state, 0x01, vm_reg[0], temp_reg);
         vm_reg[1] = map_vm_reg(state, fuse[i].rd);
         emit_load(state, S32, temp_reg, vm_reg[1], 0);

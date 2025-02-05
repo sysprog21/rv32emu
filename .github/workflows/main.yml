@@ -233,6 +233,12 @@ jobs:
             .ci/boot-linux.sh
             make ENABLE_SYSTEM=1 clean
       if: ${{ always() }}
+    - name: Architecture test
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+      run: |
+            .ci/riscv-tests.sh
+      if: ${{ always() }}
 
   host-arm64:
     needs: [detect-code-related-file-changes]
@@ -254,7 +260,7 @@ jobs:
         install: |
           apt-get update -q -y
           apt-get dist-upgrade -q -y
-          apt-get install -q -y make git clang libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
+          apt-get install -q -y make git clang python3 python3-pip build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
           git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
@@ -269,6 +275,8 @@ jobs:
           make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
           make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
           make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
+          .ci/riscv-toolchain-install.sh && export PATH=$PWD/toolchain/bin:$PATH
+          .ci/riscv-tests.sh
 
   coding-style:
     needs: [detect-code-related-file-changes]
@@ -304,21 +312,6 @@ jobs:
     - name: run scan-build with JIT
       run: |
           make ENABLE_JIT=1 distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
-
-  compliance-test:
-    needs: [detect-code-related-file-changes]
-    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: install-dependencies
-      run: |
-            .ci/riscv-toolchain-install.sh
-      shell: bash
-    - name: architectural test
-      run: |
-            .ci/riscv-tests.sh
-      shell: bash
 
   # https://docs.docker.com/build/ci/github-actions/multi-platform/
   docker-hub-build-and-publish:

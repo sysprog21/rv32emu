@@ -114,12 +114,10 @@ AR := ar
 ifeq ("$(CC_IS_EMCC)", "1")
 AR = emar
 endif
-SOFTFLOAT_OUT = $(abspath $(OUT)/softfloat)
-src/softfloat/build/Linux-RISCV-GCC/Makefile:
-	git submodule update --init src/softfloat/
-SOFTFLOAT_LIB := $(SOFTFLOAT_OUT)/softfloat.a
-$(SOFTFLOAT_LIB): src/softfloat/build/Linux-RISCV-GCC/Makefile
-	$(MAKE) -C $(dir $<) BUILD_DIR=$(SOFTFLOAT_OUT) CC=$(CC) AR=$(AR)
+
+# Berkeley SoftFloat
+include mk/softfloat.mk
+
 ifeq ($(call has, SYSTEM), 1)
 DEV_OUT := $(OUT)/devices
 endif
@@ -411,12 +409,13 @@ endif
 
 clean:
 	$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
+	-$(RM) $(SOFTFLOAT_LIB)
 distclean: clean
 	$(RM) -r $(OUT)/id1
 	$(RM) -r $(DEMO_DIR)
 	$(RM) *.zip
 	$(RM) -r $(OUT)/mini-gdbstub
 	-$(RM) $(OUT)/.config
-	-$(RM) -r $(OUT)/softfloat
+	-$(RM) -r $(SOFTFLOAT_DUMMY_PLAT) $(OUT)/softfloat
 
 -include $(deps)

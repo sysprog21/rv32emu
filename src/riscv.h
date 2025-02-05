@@ -24,7 +24,7 @@
 #define bfloat16_t softfloat_bfloat16_t
 #define float32_t softfloat_float32_t
 #define float64_t softfloat_float64_t
-#include "softfloat/softfloat.h"
+#include "softfloat/source/include/softfloat.h"
 #undef float16_t
 #undef bfloat16_t
 #undef float32_t

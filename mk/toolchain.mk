@@ -72,6 +72,9 @@ ifeq ($(UNAME_S),Darwin)
     endif
 endif
 
+# Utilities
+AR ?= ar
+
 # Supported GNU Toolchain for RISC-V
 TOOLCHAIN_LIST := riscv-none-elf-      \
 		  riscv32-unknown-elf- \

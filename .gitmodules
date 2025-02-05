@@ -8,8 +8,7 @@
 	shallow = true
 [submodule "softfloat"]
 	path = src/softfloat
-	url = https://github.com/sysprog21/berkeley-softfloat-3
-	branch = rv32emu
+	url = https://github.com/ucb-bar/berkeley-softfloat-3
 	shallow = true
 [submodule "tests/ansibench"]
 	path = tests/ansibench

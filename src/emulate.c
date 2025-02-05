@@ -16,7 +16,7 @@
 
 #if RV32_HAS(EXT_F)
 #include <math.h>
-#include "softfloat.h"
+#include "softfp.h"
 #endif /* RV32_HAS(EXT_F) */
 
 #if RV32_HAS(GDBSTUB)

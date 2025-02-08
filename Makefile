@@ -257,9 +257,6 @@ ifeq ($(call has, JIT), 1)
         $(error JIT mode only supports for x64 and arm64 target currently.)
     endif
 
-src/rv32_jit.c:
-	$(Q)tools/gen-jit-template.py $(CFLAGS) > $@
-
 $(OUT)/jit.o: src/jit.c src/rv32_jit.c
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
@@ -409,9 +406,10 @@ endif
 
 clean:
 	$(VECHO) "Cleaning... "
-	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
+	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
 	$(Q)$(call notice, [OK])
+
 distclean: clean
 	$(VECHO) "Deleting all generated files... "
 	$(Q)$(RM) -r $(OUT)/id1

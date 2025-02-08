@@ -252,7 +252,7 @@ ifeq ($(call has, JIT), 1)
         ifeq ("$(CHECK_LLVM_LIBS)", "0")
             OBJS_EXT += t2c.o
             CFLAGS += -g $(shell $(LLVM_CONFIG) --cflags)
-            LDFLAGS += $(shell $(LLVM_CONFIG) --libs)
+            LDFLAGS += $(shell $(LLVM_CONFIG) --libfiles)
         else
             $(error No llvm-config-18 installed. Check llvm-config-18 installation in advance, or use "ENABLE_T2C=0" to disable tier-2 LLVM compiler)
         endif

@@ -3,21 +3,11 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-#if !RV32_HAS(SYSTEM)
-#error "Do not manage to build this file unless you enable system support."
-#endif
-
 #include <assert.h>
 
-#include "devices/plic.h"
-#include "devices/uart.h"
-#include "devices/virtio.h"
-#include "riscv_private.h"
+#include "system.h"
 
-#define R 1
-#define W 0
-
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if !RV32_HAS(ELF_LOADER)
 void emu_update_uart_interrupts(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
@@ -29,7 +19,7 @@ void emu_update_uart_interrupts(riscv_t *rv)
     plic_update_interrupts(attr->plic);
 }
 
-static void emu_update_vblk_interrupts(riscv_t *rv)
+void emu_update_vblk_interrupts(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
     if (attr->vblk->interrupt_status)
@@ -38,112 +28,6 @@ static void emu_update_vblk_interrupts(riscv_t *rv)
         attr->plic->active &= ~IRQ_VBLK_BIT;
     plic_update_interrupts(attr->plic);
 }
-/*
- * Linux kernel might create signal frame when returning from trap
- * handling, which modifies the SEPC CSR. Thus, the fault instruction
- * cannot always redo. For example, invalid memory access causes SIGSEGV.
- */
-extern bool need_handle_signal;
-#define CHECK_PENDING_SIGNAL(rv, signal_flag)              \
-    do {                                                   \
-        signal_flag = (rv->csr_sepc != rv->last_csr_sepc); \
-    } while (0)
-
-#define MMIO_R 1
-#define MMIO_W 0
-
-enum SUPPORTED_MMIO {
-    MMIO_PLIC,
-    MMIO_UART,
-    MMIO_VIRTIOBLK,
-};
-
-/* clang-format off */
-#define MMIO_OP(io, rw)                                                             \
-    switch(io){                                                                     \
-        case MMIO_PLIC:                                                             \
-            IIF(rw)( /* read */                                                     \
-                mmio_read_val = plic_read(PRIV(rv)->plic, addr & 0x3FFFFFF); \
-                plic_update_interrupts(PRIV(rv)->plic);                             \
-                return mmio_read_val;                                               \
-                ,    /* write */                                                    \
-                plic_write(PRIV(rv)->plic, addr & 0x3FFFFFF, val);           \
-                plic_update_interrupts(PRIV(rv)->plic);                             \
-                return;                                                             \
-            )                                                                       \
-            break;                                                                  \
-        case MMIO_UART:                                                             \
-            IIF(rw)( /* read */                                                     \
-                mmio_read_val = u8250_read(PRIV(rv)->uart, addr & 0xFFFFF);         \
-                emu_update_uart_interrupts(rv);                                     \
-                return mmio_read_val;                                               \
-                ,    /* write */                                                    \
-                u8250_write(PRIV(rv)->uart, addr & 0xFFFFF, val);                   \
-                emu_update_uart_interrupts(rv);                                     \
-                return;                                                             \
-            )                                                                       \
-            break;                                                                  \
-        case MMIO_VIRTIOBLK:                                                        \
-            IIF(rw)( /* read */                                                     \
-                mmio_read_val = virtio_blk_read(PRIV(rv)->vblk, addr & 0xFFFFF);    \
-                emu_update_vblk_interrupts(rv);                                     \
-                return mmio_read_val;                                               \
-                ,    /* write */                                                    \
-                virtio_blk_write(PRIV(rv)->vblk, addr & 0xFFFFF, val);              \
-                emu_update_vblk_interrupts(rv);                                     \
-                return;                                                             \
-            )                                                                       \
-            break;                                                                  \
-        default:                                                                    \
-            rv_log_error("Unknown MMIO type %d", io);                          \
-            break;                                                                  \
-    }
-/* clang-format on */
-
-#define MMIO_READ()                                         \
-    do {                                                    \
-        uint32_t mmio_read_val;                             \
-        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */ \
-            /* 256 regions of 1MiB */                       \
-            switch ((addr >> 20) & MASK(8)) {               \
-            case 0x0:                                       \
-            case 0x2: /* PLIC (0 - 0x3F) */                 \
-                MMIO_OP(MMIO_PLIC, MMIO_R);                 \
-                break;                                      \
-            case 0x40: /* UART */                           \
-                MMIO_OP(MMIO_UART, MMIO_R);                 \
-                break;                                      \
-            case 0x42: /* Virtio-blk */                     \
-                MMIO_OP(MMIO_VIRTIOBLK, MMIO_R);            \
-                break;                                      \
-            default:                                        \
-                __UNREACHABLE;                              \
-                break;                                      \
-            }                                               \
-        }                                                   \
-    } while (0)
-
-#define MMIO_WRITE()                                        \
-    do {                                                    \
-        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */ \
-            /* 256 regions of 1MiB */                       \
-            switch ((addr >> 20) & MASK(8)) {               \
-            case 0x0:                                       \
-            case 0x2: /* PLIC (0 - 0x3F) */                 \
-                MMIO_OP(MMIO_PLIC, MMIO_W);                 \
-                break;                                      \
-            case 0x40: /* UART */                           \
-                MMIO_OP(MMIO_UART, MMIO_W);                 \
-                break;                                      \
-            case 0x42: /* Virtio-blk */                     \
-                MMIO_OP(MMIO_VIRTIOBLK, MMIO_W);            \
-                break;                                      \
-            default:                                        \
-                __UNREACHABLE;                              \
-                break;                                      \
-            }                                               \
-        }                                                   \
-    } while (0)
 #endif
 
 static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
@@ -221,8 +105,8 @@ pte_t *mmu_walk(riscv_t *rv, const uint32_t vaddr, uint32_t *level)
 #define MMU_FAULT_CHECK(op, rv, pte, vaddr, access_bits) \
     mmu_##op##_fault_check(rv, pte, vaddr, access_bits)
 #define MMU_FAULT_CHECK_IMPL(op, pgfault)                                     \
-    static bool mmu_##op##_fault_check(riscv_t *rv, pte_t *pte,               \
-                                       uint32_t vaddr, uint32_t access_bits)  \
+    bool mmu_##op##_fault_check(riscv_t *rv, pte_t *pte, uint32_t vaddr,      \
+                                uint32_t access_bits)                         \
     {                                                                         \
         uint32_t scause;                                                      \
         uint32_t stval = vaddr;                                               \
@@ -284,16 +168,6 @@ pte_t *mmu_walk(riscv_t *rv, const uint32_t vaddr, uint32_t *level)
 MMU_FAULT_CHECK_IMPL(ifetch, pagefault_insn)
 MMU_FAULT_CHECK_IMPL(read, pagefault_load)
 MMU_FAULT_CHECK_IMPL(write, pagefault_store)
-
-uint32_t ppn;
-uint32_t offset;
-#define get_ppn_and_offset()                                   \
-    do {                                                       \
-        assert(pte);                                           \
-        ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;        \
-        offset = level == 1 ? vaddr & MASK((RV_PG_SHIFT + 10)) \
-                            : vaddr & MASK(RV_PG_SHIFT);       \
-    } while (0)
 
 /* The IO handler that operates when the Memory Management Unit (MMU)
  * is enabled during system emulation is responsible for managing
@@ -449,7 +323,7 @@ static void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
  * TODO: dTLB can be introduced here to
  * cache the gVA to gPA tranlation.
  */
-static uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
+uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
 {
     if (!rv->csr_satp)
         return vaddr;

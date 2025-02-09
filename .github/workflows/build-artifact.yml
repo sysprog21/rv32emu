@@ -67,9 +67,9 @@ jobs:
           submodules: 'true'
       - name: Install dependencies
         run: |
-          sudo apt-get update -q -y
-          sudo apt-get upgrade -q -y
-          sudo apt-get install -q -y build-essential git
+          sudo apt-get update -q=2
+          sudo apt-get upgrade -q=2
+          sudo apt-get install -q=2 build-essential git
       - name: Build Linux image
         run: |
           make build-linux-image
@@ -107,9 +107,9 @@ jobs:
           submodules: 'true'
       - name: Install dependencies
         run: |
-          sudo apt-get update -q -y
-          sudo apt-get upgrade -q -y
-          sudo apt-get install -q -y gcc-multilib g++-multilib
+          sudo apt-get update -q=2
+          sudo apt-get upgrade -q=2
+          sudo apt-get install -q=2 gcc-multilib g++-multilib
           .ci/riscv-toolchain-install.sh
           echo "$PWD/toolchain/bin" >> $GITHUB_PATH
       - name: Build binaries

@@ -45,8 +45,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: install-dependencies
       run: |
-            sudo apt-get update -q -y
-            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
+            sudo apt-get update -q=2
+            sudo apt-get install -q=2 libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
             .ci/riscv-toolchain-install.sh
             echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
             wget https://apt.llvm.org/llvm.sh
@@ -258,8 +258,8 @@ jobs:
         distro: ubuntu24.04
         # No 'sudo' is available
         install: |
-          apt-get update -q -y
-          apt-get install -q -y make git clang python3 python3-pip build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
+          apt-get update -q=2
+          apt-get install -q=2 make git clang python3 python3-pip build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
           git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
@@ -285,7 +285,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: coding convention
       run: |
-            sudo apt-get install -q -y clang-format-18
+            sudo apt-get install -q=2 clang-format-18
             .ci/check-newline.sh
             .ci/check-format.sh
       shell: bash
@@ -299,12 +299,12 @@ jobs:
     # LLVM static analysis
     - name: set up scan-build
       run: |
-            sudo apt-get update -q -y
-            sudo apt-get install -q -y libsdl2-dev libsdl2-mixer-dev
+            sudo apt-get update -q=2
+            sudo apt-get install -q=2 libsdl2-dev libsdl2-mixer-dev
             wget https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
             sudo ./llvm.sh 18
-            sudo apt-get install -q -y clang-18 clang-tools-18
+            sudo apt-get install -q=2 clang-18 clang-tools-18
       shell: bash
     - name: run scan-build without JIT
       run: make distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0

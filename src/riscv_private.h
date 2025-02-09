@@ -131,7 +131,7 @@ struct riscv_internal {
 
 #if RV32_HAS(EXT_F)
     /* float registers */
-    riscv_float_t F[N_RV_REGS];
+    riscv_float_t F[32];
     uint32_t csr_fcsr;
 #endif
 

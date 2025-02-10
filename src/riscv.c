@@ -417,9 +417,6 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     rv_log_set_level(attr->log_level);
     rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
 
-    /* enable the log */
-    rv_log_set_quiet(false);
-
 #if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
     elf_t *elf = elf_new();
     assert(elf);

@@ -58,10 +58,20 @@ jobs:
       uses: rlalik/setup-cpp-compiler@master
       with:
         compiler: ${{ matrix.compiler }}
+    - name: fetch artifact first to reduce HTTP requests
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+      run: |
+            make artifact
+            make ENABLE_SYSTEM=1 artifact
+            make ENABLE_ARCH_TEST=1 artifact
+      if: ${{ always() }}
     - name: default build with -g
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
-      run: make OPT_LEVEL=-g -j$(nproc)
+      run: |
+            make distclean
+            make OPT_LEVEL=-g -j$(nproc)
       if: ${{ always() }}
     - name: default build with -Og
       env:
@@ -268,6 +278,7 @@ jobs:
           ./llvm.sh 18
         # Append custom commands here
         run: |
+          make artifact
           make -j$(nproc)
           make check -j$(nproc)
           make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(nproc)

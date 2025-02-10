@@ -273,6 +273,9 @@ int main(int argc, char **args)
     attr.data.user.elf_program = opt_prog_name;
 #endif
 
+    /* enable or disable the logging outputs */
+    rv_log_set_quiet(opt_quiet_outputs);
+
     /* create the RISC-V runtime */
     rv = rv_create(&attr);
     if (!rv) {

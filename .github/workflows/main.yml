@@ -286,6 +286,8 @@ jobs:
           make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
           make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
           .ci/riscv-toolchain-install.sh && export PATH=$PWD/toolchain/bin:$PATH
+          python3 -m venv venv
+          . venv/bin/activate
           .ci/riscv-tests.sh
 
   coding-style:

@@ -863,12 +863,12 @@ static block_t *block_find_or_translate(riscv_t *rv)
     block_t *next_blk = block_find(map, rv->PC);
 #else
     /* lookup the next block in the block cache */
-    /*
-     * The function "cache_get()" gets the cached block by the given "key (PC)".
-     * In system simulation, the returned block might be dropped because it is
-     * not the one from the current process (by checking SATP CSR register).
-     */
     block_t *next_blk = (block_t *) cache_get(rv->block_cache, rv->PC, true);
+#if RV32_HAS(SYSTEM)
+    /* discard cache if satp is not matched */
+    if (next_blk && next_blk->satp != rv->csr_satp)
+        next_blk = NULL;
+#endif
 #endif
 
     if (next_blk)
@@ -885,6 +885,14 @@ static block_t *block_find_or_translate(riscv_t *rv)
     next_blk = block_alloc(rv);
 
     block_translate(rv, next_blk);
+
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    /*
+     * May be an ifetch fault which changes satp, Do not do this
+     * in "block_alloc()"
+     */
+    next_blk->satp = rv->csr_satp;
+#endif
 
     optimize_constant(rv, next_blk);
 #if RV32_HAS(MOP_FUSION)
@@ -912,8 +920,6 @@ static block_t *block_find_or_translate(riscv_t *rv)
         return next_blk;
     }
 
-    list_del_init(&replaced_blk->list);
-
     if (prev == replaced_blk)
         prev = NULL;
 
@@ -932,6 +938,16 @@ static block_t *block_find_or_translate(riscv_t *rv)
         if (untaken == replaced_blk_entry) {
             entry->ir_tail->branch_untaken = NULL;
         }
+
+        /* upadte JALR LUT */
+        if (!entry->ir_tail->branch_table) {
+            continue;
+        }
+
+        /**
+         * TODO: upadate all JALR instructions which references to this
+         * basic block as the destination.
+         */
     }
 
     /* free IRs in replaced block */
@@ -945,6 +961,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
         mpool_free(rv->block_ir_mp, ir);
     }
 
+    list_del_init(&replaced_blk->list);
     mpool_free(rv->block_mp, replaced_blk);
 #if RV32_HAS(T2C)
     pthread_mutex_unlock(&rv->cache_lock);
@@ -961,6 +978,10 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #if RV32_HAS(JIT) && !RV32_HAS(ARCH_TEST)
 static bool runtime_profiler(riscv_t *rv, block_t *block)
 {
+#if RV32_HAS(SYSTEM)
+    if (block->satp != rv->csr_satp)
+        return false;
+#endif
     /* Based on our observations, a significant number of true hotspots are
      * characterized by high usage frequency and including loop. Consequently,
      * we posit that our profiler could effectively identify hotspots using
@@ -1053,6 +1074,10 @@ void rv_step(void *arg)
         /* by now, a block should be available */
         assert(block);
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+        assert(block->satp == rv->csr_satp);
+#endif
+
         /* After emulating the previous block, it is determined whether the
          * branch is taken or not. The IR array of the current block is then
          * assigned to either the branch_taken or branch_untaken pointer of
@@ -1060,7 +1085,11 @@ void rv_step(void *arg)
          */
 
 #if RV32_HAS(BLOCK_CHAINING)
-        if (prev) {
+        if (prev
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+            && prev->satp == rv->csr_satp
+#endif
+        ) {
             rv_insn_t *last_ir = prev->ir_tail;
             /* chain block */
             if (!insn_is_unconditional_branch(last_ir->opcode)) {

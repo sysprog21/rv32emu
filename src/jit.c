@@ -46,6 +46,10 @@
 #include "riscv_private.h"
 #include "utils.h"
 
+#if RV32_HAS(SYSTEM)
+#include "system.h"
+#endif
+
 #define JIT_CLS_MASK 0x07
 #define JIT_ALU_OP_MASK 0xf0
 #define JIT_CLS_ALU 0x04
@@ -64,7 +68,11 @@
 #define MAX_BLOCKS 8192
 #define IN_JUMP_THRESHOLD 256
 #if defined(__x86_64__)
-#define JUMP_LOC jump_loc + 2
+/* indicate where the immediate value is in the emitted jump instruction */
+#define JUMP_LOC_0 jump_loc_0 + 2
+#if RV32_HAS(SYSTEM)
+#define JUMP_LOC_1 jump_loc_1 + 1
+#endif
 /* Special values for target_pc in struct jump */
 #define TARGET_PC_EXIT -1U
 #define TARGET_PC_RETPOLINE -3U
@@ -89,7 +97,11 @@ enum x64_reg {
 };
 
 #elif defined(__aarch64__)
-#define JUMP_LOC jump_loc
+/* indicate where the immediate value is in the emitted jump instruction */
+#define JUMP_LOC_0 jump_loc_0
+#if RV32_HAS(SYSTEM)
+#define JUMP_LOC_1 jump_loc_1
+#endif
 /* Special values for target_pc in struct jump */
 #define TARGET_PC_EXIT ~UINT32_C(0)
 #define TARGET_PC_ENTER (~UINT32_C(0) & 0x0101)
@@ -186,6 +198,7 @@ enum condition {
     COND_LO,
     COND_GE = 10,
     COND_LT = 11,
+    COND_AL = 14,
 };
 
 enum {
@@ -267,12 +280,16 @@ static inline void set_dirty(int reg_idx, bool is_dirty)
     }
 }
 
-static inline void offset_map_insert(struct jit_state *state, int32_t target_pc)
+static inline void offset_map_insert(struct jit_state *state, block_t *block)
 {
-    struct offset_map *map_entry = &state->offset_map[state->n_blocks++];
     assert(state->n_blocks < MAX_BLOCKS);
-    map_entry->pc = target_pc;
+
+    struct offset_map *map_entry = &state->offset_map[state->n_blocks++];
+    map_entry->pc = block->pc_start;
     map_entry->offset = state->offset;
+#if RV32_HAS(SYSTEM)
+    map_entry->satp = block->satp;
+#endif
 }
 
 #if !defined(__APPLE__)
@@ -284,6 +301,10 @@ static bool should_flush = false;
 static void emit_bytes(struct jit_state *state, void *data, uint32_t len)
 {
     if (unlikely((state->offset + len) > state->size)) {
+        should_flush = true;
+        return;
+    }
+    if (unlikely(state->n_blocks == MAX_BLOCKS)) {
         should_flush = true;
         return;
     }
@@ -377,12 +398,17 @@ static inline void emit_pop(struct jit_state *state, int r)
 }
 
 static inline void emit_jump_target_address(struct jit_state *state,
-                                            int32_t target_pc)
+                                            int32_t target_pc,
+                                            uint32_t target_satp UNUSED)
 {
-    struct jump *jump = &state->jumps[state->n_jumps++];
     assert(state->n_jumps < MAX_JUMPS);
+
+    struct jump *jump = &state->jumps[state->n_jumps++];
     jump->offset_loc = state->offset;
     jump->target_pc = target_pc;
+#if RV32_HAS(SYSTEM)
+    jump->target_satp = target_satp;
+#endif
     emit4(state, 0);
 }
 #elif defined(__aarch64__)
@@ -589,12 +615,13 @@ static void update_branch_imm(struct jit_state *state,
 #endif
 
 static inline void emit_jump_target_offset(struct jit_state *state,
-                                           uint32_t jump_loc,
+                                           uint32_t jump_loc_0,
                                            uint32_t jump_state_offset)
 {
-    struct jump *jump = &state->jumps[state->n_jumps++];
     assert(state->n_jumps < MAX_JUMPS);
-    jump->offset_loc = jump_loc;
+
+    struct jump *jump = &state->jumps[state->n_jumps++];
+    jump->offset_loc = jump_loc_0;
     jump->target_offset = jump_state_offset;
 }
 
@@ -794,7 +821,9 @@ static inline void emit_cmp32(struct jit_state *state, int src, int dst)
 static inline void emit_jcc_offset(struct jit_state *state, int code)
 {
 #if defined(__x86_64__)
-    emit1(state, 0x0f);
+    /* unconditional jump instruction does not have 0x0f prefix */
+    if (code != 0xe9)
+        emit1(state, 0x0f);
     emit1(state, code);
     emit4(state, 0);
 #elif defined(__aarch64__)
@@ -817,9 +846,12 @@ static inline void emit_jcc_offset(struct jit_state *state, int code)
     case 0x83: /* BGEU */
         code = COND_HS;
         break;
-    default:
-        __UNREACHABLE;
+    case 0xe9: /* AL */
+        code = COND_AL;
         break;
+    default:
+        assert(NULL);
+        __UNREACHABLE;
     }
     emit_a64(state, BR_Bcond | (0 << 5) | code);
 #endif
@@ -863,8 +895,10 @@ static inline void emit_load(struct jit_state *state,
     } else if (size == S32) {
         /* mov */
         emit1(state, 0x8b);
-    } else
+    } else {
+        assert(NULL);
         __UNREACHABLE;
+    }
 
     emit_modrm_and_displacement(state, dst, src, offset);
 #elif defined(__aarch64__)
@@ -879,8 +913,8 @@ static inline void emit_load(struct jit_state *state,
         emit_loadstore_imm(state, LS_LDRW, dst, src, offset);
         break;
     default:
+        assert(NULL);
         __UNREACHABLE;
-        break;
     }
 #endif
 
@@ -1078,17 +1112,23 @@ static inline void emit_store(struct jit_state *state,
         set_dirty(src, false);
 }
 
-static inline void emit_jmp(struct jit_state *state, uint32_t target_pc)
+static inline void emit_jmp(struct jit_state *state,
+                            uint32_t target_pc,
+                            uint32_t target_satp UNUSED)
 {
 #if defined(__x86_64__)
     emit1(state, 0xe9);
-    emit_jump_target_address(state, target_pc);
+    emit_jump_target_address(state, target_pc, target_satp);
 #elif defined(__aarch64__)
-    struct jump *jump = &state->jumps[state->n_jumps++];
     assert(state->n_jumps < MAX_JUMPS);
+
+    struct jump *jump = &state->jumps[state->n_jumps++];
     jump->offset_loc = state->offset;
     jump->target_pc = target_pc;
     emit_a64(state, UBR_B);
+#if RV32_HAS(SYSTEM)
+    jump->target_satp = target_satp;
+#endif
 #endif
 }
 
@@ -1127,7 +1167,7 @@ static inline void emit_exit(struct jit_state *state)
     emit_jump_target_offset(state, state->offset, state->exit_loc);
     emit4(state, 0);
 #elif defined(__aarch64__)
-    emit_jmp(state, TARGET_PC_EXIT);
+    emit_jmp(state, TARGET_PC_EXIT, 0);
 #endif
 }
 
@@ -1173,7 +1213,7 @@ static void divmod(struct jit_state *state,
 
     if (sign) {
         /* handle overflow */
-        uint32_t jump_loc = state->offset;
+        uint32_t jump_loc_0 = state->offset;
         emit_jcc_offset(state, 0x85);
         emit_cmp_imm32(state, rm, -1);
         if (mod)
@@ -1181,7 +1221,7 @@ static void divmod(struct jit_state *state,
         else
             emit_load_imm(state, R10, 0x80000000);
         emit_conditional_move(state, rd, R10, rd, COND_EQ);
-        emit_jump_target_offset(state, JUMP_LOC, state->offset);
+        emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
     }
     if (!mod) {
         /* handle dividing zero */
@@ -1282,11 +1322,11 @@ static void muldivmod(struct jit_state *state,
                 emit_pop(state, RCX);
                 /* handle DIV overflow */
                 emit1(state, 0x9d); /* popfq */
-                uint32_t jump_loc = state->offset;
+                uint32_t jump_loc_0 = state->offset;
                 emit_jcc_offset(state, 0x85);
                 emit_cmp_imm32(state, RCX, 0x80000000);
                 emit_conditional_move(state, RCX, RAX);
-                emit_jump_target_offset(state, JUMP_LOC, state->offset);
+                emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
             }
         } else {
             /* Restore dividend to RCX */
@@ -1297,12 +1337,12 @@ static void muldivmod(struct jit_state *state,
             if (sign) {
                 /* handle REM overflow */
                 emit1(state, 0x9d); /* popfq */
-                uint32_t jump_loc = state->offset;
+                uint32_t jump_loc_0 = state->offset;
                 emit_jcc_offset(state, 0x85);
                 emit_cmp_imm32(state, RCX, 0x80000000);
                 emit_load_imm(state, RCX, 0);
                 emit_conditional_move(state, RCX, RDX);
-                emit_jump_target_offset(state, JUMP_LOC, state->offset);
+                emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
             }
         }
     }
@@ -1342,6 +1382,113 @@ static void muldivmod(struct jit_state *state,
 #endif
 }
 #endif /* RV32_HAS(EXT_M) */
+
+#if RV32_HAS(SYSTEM)
+uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
+{
+    MMIO_READ();
+    __UNREACHABLE;
+}
+
+void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
+{
+    assert(vreg_idx < 32);
+
+    uint32_t addr;
+
+    if (rv->jit_mmu.type == rv_insn_lb || rv->jit_mmu.type == rv_insn_lh ||
+        rv->jit_mmu.type == rv_insn_lbu || rv->jit_mmu.type == rv_insn_lhu ||
+        rv->jit_mmu.type == rv_insn_lw)
+        addr = rv->io.mem_translate(rv, rv->jit_mmu.vaddr, R);
+    else
+        addr = rv->io.mem_translate(rv, rv->jit_mmu.vaddr, W);
+
+    if (addr == rv->jit_mmu.vaddr || addr < PRIV(rv)->mem->mem_size) {
+        rv->jit_mmu.is_mmio = 0;
+        rv->jit_mmu.paddr = addr;
+        return;
+    }
+
+    uint32_t val;
+    rv->jit_mmu.is_mmio = 1;
+
+    switch (rv->jit_mmu.type) {
+    case rv_insn_sb:
+        val = rv->X[vreg_idx] & 0xff;
+        MMIO_WRITE();
+        break;
+    case rv_insn_sh:
+        val = rv->X[vreg_idx] & 0xffff;
+        MMIO_WRITE();
+        break;
+    case rv_insn_sw:
+        val = rv->X[vreg_idx];
+        MMIO_WRITE();
+        break;
+    case rv_insn_lb:
+        rv->X[vreg_idx] = (int8_t) jit_mmio_read_wrapper(rv, addr);
+        break;
+    case rv_insn_lh:
+        rv->X[vreg_idx] = (int16_t) jit_mmio_read_wrapper(rv, addr);
+        break;
+    case rv_insn_lw:
+        rv->X[vreg_idx] = jit_mmio_read_wrapper(rv, addr);
+        break;
+    case rv_insn_lbu:
+        rv->X[vreg_idx] = (uint8_t) jit_mmio_read_wrapper(rv, addr);
+        break;
+    case rv_insn_lhu:
+        rv->X[vreg_idx] = (uint16_t) jit_mmio_read_wrapper(rv, addr);
+        break;
+    default:
+        assert(NULL);
+        __UNREACHABLE;
+    }
+}
+
+void emit_jit_mmu_handler(struct jit_state *state, uint8_t vreg_idx)
+{
+    assert(vreg_idx < 32);
+
+#if defined(__x86_64__)
+    /* push $rdi */
+    emit1(state, 0xff);
+    emit_modrm(state, 0x3 << 6, 0x6, parameter_reg[0]);
+
+    /* mov $vreg_idx, %rsi */
+    emit1(state, 0xbe);
+    emit4(state, vreg_idx);
+
+    /* call jit_mmu_handler */
+    emit_load_imm_sext(state, temp_reg, (uintptr_t) &jit_mmu_handler);
+    emit1(state, 0xff);
+    emit_modrm(state, 0x3 << 6, 0x2, temp_reg);
+
+    /* pop rv to $rdi */
+    emit1(state, 0x8f);
+    emit_modrm(state, 0x3 << 6, 0x0, parameter_reg[0]);
+#elif defined(__aarch64__)
+    uint32_t insn;
+
+    /* push rv into stack */
+    insn = (0xf81f0fe << 4) | R0;
+    emit_a64(state, insn);
+
+    /* move vreg_idx into R1 */
+    emit_movewide_imm(state, false, R1, vreg_idx);
+
+    /* load &jit_mmu_handler */
+    emit_movewide_imm(state, true, temp_reg, (uintptr_t) &jit_mmu_handler);
+    /* blr jit_mmu_handler */
+    insn = (0xd63f << 16) | (temp_reg << 5);
+    emit_a64(state, insn);
+
+    /* pop from stack */
+    insn = (0xf84107e << 4) | R0;
+    emit_a64(state, insn);
+#endif
+}
+#endif
 
 static void prepare_translate(struct jit_state *state)
 {
@@ -1846,7 +1993,9 @@ static void ra_load2_sext(struct jit_state *state,
 }
 #endif
 
-void parse_branch_history_table(struct jit_state *state, rv_insn_t *ir)
+void parse_branch_history_table(struct jit_state *state,
+                                riscv_t *rv UNUSED,
+                                rv_insn_t *ir)
 {
     int max_idx = 0;
     branch_history_table_t *bt = ir->branch_table;
@@ -1857,14 +2006,21 @@ void parse_branch_history_table(struct jit_state *state, rv_insn_t *ir)
             max_idx = i;
     }
     if (bt->PC[max_idx] && bt->times[max_idx] >= IN_JUMP_THRESHOLD) {
-        save_reg(state, 0);
-        unmap_vm_reg(0);
-        emit_load_imm(state, register_map[0].reg_idx, bt->PC[max_idx]);
-        emit_cmp32(state, temp_reg, register_map[0].reg_idx);
-        uint32_t jump_loc = state->offset;
-        emit_jcc_offset(state, 0x85);
-        emit_jmp(state, bt->PC[max_idx]);
-        emit_jump_target_offset(state, JUMP_LOC, state->offset);
+        IIF(RV32_HAS(SYSTEM))(if (bt->satp[max_idx] == rv->csr_satp), )
+        {
+            save_reg(state, 0);
+            unmap_vm_reg(0);
+            emit_load_imm(state, register_map[0].reg_idx, bt->PC[max_idx]);
+            emit_cmp32(state, temp_reg, register_map[0].reg_idx);
+            uint32_t jump_loc_0 = state->offset;
+            emit_jcc_offset(state, 0x85);
+#if RV32_HAS(SYSTEM)
+            emit_jmp(state, bt->PC[max_idx], bt->satp[max_idx]);
+#else
+            emit_jmp(state, bt->PC[max_idx], 0);
+#endif
+            emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+        }
     }
 }
 
@@ -2028,8 +2184,12 @@ static void resolve_jumps(struct jit_state *state)
             target_loc = jump.offset_loc + sizeof(uint32_t);
             for (int i = 0; i < state->n_blocks; i++) {
                 if (jump.target_pc == state->offset_map[i].pc) {
-                    target_loc = state->offset_map[i].offset;
-                    break;
+                    IIF(RV32_HAS(SYSTEM))
+                    (if (jump.target_satp == state->offset_map[i].satp), )
+                    {
+                        target_loc = state->offset_map[i].offset;
+                        break;
+                    }
                 }
             }
         }
@@ -2050,11 +2210,14 @@ static void translate_chained_block(struct jit_state *state,
                                     riscv_t *rv,
                                     block_t *block)
 {
-    if (set_has(&state->set, block->pc_start))
+    if (set_has(&state->set, RV_HASH_KEY(block)))
         return;
 
-    set_add(&state->set, block->pc_start);
-    offset_map_insert(state, block->pc_start);
+    if (state->n_blocks == MAX_BLOCKS)
+        return;
+
+    assert(set_add(&state->set, RV_HASH_KEY(block)));
+    offset_map_insert(state, block);
     translate(state, rv, block);
     if (unlikely(should_flush))
         return;
@@ -2062,15 +2225,22 @@ static void translate_chained_block(struct jit_state *state,
     if (ir->branch_untaken && !set_has(&state->set, ir->branch_untaken->pc)) {
         block_t *block1 =
             cache_get(rv->block_cache, ir->branch_untaken->pc, false);
-        if (block1->translatable)
-            translate_chained_block(state, rv, block1);
+        if (block1->translatable) {
+            IIF(RV32_HAS(SYSTEM))
+            (if (block1->satp == rv->csr_satp), )
+                translate_chained_block(state, rv, block1);
+        }
     }
     if (ir->branch_taken && !set_has(&state->set, ir->branch_taken->pc)) {
         block_t *block1 =
             cache_get(rv->block_cache, ir->branch_taken->pc, false);
-        if (block1->translatable)
-            translate_chained_block(state, rv, block1);
+        if (block1->translatable) {
+            IIF(RV32_HAS(SYSTEM))
+            (if (block1->satp == rv->csr_satp), )
+                translate_chained_block(state, rv, block1);
+        }
     }
+
     branch_history_table_t *bt = ir->branch_table;
     if (bt) {
         int max_idx = 0;
@@ -2082,10 +2252,16 @@ static void translate_chained_block(struct jit_state *state,
         }
         if (bt->PC[max_idx] && bt->times[max_idx] >= IN_JUMP_THRESHOLD &&
             !set_has(&state->set, bt->PC[max_idx])) {
-            block_t *block1 =
-                cache_get(rv->block_cache, bt->PC[max_idx], false);
-            if (block1 && block1->translatable)
-                translate_chained_block(state, rv, block1);
+            IIF(RV32_HAS(SYSTEM))(if (bt->satp[max_idx] == rv->csr_satp), )
+            {
+                block_t *block1 =
+                    cache_get(rv->block_cache, bt->PC[max_idx], false);
+                if (block1 && block1->translatable) {
+                    IIF(RV32_HAS(SYSTEM))
+                    (if (block1->satp == rv->csr_satp), )
+                        translate_chained_block(state, rv, block1);
+                }
+            }
         }
     }
 }
@@ -2093,18 +2269,23 @@ static void translate_chained_block(struct jit_state *state,
 void jit_translate(riscv_t *rv, block_t *block)
 {
     struct jit_state *state = rv->jit_state;
-    if (set_has(&state->set, block->pc_start)) {
+    if (set_has(&state->set, RV_HASH_KEY(block))) {
         for (int i = 0; i < state->n_blocks; i++) {
-            if (block->pc_start == state->offset_map[i].pc) {
+            if (block->pc_start == state->offset_map[i].pc
+#if RV32_HAS(SYSTEM)
+                && block->satp == state->offset_map[i].satp
+#endif
+            ) {
                 block->offset = state->offset_map[i].offset;
                 block->hot = true;
                 return;
             }
         }
+        assert(NULL);
         __UNREACHABLE;
     }
 restart:
-    memset(state->jumps, 0, 1024 * sizeof(struct jump));
+    memset(state->jumps, 0, MAX_JUMPS * sizeof(struct jump));
     state->n_jumps = 0;
     block->offset = state->offset;
     translate_chained_block(state, rv, block);

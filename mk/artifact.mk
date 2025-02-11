@@ -36,15 +36,33 @@ SCIMARK2_SHA1 := de278c5b8cef84ab6dda41855052c7bfef919e36
 
 SHELL_HACK := $(shell mkdir -p $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32 $(BIN_DIR)/linux-image)
 
+# $(1): tag of GitHub releases
+# $(2): name of GitHub releases
+# $(3): name showing in terminal
+define fetch-releases-tag
+    $(if $(wildcard $(BIN_DIR)/$(2)), \
+        $(info $(3) is found. Skipping downloading.), \
+        $(eval LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
+                                    | grep '"tag_name"' \
+                                    | grep "$(1)" \
+                                    | head -n 1 \
+                                    | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')) \
+        $(if $(LATEST_RELEASE),, \
+            $(error Fetching tag of latest releases failed) \
+        ) \
+    )
+endef
+
 ifeq ($(call has, PREBUILT), 1)
-ifeq ($(call has, SYSTEM), 1)
-  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- | grep '"tag_name"' | grep "Linux-Image" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-else ifeq ($(call has, ARCH_TEST), 1)
-  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- | grep '"tag_name"' | grep "sail" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-else
-  LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- | grep '"tag_name"' | grep "ELF" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-endif
-  PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
+    ifeq ($(call has, SYSTEM), 1)
+        $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
+    else ifeq ($(call has, ARCH_TEST), 1)
+        $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
+    else
+        $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
+    endif
+
+    PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
 else
   # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,
   # we disable the hardware floating-point and the related SIMD operation of x86.
@@ -95,14 +113,15 @@ endif
 ifeq ($(call has, ARCH_TEST), 1)
 	$(Q)if [ "$(RES)" = "1" ]; then \
 	    $(PRINTF) "\n$(YELLOW)SHA-1 verification failed! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
-	    wget -q --show-progress $(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL) -O build/$(RV32EMU_PREBUILT_TARBALL);\
+	    wget -q --show-progress $(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL) -O build/$(RV32EMU_PREBUILT_TARBALL); \
 	else \
 	    $(call notice, [OK]); \
 	fi
 else
 	$(Q)if [ "$(RES)" = "1" ]; then \
 	    $(PRINTF) "\n$(YELLOW)SHA-1 verification failed! Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n$(NO_COLOR)"; \
-	    wget -q --show-progress $(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL) -O- | tar -C build --strip-components=1 -xz; \
+	    wget -q --show-progress $(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL) -O build/$(RV32EMU_PREBUILT_TARBALL); \
+	    tar --strip-components=1 -zxf build/$(RV32EMU_PREBUILT_TARBALL) -C build; \
 	else \
 	    $(call notice, [OK]); \
 	fi
@@ -147,16 +166,29 @@ endif
 
 fetch-checksum:
 ifeq ($(call has, PREBUILT), 1)
-	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ...\n"
+	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ... "
 ifeq ($(call has, SYSTEM), 1)
-	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-image $(PREBUILT_BLOB_URL)/sha1sum-linux-image
-	$(Q)$(call notice, [OK])
+    ifeq ($(wildcard $(BIN_DIR)/rv32emu-linux-image-prebuilt.tar.gz),)
+		$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-image $(PREBUILT_BLOB_URL)/sha1sum-linux-image
+		$(Q)$(call notice, [OK])
+    else
+		$(Q)$(PRINTF) "Skipped\n"
+    endif
 else ifeq ($(call has, ARCH_TEST), 1)
-	$(Q)wget -q -O $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha $(PREBUILT_BLOB_URL)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha
+    ifeq ($(wildcard $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM)),)
+		$(Q)wget -q -O $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha $(PREBUILT_BLOB_URL)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha
+		$(Q)$(call notice, [OK])
+    else
+		$(Q)$(PRINTF) "Skipped\n"
+    endif
 else
-	$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-x86-softfp $(PREBUILT_BLOB_URL)/sha1sum-linux-x86-softfp
-	$(Q)wget -q -O $(BIN_DIR)/sha1sum-riscv32 $(PREBUILT_BLOB_URL)/sha1sum-riscv32
-	$(Q)$(call notice, [OK])
+    ifeq ($(wildcard $(BIN_DIR)/rv32emu-prebuilt.tar.gz),)
+		$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-x86-softfp $(PREBUILT_BLOB_URL)/sha1sum-linux-x86-softfp
+		$(Q)wget -q -O $(BIN_DIR)/sha1sum-riscv32 $(PREBUILT_BLOB_URL)/sha1sum-riscv32
+		$(Q)$(call notice, [OK])
+    else
+		$(Q)$(PRINTF) "Skipped\n"
+    endif
 endif
 endif
 

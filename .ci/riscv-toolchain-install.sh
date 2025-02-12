@@ -24,4 +24,4 @@ else
     TOOLCHAIN_URL=${TOOLCHAIN_REPO}/releases/download/${GCC_VER}/riscv32-elf-ubuntu-${UBUNTU_VER}-gcc-nightly-${GCC_VER}-nightly.tar.xz
 fi
 
-wget -q ${TOOLCHAIN_URL} -O- | tar -C toolchain --strip-components=1 -xz
+wget ${TOOLCHAIN_URL} -O- | tar -xz --strip-components=1 -C toolchain

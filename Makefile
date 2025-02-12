@@ -408,14 +408,18 @@ endif
 endif
 
 clean:
-	$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
-	-$(RM) $(SOFTFLOAT_LIB)
+	$(VECHO) "Cleaning... "
+	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) src/rv32_jit.c
+	$(Q)-$(RM) $(SOFTFLOAT_LIB)
+	$(Q)$(call notice, [OK])
 distclean: clean
-	$(RM) -r $(OUT)/id1
-	$(RM) -r $(DEMO_DIR)
-	$(RM) *.zip
-	$(RM) -r $(OUT)/mini-gdbstub
-	-$(RM) $(OUT)/.config
-	-$(RM) -r $(SOFTFLOAT_DUMMY_PLAT) $(OUT)/softfloat
+	$(VECHO) "Deleting all generated files... "
+	$(Q)$(RM) -r $(OUT)/id1
+	$(Q)$(RM) -r $(DEMO_DIR)
+	$(Q)$(RM) *.zip
+	$(Q)$(RM) -r $(OUT)/mini-gdbstub
+	$(Q)-$(RM) $(OUT)/.config
+	$(Q)-$(RM) -r $(SOFTFLOAT_DUMMY_PLAT) $(OUT)/softfloat
+	$(Q)$(call notice, [OK])
 
 -include $(deps)

@@ -548,6 +548,14 @@ typedef struct {
     /* the data segment break address */
     riscv_word_t break_addr;
 
+#if !RV32_HAS(SYSTEM)
+    /* the exit entry address */
+    riscv_word_t exit_addr;
+
+    /* flag to determine if the emulator exits the target program */
+    bool on_exit;
+#endif
+
     /* SBI timer */
     uint64_t timer;
 } vm_attr_t;

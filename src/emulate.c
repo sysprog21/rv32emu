@@ -1078,11 +1078,17 @@ void rv_step(void *arg)
         assert(block->satp == rv->csr_satp);
 #endif
 
-        /* After emulating the previous block, it is determined whether the
-         * branch is taken or not. The IR array of the current block is then
-         * assigned to either the branch_taken or branch_untaken pointer of
-         * the previous block.
-         */
+#if !RV32_HAS(SYSTEM)
+        /* on exit */
+        if (unlikely(block->ir_head->pc == PRIV(rv)->exit_addr))
+            PRIV(rv)->on_exit = true;
+#endif
+
+            /* After emulating the previous block, it is determined whether the
+             * branch is taken or not. The IR array of the current block is then
+             * assigned to either the branch_taken or branch_untaken pointer of
+             * the previous block.
+             */
 
 #if RV32_HAS(BLOCK_CHAINING)
         if (prev

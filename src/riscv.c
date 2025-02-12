@@ -434,6 +434,15 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     if ((end = elf_get_symbol(elf, "_end")))
         attr->break_addr = end->st_value;
 
+#if !RV32_HAS(SYSTEM)
+    /* set not exiting */
+    attr->on_exit = false;
+
+    const struct Elf32_Sym *exit;
+    if ((exit = elf_get_symbol(elf, "exit")))
+        attr->exit_addr = exit->st_value;
+#endif
+
     assert(elf_load(elf, attr->mem));
 
     /* set the entry pc */

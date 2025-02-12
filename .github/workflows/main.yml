@@ -232,7 +232,7 @@ jobs:
       if: ${{ always() }}
     - name: undefined behavior test
       run: |
-            make clean && make ENABLE_UBSAN=1 check -j$(nproc)
+            make distclean && make ENABLE_UBSAN=1 check -j$(nproc)
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
       if: ${{ always() }}
     - name: boot Linux kernel test
@@ -260,22 +260,23 @@ jobs:
     - name: build artifact
       # The GitHub Action for non-x86 CPU
       uses: allinurl/run-on-arch-action@master
-      # FIXME: gcc build fails on Aarch64/Linux hosts
-      env:
-        CC: clang
       with:
         arch: aarch64
         distro: ubuntu24.04
+        githubToken: ${{ github.token }}
         # No 'sudo' is available
         install: |
           apt-get update -q=2
-          apt-get install -q=2 make git clang python3 python3-pip build-essential libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
+          apt-get install -q=2 make git clang python3 python3-pip python3-venv libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
           git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
           wget https://apt.llvm.org/llvm.sh
           chmod +x ./llvm.sh
           ./llvm.sh 18
+        # FIXME: gcc build fails on Aarch64/Linux hosts  
+        env: |
+          CC: clang-18
         # Append custom commands here
         run: |
           make artifact

@@ -357,46 +357,42 @@ EXPECTED_pi = 3.1415926535897932384626433832795028841971693993751058209749445923
 
 LOG_FILTER=sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'
 
-define exec
-$(eval OUTPUT_FILE := $(shell mktemp))
-$(eval _ := $(shell LC_ALL=C $(BIN) $(1) $(2) > $(OUTPUT_FILE)))
-$(eval RC := $(.SHELLSTATUS))
-endef
-
 # $(1): rv32emu's extra CLI parameter
 # $(2): ELF executable
 # $(3): ELF executable name
 # $(4): extra command in the pipeline
 # $(5): expected output
 define check-test
-$(call exec, $(1), $(2))
-$(Q)$(PRINTF) "Running $(3) ... "; \
-if [ 0 -eq $(RC) ] && [ "$(strip $(shell cat $(OUTPUT_FILE) | $(LOG_FILTER) | $(4)))" = "$(strip $(5))" ]; then \
+$(Q)true; \
+$(PRINTF) "Running $(3) ... "; \
+OUTPUT_FILE="$$(mktemp)"; \
+if (LC_ALL=C $(BIN) $(1) $(2) > "$$OUTPUT_FILE") && \
+   [ "$$(cat "$$OUTPUT_FILE" | $(LOG_FILTER) | $(4))" = "$(5)" ]; then \
     $(call notice, [OK]); \
 else \
     $(PRINTF) "Failed.\n"; \
     exit 1; \
 fi; \
-$(RM) $(OUTPUT_FILE)
+$(RM) "$$OUTPUT_FILE"
 endef
 
 check-hello: $(BIN)
-	$(call check-test, , $(OUT)/hello.elf, hello.elf, uniq, $(EXPECTED_hello))
+	$(call check-test, , $(OUT)/hello.elf, hello.elf, uniq,$(EXPECTED_hello))
 
 check: $(BIN) check-hello artifact
-	$(Q)$(foreach e, $(CHECK_ELF_FILES), $(call check-test, , $(OUT)/riscv32/$(e), $(e), uniq, $(EXPECTED_$(e))))
+	$(Q)$(foreach e, $(CHECK_ELF_FILES), $(call check-test, , $(OUT)/riscv32/$(e), $(e), uniq,$(EXPECTED_$(e))))
 
 EXPECTED_aes_sha1 = 89169ec034bec1c6bb2c556b26728a736d350ca3  -
 misalign: $(BIN) artifact
-	$(call check-test, -m, $(OUT)/riscv32/uaes, uaes.elf, $(SHA1SUM), $(EXPECTED_aes_sha1))
+	$(call check-test, -m, $(OUT)/riscv32/uaes, uaes.elf, $(SHA1SUM),$(EXPECTED_aes_sha1))
 
 EXPECTED_misalign = MISALIGNED INSTRUCTION FETCH TEST PASSED!
 misalign-in-blk-emu: $(BIN)
-	$(call check-test, , tests/system/alignment/misalign.elf, misalign.elf, tail -n 1, $(EXPECTED_misalign))
+	$(call check-test, , tests/system/alignment/misalign.elf, misalign.elf, tail -n 1,$(EXPECTED_misalign))
 
 EXPECTED_mmu = STORE PAGE FAULT TEST PASSED!
 mmu-test: $(BIN)
-	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1, $(EXPECTED_mmu))
+	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
 # Non-trivial demonstration programs
 ifeq ($(call has, SDL), 1)

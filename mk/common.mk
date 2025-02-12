@@ -43,13 +43,15 @@ $(eval CFLAGS += -D RV32_FEATURE_$(strip $1)=$(call has, $1))
 endef
 
 # Test suite
-PASS_COLOR = \e[32;01m
-NO_COLOR = \e[0m
 GREEN = \033[32m
 YELLOW = \033[33m
 NC = \033[0m
 
-notice = $(PRINTF) "$(PASS_COLOR)$(strip $1)$(NO_COLOR)\n"
+notice = $(PRINTF) "$(GREEN)$(strip $1)$(NC)\n"
+noticex = $(shell echo "$(GREEN)$(strip $1)$(NC)\n")
+warn = $(PRINTF) "$(YELLOW)$(strip $1)$(NC)\n"
+# Used inside $(warning) or $(error)
+warnx = $(shell echo "$(YELLOW)$(strip $1)$(NC)\n")
 
 # File utilities
 SHA1SUM = sha1sum

@@ -81,16 +81,16 @@ FIREFOX_MAJOR := $(shell $(FIREFOX_MAJOR_VERSION_CHECK_CMD))
 
 # Chrome
 ifeq ($(shell echo $(CHROME_MAJOR)\>=$(CHROME_SUPPORT_TCO_AT_MAJOR) | bc), 1)
-    $(info $(shell echo "$(GREEN)$(CHROME_SUPPORT_TCO_INFO)$(NC)"))
+    $(info $(call noticex, $(CHROME_SUPPORT_TCO_INFO)))
 else
-    $(warning $(shell echo "$(YELLOW)$(CHROME_NO_SUPPORT_TCO_WARNING)$(NC)"))
+    $(warning $(call warnx, $(CHROME_NO_SUPPORT_TCO_WARNING)))
 endif
 
 # Firefox
 ifeq ($(shell echo $(FIREFOX_MAJOR)\>=$(FIREFOX_SUPPORT_TCO_AT_MAJOR) | bc), 1)
-    $(info $(shell echo "$(GREEN)$(FIREFOX_SUPPORT_TCO_INFO)$(NC)"))
+    $(info $(call noticex, $(FIREFOX_SUPPORT_TCO_INFO)))
 else
-    $(warning $(shell echo "$(YELLOW)$(FIREFOX_NO_SUPPORT_TCO_WARNING)$(NC)"))
+    $(warning $(call warnx, $(FIREFOX_NO_SUPPORT_TCO_WARNING)))
 endif
 
 # Safari
@@ -100,9 +100,9 @@ SAFARI_VERSION := $(shell $(SAFARI_VERSION_CHECK_CMD))
 SAFARI_MAJOR := $(shell echo $(SAFARI_VERSION) | cut -f1 -d.)
 SAFARI_MINOR := $(shell echo $(SAFARI_VERSION) | cut -f2 -d.)
 ifeq ($(shell echo "$(SAFARI_MAJOR).$(SAFARI_MINOR)>=$(SAFARI_SUPPORT_TCO_AT_MAJOR_MINOR)" | bc), 1)
-    $(info $(shell echo "$(GREEN)$(SAFARI_SUPPORT_TCO_INFO)$(NC)"))
+    $(info $(call noticex, $(SAFARI_SUPPORT_TCO_INFO)))
 else
-    $(warning $(shell echo "$(YELLOW)$(SAFARI_NO_SUPPORT_TCO_WARNING)$(NC)"))
+    $(warning $(call warnx, $(SAFARI_NO_SUPPORT_TCO_WARNING)))
 endif
 endif
 

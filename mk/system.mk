@@ -18,7 +18,8 @@ $(BIN_TO_C): tools/bin2c.c
 
 BUILD_DTB2C := src/minimal_dtb.h
 $(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB)
-	$(BIN_TO_C) $(BUILD_DTB) > $(BUILD_DTB2C)
+	$(VECHO) "  BIN2C\t$@\n"
+	$(Q)$(BIN_TO_C) $(BUILD_DTB) > $@
 
 $(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(deps_emcc)
 	$(Q)mkdir -p $(DEV_OUT)

@@ -357,6 +357,7 @@ static void capture_keyboard_input()
 
 #endif
 
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
 /*
  *
  * atexit() registers void (*)(void) callbacks, so no parameters can be passed.
@@ -375,6 +376,7 @@ static void rv_async_block_clear()
     return;
 #endif /* !RV32_HAS(JIT) */
 }
+#endif
 
 riscv_t *rv_create(riscv_user_t rv_attr)
 {
@@ -383,8 +385,10 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     riscv_t *rv = calloc(1, sizeof(riscv_t));
     assert(rv);
 
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     /* register cleaning callback for CTRL+a+x exit */
     atexit(rv_async_block_clear);
+#endif
 
     /* copy over the attr */
     rv->data = rv_attr;

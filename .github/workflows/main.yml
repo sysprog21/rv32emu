@@ -317,6 +317,114 @@ jobs:
           make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
           make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
 
+  macOS-arm64:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc-14, clang]
+    runs-on: macos-latest # M1 chip
+    steps:
+     - uses: actions/checkout@v4
+     - name: install-dependencies
+       run: |
+             brew install make dtc expect sdl2 sdl2_mixer bc e2fsprogs p7zip llvm@18 dcfldd
+             .ci/riscv-toolchain-install.sh
+             echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
+     - name: Install compiler
+       id: install_cc
+       uses: rlalik/setup-cpp-compiler@master
+       with:
+         compiler: ${{ matrix.compiler }}
+     - name: Symlink gcc-14 due to the default /usr/local/bin/gcc links to system's clang
+       run: |
+             ln -s /opt/homebrew/opt/gcc/bin/gcc-14 /usr/local/bin/gcc-14
+     - name: fetch artifact first to reduce HTTP requests
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             make artifact
+             make ENABLE_SYSTEM=1 artifact
+             make ENABLE_ARCH_TEST=1 artifact
+       if: ${{ always() }}
+     - name: check + tests
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             make distclean
+             make check -j$(sysctl -n hw.logicalcpu)
+             make tests -j$(sysctl -n hw.logicalcpu)
+             make misalign -j$(sysctl -n hw.logicalcpu)
+             make tool -j$(sysctl -n hw.logicalcpu)
+       if: ${{ always() }}
+     - name: diverse configurations
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             make distclean && make ENABLE_EXT_M=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_EXT_A=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_EXT_F=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_EXT_C=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_SDL=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_Zicsr=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_MOP_FUSION=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_BLOCK_CHAINING=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_Zba=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_Zbb=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_Zbc=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_Zbs=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_Zifencei=0 check -j$(sysctl -n hw.logicalcpu)
+       if: ${{ always() }}
+     - name: gdbstub test, need RV32 toolchain
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test -j$(sysctl -n hw.logicalcpu)
+       if: ${{ always() }}
+     - name: JIT test
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_EXT_M=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_Zbc=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_Zbs=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_Zicsr=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_Zifencei=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+       if: ${{ always() }}
+     - name: undefined behavior test
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       if: ${{ env.CC == 'clang' && always() }} # gcc on macOS/arm64 does not support satinizers
+       run: |
+             make distclean && make ENABLE_UBSAN=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(sysctl -n hw.logicalcpu)
+     - name: boot Linux kernel test
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 -j$(sysctl -n hw.logicalcpu) && \
+             make ENABLE_SYSTEM=1 artifact -j$(sysctl -n hw.logicalcpu)
+             .ci/boot-linux.sh
+             make ENABLE_SYSTEM=1 clean
+       if: ${{ always() }}
+     - name: Architecture test
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             python3 -m venv venv
+             . venv/bin/activate
+             .ci/riscv-tests.sh
+       if: ${{ always() }}
+
   coding-style:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'

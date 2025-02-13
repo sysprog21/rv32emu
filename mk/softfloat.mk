@@ -6,6 +6,7 @@ CFLAGS_softfloat := \
     -Wno-unused-variable \
     -Wno-sign-compare \
     -Wno-implicit-fallthrough \
+    -Wno-uninitialized \
     -I$(SOFTFLOAT_DIR)/RISCV \
     -I$(SOFTFLOAT_DIR)/include
 

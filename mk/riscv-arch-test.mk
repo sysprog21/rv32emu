@@ -1,6 +1,6 @@
 riscof-check:
 	$(Q)if [ "$(shell pip show riscof 2>&1 | head -n 1 | cut -d' ' -f1)" = "WARNING:" ]; then \
-	$(PRINTF) "Run 'pip3 install git+https://github.com/riscv/riscof.git@d38859f85fe407bcacddd2efcd355ada4683aee4' to install RISCOF\n"; \
+	$(PRINTF) "Run 'pip3 install -r requirements.txt to install dependencies.\n"; \
 	exit 1; \
 	fi;
 

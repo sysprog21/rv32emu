@@ -243,6 +243,14 @@ jobs:
             .ci/boot-linux.sh
             make ENABLE_SYSTEM=1 clean
       if: ${{ always() }}
+    - name: boot Linux kernel test (JIT)
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+      run: |
+            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 -j$(nproc) && make ENABLE_SYSTEM=1 artifact -j$(nproc)
+            .ci/boot-linux.sh
+            make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 clean
+      if: ${{ always() }}
     - name: Architecture test
       env:
         CC: ${{ steps.install_cc.outputs.cc }}

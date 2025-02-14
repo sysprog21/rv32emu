@@ -5,7 +5,7 @@
 set -e -u -o pipefail
 
 # Install RISCOF
-pip3 install -r requirements.txt
+pip3 install -r .ci/requirements.txt
 
 set -x
 

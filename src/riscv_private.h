@@ -90,6 +90,9 @@ typedef struct block {
     bool
         translatable; /**< Determine the block has RV32AF insturctions or not */
     bool has_loops;   /**< Determine the block has loop or not */
+#if RV32_HAS(SYSTEM)
+    uint32_t satp;
+#endif
 #if RV32_HAS(T2C)
     bool compiled; /**< The T2C request is enqueued or not */
 #endif
@@ -119,15 +122,31 @@ void block_map_clear(riscv_t *rv);
 struct riscv_internal {
     bool halt; /* indicate whether the core is halted */
 
-    /* I/O interface */
-    riscv_io_t io;
-
     /* integer registers */
+    /*
+     * Aarch64 encoder only accepts 9 bits signed offset. Do not put this
+     * structure below the section.
+     */
     riscv_word_t X[N_RV_REGS];
     riscv_word_t PC;
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    /*
+     * Aarch64 encoder only accepts 9 bits signed offset. Do not put this
+     * structure below the section.
+     */
+    struct {
+        uint32_t is_mmio; /* whether is MMIO or not */
+        uint32_t type;    /* 0: read, 1: write */
+        uint32_t vaddr;
+        uint32_t paddr;
+    } jit_mmu;
+#endif
     /* user provided data */
     riscv_user_t data;
+
+    /* I/O interface */
+    riscv_io_t io;
 
 #if RV32_HAS(EXT_F)
     /* float registers */

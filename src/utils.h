@@ -13,16 +13,32 @@ void rv_gettimeofday(struct timeval *tv);
 /* Retrieve the value used by a clock which is specified by clock_id. */
 void rv_clock_gettime(struct timespec *tp);
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+
+typedef uint64_t rv_hash_key_t;
+
+#define HASH_FUNC_IMPL(name, size_bits, size)                      \
+    FORCE_INLINE rv_hash_key_t name(rv_hash_key_t val)             \
+    {                                                              \
+        /* 0x61c8864680b583eb is 64-bit golden ratio */            \
+        return (val * 0x61c8864680b583ebull >> (64 - size_bits)) & \
+               ((size) - (1));                                     \
+    }
+#else
+
+typedef uint32_t rv_hash_key_t;
+
 /* This hashing routine is adapted from Linux kernel.
  * See
  * https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/tree/include/linux/hash.h
  */
 #define HASH_FUNC_IMPL(name, size_bits, size)                           \
-    FORCE_INLINE uint32_t name(uint32_t val)                            \
+    FORCE_INLINE rv_hash_key_t name(rv_hash_key_t val)                  \
     {                                                                   \
         /* 0x61C88647 is 32-bit golden ratio */                         \
         return (val * 0x61C88647 >> (32 - size_bits)) & ((size) - (1)); \
     }
+#endif
 
 /* sanitize_path returns the shortest path name equivalent to path
  * by purely lexical processing. It applies the following rules
@@ -133,11 +149,23 @@ static inline void list_del_init(struct list_head *node)
 #define SET_SIZE (1 << SET_SIZE_BITS)
 #define SET_SLOTS_SIZE 32
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+/*
+ * Use composed key in JIT. The higher 32 bits stores the value of supervisor
+ * address translation and protection (SATP) register, and the lower 32 bits
+ * stores the program counter (PC) as same as userspace simulation.
+ */
+#define RV_HASH_KEY(block) \
+    ((((rv_hash_key_t) block->satp) << 32) | (rv_hash_key_t) block->pc_start)
+#else
+#define RV_HASH_KEY(block) ((rv_hash_key_t) block->pc_start)
+#endif
+
 /* The set consists of SET_SIZE buckets, with each bucket containing
  * SET_SLOTS_SIZE slots.
  */
 typedef struct {
-    uint32_t table[SET_SIZE][SET_SLOTS_SIZE];
+    rv_hash_key_t table[SET_SIZE][SET_SLOTS_SIZE];
 } set_t;
 
 /**
@@ -151,11 +179,11 @@ void set_reset(set_t *set);
  * @set: a pointer points to target set
  * @key: the key of the inserted entry
  */
-bool set_add(set_t *set, uint32_t key);
+bool set_add(set_t *set, rv_hash_key_t key);
 
 /**
  * set_has - check whether the element exist in the set or not
  * @set: a pointer points to target set
  * @key: the key of the inserted entry
  */
-bool set_has(set_t *set, uint32_t key);
+bool set_has(set_t *set, rv_hash_key_t key);

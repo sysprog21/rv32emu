@@ -464,6 +464,10 @@ ssize_t hex_write(FILE *stream, const void *buf, size_t len)
 
 Do not use old style K&R style C definitions.
 
+Introduced in C99, `restrict` is a pointer qualifier that informs the compiler no other pointer will access the same object during its lifetime,
+enabling optimizations such as vectorization. Violating this assumption leads to undefined behavior.
+Use `restrict` judiciously.
+
 For function parameters, place one space after each comma, except at the end of a line.
 
 ### Function-like Macros
@@ -477,10 +481,11 @@ When using function-like macros (parameterized macros), adhere to the following 
 
 For example:
 ```c
-#define SET_POINT(p, x, y)  do {    \
-    (p)->px = (x);                  \
-    (p)->py = (y);                  \
-} while (0)
+#define SET_POINT(p, x, y)      \
+    do {                        \
+        (p)->px = (x);          \
+        (p)->py = (y);          \
+    } while (0)
 ```
 
 While the extensive use of parentheses, as shown above, helps minimize some risks,
@@ -489,6 +494,45 @@ it cannot prevent issues like unintended double increments from calls such as `M
 Other risks associated with macros include comparing signed and unsigned data or testing floating-point values.
 Additionally, macros are not visible at runtime, making them impossible to step into with a debugger.
 Therefore, use them with caution.
+
+In general, macro names are typically written in all capitals, except in cases where readability is improved by using lowercase.
+For example:
+```
+#define countof(a)   (size)(sizeof(a) / sizeof(*(a)))
+#define lengthof(s)  (countof(s) - 1)
+```
+
+Although all capitals are generally preferred for constants,
+lowercase can be used for function-like macros to improve readability.
+These function-like macros do not share the same namespace concerns as other macros.
+
+For example, consider the implementation of a simple memory allocator.
+An arena can be represented by a memory buffer and an offset that begins at zero.
+To allocate an object, record the pointer at the current offset,
+advance the offset by the size of the object, and return the pointer.
+Additional considerations, such as alignment and checking for available space, are also required.
+```c
+#define new(a, n, t)  alloc(a, n, sizeof(t), _Alignof(t))
+
+typedef struct {
+    char *begin, *end;
+} arena_t;
+
+void *alloc(arena_t *a, ptrdiff_t count, ptrdiff_t size, ptrdiff_t align)
+{
+    ptrdiff_t pad = -(uintptr_t)a->begin & (align - 1);
+    assert(count < (a->end - a->begin - pad) / size);
+
+    void *result = a->begin + pad;
+    a->begin += pad + (count * size);
+    return memset(result, 0, count * size);
+}
+```
+
+Using the `new` macro helps prevent several common errors in C programs.
+If types are mixed up, the compiler generates errors or warnings.
+Moreover, naming a macro `new()` does not conflict with variables or fields named `new`,
+because the macro form does not resemble a function call.
 
 ### Use `const` and `static` effectively
 

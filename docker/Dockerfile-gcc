@@ -1,6 +1,6 @@
 # we align the version used in riscv-toolchain-install.sh
 
-FROM ubuntu:24.04 as base
+FROM ubuntu:24.04 AS base
 
 # for x86-64, we can optimize this part and take the upstream (nightly) build directly
 # for aarch64, we need to build from scratch because the upstream toolchain is only built for x86-64
@@ -16,7 +16,7 @@ RUN cd riscv-gnu-toolchain && \
     make -j$(nproc) newlib && \
     make clean
 
-FROM ubuntu:24.04 as final
+FROM ubuntu:24.04 AS final
 
 # Keep the GNU Toolchain files only
 COPY --from=base /opt/riscv/ /opt/riscv/

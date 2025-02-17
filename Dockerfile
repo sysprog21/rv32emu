@@ -1,4 +1,4 @@
-FROM alpine:3.19 as base_gcc
+FROM alpine:3.19 AS base_gcc
 
 RUN apk add --update alpine-sdk git wget
 
@@ -10,7 +10,7 @@ COPY . .
 RUN make ENABLE_SDL=0
 RUN make tool
 
-FROM alpine:3.19 as final
+FROM alpine:3.19 AS final
 
 # copy in elf files
 COPY ./build/*.elf /home/root/rv32emu/build/

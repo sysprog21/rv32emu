@@ -1,4 +1,4 @@
-FROM ubuntu:24.04 as base
+FROM ubuntu:24.04 AS base
 
 # The upstream reference emulator is built for x86-64, and the releases are pretty out of date
 # Thus, we build it ourselves for both x86-64 and aarch64
@@ -21,7 +21,7 @@ RUN cd sail-riscv && \
     make && \
     ARCH=RV32 make 
 
-FROM ubuntu:24.04 as final
+FROM ubuntu:24.04 AS final
 
 # keep the emulator only
 COPY --from=base /sail-riscv/c_emulator/riscv_sim_RV32 /home/root/riscv_sim_RV32

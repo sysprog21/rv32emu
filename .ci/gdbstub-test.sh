@@ -2,7 +2,7 @@
 
 set -e -u -o pipefail
 
-export PATH=`pwd`/toolchain/bin:$PATH
+export PATH=$(pwd)/toolchain/bin:$PATH
 
 GDB=
 prefixes=("${CROSS_COMPILE}" "riscv32-unknown-elf-" "riscv-none-elf-")

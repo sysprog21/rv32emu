@@ -230,6 +230,22 @@ static void syscall_close(riscv_t *rv)
     /* _close(fd); */
     uint32_t fd = rv_get_reg(rv, rv_reg_a0);
 
+#if !RV32_HAS(SYSTEM)
+    /*
+     * The crt0 closes standard file descriptor(0, 1, 2) when
+     * the process exits. Thus, the operations by the crt0
+     * should not considered as error.
+     */
+    if (fd < 3 && !PRIV(rv)->on_exit) {
+        rv_set_reg(rv, rv_reg_a0, -1);
+        rv_log_error(
+            "Attempted to close a file descriptor < 3 (fd=%u). Operation "
+            "not supported.",
+            fd);
+        return;
+    }
+#endif
+
     if (fd >= 3) { /* lookup the file descriptor */
         map_iter_t it;
         map_find(attr->fd_map, &it, &fd);

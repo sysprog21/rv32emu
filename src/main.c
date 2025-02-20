@@ -298,6 +298,11 @@ int main(int argc, char **args)
 
     /* finalize the RISC-V runtime */
     rv_delete(rv);
+    /*
+     * Other translation units cannot update the pointer, update it here
+     * to prevent multiple atexit()'s callback be called.
+     */
+    rv = NULL;
     rv_log_info("RISC-V emulator is destroyed");
 
 end:

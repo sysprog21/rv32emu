@@ -390,7 +390,43 @@ static void rv_async_block_clear()
     return;
 #endif /* !RV32_HAS(JIT) */
 }
-#endif
+
+static void rv_fsync_device()
+{
+    if (!rv)
+        return;
+
+    vm_attr_t *attr = PRIV(rv);
+    /*
+     * mmap_fallback, may need to write and sync the device
+     *
+     * vblk is optional, so it could be NULL
+     */
+    if (attr->vblk) {
+        if (attr->vblk->disk_fd >= 3) {
+            if (attr->vblk->device_features & VIRTIO_BLK_F_RO) /* readonly */
+                goto end;
+
+            if (pwrite(attr->vblk->disk_fd, attr->vblk->disk,
+                       attr->vblk->disk_size, 0) == -1) {
+                rv_log_error("pwrite block device failed: %s", strerror(errno));
+                return;
+            }
+
+            if (fsync(attr->vblk->disk_fd) == -1) {
+                rv_log_error("fsync block device failed: %s", strerror(errno));
+                return;
+            }
+            rv_log_info("Sync block device OK");
+
+        end:
+            close(attr->vblk->disk_fd);
+        }
+
+        vblk_delete(attr->vblk);
+    }
+}
+#endif /* RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER) */
 
 riscv_t *rv_create(riscv_user_t rv_attr)
 {
@@ -402,6 +438,8 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     /* register cleaning callback for CTRL+a+x exit */
     atexit(rv_async_block_clear);
+    /* register device sync callback for CTRL+a+x exit */
+    atexit(rv_fsync_device);
 #endif
 
     /* copy over the attr */
@@ -549,6 +587,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->uart->out_fd = attr->fd_stdout;
 
     /* setup virtio-blk */
+    attr->vblk = NULL;
     if (attr->data.system.vblk_device) {
 /* Currently, only used for block image path and permission */
 #define MAX_OPTS 2
@@ -719,7 +758,8 @@ void rv_delete(riscv_t *rv)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     u8250_delete(attr->uart);
     plic_delete(attr->plic);
-    vblk_delete(attr->vblk);
+    /* sync device, cleanup inside the callee */
+    rv_fsync_device();
 #endif
     free(rv);
 }

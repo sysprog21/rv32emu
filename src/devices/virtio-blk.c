@@ -4,14 +4,29 @@
  */
 
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/*
+ * The /dev/ block devices cannot be embedded to the part of the wasm.
+ * Thus, accessing /dev/ block devices is not supported for wasm.
+ */
+#if !defined(__EMSCRIPTEN__)
+#if defined(__APPLE__)
+#include <sys/disk.h> /* DKIOCGETBLOCKCOUNT and DKIOCGETBLOCKSIZE */
+#else
+#include <linux/fs.h> /* BLKGETSIZE64 */
+#endif
+#endif /* !defined(__EMSCRIPTEN__) */
 
 #include "virtio.h"
 
@@ -97,12 +112,16 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
     uint32_t device_features = vblk->device_features;
     uint32_t *ram = vblk->ram;
     uint32_t *disk = vblk->disk;
+    uint64_t disk_size = vblk->disk_size;
+    int disk_fd = vblk->disk_fd;
     void *priv = vblk->priv;
     uint32_t capacity = VBLK_PRIV(vblk)->capacity;
     memset(vblk, 0, sizeof(*vblk));
     vblk->device_features = device_features;
     vblk->ram = ram;
     vblk->disk = disk;
+    vblk->disk_size = disk_size;
+    vblk->disk_fd = disk_fd;
     vblk->priv = priv;
     VBLK_PRIV(vblk)->capacity = capacity;
 }
@@ -388,6 +407,12 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
         exit(EXIT_FAILURE);
     }
 
+    /*
+     * For mmap_fallback, if vblk is not specified, disk_fd should remain -1 and
+     * no fsync should be performed on exit.
+     */
+    vblk->disk_fd = -1;
+
     /* Allocate memory for the private member */
     vblk->priv = &vblk_configs[vblk_dev_cnt++];
 
@@ -402,14 +427,54 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
     /* Open disk file */
     int disk_fd = open(disk_file, readonly ? O_RDONLY : O_RDWR);
     if (disk_fd < 0) {
-        rv_log_error("Could not open %s", disk_file);
-        exit(EXIT_FAILURE);
+        rv_log_error("Could not open %s: %s", disk_file, strerror(errno));
+        goto fail;
     }
 
-    /* Get the disk image size */
     struct stat st;
-    fstat(disk_fd, &st);
-    VBLK_PRIV(vblk)->disk_size = st.st_size;
+    if (fstat(disk_fd, &st) == -1) {
+        rv_log_error("fstat failed: %s", strerror(errno));
+        goto disk_size_fail;
+    }
+
+    const char *disk_file_dirname = dirname(disk_file);
+    if (!disk_file_dirname) {
+        rv_log_error("Fail dirname disk_file: %s: %s", disk_file,
+                     strerror(errno));
+        goto disk_size_fail;
+    }
+    /* Get the disk size */
+    uint64_t disk_size;
+    if (!strcmp(disk_file_dirname, "/dev")) { /* from /dev/, leverage ioctl */
+#if !defined(__EMSCRIPTEN__)
+#if defined(__APPLE__)
+        uint32_t block_size;
+        uint64_t block_count;
+        if (ioctl(disk_fd, DKIOCGETBLOCKCOUNT, &block_count) == -1) {
+            rv_log_error("DKIOCGETBLOCKCOUNT failed: %s", strerror(errno));
+            goto disk_size_fail;
+        }
+        if (ioctl(disk_fd, DKIOCGETBLOCKSIZE, &block_size) == -1) {
+            rv_log_error("DKIOCGETBLOCKSIZE failed: %s", strerror(errno));
+            goto disk_size_fail;
+        }
+        disk_size = block_count * block_size;
+#else /* Linux */
+        if (ioctl(disk_fd, BLKGETSIZE64, &disk_size) == -1) {
+            rv_log_error("BLKGETSIZE64 failed: %s", strerror(errno));
+            goto disk_size_fail;
+        }
+#endif
+#endif       /* !defined(__EMSCRIPTEN__) */
+    } else { /* other path, stat it as normal file */
+        struct stat st;
+        if (fstat(disk_fd, &st) == -1) {
+            rv_log_error("fstat failed");
+            goto disk_size_fail;
+        }
+        disk_size = st.st_size;
+    }
+    VBLK_PRIV(vblk)->disk_size = disk_size;
 
     /* Set up the disk memory */
     uint32_t *disk_mem;
@@ -417,15 +482,38 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
     disk_mem = mmap(NULL, VBLK_PRIV(vblk)->disk_size,
                     readonly ? PROT_READ : (PROT_READ | PROT_WRITE), MAP_SHARED,
                     disk_fd, 0);
-    if (disk_mem == MAP_FAILED)
-        goto err;
-#else
+    if (disk_mem == MAP_FAILED) {
+        if (errno != EINVAL)
+            goto disk_mem_err;
+        /*
+         * On Apple platforms, mmap() on block devices appears to be unsupported
+         * and EINVAL is set to errno.
+         */
+        rv_log_trace(
+            "Fallback to malloc-based block device due to mmap() failure");
+        goto mmap_fallback;
+    }
+    /*
+     * disk_fd should be closed on exit after flushing heap data back to the
+     * device when using mmap_fallback.
+     */
+    close(disk_fd);
+    goto disk_mem_ok;
+#endif
+
+mmap_fallback:
     disk_mem = malloc(VBLK_PRIV(vblk)->disk_size);
     if (!disk_mem)
-        goto err;
-#endif
+        goto disk_mem_err;
+    vblk->disk_fd = disk_fd;
+    vblk->disk_size = disk_size;
+    if (pread(disk_fd, disk_mem, disk_size, 0) == -1) {
+        rv_log_error("pread block device failed: %s", strerror(errno));
+        goto disk_mem_err;
+    }
+
+disk_mem_ok:
     assert(!(((uintptr_t) disk_mem) & 0b11));
-    close(disk_fd);
 
     vblk->disk = disk_mem;
     VBLK_PRIV(vblk)->capacity =
@@ -436,9 +524,14 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
 
     return disk_mem;
 
-err:
-    rv_log_error("Could not map disk %s", disk_file);
-    return NULL;
+disk_mem_err:
+    rv_log_error("Could not map disk %s: %s", disk_file, strerror(errno));
+
+disk_size_fail:
+    close(disk_fd);
+
+fail:
+    exit(EXIT_FAILURE);
 }
 
 virtio_blk_state_t *vblk_new()
@@ -450,10 +543,12 @@ virtio_blk_state_t *vblk_new()
 
 void vblk_delete(virtio_blk_state_t *vblk)
 {
+    /* mmap_fallback is used */
+    if (vblk->disk_fd != -1)
+        free(vblk->disk);
 #if HAVE_MMAP
-    munmap(vblk->disk, VBLK_PRIV(vblk)->disk_size);
-#else
-    free(vblk->disk);
+    else
+        munmap(vblk->disk, VBLK_PRIV(vblk)->disk_size);
 #endif
     free(vblk);
 }

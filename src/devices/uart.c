@@ -106,7 +106,6 @@ uint32_t u8250_read(u8250_state_t *uart, uint32_t addr)
         return uart->lcr;
     case U8250_MCR:
         return uart->mcr;
-        break;
     case U8250_LSR:
         /* LSR = no error, TX done & ready */
         return (0x60 | (uint8_t) uart->in_ready);

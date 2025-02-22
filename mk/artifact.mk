@@ -84,7 +84,7 @@ ifeq ($(call has, SYSTEM), 1)
 	$(Q)$(eval PREBUILT_LINUX_IMAGE_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-linux-image | awk '{  print $$2 };'))
 
 	$(Q)$(eval $(foreach FILE,$(PREBUILT_LINUX_IMAGE_FILENAME), \
-	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-image | awk '{ print $$1 };'),$(BIN_DIR)/linux-image/$(FILE),RES) \
+	    $(call verify,$(SHA1SUM),$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-image | awk '{ print $$1 };'),$(BIN_DIR)/linux-image/$(FILE),RES) \
 	))
 
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-linux-image-prebuilt.tar.gz)
@@ -92,7 +92,7 @@ else ifeq ($(call has, ARCH_TEST), 1)
 	$(Q)$(eval PREBUILT_SAIL_FILENAME := $(shell cat $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha | awk '{  print $$2 };'))
 
 	$(Q)$(eval $(foreach FILE,$(PREBUILT_SAIL_FILENAME), \
-	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha | awk '{ print $$1 };'),$(BIN_DIR)/$(FILE),RES) \
+	    $(call verify,$(SHA1SUM),$(shell grep -w $(FILE) $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha | awk '{ print $$1 };'),$(BIN_DIR)/$(FILE),RES) \
 	))
 
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt-sail-$(HOST_PLATFORM))
@@ -101,10 +101,10 @@ else
 	$(Q)$(eval PREBUILT_RV32_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$2 };'))
 
 	$(Q)$(eval $(foreach FILE,$(PREBUILT_X86_FILENAME), \
-	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{ print $$1 };'),$(BIN_DIR)/linux-x86-softfp/$(FILE),RES) \
+	    $(call verify,$(SHA1SUM),$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{ print $$1 };'),$(BIN_DIR)/linux-x86-softfp/$(FILE),RES) \
 	))
 	$(Q)$(eval $(foreach FILE,$(PREBUILT_RV32_FILENAME), \
-	    $(call verify,$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$1 };'),$(BIN_DIR)/riscv32/$(FILE),RES) \
+	    $(call verify,$(SHA1SUM),$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$1 };'),$(BIN_DIR)/riscv32/$(FILE),RES) \
 	))
 
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt.tar.gz)
@@ -199,7 +199,7 @@ ifeq ($(call has, PREBUILT), 0)
 ifeq ($(call has, SYSTEM), 0)
 	$(Q)$(call prologue,"scimark2")
 	$(Q)$(call download,$(SCIMARK2_URL))
-	$(Q)$(call verify,$(SCIMARK2_SHA1),$(notdir $(SCIMARK2_URL)))
+	$(Q)$(call verify,$(SHA1SUM),$(SCIMARK2_SHA1),$(notdir $(SCIMARK2_URL)))
 	$(Q)$(call extract,"./tests/scimark2",$(notdir $(SCIMARK2_URL)))
 	$(Q)$(call epilogue,$(notdir $(SCIMARK2_URL)),$(SHA1_FILE1),$(SHA1_FILE2))
 	$(Q)$(PRINTF) "Building scimark2 ...\n"

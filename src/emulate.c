@@ -1175,6 +1175,7 @@ void rv_step(void *arg)
     if (rv_has_halted(rv)) {
         emscripten_cancel_main_loop();
         rv_delete(rv); /* clean up and reuse memory */
+        rv_log_info("RISC-V emulator is destroyed");
     }
 #endif
 }

@@ -6,8 +6,8 @@ WEB_JS_RESOURCES := $(ASSETS)/js
 EXPORTED_FUNCS := _main,_indirect_rv_halt
 DEMO_DIR := demo
 WEB_FILES := $(BIN).js \
-	     $(BIN).wasm \
-	     $(BIN).worker.js \
+             $(BIN).wasm \
+             $(BIN).worker.js \
              $(OUT)/elf_list.js
 
 ifeq ("$(CC_IS_EMCC)", "1")

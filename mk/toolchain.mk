@@ -52,6 +52,10 @@ else ifneq ($(shell $(CC) --version | grep "Free Software Foundation"),)
      CC_IS_GCC := 1
 endif
 
+ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)$(CC_IS_EMCC)", "")
+$(error "Only supported GCC/Clang/Emcc")
+endif
+
 CFLAGS_NO_CET :=
 processor := $(shell uname -m)
 ifeq ($(processor),$(filter $(processor),i386 x86_64))

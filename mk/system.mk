@@ -12,9 +12,17 @@ $(BUILD_DTB): $(DEV_SRC)/minimal.dts
 	$(VECHO) " DTC\t$@\n"
 	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef $(CFLAGS_dt) $^ | $(DTC) - > $@
 
+# Assume the system has either GCC or Clang
+NATIVE_CC := $(shell which gcc || which clang)
+
 BIN_TO_C := $(OUT)/bin2c
 $(BIN_TO_C): tools/bin2c.c
+# emcc generates wasm but not executable, so fallback to use GCC or Clang
+ifeq ("$(CC_IS_EMCC)", "1")
+	$(Q)$(NATIVE_CC) -Wall -o $@ $^
+else
 	$(Q)$(CC) -Wall -o $@ $^
+endif
 
 BUILD_DTB2C := src/minimal_dtb.h
 $(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB)

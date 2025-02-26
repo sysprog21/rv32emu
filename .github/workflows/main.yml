@@ -337,6 +337,11 @@ jobs:
        uses: rlalik/setup-cpp-compiler@master
        with:
          compiler: ${{ matrix.compiler }}
+     - name: Setup emsdk
+       uses: mymindstorm/setup-emsdk@v14
+       with:
+         version: 3.1.51
+         actions-cache-folder: 'emsdk-cache'
      - name: Symlink gcc-14 due to the default /usr/local/bin/gcc links to system's clang
        run: |
              ln -s /opt/homebrew/opt/gcc/bin/gcc-14 /usr/local/bin/gcc-14
@@ -347,6 +352,23 @@ jobs:
              make artifact
              make ENABLE_SYSTEM=1 artifact
              make ENABLE_ARCH_TEST=1 artifact
+             # Hack Cloudflare 403 Forbidden on GitHub Runner for Doom artifact download
+             wget --header="User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15" \
+                  --header="Referer: https://www.doomworld.com/" \
+                  --header="Accept-Language: en-US,en;q=0.9" \
+                  -O build/shareware_doom_iwad.zip \
+                  "https://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip"
+             unzip -d build/ build/shareware_doom_iwad.zip
+       if: ${{ always() }}
+     - name: default build using emcc
+       run: |
+             make CC=emcc -j$(sysctl -n hw.logicalcpu)
+       if: ${{ always() }}
+     - name: default build for system emulation using emcc
+       run: |
+             make distclean
+             make CC=emcc ENABLE_SYSTEM=1 -j$(sysctl -n hw.logicalcpu)
+             make distclean ENABLE_SYSTEM=1
        if: ${{ always() }}
      - name: check + tests
        env:

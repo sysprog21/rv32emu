@@ -359,9 +359,27 @@ jobs:
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make artifact
-             make ENABLE_SYSTEM=1 artifact
-             make ENABLE_ARCH_TEST=1 artifact
+             LATEST_RELEASE=$(wget --header="Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -q \
+                                   https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
+                                     | grep '"tag_name"' \
+                                     | grep "ELF" \
+                                     | head -n 1 \
+                                     | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+             make LATEST_RELEASE=$LATEST_RELEASE artifact
+             LATEST_RELEASE=$(wget --header="Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -q \
+                                   https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
+                                     | grep '"tag_name"' \
+                                     | grep "Linux-Image" \
+                                     | head -n 1 \
+                                     | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+             make LATEST_RELEASE=$LATEST_RELEASE ENABLE_SYSTEM=1 artifact
+             LATEST_RELEASE=$(wget --header="Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -q \
+                                   https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
+                                     | grep '"tag_name"' \
+                                     | grep "sail" \
+                                     | head -n 1 \
+                                     | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+             make LATEST_RELEASE=$LATEST_RELEASE ENABLE_ARCH_TEST=1 artifact
              # Hack Cloudflare 403 Forbidden on GitHub Runner for Doom artifact download
              wget --header="User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15" \
                   --header="Referer: https://www.doomworld.com/" \

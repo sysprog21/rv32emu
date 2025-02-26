@@ -63,6 +63,9 @@ jobs:
       with:
         version: 3.1.51
         actions-cache-folder: 'emsdk-cache'
+    - name: Set parallel jobs variable
+      run: |
+            echo "PARALLEL=-j$(nproc)" >> $GITHUB_ENV
     - name: fetch artifact first to reduce HTTP requests
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
@@ -80,12 +83,12 @@ jobs:
       if: ${{ always() }}
     - name: default build using emcc
       run: |
-            make CC=emcc -j$(nproc)
+            make CC=emcc $PARALLEL
       if: ${{ always() }}
     - name: default build for system emulation using emcc
       run: |
             make distclean
-            make CC=emcc ENABLE_SYSTEM=1 -j$(nproc)
+            make CC=emcc ENABLE_SYSTEM=1 $PARALLEL
             make distclean ENABLE_SYSTEM=1
       if: ${{ always() }}
     - name: default build with -g
@@ -93,175 +96,175 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-g -j$(nproc)
+            make OPT_LEVEL=-g $PARALLEL
       if: ${{ always() }}
     - name: default build with -Og
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-Og -j$(nproc)
+            make OPT_LEVEL=-Og $PARALLEL
       if: ${{ always() }}
     - name: default build with -O0
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-O0 -j$(nproc)
+            make OPT_LEVEL=-O0 $PARALLEL
       if: ${{ always() }}
     - name: default build with -O1
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-O1 -j$(nproc)
+            make OPT_LEVEL=-O1 $PARALLEL
       if: ${{ always() }}
     - name: default build with -O2
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-O2 -j$(nproc)
+            make OPT_LEVEL=-O2 $PARALLEL
       if: ${{ always() }}
     - name: default build with -O3
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-O3 -j$(nproc)
+            make OPT_LEVEL=-O3 $PARALLEL
       if: ${{ always() }}
     - name: default build with -Ofast
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-Ofast -j$(nproc)
+            make OPT_LEVEL=-Ofast $PARALLEL
       if: ${{ always() }}
     - name: default build for system emulation with -g
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-g ENABLE_SYSTEM=1 -j$(nproc)
+            make OPT_LEVEL=-g ENABLE_SYSTEM=1 $PARALLEL
       if: ${{ always() }}
     - name: default build for system emulation with -Og
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-Og ENABLE_SYSTEM=1 -j$(nproc)
+            make OPT_LEVEL=-Og ENABLE_SYSTEM=1 $PARALLEL
       if: ${{ always() }}
     - name: default build for system emulation with -O0
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-O0 ENABLE_SYSTEM=1 -j$(nproc)
+            make OPT_LEVEL=-O0 ENABLE_SYSTEM=1 $PARALLEL
       if: ${{ always() }}
     - name: default build for system emulation with -O1
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-O1 ENABLE_SYSTEM=1 -j$(nproc)
+            make OPT_LEVEL=-O1 ENABLE_SYSTEM=1 $PARALLEL
       if: ${{ always() }}
     - name: default build for system emulation with -O2
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-O2 ENABLE_SYSTEM=1 -j$(nproc)
+            make OPT_LEVEL=-O2 ENABLE_SYSTEM=1 $PARALLEL
       if: ${{ always() }}
     - name: default build for system emulation with -O3
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-O3 ENABLE_SYSTEM=1 -j$(nproc)
+            make OPT_LEVEL=-O3 ENABLE_SYSTEM=1 $PARALLEL
       if: ${{ always() }}
     - name: default build for system emulation with -Ofast
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make OPT_LEVEL=-Ofast ENABLE_SYSTEM=1 -j$(nproc)
+            make OPT_LEVEL=-Ofast ENABLE_SYSTEM=1 $PARALLEL
       if: ${{ always() }}
     - name: check + tests
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
-            make check -j$(nproc)
-            make tests -j$(nproc)
-            make misalign -j$(nproc)
-            make tool -j$(nproc)
+            make check $PARALLEL
+            make tests $PARALLEL
+            make misalign $PARALLEL
+            make tool $PARALLEL
       if: ${{ always() }}
     - name: diverse configurations
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make ENABLE_EXT_M=0 check -j$(nproc)
-            make distclean && make ENABLE_EXT_A=0 check -j$(nproc)
-            make distclean && make ENABLE_EXT_F=0 check -j$(nproc)
-            make distclean && make ENABLE_EXT_C=0 check -j$(nproc)
-            make distclean && make ENABLE_SDL=0 check -j$(nproc)
-            make distclean && make ENABLE_Zicsr=0 check -j$(nproc)
-            make distclean && make ENABLE_MOP_FUSION=0 check -j$(nproc)
-            make distclean && make ENABLE_BLOCK_CHAINING=0 check -j$(nproc)
-            make distclean && make ENABLE_Zba=0 check -j$(nproc)
-            make distclean && make ENABLE_Zbb=0 check -j$(nproc)
-            make distclean && make ENABLE_Zbc=0 check -j$(nproc)
-            make distclean && make ENABLE_Zbs=0 check -j$(nproc)
-            make distclean && make ENABLE_Zifencei=0 check -j$(nproc)
+            make distclean && make ENABLE_EXT_M=0 check $PARALLEL
+            make distclean && make ENABLE_EXT_A=0 check $PARALLEL
+            make distclean && make ENABLE_EXT_F=0 check $PARALLEL
+            make distclean && make ENABLE_EXT_C=0 check $PARALLEL
+            make distclean && make ENABLE_SDL=0 check $PARALLEL
+            make distclean && make ENABLE_Zicsr=0 check $PARALLEL
+            make distclean && make ENABLE_MOP_FUSION=0 check $PARALLEL
+            make distclean && make ENABLE_BLOCK_CHAINING=0 check $PARALLEL
+            make distclean && make ENABLE_Zba=0 check $PARALLEL
+            make distclean && make ENABLE_Zbb=0 check $PARALLEL
+            make distclean && make ENABLE_Zbc=0 check $PARALLEL
+            make distclean && make ENABLE_Zbs=0 check $PARALLEL
+            make distclean && make ENABLE_Zifencei=0 check $PARALLEL
       if: ${{ always() }}
     - name: misalignment test in block emulation
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/alignment/
-            make distclean && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 ENABLE_SYSTEM=1 misalign-in-blk-emu -j$(nproc)
+            make distclean && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 ENABLE_SYSTEM=1 misalign-in-blk-emu $PARALLEL
       if: ${{ always() }}
     - name: MMU test
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/mmu/
-            make distclean && make ENABLE_ELF_LOADER=1 ENABLE_SYSTEM=1 mmu-test -j$(nproc)
+            make distclean && make ENABLE_ELF_LOADER=1 ENABLE_SYSTEM=1 mmu-test $PARALLEL
       if: ${{ always() }}
     - name: gdbstub test
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make ENABLE_GDBSTUB=1 gdbstub-test -j$(nproc)
+            make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
       if: ${{ always() }}
     - name: JIT test
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_EXT_M=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_Zbc=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_Zbs=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_Zicsr=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_Zifencei=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check -j$(nproc)
+            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_EXT_M=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_Zbc=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_Zbs=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_Zicsr=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_Zifencei=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check $PARALLEL
       if: ${{ always() }}
     - name: undefined behavior test
       run: |
-            make distclean && make ENABLE_UBSAN=1 check -j$(nproc)
-            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(nproc)
+            make distclean && make ENABLE_UBSAN=1 check $PARALLEL
+            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
       if: ${{ always() }}
     - name: boot Linux kernel test
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 -j$(nproc) && make ENABLE_SYSTEM=1 artifact -j$(nproc)
+            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
             .ci/boot-linux.sh
             make ENABLE_SYSTEM=1 clean
       if: ${{ always() }}
@@ -269,7 +272,7 @@ jobs:
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 -j$(nproc) && make ENABLE_SYSTEM=1 artifact -j$(nproc)
+            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
             .ci/boot-linux.sh
             make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 clean
       if: ${{ always() }}
@@ -287,6 +290,9 @@ jobs:
     steps:
     - name: checkout code
       uses: actions/checkout@v4
+    - name: Set parallel jobs variable
+      run: |
+            echo "PARALLEL=-j$(nproc)" >> $GITHUB_ENV
     - name: build artifact
       # The GitHub Action for non-x86 CPU
       uses: allinurl/run-on-arch-action@master
@@ -307,15 +313,16 @@ jobs:
         # FIXME: gcc build fails on Aarch64/Linux hosts
         env: |
           CC: clang-18
+          PARALLEL: ${{ env.PARALLEL }}
         # Append custom commands here
         run: |
           make artifact
-          make -j$(nproc)
-          make check -j$(nproc)
-          make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(nproc)
-          make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(nproc)
-          make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(nproc)
-          make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(nproc)
+          make $PARALLEL
+          make check $PARALLEL
+          make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
+          make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check $PARALLEL
+          make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check $PARALLEL
+          make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check $PARALLEL
 
   macOS-arm64:
     needs: [detect-code-related-file-changes]
@@ -342,6 +349,9 @@ jobs:
        with:
          version: 3.1.51
          actions-cache-folder: 'emsdk-cache'
+     - name: Set parallel jobs variable
+       run: |
+             echo "PARALLEL=-j$(sysctl -n hw.logicalcpu)" >> $GITHUB_ENV
      - name: Symlink gcc-14 due to the default /usr/local/bin/gcc links to system's clang
        run: |
              ln -s /opt/homebrew/opt/gcc/bin/gcc-14 /usr/local/bin/gcc-14
@@ -362,12 +372,12 @@ jobs:
        if: ${{ always() }}
      - name: default build using emcc
        run: |
-             make CC=emcc -j$(sysctl -n hw.logicalcpu)
+             make CC=emcc $PARALLEL
        if: ${{ always() }}
      - name: default build for system emulation using emcc
        run: |
              make distclean
-             make CC=emcc ENABLE_SYSTEM=1 -j$(sysctl -n hw.logicalcpu)
+             make CC=emcc ENABLE_SYSTEM=1 $PARALLEL
              make distclean ENABLE_SYSTEM=1
        if: ${{ always() }}
      - name: check + tests
@@ -375,66 +385,66 @@ jobs:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
              make distclean
-             make check -j$(sysctl -n hw.logicalcpu)
-             make tests -j$(sysctl -n hw.logicalcpu)
-             make misalign -j$(sysctl -n hw.logicalcpu)
-             make tool -j$(sysctl -n hw.logicalcpu)
+             make check $PARALLEL
+             make tests $PARALLEL
+             make misalign $PARALLEL
+             make tool $PARALLEL
        if: ${{ always() }}
      - name: diverse configurations
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make ENABLE_EXT_M=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_EXT_A=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_EXT_F=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_EXT_C=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_SDL=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_Zicsr=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_MOP_FUSION=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_BLOCK_CHAINING=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_Zba=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_Zbb=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_Zbc=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_Zbs=0 check -j$(sysctl -n hw.logicalcpu)
-             make distclean && make ENABLE_Zifencei=0 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_EXT_M=0 check $PARALLEL
+             make distclean && make ENABLE_EXT_A=0 check $PARALLEL
+             make distclean && make ENABLE_EXT_F=0 check $PARALLEL
+             make distclean && make ENABLE_EXT_C=0 check $PARALLEL
+             make distclean && make ENABLE_SDL=0 check $PARALLEL
+             make distclean && make ENABLE_Zicsr=0 check $PARALLEL
+             make distclean && make ENABLE_MOP_FUSION=0 check $PARALLEL
+             make distclean && make ENABLE_BLOCK_CHAINING=0 check $PARALLEL
+             make distclean && make ENABLE_Zba=0 check $PARALLEL
+             make distclean && make ENABLE_Zbb=0 check $PARALLEL
+             make distclean && make ENABLE_Zbc=0 check $PARALLEL
+             make distclean && make ENABLE_Zbs=0 check $PARALLEL
+             make distclean && make ENABLE_Zifencei=0 check $PARALLEL
        if: ${{ always() }}
      - name: gdbstub test, need RV32 toolchain
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
        if: ${{ always() }}
      - name: JIT test
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_EXT_M=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_Zbc=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_Zbs=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_Zicsr=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_Zifencei=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check -j$(sysctl -n hw.logicalcpu)
+             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_EXT_M=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_Zbc=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_Zbs=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_Zicsr=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_Zifencei=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check $PARALLEL
        if: ${{ always() }}
      - name: undefined behavior test
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        if: ${{ env.CC == 'clang' && always() }} # gcc on macOS/arm64 does not support satinizers
        run: |
-             make distclean && make ENABLE_UBSAN=1 check -j$(sysctl -n hw.logicalcpu)
-             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check -j$(sysctl -n hw.logicalcpu)
+             make distclean && make ENABLE_UBSAN=1 check $PARALLEL
+             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
      - name: boot Linux kernel test
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 -j$(sysctl -n hw.logicalcpu) && \
-             make ENABLE_SYSTEM=1 artifact -j$(sysctl -n hw.logicalcpu)
+             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 $PARALLEL && \
+             make ENABLE_SYSTEM=1 artifact $PARALLEL
              .ci/boot-linux.sh
              make ENABLE_SYSTEM=1 clean
        if: ${{ always() }}

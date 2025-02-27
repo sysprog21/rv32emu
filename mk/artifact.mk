@@ -53,16 +53,22 @@ define fetch-releases-tag
     )
 endef
 
+ELF_LATEST_RELEASE := 2025.02.11-ELF
+Linux_LATEST_RELEASE := 2024.11.11-Linux-Image
+Sail_LATEST_RELEASE := 2025.01.15-sail
+PREBUILT_BLOB_URL :=
+
 ifeq ($(call has, PREBUILT), 1)
     ifeq ($(call has, SYSTEM), 1)
-        $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
+        #$(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
+PREBUILT_BLOB_URL := https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(Linux_LATEST_RELEASE)
     else ifeq ($(call has, ARCH_TEST), 1)
-        $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
+        #$(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
+PREBUILT_BLOB_URL := https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(Sail_LATEST_RELEASE)
     else
-        $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt blob)
+        #$(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
+PREBUILT_BLOB_URL := https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(ELF_LATEST_RELEASE)
     endif
-
-    PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
 else
   # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,
   # we disable the hardware floating-point and the related SIMD operation of x86.

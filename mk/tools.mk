@@ -1,6 +1,10 @@
 HIST_BIN := $(OUT)/rv_histogram
 
-# FIXME: riscv.o and map.o are dependencies of 'elf.o', not 'rv_histogram'.
+# On macOS, gcc-14 requires linking symbols from emulate.o, syscall.o, syscall_sdl.o, io.o, and log.o.
+# However, these symbols are not actually used in rv_histogram, they are only needed to pass the build.
+#
+# riscv.o and map.o are dependencies of 'elf.o', not 'rv_histogram'. But, they are also needed to pass
+# the build.
 HIST_OBJS := \
 	riscv.o \
 	utils.o \
@@ -9,6 +13,11 @@ HIST_OBJS := \
 	decode.o \
 	mpool.o \
 	utils.o \
+	emulate.o \
+	syscall.o \
+	syscall_sdl.o \
+	io.o \
+	log.o \
 	rv_histogram.o
 
 HIST_OBJS := $(addprefix $(OUT)/, $(HIST_OBJS))

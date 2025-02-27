@@ -64,3 +64,14 @@ ifndef SHA1SUM
         SHA1SUM := echo
     endif
 endif
+
+SHA256SUM = sha256sum
+SHA256SUM := $(shell which $(SHA256SUM))
+ifndef SHA256SUM
+    SHA256SUM = shasum -a 256
+    SHA256SUM := $(shell which shasum)
+    ifndef SHA256SUM
+        $(warning No sha256sum found. Disable checksums)
+        SHA256SUM := echo
+    endif
+endif

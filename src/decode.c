@@ -1983,7 +1983,9 @@ typedef bool (*decode_t)(rv_insn_t *ir, uint32_t insn);
 /* decode RISC-V instruction */
 bool rv_decode(rv_insn_t *ir, uint32_t insn)
 {
+    bool ret;
     assert(ir);
+    decode_t op;
 
 #define OP_UNIMP op_unimp
 #define OP(insn) op_##insn
@@ -2024,9 +2026,11 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
         const uint16_t c_index = (insn & FC_FUNC3) >> 11 | (insn & FC_OPCODE);
 
         /* decode instruction (compressed instructions) */
-        const decode_t op = rvc_jump_table[c_index];
+        op = rvc_jump_table[c_index];
         assert(op);
-        return op(ir, insn);
+        ret = op(ir, insn);
+
+        goto end;
     }
 #endif
 
@@ -2034,9 +2038,21 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
     const uint32_t index = (insn & INSN_6_2) >> 2;
 
     /* decode instruction */
-    const decode_t op = rv_jump_table[index];
+    op = rv_jump_table[index];
     assert(op);
-    return op(ir, insn);
+    ret = op(ir, insn);
+
+end:
+
+#if RV32_HAS(RV32E)
+    /* RV32E forbids x16-x31 for integer registers, but with the F extension,
+     * floating-point registers are not limited to 16. */
+    if ((op != op_store_fp && op != op_load_fp && op != op_op_fp) &&
+        unlikely(ir->rd > 15 || ir->rs1 > 15 || ir->rs2 > 15))
+        ret = false;
+#endif
+
+    return ret;
 
 #undef OP_UNIMP
 #undef OP

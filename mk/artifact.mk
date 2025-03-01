@@ -43,25 +43,30 @@ define fetch-releases-tag
     $(if $(wildcard $(BIN_DIR)/$(2)), \
         $(info $(call warnx, $(3) is found. Skipping downloading.)), \
         $(eval LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
-                                    | grep '"tag_name"' \
-                                    | grep "$(1)" \
-                                    | head -n 1 \
-                                    | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')) \
+                                         | grep '"tag_name"' \
+                                         | grep "$(1)" \
+                                         | head -n 1 \
+                                         | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')) \
         $(if $(LATEST_RELEASE),, \
             $(error Fetching tag of latest releases failed) \
         ) \
     )
 endef
 
-ifeq ($(call has, PREBUILT), 1)
-    ifeq ($(call has, SYSTEM), 1)
-        $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
-    else ifeq ($(call has, ARCH_TEST), 1)
-        $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
-    else
-        $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt blob)
-    endif
+LATEST_RELEASE ?=
 
+ifeq ($(call has, PREBUILT), 1)
+    # On macOS/arm64 Github runner, let's leverage the ${{ secrets.GITHUB_TOKEN }} to prevent 403 rate limit error.
+    # Thus, the LATEST_RELEASE tag is defined at Github job steps, no need to fetch them here.
+    ifeq ($(LATEST_RELEASE),)
+         ifeq ($(call has, SYSTEM), 1)
+             $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
+         else ifeq ($(call has, ARCH_TEST), 1)
+             $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
+         else
+             $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
+         endif
+    endif
     PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
 else
   # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,

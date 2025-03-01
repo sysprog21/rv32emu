@@ -1,4 +1,4 @@
-FROM alpine:3.19 AS base_gcc
+FROM alpine:3.21 AS base_gcc
 
 RUN apk add --update alpine-sdk git wget sdl2-dev sdl2_mixer-dev
 

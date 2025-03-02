@@ -67,11 +67,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RV32EMU_PREBUILT_TOKEN }}
         run: |
-          RELEASE_TAG=$(date +'%Y.%m.%d'-Linux-Image)
+          RELEASE_TAG="$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)-Linux-Image"
           cd /tmp
-          gh release create $RELEASE_TAG \
+          gh release create --latest=false $RELEASE_TAG \
             --repo sysprog21/rv32emu-prebuilt \
-            --title "$RELEASE_TAG""-nightly"
+            --title "$RELEASE_TAG"
           gh release upload $RELEASE_TAG \
             rv32emu-linux-image-prebuilt.tar.gz \
             sha1sum-linux-image \

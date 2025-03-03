@@ -69,7 +69,8 @@ $ brew install dtc
 ```
 
 #### Build and run system emulation
-Build and run using default images (the default images will be fetched from [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt) before running):
+Build and run using default images (the default images will be fetched from [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt) before running).
+If `ENABLE_ARCH_TEST=1` was previously set, run `make distclean` before proceeding.
 ```shell
 $ make ENABLE_SYSTEM=1 system
 ```
@@ -192,9 +193,10 @@ $ python3 -m pip install git+https://github.com/riscv/riscof
 
 [RISC-V GNU Compiler Toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) should be prepared in advance.
 You can obtain prebuilt GNU toolchain for `riscv32-elf` from the [Automated Nightly Release](https://github.com/riscv-collab/riscv-gnu-toolchain/releases).
+If `ENABLE_SYSTEM=1` was previously set, run `make distclean` before proceeding.
 Then, run the following command:
 ```shell
-$ make arch-test
+$ make ENABLE_ARCH_TEST=1 arch-test
 ```
 
 For macOS users, installing `sdiff` might be required:
@@ -204,7 +206,7 @@ $ brew install diffutils
 
 To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `A`, `F`, `C`, `Zifencei`, `privilege`, `SYSTEM`.
 ```shell
-$ make arch-test RISCV_DEVICE=I
+$ make ENABLE_ARCH_TEST=1 arch-test RISCV_DEVICE=I
 ```
 
 Current progress of this emulator in riscv-arch-test (RV32):

@@ -5,13 +5,21 @@
 
 #include <assert.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#if defined(__APPLE__)
+#include <sys/disk.h> /* DKIOCGETBLOCKCOUNT and DKIOCGETBLOCKSIZE */
+#else
+#include <linux/fs.h> /* BLKGETSIZE64 */
+#endif
 
 #include "virtio.h"
 
@@ -394,13 +402,45 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
     int disk_fd = open(disk_file, O_RDWR);
     if (disk_fd < 0) {
         rv_log_error("Could not open %s", disk_file);
-        exit(EXIT_FAILURE);
+        goto fail;
     }
 
-    /* Get the disk image size */
-    struct stat st;
-    fstat(disk_fd, &st);
-    VBLK_PRIV(vblk)->disk_size = st.st_size;
+    const char *disk_file_dirname = dirname(disk_file);
+    if (!disk_file_dirname) {
+        rv_log_error("Fail dirname disk_file: %s", disk_file);
+        goto disk_size_fail;
+    }
+    /* Get the disk size */
+    uint64_t disk_size;
+    if (strcmp(disk_file_dirname, "/dev") ==
+        0) { /* from /dev/, leverage ioctl */
+#if defined(__APPLE__)
+        uint32_t block_size;
+        uint64_t block_count;
+        if (ioctl(disk_fd, DKIOCGETBLOCKCOUNT, &block_count) == -1) {
+            rv_log_error("DKIOCGETBLOCKCOUNT failed");
+            goto disk_size_fail;
+        }
+        if (ioctl(disk_fd, DKIOCGETBLOCKSIZE, &block_size) == -1) {
+            rv_log_error("DKIOCGETBLOCKSIZE failed");
+            goto disk_size_fail;
+        }
+        disk_size = block_count * block_size;
+#else /* Linux */
+        if (ioctl(disk_fd, BLKGETSIZE64, &disk_size) == -1) {
+            rv_log_error("BLKGETSIZE64 failed");
+            goto disk_size_fail;
+        }
+#endif
+    } else { /* other path, stat it as normal file */
+        struct stat st;
+        if (fstat(disk_fd, &st) == -1) {
+            rv_log_error("fstat failed");
+            goto disk_size_fail;
+        }
+        disk_size = st.st_size;
+    }
+    VBLK_PRIV(vblk)->disk_size = disk_size;
 
     /* Set up the disk memory */
     uint32_t *disk_mem;
@@ -408,11 +448,11 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
     disk_mem = mmap(NULL, VBLK_PRIV(vblk)->disk_size, PROT_READ | PROT_WRITE,
                     MAP_SHARED, disk_fd, 0);
     if (disk_mem == MAP_FAILED)
-        goto err;
+        goto disk_mem_err;
 #else
     disk_mem = malloc(VBLK_PRIV(vblk)->disk_size);
     if (!disk_mem)
-        goto err;
+        goto disk_mem_err;
 #endif
     assert(!(((uintptr_t) disk_mem) & 0b11));
     close(disk_fd);
@@ -423,9 +463,14 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
 
     return disk_mem;
 
-err:
+disk_mem_err:
     rv_log_error("Could not map disk %s", disk_file);
-    return NULL;
+
+disk_size_fail:
+    close(disk_fd);
+
+fail:
+    exit(EXIT_FAILURE);
 }
 
 virtio_blk_state_t *vblk_new()

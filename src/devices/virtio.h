@@ -33,6 +33,9 @@
 #define VIRTIO_BLK_S_IOERR 1
 #define VIRTIO_BLK_S_UNSUPP 2
 
+/* TODO: support more features */
+#define VIRTIO_BLK_F_RO (1 << 5)
+
 /* VirtIO MMIO registers */
 #define VIRTIO_REG_LIST                  \
     _(MagicValue, 0x000)        /* R */  \
@@ -87,6 +90,7 @@ typedef struct {
 
 typedef struct {
     /* feature negotiation */
+    uint32_t device_features;
     uint32_t device_features_sel;
     uint32_t driver_features;
     uint32_t driver_features_sel;
@@ -107,7 +111,9 @@ uint32_t virtio_blk_read(virtio_blk_state_t *vblk, uint32_t addr);
 
 void virtio_blk_write(virtio_blk_state_t *vblk, uint32_t addr, uint32_t value);
 
-uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file);
+uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
+                          char *disk_file,
+                          bool readonly);
 
 virtio_blk_state_t *vblk_new();
 

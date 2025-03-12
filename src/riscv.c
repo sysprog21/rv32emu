@@ -535,9 +535,36 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->uart->out_fd = attr->fd_stdout;
 
     /* setup virtio-blk */
-    attr->vblk = vblk_new();
-    attr->vblk->ram = (uint32_t *) attr->mem->mem_base;
-    attr->disk = virtio_blk_init(attr->vblk, attr->data.system.vblk_device);
+    if (attr->data.system.vblk_device) {
+/* Currently, only used for block image path and permission */
+#define MAX_OPTS 2
+        char *vblk_opts[MAX_OPTS] = {NULL};
+        int vblk_opt_idx = 0;
+        char *opt = strtok(attr->data.system.vblk_device, ",");
+        while (opt) {
+            if (vblk_opt_idx == MAX_OPTS) {
+                rv_log_error("Too many arguments for vblk");
+                break;
+            }
+            vblk_opts[vblk_opt_idx++] = opt;
+            opt = strtok(NULL, ",");
+        }
+        char *vblk_device = vblk_opts[0];
+        char *vblk_readonly = vblk_opts[1];
+
+        bool readonly = false;
+        if (vblk_readonly) {
+            if (strcmp(vblk_readonly, "readonly") != 0) {
+                rv_log_error("Unknown vblk option: %s", vblk_readonly);
+                exit(EXIT_FAILURE);
+            }
+            readonly = true;
+        }
+
+        attr->vblk = vblk_new();
+        attr->vblk->ram = (uint32_t *) attr->mem->mem_base;
+        attr->disk = virtio_blk_init(attr->vblk, vblk_device, readonly);
+    }
 
     capture_keyboard_input();
 #endif /* !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)) */

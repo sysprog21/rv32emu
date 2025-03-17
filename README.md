@@ -75,10 +75,10 @@ If `ENABLE_ARCH_TEST=1` was previously set, run `make distclean` before proceedi
 $ make ENABLE_SYSTEM=1 system
 ```
 
-Build using run using specified images:
+Build and run using specified images (`readonly` option makes the virtual block device read-only):
 ```shell
 $ make ENABLE_SYSTEM=1
-$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> [-x vblk:<virtio_blk_img_path>]
+$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> [-x vblk:<virtio_blk_img_path>[,readonly]]
 ```
 
 Build with a larger INITRD_SIZE (e.g., 64 MiB) to run SDL-oriented application because the default 8 MiB is insufficient for SDL-oriented application artifacts:

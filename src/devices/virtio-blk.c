@@ -94,11 +94,13 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
         return;
 
     /* Reset */
+    uint32_t device_features = vblk->device_features;
     uint32_t *ram = vblk->ram;
     uint32_t *disk = vblk->disk;
     void *priv = vblk->priv;
     uint32_t capacity = VBLK_PRIV(vblk)->capacity;
     memset(vblk, 0, sizeof(*vblk));
+    vblk->device_features = device_features;
     vblk->ram = ram;
     vblk->disk = disk;
     vblk->priv = priv;
@@ -187,6 +189,11 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
         virtio_blk_read_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
         break;
     case VIRTIO_BLK_T_OUT:
+        if (vblk->device_features & VIRTIO_BLK_F_RO) { /* readonly */
+            rv_log_error("Fail to write on a read only block device");
+            *status = VIRTIO_BLK_S_IOERR;
+            return -1;
+        }
         virtio_blk_write_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
         break;
     default:
@@ -279,9 +286,9 @@ uint32_t virtio_blk_read(virtio_blk_state_t *vblk, uint32_t addr)
     case _(VendorID):
         return VIRTIO_VENDOR_ID;
     case _(DeviceFeatures):
-        return vblk->driver_features_sel == 0
-                   ? VBLK_FEATURES_0
-                   : (vblk->driver_features_sel == 1 ? VBLK_FEATURES_1 : 0);
+        return vblk->device_features_sel == 0
+                   ? VBLK_FEATURES_0 | vblk->device_features
+                   : (vblk->device_features_sel == 1 ? VBLK_FEATURES_1 : 0);
     case _(QueueNumMax):
         return VBLK_QUEUE_NUM_MAX;
     case _(QueueReady):
@@ -305,7 +312,7 @@ void virtio_blk_write(virtio_blk_state_t *vblk, uint32_t addr, uint32_t value)
 #define _(reg) VIRTIO_##reg
     switch (addr) {
     case _(DeviceFeaturesSel):
-        vblk->driver_features_sel = value;
+        vblk->device_features_sel = value;
         break;
     case _(DriverFeatures):
         vblk->driver_features_sel == 0 ? (vblk->driver_features = value) : 0;
@@ -371,7 +378,9 @@ void virtio_blk_write(virtio_blk_state_t *vblk, uint32_t addr, uint32_t value)
 #undef _
 }
 
-uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
+uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
+                          char *disk_file,
+                          bool readonly)
 {
     if (vblk_dev_cnt >= VBLK_DEV_CNT_MAX) {
         rv_log_error(
@@ -391,7 +400,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
     }
 
     /* Open disk file */
-    int disk_fd = open(disk_file, O_RDWR);
+    int disk_fd = open(disk_file, readonly ? O_RDONLY : O_RDWR);
     if (disk_fd < 0) {
         rv_log_error("Could not open %s", disk_file);
         exit(EXIT_FAILURE);
@@ -405,8 +414,9 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
     /* Set up the disk memory */
     uint32_t *disk_mem;
 #if HAVE_MMAP
-    disk_mem = mmap(NULL, VBLK_PRIV(vblk)->disk_size, PROT_READ | PROT_WRITE,
-                    MAP_SHARED, disk_fd, 0);
+    disk_mem = mmap(NULL, VBLK_PRIV(vblk)->disk_size,
+                    readonly ? PROT_READ : (PROT_READ | PROT_WRITE), MAP_SHARED,
+                    disk_fd, 0);
     if (disk_mem == MAP_FAILED)
         goto err;
 #else
@@ -420,6 +430,9 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk, char *disk_file)
     vblk->disk = disk_mem;
     VBLK_PRIV(vblk)->capacity =
         (VBLK_PRIV(vblk)->disk_size - 1) / DISK_BLK_SIZE + 1;
+
+    if (readonly)
+        vblk->device_features = VIRTIO_BLK_F_RO;
 
     return disk_mem;
 

@@ -74,7 +74,8 @@ static void print_usage(const char *filename)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
         "  -k <image> : use <image> as kernel image\n"
         "  -i <image> : use <image> as rootfs\n"
-        "  -x vblk:<image> : use <image> as virtio-blk disk image\n"
+        "  -x vblk:<image>[,readonly] : use <image> as virtio-blk disk image "
+        "(default read and write)\n"
         "  -b <bootargs> : use customized <bootargs> for the kernel\n"
 #endif
         "  -d [filename]: dump registers as JSON to the "

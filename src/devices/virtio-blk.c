@@ -446,6 +446,10 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
     /* Get the disk size */
     uint64_t disk_size;
     if (!strcmp(disk_file_dirname, "/dev")) { /* from /dev/, leverage ioctl */
+        if ((st.st_mode & S_IFMT) != S_IFBLK) {
+            rv_log_error("%s is not block device", disk_file);
+            goto fail;
+        }
 #if !defined(__EMSCRIPTEN__)
 #if defined(__APPLE__)
         uint32_t block_size;
@@ -466,12 +470,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
         }
 #endif
 #endif       /* !defined(__EMSCRIPTEN__) */
-    } else { /* other path, stat it as normal file */
-        struct stat st;
-        if (fstat(disk_fd, &st) == -1) {
-            rv_log_error("fstat failed");
-            goto disk_size_fail;
-        }
+    } else { /* other path, get the size of block device via stat buffer */
         disk_size = st.st_size;
     }
     VBLK_PRIV(vblk)->disk_size = disk_size;

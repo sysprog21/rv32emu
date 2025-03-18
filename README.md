@@ -93,6 +93,8 @@ Generate ext4 image file for virtio block device in Unix-like system:
 $ dd if=/dev/zero of=disk.img bs=4M count=32
 $ mkfs.ext4 disk.img
 ```
+Instead of creating a new block device image, you can share the hostOS's existing block devices. For example, on macOS host, specify the block device path as `-x vblk:/dev/disk3`, or on Linux host as `-x vblk:/dev/loop3`, assuming these paths point to valid block devices.
+
 Mount the virtual block device and create a test file after booting, note that root privilege is required to mount and unmount a disk:
 ```shell
 # mkdir mnt

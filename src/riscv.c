@@ -285,9 +285,11 @@ static char *realloc_property(char *fdt,
     return fdt;
 }
 
-static void load_dtb(char **ram_loc, char *bootargs)
+static void load_dtb(char **ram_loc, vm_attr_t *attr)
 {
 #include "minimal_dtb.h"
+    char *bootargs = attr->data.system.bootargs;
+    char *vblk = attr->data.system.vblk_device;
     char *blob = *ram_loc;
     char *buf;
     size_t len;
@@ -312,6 +314,18 @@ static void load_dtb(char **ram_loc, char *bootargs)
         }
         free(buf);
         assert(!err);
+    }
+
+    /* remove the vblk node from soc if it is not specified */
+    if (!vblk) {
+        int subnode;
+        node = fdt_path_offset(blob, "/soc@F0000000");
+        assert(node >= 0);
+
+        subnode = fdt_subnode_offset(blob, node, "virtio@4200000");
+        assert(subnode >= 0);
+
+        assert(fdt_del_node(blob, subnode) == 0);
     }
 
     totalsize = fdt_totalsize(blob);
@@ -499,7 +513,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 
     uint32_t dtb_addr = attr->mem->mem_size - DTB_SIZE;
     ram_loc = ((char *) attr->mem->mem_base) + dtb_addr;
-    load_dtb(&ram_loc, attr->data.system.bootargs);
+    load_dtb(&ram_loc, attr);
     rv_log_info("DTB loaded");
     /*
      * Load optional initrd image at last 8 MiB before the dtb region to

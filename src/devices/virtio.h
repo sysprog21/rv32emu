@@ -103,6 +103,8 @@ typedef struct {
     /* supplied by environment */
     uint32_t *ram;
     uint32_t *disk;
+    uint64_t disk_size;
+    int disk_fd;
     /* implementation-specific */
     void *priv;
 } virtio_blk_state_t;

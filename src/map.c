@@ -30,12 +30,15 @@ struct map_internal {
     map_cmp_t (*comparator)(const void *, const void *);
 };
 
-/* Each node in the red-black tree consumes at least 1 byte of space (for the
- * linkage if nothing else), so there are a maximum of sizeof(void *) << 3
- * red-black tree nodes in any process (and thus, at most sizeof(void *) << 3
- * nodes in any red-black tree). The choice of algorithm bounds the depth of
- * a tree to twice the binary logarithm (base 2) of the number of elements in
- * the tree; the following bound applies.
+/* Each red–black tree node requires at least one byte of storage (for its
+ * linkage). A one-byte object could support up to 2^{sizeof(void *) * 8} nodes
+ * in an address space. However, the red–black tree algorithm guarantees that
+ * the tree depth is bounded by 2 * log₂(n), where n is the number of nodes.
+ *
+ * For operations such as insertion and deletion, a fixed-size array is used to
+ * track the path through the tree. RB_MAX_DEPTH is conservatively defined as 16
+ * times the size of a pointer to ensure that the array is large enough for any
+ * realistic tree, regardless of the theoretical maximum node count.
  */
 #define RB_MAX_DEPTH (sizeof(void *) << 4)
 

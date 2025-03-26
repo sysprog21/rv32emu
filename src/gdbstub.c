@@ -16,7 +16,12 @@
 #include "riscv.h"
 #include "riscv_private.h"
 
-static int rv_read_reg(void *args, int regno, size_t *data)
+static size_t rv_get_reg_bytes(UNUSED int regno)
+{
+    return 4;
+}
+
+static int rv_read_reg(void *args, int regno, void *data)
 {
     riscv_t *rv = (riscv_t *) args;
 
@@ -24,23 +29,23 @@ static int rv_read_reg(void *args, int regno, size_t *data)
         return EFAULT;
 
     if (regno == 32)
-        *data = rv_get_pc(rv);
+        *(riscv_word_t *) data = rv_get_pc(rv);
     else
-        *data = rv_get_reg(rv, regno);
+        *(riscv_word_t *) data = rv_get_reg(rv, regno);
 
     return 0;
 }
 
-static int rv_write_reg(void *args, int regno, size_t data)
+static int rv_write_reg(void *args, int regno, void *data)
 {
     if (unlikely(regno > 32))
         return EFAULT;
 
     riscv_t *rv = (riscv_t *) args;
     if (regno == 32)
-        rv_set_pc(rv, data);
+        rv_set_pc(rv, *(riscv_word_t *) data);
     else
-        rv_set_reg(rv, regno, data);
+        rv_set_reg(rv, regno, *(riscv_word_t *) data);
 
     return 0;
 }
@@ -132,6 +137,7 @@ static void rv_on_interrupt(void *args)
 }
 
 const struct target_ops gdbstub_ops = {
+    .get_reg_bytes = rv_get_reg_bytes,
     .read_reg = rv_read_reg,
     .write_reg = rv_write_reg,
     .read_mem = rv_read_mem,

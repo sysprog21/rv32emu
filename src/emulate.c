@@ -247,7 +247,6 @@ void rv_debug(riscv_t *rv)
     if (!gdbstub_init(&rv->gdbstub, &gdbstub_ops,
                       (arch_info_t){
                           .reg_num = 33,
-                          .reg_byte = 4,
                           .target_desc = TARGET_RV32,
                       },
                       GDBSTUB_COMM)) {

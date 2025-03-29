@@ -766,15 +766,13 @@ typedef struct {
     uint16_t periodic  : 1; /* offset 6 bit 0      */
 } mytimer_t;
 
-/* Preprocessor check of timer register layout byte count. */
-#if (sizeof(mytimer_t) != 8)
-#error mytimer_t struct size incorrect (expected 8 bytes)
-#endif
+_Static_assert(sizeof(mytimer_t) == 8,
+               "mytimer_t struct size incorrect (expected 8 bytes)");
 ```
 
 To enhance portability, use standard-defined types (e.g., `uint16_t`, `uint32_t`) and avoid relying on compiler-specific behavior.
 Where precise control over memory layout is required, such as in embedded systems or when interfacing with hardware,
-always verify the structure size and layout using static assertions or preprocessor checks.
+always verify the structure size and layout using static assertions.
 
 #### Avoid extreme portability
 
@@ -788,6 +786,131 @@ mainstream architectures.  PDP-11 era is long gone.
 - Using `1U` instead of `UINT32_C(1)` or `(uint32_t) 1` is also fine.
 - It is fair to assume that `NULL` is matching `(uintptr_t) 0` and it is fair
 to `memset()` structures with zero.  Non-zero `NULL` is for retro computing.
+
+## Git Commit Style
+
+Effective version control is critical to modern software development.
+Git's powerful features—such as granular commits, branching,
+and a versatile staging area—offer unparalleled flexibility.
+However, this flexibility can sometimes lead to disorganized commit histories and
+merge conflicts if not managed with clear, consistent practices.
+
+By committing often, writing clear messages, and adhering to a common workflow,
+developers can not only reduce the potential for errors but also simplify collaboration and future maintenance.
+We encourage every team to tailor these best practices to their specific needs while striving
+for a shared standard that promotes efficiency and code quality.
+
+Below are the detailed guidelines that build on these principles.
+* Group Related Changes Together:
+  Each commit should encapsulate a single, coherent change.
+  e.g., if you are addressing two separate bugs, create two distinct commits.
+  This approach produces focused, small commits that simplify understanding, enable quick rollbacks,
+  and foster efficient peer reviews.
+  By taking advantage of Git’s staging area and selective file staging,
+  you can craft granular commits that make collaboration smoother and more transparent.
+* Commit Frequently:
+  Making commits often ensures that your changes remain concise and logically grouped.
+  Frequent commits not only help maintain a clean history but also allow you to share your progress with your teammates regularly.
+  This regular sharing keeps everyone in sync,
+  minimizes merge conflicts, and promotes a collaborative environment where integration happens seamlessly.
+* Avoid Committing Work in Progress:
+  Only commit code when a logical component is in a stable, ready-to-integrate state.
+  Break your feature's development into manageable segments that reach a functional milestone quickly,
+  so you can commit regularly without compromising quality.
+  If you feel the urge to commit merely to clear your working directory for actions like switching branches or pulling changes,
+  use Git's stash feature instead.
+  This practice helps maintain a stable repository and ensures that your team reviews well-tested, coherent code.
+* Test Your Code Before Committing:
+  Before committing, ensure that your code has been thoroughly tested.
+  Rather than assuming your changes are ready, run comprehensive tests to confirm they work as intended without unintended side effects.
+  Testing is especially critical when sharing your code with others,
+  as it maintains the overall stability of the project and builds trust among collaborators.
+* Utilize Branches for Parallel Development:
+  Branches are a powerful tool that enables developers to isolate different lines of work—whether you are developing new features,
+  fixing bugs, or exploring innovative ideas.
+  By using branches extensively, you can work on your tasks independently and merge only after careful review and testing.
+  This not only keeps the main branch stable but also encourages collaborative code reviews and a more organized integration process.
+
+Clear and descriptive commit messages are crucial for maintaining a transparent history of changes and for facilitating effective debugging and tracking.
+Please adhere to the guidelines outlined in [How to Write a Git Commit Message](https://cbea.ms/git-commit/).
+1. Separate the subject from the body with a blank line.
+2. Limit the subject line to 50 characters.
+3. Capitalize the subject line.
+4. Do not end the subject line with a period.
+5. Use the imperative mood in the subject line.
+6. Wrap the body at 72 characters.
+7. Use the body to explain what and why, not how.
+
+An example (derived from Chris' blog post) looks like the following:
+```text
+Summarize changes in around 50 characters or less
+
+More detailed explanatory text, if necessary. Wrap it to about 72
+characters or so. In some contexts, the first line is treated as the
+subject of the commit and the rest of the text as the body. The
+blank line separating the summary from the body is critical (unless
+you omit the body entirely); various tools like `log`, `shortlog`
+and `rebase` can get confused if you run the two together.
+
+Explain the problem that this commit is solving. Focus on why you
+are making this change as opposed to how (the code explains that).
+Are there side effects or other unintuitive consequences of this
+change? Here's the place to explain them.
+
+Further paragraphs come after blank lines.
+
+- Bullet points are okay, too
+
+- Typically a hyphen or asterisk is used for the bullet, preceded
+  by a single space, with blank lines in between, but conventions
+  vary here
+
+If you use an issue tracker, put references to them at the bottom,
+like this:
+Close #123
+```
+
+Another illustration of effective practice.
+```text
+commit f1775422bb5a1aa6e79a685dfa7cb54a852b567b
+Author: Jim Huang <jserv@ccns.ncku.edu.tw>
+Date:   Mon Feb 24 13:08:32 2025 +0800
+
+    Introduce CPU architecture filtering in scheduler
+    
+    In environments with mixed CPU architectures, it is crucial to ensure
+    that an instance runs only on a host with a compatible CPU
+    type—preventing, for example, a RISC-V instance from being scheduled on
+    an Arm host.
+    
+    This new scheduler filter enforces that requirement by comparing an
+    instance's architecture against the host's allowed architectures. For
+    the libvirt driver, the host's guest capabilities are queried, and the
+    permitted architectures are recorded in the permitted_instances_types
+    list within the host's cpu_info dictionary.
+    
+    The filter systematically excludes hosts that do not support the
+    instance's CPU architecture. Additionally, RISC-V has been added to the
+    set of acceptable architectures for scheduling.
+    
+    Note that the CPU architecture filter is disabled by default.
+```
+
+The above is a clear, unformatted description provided in plain text.
+
+In addition, this project expects contributors to follow these additional rules:
+* If there is important, useful, or essential conversation or information,
+  include a reference or copy it.
+* Do not write single-word commits. Provide a descriptive subject.
+* Avoid using abusive words.
+* Avoid using backticks in commit subjects.
+  Backticks can be easily confused with single quotes on some terminals,
+  reducing readability. Plain text or single quotes provide sufficient clarity and emphasis.
+* Avoid using parentheses in commit subjects.
+  Excessive use of parentheses "()" can clutter the subject line,
+  making it harder to quickly grasp the essential message.
+
+Some conventions are automatically enforced by the [githooks](https://git-scm.com/docs/githooks).
 
 ## References
 - [Linux kernel coding style](https://www.kernel.org/doc/html/latest/process/coding-style.html)

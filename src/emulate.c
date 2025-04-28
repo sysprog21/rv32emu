@@ -82,11 +82,10 @@ static void __trap_handler(riscv_t *rv);
 
 /* FIXME: use more precise methods for updating time, e.g., RTC */
 #if RV32_HAS(Zicsr)
-static uint64_t ctr = 0;
 static inline void update_time(riscv_t *rv)
 {
-    rv->csr_time[0] = ctr & 0xFFFFFFFF;
-    rv->csr_time[1] = ctr >> 32;
+    rv->csr_time[0] = rv->timer & 0xFFFFFFFF;
+    rv->csr_time[1] = rv->timer >> 32;
 }
 
 /* get a pointer to a CSR */
@@ -379,7 +378,7 @@ static uint32_t peripheral_update_ctr = 64;
     static bool do_##inst(riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, \
                           uint32_t PC)                                      \
     {                                                                       \
-        IIF(RV32_HAS(SYSTEM))(ctr++;, ) cycle++;                            \
+        IIF(RV32_HAS(SYSTEM))(rv->timer++;, ) cycle++;                      \
         code;                                                               \
         IIF(RV32_HAS(SYSTEM))                                               \
         (                                                                   \
@@ -1015,7 +1014,7 @@ static void rv_check_interrupt(riscv_t *rv)
             emu_update_uart_interrupts(rv);
     }
 
-    if (ctr > attr->timer)
+    if (rv->timer > attr->timer)
         rv->csr_sip |= RV_INT_STI;
     else
         rv->csr_sip &= ~RV_INT_STI;

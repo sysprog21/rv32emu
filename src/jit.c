@@ -211,6 +211,7 @@ enum operand_size {
     S8,
     S16,
     S32,
+    S64,
 };
 
 #if defined(__x86_64__)
@@ -756,7 +757,7 @@ static inline void emit_alu64(struct jit_state *state, int op, int src, int dst)
 #endif
 }
 
-#if RV32_HAS(EXT_M)
+#if RV32_HAS(EXT_M) || defined(__aarch64__)
 static inline void emit_alu64_imm8(struct jit_state *state,
                                    int op,
                                    int src UNUSED,
@@ -771,6 +772,9 @@ static inline void emit_alu64_imm8(struct jit_state *state,
     if (op == 0xc1) {
         emit_load_imm(state, R10, imm);
         emit_dataproc_2source(state, true, DP2_LSRV, dst, dst, R10);
+    } else if (src == 0) {
+        emit_load_imm(state, R10, imm);
+        emit_addsub_register(state, true, AS_ADD, dst, dst, R10);
     }
 #endif
 }
@@ -913,6 +917,9 @@ static inline void emit_load(struct jit_state *state,
         break;
     case S32:
         emit_loadstore_imm(state, LS_LDRW, dst, src, offset);
+        break;
+    case S64:
+        emit_loadstore_imm(state, LS_LDRX, dst, src, offset);
         break;
     default:
         assert(NULL);
@@ -1103,6 +1110,9 @@ static inline void emit_store(struct jit_state *state,
         break;
     case S32:
         emit_loadstore_imm(state, LS_STRW, src, dst, offset);
+        break;
+    case S64:
+        emit_loadstore_imm(state, LS_STRX, src, dst, offset);
         break;
     default:
         assert(NULL);
@@ -2026,10 +2036,28 @@ void parse_branch_history_table(struct jit_state *state,
     }
 }
 
+void emit_jit_inc_timer(struct jit_state *state)
+{
+#if defined(__x86_64__)
+    /* Increment rv->timer. *rv pointer is stored in RDI register */
+    /* INC RDI, [rv + offsetof(riscv_t, timer)] */
+    emit_rex(state, 1, 0, 0, 0);
+    emit1(state, 0xff);
+    emit1(state, 0x87);
+    emit4(state, offsetof(riscv_t, timer));
+#elif defined(__aarch64__)
+    emit_load(state, S64, parameter_reg[0], temp_reg, offsetof(riscv_t, timer));
+    emit_alu64_imm8(state, 0, 0, temp_reg, 1);
+    emit_store(state, S64, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, timer));
+#endif
+}
+
 #define GEN(inst, code)                                                       \
     static void do_##inst(struct jit_state *state UNUSED, riscv_t *rv UNUSED, \
                           rv_insn_t *ir UNUSED)                               \
     {                                                                         \
+        emit_jit_inc_timer(state);                                            \
         code;                                                                 \
     }
 #include "rv32_jit.c"

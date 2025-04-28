@@ -196,9 +196,14 @@ $ python3 -m pip install git+https://github.com/riscv/riscof
 [RISC-V GNU Compiler Toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) should be prepared in advance.
 You can obtain prebuilt GNU toolchain for `riscv32-elf` from the [Automated Nightly Release](https://github.com/riscv-collab/riscv-gnu-toolchain/releases).
 If `ENABLE_SYSTEM=1` was previously set, run `make distclean` before proceeding.
-Then, run the following command:
+Then, run the following command to run all tests:
 ```shell
-$ make ENABLE_ARCH_TEST=1 arch-test
+$ .ci/riscv-tests.sh
+```
+
+Or run it with the configuration you want:
+```shell
+$ make arch-test ENABLE_ARCH_TEST=1 ENABLE_FULL4G=1 <your-config>
 ```
 
 For macOS users, installing `sdiff` might be required:

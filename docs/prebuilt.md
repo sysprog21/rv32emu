@@ -6,6 +6,8 @@ During testing or benchmarking, these binaries are automatically downloaded into
 The RISC-V binaries are compiled using the [xPack RISC-V GCC toolchain](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack) with the options `-march=rv32im -mabi=ilp32`.
 The x86 binaries are compiled by GCC with `-m32 -mno-sse -mno-sse2 -msoft-float` options and use [ieeelib](https://github.com/sysprog21/ieeelib) as the soft-fp library.
 
+## Get executables
+
 To fetch the prebuilt binaries manually, run:
 
 ```shell
@@ -67,3 +69,13 @@ There are still some prebuilt standalone RISC-V binaries under `build/` director
 - `jit-bf.elf` : See [ezaki-k/xkon_beta](https://github.com/ezaki-k/xkon_beta)
 - `readelf.elf` : See [tests/readelf](/tests/readelf)
 - `smolnes.elf` : See [tests/smolnes](/tests/smolnes.c) [RV32M]
+
+## Run benchmarks
+
+Some benchmarks need the pre-allocated 4GB address space. Use the following command to enable it:
+
+```shell
+$ make ENABLE_FULL4G=1 <your-config>
+$ build/rv32emu <benchmark>
+```
+

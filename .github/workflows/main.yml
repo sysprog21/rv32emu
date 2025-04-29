@@ -279,9 +279,9 @@ jobs:
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
+            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
             bash -c "${BOOT_LINUX_TEST}"
-            make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 clean
+            make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 clean
       if: ${{ always() }}
     - name: Architecture test
       env:
@@ -484,9 +484,9 @@ jobs:
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
+             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
              bash -c "${BOOT_LINUX_TEST}"
-             make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_T2C=0 ENABLE_MOP_FUSION=0 clean
+             make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 clean
        if: ${{ always() }}
      - name: Architecture test
        env:

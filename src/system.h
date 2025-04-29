@@ -173,3 +173,10 @@ uint32_t *mmu_walk(riscv_t *rv, const uint32_t addr, uint32_t *level);
         offset = level == 1 ? vaddr & MASK((RV_PG_SHIFT + 10)) \
                             : vaddr & MASK(RV_PG_SHIFT);       \
     } while (0)
+
+uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr);
+uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr);
+uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr);
+void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val);
+void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val);
+void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val);

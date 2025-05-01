@@ -49,15 +49,21 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
     return NULL;
 }
 
-#define T2C_OP(inst, code)                                               \
-    static void t2c_##inst(                                              \
-        LLVMBuilderRef *builder UNUSED, LLVMTypeRef *param_types UNUSED, \
-        LLVMValueRef start UNUSED, LLVMBasicBlockRef *entry UNUSED,      \
-        LLVMBuilderRef *taken_builder UNUSED,                            \
-        LLVMBuilderRef *untaken_builder UNUSED, riscv_t *rv UNUSED,      \
-        uint64_t mem_base UNUSED, rv_insn_t *ir UNUSED)                  \
-    {                                                                    \
-        code;                                                            \
+#define T2C_OP(inst, code)                                                 \
+    static void t2c_##inst(                                                \
+        LLVMBuilderRef *builder UNUSED, LLVMTypeRef *param_types UNUSED,   \
+        LLVMValueRef start UNUSED, LLVMBasicBlockRef *entry UNUSED,        \
+        LLVMBuilderRef *taken_builder UNUSED,                              \
+        LLVMBuilderRef *untaken_builder UNUSED, riscv_t *rv UNUSED,        \
+        uint64_t mem_base UNUSED, rv_insn_t *ir UNUSED)                    \
+    {                                                                      \
+        LLVMValueRef timer_ptr = t2c_gen_timer_addr(start, builder, ir);   \
+        LLVMValueRef timer =                                               \
+            LLVMBuildLoad2(*builder, LLVMInt64Type(), timer_ptr, "");      \
+        timer = LLVMBuildAdd(*builder, timer,                              \
+                             LLVMConstInt(LLVMInt64Type(), 1, false), ""); \
+        LLVMBuildStore(*builder, timer, timer_ptr);                        \
+        code;                                                              \
     }
 
 #define T2C_LLVM_GEN_ADDR(reg, rv_member, ir_member)                          \
@@ -79,6 +85,7 @@ T2C_LLVM_GEN_ADDR(ra, X, rv_reg_ra);
 T2C_LLVM_GEN_ADDR(sp, X, rv_reg_sp);
 #endif
 T2C_LLVM_GEN_ADDR(PC, PC, 0);
+T2C_LLVM_GEN_ADDR(timer, timer, 0);
 
 #define T2C_LLVM_GEN_STORE_IMM32(builder, val, addr) \
     LLVMBuildStore(builder, LLVMConstInt(LLVMInt32Type(), val, true), addr)

@@ -49,21 +49,21 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
     return NULL;
 }
 
-#define T2C_OP(inst, code)                                                 \
-    static void t2c_##inst(                                                \
-        LLVMBuilderRef *builder UNUSED, LLVMTypeRef *param_types UNUSED,   \
-        LLVMValueRef start UNUSED, LLVMBasicBlockRef *entry UNUSED,        \
-        LLVMBuilderRef *taken_builder UNUSED,                              \
-        LLVMBuilderRef *untaken_builder UNUSED, riscv_t *rv UNUSED,        \
-        uint64_t mem_base UNUSED, rv_insn_t *ir UNUSED)                    \
-    {                                                                      \
-        LLVMValueRef timer_ptr = t2c_gen_timer_addr(start, builder, ir);   \
-        LLVMValueRef timer =                                               \
-            LLVMBuildLoad2(*builder, LLVMInt64Type(), timer_ptr, "");      \
-        timer = LLVMBuildAdd(*builder, timer,                              \
-                             LLVMConstInt(LLVMInt64Type(), 1, false), ""); \
-        LLVMBuildStore(*builder, timer, timer_ptr);                        \
-        code;                                                              \
+#define T2C_OP(inst, code)                                                     \
+    static void t2c_##inst(                                                    \
+        LLVMBuilderRef *builder UNUSED, LLVMTypeRef *param_types UNUSED,       \
+        LLVMValueRef start UNUSED, LLVMBasicBlockRef *entry UNUSED,            \
+        LLVMBuilderRef *taken_builder UNUSED,                                  \
+        LLVMBuilderRef *untaken_builder UNUSED, riscv_t *rv UNUSED,            \
+        uint64_t mem_base UNUSED, block_t *block UNUSED, rv_insn_t *ir UNUSED) \
+    {                                                                          \
+        LLVMValueRef timer_ptr = t2c_gen_timer_addr(start, builder, ir);       \
+        LLVMValueRef timer =                                                   \
+            LLVMBuildLoad2(*builder, LLVMInt64Type(), timer_ptr, "");          \
+        timer = LLVMBuildAdd(*builder, timer,                                  \
+                             LLVMConstInt(LLVMInt64Type(), 1, false), "");     \
+        LLVMBuildStore(*builder, timer, timer_ptr);                            \
+        code;                                                                  \
     }
 
 #define T2C_LLVM_GEN_ADDR(reg, rv_member, ir_member)                          \
@@ -190,6 +190,7 @@ typedef void (*t2c_codegen_block_func_t)(LLVMBuilderRef *builder UNUSED,
                                          LLVMBuilderRef *untaken_builder UNUSED,
                                          riscv_t *rv UNUSED,
                                          uint64_t mem_base UNUSED,
+                                         block_t *block UNUSED,
                                          rv_insn_t *ir UNUSED);
 
 static void t2c_trace_ebb(LLVMBuilderRef *builder,
@@ -197,10 +198,12 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                           LLVMValueRef start,
                           LLVMBasicBlockRef *entry,
                           riscv_t *rv,
-                          rv_insn_t *ir,
+                          block_t *block,
                           set_t *set,
                           struct LLVM_block_map *map)
 {
+    rv_insn_t *ir = block->ir_head;
+
     if (set_has(set, ir->pc))
         return;
     set_add(set, ir->pc);
@@ -210,7 +213,7 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
     while (1) {
         ((t2c_codegen_block_func_t) dispatch_table[ir->opcode])(
             builder, param_types, start, entry, &tk, &utk, rv,
-            (uint64_t) ((memory_t *) PRIV(rv)->mem)->mem_base, ir);
+            (uint64_t) ((memory_t *) PRIV(rv)->mem)->mem_base, block, ir);
         if (!ir->next)
             break;
         ir = ir->next;
@@ -222,15 +225,21 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                 LLVMBuildBr(utk,
                             t2c_block_map_search(map, ir->branch_untaken->pc));
             else {
-                LLVMBasicBlockRef untaken_entry =
-                    LLVMAppendBasicBlock(start,
-                                         "untaken_"
-                                         "entry");
-                LLVMBuilderRef untaken_builder = LLVMCreateBuilder();
-                LLVMPositionBuilderAtEnd(untaken_builder, untaken_entry);
-                LLVMBuildBr(utk, untaken_entry);
-                t2c_trace_ebb(&untaken_builder, param_types, start,
-                              &untaken_entry, rv, ir->branch_untaken, set, map);
+                block_t *blk =
+                    cache_get(rv->block_cache, ir->branch_untaken->pc, false);
+                if (blk && blk->translatable
+#if RV32_HAS(SYSTEM)
+                    && blk->satp == block->satp
+#endif
+                ) {
+                    LLVMBasicBlockRef untaken_entry =
+                        LLVMAppendBasicBlock(start, "untaken_entry");
+                    LLVMBuilderRef untaken_builder = LLVMCreateBuilder();
+                    LLVMPositionBuilderAtEnd(untaken_builder, untaken_entry);
+                    LLVMBuildBr(utk, untaken_entry);
+                    t2c_trace_ebb(&untaken_builder, param_types, start,
+                                  &untaken_entry, rv, blk, set, map);
+                }
             }
         }
         if (ir->branch_taken) {
@@ -238,14 +247,21 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                 LLVMBuildBr(tk,
                             t2c_block_map_search(map, ir->branch_taken->pc));
             else {
-                LLVMBasicBlockRef taken_entry = LLVMAppendBasicBlock(start,
-                                                                     "taken_"
-                                                                     "entry");
-                LLVMBuilderRef taken_builder = LLVMCreateBuilder();
-                LLVMPositionBuilderAtEnd(taken_builder, taken_entry);
-                LLVMBuildBr(tk, taken_entry);
-                t2c_trace_ebb(&taken_builder, param_types, start, &taken_entry,
-                              rv, ir->branch_taken, set, map);
+                block_t *blk =
+                    cache_get(rv->block_cache, ir->branch_taken->pc, false);
+                if (blk && blk->translatable
+#if RV32_HAS(SYSTEM)
+                    && blk->satp == block->satp
+#endif
+                ) {
+                    LLVMBasicBlockRef taken_entry =
+                        LLVMAppendBasicBlock(start, "taken_entry");
+                    LLVMBuilderRef taken_builder = LLVMCreateBuilder();
+                    LLVMPositionBuilderAtEnd(taken_builder, taken_entry);
+                    LLVMBuildBr(tk, taken_entry);
+                    t2c_trace_ebb(&taken_builder, param_types, start,
+                                  &taken_entry, rv, blk, set, map);
+                }
             }
         }
     }
@@ -254,6 +270,9 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
 void t2c_compile(riscv_t *rv, block_t *block)
 {
     LLVMModuleRef module = LLVMModuleCreateWithName("my_module");
+    /* FIXME: riscv_t structure would change according to different
+     * configuration. The linked block might jump to the wrong function pointer.
+     */
     LLVMTypeRef io_members[] = {
         LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0),
         LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0),
@@ -291,8 +310,7 @@ void t2c_compile(riscv_t *rv, block_t *block)
     struct LLVM_block_map map;
     map.count = 0;
     /* Translate custon IR into LLVM IR */
-    t2c_trace_ebb(&builder, param_types, start, &entry, rv, block->ir_head,
-                  &set, &map);
+    t2c_trace_ebb(&builder, param_types, start, &entry, rv, block, &set, &map);
     /* Offload LLVM IR to LLVM backend */
     char *error = NULL, *triple = LLVMGetDefaultTargetTriple();
     LLVMExecutionEngineRef engine;
@@ -319,7 +337,15 @@ void t2c_compile(riscv_t *rv, block_t *block)
 
     /* Return the function pointer of T2C generated machine code */
     block->func = (exec_t2c_func_t) LLVMGetPointerToGlobal(engine, start);
-    jit_cache_update(rv->jit_cache, block->pc_start, block->func);
+
+#if RV32_HAS(SYSTEM)
+    uint64_t key = (uint64_t) block->pc_start | ((uint64_t) block->satp << 32);
+#else
+    uint64_t key = (uint64_t) block->pc_start;
+#endif
+
+    jit_cache_update(rv->jit_cache, key, block->func);
+
     block->hot2 = true;
 }
 
@@ -333,11 +359,11 @@ void jit_cache_exit(struct jit_cache *cache)
     free(cache);
 }
 
-void jit_cache_update(struct jit_cache *cache, uint32_t pc, void *entry)
+void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry)
 {
-    uint32_t pos = pc & (N_JIT_CACHE_ENTRIES - 1);
+    uint32_t pos = key & (N_JIT_CACHE_ENTRIES - 1);
 
-    cache[pos].pc = pc;
+    cache[pos].key = key;
     cache[pos].entry = entry;
 }
 

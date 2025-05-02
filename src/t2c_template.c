@@ -18,14 +18,30 @@ T2C_OP(auipc, {
                              t2c_gen_rd_addr(start, builder, ir));
 })
 
+/* Query the block by pc and return if it is valid. */
+static bool t2c_check_valid_blk(riscv_t *rv, block_t *block UNUSED, uint32_t pc)
+{
+    block_t *blk = cache_get(rv->block_cache, pc, false);
+    if (!blk || !blk->translatable)
+        return false;
+
+#if RV32_HAS(SYSTEM)
+    if (blk->satp != block->satp)
+        return false;
+#endif
+
+    return true;
+}
+
 T2C_OP(jal, {
     if (ir->rd)
         T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 4,
                                  t2c_gen_rd_addr(start, builder, ir));
 
-    if (ir->branch_taken)
+    if (ir->branch_taken &&
+        t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
         *taken_builder = *builder;
-    else {
+    } else {
         T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + ir->imm,
                                  t2c_gen_PC_addr(start, builder, ir));
         LLVMBuildRetVoid(*builder);
@@ -36,6 +52,7 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
                                        LLVMValueRef start,
                                        LLVMValueRef addr,
                                        riscv_t *rv,
+                                       block_t *block UNUSED,
                                        rv_insn_t *ir)
 {
     LLVMBasicBlockRef true_path = LLVMAppendBasicBlock(start, "");
@@ -56,17 +73,27 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
         *builder, addr,
         LLVMConstInt(LLVMInt32Type(), N_JIT_CACHE_ENTRIES - 1, false), "");
 
-    /* get jit_cache_t::pc */
+    /* get jit_cache_t::key */
     LLVMValueRef cast =
         LLVMBuildIntCast2(*builder, hash, LLVMInt64Type(), false, "");
     LLVMValueRef element_ptr = LLVMBuildInBoundsGEP2(
         *builder, t2c_jit_cache_struct_type, base, &cast, 1, "");
     LLVMValueRef pc_ptr = LLVMBuildStructGEP2(
         *builder, t2c_jit_cache_struct_type, element_ptr, 0, "");
-    LLVMValueRef pc = LLVMBuildLoad2(*builder, LLVMInt32Type(), pc_ptr, "");
 
     /* compare with calculated destination */
-    LLVMValueRef cmp = LLVMBuildICmp(*builder, LLVMIntEQ, pc, addr, "");
+
+#if RV32_HAS(SYSTEM)
+    LLVMValueRef pc = LLVMBuildLoad2(*builder, LLVMInt64Type(), pc_ptr, "");
+    LLVMValueRef key = T2C_LLVM_GEN_ALU64_IMM(
+        Add, LLVMBuildIntCast2(*builder, addr, LLVMInt64Type(), false, ""),
+        (uint64_t) block->satp << 32);
+#else
+    LLVMValueRef pc = LLVMBuildLoad2(*builder, LLVMInt32Type(), pc_ptr, "");
+    LLVMValueRef key = addr;
+#endif
+
+    LLVMValueRef cmp = LLVMBuildICmp(*builder, LLVMIntEQ, pc, key, "");
 
     LLVMBuildCondBr(*builder, cmp, true_path, false_path);
 
@@ -101,7 +128,7 @@ T2C_OP(jalr, {
         T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 4,
                                  t2c_gen_rd_addr(start, builder, ir));
 
-    t2c_jit_cache_helper(builder, start, val_rs1, rv, ir);
+    t2c_jit_cache_helper(builder, start, val_rs1, rv, block, ir);
 })
 
 #define BRANCH_FUNC(type, cond)                                             \
@@ -115,18 +142,20 @@ T2C_OP(jalr, {
         LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");     \
         LLVMBuilderRef builder2 = LLVMCreateBuilder();                      \
         LLVMPositionBuilderAtEnd(builder2, taken);                          \
-        if (ir->branch_taken)                                               \
+        if (ir->branch_taken &&                                             \
+            t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {         \
             *taken_builder = builder2;                                      \
-        else {                                                              \
+        } else {                                                            \
             T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + ir->imm, addr_PC);  \
             LLVMBuildRetVoid(builder2);                                     \
         }                                                                   \
         LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken"); \
         LLVMBuilderRef builder3 = LLVMCreateBuilder();                      \
         LLVMPositionBuilderAtEnd(builder3, untaken);                        \
-        if (ir->branch_untaken)                                             \
+        if (ir->branch_untaken &&                                           \
+            t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {       \
             *untaken_builder = builder3;                                    \
-        else {                                                              \
+        } else {                                                            \
             T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 4, addr_PC);        \
             LLVMBuildRetVoid(builder3);                                     \
         }                                                                   \
@@ -140,62 +169,185 @@ BRANCH_FUNC(bge, SGE)
 BRANCH_FUNC(bltu, ULT)
 BRANCH_FUNC(bgeu, UGE)
 
+#if RV32_HAS(SYSTEM)
+
+#include "system.h"
+
+#define t2c_mmu_wrapper(opcode) t2c_mmu_wrapper_##opcode
+
+#define T2C_MMU_LOAD(opcode, fn, bits, is_signed)                             \
+    static void t2c_mmu_wrapper_##opcode(LLVMBuilderRef *builder,             \
+                                         LLVMValueRef start, rv_insn_t *ir)   \
+    {                                                                         \
+        LLVMValueRef val_rs1 =                                                \
+            LLVMBuildLoad2(*builder, LLVMInt32Type(),                         \
+                           t2c_gen_rs1_addr(start, builder, ir), "");         \
+        LLVMValueRef vaddr = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);   \
+        vaddr = LLVMBuildZExt(*builder, vaddr, LLVMInt64Type(), "");          \
+        LLVMTypeRef param_types[] = {LLVMPointerType(LLVMInt64Type(), 0),     \
+                                     LLVMInt64Type()};                        \
+        LLVMTypeRef mmu_fn_type =                                             \
+            LLVMFunctionType(LLVMInt##bits##Type(), param_types, 2, 0);       \
+        LLVMValueRef mmu_fn_addr =                                            \
+            LLVMConstInt(LLVMInt64Type(), (uintptr_t) fn, false);             \
+        LLVMValueRef mmu_fn_ptr = LLVMBuildIntToPtr(                          \
+            *builder, mmu_fn_addr, LLVMPointerType(mmu_fn_type, 0), "");      \
+        LLVMValueRef params[] = {LLVMGetParam(start, 0), vaddr};              \
+        LLVMValueRef ret =                                                    \
+            LLVMBuildCall2(*builder, mmu_fn_type, mmu_fn_ptr, params, 2, ""); \
+        ret =                                                                 \
+            LLVMBuildIntCast2(*builder, ret, LLVMInt32Type(), is_signed, ""); \
+        LLVMBuildStore(*builder, ret, t2c_gen_rd_addr(start, builder, ir));   \
+    }
+
+#define T2C_MMU_STORE(opcode, fn)                                            \
+    static void t2c_mmu_wrapper_##opcode(LLVMBuilderRef *builder,            \
+                                         LLVMValueRef start, rv_insn_t *ir)  \
+    {                                                                        \
+        LLVMValueRef val_rs1 =                                               \
+            LLVMBuildLoad2(*builder, LLVMInt32Type(),                        \
+                           t2c_gen_rs1_addr(start, builder, ir), "");        \
+        LLVMValueRef vaddr = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);  \
+        vaddr = LLVMBuildZExt(*builder, vaddr, LLVMInt64Type(), "");         \
+        LLVMTypeRef param_types[] = {LLVMPointerType(LLVMInt64Type(), 0),    \
+                                     LLVMInt64Type(), LLVMInt64Type()};      \
+        LLVMTypeRef mmu_fn_type =                                            \
+            LLVMFunctionType(LLVMVoidType(), param_types, 3, 0);             \
+        LLVMValueRef mmu_fn_addr =                                           \
+            LLVMConstInt(LLVMInt64Type(), (uintptr_t) fn, false);            \
+        T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,                                     \
+                                t2c_gen_rs2_addr(start, builder, ir));       \
+        val_rs2 =                                                            \
+            LLVMBuildIntCast2(*builder, val_rs2, LLVMInt64Type(), true, ""); \
+        LLVMValueRef mmu_fn_ptr = LLVMBuildIntToPtr(                         \
+            *builder, mmu_fn_addr, LLVMPointerType(mmu_fn_type, 0), "");     \
+        LLVMValueRef params[] = {LLVMGetParam(start, 0), vaddr, val_rs2};    \
+        LLVMBuildCall2(*builder, mmu_fn_type, mmu_fn_ptr, params, 3, "");    \
+    }
+
+T2C_MMU_LOAD(lb, mmu_read_b, 8, true);
+T2C_MMU_LOAD(lbu, mmu_read_b, 8, false);
+T2C_MMU_LOAD(lh, mmu_read_s, 16, true);
+T2C_MMU_LOAD(lhu, mmu_read_s, 16, false);
+T2C_MMU_LOAD(lw, mmu_read_w, 32, true);
+
+T2C_MMU_STORE(sb, mmu_write_b);
+T2C_MMU_STORE(sh, mmu_write_s);
+T2C_MMU_STORE(sw, mmu_write_w);
+
+#endif
+
 T2C_OP(lb, {
-    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
-    LLVMValueRef res = LLVMBuildSExt(
-        *builder, LLVMBuildLoad2(*builder, LLVMInt8Type(), mem_loc, "res"),
-        LLVMInt32Type(), "sext8to32");
-    LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+    IIF(RV32_HAS(SYSTEM))
+    (
+        { t2c_mmu_wrapper(lb)(builder, start, ir); },
+        {
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            LLVMValueRef res = LLVMBuildSExt(
+                *builder,
+                LLVMBuildLoad2(*builder, LLVMInt8Type(), mem_loc, "res"),
+                LLVMInt32Type(), "sext8to32");
+            LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+        });
 })
 
 T2C_OP(lh, {
-    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
-    LLVMValueRef res = LLVMBuildSExt(
-        *builder, LLVMBuildLoad2(*builder, LLVMInt16Type(), mem_loc, "res"),
-        LLVMInt32Type(), "sext16to32");
-    LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+    IIF(RV32_HAS(SYSTEM))
+    (
+        { t2c_mmu_wrapper(lh)(builder, start, ir); },
+        {
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            LLVMValueRef res = LLVMBuildSExt(
+                *builder,
+                LLVMBuildLoad2(*builder, LLVMInt16Type(), mem_loc, "res"),
+                LLVMInt32Type(), "sext16to32");
+            LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+        });
 })
 
 
 T2C_OP(lw, {
-    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
-    LLVMValueRef res =
-        LLVMBuildLoad2(*builder, LLVMInt32Type(), mem_loc, "res");
-    LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+    IIF(RV32_HAS(SYSTEM))
+    (
+        { t2c_mmu_wrapper(lw)(builder, start, ir); },
+        {
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            LLVMValueRef res =
+                LLVMBuildLoad2(*builder, LLVMInt32Type(), mem_loc, "res");
+            LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+        });
 })
 
 T2C_OP(lbu, {
-    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
-    LLVMValueRef res = LLVMBuildZExt(
-        *builder, LLVMBuildLoad2(*builder, LLVMInt8Type(), mem_loc, "res"),
-        LLVMInt32Type(), "zext8to32");
-    LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+    IIF(RV32_HAS(SYSTEM))
+    (
+        { t2c_mmu_wrapper(lbu)(builder, start, ir); },
+        {
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            LLVMValueRef res = LLVMBuildZExt(
+                *builder,
+                LLVMBuildLoad2(*builder, LLVMInt8Type(), mem_loc, "res"),
+                LLVMInt32Type(), "zext8to32");
+            LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+        });
 })
 
 T2C_OP(lhu, {
-    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
-    LLVMValueRef res = LLVMBuildZExt(
-        *builder, LLVMBuildLoad2(*builder, LLVMInt16Type(), mem_loc, "res"),
-        LLVMInt32Type(), "zext16to32");
-    LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+    IIF(RV32_HAS(SYSTEM))
+    (
+        { t2c_mmu_wrapper(lhu)(builder, start, ir); },
+        {
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            LLVMValueRef res = LLVMBuildZExt(
+                *builder,
+                LLVMBuildLoad2(*builder, LLVMInt16Type(), mem_loc, "res"),
+                LLVMInt32Type(), "zext16to32");
+            LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+        });
 })
 
 T2C_OP(sb, {
-    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
-    T2C_LLVM_GEN_LOAD_VMREG(rs2, 8, t2c_gen_rs2_addr(start, builder, ir));
-    LLVMBuildStore(*builder, val_rs2, mem_loc);
+    IIF(RV32_HAS(SYSTEM))
+    (
+        { t2c_mmu_wrapper(sb)(builder, start, ir); },
+        {
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            T2C_LLVM_GEN_LOAD_VMREG(rs2, 8,
+                                    t2c_gen_rs2_addr(start, builder, ir));
+            LLVMBuildStore(*builder, val_rs2, mem_loc);
+        });
 })
 
 T2C_OP(sh, {
-    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
-    T2C_LLVM_GEN_LOAD_VMREG(rs2, 16, t2c_gen_rs2_addr(start, builder, ir));
-    LLVMBuildStore(*builder, val_rs2, mem_loc);
+    IIF(RV32_HAS(SYSTEM))
+    (
+        { t2c_mmu_wrapper(sh)(builder, start, ir); },
+        {
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            T2C_LLVM_GEN_LOAD_VMREG(rs2, 16,
+                                    t2c_gen_rs2_addr(start, builder, ir));
+            LLVMBuildStore(*builder, val_rs2, mem_loc);
+        });
 })
 
 T2C_OP(sw, {
-    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
-    T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    LLVMBuildStore(*builder, val_rs2, mem_loc);
+    IIF(RV32_HAS(SYSTEM))
+    (
+        { t2c_mmu_wrapper(sw)(builder, start, ir); },
+        {
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,
+                                    t2c_gen_rs2_addr(start, builder, ir));
+            LLVMBuildStore(*builder, val_rs2, mem_loc);
+        });
 })
 
 T2C_OP(addi, {
@@ -734,7 +886,7 @@ T2C_OP(clwsp, {
 
 T2C_OP(cjr, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
-    t2c_jit_cache_helper(builder, start, val_rs1, rv, ir);
+    t2c_jit_cache_helper(builder, start, val_rs1, rv, block, ir);
 })
 
 T2C_OP(cmv, {
@@ -756,7 +908,7 @@ T2C_OP(cjalr, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 2,
                              t2c_gen_ra_addr(start, builder, ir));
-    t2c_jit_cache_helper(builder, start, val_rs1, rv, ir);
+    t2c_jit_cache_helper(builder, start, val_rs1, rv, block, ir);
 })
 
 T2C_OP(cadd, {
@@ -920,15 +1072,18 @@ T2C_OP(fuse5, {
         switch (fuse[i].opcode) {
         case rv_insn_slli:
             t2c_slli(builder, param_types, start, entry, taken_builder,
-                     untaken_builder, rv, mem_base, (rv_insn_t *) (&fuse[i]));
+                     untaken_builder, rv, mem_base, block,
+                     (rv_insn_t *) (&fuse[i]));
             break;
         case rv_insn_srli:
             t2c_srli(builder, param_types, start, entry, taken_builder,
-                     untaken_builder, rv, mem_base, (rv_insn_t *) (&fuse[i]));
+                     untaken_builder, rv, mem_base, block,
+                     (rv_insn_t *) (&fuse[i]));
             break;
         case rv_insn_srai:
             t2c_srai(builder, param_types, start, entry, taken_builder,
-                     untaken_builder, rv, mem_base, (rv_insn_t *) (&fuse[i]));
+                     untaken_builder, rv, mem_base, block,
+                     (rv_insn_t *) (&fuse[i]));
             break;
         default:
             __UNREACHABLE;

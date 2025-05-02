@@ -216,7 +216,7 @@ static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t vaddr)
     return memory_ifetch(ppn | offset);
 }
 
-static uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
+uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
@@ -235,7 +235,7 @@ static uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
     __UNREACHABLE;
 }
 
-static uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr)
+uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
@@ -247,7 +247,7 @@ static uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr)
     return memory_read_s(addr);
 }
 
-static uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
+uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
@@ -266,7 +266,7 @@ static uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
     __UNREACHABLE;
 }
 
-static void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
+void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
@@ -285,7 +285,7 @@ static void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
 #endif
 }
 
-static void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
+void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
@@ -300,7 +300,7 @@ static void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
     memory_write_s(addr, (uint8_t *) &val);
 }
 
-static void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
+void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 

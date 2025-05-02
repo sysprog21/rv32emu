@@ -71,12 +71,13 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
 #define N_JIT_CACHE_ENTRIES (1 << 12)
 
 struct jit_cache {
-    uint64_t pc; /* program counter, easy to build LLVM IR with 64-bit width */
-    void *entry; /* entry of JIT-ed code */
+    uint64_t key; /* program counter, composed to satp if it's in system
+                     simulation */
+    void *entry;  /* entry of JIT-ed code */
 };
 
 struct jit_cache *jit_cache_init();
 void jit_cache_exit(struct jit_cache *cache);
-void jit_cache_update(struct jit_cache *cache, uint32_t pc, void *entry);
+void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
 void jit_cache_clear(struct jit_cache *cache);
 #endif

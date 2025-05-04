@@ -24,16 +24,16 @@ a focus on efficiency and readability.
 
 Features:
 * Fast interpreter for executing the RV32 ISA
-* Comprehensive support for RV32I, RV32E and M, A, F, C, Zba, Zbb, Zbc, Zbs extensions
-* Memory-efficient design
-* Built-in ELF loader
-* Implementation of commonly used newlib system calls
+* Fast interpreter that faithfully executes the complete RV32 instruction set
+* Full coverage of RV32I / RV32E plus the M (integer multiply–divide), A (atomics), F (single-precision floating-point), C (compressed), and Zba/Zbb/Zbc/Zbs bit-manipulation extensions
+* Built-in ELF loader for user-mode emulation
+* Newlib-compatible system-call layer for standalone programs
+* Minimal system emulation capable of booting an RV32 Linux kernel and running user-space binaries
 * Experimental SDL-based display/event/audio system calls for running video games
-* Support for remote GDB debugging
+* Remote debugging through the GDB Remote Serial Protocol
 * Tiered JIT compilation for performance boost while maintaining a small footprint
 
 ## Build and Verify
-
 `rv32emu` relies on certain third-party packages for full functionality and access to all its features.
 To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/)
 and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
@@ -60,11 +60,11 @@ $ make
 
 ### Experimental system emulation
 Device Tree compiler (dtc) is required. To install it on Debian/Ubuntu Linux, enter the following command:
-```
+```shell
 $ sudo apt install device-tree-compiler
 ```
 For macOS, use the following command:
-```
+```shell
 $ brew install dtc
 ```
 
@@ -81,7 +81,7 @@ $ make ENABLE_SYSTEM=1
 $ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> [-x vblk:<virtio_blk_img_path>[,readonly]]
 ```
 
-Build with a larger INITRD_SIZE (e.g., 64 MiB) to run SDL-oriented application because the default 8 MiB is insufficient for SDL-oriented application artifacts:
+Build with a larger `INITRD_SIZE` (e.g., 64 MiB) to run SDL-oriented application because the default 8 MiB is insufficient for SDL-oriented application artifacts:
 ```shell
 $ make system ENABLE_SYSTEM=1 ENABLE_SDL=1 INITRD_SIZE=64
 ```
@@ -106,7 +106,7 @@ Reboot and re-mount the virtual block device, the written file should remain exi
 
 #### Build Linux image
 An automated build script is provided to compile the RISC-V cross-compiler, Busybox, and Linux kernel from source. Please note that it only supports the Linux host environment. It can be found at tools/build-linux-image.sh.
-```
+```shell
 $ make build-linux-img
 ```
 
@@ -134,11 +134,9 @@ $ make quake
 The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](docs/demo.md).
 
 ### Docker image
-
 The image containing all the necessary tools for development and testing can be executed by `docker run -it sysprog21/rv32emu:latest`. It works for both x86-64 and aarch64 (e.g., Apple's M1 chip) machines.
 
 ### Customization
-
 `rv32emu` is configurable, and you can override the below variable(s) to fit your expectations:
 * `ENABLE_RV32E`: RV32E Base Integer Instruction Set
 * `ENABLE_EXT_M`: Standard Extension for Integer Multiplication and Division
@@ -171,7 +169,6 @@ $ make
 ```
 
 ### RISCOF
-
 [RISCOF](https://github.com/riscv-software-src/riscof) (RISC-V Compatibility Framework) is
 a Python based framework that facilitates testing of a RISC-V target against a golden reference model.
 
@@ -238,7 +235,6 @@ Detail in riscv-arch-test:
 * [RISC-V Architecture Test Format Specification](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/spec/TestFormatSpec.adoc)
 
 ## Benchmarks
-
 The benchmarks are classified into three categories based on their characteristics:
 | Category                 | Benchmark  | Description |
 | -------------------------| ---------- | ----------- |
@@ -266,7 +262,6 @@ _Arm64_
 ![](docs/interp-bench-arm64.png)
 
 ### Continuous Benchmarking
-
 Continuous benchmarking is integrated into GitHub Actions,
 allowing the committer and reviewer to examine the comment on benchmark comparisons between
 the pull request commit(s) and the latest commit on the master branch within the conversation.
@@ -283,7 +278,6 @@ There are several files that have the potential to significantly impact the perf
 As a result, any modifications made to these files will trigger the benchmark CI.
 
 ## GDB Remote Debugging
-
 `rv32emu` is permitted to operate as gdbstub in an experimental manner since it supports
 a limited number of [GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html) (GDBRSP).
 To enable this feature, you need to build the emulator and set `ENABLE_GDBSTUB=1` when running the `make` command.
@@ -323,7 +317,6 @@ $ build/rv32emu -d - -q out.elf | jq .x10
 ## Usage Statistics
 
 ### RISC-V Instructions/Registers
-
 This is a static analysis tool for assessing the usage of RV32 instructions/registers
 in a given target program.
 Build this tool by running the following command:
@@ -397,11 +390,9 @@ click the Run button to run it.
 Alternatively, you may want to view a hosted `rv32emu` [demo page](https://sysprog21.github.io/rv32emu-demo/) since building takes some time.
 
 ## Contributing
-
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 ## Citation
-
 Please see our [VMIL'24](https://2024.splashcon.org/home/vmil-2024) paper, available in the [ACM digital library](https://dl.acm.org/doi/10.1145/3689490.3690399).
 ```
 @inproceedings{ncku2024accelerate,
@@ -414,16 +405,13 @@ Please see our [VMIL'24](https://2024.splashcon.org/home/vmil-2024) paper, avail
 ```
 
 ## License
-
 `rv32emu` is available under a permissive MIT-style license.
 Use of this source code is governed by a MIT license that can be found in the [LICENSE](LICENSE) file.
 
 ## External sources
-
 See [docs/prebuilt.md](docs/prebuilt.md).
 
 ## Reference
-
 * [Writing a simple RISC-V emulator in plain C](https://fmash16.github.io/content/posts/riscv-emulator-in-c.html)
 * [Writing a RISC-V Emulator in Rust](https://book.rvemu.app/)
 * [Bare metal C on my RISC-V toy CPU](https://florian.noeding.com/posts/risc-v-toy-cpu/cpu-from-scratch/)

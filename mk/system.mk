@@ -2,7 +2,8 @@
 ifeq ($(call has, SYSTEM), 1)
 
 CFLAGS += -Isrc/dtc/libfdt
-LIBFDT_HACK := $(shell git submodule update --init src/dtc)
+LIBFDT_HACK := $(shell [ -d src/dtc/.git ] || \
+	git clone --depth=1 https://git.kernel.org/pub/scm/utils/dtc/dtc.git src/dtc)
 
 DEV_SRC := src/devices
 

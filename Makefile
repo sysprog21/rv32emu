@@ -213,7 +213,7 @@ ifeq ($(call has, GDBSTUB), 1)
 GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
 src/mini-gdbstub/Makefile:
-	git submodule update --init $(dir $@)
+	$(Q)git clone https://github.com/RinHizakura/mini-gdbstub $(dir $@) --depth=1
 GDBSTUB_LIB := $(GDBSTUB_OUT)/libgdbstub.a
 $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 	$(MAKE) -C $(dir $<) O=$(dir $@)

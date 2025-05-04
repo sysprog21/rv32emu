@@ -1,5 +1,3 @@
-ENABLE_PREBUILT ?= 1
-
 CC ?= gcc
 CROSS_COMPILE ?= riscv-none-elf-
 
@@ -54,34 +52,20 @@ define fetch-releases-tag
 endef
 
 LATEST_RELEASE ?=
-
-ifeq ($(call has, PREBUILT), 1)
-    # On macOS/arm64 Github runner, let's leverage the ${{ secrets.GITHUB_TOKEN }} to prevent 403 rate limit error.
-    # Thus, the LATEST_RELEASE tag is defined at Github job steps, no need to fetch them here.
-    ifeq ($(LATEST_RELEASE),)
-         ifeq ($(call has, SYSTEM), 1)
-             $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
-         else ifeq ($(call has, ARCH_TEST), 1)
-             $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
-         else
-             $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
-         endif
+ifeq ($(LATEST_RELEASE),)
+    ifeq ($(call has, SYSTEM), 1)
+        $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
+    else ifeq ($(call has, ARCH_TEST), 1)
+        $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
+    else
+        $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
     endif
-    PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
-else
-  # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,
-  # we disable the hardware floating-point and the related SIMD operation of x86.
-  CFLAGS := -m32 -mno-sse -mno-sse2 -msoft-float -O2 -Wno-unused-result -L$(BIN_DIR)
-  LDFLAGS := -lsoft-fp -lm
-
-  CFLAGS_CROSS := -march=rv32im -mabi=ilp32 -O2 -Wno-implicit-function-declaration
-  LDFLAGS_CROSS := -lm -lsemihost
 endif
+PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
 
-.PHONY: artifact fetch-checksum scimark2 ieeelib
+.PHONY: artifact fetch-checksum
 
-artifact: fetch-checksum ieeelib scimark2
-ifeq ($(call has, PREBUILT), 1)
+artifact: fetch-checksum
 	$(Q)$(PRINTF) "Checking SHA-1 of prebuilt binaries ... "
 	$(Q)$(eval RES := 0)
 
@@ -133,46 +117,8 @@ else
 	    $(call notice, [OK]); \
 	fi
 endif
-else
-ifeq ($(call has, SYSTEM), 1)
-	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/Image >> sha1sum-linux-image)
-	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/rootfs.cpio >> sha1sum-linux-image)
-else
-	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
-	$(Q)for tb in $(TEST_SUITES); do \
-	    CC=$(CC) CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" BINDIR=$(BIN_DIR)/linux-x86-softfp $(MAKE) -C ./tests/$$tb; \
-	done
-	$(Q)for tb in $(TEST_SUITES); do \
-	    CC=$(CROSS_COMPILE)gcc CFLAGS="$(CFLAGS_CROSS)" LDFLAGS="$(LDFLAGS_CROSS)" BINDIR=$(BIN_DIR)/riscv32 $(MAKE) -C ./tests/$$tb; \
-	done
-
-	$(Q)$(PRINTF) "Building standalone testbenches ...\n"
-	$(Q)for tb in $(TEST_BENCHES); do \
-	    $(CC) $(CFLAGS) -o $(BIN_DIR)/linux-x86-softfp/$$tb ./tests/$$tb.c $(LDFLAGS); \
-	done
-	$(Q)for tb in $(TEST_BENCHES); do \
-	    $(CROSS_COMPILE)gcc $(CFLAGS_CROSS) -o $(BIN_DIR)/riscv32/$$tb ./tests/$$tb.c $(LDFLAGS_CROSS); \
-	done
-
-	git submodule update --init ./tests/doom ./tests/quake
-	$(Q)$(PRINTF) "Building doom ...\n"
-	$(Q)$(MAKE) -C ./tests/doom/src/riscv CROSS=$(CROSS_COMPILE)
-	$(Q)cp ./tests/doom/src/riscv/doom-riscv.elf $(BIN_DIR)/riscv32/doom
-	$(Q)$(PRINTF) "Building quake ...\n"
-	$(Q)cd ./tests/quake && mkdir -p build && cd build && \
-	    cmake -DCMAKE_TOOLCHAIN_FILE=../port/boards/rv32emu/toolchain.cmake \
-	          -DCROSS_COMPILE=$(CROSS_COMPILE) \
-	          -DCMAKE_BUILD_TYPE=RELEASE -DBOARD_NAME=rv32emu .. && \
-	    make
-	$(Q)cp ./tests/quake/build/port/boards/rv32emu/quake $(BIN_DIR)/riscv32/quake
-
-	$(Q)(cd $(BIN_DIR)/linux-x86-softfp; for fd in *; do $(SHA1SUM) "$$fd"; done) >> $(BIN_DIR)/sha1sum-linux-x86-softfp
-	$(Q)(cd $(BIN_DIR)/riscv32; for fd in *; do $(SHA1SUM) "$$fd"; done) >> $(BIN_DIR)/sha1sum-riscv32
-endif
-endif
 
 fetch-checksum:
-ifeq ($(call has, PREBUILT), 1)
 	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ... "
 ifeq ($(call has, SYSTEM), 1)
     ifeq ($(wildcard $(BIN_DIR)/rv32emu-linux-image-prebuilt.tar.gz),)
@@ -196,28 +142,4 @@ else
     else
 		$(Q)$(call warn , skipped)
     endif
-endif
-endif
-
-scimark2:
-ifeq ($(call has, PREBUILT), 0)
-ifeq ($(call has, SYSTEM), 0)
-	$(Q)$(call prologue,"scimark2")
-	$(Q)$(call download,$(SCIMARK2_URL))
-	$(Q)$(call verify,$(SHA1SUM),$(SCIMARK2_SHA1),$(notdir $(SCIMARK2_URL)))
-	$(Q)$(call extract,"./tests/scimark2",$(notdir $(SCIMARK2_URL)))
-	$(Q)$(call epilogue,$(notdir $(SCIMARK2_URL)),$(SHA1_FILE1),$(SHA1_FILE2))
-	$(Q)$(PRINTF) "Building scimark2 ...\n"
-	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CC) CFLAGS="-m32 -O2"
-	$(Q)cp ./tests/scimark2/scimark2 $(BIN_DIR)/linux-x86-softfp/scimark2
-	$(Q)$(MAKE) -C ./tests/scimark2 clean && $(RM) ./tests/scimark2/scimark2.o
-	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CROSS_COMPILE)gcc CFLAGS="-march=rv32imf -mabi=ilp32 -O2"
-	$(Q)cp ./tests/scimark2/scimark2 $(BIN_DIR)/riscv32/scimark2
-endif
-endif
-
-ieeelib:
-ifeq ($(call has, PREBUILT), 0)
-	git submodule update --init ./src/ieeelib
-	$(Q)$(MAKE) -C ./src/ieeelib CC=$(CC) CFLAGS="$(CFLAGS)" BINDIR=$(BIN_DIR)
 endif

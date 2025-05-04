@@ -19,7 +19,7 @@ arch-test: riscof-check $(BIN) artifact
 ifeq ($(CROSS_COMPILE),)
 	$(error GNU Toolchain for RISC-V is required to build architecture tests. Please check package installation)
 endif
-	git submodule update --init $(dir $(ARCH_TEST_DIR))
+	$(Q)git clone https://github.com/riscv-non-isa/riscv-arch-test $(dir $(ARCH_TEST_DIR)) --depth=1
 	$(Q)cp $(OUT)/rv32emu-prebuilt-sail-$(HOST_PLATFORM) tests/arch-test-target/sail_cSim/riscv_sim_RV32
 	$(Q)chmod +x tests/arch-test-target/sail_cSim/riscv_sim_RV32
 	$(Q)python3 -B $(RISCV_TARGET)/setup.py --riscv_device=$(RISCV_DEVICE) --hw_data_misaligned_support=$(hw_data_misaligned_support)

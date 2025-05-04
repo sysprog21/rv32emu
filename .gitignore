@@ -31,3 +31,14 @@ tests/arch-test-target/sail_cSim/riscv_sim_RV32
 tests/scimark2/
 __pycache__/
 src/minimal_dtb.h
+
+# external
+tests/riscv-arch-test
+src/mini-gdbstub
+src/softfloat
+tests/ansibench
+tests/rv8-bench
+src/ieeelib
+tests/doom
+tests/quake
+src/dtc

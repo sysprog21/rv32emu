@@ -302,7 +302,7 @@ jobs:
             echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
     - name: build artifact
       # The GitHub Action for non-x86 CPU
-      uses: allinurl/run-on-arch-action@master
+      uses: uraimo/run-on-arch-action@v3
       with:
         arch: aarch64
         distro: ubuntu24.04

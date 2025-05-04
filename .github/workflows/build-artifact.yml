@@ -16,7 +16,7 @@ jobs:
           submodules: 'true'
       - name: Test file change
         id: test-file-change
-        uses: tj-actions/changed-files@v45
+        uses: tj-actions/changed-files@v46
         with:
           fetch_additional_submodule_history: 'true'
           files: |

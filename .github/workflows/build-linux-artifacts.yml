@@ -16,7 +16,7 @@ jobs:
           submodules: 'true'
       - name: Test file change of Linux image
         id: test-linux-image-version-change
-        uses: tj-actions/changed-files@v45
+        uses: tj-actions/changed-files@v46
         with:
           files: |
             mk/external.mk

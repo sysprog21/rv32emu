@@ -469,7 +469,6 @@ riscv_t *rv_create(riscv_user_t rv_attr)
                        },
                        3);
 
-    /* set the log level to TRACE, everything is captured */
     rv_log_set_level(attr->log_level);
     rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
 

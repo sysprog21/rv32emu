@@ -38,16 +38,32 @@ However, participation requires adherence to fundamental ground rules:
 * Code must strictly adhere to the established C coding style (refer to the guidelines below).
   While there is some flexibility in basic style, it is crucial to stick to the current coding standards.
   Complex algorithmic constructs without proper comments will not be accepted.
+* Shell scripts must be formatted before submission. Use consistent flags across the project to ensure uniform formatting.
 * External pull requests should include thorough documentation in the pull request comments for consideration.
 * When composing documentation, code comments, and other materials in English,
   please adhere to the American English (`en_US`) dialect.
   This variant should be considered the standard for all documentation efforts.
   For instance, opt for "initialize" over "initialise" and "color" rather than "colour".
 
-Software requirement: [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 18 or later.
+Software requirement:
+* [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 18 or later.
+* [shfmt](https://github.com/mvdan/sh).
 
-This repository consistently contains an up-to-date `.clang-format` file with rules that match the explained ones.
-For maintaining a uniform coding style, execute the command `clang-format -i *.{c,h}`.
+This repository consistently contains an up-to-date `.clang-format` file with rules that match the explained ones and uses shell script formatting supported by `shfmt`.
+For maintaining a uniform coding style, execute the command `clang-format -i *.{c,h}` and `shfmt -w $(find . -type f -name "*.sh")`.
+
+## Coding Style for Shell Script
+
+Shell scripts must be clean, consistent, and portable. The following `shfmt` rules(check `.editorconfig` file) are enforced project-wide:
+* Use spaces for indentation.
+* Indent with 4 spaces.
+* Use Unix-style line endings (LF).
+* Remove trailing whitespace at the end of lines.
+* Ensure the file ends with a newline.
+* Place the opening brace of a function on the next line.
+* Indent `case` statements within `switch` blocks.
+* Add spaces around redirection operators (e.g., `>`, `>>`).
+* Place binary operators (e.g., `&&`, `|`) on the next line when breaking lines.
 
 ## Coding Style for Modern C
 
@@ -877,22 +893,22 @@ Author: Jim Huang <jserv@ccns.ncku.edu.tw>
 Date:   Mon Feb 24 13:08:32 2025 +0800
 
     Introduce CPU architecture filtering in scheduler
-    
+
     In environments with mixed CPU architectures, it is crucial to ensure
     that an instance runs only on a host with a compatible CPU
     type—preventing, for example, a RISC-V instance from being scheduled on
     an Arm host.
-    
+
     This new scheduler filter enforces that requirement by comparing an
     instance's architecture against the host's allowed architectures. For
     the libvirt driver, the host's guest capabilities are queried, and the
     permitted architectures are recorded in the permitted_instances_types
     list within the host's cpu_info dictionary.
-    
+
     The filter systematically excludes hosts that do not support the
     instance's CPU architecture. Additionally, RISC-V has been added to the
     set of acceptable architectures for scheduling.
-    
+
     Note that the CPU architecture filter is disabled by default.
 ```
 

@@ -18,7 +18,7 @@ make distclean
 # for this purpose, although the emulator can run all selected benchmarks with
 # much smaller memory mapping regions.
 make ENABLE_ARCH_TEST=1 ENABLE_EXT_M=1 ENABLE_EXT_A=1 ENABLE_EXT_F=1 ENABLE_EXT_C=1 \
-     ENABLE_Zicsr=1 ENABLE_Zifencei=1 ENABLE_FULL4G=1 $PARALLEL
+    ENABLE_Zicsr=1 ENABLE_Zifencei=1 ENABLE_FULL4G=1 $PARALLEL
 make arch-test RISCV_DEVICE=IMAFCZicsrZifencei hw_data_misaligned_support=1 $PARALLEL || exit 1
 make arch-test RISCV_DEVICE=FCZicsr hw_data_misaligned_support=1 $PARALLEL || exit 1
 make arch-test RISCV_DEVICE=IMZbaZbbZbcZbs hw_data_misaligned_support=1 $PARALLEL || exit 1
@@ -33,6 +33,6 @@ make arch-test RISCV_DEVICE=E $PARALLEL || exit 1
 # the hardware misalignment (hw_data_misaligned_support) option.
 make distclean
 make ENABLE_ARCH_TEST=1 ENABLE_JIT=1 ENABLE_T2C=0 \
-     ENABLE_EXT_M=1 ENABLE_EXT_A=1 ENABLE_EXT_F=1 ENABLE_EXT_C=1 \
-     ENABLE_Zicsr=1 ENABLE_Zifencei=1 ENABLE_FULL4G=1 $PARALLEL
+    ENABLE_EXT_M=1 ENABLE_EXT_A=1 ENABLE_EXT_F=1 ENABLE_EXT_C=1 \
+    ENABLE_Zicsr=1 ENABLE_Zifencei=1 ENABLE_FULL4G=1 $PARALLEL
 make arch-test RISCV_DEVICE=IMC hw_data_misaligned_support=0 $PARALLEL || exit 1

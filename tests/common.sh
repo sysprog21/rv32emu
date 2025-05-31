@@ -1,4 +1,4 @@
-function fail()                                                                                                                                               
+function fail()
 {
     echo "*** Fail"
     exit 1

@@ -25,8 +25,7 @@ function run_dhrystone()
 sanity_check
 # Run Dhrystone benchmark and collect DMIPS values
 dmips_values=()
-for ((i=1; i<=$N_RUNS; i++))
-do
+for ((i = 1; i <= $N_RUNS; i++)); do
     echo "Running Dhrystone benchmark - Run #$i"
     dmips=$(run_dhrystone)
     exit_code=$?
@@ -48,7 +47,7 @@ fi
 
 deviation=0
 for dmips in "${sorted_dmips[@]}"; do
-    if (( $(echo "$dmips > $median" | bc -l) )); then
+    if (($(echo "$dmips > $median" | bc -l))); then
         diff=$(echo "$dmips - $median" | bc -l)
     else
         diff=$(echo "$median - $dmips" | bc -l)
@@ -60,15 +59,14 @@ mad=$(echo "scale=2; $deviation / $num_dmips" | bc -l)
 
 # Filter outliers based on MAD
 filtered_dmips=()
-for dmips in "${sorted_dmips[@]}"
-do
-    if (( $(echo "$dmips > 0" | bc -l) )); then
-        if (( $(echo "$dmips > $median" | bc -l) )); then
+for dmips in "${sorted_dmips[@]}"; do
+    if (($(echo "$dmips > 0" | bc -l))); then
+        if (($(echo "$dmips > $median" | bc -l))); then
             diff=$(echo "$dmips - $median" | bc -l)
         else
             diff=$(echo "$median - $dmips" | bc -l)
         fi
-        if (( $(echo "$diff <= $mad * 2" | bc -l) )); then
+        if (($(echo "$diff <= $mad * 2" | bc -l))); then
             filtered_dmips+=("$dmips")
         fi
     fi
@@ -83,8 +81,7 @@ echo -n "" > $benchmark_output
 num_filtered=${#filtered_dmips[@]}
 if ((num_filtered > 0)); then
     total_dmips=0
-    for dmips in "${filtered_dmips[@]}"
-    do
+    for dmips in "${filtered_dmips[@]}"; do
         total_dmips=$(echo "scale=2; $total_dmips + $dmips" | bc -l)
     done
 

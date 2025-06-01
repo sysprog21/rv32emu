@@ -6,8 +6,8 @@ OS_TYPE=$(uname -s)
 check_platform()
 {
     case "${MACHINE_TYPE}/${OS_TYPE}" in
-        x86_64/Linux | aarch64/Linux | arm64/Darwin)
-            ;;
+        x86_64/Linux | aarch64/Linux | arm64/Darwin) ;;
+
         *)
             echo "Unsupported platform: ${MACHINE_TYPE}/${OS_TYPE}"
             exit 1
@@ -16,7 +16,7 @@ check_platform()
 }
 
 if [[ "${OS_TYPE}" == "Linux" ]]; then
-  PARALLEL=-j$(nproc)
+    PARALLEL=-j$(nproc)
 else
-  PARALLEL=-j$(sysctl -n hw.logicalcpu)
+    PARALLEL=-j$(sysctl -n hw.logicalcpu)
 fi

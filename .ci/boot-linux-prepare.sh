@@ -5,10 +5,19 @@
 check_platform
 
 VBLK_IMG=build/disk.img
-which dd >/dev/null 2>&1 || { echo "Error: dd not found"; exit 1; }
-which mkfs.ext4 >/dev/null 2>&1 || which $(brew --prefix e2fsprogs)/sbin/mkfs.ext4 >/dev/null 2>&1 || \
-	{ echo "Error: mkfs.ext4 not found"; exit 1; }
-which 7z >/dev/null 2>&1 || { echo "Error: 7z not found"; exit 1; }
+which dd > /dev/null 2>&1 || {
+    echo "Error: dd not found"
+    exit 1
+}
+which mkfs.ext4 > /dev/null 2>&1 || which $(brew --prefix e2fsprogs)/sbin/mkfs.ext4 > /dev/null 2>&1 \
+    || {
+        echo "Error: mkfs.ext4 not found"
+        exit 1
+    }
+which 7z > /dev/null 2>&1 || {
+    echo "Error: 7z not found"
+    exit 1
+}
 
 ACTION=$1
 
@@ -23,11 +32,11 @@ case "$ACTION" in
                 mkfs.ext4 ${VBLK_IMG}
                 BLK_DEV=$(losetup -f)
                 losetup ${BLK_DEV} ${VBLK_IMG}
-            ;;
+                ;;
             Darwin)
                 $(brew --prefix e2fsprogs)/sbin/mkfs.ext4 ${VBLK_IMG}
                 BLK_DEV=$(hdiutil attach -nomount ${VBLK_IMG})
-            ;;
+                ;;
         esac
 
         # On Linux, ${VBLK_IMG} will be created by root and owned by root:root.
@@ -48,10 +57,10 @@ case "$ACTION" in
         case "${OS_TYPE}" in
             Linux)
                 losetup -d ${BLK_DEV}
-            ;;
+                ;;
             Darwin)
                 hdiutil detach ${BLK_DEV}
-            ;;
+                ;;
         esac
 
         # delete disk image

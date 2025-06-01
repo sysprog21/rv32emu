@@ -337,7 +337,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        compiler: [gcc-14, clang]
+        compiler: [gcc-15, clang]
     runs-on: macos-latest # M1 chip
     steps:
      - uses: actions/checkout@v4
@@ -366,9 +366,9 @@ jobs:
                                    EXIT_CODE=\$?; \
                                    sudo env TMP_FILE=\${TMP_FILE} BLK_DEV=\${BLK_DEV} .ci/boot-linux-prepare.sh cleanup; \
                                    exit \${EXIT_CODE};" >> "$GITHUB_ENV"
-     - name: Symlink gcc-14 due to the default /usr/local/bin/gcc links to system's clang
+     - name: Symlink gcc-15 due to the default /usr/local/bin/gcc links to system's clang
        run: |
-             ln -s /opt/homebrew/opt/gcc/bin/gcc-14 /usr/local/bin/gcc-14
+             ln -s /opt/homebrew/opt/gcc/bin/gcc-15 /usr/local/bin/gcc-15
      - name: fetch artifact first to reduce HTTP requests
        env:
          CC: ${{ steps.install_cc.outputs.cc }}

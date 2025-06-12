@@ -13,7 +13,9 @@ def list_files(d, ignore_list=None):
                 for f in os.listdir(d)
                 if os.path.isfile(os.path.join(d, f))
                 and f.endswith(".elf")
-                and not any(f.endswith(ign) or f.startswith(ign) for ign in ignore_list)
+                and not any(
+                    f.endswith(ign) or f.startswith(ign) for ign in ignore_list
+                )
             ]
         else:
             parent_dir = os.path.dirname(d)

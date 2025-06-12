@@ -21,4 +21,14 @@ for file in ${SH_SOURCES}; do
 done
 SH_MISMATCH_FILE_CNT=$(shfmt -l ${SH_SOURCES})
 
-exit $((C_MISMATCH_LINE_CNT + SH_MISMATCH_FILE_CNT))
+PY_SOURCES=$(find "${REPO_ROOT}" | egrep "\.py$")
+for file in ${PY_SOURCES}; do
+    echo "Checking Python file: ${file}"
+    black --diff "${file}"
+done
+PY_MISMATCH_FILE_CNT=0
+if [ -n "${PY_SOURCES}" ]; then
+    PY_MISMATCH_FILE_CNT=$(echo "$(black --check ${PY_SOURCES} 2>&1)" | grep -c "^would reformat ")
+fi
+
+exit $((C_MISMATCH_LINE_CNT + SH_MISMATCH_FILE_CNT + PY_MISMATCH_FILE_CNT))

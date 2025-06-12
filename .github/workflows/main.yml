@@ -505,7 +505,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: coding convention
       run: |
-            sudo apt-get install -q=2 clang-format-18 shfmt
+            sudo apt-get install -q=2 clang-format-18 shfmt python3-pip
+            pip3 install black==25.1.0
             .ci/check-newline.sh
             .ci/check-format.sh
       shell: bash

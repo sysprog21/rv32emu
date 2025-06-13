@@ -15,6 +15,7 @@ from riscof.pluginTemplate import pluginTemplate
 
 logger = logging.getLogger()
 
+
 class rv32emu(pluginTemplate):
     __model__ = "rv32emu"
     __version__ = "dev"
@@ -22,7 +23,7 @@ class rv32emu(pluginTemplate):
     def __init__(self, *args, **kwargs):
         sclass = super().__init__(*args, **kwargs)
 
-        config = kwargs.get('config')
+        config = kwargs.get("config")
 
         # If the config node for this DUT is missing or empty. Raise an error. At minimum we need
         # the paths to the ispec and pspec files
@@ -34,25 +35,27 @@ class rv32emu(pluginTemplate):
         # test-bench produced by a simulator (like verilator, vcs, incisive, etc). In case of an iss or
         # emulator, this variable could point to where the iss binary is located. If 'PATH variable
         # is missing in the config.ini we can hardcode the alternate here.
-        self.dut_exe = os.path.join(config['PATH'] if 'PATH' in config else "","rv32emu")
+        self.dut_exe = os.path.join(
+            config["PATH"] if "PATH" in config else "", "rv32emu"
+        )
 
         # Number of parallel jobs that can be spawned off by RISCOF
         # for various actions performed in later functions, specifically to run the tests in
         # parallel on the DUT executable. Can also be used in the build function if required.
-        self.num_jobs = str(config['jobs'] if 'jobs' in config else 1)
+        self.num_jobs = str(config["jobs"] if "jobs" in config else 1)
 
         # Path to the directory where this python file is located. Collect it from the config.ini
-        self.pluginpath=os.path.abspath(config['pluginpath'])
+        self.pluginpath = os.path.abspath(config["pluginpath"])
 
         # Collect the paths to the  riscv-config absed ISA and platform yaml files. One can choose
         # to hardcode these here itself instead of picking it from the config.ini file.
-        self.isa_spec = os.path.abspath(config['ispec'])
-        self.platform_spec = os.path.abspath(config['pspec'])
+        self.isa_spec = os.path.abspath(config["ispec"])
+        self.platform_spec = os.path.abspath(config["pspec"])
 
         # We capture if the user would like the run the tests on the target or
         # not. If you are interested in just compiling the tests and not running
         # them on the target, then following variable should be set to False
-        if 'target_run' in config and config['target_run']=='0':
+        if "target_run" in config and config["target_run"] == "0":
             self.target_run = False
         else:
             self.target_run = True
@@ -72,36 +75,57 @@ class rv32emu(pluginTemplate):
         # Note the march is not hardwired here, because it will change for each
         # test. Similarly the output elf name and compile macros will be assigned later in the
         # runTests function
-        self.compile_cmd = os.getenv("CROSS_COMPILE") + 'gcc -march={0}\
+        self.compile_cmd = (
+            os.getenv("CROSS_COMPILE")
+            + "gcc -march={0}\
         -static -mcmodel=medany -fvisibility=hidden -nostdlib -nostartfiles -g\
-        -T '+self.pluginpath+'/env/link.ld\
-        -I '+self.pluginpath+'/env/\
-        -I ' + archtest_env + ' {2} -o {3} {4}'
+        -T "
+            + self.pluginpath
+            + "/env/link.ld\
+        -I "
+            + self.pluginpath
+            + "/env/\
+        -I "
+            + archtest_env
+            + " {2} -o {3} {4}"
+        )
 
     def build(self, isa_yaml, platform_yaml):
         # load the isa yaml as a dictionary in python.
-        ispec = utils.load_yaml(isa_yaml)['hart0']
+        ispec = utils.load_yaml(isa_yaml)["hart0"]
 
         # capture the XLEN value by picking the max value in 'supported_xlen' field of isa yaml. This
         # will be useful in setting integer value in the compiler string (if not already hardcoded);
-        self.xlen = ('64' if 64 in ispec['supported_xlen'] else '32')
+        self.xlen = "64" if 64 in ispec["supported_xlen"] else "32"
 
-        if 'E' not in ispec['ISA']:
-            self.compile_cmd = self.compile_cmd+' -mabi='+('lp64 ' if 64 in ispec['supported_xlen'] else 'ilp32 ')
+        if "E" not in ispec["ISA"]:
+            self.compile_cmd = (
+                self.compile_cmd
+                + " -mabi="
+                + ("lp64 " if 64 in ispec["supported_xlen"] else "ilp32 ")
+            )
         else:
-            self.compile_cmd = self.compile_cmd+' -mabi='+('lp64e ' if 64 in ispec['supported_xlen'] else 'ilp32e ')
-            self.compile_cmd += '-D RV32E '
+            self.compile_cmd = (
+                self.compile_cmd
+                + " -mabi="
+                + ("lp64e " if 64 in ispec["supported_xlen"] else "ilp32e ")
+            )
+            self.compile_cmd += "-D RV32E "
 
     def runTests(self, testList):
         # Delete Makefile if it already exists.
-        if os.path.exists(self.work_dir+ "/Makefile." + self.name[:-1]):
-            os.remove(self.work_dir+ "/Makefile." + self.name[:-1])
+        if os.path.exists(self.work_dir + "/Makefile." + self.name[:-1]):
+            os.remove(self.work_dir + "/Makefile." + self.name[:-1])
         # create an instance the makeUtil class that we will use to create targets.
-        make = utils.makeUtil(makefilePath=os.path.join(self.work_dir, "Makefile." + self.name[:-1]))
+        make = utils.makeUtil(
+            makefilePath=os.path.join(
+                self.work_dir, "Makefile." + self.name[:-1]
+            )
+        )
 
         # set the make command that will be used. The num_jobs parameter was set in the __init__
         # function earlier
-        make.makeCommand = 'make -j' + self.num_jobs
+        make.makeCommand = "make -j" + self.num_jobs
 
         # we will iterate over each entry in the testList. Each entry node will be refered to by the
         # variable testname.
@@ -110,14 +134,14 @@ class rv32emu(pluginTemplate):
             testentry = testList[testname]
 
             # we capture the path to the assembly file of this test
-            test = testentry['test_path']
+            test = testentry["test_path"]
 
             # capture the directory where the artifacts of this test will be dumped/created. RISCOF is
             # going to look into this directory for the signature files
-            test_dir = testentry['work_dir']
+            test_dir = testentry["work_dir"]
 
             # name of the elf file after compilation of the test
-            elf = 'my.elf'
+            elf = "my.elf"
 
             # name of the signature file as per requirement of RISCOF. RISCOF expects the signature to
             # be named as DUT-<dut-name>.signature. The below variable creates an absolute path of
@@ -127,22 +151,26 @@ class rv32emu(pluginTemplate):
             # for each test there are specific compile macros that need to be enabled. The macros in
             # the testList node only contain the macros/values. For the gcc toolchain we need to
             # prefix with "-D". The following does precisely that.
-            compile_macros = ' -D' + " -D".join(testentry['macros'])
+            compile_macros = " -D" + " -D".join(testentry["macros"])
 
             # substitute all variables in the compile command that we created in the initialize function
-            cmd = self.compile_cmd.format(testentry['isa'].lower(), self.xlen, test, elf, compile_macros)
+            cmd = self.compile_cmd.format(
+                testentry["isa"].lower(), self.xlen, test, elf, compile_macros
+            )
 
-     	    # if the user wants to disable running the tests and only compile the tests, then
+            # if the user wants to disable running the tests and only compile the tests, then
             # the "else" clause is executed below assigning the sim command to simple no action
             # echo statement.
             if self.target_run:
-            # set up the simulation command. Template is for spike. Please change.
-                simcmd = self.dut_exe + ' -a {0} {1}'.format(sig_file, elf)
+                # set up the simulation command. Template is for spike. Please change.
+                simcmd = self.dut_exe + " -a {0} {1}".format(sig_file, elf)
             else:
                 simcmd = 'echo "NO RUN"'
 
             # concatenate all commands that need to be executed within a make-target.
-            execute = '@cd {0}; {1}; {2};'.format(testentry['work_dir'], cmd, simcmd)
+            execute = "@cd {0}; {1}; {2};".format(
+                testentry["work_dir"], cmd, simcmd
+            )
 
             # create a target. The makeutil will create a target with the name "TARGET<num>" where num
             # starts from 0 and increments automatically for each new target that is added

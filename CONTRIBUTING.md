@@ -39,6 +39,7 @@ However, participation requires adherence to fundamental ground rules:
   While there is some flexibility in basic style, it is crucial to stick to the current coding standards.
   Complex algorithmic constructs without proper comments will not be accepted.
 * Shell scripts must be formatted before submission. Use consistent flags across the project to ensure uniform formatting.
+* Python scripts must be formatted before submission. Use consistent flags across the project to ensure uniform formatting.
 * External pull requests should include thorough documentation in the pull request comments for consideration.
 * When composing documentation, code comments, and other materials in English,
   please adhere to the American English (`en_US`) dialect.
@@ -48,9 +49,12 @@ However, participation requires adherence to fundamental ground rules:
 Software requirement:
 * [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 18 or later.
 * [shfmt](https://github.com/mvdan/sh).
+* [black](https://github.com/psf/black) version 25.1.0.
 
-This repository consistently contains an up-to-date `.clang-format` file with rules that match the explained ones and uses shell script formatting supported by `shfmt`.
-For maintaining a uniform coding style, execute the command `clang-format -i *.{c,h}` and `shfmt -w $(find . -type f -name "*.sh")`.
+To maintain a uniform style across languages, run:
+* `clang-format -i *.{c,h}` to apply the project’s C/C++ formatting rules from the up-to-date .clang-format file.
+* `shfmt -w $(find . -type f -name "*.sh")` to clean and standardize all shell scripts.
+* `black .` to enforce a consistent, idiomatic layout for Python code.
 
 ## Coding Style for Shell Script
 
@@ -64,6 +68,19 @@ Shell scripts must be clean, consistent, and portable. The following `shfmt` rul
 * Indent `case` statements within `switch` blocks.
 * Add spaces around redirection operators (e.g., `>`, `>>`).
 * Place binary operators (e.g., `&&`, `|`) on the next line when breaking lines.
+
+## Coding Style for Python
+
+Python scripts must be clean, consistent, and adhere to modern Python best practices. The following formatting rules are enforced project-wide using `black`:
+
+* Use 4 spaces for indentation (never tabs).
+* Limit lines to 80 characters maximum.
+* Use double quotes for strings (unless single quotes avoid escaping).
+* Use trailing commas in multi-line constructs.
+* Format imports according to PEP 8 guidelines.
+* Use Unix-style line endings (LF).
+* Remove trailing whitespace at the end of lines.
+* Ensure files end with a newline.
 
 ## Coding Style for Modern C
 

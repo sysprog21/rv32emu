@@ -1,19 +1,19 @@
 import os
 
-dutname = 'rv32emu'
-refname = 'sail_cSim'
+dutname = "rv32emu"
+refname = "sail_cSim"
 
 root = os.path.abspath(os.path.dirname(__file__))
 cwd = os.getcwd()
 
-misa_A = (1 << 0)
-misa_C = (1 << 2)
-misa_E = (1 << 4)
-misa_F = (1 << 5)
-misa_I = (1 << 8)
-misa_M = (1 << 12)
+misa_A = 1 << 0
+misa_C = 1 << 2
+misa_E = 1 << 4
+misa_F = 1 << 5
+misa_I = 1 << 8
+misa_M = 1 << 12
 
-config_temp = '''[RISCOF]
+config_temp = """[RISCOF]
 ReferencePlugin={0}
 ReferencePluginPath={1}
 DUTPlugin={2}
@@ -29,4 +29,4 @@ target_run=1
 [{0}]
 pluginpath={1}
 path={1}
-'''
+"""

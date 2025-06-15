@@ -3031,3 +3031,4644 @@ RVOP(
     }))
 
 #endif
+
+#if RV32_HAS(EXT_V)
+#define V_NOP                        \
+    for (int i = 0; i < 4; i++) {    \
+        (rv)->V[rv_reg_zero][i] = 0; \
+    }
+
+#define VREG_U32_COUNT ((VLEN) >> (5))
+/*
+ * Vector Configuration-Setting Instructions
+ *
+ * These instructions set the vector CSRs, specifically csr_vl and csr_vtype.
+ * The CSRs can only be updated using vset{i}vl{i} instructions. The current
+ * implementation does not support vma and vta.
+ *
+ * The value VLMAX = (LMUL * VLEN) / SEW represents the maximum number of
+ * elements that can be processed by a single vector instruction given the
+ * current SEW and LMUL.
+ *
+ * Constraints on Setting vl:
+ *  - vl = AVL if AVL ≤ VLMAX
+ *  - ceil(AVL / 2) ≤ vl ≤ VLMAX if AVL < 2 * VLMAX
+ *  - vl = VLMAX if AVL ≥ 2 * VLMAX
+ *
+ * +------------+------+--------------+
+ * | vlmul[2:0] | LMUL |    VLMAX     |
+ * +------------+------+--------------+
+ * |    1 0 0   |  -   |       -      |
+ * |    1 0 1   | 1/8  |  VLEN/SEW/8  |
+ * |    1 1 0   | 1/4  |  VLEN/SEW/4  |
+ * |    1 1 1   | 1/2  |  VLEN/SEW/2  |
+ * |    0 0 0   |  1   |  VLEN/SEW    |
+ * |    0 0 1   |  2   |  2*VLEN/SEW  |
+ * |    0 1 0   |  4   |  4*VLEN/SEW  |
+ * |    0 1 1   |  8   |  8*VLEN/SEW  |
+ * +------------+------+--------------+
+ *
+ * LMUL determines how vector registers are grouped. Since VL controls the
+ * number of processed elements (based on SEW) and is derived from VLMAX,
+ * LMUL's primary role is setting VLMAX. This implementation computes VLMAX
+ * directly, avoiding fractional LMUL values (e.g., 1/2, 1/4, 1/8).
+ *
+ * Mapping of rd, rs1, and AVL value effects on vl:
+ * +-----+-----+------------------+----------------------------------+
+ * | rd  | rs1 |    AVL value     |         Effect on vl             |
+ * +-----+-----+------------------+----------------------------------+
+ * |  -  | !x0 | Value in x[rs1]  | Normal stripmining               |
+ * | !x0 |  x0 | ~0               | Set vl to VLMAX                  |
+ * |  x0 |  x0 | Value in vl reg  | Keep existing vl                 |
+ * +-----+-----+------------------+----------------------------------+
+ *
+ * +------------+----------+
+ * | vsew[2:0]  |   SEW    |
+ * +------------+----------+
+ * |    0 0 0   |     8    |
+ * |    0 0 1   |    16    |
+ * |    0 1 0   |    32    |
+ * |    0 1 1   |    64    |
+ * |    1 X X   | Reserved |
+ * +------------+----------+
+ */
+
+#define vl_setting(vlmax_, rs1, vl)    \
+    if ((rs1) <= vlmax_) {             \
+        (vl) = (rs1);                  \
+    } else if ((rs1) < (2 * vlmax_)) { \
+        (vl) = vlmax_;                 \
+    } else {                           \
+        (vl) = vlmax_;                 \
+    }
+
+RVOP(
+    vsetvli,
+    {
+        uint8_t v_lmul = ir->zimm & 0b111;
+        uint8_t v_sew = (ir->zimm >> 3) & 0b111;
+
+        if (v_lmul == 4 || v_sew >= 4) {
+            /* Illegal setting */
+            rv->csr_vl = 0;
+            rv->csr_vtype = 0x80000000;
+            return true;
+        }
+        uint16_t vlmax = (v_lmul < 4)
+                             ? ((1 << v_lmul) * VLEN) >> (3 + v_sew)
+                             : (VLEN >> (3 + v_sew) >> (3 - (v_lmul - 5)));
+        if (ir->rs1) {
+            vl_setting(vlmax, rv->X[ir->rs1], rv->csr_vl);
+            rv->csr_vtype = ir->zimm;
+        } else {
+            if (!ir->rd) {
+                rv->csr_vtype = ir->zimm;
+            } else {
+                rv->csr_vl = vlmax;
+                rv->csr_vtype = ir->zimm;
+            }
+        }
+        rv->X[ir->rd] = rv->csr_vl;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsetivli,
+    {
+        uint8_t v_lmul = ir->zimm & 0b111;
+        uint8_t v_sew = (ir->zimm >> 3) & 0b111;
+
+        if (v_lmul == 4 || v_sew >= 4) {
+            /* Illegal setting */
+            rv->csr_vl = 0;
+            rv->csr_vtype = 0x80000000;
+            return true;
+        }
+        uint16_t vlmax = (v_lmul < 4)
+                             ? ((1 << v_lmul) * VLEN) >> (3 + v_sew)
+                             : (VLEN >> (3 + v_sew) >> (3 - (v_lmul - 5)));
+        if (ir->rs1) {
+            vl_setting(vlmax, ir->rs1, rv->csr_vl);
+            rv->csr_vtype = ir->zimm;
+        } else {
+            if (!ir->rd) {
+                rv->csr_vtype = ir->zimm;
+            } else {
+                rv->csr_vl = vlmax;
+                rv->csr_vtype = ir->zimm;
+            }
+        }
+        rv->X[ir->rd] = rv->csr_vl;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsetvl,
+    {
+        uint8_t v_lmul = rv->X[ir->rs2] & 0b111;
+        uint8_t v_sew = (rv->X[ir->rs2] >> 3) & 0b111;
+
+        if (v_lmul == 4 || v_sew >= 4) {
+            /* Illegal setting */
+            rv->csr_vl = 0;
+            rv->csr_vtype = 0x80000000;
+            return true;
+        }
+        uint16_t vlmax = (v_lmul < 4)
+                             ? ((1 << v_lmul) * VLEN) >> (3 + v_sew)
+                             : (VLEN >> (3 + v_sew) >> (3 - (v_lmul - 5)));
+        if (rv->X[ir->rs1]) {
+            vl_setting(vlmax, rv->X[ir->rs1], rv->csr_vl);
+            rv->csr_vtype = rv->X[ir->rs2];
+        } else {
+            if (!ir->rd) {
+                rv->csr_vtype = rv->X[ir->rs2];
+            } else {
+                rv->csr_vl = vlmax;
+                rv->csr_vtype = rv->X[ir->rs2];
+            }
+        }
+        rv->X[ir->rd] = rv->csr_vl;
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+#undef vl_setting
+
+/*
+ * In RVV, vector register v0 serves as the mask register. Each bit in v0
+ * indicates whether the corresponding element in other vector registers should
+ * be updated or left unmodified. When ir->vm == 1, masking is disabled. When
+ * ir->vm == 0, masking is enabled, and for each element, the bit in v0
+ * determines whether to use the newly computed result (bit = 1) or keep the
+ * original value in the destination register (bit = 0).
+ *
+ * The macro VECTOR_DISPATCH(des, op1, op2, op, op_type) selects the
+ * corresponding handler based on the sew from csr_vtype. It then calls one of
+ * the sew_*b_handler functions for 8-bit, 16-bit, or 32-bit operations. Each
+ * handler checks csr_vl to determine how many elements need to be processed and
+ * uses one of the three macros VV_LOOP, VX_LOOP, VI_LOOP depending on whether
+ * the second operand is a vector, a scalar, or an immediate. These LOOP macros
+ * handle one 32-bit word at a time and pass remainder to their respective
+ * V*_LOOP_LEFT macro if the csr_vl is not evenly divisible.
+ *
+ * Inside each loop macro, SHIFT and MASK determine how to isolate and position
+ * sub-elements within each 32-bit word. SHIFT specifies how many bits to shift
+ * for each sub-element, and MASK filters out the bits that belong to a single
+ * sub-element, such as 0xFF for 8-bit or 0xFFFF for 16-bit. Index __i tracks
+ * which 32-bit word within the vector register is processed; when it reaches
+ * the end of the current VLEN vector register, __j increments to move on to the
+ * next vector register, and __i resets.
+ *
+ * The current approach supports only SEW values of 8, 16, and 32 bits.
+ */
+
+#define VECTOR_DISPATCH(des, op1, op2, op, op_type)      \
+    {                                                    \
+        switch (8 << ((rv->csr_vtype >> 3) & 0b111)) {   \
+        case 8:                                          \
+            sew_8b_handler(des, op1, op2, op, op_type);  \
+            break;                                       \
+        case 16:                                         \
+            sew_16b_handler(des, op1, op2, op, op_type); \
+            break;                                       \
+        case 32:                                         \
+            sew_32b_handler(des, op1, op2, op, op_type); \
+            break;                                       \
+        default:                                         \
+            break;                                       \
+        }                                                \
+    }
+
+#define VI_LOOP(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)                 \
+    uint32_t tmp_1 = rv->V[op1 + j][i];                                        \
+    uint32_t tmp_d = rv->V[des + j][i];                                        \
+    uint32_t ans = 0;                                                          \
+    rv->V[des + j][i] = 0;                                                     \
+    for (uint8_t k = 0; k < itr; k++) {                                        \
+        if (ir->vm) {                                                          \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK))       \
+                  << (k << (SHIFT));                                           \
+        } else {                                                               \
+            ans = (vm & (0x1 << k))                                            \
+                      ? ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK)) \
+                            << (k << (SHIFT))                                  \
+                      : (tmp_d & (MASK << (k << (SHIFT))));                    \
+        }                                                                      \
+        rv->V[des + j][i] += ans;                                              \
+    }
+
+#define VI_LOOP_LEFT(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)            \
+    uint32_t tmp_1 = rv->V[op1 + j][i];                                        \
+    uint32_t tmp_d = rv->V[des + j][i];                                        \
+    if (rv->csr_vl % itr) {                                                    \
+        rv->V[des + j][i] &= (0xFFFFFFFF << ((rv->csr_vl % itr) << SHIFT));    \
+    }                                                                          \
+    uint32_t ans = 0;                                                          \
+    for (uint8_t k = 0; k < (rv->csr_vl % itr); k++) {                         \
+        assert((des + j) < 32);                                                \
+        if (ir->vm) {                                                          \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK))       \
+                  << (k << (SHIFT));                                           \
+        } else {                                                               \
+            ans = (vm & (0x1 << k))                                            \
+                      ? ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK)) \
+                            << (k << (SHIFT))                                  \
+                      : (tmp_d & (MASK << (k << (SHIFT))));                    \
+        }                                                                      \
+        rv->V[des + j][i] += ans;                                              \
+    }
+
+#define VV_LOOP(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)                \
+    uint32_t tmp_1 = rv->V[op1 + j][i];                                       \
+    uint32_t tmp_2 = rv->V[op2 + j][i];                                       \
+    uint32_t tmp_d = rv->V[des + j][i];                                       \
+    uint32_t ans = 0;                                                         \
+    rv->V[des + j][i] = 0;                                                    \
+    for (uint8_t k = 0; k < itr; k++) {                                       \
+        if (ir->vm) {                                                         \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))),                        \
+                            (tmp_2 >> (k << (SHIFT))))) &                     \
+                   (MASK))                                                    \
+                  << (k << (SHIFT));                                          \
+        } else {                                                              \
+            ans = (vm & (0x1 << k)) ? ((op_##op((tmp_1 >> (k << (SHIFT))),    \
+                                                (tmp_2 >> (k << (SHIFT))))) & \
+                                       (MASK))                                \
+                                          << (k << (SHIFT))                   \
+                                    : (tmp_d & (MASK << (k << (SHIFT))));     \
+        }                                                                     \
+        rv->V[des + j][i] += ans;                                             \
+    }
+
+#define VV_LOOP_LEFT(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)           \
+    uint32_t tmp_1 = rv->V[op1 + j][i];                                       \
+    uint32_t tmp_2 = rv->V[op2 + j][i];                                       \
+    uint32_t tmp_d = rv->V[des + j][i];                                       \
+    if (rv->csr_vl % itr) {                                                   \
+        rv->V[des + j][i] &= (0xFFFFFFFF << ((rv->csr_vl % itr) << SHIFT));   \
+    }                                                                         \
+    uint32_t ans = 0;                                                         \
+    for (uint8_t k = 0; k < (rv->csr_vl % itr); k++) {                        \
+        assert((des + j) < 32);                                               \
+        if (ir->vm) {                                                         \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))),                        \
+                            (tmp_2 >> (k << (SHIFT))))) &                     \
+                   (MASK))                                                    \
+                  << (k << (SHIFT));                                          \
+        } else {                                                              \
+            ans = (vm & (0x1 << k)) ? ((op_##op((tmp_1 >> (k << (SHIFT))),    \
+                                                (tmp_2 >> (k << (SHIFT))))) & \
+                                       (MASK))                                \
+                                          << (k << (SHIFT))                   \
+                                    : (tmp_d & (MASK << (k << (SHIFT))));     \
+        }                                                                     \
+        rv->V[des + j][i] += ans;                                             \
+    }
+
+#define VX_LOOP(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)                 \
+    uint32_t tmp_1 = rv->V[op1 + j][i];                                        \
+    uint32_t tmp_2 = rv->X[op2];                                               \
+    uint32_t tmp_d = rv->V[des + j][i];                                        \
+    uint32_t ans = 0;                                                          \
+    rv->V[des + j][i] = 0;                                                     \
+    for (uint8_t k = 0; k < itr; k++) {                                        \
+        if (ir->vm) {                                                          \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK))     \
+                  << (k << (SHIFT));                                           \
+        } else {                                                               \
+            ans =                                                              \
+                (vm & (0x1 << k))                                              \
+                    ? ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK)) \
+                          << (k << (SHIFT))                                    \
+                    : (tmp_d & (MASK << (k << (SHIFT))));                      \
+        }                                                                      \
+        rv->V[des + j][i] += ans;                                              \
+    }
+
+#define VX_LOOP_LEFT(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)            \
+    uint32_t tmp_1 = rv->V[op1 + j][i];                                        \
+    uint32_t tmp_2 = rv->X[op2];                                               \
+    uint32_t tmp_d = rv->V[des + j][i];                                        \
+    if (rv->csr_vl % itr) {                                                    \
+        rv->V[des + j][i] &= (0xFFFFFFFF << ((rv->csr_vl % itr) << SHIFT));    \
+    }                                                                          \
+    uint32_t ans = 0;                                                          \
+    for (uint8_t k = 0; k < (rv->csr_vl % itr); k++) {                         \
+        assert((des + j) < 32);                                                \
+        if (ir->vm) {                                                          \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK))     \
+                  << (k << (SHIFT));                                           \
+        } else {                                                               \
+            ans =                                                              \
+                (vm & (0x1 << k))                                              \
+                    ? ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK)) \
+                          << (k << (SHIFT))                                    \
+                    : (tmp_d & (MASK << (k << (SHIFT))));                      \
+        }                                                                      \
+        rv->V[des + j][i] += ans;                                              \
+    }
+
+#define sew_8b_handler(des, op1, op2, op, op_type)                             \
+    {                                                                          \
+        uint8_t __i = 0;                                                       \
+        uint8_t __j = 0;                                                       \
+        uint8_t __m = 0;                                                       \
+        uint32_t vm = rv->V[0][__m];                                           \
+        for (uint32_t __k = 0; (rv->csr_vl - __k) >= 4;) {                     \
+            __i %= VREG_U32_COUNT;                                             \
+            assert((des + __j) < 32);                                          \
+            op_type##_LOOP(des, op1, op2, op, 3, 0xFF, __i, __j, 4, vm);       \
+            __k += 4;                                                          \
+            __i++;                                                             \
+            /* If multiple of 16. In sew = 8, 16 * (sew=8) forms a 128b vector \
+               register */                                                     \
+            if (!(__k % (VREG_U32_COUNT << 2))) {                              \
+                __j++;                                                         \
+                __i = 0;                                                       \
+            }                                                                  \
+            vm >>= 4;                                                          \
+            if (!(__k % 32)) {                                                 \
+                __m++;                                                         \
+                vm = rv->V[0][__m];                                            \
+            }                                                                  \
+        }                                                                      \
+        op_type##_LOOP_LEFT(des, op1, op2, op, 3, 0xFF, __i, __j, 4, vm);      \
+    }
+
+#define sew_16b_handler(des, op1, op2, op, op_type)                         \
+    {                                                                       \
+        uint8_t __i = 0;                                                    \
+        uint8_t __j = 0;                                                    \
+        uint8_t __m = 0;                                                    \
+        uint32_t vm = rv->V[0][__m];                                        \
+        for (uint32_t __k = 0; (rv->csr_vl - __k) >= 2;) {                  \
+            __i %= VREG_U32_COUNT;                                          \
+            assert((des + __j) < 32);                                       \
+            op_type##_LOOP(des, op1, op2, op, 4, 0xFFFF, __i, __j, 2, vm);  \
+            __k += 2;                                                       \
+            __i++;                                                          \
+            if (!(__k % (VREG_U32_COUNT << 1))) {                           \
+                __j++;                                                      \
+                __i = 0;                                                    \
+            }                                                               \
+            vm >>= 2;                                                       \
+            if (!(__k % 32)) {                                              \
+                __m++;                                                      \
+                vm = rv->V[0][__m];                                         \
+            }                                                               \
+        }                                                                   \
+        op_type##_LOOP_LEFT(des, op1, op2, op, 4, 0xFFFF, __i, __j, 2, vm); \
+    }
+
+#define sew_32b_handler(des, op1, op2, op, op_type)                            \
+    {                                                                          \
+        uint8_t __i = 0;                                                       \
+        uint8_t __j = 0;                                                       \
+        uint32_t vm = rv->V[0][__i];                                           \
+        for (uint32_t __k = 0; rv->csr_vl > __k;) {                            \
+            __i %= VREG_U32_COUNT;                                             \
+            assert((des + __j) < 32);                                          \
+            op_type##_LOOP(des, op1, op2, op, 0, 0xFFFFFFFF, __i, __j, 1, vm); \
+            __k += 1;                                                          \
+            __i++;                                                             \
+            if (!(__k % (VREG_U32_COUNT))) {                                   \
+                __j++;                                                         \
+                __i = 0;                                                       \
+            }                                                                  \
+            vm >>= 1;                                                          \
+        }                                                                      \
+    }
+
+RVOP(
+    vle8_v,
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl - cnt >= 4;) {
+                i %= VREG_U32_COUNT;
+                /* Set illegal when trying to access vector register that is
+                 * larger then 31.
+                 */
+                assert(ir->vd + j < 32);
+                /* Process full 32-bit words */
+                rv->V[ir->vd + j][i] = 0;
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr);
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr + 1) << 8;
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr + 2) << 16;
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr + 3) << 24;
+                cnt += 4;
+                i++;
+
+                /* Move to next vector register after filling VLEN */
+                if (!(cnt % (VREG_U32_COUNT << 2))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+            /* Clear corresponding bits of eews */
+            if (rv->csr_vl % 4) {
+                rv->V[ir->vd + j][i] %= 0xFFFFFFFF << ((rv->csr_vl % 4) << 3);
+            }
+            /* Handle eews that is narrower then a word */
+            for (uint32_t cnt = 0; cnt < (rv->csr_vl % 4); cnt++) {
+                assert(ir->vd + j < 32); /* Illegal */
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_b(rv, addr + cnt)
+                                        << (cnt << 3);
+            }
+        }
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle16_v,
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl - cnt >= 2;) {
+                i %= VREG_U32_COUNT;
+                assert(ir->vd + j < 32);
+                /* Process full 32-bit words */
+                rv->V[ir->vd + j][i] = 0;
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_s(rv, addr);
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_s(rv, addr + 2) << 16;
+                cnt += 2;
+                i++;
+
+                /* Move to next vector register after filling VLEN */
+                if (!(cnt % (VREG_U32_COUNT << 1))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+            if (rv->csr_vl % 2) {
+                assert(ir->vd + j < 32); /* Illegal */
+                rv->V[ir->vd + j][i] |= rv->io.mem_read_s(rv, addr);
+            }
+        }
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle32_v,
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl > cnt;) {
+                i %= VREG_U32_COUNT;
+                assert(ir->vd + j < 32);
+                rv->V[ir->vd + j][i] = rv->io.mem_read_w(rv, addr);
+                cnt += 1;
+                i++;
+
+                if (!(cnt % VREG_U32_COUNT)) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+        }
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl1re8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl1re16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl1re32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl1re64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl2re8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl2re16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+RVOP(
+    vl2re32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl2re64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl4re8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl4re16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl4re32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl4re64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl8re8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl8re16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl8re32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vl8re64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlm_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vle64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e8ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e16ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e32ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg2e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg3e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg4e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg5e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg6e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg7e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlseg8e64ff_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg2ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg3ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg4ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg5ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg6ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg7ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg8ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg2ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg3ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg4ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg5ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg6ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg7ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg8ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg2ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg3ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg4ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg5ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg6ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg7ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg8ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg2ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg3ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg4ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg5ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg6ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg7ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vluxseg8ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlse8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlse16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlse32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlse64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg2e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg3e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg4e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg5e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg6e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg7e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg8e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg2e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg3e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg4e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg5e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg6e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg7e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg8e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg2e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg3e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg4e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg5e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg6e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg7e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg8e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg2e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg3e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg4e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg5e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg6e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg7e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vlsseg8e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg2ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg3ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg4ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg5ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg6ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg7ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg8ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg2ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg3ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg4ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg5ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg6ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg7ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg8ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg2ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg3ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg4ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg5ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg6ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg7ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg8ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg2ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg3ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg4ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg5ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg6ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg7ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vloxseg8ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vse8_v,
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl - cnt >= 4;) {
+                i %= VREG_U32_COUNT;
+                /* Set illegal when trying to access vector register that is
+                 * larger then 31.
+                 */
+                assert(ir->vs3 + j < 32);
+                uint32_t tmp = rv->V[ir->vs3 + j][i];
+                /* Process full 32-bit words */
+                rv->io.mem_write_b(rv, addr, (tmp) & 0xff);
+                rv->io.mem_write_b(rv, addr + 1, (tmp >> 8) & 0xff);
+                rv->io.mem_write_b(rv, addr + 2, (tmp >> 16) & 0xff);
+                rv->io.mem_write_b(rv, addr + 3, (tmp >> 24) & 0xff);
+                cnt += 4;
+                i++;
+
+                /* Move to next vector register after filling VLEN */
+                if (!(cnt % (VREG_U32_COUNT << 2))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+            /* Handle eews that is narrower then a word */
+            for (uint32_t cnt = 0; cnt < (rv->csr_vl % 4); cnt++) {
+                assert(ir->vs3 + j < 32); /* Illegal */
+                uint8_t tmp = (rv->V[ir->vs3 + j][i] >> (cnt << 3)) & 0xff;
+                rv->io.mem_write_b(rv, addr + cnt, tmp);
+            }
+        }
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vse16_v,
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl - cnt >= 2;) {
+                i %= VREG_U32_COUNT;
+                assert(ir->vs3 + j < 32);
+                uint32_t tmp = rv->V[ir->vs3 + j][i];
+                /* Process full 32-bit words */
+                rv->io.mem_write_s(rv, addr, (tmp) & 0xffff);
+                rv->io.mem_write_s(rv, addr + 2, (tmp >> 16) & 0xffff);
+                cnt += 2;
+                i++;
+
+                if (!(cnt % (VREG_U32_COUNT << 1))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+            if (rv->csr_vl % 2) {
+                rv->io.mem_write_s(rv, addr, rv->V[ir->vs3 + j][i] & 0xffff);
+            }
+        }
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vse32_v,
+    {
+        uint8_t sew = 8 << ((rv->csr_vtype >> 3) & 0b111);
+        uint32_t addr = rv->X[ir->rs1];
+
+        if (ir->eew > sew) {
+            /* Illegal */
+            rv->csr_vtype = 0x80000000;
+            rv->csr_vl = 0;
+            return true;
+        } else {
+            uint8_t i = 0;
+            uint8_t j = 0;
+            for (uint32_t cnt = 0; rv->csr_vl > cnt;) {
+                i %= VREG_U32_COUNT;
+                assert(ir->vs3 + j < 32);
+                rv->io.mem_write_w(rv, addr, rv->V[ir->vs3 + j][i]);
+                cnt += 1;
+                i++;
+
+                if (!(cnt % (VREG_U32_COUNT))) {
+                    j++;
+                    i = 0;
+                }
+                addr += 4;
+            }
+        }
+    },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vse64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg2e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg3e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg4e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg5e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg6e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg7e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg8e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg2e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg3e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg4e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg5e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg6e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg7e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg8e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg2e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg3e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg4e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg5e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg6e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg7e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg8e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg2e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg3e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg4e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg5e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg6e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg7e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsseg8e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vs1r_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vs2r_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vs4r_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vs8r_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsm_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg2ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg3ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg4ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg5ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg6ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg7ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg8ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg2ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg3ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg4ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg5ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg6ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg7ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg8ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg2ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg3ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg4ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg5ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg6ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg7ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg8ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg2ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg3ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg4ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg5ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg6ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg7ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsuxseg8ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsse8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsse16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsse32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsse64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg2e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg3e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg4e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg5e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg6e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg7e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg8e8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg2e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg3e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg4e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg5e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg6e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg7e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg8e16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg2e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg3e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg4e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg5e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg6e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg7e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg8e32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg2e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg3e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg4e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg5e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg6e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg7e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssseg8e64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg2ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg3ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg4ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg5ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg6ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg7ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg8ei8_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg2ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg3ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg4ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg5ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg6ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg7ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg8ei16_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg2ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg3ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg4ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg5ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg6ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg7ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg8ei32_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg2ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg3ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg4ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg5ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg6ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg7ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsoxseg8ei64_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#define op_add(a, b) ((a) + (b))
+RVOP(vadd_vv, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->vs1, add, VV)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vadd_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, add, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vadd_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, add, VI)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_add
+
+#define op_sub(a, b) ((a) - (b))
+RVOP(vsub_vv, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->vs1, sub, VV)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vsub_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, sub, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_sub
+
+#define op_rsub(a, b) ((b) - (a))
+RVOP(vrsub_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, rsub, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vrsub_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, rsub, VI)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_rsub
+
+RVOP(
+    vminu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vminu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmin_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmin_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmaxu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmaxu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmax_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmax_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#define op_and(a, b) ((a) & (b))
+RVOP(vand_vv, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->vs1, and, VV)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vand_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, and, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vand_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, and, VI)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_and
+
+#define op_or(a, b) ((a) | (b))
+RVOP(vor_vv, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->vs1, or, VV)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vor_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, or, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vor_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, or, VI)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_or
+
+#define op_xor(a, b) ((a) ^ (b))
+RVOP(vxor_vv, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->vs1, xor, VV)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vxor_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, xor, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vxor_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, xor, VI)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_xor
+
+RVOP(
+    vrgather_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrgather_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrgather_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslideup_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslideup_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrgatherei16_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslidedown_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslidedown_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vadc_vvm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vadc_vxm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vadc_vim,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadc_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadc_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsbc_vvm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsbc_vxm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsbc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsbc_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmerge_vvm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmerge_vxm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmerge_vim,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#define op_vmv(a, b) (((a) & 0) + (b))
+RVOP(vmv_v_v, {VECTOR_DISPATCH(ir->vd, 0, ir->vs1, vmv, VV)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vmv_v_x, {VECTOR_DISPATCH(ir->vd, 0, ir->rs1, vmv, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vmv_v_i, {VECTOR_DISPATCH(ir->vd, 0, ir->imm, vmv, VI)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_vmv
+
+RVOP(
+    vmseq_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmseq_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmseq_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsne_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsne_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsne_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsltu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsltu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmslt_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmslt_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsleu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsleu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsleu_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsle_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsle_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsle_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsgtu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsgtu_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsgt_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsgt_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsaddu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsaddu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsaddu_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsadd_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssubu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssubu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#define op_sll(a, b) \
+    ((a) << ((b) & ((8 << ((rv->csr_vtype >> 3) & 0b111)) - 1)))
+RVOP(vsll_vv, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->vs1, sll, VV)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vsll_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, sll, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vsll_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, sll, VI)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_sll
+
+RVOP(
+    vsmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsmul_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsrl_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsrl_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsrl_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsra_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsra_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vsra_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssrl_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssrl_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssrl_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssra_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssra_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vssra_vi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsrl_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsrl_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsrl_wi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsra_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsra_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnsra_wi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclipu_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclipu_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclipu_wi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclip_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclip_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnclip_wi,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwredsumu_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwredsum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+
+
+RVOP(
+    vredsum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredand_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredor_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredxor_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredminu_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredmin_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredmaxu_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vredmax_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vaaddu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vaaddu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vaadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vaadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vasubu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vasubu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vasub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vasub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslide1up_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vslide1down_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vcompress_vm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmandn_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmand_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmor_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmxor_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmorn_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmnand_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmnor_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmxnor_mm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vdivu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vdivu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vdiv_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vdiv_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vremu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vremu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrem_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vrem_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulhu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulhu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#define op_mul(a, b) ((a) * (b))
+RVOP(vmul_vv, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->vs1, mul, VV)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+
+RVOP(vmul_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, mul, VX)}, GEN({
+         assert; /* FIXME: Implement */
+     }))
+#undef op_mul
+
+RVOP(
+    vmulhsu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulhsu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulh_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmulh_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnmsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnmsub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmacc_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vnmsac_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwaddu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwaddu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwadd_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsubu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsubu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsub_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwaddu_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwaddu_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwadd_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwadd_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsubu_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsubu_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsub_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwsub_wx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmulu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmulu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmulsu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmulsu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmul_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmacc_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccus_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccsu_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vwmaccsu_vx,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmv_s_x,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmv_x_s,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vcpop_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfirst_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsbf_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsof_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmsif_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    viota_m,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vid_v,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+
+RVOP(
+    vfadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfadd_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfredusum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfredosum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmin_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmin_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfredmin_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmax_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmax_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfredmax_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnj_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnj_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnjn_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnjn_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnjx_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfsgnjx_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfslide1up_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfslide1down_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmerge_vfm,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmv_v_f,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfeq_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfeq_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfle_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfle_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmflt_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmflt_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfne_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfne_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfgt_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vmfge_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfdiv_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfdiv_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfrdiv_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmul_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfrsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmadd_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmadd_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmacc_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmacc_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfmsac_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfnmsac_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwadd_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwadd_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwredusum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwsub_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwsub_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwredosum_vs,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwadd_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwadd_wf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwsub_wv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwsub_wf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmul_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmul_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmacc_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwnmacc_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwnmacc_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwmsac_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwnmsac_vv,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+RVOP(
+    vfwnmsac_vf,
+    { V_NOP; },
+    GEN({
+        assert; /* FIXME: Implement */
+    }))
+
+#endif

@@ -118,5 +118,10 @@
 #define RV32_FEATURE_ARCH_TEST 0
 #endif
 
+/* Standard Extension for Vector Instructions */
+#ifndef RV32_FEATURE_EXT_V
+#define RV32_FEATURE_EXT_V 0
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x

@@ -80,12 +80,8 @@ jobs:
             make artifact
             make ENABLE_SYSTEM=1 artifact
             make ENABLE_ARCH_TEST=1 artifact
-            # Hack Cloudflare 403 Forbidden on GitHub Runner for Doom artifact download
-            wget --header="User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0" \
-                 --header="Referer: https://www.doomworld.com/" \
-                 --header="Accept-Language: en-US,en;q=0.9" \
-                 -O build/shareware_doom_iwad.zip \
-                 "https://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip"
+            # get from rv32emu-prebuilt
+            wget -O build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
             unzip -d build/ build/shareware_doom_iwad.zip
       if: ${{ always() }}
     - name: default build using emcc
@@ -394,12 +390,8 @@ jobs:
                                      | head -n 1 \
                                      | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
              make LATEST_RELEASE=$LATEST_RELEASE ENABLE_ARCH_TEST=1 artifact
-             # Hack Cloudflare 403 Forbidden on GitHub Runner for Doom artifact download
-             wget --header="User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15" \
-                  --header="Referer: https://www.doomworld.com/" \
-                  --header="Accept-Language: en-US,en;q=0.9" \
-                  -O build/shareware_doom_iwad.zip \
-                  "https://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip"
+             # get from rv32emu-prebuilt
+             wget -O build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
              unzip -d build/ build/shareware_doom_iwad.zip
        if: ${{ always() }}
      - name: default build using emcc

@@ -286,8 +286,8 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 
 include mk/external.mk
 include mk/artifact.mk
-include mk/wasm.mk
 include mk/system.mk
+include mk/wasm.mk
 
 all: config $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
 

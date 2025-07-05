@@ -52,7 +52,11 @@ static void stdout_callback(log_event_t *ev)
             ev->file, ev->line);
 #endif /* RV32_HAS(LOG_COLOR) */
     vfprintf(ev->udata, ev->fmt, ev->ap);
+#if defined(__EMSCRIPTEN__)
+    fprintf(ev->udata, "\r\n");
+#else
     fprintf(ev->udata, "\n");
+#endif
     fflush(ev->udata);
 }
 

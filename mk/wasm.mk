@@ -56,7 +56,7 @@ CFLAGS_emcc += --embed-file build/jit-bf.elf@/jit-bf.elf \
 endif
 
 
-$(OUT)/elf_list.js: tools/gen-elf-list-js.py
+$(OUT)/elf_list.js: artifact tools/gen-elf-list-js.py
 	$(Q)tools/gen-elf-list-js.py > $@
 
 # used to download all dependencies of elf executable and bundle into single wasm

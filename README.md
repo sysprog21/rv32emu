@@ -378,16 +378,25 @@ $ source ~/emsdk/emsdk_env.sh
 Change the Emscripten SDK environment path if necessary.
 
 At this point, you can build and start a web server service to serve WebAssembly by running:
+- user space emulation:
 ```shell
-$ make CC=emcc start-web
+$ make CC=emcc start-web -j8
+```
+- system emulation:
+```shell
+$ make CC=emcc start-web ENABLE_SYSTEM=1 INITRD_SIZE=32 -j8
 ```
 You would see the server's IP:PORT in your terminal. Copy and paste it to the browsers and
 you just access the index page of `rv32emu`.
 
-You would see a dropdown menu which you can use to select the ELF executable. Select one and
-click the Run button to run it.
+You would see a dropdown menu which you can use to select the ELF executable for user space emulation, select one and
+click the 'Run' button to run it. For system emulation, click the 'Run Linux' button to boot Linux.
 
-Alternatively, you may want to view a hosted `rv32emu` [demo page](https://sysprog21.github.io/rv32emu-demo/) since building takes some time.
+Alternatively, you may want to view a hosted `rv32emu` since building takes some time.
+- [user space emulation demo page](https://sysprog21.github.io/rv32emu-demo/)
+- [system emulation demo page](https://sysprog21.github.io/rv32emu-demo/system)
+
+Both pages can be easily switched using the navigation button.
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.

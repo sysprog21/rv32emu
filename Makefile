@@ -286,25 +286,32 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 
 include mk/external.mk
 include mk/artifact.mk
-include mk/wasm.mk
 include mk/system.mk
+include mk/wasm.mk
 
 all: config $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
 
 OBJS := \
-	map.o \
-	utils.o \
-	decode.o \
-	io.o \
-	syscall.o \
-	emulate.o \
-	riscv.o \
-	log.o \
-	elf.o \
-	cache.o \
-	mpool.o \
-	$(OBJS_EXT) \
-	main.o
+    map.o \
+    utils.o \
+    decode.o \
+    io.o \
+    syscall.o
+
+# em_runtime.o should prior to emulate.o, otherwise wasm-ld fails to link
+ifeq ($(CC_IS_EMCC), 1)
+OBJS += em_runtime.o
+endif
+
+OBJS += \
+    emulate.o \
+    riscv.o \
+    log.o \
+    elf.o \
+    cache.o \
+    mpool.o \
+    $(OBJS_EXT) \
+    main.o
 
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps += $(OBJS:%.o=%.o.d) # mk/system.mk includes prior this line, so declare deps at there

@@ -11,6 +11,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#if defined(__EMSCRIPTEN__)
+#include "em_runtime.h"
+#endif
+
 #include "uart.h"
 /* Emulate 8250 (plain, without loopback mode support) */
 
@@ -33,15 +37,42 @@ void u8250_update_interrupts(u8250_state_t *uart)
         uart->current_intr = ilog2(uart->pending_intrs);
 }
 
+#if defined(__EMSCRIPTEN__)
+#define INPUT_BUF_MAX_CAP 16
+static char input_buf[INPUT_BUF_MAX_CAP];
+static uint8_t input_buf_start = 0;
+uint8_t input_buf_size = 0;
+
+char *get_input_buf()
+{
+    return input_buf;
+}
+
+uint8_t get_input_buf_cap()
+{
+    return INPUT_BUF_MAX_CAP;
+}
+
+void set_input_buf_size(uint8_t size)
+{
+    input_buf_size = size;
+}
+#endif
+
 void u8250_check_ready(u8250_state_t *uart)
 {
     if (uart->in_ready)
         return;
 
+#if defined(__EMSCRIPTEN__)
+    if (input_buf_size)
+        uart->in_ready = true;
+#else
     struct pollfd pfd = {uart->in_fd, POLLIN, 0};
     poll(&pfd, 1, 0);
     if (pfd.revents & POLLIN)
         uart->in_ready = true;
+#endif
 }
 
 static void u8250_handle_out(u8250_state_t *uart, uint8_t value)
@@ -57,12 +88,19 @@ static uint8_t u8250_handle_in(u8250_state_t *uart)
     if (!uart->in_ready)
         return value;
 
+#if defined(__EMSCRIPTEN__)
+    value = (uint8_t) input_buf[input_buf_start];
+    input_buf_start++;
+    if (--input_buf_size == 0)
+        input_buf_start = 0;
+#else
     if (read(uart->in_fd, &value, 1) < 0)
         rv_log_error("Failed to read UART input: %s", strerror(errno));
+#endif
     uart->in_ready = false;
-    u8250_check_ready(uart);
 
-    if (value == 1) {           /* start of heading (Ctrl-a) */
+    if (value == 1) { /* start of heading (Ctrl-a) */
+        u8250_check_ready(uart);
         if (getchar() == 120) { /* keyboard x */
             rv_log_info("RISC-V emulator is destroyed");
             exit(EXIT_SUCCESS);

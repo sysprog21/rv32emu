@@ -121,6 +121,10 @@ canvas.emscripten { border: 0px none; background-color: black; }
     </select>
     <button id="runButton">Run</button>
 
+    <button id="toSysEmuButton">
+      🚀 Navigate to System Emulation
+    </button>
+
     <div class="emscripten">
       <progress value="0" max="100" id="progress" hidden=1></progress>
     </div>
@@ -137,6 +141,13 @@ canvas.emscripten { border: 0px none; background-color: black; }
       var spinnerElement = document.getElementById('spinner');
       var runButton = document.getElementById("runButton");
       runButton.addEventListener("click", runButtonClickHandler);
+      var toSysEmuButton = document.getElementById("toSysEmuButton");
+      toSysEmuButton.addEventListener("click", toSysEmuButtonClickHandler);
+
+      function toSysEmuButtonClickHandler() {
+        console.log("Navigate to system emulation");
+        window.location.href = "./system"
+      }
 
       var elfDropdown = document.getElementById("elfDropdown");
       for (var i = 0; i < elfFiles.length; i++) {
@@ -163,11 +174,7 @@ canvas.emscripten { border: 0px none; background-color: black; }
           element.scrollTop = element.scrollHeight;
         }
         Module._indirect_rv_halt();
-        /* important to add some delay for waiting cancellation of main loop before next run */
-        /* Otherwise, get error: only one main loop can be existed */
-        setTimeout(() => {
-          Module['onRuntimeInitialized'](target_elf);
-        }, 1000);
+        Module['run_user'](target_elf);
       }
 
       var Module = {

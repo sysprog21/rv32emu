@@ -10,10 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
-
 #if RV32_HAS(EXT_F)
 #include <math.h>
 #include "softfp.h"
@@ -21,6 +17,10 @@
 
 #if RV32_HAS(GDBSTUB)
 extern struct target_ops gdbstub_ops;
+#endif
+
+#if defined(__EMSCRIPTEN__)
+#include "em_runtime.h"
 #endif
 
 #include "decode.h"
@@ -1009,6 +1009,9 @@ static void rv_check_interrupt(riscv_t *rv)
     if (peripheral_update_ctr-- == 0) {
         peripheral_update_ctr = 64;
 
+#if defined(__EMSCRIPTEN__)
+    escape_seq:
+#endif
         u8250_check_ready(PRIV(rv)->uart);
         if (PRIV(rv)->uart->in_ready)
             emu_update_uart_interrupts(rv);
@@ -1031,6 +1034,11 @@ static void rv_check_interrupt(riscv_t *rv)
             break;
         case (SUPERVISOR_EXTERNAL_INTR & 0xf):
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
+#if defined(__EMSCRIPTEN__)
+            /* escape sequence has more than 1 byte */
+            if (input_buf_size)
+                goto escape_seq;
+#endif
             break;
         default:
             break;
@@ -1174,6 +1182,7 @@ void rv_step(void *arg)
         emscripten_cancel_main_loop();
         rv_delete(rv); /* clean up and reuse memory */
         rv_log_info("RISC-V emulator is destroyed");
+        enable_run_button();
     }
 #endif
 }

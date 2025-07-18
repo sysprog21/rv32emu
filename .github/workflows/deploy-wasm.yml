@@ -92,6 +92,7 @@ jobs:
             mv /tmp/rv32emu-system-demo/rv32emu.wasm ./system
             mv /tmp/rv32emu-system-demo/rv32emu.worker.js ./system
       - name: Commit files
+        id: commit
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
@@ -99,11 +100,14 @@ jobs:
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
             git config --local user.name "github-actions[bot]"
             git add system/
-            git commit -m "Add changes to system emulation"
+            if git diff --cached --quiet; then
+              echo "committed=false" >> $GITHUB_OUTPUT
+            else
+              git commit -m "Add changes to system emulation"
+              echo "committed=true" >> $GITHUB_OUTPUT
+            fi
       - name: Push changes
-        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
-            github.event_name == 'workflow_dispatch' ||
-            (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
+        if: steps.commit.outputs.committed == 'true'
         uses: ad-m/github-push-action@master
         with:
           repository: sysprog21/rv32emu-demo
@@ -184,6 +188,7 @@ jobs:
             mv /tmp/rv32emu-demo/rv32emu.wasm .
             mv /tmp/rv32emu-demo/rv32emu.worker.js .
       - name: Commit files
+        id: commit
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm') }}
@@ -191,11 +196,14 @@ jobs:
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
             git config --local user.name "github-actions[bot]"
             git add --all
-            git commit -m "Add changes to user emulation"
+            if git diff --cached --quiet; then
+              echo "committed=false" >> $GITHUB_OUTPUT
+            else
+              git commit -m "Add changes to user emulation"
+              echo "committed=true" >> $GITHUB_OUTPUT
+            fi
       - name: Push changes
-        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
-            github.event_name == 'workflow_dispatch' ||
-            (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm') }}
+        if: steps.commit.outputs.committed == 'true'
         uses: ad-m/github-push-action@master
         with:
           repository: sysprog21/rv32emu-demo

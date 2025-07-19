@@ -30,6 +30,7 @@ Features:
 * Newlib-compatible system-call layer for standalone programs
 * Minimal system emulation capable of booting an RV32 Linux kernel and running user-space binaries
 * Experimental SDL-based display/event/audio system calls for running video games
+* WebAssembly build for user-mode and system emulation with SDL graphics and audio in modern browsers
 * Remote debugging through the GDB Remote Serial Protocol
 * Tiered JIT compilation for performance boost while maintaining a small footprint
 
@@ -104,10 +105,16 @@ Mount the virtual block device and create a test file after booting, note that r
 ```
 Reboot and re-mount the virtual block device, the written file should remain existing.
 
+#### Customize bootargs
+Build and run with customized bootargs to boot the guestOS. Otherwise, the default bootargs defined in `src/devices/minimal.dts` will be used.
+```shell
+$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> [-b <bootargs>]
+```
+
 #### Build Linux image
 An automated build script is provided to compile the RISC-V cross-compiler, Busybox, and Linux kernel from source. Please note that it only supports the Linux host environment. It can be found at tools/build-linux-image.sh.
 ```shell
-$ make build-linux-img
+$ make build-linux-image
 ```
 
 ### Verify with prebuilt RISC-V ELF files
@@ -378,7 +385,7 @@ $ source ~/emsdk/emsdk_env.sh
 Change the Emscripten SDK environment path if necessary.
 
 At this point, you can build and start a web server service to serve WebAssembly by running:
-- user space emulation:
+- user-mode emulation:
 ```shell
 $ make CC=emcc start-web -j8
 ```
@@ -389,11 +396,11 @@ $ make CC=emcc start-web ENABLE_SYSTEM=1 INITRD_SIZE=32 -j8
 You would see the server's IP:PORT in your terminal. Copy and paste it to the browsers and
 you just access the index page of `rv32emu`.
 
-You would see a dropdown menu which you can use to select the ELF executable for user space emulation, select one and
+You would see a dropdown menu which you can use to select the ELF executable for user-mode emulation, select one and
 click the 'Run' button to run it. For system emulation, click the 'Run Linux' button to boot Linux.
 
 Alternatively, you may want to view a hosted `rv32emu` since building takes some time.
-- [user space emulation demo page](https://sysprog21.github.io/rv32emu-demo/)
+- [user-mode emulation demo page](https://sysprog21.github.io/rv32emu-demo/)
 - [system emulation demo page](https://sysprog21.github.io/rv32emu-demo/system)
 
 Both pages can be easily switched using the navigation button.

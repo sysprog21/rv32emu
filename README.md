@@ -105,6 +105,12 @@ Mount the virtual block device and create a test file after booting, note that r
 ```
 Reboot and re-mount the virtual block device, the written file should remain existing.
 
+To specify multiple virtual block devices, pass multiple `-x vblk` options when launching the emulator. Each option can point to either a disk image or a hostOS block device, with optional read-only mode. For example:
+```shell
+$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -x vblk:disk.img -x vblk:/dev/loop22,readonly
+```
+Note that the /dev/vdx device order in guestOS is assigned in reverse: the first `-x vblk` argument corresponds to the device with the highest letter, while subsequent arguments receive lower-lettered device names.
+
 #### Customize bootargs
 Build and run with customized bootargs to boot the guestOS. Otherwise, the default bootargs defined in `src/devices/minimal.dts` will be used.
 ```shell

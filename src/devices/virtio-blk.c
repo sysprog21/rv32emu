@@ -32,9 +32,6 @@
 
 #define DISK_BLK_SIZE 512
 
-/* TODO: Enable mutiple virtio-blk devices. */
-#define VBLK_DEV_CNT_MAX 1
-
 #define VBLK_FEATURES_0 0
 #define VBLK_FEATURES_1 1 /* VIRTIO_F_VERSION_1 */
 #define VBLK_QUEUE_NUM_MAX 1024
@@ -80,9 +77,6 @@ PACKED(struct vblk_req_header {
     uint64_t sector;
     uint8_t status;
 });
-
-static struct virtio_blk_config vblk_configs[VBLK_DEV_CNT_MAX];
-static int vblk_dev_cnt = 0;
 
 static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
 {
@@ -401,20 +395,16 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
                           char *disk_file,
                           bool readonly)
 {
-    if (vblk_dev_cnt >= VBLK_DEV_CNT_MAX) {
-        rv_log_error(
-            "Exceeded the number of virtio-blk devices that can be allocated");
-        exit(EXIT_FAILURE);
-    }
-
     /*
      * For mmap_fallback, if vblk is not specified, disk_fd should remain -1 and
      * no fsync should be performed on exit.
      */
+
     vblk->disk_fd = -1;
 
     /* Allocate memory for the private member */
-    vblk->priv = &vblk_configs[vblk_dev_cnt++];
+    vblk->priv = calloc(1, sizeof(struct virtio_blk_config));
+    assert(vblk->priv);
 
     /* No disk image is provided */
     if (!disk_file) {
@@ -549,5 +539,6 @@ void vblk_delete(virtio_blk_state_t *vblk)
     else
         munmap(vblk->disk, VBLK_PRIV(vblk)->disk_size);
 #endif
+    free(vblk->priv);
     free(vblk);
 }

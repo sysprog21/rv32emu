@@ -76,8 +76,7 @@ struct virtq_desc {
     uint16_t next;
 };
 
-#define IRQ_VBLK_SHIFT 3
-#define IRQ_VBLK_BIT (1 << IRQ_VBLK_SHIFT)
+#define IRQ_VBLK_BIT(base, i) (1 << (base + i))
 
 typedef struct {
     uint32_t queue_num;

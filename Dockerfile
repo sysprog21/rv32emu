@@ -10,7 +10,7 @@ COPY . .
 RUN make
 RUN make tool
 
-FROM alpine:3.19 AS final
+FROM alpine:3.21 AS final
 
 # copy in elf files
 COPY ./build/*.elf /home/root/rv32emu/build/

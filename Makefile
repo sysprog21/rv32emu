@@ -115,6 +115,9 @@ ENABLE_EXT_F ?= 1
 $(call set-feature, EXT_F)
 ifeq ($(call has, EXT_F), 1)
 AR := ar
+ifeq ("$(CC_IS_CLANG)", "1")
+AR = llvm-ar
+endif
 ifeq ("$(CC_IS_EMCC)", "1")
 AR = emar
 endif

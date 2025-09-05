@@ -66,10 +66,14 @@
             clock-frequency = <5000000>; /* the baudrate divisor is ignored */
         };
 
-        blk0: virtio@4200000 {
+        /*
+         * Virtio block example subnode
+         * The actual subnode are generated dynamically depends on the CLI -x vblk option
+         */
+        /*blk0: virtio@4100000 {
             compatible = "virtio,mmio";
-            reg = <0x4200000 0x200>;
-            interrupts = <3>;
-        };
+            reg = <0x4100000 0x200>;
+            interrupts = <2>;
+        };*/
     };
 };

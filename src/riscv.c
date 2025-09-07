@@ -318,10 +318,10 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         node = fdt_path_offset(dtb_buf, "/chosen");
         assert(node > 0);
 
-        len = strlen(bootargs) + 1;
-        buf = malloc(len);
+        len = strlen(bootargs);
+        buf = malloc(len + 1);
         assert(buf);
-        memcpy(buf, bootargs, len - 1);
+        memcpy(buf, bootargs, len);
         buf[len] = 0;
         err = fdt_setprop(dtb_buf, node, "bootargs", buf, len + 1);
         if (err == -FDT_ERR_NOSPACE) {

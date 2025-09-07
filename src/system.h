@@ -54,11 +54,11 @@ enum SUPPORTED_MMIO {
             break;                                                               \
         case MMIO_VIRTIOBLK:                                                     \
             IIF(rw)( /* read */                                                  \
-                mmio_read_val = virtio_blk_read(PRIV(rv)->vblk, addr & 0xFFFFF); \
+                mmio_read_val = virtio_blk_read(PRIV(rv)->vblk_curr, addr & 0xFFFFF); \
                 emu_update_vblk_interrupts(rv);                                  \
                 return mmio_read_val;                                            \
                 ,    /* write */                                                 \
-                virtio_blk_write(PRIV(rv)->vblk, addr & 0xFFFFF, val);           \
+                virtio_blk_write(PRIV(rv)->vblk_curr, addr & 0xFFFFF, val);           \
                 emu_update_vblk_interrupts(rv);                                  \
                 return;                                                          \
             )                                                                    \
@@ -69,49 +69,59 @@ enum SUPPORTED_MMIO {
     }
 /* clang-format on */
 
-#define MMIO_READ()                                         \
-    do {                                                    \
-        uint32_t mmio_read_val;                             \
-        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */ \
-            /* 256 regions of 1MiB */                       \
-            switch ((addr >> 20) & MASK(8)) {               \
-            case 0x0:                                       \
-            case 0x2: /* PLIC (0 - 0x3F) */                 \
-                MMIO_OP(MMIO_PLIC, MMIO_R);                 \
-                break;                                      \
-            case 0x40: /* UART */                           \
-                MMIO_OP(MMIO_UART, MMIO_R);                 \
-                break;                                      \
-            case 0x42: /* Virtio-blk */                     \
-                MMIO_OP(MMIO_VIRTIOBLK, MMIO_R);            \
-                break;                                      \
-            default:                                        \
-                __UNREACHABLE;                              \
-                break;                                      \
-            }                                               \
-        }                                                   \
+#define MMIO_READ()                                                   \
+    do {                                                              \
+        uint32_t mmio_read_val;                                       \
+        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */           \
+            /* 256 regions of 1MiB */                                 \
+            uint32_t hi = (addr >> 20) & MASK(8);                     \
+            if (hi >= PRIV(rv)->vblk_mmio_base_hi &&                  \
+                hi <= PRIV(rv)->vblk_mmio_max_hi) {                   \
+                PRIV(rv)->vblk_curr =                                 \
+                    PRIV(rv)->vblk[hi - PRIV(rv)->vblk_mmio_base_hi]; \
+                MMIO_OP(MMIO_VIRTIOBLK, MMIO_R);                      \
+            } else {                                                  \
+                switch (hi) {                                         \
+                case 0x0:                                             \
+                case 0x2: /* PLIC (0 - 0x3F) */                       \
+                    MMIO_OP(MMIO_PLIC, MMIO_R);                       \
+                    break;                                            \
+                case 0x40: /* UART */                                 \
+                    MMIO_OP(MMIO_UART, MMIO_R);                       \
+                    break;                                            \
+                default:                                              \
+                    __UNREACHABLE;                                    \
+                    break;                                            \
+                }                                                     \
+            }                                                         \
+        }                                                             \
     } while (0)
 
-#define MMIO_WRITE()                                        \
-    do {                                                    \
-        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */ \
-            /* 256 regions of 1MiB */                       \
-            switch ((addr >> 20) & MASK(8)) {               \
-            case 0x0:                                       \
-            case 0x2: /* PLIC (0 - 0x3F) */                 \
-                MMIO_OP(MMIO_PLIC, MMIO_W);                 \
-                break;                                      \
-            case 0x40: /* UART */                           \
-                MMIO_OP(MMIO_UART, MMIO_W);                 \
-                break;                                      \
-            case 0x42: /* Virtio-blk */                     \
-                MMIO_OP(MMIO_VIRTIOBLK, MMIO_W);            \
-                break;                                      \
-            default:                                        \
-                __UNREACHABLE;                              \
-                break;                                      \
-            }                                               \
-        }                                                   \
+#define MMIO_WRITE()                                                  \
+    do {                                                              \
+        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */           \
+            /* 256 regions of 1MiB */                                 \
+            uint32_t hi = (addr >> 20) & MASK(8);                     \
+            if (hi >= PRIV(rv)->vblk_mmio_base_hi &&                  \
+                hi <= PRIV(rv)->vblk_mmio_max_hi) {                   \
+                PRIV(rv)->vblk_curr =                                 \
+                    PRIV(rv)->vblk[hi - PRIV(rv)->vblk_mmio_base_hi]; \
+                MMIO_OP(MMIO_VIRTIOBLK, MMIO_W);                      \
+            } else {                                                  \
+                switch (hi) {                                         \
+                case 0x0:                                             \
+                case 0x2: /* PLIC (0 - 0x3F) */                       \
+                    MMIO_OP(MMIO_PLIC, MMIO_W);                       \
+                    break;                                            \
+                case 0x40: /* UART */                                 \
+                    MMIO_OP(MMIO_UART, MMIO_W);                       \
+                    break;                                            \
+                default:                                              \
+                    __UNREACHABLE;                                    \
+                    break;                                            \
+                }                                                     \
+            }                                                         \
+        }                                                             \
     } while (0)
 
 void emu_update_uart_interrupts(riscv_t *rv);

@@ -293,44 +293,109 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
 {
 #include "minimal_dtb.h"
     char *bootargs = attr->data.system.bootargs;
-    char *vblk = attr->data.system.vblk_device;
+    char **vblk = attr->data.system.vblk_device;
     char *blob = *ram_loc;
     char *buf;
     size_t len;
     int node, err;
     int totalsize;
 
-    memcpy(blob, minimal, sizeof(minimal));
+#define DTB_EXPAND_SIZE 1024 /* or more if needed */
+
+    /* Allocate enough memory for DTB + extra room */
+    size_t minimal_len = ARRAY_SIZE(minimal);
+    void *dtb_buf = calloc(minimal_len + DTB_EXPAND_SIZE, sizeof(uint8_t));
+    assert(dtb_buf);
+
+    /* Expand it to a usable DTB blob */
+    err = fdt_open_into(minimal, dtb_buf, minimal_len + DTB_EXPAND_SIZE);
+    if (err < 0) {
+        rv_log_error("fdt_open_into fails\n");
+        exit(EXIT_FAILURE);
+    }
 
     if (bootargs) {
-        node = fdt_path_offset(blob, "/chosen");
+        node = fdt_path_offset(dtb_buf, "/chosen");
         assert(node > 0);
 
-        len = strlen(bootargs) + 1;
-        buf = malloc(len);
+        len = strlen(bootargs);
+        buf = malloc(len + 1);
         assert(buf);
-        memcpy(buf, bootargs, len - 1);
+        memcpy(buf, bootargs, len);
         buf[len] = 0;
-        err = fdt_setprop(blob, node, "bootargs", buf, len + 1);
+        err = fdt_setprop(dtb_buf, node, "bootargs", buf, len + 1);
         if (err == -FDT_ERR_NOSPACE) {
-            blob = realloc_property(blob, node, "bootargs", len);
-            err = fdt_setprop(blob, node, "bootargs", buf, len);
+            dtb_buf = realloc_property(dtb_buf, node, "bootargs", len);
+            err = fdt_setprop(dtb_buf, node, "bootargs", buf, len);
         }
         free(buf);
         assert(!err);
     }
 
-    /* remove the vblk node from soc if it is not specified */
-    if (!vblk) {
-        int subnode;
-        node = fdt_path_offset(blob, "/soc@F0000000");
+    if (vblk) {
+        int node = fdt_path_offset(dtb_buf, "/soc@F0000000");
         assert(node >= 0);
 
-        subnode = fdt_subnode_offset(blob, node, "virtio@4200000");
-        assert(subnode >= 0);
+        uint32_t base_addr = 0x4000000;
+        uint32_t addr_offset = 0x100000;
+        uint32_t size = 0x200;
 
-        assert(fdt_del_node(blob, subnode) == 0);
+        uint32_t next_addr = base_addr;
+        uint32_t next_irq = 1;
+
+        /* scan existing nodes to get next addr and irq */
+        int subnode;
+        fdt_for_each_subnode(subnode, dtb_buf, node)
+        {
+            const char *name = fdt_get_name(dtb_buf, subnode, NULL);
+            assert(name);
+
+            uint32_t addr = strtoul(name + 7, NULL, 16);
+            if (addr == next_addr)
+                next_addr = addr + addr_offset;
+
+            const fdt32_t *irq_prop =
+                fdt_getprop(dtb_buf, subnode, "interrupts", NULL);
+            if (irq_prop) {
+                uint32_t irq = fdt32_to_cpu(*irq_prop);
+                if (irq == next_irq)
+                    next_irq = irq + 1;
+            }
+        }
+        /* set IRQ for virtio block, see devices/virtio.h */
+        attr->vblk_irq_base = next_irq;
+
+        /* adding new virtio block nodes */
+        for (int i = 0; i < attr->vblk_cnt; i++) {
+            uint32_t new_addr = next_addr + i * addr_offset;
+            uint32_t new_irq = next_irq + i;
+
+            char node_name[32];
+            snprintf(node_name, sizeof(node_name), "virtio@%x", new_addr);
+
+            int subnode = fdt_add_subnode(dtb_buf, node, node_name);
+            if (subnode == -FDT_ERR_NOSPACE) {
+                rv_log_warn("add subnode no space!\n");
+            }
+            assert(subnode >= 0);
+
+            /* compatible = "virtio,mmio" */
+            assert(fdt_setprop_string(dtb_buf, subnode, "compatible",
+                                      "virtio,mmio") == 0);
+
+            /* reg = <new_addr size> */
+            uint32_t reg[2] = {cpu_to_fdt32(new_addr), cpu_to_fdt32(size)};
+            assert(fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)) == 0);
+
+            /* interrupts = <new_irq> */
+            uint32_t irq = cpu_to_fdt32(new_irq);
+            assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
+                               sizeof(irq)) == 0);
+        }
     }
+
+    memcpy(blob, dtb_buf, minimal_len + DTB_EXPAND_SIZE);
+    free(dtb_buf);
 
     totalsize = fdt_totalsize(blob);
     *ram_loc += totalsize;
@@ -406,28 +471,36 @@ static void rv_fsync_device()
      *
      * vblk is optional, so it could be NULL
      */
-    if (attr->vblk) {
-        if (attr->vblk->disk_fd >= 3) {
-            if (attr->vblk->device_features & VIRTIO_BLK_F_RO) /* readonly */
-                goto end;
+    if (attr->vblk_cnt) {
+        for (int i = 0; i < attr->vblk_cnt; i++) {
+            virtio_blk_state_t *vblk = attr->vblk[i];
+            if (vblk->disk_fd >= 3) {
+                if (vblk->device_features & VIRTIO_BLK_F_RO) /* readonly */
+                    goto end;
 
-            if (pwrite(attr->vblk->disk_fd, attr->vblk->disk,
-                       attr->vblk->disk_size, 0) == -1) {
-                rv_log_error("pwrite block device failed: %s", strerror(errno));
-                return;
+                if (pwrite(vblk->disk_fd, vblk->disk, vblk->disk_size, 0) ==
+                    -1) {
+                    rv_log_error("pwrite block device failed: %s",
+                                 strerror(errno));
+                    return;
+                }
+
+                if (fsync(vblk->disk_fd) == -1) {
+                    rv_log_error("fsync block device failed: %s",
+                                 strerror(errno));
+                    return;
+                }
+                rv_log_info("Sync block device OK");
+
+            end:
+                close(vblk->disk_fd);
             }
 
-            if (fsync(attr->vblk->disk_fd) == -1) {
-                rv_log_error("fsync block device failed: %s", strerror(errno));
-                return;
-            }
-            rv_log_info("Sync block device OK");
-
-        end:
-            close(attr->vblk->disk_fd);
+            vblk_delete(vblk);
         }
 
-        vblk_delete(attr->vblk);
+        free(attr->vblk);
+        free(attr->disk);
     }
 }
 #endif /* RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER) */
@@ -548,6 +621,9 @@ riscv_t *rv_create(riscv_user_t rv_attr)
      * *----------------*----------------*-------*
      */
 
+    /* load_dtb needs the count to add the virtio block subnode dynamically */
+    attr->vblk_cnt = attr->data.system.vblk_device_cnt;
+
     char *ram_loc = (char *) attr->mem->mem_base;
     map_file(&ram_loc, attr->data.system.kernel);
     rv_log_info("Kernel loaded");
@@ -590,36 +666,47 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->uart->out_fd = attr->fd_stdout;
 
     /* setup virtio-blk */
-    attr->vblk = NULL;
-    if (attr->data.system.vblk_device) {
+    attr->vblk_mmio_base_hi = 0x41;
+    attr->vblk_mmio_max_hi = attr->vblk_mmio_base_hi + attr->vblk_cnt;
+
+    attr->vblk = malloc(sizeof(virtio_blk_state_t *) * attr->vblk_cnt);
+    assert(attr->vblk);
+    attr->disk = malloc(sizeof(uint32_t *) * attr->vblk_cnt);
+    assert(attr->disk);
+
+    if (attr->vblk_cnt) {
+        for (int i = 0; i < attr->vblk_cnt; i++) {
 /* Currently, only used for block image path and permission */
 #define MAX_OPTS 2
-        char *vblk_opts[MAX_OPTS] = {NULL};
-        int vblk_opt_idx = 0;
-        char *opt = strtok(attr->data.system.vblk_device, ",");
-        while (opt) {
-            if (vblk_opt_idx == MAX_OPTS) {
-                rv_log_error("Too many arguments for vblk");
-                break;
+            char *vblk_device_str = attr->data.system.vblk_device[i];
+            char *vblk_opts[MAX_OPTS] = {NULL};
+            int vblk_opt_idx = 0;
+            char *opt = strtok(vblk_device_str, ",");
+            while (opt) {
+                if (vblk_opt_idx == MAX_OPTS) {
+                    rv_log_error("Too many arguments for vblk");
+                    break;
+                }
+                vblk_opts[vblk_opt_idx++] = opt;
+                opt = strtok(NULL, ",");
             }
-            vblk_opts[vblk_opt_idx++] = opt;
-            opt = strtok(NULL, ",");
-        }
-        char *vblk_device = vblk_opts[0];
-        char *vblk_readonly = vblk_opts[1];
+            char *vblk_device = vblk_opts[0];
+            char *vblk_readonly = vblk_opts[1];
 
-        bool readonly = false;
-        if (vblk_readonly) {
-            if (strcmp(vblk_readonly, "readonly") != 0) {
-                rv_log_error("Unknown vblk option: %s", vblk_readonly);
-                exit(EXIT_FAILURE);
+            bool readonly = false;
+            if (vblk_readonly) {
+                if (strcmp(vblk_readonly, "readonly") != 0) {
+                    rv_log_error("Unknown vblk option: %s", vblk_readonly);
+                    exit(EXIT_FAILURE);
+                }
+                readonly = true;
             }
-            readonly = true;
-        }
 
-        attr->vblk = vblk_new();
-        attr->vblk->ram = (uint32_t *) attr->mem->mem_base;
-        attr->disk = virtio_blk_init(attr->vblk, vblk_device, readonly);
+            attr->vblk[i] = vblk_new();
+            attr->vblk[i]->ram = (uint32_t *) attr->mem->mem_base;
+            attr->disk[i] =
+                virtio_blk_init(attr->vblk[i], vblk_device, readonly);
+        }
     }
 
     capture_keyboard_input();

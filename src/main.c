@@ -60,7 +60,10 @@ static char *prof_out_file;
 static char *opt_kernel_img;
 static char *opt_rootfs_img;
 static char *opt_bootargs;
-static char *opt_virtio_blk_img;
+/* FIXME: handle overflow */
+#define VBLK_DEV_MAX 100
+static char *opt_virtio_blk_img[VBLK_DEV_MAX];
+static int opt_virtio_blk_idx = 0;
 #endif
 
 static void print_usage(const char *filename)
@@ -78,8 +81,10 @@ static void print_usage(const char *filename)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
         "  -k <image> : use <image> as kernel image\n"
         "  -i <image> : use <image> as rootfs\n"
-        "  -x vblk:<image>[,readonly] : use <image> as virtio-blk disk image "
-        "(default read and write)\n"
+        "  -x vblk:<image>[,readonly]: use "
+        "<image> as virtio-blk disk image "
+        "(default read and write). This option may be specified "
+        "multiple times for multiple block devices\n"
         "  -b <bootargs> : use customized <bootargs> for the kernel\n"
 #endif
         "  -d [filename]: dump registers as JSON to the "
@@ -127,7 +132,8 @@ static bool parse_args(int argc, char **args)
             break;
         case 'x':
             if (!strncmp("vblk:", optarg, 5))
-                opt_virtio_blk_img = optarg + 5; /* strlen("vblk:") */
+                opt_virtio_blk_img[opt_virtio_blk_idx++] =
+                    optarg + 5; /* strlen("vblk:") */
             else
                 return false;
             emu_argc++;
@@ -273,7 +279,12 @@ int main(int argc, char **args)
     attr.data.system.kernel = opt_kernel_img;
     attr.data.system.initrd = opt_rootfs_img;
     attr.data.system.bootargs = opt_bootargs;
-    attr.data.system.vblk_device = opt_virtio_blk_img;
+    if (opt_virtio_blk_idx) {
+        attr.data.system.vblk_device = opt_virtio_blk_img;
+        attr.data.system.vblk_device_cnt = opt_virtio_blk_idx;
+    } else {
+        attr.data.system.vblk_device = NULL;
+    }
 #else
     attr.data.user.elf_program = opt_prog_name;
 #endif

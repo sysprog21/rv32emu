@@ -22,11 +22,13 @@ void emu_update_uart_interrupts(riscv_t *rv)
 void emu_update_vblk_interrupts(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
-    if (attr->vblk->interrupt_status)
-        attr->plic->active |= IRQ_VBLK_BIT;
-    else
-        attr->plic->active &= ~IRQ_VBLK_BIT;
-    plic_update_interrupts(attr->plic);
+    for (int i = 0; i < attr->vblk_cnt; i++) {
+        if (attr->vblk[i]->interrupt_status)
+            attr->plic->active |= IRQ_VBLK_BIT(attr->vblk_irq_base, i);
+        else
+            attr->plic->active &= ~IRQ_VBLK_BIT(attr->vblk_irq_base, i);
+        plic_update_interrupts(attr->plic);
+    }
 }
 #endif
 

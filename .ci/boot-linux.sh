@@ -61,6 +61,20 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     ')
 
+    # multiple blocks, Read-only, one disk image, one loop device (/dev/loopx(Linux) or /dev/diskx(Darwin))
+    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG},readonly -x vblk:${BLK_DEV},readonly")
+    EXPECT_CMDS+=('
+        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "uname -a\n" } timeout { exit 2 }
+        expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
+        expect -ex "-sh: can'\''t create mnt/emu.txt: Read-only file system" {} timeout { exit 3 }
+        expect "# " { send "mkdir mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
+        expect -ex "-sh: can'\''t create mnt2/emu.txt: Read-only file system" {} timeout { exit 3 }
+        expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+    ')
+
     # Read-write using disk image
     TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG}")
     VBLK_EXPECT_CMDS='
@@ -76,6 +90,23 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
 
     # Read-write using /dev/loopx(Linux) or /dev/diskx(Darwin) block device
     TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${BLK_DEV}")
+    EXPECT_CMDS+=("${VBLK_EXPECT_CMDS}")
+
+    # multiple blocks, Read-write, one disk image and one loop device (/dev/loopx(Linux) or /dev/diskx(Darwin))
+    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG} -x vblk:${BLK_DEV}")
+    VBLK_EXPECT_CMDS='
+        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "uname -a\n" } timeout { exit 2 }
+        expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
+        expect "# " { send "sync\n" } timeout { exit 3 }
+        expect "# " { send "umount mnt\n" } timeout { exit 3 }
+        expect "# " { send "mkdir mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
+        expect "# " { send "sync\n" } timeout { exit 3 }
+        expect "# " { send "umount mnt2\n" } timeout { exit 3 }
+        expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+    '
     EXPECT_CMDS+=("${VBLK_EXPECT_CMDS}")
 fi
 

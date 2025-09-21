@@ -2,7 +2,9 @@
 
 set -e -u -o pipefail
 
-. .ci/common.sh
+# Get the directory of this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SCRIPT_DIR}/common.sh"
 
 check_platform
 mkdir -p toolchain
@@ -30,4 +32,16 @@ else
     TOOLCHAIN_URL=${TOOLCHAIN_REPO}/releases/download/${GCC_VER}/riscv32-elf-ubuntu-${UBUNTU_VER}-gcc-nightly-${GCC_VER}-nightly.tar.xz
 fi
 
-wget ${TOOLCHAIN_URL} -O- | tar -xz --strip-components=1 -C toolchain
+# Detect compression type and extract accordingly
+case "${TOOLCHAIN_URL}" in
+    *.tar.xz)
+        download_to_stdout "${TOOLCHAIN_URL}" | tar -xJ --strip-components=1 -C toolchain
+        ;;
+    *.tar.gz)
+        download_to_stdout "${TOOLCHAIN_URL}" | tar -xz --strip-components=1 -C toolchain
+        ;;
+    *)
+        echo "Error: Unknown archive format for ${TOOLCHAIN_URL}" >&2
+        exit 1
+        ;;
+esac

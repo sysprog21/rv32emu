@@ -65,6 +65,9 @@ ASSERT()
 
 cleanup
 
+# To test RTC clock
+HOST_UTC_YEAR=$(LC_ALL=C date -u +%Y)
+
 ENABLE_VBLK=1
 VBLK_IMG=build/disk.img
 [ -f "${VBLK_IMG}" ] || ENABLE_VBLK=0
@@ -76,8 +79,91 @@ OPTS_BASE+=" -i build/linux-image/rootfs.cpio"
 TEST_OPTIONS=("base (${OPTS_BASE})")
 EXPECT_CMDS=('
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+    expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+    expect "rtc0" { } timeout { exit 3 }
+    expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+    expect "${host_utc_year}" { } timeout { exit 3 }
     expect "# " { send "uname -a\n" } timeout { exit 2 }
     expect "riscv32 GNU/Linux" { send "\x01"; send "x" } timeout { exit 3 }
+')
+
+# RTC alarm and settime tests
+TEST_OPTIONS+=("base (${OPTS_BASE})")
+EXPECT_CMDS+=('
+    expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+    expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+    expect "rtc0" { } timeout { exit 3 }
+    expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+    expect "${host_utc_year}" { } timeout { exit 3 }
+    expect "# " { send "uname -a\n" } timeout { exit 2 }
+    expect "riscv32 GNU/Linux" { } timeout { exit 3 }
+    expect "# " { send "rtc_alarm\n" } timeout { exit 3 }
+    expect "alarm_IRQ	: no" { } timeout { exit 3 }
+    expect "alarm_IRQ	: yes" { } timeout { exit 3 }
+    expect "alarm_IRQ	: no" { } timeout { exit 3 }
+    expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+')
+YEAR1=1980
+YEAR2=2030
+TEST_OPTIONS+=("base (${OPTS_BASE})")
+EXPECT_CMDS+=('
+    expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+    expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+    expect "rtc0" { } timeout { exit 3 }
+    expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+    expect "${host_utc_year}" { } timeout { exit 3 }
+    expect "# " { send "uname -a\n" } timeout { exit 2 }
+    expect "riscv32 GNU/Linux" { } timeout { exit 3 }
+    expect "# " { send "rtc_settime ${year1}\n" } timeout { exit 3 }
+    expect "rtc_date	: ${year1}-01-01" { } timeout { exit 3 }
+    expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+')
+TEST_OPTIONS+=("base (${OPTS_BASE})")
+EXPECT_CMDS+=('
+    expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+    expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+    expect "rtc0" { } timeout { exit 3 }
+    expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+    expect "${host_utc_year}" { } timeout { exit 3 }
+    expect "# " { send "uname -a\n" } timeout { exit 2 }
+    expect "riscv32 GNU/Linux" { } timeout { exit 3 }
+    expect "# " { send "rtc_settime ${year2}\n" } timeout { exit 3 }
+    expect "rtc_date	: ${year2}-01-01" { } timeout { exit 3 }
+    expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+')
+TEST_OPTIONS+=("base (${OPTS_BASE})")
+EXPECT_CMDS+=('
+    expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+    expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+    expect "rtc0" { } timeout { exit 3 }
+    expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+    expect "${host_utc_year}" { } timeout { exit 3 }
+    expect "# " { send "uname -a\n" } timeout { exit 2 }
+    expect "riscv32 GNU/Linux" { } timeout { exit 3 }
+    expect "# " { send "rtc_settime ${year1}\n" } timeout { exit 3 }
+    expect "rtc_date	: ${year1}-01-01" { } timeout { exit 3 }
+    expect "# " { send "rtc_alarm\n" } timeout { exit 3 }
+    expect "alarm_IRQ	: no" { } timeout { exit 3 }
+    expect "alarm_IRQ	: yes" { } timeout { exit 3 }
+    expect "alarm_IRQ	: no" { } timeout { exit 3 }
+    expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+')
+TEST_OPTIONS+=("base (${OPTS_BASE})")
+EXPECT_CMDS+=('
+    expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+    expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+    expect "rtc0" { } timeout { exit 3 }
+    expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+    expect "${host_utc_year}" { } timeout { exit 3 }
+    expect "# " { send "uname -a\n" } timeout { exit 2 }
+    expect "riscv32 GNU/Linux" { } timeout { exit 3 }
+    expect "# " { send "rtc_settime ${year2}\n" } timeout { exit 3 }
+    expect "rtc_date	: ${year2}-01-01" { } timeout { exit 3 }
+    expect "# " { send "rtc_alarm\n" } timeout { exit 3 }
+    expect "alarm_IRQ	: no" { } timeout { exit 3 }
+    expect "alarm_IRQ	: yes" { } timeout { exit 3 }
+    expect "alarm_IRQ	: no" { } timeout { exit 3 }
+    expect "# " { send "\x01"; send "x" } timeout { exit 3 }
 ')
 
 COLOR_G='\e[32;01m' # Green
@@ -97,6 +183,10 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
     TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG},readonly")
     EXPECT_CMDS+=('
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+        expect "rtc0" { } timeout { exit 3 }
+        expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+        expect "${host_utc_year}" { } timeout { exit 3 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
@@ -108,6 +198,10 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
     TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG},readonly -x vblk:${BLK_DEV},readonly")
     EXPECT_CMDS+=('
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+        expect "rtc0" { } timeout { exit 3 }
+        expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+        expect "${host_utc_year}" { } timeout { exit 3 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
@@ -135,6 +229,10 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
     TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG}")
     VBLK_EXPECT_CMDS='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+        expect "rtc0" { } timeout { exit 3 }
+        expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+        expect "${host_utc_year}" { } timeout { exit 3 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
@@ -152,6 +250,10 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
     TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG} -x vblk:${BLK_DEV}")
     VBLK_EXPECT_CMDS='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+        expect "rtc0" { } timeout { exit 3 }
+        expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+        expect "${host_utc_year}" { } timeout { exit 3 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
@@ -180,6 +282,9 @@ for i in "${!TEST_OPTIONS[@]}"; do
     RUN_LINUX="build/rv32emu ${OPTS}"
 
     ASSERT expect <<- DONE
+	set host_utc_year ${HOST_UTC_YEAR}
+	set year1 ${YEAR1}
+	set year2 ${YEAR2}
 	set timeout ${TIMEOUT}
 	spawn ${RUN_LINUX}
 	${EXPECT_CMDS[$i]}

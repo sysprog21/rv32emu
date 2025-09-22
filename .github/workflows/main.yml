@@ -369,29 +369,31 @@ jobs:
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             LATEST_RELEASE=$(wget --header="Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -q \
-                                   https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
+             . .ci/common.sh
+             LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
+                                                    "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
                                      | grep '"tag_name"' \
                                      | grep "ELF" \
                                      | head -n 1 \
                                      | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
              make LATEST_RELEASE=$LATEST_RELEASE artifact
-             LATEST_RELEASE=$(wget --header="Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -q \
-                                   https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
+             LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
+                                                    "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
                                      | grep '"tag_name"' \
                                      | grep "Linux-Image" \
                                      | head -n 1 \
                                      | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
              make LATEST_RELEASE=$LATEST_RELEASE ENABLE_SYSTEM=1 artifact
-             LATEST_RELEASE=$(wget --header="Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -q \
-                                   https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
+             LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
+                                                    "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
                                      | grep '"tag_name"' \
                                      | grep "sail" \
                                      | head -n 1 \
                                      | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
              make LATEST_RELEASE=$LATEST_RELEASE ENABLE_ARCH_TEST=1 artifact
              # get from rv32emu-prebuilt
-             wget -O build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
+             download_to_file "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip" \
+                             "build/shareware_doom_iwad.zip"
              unzip -d build/ build/shareware_doom_iwad.zip
        if: ${{ always() }}
      - name: default build using emcc

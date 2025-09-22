@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-. .ci/common.sh
+# Get the directory of this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SCRIPT_DIR}/common.sh"
 
 set -e -u -o pipefail
 

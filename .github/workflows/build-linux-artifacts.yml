@@ -28,6 +28,7 @@ jobs:
             mk/kconfig.mk
             mk/toolchain.mk
             tools/detect-env.py
+            tests/system/br_pkgs/rtc/*.c
       - name: Set alias
         id: has_changed_files
         run: |

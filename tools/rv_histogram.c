@@ -125,20 +125,50 @@ static char *gen_hist_bar(char *hist_bar,
                           unsigned short used_col)
 {
 #if defined(_WIN32)
-    size_t v = insn_freq * (max_col - used_col) / max_insn_freq;
+    size_t v =
+        max_insn_freq ? insn_freq * (max_col - used_col) / max_insn_freq : 0;
     for (size_t i = 0; i < v; i++) {
         hist_bar[i] = '*';
     }
     hist_bar[v] = 0;
 #else
     const char *a[] = {" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"};
-    size_t v = insn_freq * (max_col - used_col) * 8 / max_insn_freq;
-    hist_bar[0] = '\0';
-    while (v > 8) {
-        strncat(hist_bar, a[8], hist_bar_len--);
-        v -= 8;
+    size_t units = max_insn_freq
+                       ? insn_freq * (max_col - used_col) * 8 / max_insn_freq
+                       : 0;
+    size_t full = units / 8; /* count of full blocks */
+    size_t rem = units % 8;  /* remainder block index */
+
+    char *p = hist_bar;
+    size_t remaining = hist_bar_len;
+
+    if (remaining == 0)
+        return hist_bar;
+
+    /* Append full blocks safely */
+    for (size_t i = 0; i < full; i++) {
+        const char *blk = a[8];
+        size_t glyph_len = strlen(blk); /* UTF-8, typically 3 bytes */
+        if (glyph_len + 1 > remaining)
+            break; /* not enough space for this glyph + NUL */
+        memcpy(p, blk, glyph_len);
+        p += glyph_len;
+        remaining -= glyph_len;
     }
-    strncat(hist_bar, a[v], hist_bar_len--);
+
+    /* Append remainder block if any */
+    if (rem > 0) {
+        const char *blk = a[rem];
+        size_t glyph_len = strlen(blk);
+        if (glyph_len + 1 <= remaining) {
+            memcpy(p, blk, glyph_len);
+            p += glyph_len;
+            remaining -= glyph_len;
+        }
+    }
+
+    /* NUL-terminate */
+    *p = '\0';
 #endif
 
     return hist_bar;

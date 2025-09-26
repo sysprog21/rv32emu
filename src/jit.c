@@ -593,6 +593,10 @@ static void update_branch_imm(struct jit_state *state,
     assert((imm & 3) == 0);
     uint32_t insn;
     imm >>= 2;
+#if defined(__APPLE__) && defined(__aarch64__)
+    /* Must be in write mode to read/write MAP_JIT memory on Apple ARM64 */
+    pthread_jit_write_protect_np(false);
+#endif
     memcpy(&insn, state->buf + offset, sizeof(uint32_t));
     if ((insn & 0xfe000000U) == 0x54000000U /* Conditional branch immediate. */
         || (insn & 0x7e000000U) ==
@@ -607,9 +611,6 @@ static void update_branch_imm(struct jit_state *state,
         assert(false);
         insn = BAD_OPCODE;
     }
-#if defined(__APPLE__) && defined(__aarch64__)
-    pthread_jit_write_protect_np(false);
-#endif
     memcpy(state->buf + offset, &insn, sizeof(uint32_t));
     sys_icache_invalidate(state->buf + offset, sizeof(uint32_t));
 #if defined(__APPLE__) && defined(__aarch64__)
@@ -2231,6 +2232,7 @@ static void resolve_jumps(struct jit_state *state)
 
         uint8_t *offset_ptr = &state->buf[jump.offset_loc];
         memcpy(offset_ptr, &rel, sizeof(uint32_t));
+        sys_icache_invalidate(offset_ptr, sizeof(uint32_t));
 #elif defined(__aarch64__)
         int32_t rel = target_loc - jump.offset_loc;
         update_branch_imm(state, jump.offset_loc, rel);

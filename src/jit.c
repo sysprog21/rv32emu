@@ -611,6 +611,7 @@ static void update_branch_imm(struct jit_state *state,
     pthread_jit_write_protect_np(false);
 #endif
     memcpy(state->buf + offset, &insn, sizeof(uint32_t));
+    sys_icache_invalidate(state->buf + offset, sizeof(uint32_t));
 #if defined(__APPLE__) && defined(__aarch64__)
     pthread_jit_write_protect_np(true);
 #endif
@@ -2167,6 +2168,7 @@ static void code_cache_flush(struct jit_state *state, riscv_t *rv)
     should_flush = false;
     state->offset = state->org_size;
     state->n_blocks = 0;
+    state->n_jumps = 0; /* Reset jump count when flushing */
     set_reset(&state->set);
     clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
 #if RV32_HAS(T2C)
@@ -2320,6 +2322,9 @@ restart:
     block->offset = state->offset;
     translate_chained_block(state, rv, block);
     if (unlikely(should_flush)) {
+        /* Mark block as not translated since translation was incomplete */
+        block->hot = false;
+        /* Don't reset offset - it will be set correctly on restart */
         code_cache_flush(state, rv);
         goto restart;
     }

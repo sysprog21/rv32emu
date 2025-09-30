@@ -572,7 +572,7 @@ bool map_insert(map_t obj, const void *key, const void *val)
         return false;
 
     rb_path_entry_t path[RB_MAX_DEPTH];
-    rb_path_entry_t *pathp;
+    rb_path_entry_t *pathp = NULL;
 
     /* Single traversal to check existence and get insertion point */
     const map_node_t *existing = rb_insert_unique(obj, key, path, &pathp);

@@ -216,9 +216,10 @@ static submission_t submission_pop(riscv_t *rv)
 static void event_push(riscv_t *rv, event_t event)
 {
     vm_attr_t *attr = PRIV(rv);
-    memory_write(attr->mem,
-                 event_queue.base + event_queue.end * sizeof(event_t),
-                 (void *) &event, sizeof(event_t));
+    if (!memory_write(attr->mem,
+                      event_queue.base + event_queue.end * sizeof(event_t),
+                      (void *) &event, sizeof(event_t)))
+        return;
     ++event_queue.end;
     event_queue.end &= queues_capacity - 1;
 

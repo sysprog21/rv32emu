@@ -273,6 +273,8 @@ HASH_FUNC_IMPL(map_hash, BLOCK_MAP_CAPACITY_BITS, 1 << BLOCK_MAP_CAPACITY_BITS)
 static block_t *block_alloc(riscv_t *rv)
 {
     block_t *block = mpool_alloc(rv->block_mp);
+    if (unlikely(!block))
+        return NULL;
     assert(block);
     block->n_insn = 0;
 #if RV32_HAS(JIT)
@@ -619,13 +621,15 @@ FORCE_INLINE bool insn_is_indirect_branch(uint8_t opcode)
     }
 }
 
-static void block_translate(riscv_t *rv, block_t *block)
+static bool block_translate(riscv_t *rv, block_t *block)
 {
 retranslate:
     block->pc_start = block->pc_end = rv->PC;
 
     rv_insn_t *prev_ir = NULL;
     rv_insn_t *ir = mpool_calloc(rv->block_ir_mp);
+    if (unlikely(!ir))
+        return false;
     block->ir_head = ir;
 
     /* translate the basic block */
@@ -665,6 +669,8 @@ retranslate:
         if (insn_is_branch(ir->opcode)) {
             if (insn_is_indirect_branch(ir->opcode)) {
                 ir->branch_table = calloc(1, sizeof(branch_history_table_t));
+                if (unlikely(!ir->branch_table))
+                    return false;
                 assert(ir->branch_table);
                 memset(ir->branch_table->PC, -1,
                        sizeof(uint32_t) * HISTORY_SIZE);
@@ -673,36 +679,44 @@ retranslate:
         }
 
         ir = mpool_calloc(rv->block_ir_mp);
+        if (unlikely(!ir))
+            return false;
     }
 
     assert(prev_ir);
     block->ir_tail = prev_ir;
     block->ir_tail->next = NULL;
+    return true;
 }
 
 #if RV32_HAS(MOP_FUSION)
-#define COMBINE_MEM_OPS(RW)                                       \
-    next_ir = ir->next;                                           \
-    count = 1;                                                    \
-    while (1) {                                                   \
-        if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw))   \
-            break;                                                \
-        count++;                                                  \
-        if (!next_ir->next)                                       \
-            break;                                                \
-        next_ir = next_ir->next;                                  \
-    }                                                             \
-    if (count > 1) {                                              \
-        ir->opcode = IIF(RW)(rv_insn_fuse4, rv_insn_fuse3);       \
-        ir->fuse = malloc(count * sizeof(opcode_fuse_t));         \
-        assert(ir->fuse);                                         \
-        ir->imm2 = count;                                         \
-        memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));              \
-        ir->impl = dispatch_table[ir->opcode];                    \
-        next_ir = ir->next;                                       \
-        for (int j = 1; j < count; j++, next_ir = next_ir->next)  \
-            memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t)); \
-        remove_next_nth_ir(rv, ir, block, count - 1);             \
+#define COMBINE_MEM_OPS(RW)                                           \
+    next_ir = ir->next;                                               \
+    count = 1;                                                        \
+    while (1) {                                                       \
+        if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw))       \
+            break;                                                    \
+        count++;                                                      \
+        if (!next_ir->next)                                           \
+            break;                                                    \
+        next_ir = next_ir->next;                                      \
+    }                                                                 \
+    if (count > 1) {                                                  \
+        ir->opcode = IIF(RW)(rv_insn_fuse4, rv_insn_fuse3);           \
+        ir->fuse = malloc(count * sizeof(opcode_fuse_t));             \
+        if (unlikely(!ir->fuse)) {                                    \
+            ir->opcode = IIF(RW)(rv_insn_lw, rv_insn_sw);             \
+            count = 1; /* Degrade to non-fused operation */           \
+        } else {                                                      \
+            assert(ir->fuse);                                         \
+            ir->imm2 = count;                                         \
+            memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));              \
+            ir->impl = dispatch_table[ir->opcode];                    \
+            next_ir = ir->next;                                       \
+            for (int j = 1; j < count; j++, next_ir = next_ir->next)  \
+                memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t)); \
+            remove_next_nth_ir(rv, ir, block, count - 1);             \
+        }                                                             \
     }
 
 static inline void remove_next_nth_ir(const riscv_t *rv,
@@ -762,16 +776,20 @@ static void match_pattern(riscv_t *rv, block_t *block)
                     next_ir = next_ir->next;
                 }
                 if (count > 1) {
-                    ir->opcode = rv_insn_fuse1;
                     ir->fuse = malloc(count * sizeof(opcode_fuse_t));
-                    assert(ir->fuse);
-                    ir->imm2 = count;
-                    memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
-                    ir->impl = dispatch_table[ir->opcode];
-                    next_ir = ir->next;
-                    for (int j = 1; j < count; j++, next_ir = next_ir->next)
-                        memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));
-                    remove_next_nth_ir(rv, ir, block, count - 1);
+                    if (likely(ir->fuse)) {
+                        ir->opcode = rv_insn_fuse1;
+                        assert(ir->fuse);
+                        ir->imm2 = count;
+                        memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
+                        ir->impl = dispatch_table[ir->opcode];
+                        next_ir = ir->next;
+                        for (int j = 1; j < count; j++, next_ir = next_ir->next)
+                            memcpy(ir->fuse + j, next_ir,
+                                   sizeof(opcode_fuse_t));
+                        remove_next_nth_ir(rv, ir, block, count - 1);
+                    }
+                    /* If malloc failed, degrade gracefully to non-fused ops */
                 }
                 break;
             }
@@ -803,15 +821,18 @@ static void match_pattern(riscv_t *rv, block_t *block)
             }
             if (count > 1) {
                 ir->fuse = malloc(count * sizeof(opcode_fuse_t));
-                assert(ir->fuse);
-                memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
-                ir->opcode = rv_insn_fuse5;
-                ir->imm2 = count;
-                ir->impl = dispatch_table[ir->opcode];
-                next_ir = ir->next;
-                for (int j = 1; j < count; j++, next_ir = next_ir->next)
-                    memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));
-                remove_next_nth_ir(rv, ir, block, count - 1);
+                if (likely(ir->fuse)) {
+                    assert(ir->fuse);
+                    memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
+                    ir->opcode = rv_insn_fuse5;
+                    ir->imm2 = count;
+                    ir->impl = dispatch_table[ir->opcode];
+                    next_ir = ir->next;
+                    for (int j = 1; j < count; j++, next_ir = next_ir->next)
+                        memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));
+                    remove_next_nth_ir(rv, ir, block, count - 1);
+                }
+                /* If malloc failed, degrade gracefully to non-fused ops */
             }
             break;
         }
@@ -881,8 +902,11 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #endif
     /* allocate a new block */
     next_blk = block_alloc(rv);
+    if (unlikely(!next_blk))
+        return NULL;
 
-    block_translate(rv, next_blk);
+    if (unlikely(!block_translate(rv, next_blk)))
+        return NULL;
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
     /*
@@ -1078,6 +1102,12 @@ void rv_step(void *arg)
          */
         block_t *block = block_find_or_translate(rv);
         /* by now, a block should be available */
+        if (unlikely(!block)) {
+            rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
+                         rv->PC);
+            rv->halt = true;
+            return;
+        }
         assert(block);
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
@@ -1129,6 +1159,11 @@ void rv_step(void *arg)
         else if (!block->compiled && block->n_invoke >= THRESHOLD) {
             block->compiled = true;
             queue_entry_t *entry = malloc(sizeof(queue_entry_t));
+            if (unlikely(!entry)) {
+                /* Malloc failed - reset compiled flag to allow retry later */
+                block->compiled = false;
+                continue;
+            }
             entry->block = block;
             pthread_mutex_lock(&rv->wait_queue_lock);
             list_add(&entry->list, &rv->wait_queue);
@@ -1378,16 +1413,38 @@ void ecall_handler(riscv_t *rv)
 void memset_handler(riscv_t *rv)
 {
     memory_t *m = PRIV(rv)->mem;
-    memset((char *) m->mem_base + rv->X[rv_reg_a0], rv->X[rv_reg_a1],
-           rv->X[rv_reg_a2]);
+    uint32_t dest = rv->X[rv_reg_a0];
+    uint32_t value = rv->X[rv_reg_a1];
+    uint32_t count = rv->X[rv_reg_a2];
+
+    /* Bounds checking to prevent buffer overflow */
+    if (dest >= m->mem_size || count > m->mem_size - dest) {
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, STORE_MISALIGNED, dest);
+        return;
+    }
+
+    memset((char *) m->mem_base + dest, value, count);
     rv->PC = rv->X[rv_reg_ra] & ~1U;
 }
 
 void memcpy_handler(riscv_t *rv)
 {
     memory_t *m = PRIV(rv)->mem;
-    memcpy((char *) m->mem_base + rv->X[rv_reg_a0],
-           (char *) m->mem_base + rv->X[rv_reg_a1], rv->X[rv_reg_a2]);
+    uint32_t dest = rv->X[rv_reg_a0];
+    uint32_t src = rv->X[rv_reg_a1];
+    uint32_t count = rv->X[rv_reg_a2];
+
+    /* Bounds checking to prevent buffer overflow */
+    if (dest >= m->mem_size || count > m->mem_size - dest) {
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, STORE_MISALIGNED, dest);
+        return;
+    }
+    if (src >= m->mem_size || count > m->mem_size - src) {
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, LOAD_MISALIGNED, src);
+        return;
+    }
+
+    memcpy((char *) m->mem_base + dest, (char *) m->mem_base + src, count);
     rv->PC = rv->X[rv_reg_ra] & ~1U;
 }
 

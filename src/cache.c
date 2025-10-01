@@ -147,6 +147,10 @@ static inline void hlist_del_init(struct hlist_node *n)
 
 cache_t *cache_create(uint32_t size_bits)
 {
+    /* Prevent integer overflow in 1 << size_bits */
+    if (size_bits >= 32)
+        return NULL;
+
     cache_t *cache = malloc(sizeof(cache_t));
     if (!cache)
         return NULL;
@@ -160,16 +164,23 @@ cache_t *cache_create(uint32_t size_bits)
     cache->ghost_list_size = 0;
     cache->capacity = cache_size;
 
-    cache->map.ht_list_head = malloc(cache_size * sizeof(struct hlist_head));
-    if (!cache->map.ht_list_head) {
-        free(cache);
-        return NULL;
-    }
+    /* Check for overflow in size calculation */
+    size_t alloc_size = cache_size * sizeof(struct hlist_head);
+    if (alloc_size / sizeof(struct hlist_head) != cache_size)
+        goto fail_cache;
+
+    cache->map.ht_list_head = malloc(alloc_size);
+    if (!cache->map.ht_list_head)
+        goto fail_cache;
 
     for (uint32_t i = 0; i < cache_size; i++)
         INIT_HLIST_HEAD(&cache->map.ht_list_head[i]);
 
     return cache;
+
+fail_cache:
+    free(cache);
+    return NULL;
 }
 
 void *cache_get(const cache_t *cache, uint32_t key, bool update)
@@ -285,6 +296,17 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
     }
 
     cache_entry_t *new_entry = calloc(1, sizeof(cache_entry_t));
+    if (unlikely(!new_entry)) {
+        /* Allocation failed - restore replaced entry if exists */
+        if (replaced) {
+            replaced->alive = true;
+            list_del_init(&replaced->list);
+            list_add(&replaced->list, &cache->list);
+            cache->size++;
+            cache->ghost_list_size--;
+        }
+        return NULL;
+    }
     assert(new_entry);
 
     INIT_LIST_HEAD(&new_entry->list);

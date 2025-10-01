@@ -2330,7 +2330,10 @@ restart:
 struct jit_state *jit_state_init(size_t size)
 {
     struct jit_state *state = malloc(sizeof(struct jit_state));
+    if (!state)
+        return NULL;
     assert(state);
+
     state->offset = 0;
     state->size = size;
     state->buf = mmap(0, size, PROT_READ | PROT_WRITE | PROT_EXEC,
@@ -2340,13 +2343,32 @@ struct jit_state *jit_state_init(size_t size)
 #endif
                       ,
                       -1, 0);
-    state->n_blocks = 0;
+    if (state->buf == MAP_FAILED) {
+        free(state);
+        return NULL;
+    }
     assert(state->buf != MAP_FAILED);
+
+    state->n_blocks = 0;
     set_reset(&state->set);
     reset_reg();
     prepare_translate(state);
+
     state->offset_map = calloc(MAX_BLOCKS, sizeof(struct offset_map));
+    if (!state->offset_map) {
+        munmap(state->buf, state->size);
+        free(state);
+        return NULL;
+    }
+
     state->jumps = calloc(MAX_JUMPS, sizeof(struct jump));
+    if (!state->jumps) {
+        free(state->offset_map);
+        munmap(state->buf, state->size);
+        free(state);
+        return NULL;
+    }
+
     return state;
 }
 

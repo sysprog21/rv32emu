@@ -177,20 +177,33 @@ static bool parse_args(int argc, char **args)
         assert(getcwd(cwd_path, PATH_MAX));
 
         char rel_path[PATH_MAX] = {0};
-        memcpy(rel_path, args[0], strlen(args[0]) - 7 /* strlen("rv32emu") */);
+        size_t args0_len = strlen(args[0]);
+        /* Ensure args[0] is long enough before subtracting */
+        if (args0_len > 7) { /* strlen("rv32emu") */
+            size_t copy_len = args0_len - 7;
+            if (copy_len >= PATH_MAX)
+                copy_len = PATH_MAX - 1;
+            memcpy(rel_path, args[0], copy_len);
+            rel_path[copy_len] = '\0';
+        }
 
         char *prog_basename = basename(opt_prog_name);
-        prof_out_file = malloc(strlen(cwd_path) + 1 + strlen(rel_path) +
-                               strlen(prog_basename) + 5 + 1);
+        size_t total_len = strlen(cwd_path) + 1 + strlen(rel_path) +
+                           strlen(prog_basename) + 5 + 1;
+        prof_out_file = malloc(total_len);
+        if (!prof_out_file) {
+            rv_log_error("Failed to allocate profiling output filename");
+            return false;
+        }
         assert(prof_out_file);
 
-        sprintf(prof_out_file, "%s/%s%s.prof", cwd_path, rel_path,
-                prog_basename);
+        snprintf(prof_out_file, total_len, "%s/%s%s.prof", cwd_path, rel_path,
+                 prog_basename);
     }
     return true;
 }
 
-static void dump_test_signature(const char *prog_name)
+static void dump_test_signature(const char UNUSED *prog_name)
 {
     elf_t *elf = elf_new();
     assert(elf && elf_open(elf, prog_name));

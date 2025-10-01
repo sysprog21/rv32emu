@@ -274,14 +274,14 @@ bool elf_load(elf_t *e, memory_t *mem)
 
         /* memcpy required range */
         const int to_copy = min(phdr->p_memsz, phdr->p_filesz);
-        if (to_copy)
-            memory_write(mem, phdr->p_vaddr, e->raw_data + phdr->p_offset,
-                         to_copy);
+        if (to_copy && !memory_write(mem, phdr->p_vaddr,
+                                     e->raw_data + phdr->p_offset, to_copy))
+            return false;
 
         /* zero fill required range */
         const int to_zero = max(phdr->p_memsz, phdr->p_filesz) - to_copy;
-        if (to_zero)
-            memory_fill(mem, phdr->p_vaddr + to_copy, to_zero, 0);
+        if (to_zero && !memory_fill(mem, phdr->p_vaddr + to_copy, to_zero, 0))
+            return false;
     }
 
     return true;

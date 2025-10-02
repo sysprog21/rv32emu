@@ -23,6 +23,8 @@ memory_t *memory_new(uint32_t size)
         return NULL;
 
     memory_t *mem = malloc(sizeof(memory_t));
+    if (!mem)
+        return NULL;
     assert(mem);
 #if HAVE_MMAP
     data_memory_base = mmap(NULL, size, PROT_READ | PROT_WRITE,

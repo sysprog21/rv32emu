@@ -2,6 +2,7 @@
  * rv32emu is freely redistributable under the MIT License. See the file
  * "LICENSE" for information on usage and redistribution of this file.
  */
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #if HAVE_MMAP
@@ -51,14 +52,27 @@ mpool_t *mpool_create(size_t pool_size, size_t chunk_size)
 
     new_mp->area.next = NULL;
     size_t pgsz = getpagesize();
+
+    /* Check for overflow in chunk_size + sizeof(memchunk_t) */
+    if (chunk_size > SIZE_MAX - sizeof(memchunk_t))
+        goto fail_mpool;
+
     if (pool_size < chunk_size + sizeof(memchunk_t))
         pool_size += sizeof(memchunk_t);
+
+    /* Check for overflow in pool_size + pgsz - 1 */
+    if (pool_size > SIZE_MAX - pgsz + 1)
+        goto fail_mpool;
+
     size_t page_count = (pool_size + pgsz - 1) / pgsz;
+
+    /* Check for overflow in page_count * pgsz */
+    if (page_count > SIZE_MAX / pgsz)
+        goto fail_mpool;
+
     char *p = mem_arena(page_count * pgsz);
-    if (!p) {
-        free(new_mp);
-        return NULL;
-    }
+    if (!p)
+        goto fail_mpool;
 
     new_mp->area.mapped = p;
     new_mp->page_count = page_count;
@@ -73,6 +87,10 @@ mpool_t *mpool_create(size_t pool_size, size_t chunk_size)
     }
     cur->next = NULL;
     return new_mp;
+
+fail_mpool:
+    free(new_mp);
+    return NULL;
 }
 
 static void *mpool_extend(mpool_t *mp)
@@ -84,7 +102,7 @@ static void *mpool_extend(mpool_t *mp)
 
     area_t *new_area = malloc(sizeof(area_t));
     if (!new_area)
-        return NULL;
+        goto fail_area;
 
     new_area->mapped = p;
     new_area->next = NULL;
@@ -105,6 +123,14 @@ static void *mpool_extend(mpool_t *mp)
     cur_area->next = new_area;
 
     return p;
+
+fail_area:
+#if HAVE_MMAP
+    munmap(p, pool_size);
+#else
+    free(p);
+#endif
+    return NULL;
 }
 
 FORCE_INLINE void *mpool_alloc_helper(mpool_t *mp)

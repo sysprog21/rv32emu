@@ -510,6 +510,8 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     assert(rv_attr);
 
     riscv_t *rv = calloc(1, sizeof(riscv_t));
+    if (!rv)
+        return NULL;
     assert(rv);
 
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
@@ -578,7 +580,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     assert(elf_load(elf, attr->mem));
 
     /* set the entry pc */
-    const struct Elf32_Ehdr *hdr = get_elf_header(elf);
+    const struct Elf32_Ehdr UNUSED *hdr = get_elf_header(elf);
     assert(rv_set_pc(rv, hdr->e_entry));
 
     elf_delete(elf);
@@ -724,11 +726,22 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 #else
     INIT_LIST_HEAD(&rv->block_list);
     rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
+    if (!rv->jit_state) {
+        rv_log_fatal("Failed to initialize JIT state");
+        goto fail_jit_state;
+    }
     rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
-    assert(rv->block_cache);
+    if (!rv->block_cache) {
+        rv_log_fatal("Failed to create block cache");
+        goto fail_block_cache;
+    }
 #if RV32_HAS(T2C)
     rv->quit = false;
     rv->jit_cache = jit_cache_init();
+    if (!rv->jit_cache) {
+        rv_log_fatal("Failed to initialize JIT cache");
+        goto fail_jit_cache;
+    }
     /* prepare wait queue. */
     pthread_mutex_init(&rv->wait_queue_lock, NULL);
     pthread_mutex_init(&rv->cache_lock, NULL);
@@ -739,6 +752,23 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 #endif
 
     return rv;
+
+#if RV32_HAS(JIT)
+#if RV32_HAS(T2C)
+fail_jit_cache:
+    cache_free(rv->block_cache);
+#endif
+fail_block_cache:
+    if (rv->jit_state)
+        jit_state_exit(rv->jit_state);
+fail_jit_state:
+    mpool_destroy(rv->block_ir_mp);
+    mpool_destroy(rv->block_mp);
+    map_delete(attr->fd_map);
+    memory_delete(attr->mem);
+    free(rv);
+    return NULL;
+#endif
 }
 
 #if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
@@ -753,7 +783,7 @@ static void rv_run_and_trace(riscv_t *rv)
     assert(attr && attr->data.user.elf_program);
     attr->cycle_per_step = 1;
 
-    const char *prog_name = attr->data.user.elf_program;
+    const char UNUSED *prog_name = attr->data.user.elf_program;
     elf_t *elf = elf_new();
     assert(elf && elf_open(elf, prog_name));
 
@@ -911,7 +941,7 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 
     /* argc */
     uintptr_t *args_p = (uintptr_t *) args_top;
-    memory_write(mem, (uintptr_t) args_p, (void *) &argc, sizeof(int));
+    assert(memory_write(mem, (uintptr_t) args_p, (void *) &argc, sizeof(int)));
     args_p++;
 
     /* args */
@@ -923,8 +953,8 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     for (int i = 0; i < argc; i++) {
         const char *arg = args[i];
         args_len = strlen(arg);
-        memory_write(mem, (uintptr_t) args_p, (void *) arg,
-                     (args_len + 1) * sizeof(uint8_t));
+        assert(memory_write(mem, (uintptr_t) args_p, (void *) arg,
+                            (args_len + 1) * sizeof(uint8_t)));
         args_space[args_space_idx++] = args_len + 1;
         args_p = (uintptr_t *) ((uintptr_t) args_p + args_len + 1);
         args_len_total += args_len + 1;
@@ -940,8 +970,9 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 
     /* argc */
     uintptr_t *sp = (uintptr_t *) stack_top;
-    memory_write(mem, (uintptr_t) sp,
-                 (void *) (mem->mem_base + (uintptr_t) args_p), sizeof(int));
+    assert(memory_write(mem, (uintptr_t) sp,
+                        (void *) (mem->mem_base + (uintptr_t) args_p),
+                        sizeof(int)));
     args_p++;
     /* keep argc and args[0] within one word due to RV32 ABI */
     sp = (uintptr_t *) ((uint32_t *) sp + 1);
@@ -949,11 +980,12 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     /* args */
     for (int i = 0; i < argc; i++) {
         uintptr_t offset = (uintptr_t) args_p;
-        memory_write(mem, (uintptr_t) sp, (void *) &offset, sizeof(uintptr_t));
+        assert(memory_write(mem, (uintptr_t) sp, (void *) &offset,
+                            sizeof(uintptr_t)));
         args_p = (uintptr_t *) ((uintptr_t) args_p + args_space[i]);
         sp = (uintptr_t *) ((uint32_t *) sp + 1);
     }
-    memory_fill(mem, (uintptr_t) sp, sizeof(uint32_t), 0);
+    assert(memory_fill(mem, (uintptr_t) sp, sizeof(uint32_t), 0));
 
     /* reset sp pointing to argc */
     rv->X[rv_reg_sp] = stack_top;

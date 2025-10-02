@@ -330,14 +330,20 @@ static void syscall_read(riscv_t *rv)
 
     while (count > PREALLOC_SIZE) {
         size_t r = fread(tmp, 1, PREALLOC_SIZE, handle);
-        memory_write(attr->mem, buf + total_read, tmp, r);
+        if (!memory_write(attr->mem, buf + total_read, tmp, r)) {
+            rv_set_reg(rv, rv_reg_a0, -1);
+            return;
+        }
         count -= r;
         total_read += r;
         if (r != PREALLOC_SIZE)
             break;
     }
     size_t r = fread(tmp, 1, count, handle);
-    memory_write(attr->mem, buf + total_read, tmp, r);
+    if (!memory_write(attr->mem, buf + total_read, tmp, r)) {
+        rv_set_reg(rv, rv_reg_a0, -1);
+        return;
+    }
     total_read += r;
     if (total_read != rv_get_reg(rv, rv_reg_a2) && ferror(handle)) {
         /* error */
@@ -362,9 +368,28 @@ static void syscall_open(riscv_t *rv)
     uint32_t flags = rv_get_reg(rv, rv_reg_a1);
     uint32_t mode = rv_get_reg(rv, rv_reg_a2);
 
-    /* read name from runtime memory */
-    const size_t name_len = strlen((char *) attr->mem->mem_base + name);
+    /* read name from runtime memory with bounds checking */
+    if (name >= attr->mem->mem_size) {
+        rv_set_reg(rv, rv_reg_a0, -1);
+        return;
+    }
+
+    /* Calculate safe maximum length to prevent reading beyond memory */
+    const size_t max_len = attr->mem->mem_size - name;
+    const char *name_ptr = (char *) attr->mem->mem_base + name;
+
+    /* Use strnlen to safely find string length within bounds */
+    const size_t name_len = strnlen(name_ptr, max_len);
+    if (name_len == max_len) {
+        /* No null terminator found within bounds */
+        rv_set_reg(rv, rv_reg_a0, -1);
+        return;
+    }
     char *name_str = malloc(name_len + 1);
+    if (!name_str) {
+        rv_set_reg(rv, rv_reg_a0, -1);
+        return;
+    }
     assert(name_str);
     name_str[name_len] = '\0';
     memory_read(attr->mem, (uint8_t *) name_str, name, name_len);
@@ -372,12 +397,14 @@ static void syscall_open(riscv_t *rv)
     /* open the file */
     const char *mode_str = get_mode_str(flags, mode);
     if (!mode_str) {
+        free(name_str);
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }
 
     FILE *handle = fopen(name_str, mode_str);
     if (!handle) {
+        free(name_str);
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
     }

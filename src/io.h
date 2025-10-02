@@ -36,12 +36,16 @@ uint8_t memory_read_b(uint32_t addr);
 void memory_read(const memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size);
 
 /* write a length of data to memory */
-static inline void memory_write(memory_t *m,
+static inline bool memory_write(memory_t *m,
                                 uint32_t addr,
                                 const uint8_t *src,
                                 uint32_t size)
 {
+    /* Bounds checking to prevent buffer overflow */
+    if (addr >= m->mem_size || size > m->mem_size - addr)
+        return false;
     memcpy(m->mem_base + addr, src, size);
+    return true;
 }
 
 /* write a word to memory */
@@ -54,10 +58,14 @@ void memory_write_s(uint32_t addr, const uint8_t *src);
 void memory_write_b(uint32_t addr, const uint8_t *src);
 
 /* write a length of certain value to memory */
-static inline void memory_fill(memory_t *m,
+static inline bool memory_fill(memory_t *m,
                                uint32_t addr,
                                uint32_t size,
                                uint8_t val)
 {
+    /* Bounds checking to prevent buffer overflow */
+    if (addr >= m->mem_size || size > m->mem_size - addr)
+        return false;
     memset(m->mem_base + addr, val, size);
+    return true;
 }

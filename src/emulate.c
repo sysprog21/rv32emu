@@ -1190,10 +1190,14 @@ void rv_step(void *arg)
 #endif
         ) {
             jit_translate(rv, block);
-            ((exec_block_func_t) state->buf)(
-                rv, (uintptr_t) (state->buf + block->offset));
-            prev = NULL;
-            continue;
+            /* Only execute if translation succeeded (block is hot) */
+            if (block->hot) {
+                ((exec_block_func_t) state->buf)(
+                    rv, (uintptr_t) (state->buf + block->offset));
+                prev = NULL;
+                continue;
+            }
+            /* Fall through to interpreter if translation failed */
         }
         set_reset(&pc_set);
         has_loops = false;

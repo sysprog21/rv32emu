@@ -80,6 +80,28 @@ endif
 ENABLE_ARCH_TEST ?= 0
 $(call set-feature, ARCH_TEST)
 
+# ThreadSanitizer support
+# TSAN on x86-64 memory layout:
+#   Shadow: 0x02a000000000 - 0x7cefffffffff (reserved by TSAN)
+#   App:    0x7cf000000000 - 0x7ffffffff000 (usable by application)
+#
+# We use MAP_FIXED to allocate FULL4G's 4GB memory at a fixed address
+# (0x7d0000000000) within TSAN's app range, ensuring compatibility.
+#
+# IMPORTANT: TSAN requires ASLR (Address Space Layout Randomization) to be
+# disabled to prevent system allocations from landing in TSAN's shadow memory.
+# Tests are run with 'setarch $(uname -m) -R' to disable ASLR.
+ENABLE_TSAN ?= 0
+ifeq ("$(ENABLE_TSAN)", "1")
+override ENABLE_SDL := 0       # SDL (uninstrumented system lib) creates threads TSAN cannot track
+override ENABLE_LTO := 0       # LTO interferes with TSAN instrumentation
+CFLAGS += -DTSAN_ENABLED       # Signal code to use TSAN-compatible allocations
+# Disable ASLR for TSAN tests to prevent allocations in TSAN shadow memory
+BIN_WRAPPER = setarch $(shell uname -m) -R
+else
+BIN_WRAPPER =
+endif
+
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
 ifeq ($(call has, LTO), 1)
@@ -332,6 +354,12 @@ CFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
 LDFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
 endif
 
+# ThreadSanitizer flags (ENABLE_TSAN is set earlier to override SDL/FULL4G)
+ifeq ("$(ENABLE_TSAN)", "1")
+CFLAGS += -fsanitize=thread -g
+LDFLAGS += -fsanitize=thread
+endif
+
 $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-stack-check -fno-stack-protector
 
 # .DEFAULT_GOAL should be set to all since the very first target is not all
@@ -445,7 +473,7 @@ define check-test
 $(Q)true; \
 $(PRINTF) "Running $(3) ... "; \
 OUTPUT_FILE="$$(mktemp)"; \
-if (LC_ALL=C $(BIN) $(1) $(2) > "$$OUTPUT_FILE") && \
+if (LC_ALL=C $(BIN_WRAPPER) $(BIN) $(1) $(2) > "$$OUTPUT_FILE") && \
    [ "$$(cat "$$OUTPUT_FILE" | $(LOG_FILTER) | $(4))" = "$(5)" ]; then \
     $(call notice, [OK]); \
 else \

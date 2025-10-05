@@ -27,12 +27,33 @@ memory_t *memory_new(uint32_t size)
         return NULL;
     assert(mem);
 #if HAVE_MMAP
+#if defined(TSAN_ENABLED) && defined(__x86_64__)
+    /* ThreadSanitizer compatibility: Use MAP_FIXED to allocate at a specific
+     * address within TSAN's app range (0x7cf000000000 - 0x7ffffffff000).
+     *
+     * Fixed address: 0x7d0000000000
+     * Size: up to 4GB (0x100000000)
+     * End: 0x7d0100000000 (well within app range)
+     *
+     * This guarantees the allocation won't land in TSAN's shadow memory,
+     * preventing "unexpected memory mapping" errors.
+     */
+    void *fixed_addr = (void *) 0x7d0000000000UL;
+    data_memory_base = mmap(fixed_addr, size, PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    if (data_memory_base == MAP_FAILED) {
+        free(mem);
+        return NULL;
+    }
+#else
+    /* Standard allocation without TSAN */
     data_memory_base = mmap(NULL, size, PROT_READ | PROT_WRITE,
                             MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
     if (data_memory_base == MAP_FAILED) {
         free(mem);
         return NULL;
     }
+#endif
 #else
     data_memory_base = malloc(size);
     if (!data_memory_base) {

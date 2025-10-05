@@ -346,7 +346,9 @@ void t2c_compile(riscv_t *rv, block_t *block)
 
     jit_cache_update(rv->jit_cache, key, block->func);
 
-    block->hot2 = true;
+    /* Use release semantics to ensure func write is visible before hot2 is set
+     */
+    __atomic_store_n(&block->hot2, true, __ATOMIC_RELEASE);
 }
 
 struct jit_cache *jit_cache_init()

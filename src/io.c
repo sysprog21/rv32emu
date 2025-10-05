@@ -27,18 +27,32 @@ memory_t *memory_new(uint32_t size)
         return NULL;
     assert(mem);
 #if HAVE_MMAP
-#if defined(TSAN_ENABLED) && defined(__x86_64__)
+#if defined(TSAN_ENABLED)
     /* ThreadSanitizer compatibility: Use MAP_FIXED to allocate at a specific
-     * address within TSAN's app range (0x7cf000000000 - 0x7ffffffff000).
+     * address to avoid conflicts with TSAN's shadow memory.
+     */
+#if defined(__x86_64__)
+    /* x86_64: Allocate within TSAN's range (0x7cf000000000 - 0x7ffffffff000).
      *
      * Fixed address: 0x7d0000000000
      * Size: up to 4GB (0x100000000)
      * End: 0x7d0100000000 (well within app range)
-     *
-     * This guarantees the allocation won't land in TSAN's shadow memory,
-     * preventing "unexpected memory mapping" errors.
      */
     void *fixed_addr = (void *) 0x7d0000000000UL;
+#elif defined(__aarch64__)
+    /* ARM64 (macOS/Apple Silicon): Use higher address range.
+     *
+     * Fixed address: 0x150000000000 (21TB)
+     * Size: up to 4GB (0x100000000)
+     * End: 0x150100000000
+     *
+     * This avoids TSAN's shadow memory and typical process allocations.
+     * Requires ASLR disabled via: setarch $(uname -m) -R
+     */
+    void *fixed_addr = (void *) 0x150000000000UL;
+#else
+#error "TSAN is only supported on x86_64 and aarch64"
+#endif
     data_memory_base = mmap(fixed_addr, size, PROT_READ | PROT_WRITE,
                             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
     if (data_memory_base == MAP_FAILED) {

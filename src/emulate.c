@@ -24,6 +24,7 @@ extern struct target_ops gdbstub_ops;
 #endif
 
 #include "decode.h"
+#include "log.h"
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -1271,10 +1272,20 @@ void rv_step(void *arg)
 #endif
         ) {
             jit_translate(rv, block);
-            ((exec_block_func_t) state->buf)(
-                rv, (uintptr_t) (state->buf + block->offset));
-            prev = NULL;
-            continue;
+            /* Only execute if translation succeeded (block is hot) */
+            if (block->hot) {
+                rv_log_debug("JIT: Executing block pc=0x%08x, offset=%u",
+                             block->pc_start, block->offset);
+                ((exec_block_func_t) state->buf)(
+                    rv, (uintptr_t) (state->buf + block->offset));
+                prev = NULL;
+                continue;
+            }
+            /* Fall through to interpreter if translation failed */
+            rv_log_debug(
+                "JIT: Translation failed for block pc=0x%08x, using "
+                "interpreter",
+                block->pc_start);
         }
         set_reset(&pc_set);
         has_loops = false;

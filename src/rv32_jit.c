@@ -180,7 +180,7 @@ GEN(lb, {
             emit_cmp_imm32(state, temp_reg, 0);
             uint32_t jump_loc_0 = state->offset;
             emit_jcc_offset(state, 0x84);
-            vm_reg[1] = map_vm_reg(state, ir->rd);
+            vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
 
             emit_load(state, S32, parameter_reg[0], vm_reg[1],
                       offsetof(riscv_t, X) + 4 * ir->rd);
@@ -232,7 +232,7 @@ GEN(lh, {
             emit_cmp_imm32(state, temp_reg, 0);
             uint32_t jump_loc_0 = state->offset;
             emit_jcc_offset(state, 0x84);
-            vm_reg[1] = map_vm_reg(state, ir->rd);
+            vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
 
             emit_load(state, S32, parameter_reg[0], vm_reg[1],
                       offsetof(riscv_t, X) + 4 * ir->rd);
@@ -284,7 +284,7 @@ GEN(lw, {
             emit_cmp_imm32(state, temp_reg, 0);
             uint32_t jump_loc_0 = state->offset;
             emit_jcc_offset(state, 0x84);
-            vm_reg[1] = map_vm_reg(state, ir->rd);
+            vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
 
             emit_load(state, S32, parameter_reg[0], vm_reg[1],
                       offsetof(riscv_t, X) + 4 * ir->rd);
@@ -336,7 +336,7 @@ GEN(lbu, {
             emit_cmp_imm32(state, temp_reg, 0);
             uint32_t jump_loc_0 = state->offset;
             emit_jcc_offset(state, 0x84);
-            vm_reg[1] = map_vm_reg(state, ir->rd);
+            vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
 
             emit_load(state, S32, parameter_reg[0], vm_reg[1],
                       offsetof(riscv_t, X) + 4 * ir->rd);
@@ -388,7 +388,7 @@ GEN(lhu, {
             emit_cmp_imm32(state, temp_reg, 0);
             uint32_t jump_loc_0 = state->offset;
             emit_jcc_offset(state, 0x84);
-            vm_reg[1] = map_vm_reg(state, ir->rd);
+            vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
 
             emit_load(state, S32, parameter_reg[0], vm_reg[1],
                       offsetof(riscv_t, X) + 4 * ir->rd);

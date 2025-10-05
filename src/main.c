@@ -19,6 +19,28 @@
 #include "riscv.h"
 #include "utils.h"
 
+/* ThreadSanitizer configuration for FULL4G compatibility
+ *
+ * We use MAP_FIXED to allocate emulated memory at 0x7d0000000000, which is
+ * within TSAN's application memory range (0x7cf000000000 - 0x7ffffffff000).
+ * This avoids conflicts with TSAN's shadow memory and allows race detection
+ * to work with FULL4G's 4GB address space.
+ *
+ * Configuration optimizes for race detection with minimal overhead.
+ */
+#if defined(__SANITIZE_THREAD__)
+const char *__tsan_default_options()
+{
+    return "halt_on_error=0"          /* Continue after errors */
+           ":report_bugs=1"           /* Report data races */
+           ":second_deadlock_stack=1" /* Full deadlock info */
+           ":verbosity=0"             /* Reduce noise */
+           ":memory_limit_mb=0"       /* No memory limit */
+           ":history_size=7"          /* Larger race detection window */
+           ":io_sync=0";              /* Don't sync on I/O */
+}
+#endif
+
 /* enable program trace mode */
 #if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
 static bool opt_trace = false;

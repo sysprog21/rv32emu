@@ -2336,6 +2336,25 @@ struct jit_state *jit_state_init(size_t size)
 
     state->offset = 0;
     state->size = size;
+#if defined(TSAN_ENABLED) && defined(__x86_64__)
+    /* ThreadSanitizer compatibility: Allocate JIT code buffer at a fixed
+     * address above the main memory region to avoid conflicts.
+     *
+     * Main memory: 0x7d0000000000 - 0x7d0100000000 (4GB for FULL4G)
+     * JIT buffer:  0x7d1000000000 + size
+     *
+     * This keeps both allocations in TSAN's app range (0x7cf000000000 -
+     * 0x7ffffffff000) and prevents overlap with main memory or TSAN shadow.
+     */
+    void *jit_addr = (void *) 0x7d1000000000UL;
+    state->buf = mmap(jit_addr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    if (state->buf == MAP_FAILED) {
+        free(state);
+        return NULL;
+    }
+#else
+    /* Standard allocation without TSAN */
     state->buf = mmap(0, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                       MAP_PRIVATE | MAP_ANONYMOUS
 #if defined(__APPLE__)
@@ -2347,8 +2366,7 @@ struct jit_state *jit_state_init(size_t size)
         free(state);
         return NULL;
     }
-    assert(state->buf != MAP_FAILED);
-
+#endif
     state->n_blocks = 0;
     set_reset(&state->set);
     reset_reg();

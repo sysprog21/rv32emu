@@ -8,20 +8,21 @@ set -x
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-C_SOURCES=$(find "${REPO_ROOT}" | egrep "\.(c|cxx|cpp|h|hpp)$")
+# Use git ls-files to only check files tracked by git (excludes submodules and generated files)
+C_SOURCES=$(git ls-files "${REPO_ROOT}" | egrep "\.(c|cxx|cpp|h|hpp)$")
 for file in ${C_SOURCES}; do
     clang-format-18 ${file} > expected-format
     diff -u -p --label="${file}" --label="expected coding style" ${file} expected-format
 done
 C_MISMATCH_LINE_CNT=$(clang-format-18 --output-replacements-xml ${C_SOURCES} | egrep -c "</replacement>")
 
-SH_SOURCES=$(find "${REPO_ROOT}" | egrep "\.sh$")
+SH_SOURCES=$(git ls-files "${REPO_ROOT}" | egrep "\.sh$")
 for file in ${SH_SOURCES}; do
     shfmt -d "${file}"
 done
-SH_MISMATCH_FILE_CNT=$(shfmt -l ${SH_SOURCES})
+SH_MISMATCH_FILE_CNT=$(shfmt -l ${SH_SOURCES} | wc -l)
 
-PY_SOURCES=$(find "${REPO_ROOT}" | egrep "\.py$")
+PY_SOURCES=$(git ls-files "${REPO_ROOT}" | egrep "\.py$")
 for file in ${PY_SOURCES}; do
     echo "Checking Python file: ${file}"
     black --diff "${file}"

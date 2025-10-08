@@ -85,10 +85,12 @@ $(CACHE_TEST_TARGET): $(CACHE_TEST_OBJS)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
 
-$(CACHE_TEST_OUTDIR)/%.o: $(CACHE_TEST_SRCDIR)/%.c
+$(CACHE_TEST_OUTDIR)/%.o: $(CACHE_TEST_SRCDIR)/%.c $(CONFIG_FILE) | $(CACHE_TEST_OUTDIR) $(CACHE_TEST_OUTDIR)/lfu
 	$(VECHO) "  CC\t$@\n"
-	$(Q)mkdir -p $(dir $@)/lfu
 	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
+
+$(CACHE_TEST_OUTDIR) $(CACHE_TEST_OUTDIR)/lfu:
+	$(Q)mkdir -p $@
 
 $(MAP_TEST_OUT): $(MAP_TEST_TARGET)
 	$(Q)touch $@
@@ -97,10 +99,12 @@ $(MAP_TEST_TARGET): $(MAP_TEST_OBJS)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
 
-$(MAP_TEST_OUTDIR)/%.o: $(MAP_TEST_SRCDIR)/%.c
+$(MAP_TEST_OUTDIR)/%.o: $(MAP_TEST_SRCDIR)/%.c $(CONFIG_FILE) | $(MAP_TEST_OUTDIR)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
+
+$(MAP_TEST_OUTDIR):
+	$(Q)mkdir -p $@
 
 $(PATH_TEST_OUT): $(PATH_TEST_TARGET)
 	$(Q)touch $@
@@ -109,7 +113,11 @@ $(PATH_TEST_TARGET): $(PATH_TEST_OBJS)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
 
-$(PATH_TEST_OUTDIR)/%.o: $(PATH_TEST_SRCDIR)/%.c
+$(PATH_TEST_OUTDIR)/%.o: $(PATH_TEST_SRCDIR)/%.c $(CONFIG_FILE) | $(PATH_TEST_OUTDIR)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)mkdir -p $(dir $@)
 	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
+
+$(PATH_TEST_OUTDIR):
+	$(Q)mkdir -p $@
+
+.PHONY: tests run-test-cache run-test-map run-test-path

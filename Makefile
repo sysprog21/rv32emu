@@ -15,13 +15,6 @@ CFLAGS += -include src/common.h -Isrc/
 
 OBJS_EXT :=
 
-# In the system test suite, the executable is an ELF file (e.g., MMU).
-# However, the Linux kernel emulation includes the Image, DT, and
-# root filesystem (rootfs). Therefore, the test suite needs this
-# flag to load the ELF and differentiate it from the kernel emulation.
-ENABLE_ELF_LOADER ?= 0
-$(call set-feature, ELF_LOADER)
-
 # Enable MOP fusion, easier for ablation study
 ENABLE_MOP_FUSION ?= 1
 $(call set-feature, MOP_FUSION)
@@ -37,6 +30,18 @@ $(call set-feature, LOG_COLOR)
 # Enable system emulation
 ENABLE_SYSTEM ?= 0
 $(call set-feature, SYSTEM)
+
+# In the system test suite, the executable is an ELF file (e.g., MMU).
+# However, the Linux kernel emulation includes the Image, DT, and
+# root filesystem (rootfs). Therefore, the test suite needs this
+# flag to load the ELF and differentiate it from the kernel emulation.
+# User-space emulation (SYSTEM=0) always needs ELF loader.
+ifeq ($(ENABLE_SYSTEM), 0)
+    override ENABLE_ELF_LOADER := 1
+else
+    ENABLE_ELF_LOADER ?= 0
+endif
+$(call set-feature, ELF_LOADER)
 
 ifeq ($(call has, SYSTEM), 1)
     OBJS_EXT += system.o

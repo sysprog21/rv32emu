@@ -29,10 +29,13 @@ $(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB)
 	$(VECHO) "  BIN2C\t$@\n"
 	$(Q)$(BIN_TO_C) $(BUILD_DTB) > $@
 
-$(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(deps_emcc)
-	$(Q)mkdir -p $(DEV_OUT)
+$(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(CONFIG_FILE) $(deps_emcc) | $(DEV_OUT)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
+
+$(DEV_OUT):
+	$(Q)mkdir -p $@
+
 DEV_OBJS := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c))
 deps := $(DEV_OBJS:%.o=%.o.d)
 
@@ -45,5 +48,7 @@ system_action := ($(BIN) -k $(OUT)/$(LINUX_IMAGE_DIR)/Image -i $(OUT)/$(LINUX_IM
 system_deps += artifact $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
 system: $(system_deps)
 	$(system_action)
+
+.PHONY: system
 
 endif

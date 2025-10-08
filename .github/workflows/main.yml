@@ -283,6 +283,7 @@ jobs:
     - name: Architecture test
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
+        LATEST_RELEASE: dummy
       run: |
             .ci/riscv-tests.sh
       if: ${{ always() }}
@@ -492,6 +493,7 @@ jobs:
      - name: Architecture test
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
+         LATEST_RELEASE: dummy
        run: |
              python3 -m venv venv
              . venv/bin/activate
@@ -529,8 +531,12 @@ jobs:
             sudo apt-get install -q=2 clang-18 clang-tools-18
       shell: bash
     - name: run scan-build without JIT
+      env:
+        LATEST_RELEASE: dummy
       run: make distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
     - name: run scan-build with JIT
+      env:
+        LATEST_RELEASE: dummy
       run: |
           make ENABLE_JIT=1 distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
 

@@ -1,6 +1,11 @@
 include mk/common.mk
 include mk/toolchain.mk
 
+# Verify GNU make version (3.80+ required for order-only prerequisites)
+ifeq ($(filter 3.80 3.81 3.82 3.83 3.84 4.% 5.%,$(MAKE_VERSION)),)
+$(error GNU make 3.80 or higher is required. Current version: $(MAKE_VERSION))
+endif
+
 OUT ?= build
 BIN := $(OUT)/rv32emu
 
@@ -46,6 +51,7 @@ endif
 #   Device Tree(initrd, memory range)
 #   src/io.c(memory init)
 #   src/riscv.c(system emulation layout init)
+# Note: These memory settings are for SYSTEM mode only (when ELF_LOADER=0)
 ifeq ($(call has, SYSTEM), 1)
 ifeq ($(call has, ELF_LOADER), 0)
 MiB = 1024*1024
@@ -66,6 +72,7 @@ CFLAGS_dt += -DMEM_START=0x$(MEM_START) \
              -DINITRD_END=0x$(shell echo "obase=16; ibase=16; \
                             $(REAL_MEM_SIZE) - $(call compute_size, $(DTB_SIZE)) - 1" | bc)
 
+# Memory size for SYSTEM mode (may be overridden by FULL4G if ENABLE_ELF_LOADER=1)
 CFLAGS += -DMEM_SIZE=0x$(REAL_MEM_SIZE) -DDTB_SIZE=0x$(REAL_DTB_SIZE) -DINITRD_SIZE=0x$(REAL_INITRD_SIZE)
 endif
 endif
@@ -225,7 +232,22 @@ endif
 # Full access to a 4 GiB address space, necessitating more memory mapping
 # during emulator initialization.
 $(call set-feature, FULL4G)
+
+# Configuration validation and conflict detection
+ifeq ($(call has, SDL), 1)
+ifeq ($(call has, SYSTEM), 1)
+ifeq ($(call has, ELF_LOADER), 0)
+ifeq ($(call has, FULL4G), 0)
+    $(warning SDL requires FULL4G=1 but SYSTEM forces FULL4G=0. Set ENABLE_ELF_LOADER=1 or disable SDL/SYSTEM)
+endif
+endif
+endif
+endif
+
 ifeq ($(call has, FULL4G), 1)
+# Note: If both SYSTEM and FULL4G are enabled with ELF_LOADER=1,
+# this MEM_SIZE definition will override the SYSTEM mode definition.
+# This is intentional for ELF loader use cases.
 CFLAGS += -DMEM_SIZE=0xFFFFFFFFULL # 2^{32} - 1
 endif
 
@@ -278,6 +300,8 @@ ifeq ($(call has, JIT), 1)
         else
             $(error No llvm-config-18 installed. Check llvm-config-18 installation in advance, or use "ENABLE_T2C=0" to disable tier-2 LLVM compiler)
         endif
+    else
+        $(warning T2C (tier-2 compiler) is disabled. Using tier-1 JIT only.)
     endif
     ifneq ($(processor),$(filter $(processor),x86_64 aarch64 arm64))
         $(error JIT mode only supports for x64 and arm64 target currently.)
@@ -318,7 +342,7 @@ DTB_DEPS := $(BUILD_DTB) $(BUILD_DTB2C)
 endif
 endif
 
-all: config $(DTB_DEPS) $(BIN)
+all: config $(DTB_DEPS) $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
 
 OBJS := \
     map.o \
@@ -353,19 +377,31 @@ ifeq ($(call has, GDBSTUB), 1)
 $(OBJS): $(GDBSTUB_LIB)
 endif
 
-$(OUT)/%.o: src/%.c $(deps_emcc)
-	$(Q)mkdir -p $(shell dirname $@)
+$(OUT)/%.o: src/%.c $(CONFIG_FILE) $(deps_emcc) | $(OUT)
+	$(Q)mkdir -p $(dir $@)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
-$(BIN): $(OBJS) $(DEV_OBJS)
+$(OUT):
+	$(Q)mkdir -p $@
+
+$(BIN): $(OBJS) $(DEV_OBJS) | $(OUT)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $^ $(LDFLAGS)
 
+$(CONFIG_FILE): FORCE
+	$(Q)mkdir -p $(OUT)
+	$(Q)echo "$(CFLAGS)" | xargs -n1 | sort | sed -n 's/^RV32_FEATURE/ENABLE/p' > $@.tmp
+	$(Q)if ! cmp -s $@ $@.tmp 2>/dev/null; then \
+		mv $@.tmp $@; \
+		$(PRINTF) "Configuration updated. Check $(OUT)/.config for configured items.\n"; \
+	else \
+		$(RM) $@.tmp; \
+	fi
+
+.PHONY: FORCE config
+FORCE:
 config: $(CONFIG_FILE)
-$(CONFIG_FILE):
-	$(Q)echo "$(CFLAGS)" | xargs -n1 | sort | sed -n 's/^RV32_FEATURE/ENABLE/p' > $@
-	$(VECHO) "Check the file $(OUT)/.config for configured items.\n"
 
 # Tools
 include mk/tools.mk
@@ -459,5 +495,8 @@ distclean: clean
 	$(Q)-$(RM) $(OUT)/.config
 	$(Q)-$(RM) -r $(SOFTFLOAT_DUMMY_PLAT) $(OUT)/softfloat
 	$(Q)$(call notice, [OK])
+
+.PHONY: all config tool check check-hello misalign misalign-in-blk-emu mmu-test
+.PHONY: gdbstub-test doom quake clean distclean artifact
 
 -include $(deps)

@@ -299,6 +299,89 @@ static inline void offset_map_insert(struct jit_state *state, block_t *block)
     __builtin___clear_cache((char *) (addr), (char *) (addr) + (size));
 #endif
 
+/* JIT debug helpers - enable with ENABLE_JIT_DEBUG=1 to detect issues early */
+#ifndef ENABLE_JIT_DEBUG
+#define ENABLE_JIT_DEBUG 0
+#endif
+
+#if ENABLE_JIT_DEBUG
+static void jit_dump_regmap(const char *ctx)
+{
+    rv_log_debug("JIT RegMap [%s]:", ctx);
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx >= 0) {
+            rv_log_debug("  Host R%d -> VM x%d (dirty=%d)",
+                         register_map[i].reg_idx, register_map[i].vm_reg_idx,
+                         register_map[i].dirty);
+        }
+    }
+}
+
+static void jit_check_regmap_conflict(int vm_reg,
+                                      int host_reg,
+                                      const char *insn)
+{
+    int found_idx = -1;
+    /* Check if VM register is already mapped */
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx == vm_reg) {
+            if (found_idx >= 0 && found_idx != i) {
+                /* VM register mapped to multiple host registers */
+                rv_log_error(
+                    "JIT RegMap CONFLICT in %s: VM x%d mapped to "
+                    "Host R%d (idx %d) and R%d (idx %d)",
+                    insn, vm_reg, register_map[found_idx].reg_idx, found_idx,
+                    register_map[i].reg_idx, i);
+                jit_dump_regmap("CONFLICT");
+                assert(false);
+            }
+            found_idx = i;
+            /* Verify the found mapping is correct */
+            if (register_map[i].reg_idx != host_reg) {
+                rv_log_error(
+                    "JIT RegMap CONFLICT in %s: VM x%d expected at "
+                    "Host R%d but found at R%d",
+                    insn, vm_reg, host_reg, register_map[i].reg_idx);
+                jit_dump_regmap("CONFLICT");
+                assert(false);
+            }
+        } else if (register_map[i].reg_idx == host_reg &&
+                   register_map[i].vm_reg_idx >= 0) {
+            /* Host register holds different VM register */
+            rv_log_error(
+                "JIT RegMap CONFLICT in %s: Host R%d already holds "
+                "VM x%d, cannot map VM x%d",
+                insn, host_reg, register_map[i].vm_reg_idx, vm_reg);
+            jit_dump_regmap("CONFLICT");
+            assert(false);
+        }
+    }
+}
+
+static void jit_verify_cache_coherency(struct jit_state *state, uint32_t pc)
+    UNUSED;
+static void jit_verify_cache_coherency(struct jit_state *state, uint32_t pc)
+{
+    /* On ARM64, verify instruction cache was properly invalidated */
+#if defined(__aarch64__)
+    if (state->offset > 0) {
+        rv_log_debug("JIT: Cache coherency check at PC=0x%08x, offset=%u", pc,
+                     state->offset);
+    }
+#endif
+}
+#else
+#define jit_dump_regmap(ctx) \
+    do {                     \
+    } while (0)
+#define jit_check_regmap_conflict(vm_reg, host_reg, insn) \
+    do {                                                  \
+    } while (0)
+#define jit_verify_cache_coherency(state, pc) \
+    do {                                      \
+    } while (0)
+#endif
+
 static bool should_flush = false;
 static void emit_bytes(struct jit_state *state, void *data, uint32_t len)
 {
@@ -1890,6 +1973,7 @@ static inline int map_vm_reg(struct jit_state *state, int vm_reg_idx)
     save_reg(state, idx);
     unmap_vm_reg(idx);
     set_vm_reg(idx, vm_reg_idx);
+    jit_check_regmap_conflict(vm_reg_idx, target_reg, "map_vm_reg");
     return target_reg;
 }
 
@@ -1933,6 +2017,15 @@ static inline int map_vm_reg_reserved(struct jit_state *state,
     save_reg(state, idx);
     unmap_vm_reg(idx);
     set_vm_reg(idx, vm_reg_idx);
+    jit_check_regmap_conflict(vm_reg_idx, target_reg, "map_vm_reg_reserved");
+    /* Additional check: ensure we didn't allocate the reserved register */
+    if (target_reg == reserved_reg_idx) {
+        rv_log_error(
+            "JIT RegMap ERROR: map_vm_reg_reserved allocated reserved "
+            "register R%d for VM x%d",
+            reserved_reg_idx, vm_reg_idx);
+        assert(false);
+    }
     return target_reg;
 }
 

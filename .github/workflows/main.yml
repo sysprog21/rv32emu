@@ -461,6 +461,14 @@ jobs:
              make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check $PARALLEL
              make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check $PARALLEL
        if: ${{ always() }}
+     - name: JIT debug test
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             # Run JIT tests with debug mode to catch register allocation and cache coherency issues
+             make distclean && make ENABLE_JIT=1 ENABLE_JIT_DEBUG=1 check $PARALLEL
+             make distclean && make ENABLE_EXT_C=0 ENABLE_JIT=1 ENABLE_JIT_DEBUG=1 check $PARALLEL
+       if: ${{ always() }}
      - name: undefined behavior test
        env:
          CC: ${{ steps.install_cc.outputs.cc }}

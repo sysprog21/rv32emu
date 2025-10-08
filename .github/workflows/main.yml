@@ -539,6 +539,15 @@ jobs:
                fi
              done
 
+    - name: JIT debug test
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+      run: |
+            # Run JIT tests with debug mode to catch register allocation and cache coherency issues
+            make distclean && make ENABLE_JIT=1 ENABLE_JIT_DEBUG=1 check $PARALLEL
+            make distclean && make ENABLE_EXT_C=0 ENABLE_JIT=1 ENABLE_JIT_DEBUG=1 check $PARALLEL
+      if: ${{ always() }}
+
      - name: undefined behavior test
        if: (success() || failure()) && steps.install_cc.outputs.cc == 'clang'  # gcc on macOS/arm64 does not support sanitizers
        env:

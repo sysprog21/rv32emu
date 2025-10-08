@@ -302,6 +302,11 @@ ENABLE_JIT ?= 0
 $(call set-feature, JIT)
 ifeq ($(call has, JIT), 1)
     OBJS_EXT += jit.o
+    # JIT debug mode for early issue detection in CI/CD
+    ENABLE_JIT_DEBUG ?= 0
+    ifeq ("$(ENABLE_JIT_DEBUG)", "1")
+        CFLAGS += -DENABLE_JIT_DEBUG=1
+    endif
     ENABLE_T2C ?= 1
     $(call set-feature, T2C)
     ifeq ($(call has, T2C), 1)

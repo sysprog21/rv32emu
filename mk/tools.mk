@@ -23,7 +23,7 @@ HIST_OBJS := \
 HIST_OBJS := $(addprefix $(OUT)/, $(HIST_OBJS))
 deps += $(HIST_OBJS:%.o=%.o.d)
 
-$(OUT)/%.o: tools/%.c
+$(OUT)/%.o: tools/%.c | $(OUT)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -Wno-missing-field-initializers -Isrc -c -MMD -MF $@.d $<
 
@@ -39,3 +39,5 @@ LINUX_IMAGE_SRC = $(BUILDROOT_DATA) $(LINUX_DATA)
 build-linux-image: $(LINUX_IMAGE_SRC)
 	$(Q)./tools/build-linux-image.sh
 	$(Q)$(PRINTF) "Build done.\n"
+
+.PHONY: build-linux-image

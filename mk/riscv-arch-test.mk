@@ -1,8 +1,8 @@
 riscof-check:
 	$(Q)if [ "$(shell pip show riscof 2>&1 | head -n 1 | cut -d' ' -f1)" = "WARNING:" ]; then \
-	$(PRINTF) "Run 'pip3 install -r requirements.txt to install dependencies.\n"; \
-	exit 1; \
-	fi;
+		$(PRINTF) "Run 'pip3 install -r requirements.txt' to install dependencies.\n"; \
+		exit 1; \
+	fi
 
 ARCH_TEST_DIR ?= tests/riscv-arch-test
 ARCH_TEST_SUITE ?= $(ARCH_TEST_DIR)/riscv-test-suite
@@ -27,3 +27,5 @@ endif
 			--config=$(RISCV_TARGET)/config.ini \
 			--suite=$(ARCH_TEST_SUITE) \
 			--env=$(ARCH_TEST_DIR)/riscv-test-suite/env
+
+.PHONY: riscof-check arch-test

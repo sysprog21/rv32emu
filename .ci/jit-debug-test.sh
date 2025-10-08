@@ -5,7 +5,7 @@
 
 set -e
 
-PARALLEL="${PARALLEL:--j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+PARALLEL="${PARALLEL:--j$(nproc 2> /dev/null || sysctl -n hw.ncpu 2> /dev/null || echo 4)}"
 
 echo "======================================"
 echo "JIT Debug Mode Test"
@@ -39,8 +39,7 @@ for config in \
     "ENABLE_EXT_F=0" \
     "ENABLE_EXT_M=0" \
     "ENABLE_Zba=0" \
-    "ENABLE_Zbb=0"
-do
+    "ENABLE_Zbb=0"; do
     echo ""
     echo "Testing: $config with JIT debug"
     make distclean

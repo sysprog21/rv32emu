@@ -31,18 +31,6 @@ $(call set-feature, LOG_COLOR)
 ENABLE_SYSTEM ?= 0
 $(call set-feature, SYSTEM)
 
-# In the system test suite, the executable is an ELF file (e.g., MMU).
-# However, the Linux kernel emulation includes the Image, DT, and
-# root filesystem (rootfs). Therefore, the test suite needs this
-# flag to load the ELF and differentiate it from the kernel emulation.
-# User-space emulation (SYSTEM=0) always needs ELF loader.
-ifeq ($(ENABLE_SYSTEM), 0)
-    override ENABLE_ELF_LOADER := 1
-else
-    ENABLE_ELF_LOADER ?= 0
-endif
-$(call set-feature, ELF_LOADER)
-
 ifeq ($(call has, SYSTEM), 1)
     OBJS_EXT += system.o
 endif
@@ -77,6 +65,22 @@ endif
 
 ENABLE_ARCH_TEST ?= 0
 $(call set-feature, ARCH_TEST)
+
+# In the system test suite, the executable is an ELF file (e.g., MMU).
+# However, the Linux kernel emulation includes the Image, DT, and
+# root filesystem (rootfs). Therefore, the test suite needs this
+# flag to load the ELF and differentiate it from the kernel emulation.
+# User-space emulation (SYSTEM=0) always needs ELF loader, except for architecture tests.
+ifeq ($(ENABLE_SYSTEM), 0)
+    ifneq ($(ENABLE_ARCH_TEST), 1)
+        override ENABLE_ELF_LOADER := 1
+    else
+        ENABLE_ELF_LOADER ?= 0
+    endif
+else
+    ENABLE_ELF_LOADER ?= 0
+endif
+$(call set-feature, ELF_LOADER)
 
 # ThreadSanitizer support
 # TSAN on x86-64 memory layout:

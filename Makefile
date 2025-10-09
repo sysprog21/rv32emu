@@ -199,6 +199,7 @@ ENABLE_FULL4G ?= 0
 
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
+ENABLE_SDL_MIXER ?= 1
 ifneq ("$(CC_IS_EMCC)", "1") # note that emcc generates port SDL headers/library, so it does not requires system SDL headers/library
 ifeq ($(call has, SDL), 1)
 ifeq (, $(shell which sdl2-config))
@@ -208,16 +209,28 @@ endif
 ifeq (1, $(shell pkg-config --exists SDL2_mixer; echo $$?))
 $(warning No SDL2_mixer lib installed. Check SDL2_mixer installation in advance)
 override ENABLE_SDL := 0
+override ENABLE_SDL_MIXER := 0
 endif
+endif
+else
+# Disable SDL_MIXER for emscripten builds to avoid SDL2_mixer port compilation issues
+# The emscripten-ports/SDL2_mixer was archived in Jan 2024 with unfixable warnings
+override ENABLE_SDL_MIXER := 0
 endif
 $(call set-feature, SDL)
+$(call set-feature, SDL_MIXER)
 ifeq ($(call has, SDL), 1)
 OBJS_EXT += syscall_sdl.o
+ifneq ("$(CC_IS_EMCC)", "1")
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
+endif
 # 4 GiB of memory is required to run video games.
 ENABLE_FULL4G := 1
+ifneq ("$(CC_IS_EMCC)", "1")
 LDFLAGS += $(shell sdl2-config --libs) -pthread
+ifeq ($(call has, SDL_MIXER), 1)
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
+endif
 endif
 endif
 

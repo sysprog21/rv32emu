@@ -199,25 +199,56 @@ ENABLE_FULL4G ?= 0
 
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
-ifneq ("$(CC_IS_EMCC)", "1") # note that emcc generates port SDL headers/library, so it does not requires system SDL headers/library
-ifeq ($(call has, SDL), 1)
-ifeq (, $(shell which sdl2-config))
+ENABLE_SDL_MIXER ?= 1
+
+# Step 1: Detect SDL availability
+ifneq ("$(CC_IS_EMCC)", "1")
+# Native build: require sdl2-config for SDL support
+ifeq (, $(shell command -v sdl2-config))
 $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
 override ENABLE_SDL := 0
+override ENABLE_SDL_MIXER := 0
 endif
-ifeq (1, $(shell pkg-config --exists SDL2_mixer; echo $$?))
-$(warning No SDL2_mixer lib installed. Check SDL2_mixer installation in advance)
-override ENABLE_SDL := 0
+else
+# Emscripten build: SDL is available via ports, but SDL_MIXER has unfixable warnings
+# The emscripten-ports/SDL2_mixer was archived in Jan 2024 with compilation issues
+override ENABLE_SDL_MIXER := 0
+endif
+
+# Enforce dependency: SDL_MIXER requires SDL
+ifeq ($(ENABLE_SDL), 0)
+override ENABLE_SDL_MIXER := 0
+endif
+
+# Step 2: If SDL is enabled on native builds, check for SDL_MIXER
+ifneq ("$(CC_IS_EMCC)", "1")
+ifeq ($(ENABLE_SDL), 1)
+ifneq (, $(shell command -v pkg-config))
+ifneq (0, $(shell pkg-config --exists SDL2_mixer; echo $$?))
+$(warning No SDL2_mixer lib installed. SDL2_mixer support will be disabled)
+override ENABLE_SDL_MIXER := 0
+endif
+else
+$(warning No pkg-config found. Disabling SDL2_mixer support)
+override ENABLE_SDL_MIXER := 0
 endif
 endif
+endif
+
 $(call set-feature, SDL)
+$(call set-feature, SDL_MIXER)
 ifeq ($(call has, SDL), 1)
 OBJS_EXT += syscall_sdl.o
+ifneq ("$(CC_IS_EMCC)", "1")
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
+endif
 # 4 GiB of memory is required to run video games.
 ENABLE_FULL4G := 1
+ifneq ("$(CC_IS_EMCC)", "1")
 LDFLAGS += $(shell sdl2-config --libs) -pthread
+ifeq ($(call has, SDL_MIXER), 1)
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
+endif
 endif
 endif
 

@@ -15,7 +15,9 @@
 #include <unistd.h>
 
 #include <SDL.h>
+#if RV32_HAS(SDL_MIXER)
 #include <SDL_mixer.h>
+#endif
 
 #include "riscv.h"
 #include "riscv_private.h"
@@ -92,6 +94,7 @@ typedef struct sound {
 } sound_t;
 
 /* SDL-mixer-related and music-related variables */
+#if RV32_HAS(SDL_MIXER)
 static pthread_t music_thread;
 static uint8_t *music_midi_data;
 static Mix_Music *mid;
@@ -107,6 +110,7 @@ static int chan;
 static bool audio_init = false;
 static bool sfx_thread_init = false;
 static bool music_thread_init = false;
+#endif
 
 typedef struct {
     void *data;
@@ -718,6 +722,7 @@ uint8_t *mus2midi(uint8_t *data, int *length)
     return midi_data;
 }
 
+#if RV32_HAS(SDL_MIXER)
 static void *sfx_handler(void *arg)
 {
     sound_t *sfx = (sound_t *) arg;
@@ -916,7 +921,9 @@ static void set_music_volume(riscv_t *rv)
     /* multiplied by 8 because volume's max is 15 */
     Mix_VolumeMusic(volume * 8);
 }
+#endif /* RV32_HAS(SDL_MIXER) */
 
+#if RV32_HAS(SDL_MIXER)
 static void init_audio(void)
 {
     if (!(SDL_WasInit(-1) & SDL_INIT_AUDIO)) {
@@ -977,6 +984,7 @@ static void shutdown_audio()
 
     audio_init = sfx_thread_init = music_thread_init = false;
 }
+#endif
 
 void sdl_video_audio_cleanup()
 {
@@ -984,6 +992,8 @@ void sdl_video_audio_cleanup()
         SDL_DestroyWindow(window);
         window = NULL;
     }
+
+#if RV32_HAS(SDL_MIXER)
     /*
      * The sfx_or_music_thread_init flag might not be set if a quick ctrl-c
      * occurs while the audio configuration is being initialized. Therefore,
@@ -992,6 +1002,7 @@ void sdl_video_audio_cleanup()
     bool sfx_or_music_thread_init = sfx_thread_init | music_thread_init;
     if (sfx_or_music_thread_init || (!sfx_or_music_thread_init && audio_init))
         shutdown_audio();
+#endif
     SDL_Quit();
 }
 
@@ -1002,10 +1013,14 @@ void syscall_setup_audio(riscv_t *rv)
 
     switch (request) {
     case INIT_AUDIO:
+#if RV32_HAS(SDL_MIXER)
         init_audio();
+#endif
         break;
     case SHUTDOWN_AUDIO:
+#if RV32_HAS(SDL_MIXER)
         shutdown_audio();
+#endif
         break;
     default:
         rv_log_error("Unknown sound request: %d", request);
@@ -1020,16 +1035,24 @@ void syscall_control_audio(riscv_t *rv)
 
     switch (request) {
     case PLAY_MUSIC:
+#if RV32_HAS(SDL_MIXER)
         play_music(rv);
+#endif
         break;
     case PLAY_SFX:
+#if RV32_HAS(SDL_MIXER)
         play_sfx(rv);
+#endif
         break;
     case SET_MUSIC_VOLUME:
+#if RV32_HAS(SDL_MIXER)
         set_music_volume(rv);
+#endif
         break;
     case STOP_MUSIC:
+#if RV32_HAS(SDL_MIXER)
         stop_music();
+#endif
         break;
     default:
         rv_log_error("Unknown sound control request: %d", request);

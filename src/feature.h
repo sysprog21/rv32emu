@@ -67,6 +67,17 @@
 #define RV32_FEATURE_SDL 1
 #endif
 
+/* SDL2_mixer audio support (requires SDL) */
+#ifndef RV32_FEATURE_SDL_MIXER
+#define RV32_FEATURE_SDL_MIXER 1
+#endif
+
+/* Enforce dependency: SDL_MIXER requires SDL */
+#if RV32_FEATURE_SDL_MIXER && !RV32_FEATURE_SDL
+#undef RV32_FEATURE_SDL_MIXER
+#define RV32_FEATURE_SDL_MIXER 0
+#endif
+
 /* GDB remote debugging */
 #ifndef RV32_FEATURE_GDBSTUB
 #define RV32_FEATURE_GDBSTUB 0

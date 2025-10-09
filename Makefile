@@ -188,8 +188,7 @@ $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
 override ENABLE_SDL := 0
 endif
 ifeq (1, $(shell pkg-config --exists SDL2_mixer; echo $$?))
-$(warning No SDL2_mixer lib installed. Check SDL2_mixer installation in advance)
-override ENABLE_SDL := 0
+$(warning No SDL2_mixer lib installed. SDL2_mixer support will be disabled)
 override ENABLE_SDL_MIXER := 0
 endif
 endif

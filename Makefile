@@ -207,15 +207,10 @@ $(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
 override ENABLE_SDL := 0
 endif
 ifeq (1, $(shell pkg-config --exists SDL2_mixer; echo $$?))
-$(warning No SDL2_mixer lib installed. Check SDL2_mixer installation in advance)
-override ENABLE_SDL := 0
+$(warning No SDL2_mixer lib installed. SDL2_mixer support will be disabled)
 override ENABLE_SDL_MIXER := 0
 endif
 endif
-else
-# Disable SDL_MIXER for emscripten builds to avoid SDL2_mixer port compilation issues
-# The emscripten-ports/SDL2_mixer was archived in Jan 2024 with unfixable warnings
-override ENABLE_SDL_MIXER := 0
 endif
 $(call set-feature, SDL)
 $(call set-feature, SDL_MIXER)

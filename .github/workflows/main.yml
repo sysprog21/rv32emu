@@ -283,8 +283,14 @@ jobs:
     - name: Architecture test
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
-        LATEST_RELEASE: dummy
       run: |
+            . .ci/common.sh
+            export LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
+                                                          "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                                           | grep '"tag_name"' \
+                                           | grep "sail" \
+                                           | head -n 1 \
+                                           | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
             .ci/riscv-tests.sh
       if: ${{ always() }}
 
@@ -342,7 +348,8 @@ jobs:
      - uses: actions/checkout@v4
      - name: install-dependencies
        run: |
-             brew install make dtc expect sdl2 sdl2_mixer bc e2fsprogs p7zip llvm@18 dcfldd
+             brew install make dtc expect sdl2 bc e2fsprogs p7zip llvm@18 dcfldd
+             brew install sdl2_mixer || echo "Warning: sdl2_mixer installation failed, continuing without SDL_MIXER support"
              .ci/riscv-toolchain-install.sh
              echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
              echo "$(brew --prefix llvm@18)/bin" >> $GITHUB_PATH
@@ -493,8 +500,14 @@ jobs:
      - name: Architecture test
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
-         LATEST_RELEASE: dummy
        run: |
+             . .ci/common.sh
+             export LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
+                                                           "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                                            | grep '"tag_name"' \
+                                            | grep "sail" \
+                                            | head -n 1 \
+                                            | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
              python3 -m venv venv
              . venv/bin/activate
              .ci/riscv-tests.sh

@@ -116,7 +116,26 @@ $(call set-feature, EXT_F)
 ifeq ($(call has, EXT_F), 1)
 AR := ar
 ifeq ("$(CC_IS_CLANG)", "1")
-AR = llvm-ar
+    # On macOS, system ar works with Apple Clang's LTO
+    ifeq ($(UNAME_S),Darwin)
+        # macOS: system ar is sufficient
+    else
+        # Non-macOS with Clang: check if LTO is enabled
+        ifeq ($(call has, LTO), 1)
+            # LTO requires llvm-ar to handle LLVM bitcode in object files
+            LLVM_AR := $(shell which llvm-ar 2>/dev/null)
+            ifeq ($(LLVM_AR),)
+                $(error llvm-ar not found. Install LLVM or disable LTO with ENABLE_LTO=0)
+            endif
+            AR = llvm-ar
+        else
+            # LTO disabled: prefer llvm-ar if available, otherwise use system ar
+            LLVM_AR := $(shell which llvm-ar 2>/dev/null)
+            ifneq ($(LLVM_AR),)
+                AR = llvm-ar
+            endif
+        endif
+    endif
 endif
 ifeq ("$(CC_IS_EMCC)", "1")
 AR = emar

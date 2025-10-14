@@ -311,7 +311,14 @@ include mk/artifact.mk
 include mk/system.mk
 include mk/wasm.mk
 
-all: config $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
+DTB_DEPS :=
+ifeq ($(call has, SYSTEM), 1)
+ifeq ($(call has, ELF_LOADER), 0)
+DTB_DEPS := $(BUILD_DTB) $(BUILD_DTB2C)
+endif
+endif
+
+all: config $(DTB_DEPS) $(BIN)
 
 OBJS := \
     map.o \

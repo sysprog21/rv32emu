@@ -155,7 +155,7 @@ GEN(bgeu, {
 GEN(lb, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    IIF(RV32_HAS(SYSTEM))
+    IIF(RV32_HAS(SYSTEM_MMIO))
     (
         {
             emit_load_imm_sext(state, temp_reg, ir->imm);
@@ -207,7 +207,7 @@ GEN(lb, {
 GEN(lh, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    IIF(RV32_HAS(SYSTEM))
+    IIF(RV32_HAS(SYSTEM_MMIO))
     (
         {
             emit_load_imm_sext(state, temp_reg, ir->imm);
@@ -259,7 +259,7 @@ GEN(lh, {
 GEN(lw, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    IIF(RV32_HAS(SYSTEM))
+    IIF(RV32_HAS(SYSTEM_MMIO))
     (
         {
             emit_load_imm_sext(state, temp_reg, ir->imm);
@@ -311,7 +311,7 @@ GEN(lw, {
 GEN(lbu, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    IIF(RV32_HAS(SYSTEM))
+    IIF(RV32_HAS(SYSTEM_MMIO))
     (
         {
             emit_load_imm_sext(state, temp_reg, ir->imm);
@@ -363,7 +363,7 @@ GEN(lbu, {
 GEN(lhu, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    IIF(RV32_HAS(SYSTEM))
+    IIF(RV32_HAS(SYSTEM_MMIO))
     (
         {
             emit_load_imm_sext(state, temp_reg, ir->imm);
@@ -415,7 +415,7 @@ GEN(lhu, {
 GEN(sb, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    IIF(RV32_HAS(SYSTEM))
+    IIF(RV32_HAS(SYSTEM_MMIO))
     (
         {
             emit_load_imm_sext(state, temp_reg, ir->imm);
@@ -465,7 +465,7 @@ GEN(sb, {
 GEN(sh, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    IIF(RV32_HAS(SYSTEM))
+    IIF(RV32_HAS(SYSTEM_MMIO))
     (
         {
             emit_load_imm_sext(state, temp_reg, ir->imm);
@@ -515,7 +515,7 @@ GEN(sh, {
 GEN(sw, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    IIF(RV32_HAS(SYSTEM))
+    IIF(RV32_HAS(SYSTEM_MMIO))
     (
         {
             emit_load_imm_sext(state, temp_reg, ir->imm);

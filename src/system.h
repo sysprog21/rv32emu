@@ -16,6 +16,10 @@
 #define R 1
 #define W 0
 
+/* MMIO definitions for Linux kernel emulation.
+ * Only defined when ELF_LOADER is disabled, as kernel mode needs MMIO but ELF
+ * test mode does not.
+ */
 #if !RV32_HAS(ELF_LOADER)
 
 #define MMIO_R 1

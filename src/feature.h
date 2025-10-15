@@ -118,5 +118,16 @@
 #define RV32_FEATURE_ARCH_TEST 0
 #endif
 
+/* MMIO support for system emulation
+ * It is enabled when running in SYSTEM mode without ELF_LOADER, corresponding
+ * to booting a full Linux kernel that requires memory-mapped I/O to interact
+ * with virtual devices (UART, PLIC, virtio-blk).
+ */
+#if RV32_FEATURE_SYSTEM && !RV32_FEATURE_ELF_LOADER
+#define RV32_FEATURE_SYSTEM_MMIO 1
+#else
+#define RV32_FEATURE_SYSTEM_MMIO 0
+#endif
+
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x

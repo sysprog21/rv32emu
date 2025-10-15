@@ -164,6 +164,16 @@ $(call set-feature, EXT_C)
 ENABLE_RV32E ?= 0
 $(call set-feature, RV32E)
 
+# Vector extension instructions
+ENABLE_EXT_V ?= 0
+$(call set-feature, EXT_V)
+VLEN ?= 128 # Default VLEN is 128
+ifeq ($(call has, EXT_V), 1)
+CFLAGS += -DVLEN=$(VLEN)
+ENABLE_EXT_F ?= 1
+$(call set-feature, EXT_F)
+endif
+
 # Control and Status Register (CSR)
 ENABLE_Zicsr ?= 1
 $(call set-feature, Zicsr)

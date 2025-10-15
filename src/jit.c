@@ -42,6 +42,7 @@
 #include "decode.h"
 #include "io.h"
 #include "jit.h"
+#include "log.h"
 #include "riscv.h"
 #include "riscv_private.h"
 #include "utils.h"
@@ -296,6 +297,89 @@ static inline void offset_map_insert(struct jit_state *state, block_t *block)
 #if !defined(__APPLE__)
 #define sys_icache_invalidate(addr, size) \
     __builtin___clear_cache((char *) (addr), (char *) (addr) + (size));
+#endif
+
+/* JIT debug helpers - enable with ENABLE_JIT_DEBUG=1 to detect issues early */
+#ifndef ENABLE_JIT_DEBUG
+#define ENABLE_JIT_DEBUG 0
+#endif
+
+#if ENABLE_JIT_DEBUG
+static void jit_dump_regmap(const char *ctx)
+{
+    rv_log_debug("JIT RegMap [%s]:", ctx);
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx >= 0) {
+            rv_log_debug("  Host R%d -> VM x%d (dirty=%d)",
+                         register_map[i].reg_idx, register_map[i].vm_reg_idx,
+                         register_map[i].dirty);
+        }
+    }
+}
+
+static void jit_check_regmap_conflict(int vm_reg,
+                                      int host_reg,
+                                      const char *insn)
+{
+    int found_idx = -1;
+    /* Check if VM register is already mapped */
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx == vm_reg) {
+            if (found_idx >= 0 && found_idx != i) {
+                /* VM register mapped to multiple host registers */
+                rv_log_error(
+                    "JIT RegMap CONFLICT in %s: VM x%d mapped to "
+                    "Host R%d (idx %d) and R%d (idx %d)",
+                    insn, vm_reg, register_map[found_idx].reg_idx, found_idx,
+                    register_map[i].reg_idx, i);
+                jit_dump_regmap("CONFLICT");
+                assert(false);
+            }
+            found_idx = i;
+            /* Verify the found mapping is correct */
+            if (register_map[i].reg_idx != host_reg) {
+                rv_log_error(
+                    "JIT RegMap CONFLICT in %s: VM x%d expected at "
+                    "Host R%d but found at R%d",
+                    insn, vm_reg, host_reg, register_map[i].reg_idx);
+                jit_dump_regmap("CONFLICT");
+                assert(false);
+            }
+        } else if (register_map[i].reg_idx == host_reg &&
+                   register_map[i].vm_reg_idx >= 0) {
+            /* Host register holds different VM register */
+            rv_log_error(
+                "JIT RegMap CONFLICT in %s: Host R%d already holds "
+                "VM x%d, cannot map VM x%d",
+                insn, host_reg, register_map[i].vm_reg_idx, vm_reg);
+            jit_dump_regmap("CONFLICT");
+            assert(false);
+        }
+    }
+}
+
+static void jit_verify_cache_coherency(struct jit_state *state, uint32_t pc)
+    UNUSED;
+static void jit_verify_cache_coherency(struct jit_state *state, uint32_t pc)
+{
+    /* On ARM64, verify instruction cache was properly invalidated */
+#if defined(__aarch64__)
+    if (state->offset > 0) {
+        rv_log_debug("JIT: Cache coherency check at PC=0x%08x, offset=%u", pc,
+                     state->offset);
+    }
+#endif
+}
+#else
+#define jit_dump_regmap(ctx) \
+    do {                     \
+    } while (0)
+#define jit_check_regmap_conflict(vm_reg, host_reg, insn) \
+    do {                                                  \
+    } while (0)
+#define jit_verify_cache_coherency(state, pc) \
+    do {                                      \
+    } while (0)
 #endif
 
 static bool should_flush = false;
@@ -593,24 +677,30 @@ static void update_branch_imm(struct jit_state *state,
     assert((imm & 3) == 0);
     uint32_t insn;
     imm >>= 2;
+    rv_log_debug("JIT: Patching branch at offset=%u, imm=%d", offset, imm * 4);
+    /* Read instruction while in execute mode (MAP_JIT requirement) */
     memcpy(&insn, state->buf + offset, sizeof(uint32_t));
     if ((insn & 0xfe000000U) == 0x54000000U /* Conditional branch immediate. */
         || (insn & 0x7e000000U) ==
                0x34000000U) { /* Compare and branch immediate. */
         assert((imm >> 19) == INT64_C(-1) || (imm >> 19) == 0);
+        insn &= ~(0x7ffffU << 5); /* Clear old offset bits */
         insn |= (imm & 0x7ffff) << 5;
     } else if ((insn & 0x7c000000U) == 0x14000000U) {
         /* Unconditional branch immediate.  */
         assert((imm >> 26) == INT64_C(-1) || (imm >> 26) == 0);
+        insn &= ~0x03ffffffU; /* Clear old offset bits */
         insn |= (imm & 0x03ffffffU) << 0;
     } else {
         assert(false);
         insn = BAD_OPCODE;
     }
 #if defined(__APPLE__) && defined(__aarch64__)
+    /* Switch to write mode only for writing */
     pthread_jit_write_protect_np(false);
 #endif
     memcpy(state->buf + offset, &insn, sizeof(uint32_t));
+    sys_icache_invalidate(state->buf + offset, sizeof(uint32_t));
 #if defined(__APPLE__) && defined(__aarch64__)
     pthread_jit_write_protect_np(true);
 #endif
@@ -1883,6 +1973,7 @@ static inline int map_vm_reg(struct jit_state *state, int vm_reg_idx)
     save_reg(state, idx);
     unmap_vm_reg(idx);
     set_vm_reg(idx, vm_reg_idx);
+    jit_check_regmap_conflict(vm_reg_idx, target_reg, "map_vm_reg");
     return target_reg;
 }
 
@@ -1926,6 +2017,15 @@ static inline int map_vm_reg_reserved(struct jit_state *state,
     save_reg(state, idx);
     unmap_vm_reg(idx);
     set_vm_reg(idx, vm_reg_idx);
+    jit_check_regmap_conflict(vm_reg_idx, target_reg, "map_vm_reg_reserved");
+    /* Additional check: ensure we didn't allocate the reserved register */
+    if (target_reg == reserved_reg_idx) {
+        rv_log_error(
+            "JIT RegMap ERROR: map_vm_reg_reserved allocated reserved "
+            "register R%d for VM x%d",
+            reserved_reg_idx, vm_reg_idx);
+        assert(false);
+    }
     return target_reg;
 }
 
@@ -2164,9 +2264,12 @@ void clear_hot(block_t *block)
 
 static void code_cache_flush(struct jit_state *state, riscv_t *rv)
 {
+    rv_log_info("JIT: Flushing code cache (n_blocks=%d, n_jumps=%d, offset=%u)",
+                state->n_blocks, state->n_jumps, state->offset);
     should_flush = false;
     state->offset = state->org_size;
     state->n_blocks = 0;
+    state->n_jumps = 0; /* Reset jump count when flushing */
     set_reset(&state->set);
     clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
 #if RV32_HAS(T2C)
@@ -2196,6 +2299,7 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
 
 static void resolve_jumps(struct jit_state *state)
 {
+    rv_log_debug("JIT: Resolving %d jumps", state->n_jumps);
     for (int i = 0; i < state->n_jumps; i++) {
         struct jump jump = state->jumps[i];
         int target_loc;
@@ -2218,6 +2322,10 @@ static void resolve_jumps(struct jit_state *state)
                     (if (jump.target_satp == state->offset_map[i].satp), )
                     {
                         target_loc = state->offset_map[i].offset;
+                        rv_log_debug(
+                            "JIT: Jump %d resolved to block pc=0x%08x, "
+                            "offset=%d",
+                            i, jump.target_pc, target_loc);
                         break;
                     }
                 }
@@ -2229,6 +2337,7 @@ static void resolve_jumps(struct jit_state *state)
 
         uint8_t *offset_ptr = &state->buf[jump.offset_loc];
         memcpy(offset_ptr, &rel, sizeof(uint32_t));
+        sys_icache_invalidate(offset_ptr, sizeof(uint32_t));
 #elif defined(__aarch64__)
         int32_t rel = target_loc - jump.offset_loc;
         update_branch_imm(state, jump.offset_loc, rel);
@@ -2308,23 +2417,35 @@ void jit_translate(riscv_t *rv, block_t *block)
             ) {
                 block->offset = state->offset_map[i].offset;
                 block->hot = true;
+                rv_log_debug("JIT: Cache hit for block pc=0x%08x, offset=%u",
+                             block->pc_start, block->offset);
                 return;
             }
         }
         assert(NULL);
         __UNREACHABLE;
     }
+    rv_log_debug("JIT: Starting translation for block pc=0x%08x",
+                 block->pc_start);
 restart:
     memset(state->jumps, 0, MAX_JUMPS * sizeof(struct jump));
     state->n_jumps = 0;
     block->offset = state->offset;
     translate_chained_block(state, rv, block);
     if (unlikely(should_flush)) {
+        /* Mark block as not translated since translation was incomplete */
+        block->hot = false;
+        /* Don't reset offset - it will be set correctly on restart */
+        rv_log_debug("JIT: Translation triggered flush for block pc=0x%08x",
+                     block->pc_start);
         code_cache_flush(state, rv);
         goto restart;
     }
     resolve_jumps(state);
     block->hot = true;
+    rv_log_debug(
+        "JIT: Translation completed for block pc=0x%08x, offset=%u, size=%u",
+        block->pc_start, block->offset, state->offset - block->offset);
 }
 
 struct jit_state *jit_state_init(size_t size)
@@ -2336,6 +2457,52 @@ struct jit_state *jit_state_init(size_t size)
 
     state->offset = 0;
     state->size = size;
+#if defined(TSAN_ENABLED)
+    /* ThreadSanitizer compatibility: Allocate JIT code buffer at a fixed
+     * address above the main memory region to avoid conflicts.
+     */
+#if defined(__x86_64__)
+    /* x86_64 memory layout:
+     * Main memory: 0x7d0000000000 - 0x7d0100000000 (4GB for FULL4G)
+     * JIT buffer:  0x7d1000000000 + size
+     *
+     * This keeps both allocations in TSAN's app range (0x7cf000000000 -
+     * 0x7ffffffff000) and prevents overlap with main memory or TSAN shadow.
+     */
+    void *jit_addr = (void *) 0x7d1000000000UL;
+    state->buf = mmap(jit_addr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED
+#if defined(__APPLE__)
+                          | MAP_JIT
+#endif
+                      ,
+                      -1, 0);
+#elif defined(__aarch64__)
+    /* ARM64 memory layout (macOS/Apple Silicon):
+     * Main memory: 0x150000000000 - 0x150100000000 (4GB for FULL4G)
+     * JIT buffer:  0x151000000000 + size
+     *
+     * Apple Silicon requires MAP_JIT for executable memory. The fixed
+     * address is chosen to avoid TSAN's shadow memory and typical process
+     * allocations. Requires ASLR disabled via: setarch $(uname -m) -R
+     */
+    void *jit_addr = (void *) 0x151000000000UL;
+    state->buf = mmap(jit_addr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED
+#if defined(__APPLE__)
+                          | MAP_JIT
+#endif
+                      ,
+                      -1, 0);
+#else
+#error "TSAN is only supported on x86_64 and aarch64"
+#endif
+    if (state->buf == MAP_FAILED) {
+        free(state);
+        return NULL;
+    }
+#else
+    /* Standard allocation without TSAN */
     state->buf = mmap(0, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                       MAP_PRIVATE | MAP_ANONYMOUS
 #if defined(__APPLE__)
@@ -2347,8 +2514,7 @@ struct jit_state *jit_state_init(size_t size)
         free(state);
         return NULL;
     }
-    assert(state->buf != MAP_FAILED);
-
+#endif
     state->n_blocks = 0;
     set_reset(&state->set);
     reset_reg();

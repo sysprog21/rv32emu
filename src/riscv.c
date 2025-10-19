@@ -681,6 +681,11 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 /* Currently, only used for block image path and permission */
 #define MAX_OPTS 2
             char *vblk_device_str = attr->data.system.vblk_device[i];
+            if (!vblk_device_str[0]) {
+                rv_log_error("Disk path cannot be empty");
+                exit(EXIT_FAILURE);
+            }
+
             char *vblk_opts[MAX_OPTS] = {NULL};
             int vblk_opt_idx = 0;
             char *opt = strtok(vblk_device_str, ",");
@@ -692,10 +697,34 @@ riscv_t *rv_create(riscv_user_t rv_attr)
                 vblk_opts[vblk_opt_idx++] = opt;
                 opt = strtok(NULL, ",");
             }
-            char *vblk_device = vblk_opts[0];
-            char *vblk_readonly = vblk_opts[1];
 
+            char *vblk_device;
+            char *vblk_readonly = vblk_opts[1];
             bool readonly = false;
+
+            if (vblk_opts[0][0] == '~') {
+                /* HOME environment variable should be common in macOS and Linux
+                 * distribution and it is set by the login program
+                 */
+                const char *home = getenv("HOME");
+                if (!home) {
+                    rv_log_error(
+                        "HOME environment variable is not set, cannot access "
+                        "the disk %s",
+                        vblk_opts[0]);
+                    exit(EXIT_FAILURE);
+                }
+
+                vblk_device = malloc(strlen(vblk_opts[0]) - 1 /* skip ~ */ +
+                                     strlen(home) + 1);
+                assert(vblk_device);
+
+                strcpy(vblk_device, home);
+                strcat(vblk_device, vblk_opts[0] + 1 /* skip ~ */);
+            } else {
+                vblk_device = vblk_opts[0];
+            }
+
             if (vblk_readonly) {
                 if (strcmp(vblk_readonly, "readonly") != 0) {
                     rv_log_error("Unknown vblk option: %s", vblk_readonly);
@@ -708,6 +737,9 @@ riscv_t *rv_create(riscv_user_t rv_attr)
             attr->vblk[i]->ram = (uint32_t *) attr->mem->mem_base;
             attr->disk[i] =
                 virtio_blk_init(attr->vblk[i], vblk_device, readonly);
+
+            if (vblk_opts[0][0] == '~')
+                free(vblk_device);
         }
     }
 

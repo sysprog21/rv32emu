@@ -77,6 +77,19 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     ')
 
+    # Read-write using disk image with ~ home directory symbol
+    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:~$(pwd | sed "s|$HOME||")/${VBLK_IMG}")
+    VBLK_EXPECT_CMDS='
+        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "uname -a\n" } timeout { exit 2 }
+        expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
+        expect "# " { send "sync\n" } timeout { exit 3 }
+        expect "# " { send "umount mnt\n" } timeout { exit 3 }
+        expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+    '
+    EXPECT_CMDS+=("${VBLK_EXPECT_CMDS}")
+
     # Read-write using disk image
     TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG}")
     VBLK_EXPECT_CMDS='

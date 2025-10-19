@@ -15,13 +15,6 @@ CFLAGS += -include src/common.h -Isrc/
 
 OBJS_EXT :=
 
-# In the system test suite, the executable is an ELF file (e.g., MMU).
-# However, the Linux kernel emulation includes the Image, DT, and
-# root filesystem (rootfs). Therefore, the test suite needs this
-# flag to load the ELF and differentiate it from the kernel emulation.
-ENABLE_ELF_LOADER ?= 0
-$(call set-feature, ELF_LOADER)
-
 # Enable MOP fusion, easier for ablation study
 ENABLE_MOP_FUSION ?= 1
 $(call set-feature, MOP_FUSION)
@@ -72,6 +65,44 @@ endif
 
 ENABLE_ARCH_TEST ?= 0
 $(call set-feature, ARCH_TEST)
+
+# In the system test suite, the executable is an ELF file (e.g., MMU).
+# However, the Linux kernel emulation includes the Image, DT, and
+# root filesystem (rootfs). Therefore, the test suite needs this
+# flag to load the ELF and differentiate it from the kernel emulation.
+# User-space emulation (SYSTEM=0) always needs ELF loader, except for architecture tests.
+ifeq ($(ENABLE_SYSTEM), 0)
+    ifneq ($(ENABLE_ARCH_TEST), 1)
+        override ENABLE_ELF_LOADER := 1
+    else
+        ENABLE_ELF_LOADER ?= 0
+    endif
+else
+    ENABLE_ELF_LOADER ?= 0
+endif
+$(call set-feature, ELF_LOADER)
+
+# ThreadSanitizer support
+# TSAN on x86-64 memory layout:
+#   Shadow: 0x02a000000000 - 0x7cefffffffff (reserved by TSAN)
+#   App:    0x7cf000000000 - 0x7ffffffff000 (usable by application)
+#
+# We use MAP_FIXED to allocate FULL4G's 4GB memory at a fixed address
+# (0x7d0000000000) within TSAN's app range, ensuring compatibility.
+#
+# IMPORTANT: TSAN requires ASLR (Address Space Layout Randomization) to be
+# disabled to prevent system allocations from landing in TSAN's shadow memory.
+# Tests are run with 'setarch $(uname -m) -R' to disable ASLR.
+ENABLE_TSAN ?= 0
+ifeq ("$(ENABLE_TSAN)", "1")
+override ENABLE_SDL := 0       # SDL (uninstrumented system lib) creates threads TSAN cannot track
+override ENABLE_LTO := 0       # LTO interferes with TSAN instrumentation
+CFLAGS += -DTSAN_ENABLED       # Signal code to use TSAN-compatible allocations
+# Disable ASLR for TSAN tests to prevent allocations in TSAN shadow memory
+BIN_WRAPPER = setarch $(shell uname -m) -R
+else
+BIN_WRAPPER =
+endif
 
 # Enable link-time optimization (LTO)
 ENABLE_LTO ?= 1
@@ -250,6 +281,11 @@ ENABLE_JIT ?= 0
 $(call set-feature, JIT)
 ifeq ($(call has, JIT), 1)
     OBJS_EXT += jit.o
+    # JIT debug mode for early issue detection in CI/CD
+    ENABLE_JIT_DEBUG ?= 0
+    ifeq ("$(ENABLE_JIT_DEBUG)", "1")
+        CFLAGS += -DENABLE_JIT_DEBUG=1
+    endif
     ENABLE_T2C ?= 1
     $(call set-feature, T2C)
     ifeq ($(call has, T2C), 1)
@@ -298,6 +334,12 @@ ENABLE_UBSAN ?= 0
 ifeq ("$(ENABLE_UBSAN)", "1")
 CFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
 LDFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
+endif
+
+# ThreadSanitizer flags (ENABLE_TSAN is set earlier to override SDL/FULL4G)
+ifeq ("$(ENABLE_TSAN)", "1")
+CFLAGS += -fsanitize=thread -g
+LDFLAGS += -fsanitize=thread
 endif
 
 $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-stack-check -fno-stack-protector
@@ -401,7 +443,7 @@ define check-test
 $(Q)true; \
 $(PRINTF) "Running $(3) ... "; \
 OUTPUT_FILE="$$(mktemp)"; \
-if (LC_ALL=C $(BIN) $(1) $(2) > "$$OUTPUT_FILE") && \
+if (LC_ALL=C $(BIN_WRAPPER) $(BIN) $(1) $(2) > "$$OUTPUT_FILE") && \
    [ "$$(cat "$$OUTPUT_FILE" | $(LOG_FILTER) | $(4))" = "$(5)" ]; then \
     $(call notice, [OK]); \
 else \

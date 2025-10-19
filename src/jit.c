@@ -1395,7 +1395,7 @@ static void muldivmod(struct jit_state *state,
 }
 #endif /* RV32_HAS(EXT_M) */
 
-#if RV32_HAS(SYSTEM)
+#if RV32_HAS(SYSTEM_MMIO)
 uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
 {
     MMIO_READ();

@@ -4,10 +4,10 @@ COMPRESSED_IS_DIR :=
 EXTRACTOR :=
 VERIFIER :=
 
-# temporarily files to store correct SHA value and computed SHA value
+# Temporary files to store correct SHA value and computed SHA value
 # respectively for verification of directory source
-$(eval SHA_FILE1 := $(shell mktemp))
-$(eval SHA_FILE2 := $(shell mktemp))
+SHA_FILE1 := $(shell mktemp)
+SHA_FILE2 := $(shell mktemp)
 
 # $(1): compressed source
 define prologue
@@ -17,7 +17,7 @@ endef
 
 # $(1), $(2), $(3): files to be deleted
 define epilogue
-    $(eval _ := $(shell $(RM) $(1) $(2) $(3)))
+    $(RM) $(1) $(2) $(3)
 endef
 
 # $(1): compressed source URL

@@ -18,9 +18,15 @@ CFLAGS += -mtail-call
 
 # Build emscripten-port SDL
 ifeq ($(call has, SDL), 1)
-CFLAGS_emcc += -sUSE_SDL=2 -sSDL2_MIXER_FORMATS=wav,mid -sUSE_SDL_MIXER=2
+CFLAGS_emcc += -sUSE_SDL=2
 OBJS_EXT += syscall_sdl.o
 LDFLAGS += -pthread
+# SDL_MIXER is disabled by default for emscripten due to archived port with warnings
+ifeq ($(call has, SDL_MIXER), 1)
+# Note: Enabling SDL_MIXER requires -sSTRICT=0 due to unfixable warnings in music_modplug.c
+# The emscripten-ports/SDL2_mixer was archived in Jan 2024
+CFLAGS_emcc += -sSTRICT=0 -sSDL2_MIXER_FORMATS=wav,mid -sUSE_SDL_MIXER=2
+endif
 endif
 
 # More build flags
@@ -159,4 +165,7 @@ start-web: $(start_web_deps)
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(Q)mv $(DEMO_DIR)/*.html $(DEMO_DIR)/index.html
 	$(Q)python3 -m http.server --bind $(DEMO_IP) $(DEMO_PORT) --directory $(DEMO_DIR)
+
+.PHONY: check-demo-dir-exist start-web
+
 endif

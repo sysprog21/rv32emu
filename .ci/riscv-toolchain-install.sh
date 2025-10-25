@@ -9,11 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 check_platform
 mkdir -p toolchain
 
-if [[ "$#" == "0" ]] || [[ "$1" != "riscv-collab" ]]; then
+if [ "$#" = "0" ] || [ "$1" != "riscv-collab" ]; then
     GCC_VER=15.2.0-1
     TOOLCHAIN_REPO=https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack
 
-    if [[ "${OS_TYPE}" == "Linux" ]]; then
+    if [ "${OS_TYPE}" = "Linux" ]; then
         case "${MACHINE_TYPE}" in
             "x86_64")
                 TOOLCHAIN_URL=${TOOLCHAIN_REPO}/releases/download/v${GCC_VER}/xpack-riscv-none-elf-gcc-${GCC_VER}-linux-x64.tar.gz

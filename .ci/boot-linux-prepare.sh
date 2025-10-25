@@ -16,10 +16,10 @@ which mkfs.ext4 > /dev/null 2>&1 || which $(brew --prefix e2fsprogs)/sbin/mkfs.e
         echo "Error: mkfs.ext4 not found"
         exit 1
     }
-which 7z > /dev/null 2>&1 || {
-    echo "Error: 7z not found"
-    exit 1
-}
+# Optional tooling used later in the test suite
+if ! command -v debugfs > /dev/null 2>&1 && ! command -v 7z > /dev/null 2>&1; then
+    print_warning "Neither debugfs nor 7z is available; virtio-blk verification will be skipped."
+fi
 
 ACTION=$1
 

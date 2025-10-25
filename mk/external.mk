@@ -137,6 +137,13 @@ LINUX_DATA_SHA = $(shell wget -q -O- $(LINUX_CDN_VERSION_URL)/sha256sums.asc | \
                          grep $(LINUX_DATA) | awk '{print $$1}')
 LINUX_DATA_SHA_CMD = $(SHA256SUM)
 
+# simplefs
+SIMPLEFS_VERSION = master
+SIMPLEFS_DATA = /tmp/simplefs
+SIMPLEFS_DATA_URL = git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
+SIMPLEFS_DATA_SHA = 863936f72e0781b240c5ec4574510c57f0394b99
+SIMPLEFS_DATA_SHA_CMD = $(SHA1SUM)
+
 define download-extract-verify
 $($(T)_DATA):
 	$(Q)$$(call prologue,$$@)
@@ -146,5 +153,5 @@ $($(T)_DATA):
 	$(Q)$$(call epilogue,$(notdir $($(T)_DATA_URL)),$(SHA_FILE1),$(SHA_FILE2))
 endef
 
-EXTERNAL_DATA = DOOM QUAKE TIMIDITY BUILDROOT LINUX
+EXTERNAL_DATA = DOOM QUAKE TIMIDITY BUILDROOT LINUX SIMPLEFS
 $(foreach T,$(EXTERNAL_DATA),$(eval $(download-extract-verify)))

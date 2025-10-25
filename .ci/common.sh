@@ -30,21 +30,25 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-print_success() {
+print_success()
+{
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
-print_error() {
+print_error()
+{
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-print_warning() {
+print_warning()
+{
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
 # Assertion function for tests
 # Usage: ASSERT <condition> <error_message>
-ASSERT() {
+ASSERT()
+{
     local condition=$1
     shift
     local message="$*"
@@ -59,11 +63,13 @@ ASSERT() {
 # Cleanup function registry
 CLEANUP_FUNCS=()
 
-register_cleanup() {
+register_cleanup()
+{
     CLEANUP_FUNCS+=("$1")
 }
 
-cleanup() {
+cleanup()
+{
     for func in "${CLEANUP_FUNCS[@]}"; do
         eval "${func}" || true
     done

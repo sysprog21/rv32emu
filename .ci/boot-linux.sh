@@ -131,8 +131,7 @@ for i in "${!TEST_OPTIONS[@]}"; do
     OPTS="${OPTS_BASE}"
     # No need to add option when running base test
     case "${TEST_OPTIONS[$i]}" in
-        *base*)
-            ;;
+        *base*) ;;
         *)
             OPTS+="${TEST_OPTIONS[$i]}"
             ;;
@@ -153,8 +152,7 @@ for i in "${!TEST_OPTIONS[@]}"; do
         *vblk*)
             # read-only test first, so the emu.txt definitely does not exist, skipping the check
             case "${TEST_OPTIONS[$i]}" in
-                *readonly*)
-                    ;;
+                *readonly*) ;;
                 *)
                     7z l ${VBLK_IMG} | grep emu.txt > /dev/null 2>&1 || ret=4
                     ;;

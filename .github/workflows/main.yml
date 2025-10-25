@@ -2,17 +2,30 @@ name: CI
 
 on: [push, pull_request]
 
+# Minimal permissions for security
+permissions:
+  contents: read
+  actions: read
+
+# Cancel in-progress runs when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   detect-code-related-file-changes:
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       has_code_related_changes: ${{ steps.set_has_code_related_changes.outputs.has_code_related_changes }}
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+        timeout-minutes: 2
       - name: Test changed files
         id: changed-files
         uses: tj-actions/changed-files@v46
+        timeout-minutes: 2
         with:
           files: |
               .ci/**
@@ -26,8 +39,9 @@ jobs:
               Makefile
       - name: Set has_code_related_changes
         id: set_has_code_related_changes
+        timeout-minutes: 1
         run: |
-          if [[ ${{ steps.changed-files.outputs.any_changed }} == true ]]; then
+          if [ "${{ steps.changed-files.outputs.any_changed }}" = "true" ]; then
             echo "has_code_related_changes=true" >> $GITHUB_OUTPUT
           else
             echo "has_code_related_changes=false" >> $GITHUB_OUTPUT
@@ -41,30 +55,71 @@ jobs:
       matrix:
         compiler: [gcc, clang]
     runs-on: ubuntu-24.04
+    timeout-minutes: 180
     steps:
     - uses: actions/checkout@v4
+      timeout-minutes: 2
+      with:
+        submodules: recursive
+
+    - name: Cache APT packages
+      uses: actions/cache@v4
+      timeout-minutes: 2
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-${{ hashFiles('.ci/*.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
+
+    - name: Cache RISC-V toolchain
+      uses: actions/cache@v4
+      timeout-minutes: 2
+      with:
+        path: toolchain
+        key: ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-${{ hashFiles('.ci/riscv-toolchain-install.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-
+
+    - name: Cache build artifacts
+      uses: actions/cache@v4
+      timeout-minutes: 2
+      with:
+        path: |
+          build/
+          src/softfloat/build/
+          src/mini-gdbstub/libgdbstub.a
+        key: ${{ runner.os }}-${{ runner.arch }}-build-${{ matrix.compiler }}-${{ hashFiles('src/**', 'Makefile', 'mk/**') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-build-${{ matrix.compiler }}-
+
     - name: install-dependencies
+      timeout-minutes: 10
       run: |
             sudo apt-get update -q=2
             sudo apt-get install -q=2 libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
             .ci/riscv-toolchain-install.sh
             echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
-            wget https://apt.llvm.org/llvm.sh
+            wget -q https://apt.llvm.org/llvm.sh
             sudo chmod +x ./llvm.sh
             sudo ./llvm.sh 18
             echo "/usr/lib/llvm-18/bin" >> $GITHUB_PATH
       shell: bash
     - name: Install compiler
       id: install_cc
+      timeout-minutes: 2
       uses: rlalik/setup-cpp-compiler@master
       with:
         compiler: ${{ matrix.compiler }}
+
     - name: Setup emsdk
+      timeout-minutes: 10
       uses: mymindstorm/setup-emsdk@v14
       with:
         version: 3.1.51
         actions-cache-folder: 'emsdk-cache'
+
     - name: Set parallel jobs variable
+      timeout-minutes: 1
       run: |
             echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
             echo "BOOT_LINUX_TEST=TMP_FILE=\$(mktemp "$RUNNER_TEMP/tmpfile.XXXXXX"); \
@@ -74,7 +129,9 @@ jobs:
                                   EXIT_CODE=\$?; \
                                   sudo env TMP_FILE=\${TMP_FILE} BLK_DEV=\${BLK_DEV} .ci/boot-linux-prepare.sh cleanup; \
                                   exit \${EXIT_CODE};" >> "$GITHUB_ENV"
+
     - name: fetch artifact first to reduce HTTP requests
+      timeout-minutes: 5
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -82,20 +139,25 @@ jobs:
             make ENABLE_SYSTEM=1 artifact
             make ENABLE_ARCH_TEST=1 artifact
             # get from rv32emu-prebuilt
-            wget -O build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
+            wget -q -O build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
             unzip -d build/ build/shareware_doom_iwad.zip
       if: ${{ always() }}
     - name: default build using emcc
+      timeout-minutes: 10
       run: |
             make CC=emcc $PARALLEL
       if: ${{ always() }}
+
     - name: default build for system emulation using emcc
+      timeout-minutes: 10
       run: |
             make distclean
             make CC=emcc ENABLE_SYSTEM=1 $PARALLEL
             make distclean ENABLE_SYSTEM=1
       if: ${{ always() }}
+
     - name: default build with -g
+      timeout-minutes: 10
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -194,6 +256,7 @@ jobs:
             make OPT_LEVEL=-Ofast ENABLE_SYSTEM=1 $PARALLEL
       if: ${{ always() }}
     - name: check + tests
+      timeout-minutes: 15
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -203,7 +266,9 @@ jobs:
             make misalign $PARALLEL
             make tool $PARALLEL
       if: ${{ always() }}
+
     - name: diverse configurations
+      timeout-minutes: 30
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -222,26 +287,33 @@ jobs:
             make distclean && make ENABLE_Zifencei=0 check $PARALLEL
       if: ${{ always() }}
     - name: misalignment test in block emulation
+      timeout-minutes: 10
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/alignment/
             make distclean && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 ENABLE_SYSTEM=1 misalign-in-blk-emu $PARALLEL
       if: ${{ always() }}
+
     - name: MMU test
+      timeout-minutes: 10
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/mmu/
             make distclean && make ENABLE_ELF_LOADER=1 ENABLE_SYSTEM=1 mmu-test $PARALLEL
       if: ${{ always() }}
+
     - name: gdbstub test
+      timeout-minutes: 10
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
       if: ${{ always() }}
+
     - name: JIT test
+      timeout-minutes: 30
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -259,12 +331,16 @@ jobs:
             make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check $PARALLEL
             make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check $PARALLEL
       if: ${{ always() }}
+
     - name: undefined behavior test
+      timeout-minutes: 15
       run: |
             make distclean && make ENABLE_UBSAN=1 check $PARALLEL
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
       if: ${{ always() }}
+
     - name: boot Linux kernel test
+      timeout-minutes: 15
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -272,7 +348,9 @@ jobs:
             bash -c "${BOOT_LINUX_TEST}"
             make ENABLE_SYSTEM=1 clean
       if: ${{ always() }}
+
     - name: boot Linux kernel test (JIT)
+      timeout-minutes: 15
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -280,7 +358,9 @@ jobs:
             bash -c "${BOOT_LINUX_TEST}"
             make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 clean
       if: ${{ always() }}
+
     - name: Architecture test
+      timeout-minutes: 20
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -291,10 +371,16 @@ jobs:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
     - name: checkout code
       uses: actions/checkout@v4
+      timeout-minutes: 2
+      with:
+        submodules: recursive
+
     - name: Set parallel jobs variable
+      timeout-minutes: 1
       run: |
             echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
     - name: build artifact
@@ -337,9 +423,36 @@ jobs:
       matrix:
         compiler: [gcc-15, clang]
     runs-on: macos-latest # M1 chip
+    timeout-minutes: 180
     steps:
      - uses: actions/checkout@v4
+       timeout-minutes: 2
+       with:
+         submodules: recursive
+
+     - name: Cache RISC-V toolchain
+       uses: actions/cache@v4
+       timeout-minutes: 2
+       with:
+         path: toolchain
+         key: ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-${{ hashFiles('.ci/riscv-toolchain-install.sh') }}
+         restore-keys: |
+           ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-
+
+     - name: Cache build artifacts
+       uses: actions/cache@v4
+       timeout-minutes: 2
+       with:
+         path: |
+           build/
+           src/softfloat/build/
+           src/mini-gdbstub/libgdbstub.a
+         key: ${{ runner.os }}-${{ runner.arch }}-build-${{ matrix.compiler }}-${{ hashFiles('src/**', 'Makefile', 'mk/**') }}
+         restore-keys: |
+           ${{ runner.os }}-${{ runner.arch }}-build-${{ matrix.compiler }}-
+
      - name: install-dependencies
+       timeout-minutes: 15
        run: |
              brew install make dtc expect sdl2 sdl2_mixer bc e2fsprogs p7zip llvm@18 dcfldd
              .ci/riscv-toolchain-install.sh
@@ -498,9 +611,13 @@ jobs:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
+      timeout-minutes: 2
+
     - name: coding convention
+      timeout-minutes: 5
       run: |
             sudo apt-get install -q=2 clang-format-18 shfmt python3-pip
             pip3 install black==25.1.0
@@ -512,21 +629,31 @@ jobs:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
+      timeout-minutes: 2
+      with:
+        submodules: recursive
+
     # LLVM static analysis
     - name: set up scan-build
+      timeout-minutes: 10
       run: |
             sudo apt-get update -q=2
             sudo apt-get install -q=2 libsdl2-dev libsdl2-mixer-dev
-            wget https://apt.llvm.org/llvm.sh
+            wget -q https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
             sudo ./llvm.sh 18
             sudo apt-get install -q=2 clang-18 clang-tools-18
       shell: bash
+
     - name: run scan-build without JIT
+      timeout-minutes: 10
       run: make distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
+
     - name: run scan-build with JIT
+      timeout-minutes: 10
       run: |
           make ENABLE_JIT=1 distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
 
@@ -535,25 +662,39 @@ jobs:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+        timeout-minutes: 2
+        with:
+          submodules: recursive
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
+        timeout-minutes: 5
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        timeout-minutes: 5
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
+        timeout-minutes: 2
         if: ${{ github.event_name == 'push'}}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_ACCESS_TOKEN }}
+
       - name: Get short commit SHA1
+        timeout-minutes: 1
         if: ${{ github.event_name == 'push'}}
         shell: bash
         run: |
           echo "short_hash=$(git rev-parse --short "$GITHUB_SHA")" >> "$GITHUB_ENV"
+
       - name: Build and push
+        timeout-minutes: 45
         if: ${{ github.event_name == 'push'}}
         uses: docker/build-push-action@v6
         with:

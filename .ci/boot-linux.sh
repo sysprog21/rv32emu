@@ -6,13 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 check_platform
 
-function cleanup
+cleanup()
 {
     sleep 1
     pkill -9 rv32emu
 }
 
-function ASSERT
+ASSERT()
 {
     $*
     local RES=$?
@@ -130,9 +130,12 @@ for i in "${!TEST_OPTIONS[@]}"; do
 
     OPTS="${OPTS_BASE}"
     # No need to add option when running base test
-    if [[ ! "${TEST_OPTIONS[$i]}" =~ "base" ]]; then
-        OPTS+="${TEST_OPTIONS[$i]}"
-    fi
+    case "${TEST_OPTIONS[$i]}" in
+        *base*) ;;
+        *)
+            OPTS+="${TEST_OPTIONS[$i]}"
+            ;;
+    esac
     RUN_LINUX="build/rv32emu ${OPTS}"
 
     ASSERT expect <<- DONE
@@ -145,13 +148,18 @@ for i in "${!TEST_OPTIONS[@]}"; do
     cleanup
 
     printf "\nBoot Linux Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
-    if [[ "${TEST_OPTIONS[$i]}" =~ vblk ]]; then
-        # read-only test first, so the emu.txt definitely does not exist, skipping the check
-        if [[ ! "${TEST_OPTIONS[$i]}" =~ readonly ]]; then
-            7z l ${VBLK_IMG} | grep emu.txt > /dev/null 2>&1 || ret=4
-        fi
-        printf "Virtio-blk Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
-    fi
+    case "${TEST_OPTIONS[$i]}" in
+        *vblk*)
+            # read-only test first, so the emu.txt definitely does not exist, skipping the check
+            case "${TEST_OPTIONS[$i]}" in
+                *readonly*) ;;
+                *)
+                    7z l ${VBLK_IMG} | grep emu.txt > /dev/null 2>&1 || ret=4
+                    ;;
+            esac
+            printf "Virtio-blk Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
+            ;;
+    esac
 done
 
 exit ${ret}

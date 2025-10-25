@@ -51,5 +51,14 @@ function do_linux
     cp -f $SRC_DIR/linux/arch/riscv/boot/Image $OUTPUT_DIR
 }
 
+function do_simplefs
+{
+    pushd $SRC_DIR/simplefs
+    ASSERT make KDIR=$SRC_DIR/linux $PARALLEL
+    popd
+    cp -f $SRC_DIR/simplefs/simplefs.ko $OUTPUT_DIR
+}
+
 do_buildroot && OK
 do_linux && OK
+do_simplefs && OK

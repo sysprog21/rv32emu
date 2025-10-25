@@ -111,6 +111,19 @@ $ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -x vblk:disk.img -x vb
 ```
 Note that the /dev/vdx device order in guestOS is assigned in reverse: the first `-x vblk` argument corresponds to the device with the highest letter, while subsequent arguments receive lower-lettered device names.
 
+In addition to the built-in ext4 filesystem support, other filesystems such as [simplefs](https://github.com/sysprog21/simplefs) is also supported. To use simplefs, first follow the instructions [here](https://github.com/sysprog21/simplefs?tab=readme-ov-file#build-and-run) to generate the simplefs disk image, and then attach it to the guestOS via the virtio block device. Another ext4 image containing `simplefs.ko` must also be attached to the guestOS, since `simplefs.ko` is not built into the Linux kernel by default. The pre-built `simplefs.ko` can be found at `build/linux-image/` (run `make artifact ENABLE_SYSTEM=1` to get the artifacts).
+```shell
+$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -x vblk:<ext4_disk_img_path> -x vblk:<simplefs_disk_img_path>
+```
+Once the guestOS is booted, insert the `simplefs.ko` kernel module. After loading the module, the simplefs disk will be recognized by the Linux kernel and can be mounted and used as a regular filesystem.
+```shell
+# mkdir -p mnt && mount /dev/vdb mnt # mount the ext4 disk that contains simplefs.ko
+
+# insmod mnt/simplefs.ko # insert simplefs.ko
+
+# mkdir -p simplefs && mount -t simplefs /dev/vda simplefs # mount the simplefs disk
+```
+
 #### Customize bootargs
 Build and run with customized bootargs to boot the guestOS. Otherwise, the default bootargs defined in `src/devices/minimal.dts` will be used.
 ```shell

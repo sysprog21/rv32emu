@@ -1,0 +1,72 @@
+name: 'Setup rv32emu Dependencies'
+description: 'Install dependencies for building rv32emu on Linux and macOS'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -q=2
+        sudo apt-get install -q=2 \
+          build-essential \
+          libsdl2-dev \
+          libsdl2-mixer-dev \
+          device-tree-compiler \
+          expect \
+          bc \
+          p7zip-full
+      timeout-minutes: 5
+
+    - name: Cache APT packages
+      if: runner.os == 'Linux'
+      uses: actions/cache@v4
+      with:
+        path: /var/cache/apt/archives
+        key: ${{ runner.os }}-apt-${{ hashFiles('.ci/*.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
+
+    - name: Install LLVM 18
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        wget -q https://apt.llvm.org/llvm.sh
+        sudo chmod +x ./llvm.sh
+        sudo ./llvm.sh 18
+        echo "/usr/lib/llvm-18/bin" >> $GITHUB_PATH
+      timeout-minutes: 5
+
+    - name: Install macOS dependencies
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install \
+          make \
+          dtc \
+          expect \
+          sdl2 \
+          sdl2_mixer \
+          bc \
+          e2fsprogs \
+          p7zip \
+          llvm@18 \
+          dcfldd
+        echo "$(brew --prefix llvm@18)/bin" >> $GITHUB_PATH
+      timeout-minutes: 10
+
+    - name: Install RISC-V toolchain
+      shell: bash
+      run: |
+        .ci/riscv-toolchain-install.sh
+        echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
+      timeout-minutes: 10
+
+    - name: Cache RISC-V toolchain
+      uses: actions/cache@v4
+      with:
+        path: toolchain
+        key: ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-${{ hashFiles('.ci/riscv-toolchain-install.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-

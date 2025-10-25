@@ -58,6 +58,7 @@ jobs:
           mkdir -p /tmp/rv32emu-linux-image-prebuilt/linux-image
           mv build/linux-image/Image /tmp/rv32emu-linux-image-prebuilt/linux-image
           mv build/linux-image/rootfs.cpio /tmp/rv32emu-linux-image-prebuilt/linux-image
+          mv build/linux-image/simplefs.ko /tmp/rv32emu-linux-image-prebuilt/simplefs.ko
           mv build/sha1sum-linux-image /tmp
       - name: Create tarball
         run: |

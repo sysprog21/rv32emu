@@ -137,6 +137,7 @@ else
 ifeq ($(call has, SYSTEM), 1)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/Image >> sha1sum-linux-image)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/rootfs.cpio >> sha1sum-linux-image)
+	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/simplefs.ko >> sha1sum-linux-image)
 else
 	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
 	$(Q)for tb in $(TEST_SUITES); do \

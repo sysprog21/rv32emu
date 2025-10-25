@@ -1,3 +1,6 @@
+# Bash strict mode
+set -euo pipefail
+
 # Expect host is Linux/x86_64, Linux/aarch64, macOS/arm64
 
 MACHINE_TYPE=$(uname -m)
@@ -15,11 +18,58 @@ check_platform()
     esac
 }
 
-if [[ "${OS_TYPE}" == "Linux" ]]; then
+if [ "${OS_TYPE}" = "Linux" ]; then
     PARALLEL=-j$(nproc)
 else
     PARALLEL=-j$(sysctl -n hw.logicalcpu)
 fi
+
+# Color output helpers
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+# Assertion function for tests
+# Usage: ASSERT <condition> <error_message>
+ASSERT() {
+    local condition=$1
+    shift
+    local message="$*"
+
+    if ! eval "${condition}"; then
+        print_error "Assertion failed: ${message}"
+        print_error "Condition: ${condition}"
+        return 1
+    fi
+}
+
+# Cleanup function registry
+CLEANUP_FUNCS=()
+
+register_cleanup() {
+    CLEANUP_FUNCS+=("$1")
+}
+
+cleanup() {
+    for func in "${CLEANUP_FUNCS[@]}"; do
+        eval "${func}" || true
+    done
+}
+
+trap cleanup EXIT
 
 # Universal download utility with curl/wget compatibility
 # Provides consistent interface regardless of which tool is available

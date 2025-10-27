@@ -4,31 +4,58 @@
 
 set -u -o pipefail
 
-set -x
-
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
-C_SOURCES=$(find "${REPO_ROOT}" | egrep "\.(c|cxx|cpp|h|hpp)$")
-for file in ${C_SOURCES}; do
-    clang-format-18 ${file} > expected-format
-    diff -u -p --label="${file}" --label="expected coding style" ${file} expected-format
-done
-C_MISMATCH_LINE_CNT=$(clang-format-18 --output-replacements-xml ${C_SOURCES} | egrep -c "</replacement>")
+# Use git ls-files to exclude submodules and untracked files
+C_SOURCES=()
+while IFS= read -r file; do
+    [ -n "$file" ] && C_SOURCES+=("$file")
+done < <(git ls-files -- '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
 
-SH_SOURCES=$(find "${REPO_ROOT}" | egrep "\.sh$")
-for file in ${SH_SOURCES}; do
-    shfmt -d "${file}"
-done
-SH_MISMATCH_FILE_CNT=$(shfmt -l ${SH_SOURCES})
-
-PY_SOURCES=$(find "${REPO_ROOT}" | egrep "\.py$")
-for file in ${PY_SOURCES}; do
-    echo "Checking Python file: ${file}"
-    black --diff "${file}"
-done
-PY_MISMATCH_FILE_CNT=0
-if [ -n "${PY_SOURCES}" ]; then
-    PY_MISMATCH_FILE_CNT=$(echo "$(black --check ${PY_SOURCES} 2>&1)" | grep -c "^would reformat ")
+if [ ${#C_SOURCES[@]} -gt 0 ]; then
+    if command -v clang-format-18 > /dev/null 2>&1; then
+        echo "Checking C/C++ files..."
+        clang-format-18 -n --Werror "${C_SOURCES[@]}"
+        C_FORMAT_EXIT=$?
+    else
+        echo "Skipping C/C++ format check: clang-format-18 not found" >&2
+        C_FORMAT_EXIT=0
+    fi
+else
+    C_FORMAT_EXIT=0
 fi
 
-exit $((C_MISMATCH_LINE_CNT + SH_MISMATCH_FILE_CNT + PY_MISMATCH_FILE_CNT))
+SH_SOURCES=()
+while IFS= read -r file; do
+    [ -n "$file" ] && SH_SOURCES+=("$file")
+done < <(git ls-files -- '*.sh')
+
+if [ ${#SH_SOURCES[@]} -gt 0 ]; then
+    echo "Checking shell scripts..."
+    MISMATCHED_SH=$(shfmt -l "${SH_SOURCES[@]}")
+    if [ -n "$MISMATCHED_SH" ]; then
+        echo "The following shell scripts are not formatted correctly:"
+        printf '%s\n' "$MISMATCHED_SH"
+        shfmt -d "${SH_SOURCES[@]}"
+        SH_FORMAT_EXIT=1
+    else
+        SH_FORMAT_EXIT=0
+    fi
+else
+    SH_FORMAT_EXIT=0
+fi
+
+PY_SOURCES=()
+while IFS= read -r file; do
+    [ -n "$file" ] && PY_SOURCES+=("$file")
+done < <(git ls-files -- '*.py')
+
+if [ ${#PY_SOURCES[@]} -gt 0 ]; then
+    echo "Checking Python files..."
+    black --check --diff "${PY_SOURCES[@]}"
+    PY_FORMAT_EXIT=$?
+else
+    PY_FORMAT_EXIT=0
+fi
+
+exit $((C_FORMAT_EXIT + SH_FORMAT_EXIT + PY_FORMAT_EXIT))

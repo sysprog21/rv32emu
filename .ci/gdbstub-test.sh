@@ -9,8 +9,8 @@ prefixes=("${CROSS_COMPILE}" "riscv32-unknown-elf-" "riscv-none-elf-")
 for prefix in "${prefixes[@]}"; do
     utility=${prefix}gdb
     set +e # temporarily disable exit on error
-    command -v "${utility}" &> /dev/null
-    if [[ $? == 0 ]]; then
+    command -v "${utility}" > /dev/null 2>&1
+    if [ $? = 0 ]; then
         GDB=${utility}
     fi
     set -e

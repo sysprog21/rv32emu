@@ -15,7 +15,9 @@
 #include <unistd.h>
 
 #include <SDL.h>
+#if RV32_HAS(SDL_MIXER)
 #include <SDL_mixer.h>
+#endif
 
 #include "riscv.h"
 #include "riscv_private.h"
@@ -94,11 +96,13 @@ typedef struct sound {
 /* SDL-mixer-related and music-related variables */
 static pthread_t music_thread;
 static uint8_t *music_midi_data;
+#if RV32_HAS(SDL_MIXER)
 static Mix_Music *mid;
 
 /* SDL-mixer-related and sfx-related variables */
 static pthread_t sfx_thread;
 static Mix_Chunk *sfx_chunk;
+#endif
 static uint8_t *sfx_samples;
 static uint32_t nr_sfx_samples;
 static int chan;
@@ -718,6 +722,7 @@ uint8_t *mus2midi(uint8_t *data, int *length)
     return midi_data;
 }
 
+#if RV32_HAS(SDL_MIXER)
 static void *sfx_handler(void *arg)
 {
     sound_t *sfx = (sound_t *) arg;
@@ -836,13 +841,17 @@ static void play_sfx(riscv_t *rv)
         .size = sfx_data_size,
         .volume = volume,
     };
+#if RV32_HAS(SDL_MIXER)
     pthread_create(&sfx_thread, NULL, sfx_handler, &sfx);
     sfx_thread_init = true;
+#endif
     /* FIXME: In web browser runtime, web workers in thread pool do not reap
      * after sfx_handler return, thus we have to join them. sfx_handler does not
      * contain infinite loop,so do not worry to be stalled by it */
 #ifdef __EMSCRIPTEN__
+#if RV32_HAS(SDL_MIXER)
     pthread_join(sfx_thread, NULL);
+#endif
 #endif
 }
 
@@ -893,13 +902,17 @@ static void play_music(riscv_t *rv)
         .looping = looping,
         .volume = volume,
     };
+#if RV32_HAS(SDL_MIXER)
     pthread_create(&music_thread, NULL, music_handler, &music);
     music_thread_init = true;
+#endif
     /* FIXME: In web browser runtime, web workers in thread pool do not reap
      * after music_handler return, thus we have to join them. music_handler does
      * not contain infinite loop,so do not worry to be stalled by it */
 #ifdef __EMSCRIPTEN__
+#if RV32_HAS(SDL_MIXER)
     pthread_join(music_thread, NULL);
+#endif
 #endif
 }
 
@@ -916,6 +929,7 @@ static void set_music_volume(riscv_t *rv)
     /* multiplied by 8 because volume's max is 15 */
     Mix_VolumeMusic(volume * 8);
 }
+#endif /* RV32_HAS(SDL_MIXER) */
 
 static void init_audio(void)
 {
@@ -933,6 +947,7 @@ static void init_audio(void)
         exit(EXIT_FAILURE);
     }
 
+#if RV32_HAS(SDL_MIXER)
     /* Initialize SDL2 Mixer */
     if (Mix_Init(MIX_INIT_MID) != MIX_INIT_MID) {
         rv_log_fatal("Mix_Init failed: %s", Mix_GetError());
@@ -943,6 +958,7 @@ static void init_audio(void)
         Mix_Quit();
         exit(EXIT_FAILURE);
     }
+#endif
     audio_init = true;
 }
 
@@ -956,6 +972,7 @@ static void shutdown_audio()
      * on a valid pthread_t identifier.
      */
 
+#if RV32_HAS(SDL_MIXER)
     if (music_thread_init) {
         stop_music();
         pthread_join(music_thread, NULL);
@@ -968,12 +985,16 @@ static void shutdown_audio()
         pthread_join(sfx_thread, NULL);
         Mix_HaltChannel(-1);
         Mix_FreeChunk(sfx_chunk);
-        free(sfx_samples);
-        sfx_samples = NULL;
     }
 
     Mix_CloseAudio();
     Mix_Quit();
+#endif
+
+    if (sfx_samples) {
+        free(sfx_samples);
+        sfx_samples = NULL;
+    }
 
     audio_init = sfx_thread_init = music_thread_init = false;
 }
@@ -1020,16 +1041,24 @@ void syscall_control_audio(riscv_t *rv)
 
     switch (request) {
     case PLAY_MUSIC:
+#if RV32_HAS(SDL_MIXER)
         play_music(rv);
+#endif
         break;
     case PLAY_SFX:
+#if RV32_HAS(SDL_MIXER)
         play_sfx(rv);
+#endif
         break;
     case SET_MUSIC_VOLUME:
+#if RV32_HAS(SDL_MIXER)
         set_music_volume(rv);
+#endif
         break;
     case STOP_MUSIC:
+#if RV32_HAS(SDL_MIXER)
         stop_music();
+#endif
         break;
     default:
         rv_log_error("Unknown sound control request: %d", request);

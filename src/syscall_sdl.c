@@ -849,7 +849,9 @@ static void play_sfx(riscv_t *rv)
      * after sfx_handler return, thus we have to join them. sfx_handler does not
      * contain infinite loop,so do not worry to be stalled by it */
 #ifdef __EMSCRIPTEN__
+#if RV32_HAS(SDL_MIXER)
     pthread_join(sfx_thread, NULL);
+#endif
 #endif
 }
 
@@ -908,7 +910,9 @@ static void play_music(riscv_t *rv)
      * after music_handler return, thus we have to join them. music_handler does
      * not contain infinite loop,so do not worry to be stalled by it */
 #ifdef __EMSCRIPTEN__
+#if RV32_HAS(SDL_MIXER)
     pthread_join(music_thread, NULL);
+#endif
 #endif
 }
 
@@ -981,13 +985,16 @@ static void shutdown_audio()
         pthread_join(sfx_thread, NULL);
         Mix_HaltChannel(-1);
         Mix_FreeChunk(sfx_chunk);
-        free(sfx_samples);
-        sfx_samples = NULL;
     }
 
     Mix_CloseAudio();
     Mix_Quit();
 #endif
+
+    if (sfx_samples) {
+        free(sfx_samples);
+        sfx_samples = NULL;
+    }
 
     audio_init = sfx_thread_init = music_thread_init = false;
 }

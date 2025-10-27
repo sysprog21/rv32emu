@@ -10,7 +10,7 @@ check_platform
 mkdir -p toolchain
 
 if [[ "$#" == "0" ]] || [[ "$1" != "riscv-collab" ]]; then
-    GCC_VER=14.2.0-3
+    GCC_VER=15.2.0-1
     TOOLCHAIN_REPO=https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack
 
     if [[ "${OS_TYPE}" == "Linux" ]]; then
@@ -27,7 +27,7 @@ if [[ "$#" == "0" ]] || [[ "$1" != "riscv-collab" ]]; then
     fi
 else
     UBUNTU_VER=$(lsb_release -r | cut -f2)
-    GCC_VER=2025.01.20
+    GCC_VER=2025.10.18
     TOOLCHAIN_REPO=https://github.com/riscv-collab/riscv-gnu-toolchain
     TOOLCHAIN_URL=${TOOLCHAIN_REPO}/releases/download/${GCC_VER}/riscv32-elf-ubuntu-${UBUNTU_VER}-gcc-nightly-${GCC_VER}-nightly.tar.xz
 fi

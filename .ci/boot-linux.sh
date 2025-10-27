@@ -66,8 +66,22 @@ ASSERT()
 cleanup
 
 ENABLE_VBLK=1
-VBLK_IMG=build/disk.img
-[ -f "${VBLK_IMG}" ] || ENABLE_VBLK=0
+VBLK_IMGS=(
+    build/disk_ext4.img
+)
+# FIXME: mkfs.simplefs is not compilable on macOS, thus running the
+# simplefs cases on Linux runner for now
+if [[ "${OS_TYPE}" == "Linux" ]]; then
+    VBLK_IMGS+=(build/disk_simplefs.img)
+fi
+SIMPLEFS_KO_SRC="${VBLK_IMGS[0]}"
+
+# If any disk image is not found in the VBLK_IMGS, skip the VBLK tests
+for disk_img in "${VBLK_IMGS[@]}"; do
+    if [ ! -f "${disk_img}" ]; then
+        ENABLE_VBLK=0
+    fi
+done
 
 TIMEOUT=50
 OPTS_BASE=" -k build/linux-image/Image"
@@ -85,28 +99,64 @@ COLOR_R='\e[31;01m' # Red
 COLOR_Y='\e[33;01m' # Yellow
 COLOR_N='\e[0m'     # No color
 
-MESSAGES=("${COLOR_G}OK!"
-    "${COLOR_R}Fail to boot"
-    "${COLOR_R}Fail to login"
-    "${COLOR_R}Fail to run commands"
-    "${COLOR_R}Fail to find emu.txt in ${VBLK_IMG}"
-)
+for disk_img in "${VBLK_IMGS[@]}"; do
+    TEST_OPTIONS=()
+    EXPECT_CMDS=()
 
-if [ "${ENABLE_VBLK}" -eq "1" ]; then
-    # Read-only
-    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG},readonly")
-    EXPECT_CMDS+=('
+    MESSAGES=("${COLOR_G}OK!"
+        "${COLOR_R}Fail to boot"
+        "${COLOR_R}Fail to login"
+        "${COLOR_R}Fail to run commands"
+        "${COLOR_R}Fail to find emu.txt in ${disk_img}"
+    )
+
+    if [ "${ENABLE_VBLK}" -eq "1" ]; then
+        # Read-only
+        if [[ ${disk_img} =~ simplefs ]]; then
+            TEST_OPTION="${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img},readonly"
+            EXPECT_CMD='
+        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "uname -a\n" } timeout { exit 2 }
+        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
+		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
+        expect -ex "-sh: can'\''t create mnt/emu.txt: Read-only file system" {} timeout { exit 3 }
+        expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+    '
+        else
+            TEST_OPTION="${OPTS_BASE} -x vblk:${disk_img},readonly"
+            EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect -ex "-sh: can'\''t create mnt/emu.txt: Read-only file system" {} timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
-    ')
+    '
+        fi
+        TEST_OPTIONS+=("${TEST_OPTION}")
+        EXPECT_CMDS+=("${EXPECT_CMD}")
 
-    # multiple blocks, Read-only, one disk image, one loop device (/dev/loopx(Linux) or /dev/diskx(Darwin))
-    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG},readonly -x vblk:${BLK_DEV},readonly")
-    EXPECT_CMDS+=('
+        # multiple blocks, Read-only, one disk image, one loop device (/dev/loopx(Linux) or /dev/diskx(Darwin))
+        if [[ ${disk_img} =~ simplefs ]]; then
+            TEST_OPTION=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img},readonly -x vblk:${BLK_DEV_SIMPLEFS},readonly")
+            EXPECT_CMD='
+        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "uname -a\n" } timeout { exit 2 }
+        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdc simplefs_ko_src && \
+		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
+        expect -ex "-sh: can'\''t create mnt/emu.txt: Read-only file system" {} timeout { exit 3 }
+        expect "# " { send "mkdir mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
+        expect -ex "-sh: can'\''t create mnt2/emu.txt: Read-only file system" {} timeout { exit 3 }
+        expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+    '
+        else
+            TEST_OPTION=("${OPTS_BASE} -x vblk:${disk_img},readonly -x vblk:${BLK_DEV_EXT4},readonly")
+            EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
@@ -116,11 +166,29 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
         expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
         expect -ex "-sh: can'\''t create mnt2/emu.txt: Read-only file system" {} timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
-    ')
+    '
+        fi
+        TEST_OPTIONS+=("${TEST_OPTION}")
+        EXPECT_CMDS+=("${EXPECT_CMD}")
 
-    # Read-write using disk image with ~ home directory symbol
-    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:~$(pwd | sed "s|$HOME||")/${VBLK_IMG}")
-    VBLK_EXPECT_CMDS='
+        # Read-write using disk image with ~ home directory symbol
+        if [[ ${disk_img} =~ simplefs ]]; then
+            TEST_OPTION=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:~$(pwd | sed "s|$HOME||")/${disk_img}")
+            EXPECT_CMD='
+        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "uname -a\n" } timeout { exit 2 }
+        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
+		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
+        expect "# " { send "sync\n" } timeout { exit 3 }
+        expect "# " { send "cat mnt/emu.txt\n" } timeout { exit 3 }
+        expect "rv32emu" { send "umount mnt\n" } timeout { exit 4 }
+        expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+    '
+        else
+            TEST_OPTION=("${OPTS_BASE} -x vblk:~$(pwd | sed "s|$HOME||")/${disk_img}")
+            EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
@@ -129,11 +197,29 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
         expect "# " { send "umount mnt\n" } timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
-    EXPECT_CMDS+=("${VBLK_EXPECT_CMDS}")
+        fi
+        TEST_OPTIONS+=("${TEST_OPTION}")
+        EXPECT_CMDS+=("${EXPECT_CMD}")
 
-    # Read-write using disk image
-    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG}")
-    VBLK_EXPECT_CMDS='
+        # Read-write using disk image
+        if [[ ${disk_img} =~ simplefs ]]; then
+            TEST_OPTION=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img}")
+            VBLK_EXPECT_CMDS='
+        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "uname -a\n" } timeout { exit 2 }
+        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
+		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
+        expect "# " { send "sync\n" } timeout { exit 3 }
+        expect "# " { send "cat mnt/emu.txt\n" } timeout { exit 3 }
+        expect "rv32emu" { send "umount mnt\n" } timeout { exit 4 }
+        expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+    '
+            EXPECT_CMD=("${VBLK_EXPECT_CMDS}")
+        else
+            TEST_OPTION=("${OPTS_BASE} -x vblk:${disk_img}")
+            VBLK_EXPECT_CMDS='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
@@ -142,15 +228,42 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
         expect "# " { send "umount mnt\n" } timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
-    EXPECT_CMDS+=("${VBLK_EXPECT_CMDS}")
+            EXPECT_CMD=("${VBLK_EXPECT_CMDS}")
+        fi
+        TEST_OPTIONS+=("${TEST_OPTION}")
+        EXPECT_CMDS+=("${EXPECT_CMD}")
 
-    # Read-write using /dev/loopx(Linux) or /dev/diskx(Darwin) block device
-    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${BLK_DEV}")
-    EXPECT_CMDS+=("${VBLK_EXPECT_CMDS}")
+        # Read-write using /dev/loopx(Linux) or /dev/diskx(Darwin) block device
+        if [[ ${disk_img} =~ simplefs ]]; then
+            TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${BLK_DEV_SIMPLEFS}")
+            EXPECT_CMDS+=("${EXPECT_CMD}")
+        else
+            TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${BLK_DEV_EXT4}")
+            EXPECT_CMDS+=("${EXPECT_CMD}")
+        fi
 
-    # multiple blocks, Read-write, one disk image and one loop device (/dev/loopx(Linux) or /dev/diskx(Darwin))
-    TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${VBLK_IMG} -x vblk:${BLK_DEV}")
-    VBLK_EXPECT_CMDS='
+        # multiple blocks, Read-write, one disk image and one loop device (/dev/loopx(Linux) or /dev/diskx(Darwin))
+        if [[ ${disk_img} =~ simplefs ]]; then
+            TEST_OPTION=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img} -x vblk:${BLK_DEV_SIMPLEFS}")
+            EXPECT_CMD='
+        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+        expect "# " { send "uname -a\n" } timeout { exit 2 }
+        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdc simplefs_ko_src && \
+		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
+        expect "# " { send "sync\n" } timeout { exit 3 }
+        expect "# " { send "umount mnt\n" } timeout { exit 3 }
+        expect "# " { send "mkdir mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
+        expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
+        expect "# " { send "sync\n" } timeout { exit 3 }
+        expect "# " { send "cat mnt2/emu.txt\n" } timeout { exit 3 }
+        expect "rv32emu" { send "umount mnt2\n" } timeout { exit 4 }
+        expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+    '
+        else
+            TEST_OPTION=("${OPTS_BASE} -x vblk:${disk_img} -x vblk:${BLK_DEV_EXT4}")
+            EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
         expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
@@ -163,46 +276,45 @@ if [ "${ENABLE_VBLK}" -eq "1" ]; then
         expect "# " { send "umount mnt2\n" } timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
-    EXPECT_CMDS+=("${VBLK_EXPECT_CMDS}")
-fi
+        fi
+        TEST_OPTIONS+=("${TEST_OPTION}")
+        EXPECT_CMDS+=("${EXPECT_CMD}")
+    fi
 
-for i in "${!TEST_OPTIONS[@]}"; do
-    printf "${COLOR_Y}===== Test option: ${TEST_OPTIONS[$i]} =====${COLOR_N}\n"
+    for i in "${!TEST_OPTIONS[@]}"; do
+        printf "${COLOR_Y}===== Test option: ${TEST_OPTIONS[$i]} =====${COLOR_N}\n"
 
-    OPTS="${OPTS_BASE}"
-    # No need to add option when running base test
-    case "${TEST_OPTIONS[$i]}" in
-        *base*) ;;
-        *)
+        OPTS="${OPTS_BASE}"
+        # No need to add option when running base test
+        if [[ ! "${TEST_OPTIONS[$i]}" =~ "base" ]]; then
             OPTS+="${TEST_OPTIONS[$i]}"
-            ;;
-    esac
-    RUN_LINUX="build/rv32emu ${OPTS}"
+        fi
+        RUN_LINUX="build/rv32emu ${OPTS}"
 
-    ASSERT expect <<- DONE
+        ASSERT expect <<- DONE
 	set timeout ${TIMEOUT}
 	spawn ${RUN_LINUX}
 	${EXPECT_CMDS[$i]}
 	DONE
 
-    ret=$?
-    cleanup
+        ret=$?
+        cleanup
 
-    printf "\nBoot Linux Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
-    case "${TEST_OPTIONS[$i]}" in
-        *vblk*)
+        printf "\nBoot Linux Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
+        if [[ "${TEST_OPTIONS[$i]}" =~ vblk ]]; then
             # read-only test first, so the emu.txt definitely does not exist, skipping the check
-            case "${TEST_OPTIONS[$i]}" in
-                *readonly*) ;;
-                *)
-                    if ! check_image_for_file "${VBLK_IMG}" emu.txt; then
-                        ret=4
-                    fi
-                    ;;
-            esac
+            if [[ ! "${TEST_OPTIONS[$i]}" =~ readonly ]]; then
+                if [[ ${disk_img} =~ simplefs ]]; then
+                    # Does not verify the written file on hostOS since 7z does not recognize the format.
+                    # But, the written file is printed out and verified in EXPECT_CMD in guestOS
+                    :
+                else
+                    7z l ${disk_img} | grep emu.txt > /dev/null 2>&1 || ret=4
+                fi
+            fi
             printf "Virtio-blk Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
-            ;;
-    esac
+        fi
+    done
 done
 
 exit ${ret}

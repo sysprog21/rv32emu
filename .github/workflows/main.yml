@@ -72,7 +72,8 @@ jobs:
                                   . \${TMP_FILE}; \
                                   .ci/boot-linux.sh; \
                                   EXIT_CODE=\$?; \
-                                  sudo env TMP_FILE=\${TMP_FILE} BLK_DEV=\${BLK_DEV} .ci/boot-linux-prepare.sh cleanup; \
+                                  sudo env TMP_FILE=\${TMP_FILE} BLK_DEV_EXT4=\${BLK_DEV_EXT4} \
+                                           BLK_DEV_SIMPLEFS=\${BLK_DEV_SIMPLEFS} .ci/boot-linux-prepare.sh cleanup; \
                                   exit \${EXIT_CODE};" >> "$GITHUB_ENV"
     - name: fetch artifact first to reduce HTTP requests
       env:
@@ -375,7 +376,7 @@ jobs:
                                    . \${TMP_FILE}; \
                                    .ci/boot-linux.sh; \
                                    EXIT_CODE=\$?; \
-                                   sudo env TMP_FILE=\${TMP_FILE} BLK_DEV=\${BLK_DEV} .ci/boot-linux-prepare.sh cleanup; \
+                                   sudo env TMP_FILE=\${TMP_FILE} BLK_DEV_EXT4=\${BLK_DEV_EXT4} .ci/boot-linux-prepare.sh cleanup; \
                                    exit \${EXIT_CODE};" >> "$GITHUB_ENV"
      - name: Symlink gcc-15 due to the default /usr/local/bin/gcc links to system's clang
        run: |

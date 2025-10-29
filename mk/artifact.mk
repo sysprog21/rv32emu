@@ -135,8 +135,14 @@ else
 endif
 else
 ifeq ($(call has, SYSTEM), 1)
+	$(Q)(mkdir -p /tmp/rv32emu-linux-image-prebuilt/linux-image)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/Image >> sha1sum-linux-image)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/rootfs.cpio >> sha1sum-linux-image)
+	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/simplefs.ko >> sha1sum-linux-image)
+	$(Q)(mv $(BIN_DIR)/sha1sum-linux-image /tmp)
+	$(Q)(mv $(BIN_DIR)/linux-image/Image /tmp/rv32emu-linux-image-prebuilt/linux-image)
+	$(Q)(mv $(BIN_DIR)/linux-image/rootfs.cpio /tmp/rv32emu-linux-image-prebuilt/linux-image)
+	$(Q)(mv $(BIN_DIR)/linux-image/simplefs.ko /tmp/rv32emu-linux-image-prebuilt/linux-image)
 else
 	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
 	$(Q)for tb in $(TEST_SUITES); do \

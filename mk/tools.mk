@@ -35,7 +35,7 @@ $(HIST_BIN): $(HIST_OBJS)
 TOOLS_BIN += $(HIST_BIN)
 
 # Build Linux image
-LINUX_IMAGE_SRC = $(BUILDROOT_DATA) $(LINUX_DATA)
+LINUX_IMAGE_SRC = $(BUILDROOT_DATA) $(LINUX_DATA) $(SIMPLEFS_DATA)
 build-linux-image: $(LINUX_IMAGE_SRC)
 	$(Q)./tools/build-linux-image.sh
 	$(Q)$(PRINTF) "Build done.\n"

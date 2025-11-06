@@ -440,6 +440,12 @@ void rv_halt(riscv_t *rv);
 /* return the halt state */
 bool rv_has_halted(riscv_t *rv);
 
+#if RV32_HAS(ARCH_TEST)
+/* Set tohost/fromhost addresses for architectural testing */
+void rv_set_tohost_addr(riscv_t *rv, uint32_t addr);
+void rv_set_fromhost_addr(riscv_t *rv, uint32_t addr);
+#endif
+
 enum {
     /* run and trace instructions and print them out during emulation */
     RV_RUN_TRACE = 1,

@@ -886,6 +886,18 @@ bool rv_has_halted(riscv_t *rv)
     return rv->halt;
 }
 
+#if RV32_HAS(ARCH_TEST)
+void rv_set_tohost_addr(riscv_t *rv, uint32_t addr)
+{
+    rv->tohost_addr = addr;
+}
+
+void rv_set_fromhost_addr(riscv_t *rv, uint32_t addr)
+{
+    rv->fromhost_addr = addr;
+}
+#endif
+
 void rv_delete(riscv_t *rv)
 {
     assert(rv);

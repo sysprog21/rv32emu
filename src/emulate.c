@@ -61,6 +61,25 @@ static void rv_trap_default_handler(riscv_t *rv)
 static void __trap_handler(riscv_t *rv);
 #endif /* RV32_HAS(SYSTEM) */
 
+#if RV32_HAS(ARCH_TEST)
+/* Check if the write is to tohost and halt emulation if so.
+ * Compliance tests write to tohost and then enter an infinite loop.
+ * The emulator should detect this and exit gracefully.
+ */
+static inline void check_tohost_write(riscv_t *rv,
+                                      uint32_t addr,
+                                      uint32_t value)
+{
+    if (rv->tohost_addr && addr == rv->tohost_addr && value != 0) {
+        /* Non-zero write to tohost means test wants to exit */
+        rv->halt = true;
+        /* Extract exit code from tohost value (value >> 1) */
+        vm_attr_t *attr = PRIV(rv);
+        attr->exit_code = (value >> 1);
+    }
+}
+#endif /* RV32_HAS(ARCH_TEST) */
+
 /* wrap load/store and insn misaligned handler
  * @mask_or_pc: mask for load/store and pc for insn misaligned handler.
  * @type: type of misaligned handler
@@ -466,7 +485,11 @@ static bool do_fuse3(riscv_t *rv,
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
-        rv->io.mem_write_w(rv, addr, rv->X[fuse[i].rs2]);
+        uint32_t value = rv->X[fuse[i].rs2];
+        rv->io.mem_write_w(rv, addr, value);
+#if RV32_HAS(ARCH_TEST)
+        check_tohost_write(rv, addr, value);
+#endif
     }
     PC += ir->imm2 * 4;
     if (unlikely(RVOP_NO_NEXT(ir))) {

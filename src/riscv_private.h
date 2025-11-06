@@ -229,6 +229,12 @@ struct riscv_internal {
      */
     uint32_t last_csr_sepc;
 #endif
+
+#if RV32_HAS(ARCH_TEST)
+    /* RISC-V architectural test support: tohost/fromhost addresses */
+    uint32_t tohost_addr;
+    uint32_t fromhost_addr;
+#endif
 };
 
 /* sign extend a 16 bit value */

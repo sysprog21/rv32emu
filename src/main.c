@@ -314,6 +314,25 @@ int main(int argc, char **args)
     }
     rv_log_info("RISC-V emulator is created and ready to run");
 
+#if RV32_HAS(ARCH_TEST)
+    /* Extract tohost/fromhost addresses for arch-test mode */
+    if (opt_arch_test && opt_prog_name) {
+        elf_t *elf = elf_new();
+        if (elf && elf_open(elf, opt_prog_name)) {
+            const struct Elf32_Sym *sym;
+            if ((sym = elf_get_symbol(elf, "tohost"))) {
+                rv_set_tohost_addr(rv, sym->st_value);
+                rv_log_info("Found tohost at 0x%08x", sym->st_value);
+            }
+            if ((sym = elf_get_symbol(elf, "fromhost"))) {
+                rv_set_fromhost_addr(rv, sym->st_value);
+                rv_log_info("Found fromhost at 0x%08x", sym->st_value);
+            }
+        }
+        elf_delete(elf);
+    }
+#endif
+
 #if defined(__EMSCRIPTEN__)
     disable_run_button();
 #endif

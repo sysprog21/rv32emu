@@ -6,6 +6,10 @@ on:
       - master
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   detect-file-change:
     runs-on: ubuntu-24.04
@@ -40,7 +44,7 @@ jobs:
   build-linux-image-artifact:
     needs: [detect-file-change]
     if: ${{ needs.detect-file-change.outputs.has_changed_linux_image_version == 'true' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

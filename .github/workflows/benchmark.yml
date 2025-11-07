@@ -2,13 +2,21 @@ name: Benchmark
 
 on: [push, pull_request_target, workflow_dispatch]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   benchmark:
     name: Performance regression check
     if: contains(toJSON(github.event.head_commit.message), 'Merge pull request ') == false
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+
       - name: Test changed files
         id: changed-files
         uses: tj-actions/changed-files@v46
@@ -19,24 +27,35 @@ jobs:
               src/emulate.c
               src/rv32_template.c
               src/rv32_constopt.c
-      - name: install-dependencies
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
-            github.event_name == 'workflow_dispatch'}}
+              src/cache.c
+              src/io.c
+              src/jit.c
+
+      - name: Cache benchmark artifacts
+        if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache@v4
+        with:
+          path: build/
+          key: benchmark-artifacts-${{ runner.os }}-${{ hashFiles('mk/artifact.mk') }}
+          restore-keys: |
+            benchmark-artifacts-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
         run: |
             sudo pip3 install numpy --break-system-packages
         shell: bash
-      - name: default build
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
-            github.event_name == 'workflow_dispatch'}}
+
+      - name: Build for benchmark
+        if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
         run: make ENABLE_SDL=0 all artifact
       - name: Run benchmark
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
-            github.event_name == 'workflow_dispatch'}}
+        if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           tests/bench-aggregator.py
+
       - name: Store benchmark results
-        if: ${{ steps.changed-files.outputs.any_changed == 'true' ||
-            github.event_name == 'workflow_dispatch'}}
+        if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: Benchmarks

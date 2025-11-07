@@ -1216,7 +1216,7 @@ RVOP(
 RVOP(
     csrrw,
     {
-        uint32_t tmp = csr_csrrw(rv, ir->imm, rv->X[ir->rs1]);
+        uint32_t tmp = csr_csrrw(rv, ir->imm, rv->X[ir->rs1], cycle);
         rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
     },
     GEN({
@@ -1236,7 +1236,7 @@ RVOP(
     csrrs,
     {
         uint32_t tmp = csr_csrrs(
-            rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1]);
+            rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1], cycle);
         rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
     },
     GEN({
@@ -1248,7 +1248,7 @@ RVOP(
     csrrc,
     {
         uint32_t tmp = csr_csrrc(
-            rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1]);
+            rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1], cycle);
         rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
     },
     GEN({
@@ -1259,7 +1259,7 @@ RVOP(
 RVOP(
     csrrwi,
     {
-        uint32_t tmp = csr_csrrw(rv, ir->imm, ir->rs1);
+        uint32_t tmp = csr_csrrw(rv, ir->imm, ir->rs1, cycle);
         rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
     },
     GEN({
@@ -1270,7 +1270,7 @@ RVOP(
 RVOP(
     csrrsi,
     {
-        uint32_t tmp = csr_csrrs(rv, ir->imm, ir->rs1);
+        uint32_t tmp = csr_csrrs(rv, ir->imm, ir->rs1, cycle);
         rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
     },
     GEN({
@@ -1281,7 +1281,7 @@ RVOP(
 RVOP(
     csrrci,
     {
-        uint32_t tmp = csr_csrrc(rv, ir->imm, ir->rs1);
+        uint32_t tmp = csr_csrrc(rv, ir->imm, ir->rs1, cycle);
         rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
     },
     GEN({

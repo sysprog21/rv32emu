@@ -28,6 +28,7 @@
  *
  * Configuration optimizes for race detection with minimal overhead.
  */
+/* GCC uses __SANITIZE_THREAD__, clang uses __has_feature(thread_sanitizer) */
 #if defined(__SANITIZE_THREAD__)
 const char *__tsan_default_options()
 {
@@ -39,6 +40,19 @@ const char *__tsan_default_options()
            ":history_size=7"          /* Larger race detection window */
            ":io_sync=0";              /* Don't sync on I/O */
 }
+#elif defined(__clang__)
+#if __has_feature(thread_sanitizer)
+const char *__tsan_default_options()
+{
+    return "halt_on_error=0"          /* Continue after errors */
+           ":report_bugs=1"           /* Report data races */
+           ":second_deadlock_stack=1" /* Full deadlock info */
+           ":verbosity=0"             /* Reduce noise */
+           ":memory_limit_mb=0"       /* No memory limit */
+           ":history_size=7"          /* Larger race detection window */
+           ":io_sync=0";              /* Don't sync on I/O */
+}
+#endif
 #endif
 
 /* enable program trace mode */
@@ -304,7 +318,7 @@ int main(int argc, char **args)
         .args_offset_size = ARGS_OFFSET_SIZE,
         .argc = prog_argc,
         .argv = prog_args,
-        .log_level = LOG_INFO,
+        .log_level = LOG_TRACE,
         .run_flag = run_flag,
         .profile_output_file = prof_out_file,
         .cycle_per_step = CYCLE_PER_STEP,

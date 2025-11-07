@@ -151,6 +151,7 @@ jobs:
     - name: default build using emcc
       if: success()
       run: |
+            make distclean
             make CC=emcc ENABLE_JIT=0 $PARALLEL
 
     - name: default build for system emulation using emcc
@@ -158,7 +159,7 @@ jobs:
       run: |
             make distclean
             make CC=emcc ENABLE_SYSTEM=1 ENABLE_JIT=0 $PARALLEL
-            make distclean ENABLE_SYSTEM=1
+            make distclean
 
     - name: Build with various optimization levels
       if: success()
@@ -317,31 +318,40 @@ jobs:
         githubToken: ${{ github.token }}
         # No 'sudo' is available
         install: |
-          set +e  # Disable errexit for entire install block
-          # Configure apt to tolerate mirror sync failures
-          cat > /etc/apt/apt.conf.d/99-ci-reliability << 'APTCONF'
-          APT::Update::Error-Mode "any";
-          Acquire::IndexTargets::deb::DEP-11::DefaultEnabled "false";
-          Acquire::IndexTargets::deb::DEP-11-icons::DefaultEnabled "false";
-          Acquire::IndexTargets::deb::DEP-11-icons-hidpi::DefaultEnabled "false";
-          Acquire::Retries "3";
-          Acquire::Check-Valid-Until "false";
-          APTCONF
-          # Update with error tolerance - may fail during mirror sync
-          apt update -qq 2>&1
-          UPDATE_EXIT=$?
-          if [ $UPDATE_EXIT -ne 0 ]; then
-            echo "WARNING: apt update exited with code $UPDATE_EXIT (mirror sync likely in progress)"
-            echo "Continuing with installation using cached/partial indexes..."
-          fi
-          # Install packages - will use whatever indexes are available
-          apt install -yqq make git curl wget clang libsdl2-dev libsdl2-mixer-dev lsb-release software-properties-common gnupg bc || {
-            echo "WARNING: Some packages may have failed to install, retrying critical ones..."
-            apt install -yqq --no-download make git curl wget clang || true
-          }
-          which wget || echo "WARNING: wget not found after installation"
-          set -e  # Re-enable errexit
-          exit 0  # Force success exit code
+          # Retry apt update with exponential backoff for mirror sync issues
+          # Note: dep11 (AppStream metadata) failures are non-critical for build tools
+          set -o pipefail
+          for i in 1 2 3; do
+            if apt update -qq --allow-releaseinfo-change 2>&1 | tee /tmp/apt-update.log; then
+              APT_EXIT=0
+            else
+              APT_EXIT=$?
+            fi
+            # Check for critical failures (package indices), ignore dep11 metadata
+            # Include InRelease which is the combined Release+Release.gpg file
+            if [ $APT_EXIT -eq 0 ] && ! grep -E "Failed to fetch.*/(Packages|Sources|Release|InRelease)" /tmp/apt-update.log; then
+              echo "apt update succeeded (core package lists available)"
+              break
+            fi
+            if [ $i -lt 3 ]; then
+              delay=$((i * 30))
+              echo "apt update attempt $i: errors detected (exit=$APT_EXIT), waiting ${delay}s..."
+              sleep $delay
+            else
+              echo "Warning: Proceeding after 3 attempts - some package lists may be incomplete"
+            fi
+          done
+          # Install packages - exit 0 even if dep11 metadata is incomplete
+          apt install -yqq make git curl wget clang libsdl2-dev libsdl2-mixer-dev lsb-release software-properties-common gnupg bc 2>&1 | tee /tmp/apt-install.log || true
+          # Verify critical packages were installed
+          for pkg in make git curl clang bc; do
+            if ! command -v $pkg >/dev/null 2>&1; then
+              echo "ERROR: Critical package $pkg failed to install!"
+              cat /tmp/apt-install.log
+              exit 1
+            fi
+          done
+          echo "All critical build tools installed successfully"
         # FIXME: gcc build fails on Aarch64/Linux hosts
         env: |
           CC: clang-18
@@ -349,9 +359,15 @@ jobs:
         run: |
           # Verify and install wget if needed (workaround for install step issues)
           if ! command -v wget > /dev/null 2>&1; then
-            # Config file should already exist from install step, but apt may still fail
-            apt update -qq 2>&1 || true
-            apt install -yqq wget || { echo "wget install failed, trying without update..."; apt install -yqq wget --no-download || true; }
+            echo "wget not found, attempting to install..."
+            apt update -qq --allow-releaseinfo-change 2>&1 | tee /tmp/apt-update-wget.log || true
+            apt install -yqq wget 2>&1 | tee /tmp/wget-install.log || true
+            if ! command -v wget > /dev/null 2>&1; then
+              echo "ERROR: wget installation failed!"
+              cat /tmp/wget-install.log
+              exit 1
+            fi
+            echo "wget installed successfully"
           fi
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
@@ -475,6 +491,7 @@ jobs:
      - name: default build using emcc
        if: success()
        run: |
+             make distclean
              make CC=emcc ENABLE_JIT=0 $PARALLEL
 
      - name: default build for system emulation using emcc
@@ -482,7 +499,7 @@ jobs:
        run: |
              make distclean
              make CC=emcc ENABLE_SYSTEM=1 ENABLE_JIT=0 $PARALLEL
-             make distclean ENABLE_SYSTEM=1
+             make distclean
 
      - name: check + tests
        if: success()
@@ -539,14 +556,14 @@ jobs:
                fi
              done
 
-    - name: JIT debug test
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            # Run JIT tests with debug mode to catch register allocation and cache coherency issues
-            make distclean && make ENABLE_JIT=1 ENABLE_JIT_DEBUG=1 check $PARALLEL
-            make distclean && make ENABLE_EXT_C=0 ENABLE_JIT=1 ENABLE_JIT_DEBUG=1 check $PARALLEL
-      if: ${{ always() }}
+     - name: JIT debug test
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             # Run JIT tests with debug mode to catch register allocation and cache coherency issues
+             make distclean && make ENABLE_JIT=1 ENABLE_JIT_DEBUG=1 check $PARALLEL
+             make distclean && make ENABLE_EXT_C=0 ENABLE_JIT=1 ENABLE_JIT_DEBUG=1 check $PARALLEL
+       if: ${{ always() }}
 
      - name: undefined behavior test
        if: (success() || failure()) && steps.install_cc.outputs.cc == 'clang'  # gcc on macOS/arm64 does not support sanitizers

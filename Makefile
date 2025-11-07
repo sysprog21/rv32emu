@@ -106,7 +106,12 @@ override ENABLE_SDL := 0       # SDL (uninstrumented system lib) creates threads
 override ENABLE_LTO := 0       # LTO interferes with TSAN instrumentation
 CFLAGS += -DTSAN_ENABLED       # Signal code to use TSAN-compatible allocations
 # Disable ASLR for TSAN tests to prevent allocations in TSAN shadow memory
+# Note: setarch is Linux-only; macOS requires different approach (SIP disable)
+ifeq ($(UNAME_S),Linux)
 BIN_WRAPPER = setarch $(shell uname -m) -R
+else
+BIN_WRAPPER =
+endif
 else
 BIN_WRAPPER =
 endif
@@ -392,7 +397,7 @@ DTB_DEPS := $(BUILD_DTB) $(BUILD_DTB2C)
 endif
 endif
 
-all: config $(DTB_DEPS) $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
+all: config $(DTB_DEPS) $(BIN)
 
 OBJS := \
     map.o \
@@ -437,7 +442,7 @@ $(OUT):
 
 $(BIN): $(OBJS) $(DEV_OBJS) | $(OUT)
 	$(VECHO) "  LD\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $^ $(LDFLAGS)
+	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $(filter-out %.dtb %.h,$^) $(LDFLAGS)
 
 $(CONFIG_FILE): FORCE
 	$(Q)mkdir -p $(OUT)

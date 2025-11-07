@@ -2,6 +2,10 @@ name: CI
 
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   detect-code-related-file-changes:
     runs-on: ubuntu-24.04
@@ -36,6 +40,7 @@ jobs:
   host-x64:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -43,17 +48,50 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
-    - name: install-dependencies
+      with:
+        submodules: 'true'
+
+    - name: Cache LLVM 18
+      id: cache-llvm
+      uses: actions/cache@v4
+      with:
+        path: /usr/lib/llvm-18
+        key: ${{ runner.os }}-${{ runner.arch }}-llvm-18-v2
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-llvm-18-
+
+    - name: Cache RISC-V Toolchain
+      id: cache-toolchain
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/toolchain
+        key: ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-${{ hashFiles('.ci/riscv-toolchain-install.sh') }}
+
+    - name: Install dependencies
       run: |
             sudo apt-get update -q=2
-            sudo apt-get install -q=2 libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
-            .ci/riscv-toolchain-install.sh
-            echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
-            wget https://apt.llvm.org/llvm.sh
-            sudo chmod +x ./llvm.sh
-            sudo ./llvm.sh 18
-            echo "/usr/lib/llvm-18/bin" >> $GITHUB_PATH
+            sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
       shell: bash
+
+    - name: Install RISC-V Toolchain
+      if: steps.cache-toolchain.outputs.cache-hit != 'true'
+      run: |
+            .ci/riscv-toolchain-install.sh
+
+    - name: Setup RISC-V Toolchain PATH
+      run: echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
+
+    - name: Install LLVM 18
+      if: steps.cache-llvm.outputs.cache-hit != 'true'
+      run: |
+            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x ./llvm.sh
+            sudo ./llvm.sh 18
+
+    - name: Setup LLVM PATH
+      run: echo "/usr/lib/llvm-18/bin" >> $GITHUB_PATH
+      shell: bash
+
     - name: Install compiler
       id: install_cc
       uses: rlalik/setup-cpp-compiler@master
@@ -75,7 +113,15 @@ jobs:
                                   sudo env TMP_FILE=\${TMP_FILE} BLK_DEV_EXT4=\${BLK_DEV_EXT4} \
                                            BLK_DEV_SIMPLEFS=\${BLK_DEV_SIMPLEFS} .ci/boot-linux-prepare.sh cleanup; \
                                   exit \${EXIT_CODE};" >> "$GITHUB_ENV"
-    - name: fetch artifact first to reduce HTTP requests
+    - name: Cache build artifacts
+      uses: actions/cache@v4
+      with:
+        path: build/
+        key: rv32emu-artifacts-${{ runner.os }}-${{ hashFiles('mk/artifact.mk', 'mk/external.mk') }}
+        restore-keys: |
+          rv32emu-artifacts-${{ runner.os }}-
+
+    - name: Fetch artifacts
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -83,118 +129,51 @@ jobs:
             make ENABLE_SYSTEM=1 artifact
             make ENABLE_ARCH_TEST=1 artifact
             # get from rv32emu-prebuilt
-            wget -O build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
-            unzip -d build/ build/shareware_doom_iwad.zip
-      if: ${{ always() }}
+            .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
+            unzip -o -d build/ build/shareware_doom_iwad.zip
+
     - name: default build using emcc
+      if: success()
       run: |
-            make CC=emcc $PARALLEL
-      if: ${{ always() }}
+            make CC=emcc ENABLE_JIT=0 $PARALLEL
+
     - name: default build for system emulation using emcc
+      if: success()
       run: |
             make distclean
-            make CC=emcc ENABLE_SYSTEM=1 $PARALLEL
+            make CC=emcc ENABLE_SYSTEM=1 ENABLE_JIT=0 $PARALLEL
             make distclean ENABLE_SYSTEM=1
-      if: ${{ always() }}
-    - name: default build with -g
+
+    - name: Build with various optimization levels
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean
-            make OPT_LEVEL=-g $PARALLEL
-      if: ${{ always() }}
-    - name: default build with -Og
+            set -euo pipefail
+            for opt_level in -g -Og -O0 -O1 -O2 -O3 -Ofast; do
+              echo "Building with OPT_LEVEL=$opt_level"
+              if ! (make distclean && make OPT_LEVEL=$opt_level $PARALLEL); then
+                echo "ERROR: Build failed with OPT_LEVEL=$opt_level"
+                exit 1
+              fi
+            done
+
+    - name: Build system emulation with various optimization levels
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean
-            make OPT_LEVEL=-Og $PARALLEL
-      if: ${{ always() }}
-    - name: default build with -O0
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-O0 $PARALLEL
-      if: ${{ always() }}
-    - name: default build with -O1
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-O1 $PARALLEL
-      if: ${{ always() }}
-    - name: default build with -O2
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-O2 $PARALLEL
-      if: ${{ always() }}
-    - name: default build with -O3
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-O3 $PARALLEL
-      if: ${{ always() }}
-    - name: default build with -Ofast
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-Ofast $PARALLEL
-      if: ${{ always() }}
-    - name: default build for system emulation with -g
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-g ENABLE_SYSTEM=1 $PARALLEL
-      if: ${{ always() }}
-    - name: default build for system emulation with -Og
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-Og ENABLE_SYSTEM=1 $PARALLEL
-      if: ${{ always() }}
-    - name: default build for system emulation with -O0
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-O0 ENABLE_SYSTEM=1 $PARALLEL
-      if: ${{ always() }}
-    - name: default build for system emulation with -O1
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-O1 ENABLE_SYSTEM=1 $PARALLEL
-      if: ${{ always() }}
-    - name: default build for system emulation with -O2
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-O2 ENABLE_SYSTEM=1 $PARALLEL
-      if: ${{ always() }}
-    - name: default build for system emulation with -O3
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-O3 ENABLE_SYSTEM=1 $PARALLEL
-      if: ${{ always() }}
-    - name: default build for system emulation with -Ofast
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean
-            make OPT_LEVEL=-Ofast ENABLE_SYSTEM=1 $PARALLEL
-      if: ${{ always() }}
+            set -euo pipefail
+            for opt_level in -g -Og -O0 -O1 -O2 -O3 -Ofast; do
+              echo "Building system emulation with OPT_LEVEL=$opt_level"
+              if ! (make distclean && make OPT_LEVEL=$opt_level ENABLE_SYSTEM=1 $PARALLEL); then
+                echo "ERROR: System emulation build failed with OPT_LEVEL=$opt_level"
+                exit 1
+              fi
+            done
+
     - name: check + tests
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
@@ -203,108 +182,116 @@ jobs:
             make tests $PARALLEL
             make misalign $PARALLEL
             make tool $PARALLEL
-      if: ${{ always() }}
+
     - name: diverse configurations
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make ENABLE_EXT_M=0 check $PARALLEL
-            make distclean && make ENABLE_EXT_A=0 check $PARALLEL
-            make distclean && make ENABLE_EXT_F=0 check $PARALLEL
-            make distclean && make ENABLE_EXT_C=0 check $PARALLEL
-            make distclean && make ENABLE_SDL=0 check $PARALLEL
-            make distclean && make ENABLE_Zicsr=0 check $PARALLEL
-            make distclean && make ENABLE_MOP_FUSION=0 check $PARALLEL
-            make distclean && make ENABLE_BLOCK_CHAINING=0 check $PARALLEL
-            make distclean && make ENABLE_Zba=0 check $PARALLEL
-            make distclean && make ENABLE_Zbb=0 check $PARALLEL
-            make distclean && make ENABLE_Zbc=0 check $PARALLEL
-            make distclean && make ENABLE_Zbs=0 check $PARALLEL
-            make distclean && make ENABLE_Zifencei=0 check $PARALLEL
-      if: ${{ always() }}
+            set -euo pipefail
+            for config in ENABLE_EXT_M ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C \
+                          ENABLE_SDL ENABLE_Zicsr ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING \
+                          ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs ENABLE_Zifencei; do
+              echo "Testing with ${config}=0"
+              if ! (make distclean && make ${config}=0 check $PARALLEL); then
+                echo "ERROR: Test failed with ${config}=0"
+                exit 1
+              fi
+            done
+
     - name: misalignment test in block emulation
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/alignment/
             make distclean && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 ENABLE_SYSTEM=1 misalign-in-blk-emu $PARALLEL
-      if: ${{ always() }}
+
     - name: MMU test
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/mmu/
             make distclean && make ENABLE_ELF_LOADER=1 ENABLE_SYSTEM=1 mmu-test $PARALLEL
-      if: ${{ always() }}
+
     - name: gdbstub test
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
-      if: ${{ always() }}
+
     - name: JIT test
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
+            set -euo pipefail
+            # Base JIT test
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_EXT_M=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_Zbc=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_Zbs=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_Zicsr=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_Zifencei=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check $PARALLEL
-      if: ${{ always() }}
+
+            # JIT tests with disabled extensions
+            for ext in ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C ENABLE_EXT_M \
+                       ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs \
+                       ENABLE_Zicsr ENABLE_Zifencei \
+                       ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
+              echo "JIT test with ${ext}=0"
+              if ! (make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL); then
+                echo "ERROR: JIT test failed with ${ext}=0"
+                exit 1
+              fi
+            done
+
     - name: undefined behavior test
+      if: success() || failure()
       run: |
             make distclean && make ENABLE_UBSAN=1 check $PARALLEL
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
-      if: ${{ always() }}
+
     - name: boot Linux kernel test
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
             bash -c "${BOOT_LINUX_TEST}"
             make ENABLE_SYSTEM=1 clean
-      if: ${{ always() }}
+
     - name: boot Linux kernel test (JIT)
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
             bash -c "${BOOT_LINUX_TEST}"
             make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 clean
-      if: ${{ always() }}
+
     - name: Architecture test
+      if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
             . .ci/common.sh
             export LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                          "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                                                          "Authorization: Bearer ${GH_TOKEN}" \
                                            | grep '"tag_name"' \
                                            | grep "sail" \
                                            | head -n 1 \
                                            | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
             .ci/riscv-tests.sh
-      if: ${{ always() }}
 
   host-arm64:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 45
     runs-on: ubuntu-24.04
     steps:
     - name: checkout code
       uses: actions/checkout@v4
-    - name: Set parallel jobs variable
-      run: |
-            echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
+      with:
+        submodules: 'true'
     - name: build artifact
       # The GitHub Action for non-x86 CPU
       uses: uraimo/run-on-arch-action@v3
@@ -315,20 +302,25 @@ jobs:
         # No 'sudo' is available
         install: |
           apt update -qq
-          apt install -yqq make git clang libsdl2-dev libsdl2-mixer-dev lsb-release wget software-properties-common gnupg bc
-          git config --global --add safe.directory ${{ github.workspace }}
-          git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
-          git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x ./llvm.sh
-          ./llvm.sh 18
+          apt install -yqq make git curl wget clang libsdl2-dev libsdl2-mixer-dev lsb-release software-properties-common gnupg bc
+          which wget || echo "WARNING: wget not found after installation"
         # FIXME: gcc build fails on Aarch64/Linux hosts
         env: |
           CC: clang-18
-          PARALLEL: ${{ env.PARALLEL }}
         # Append custom commands here
         run: |
+          # Verify and install wget if needed (workaround for install step issues)
+          if ! command -v wget > /dev/null 2>&1; then
+            apt update -qq && apt install -yqq wget
+          fi
+          git config --global --add safe.directory ${{ github.workspace }}
+          git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
+          git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          /tmp/llvm.sh 18
           export PATH=/usr/lib/llvm-18/bin:$PATH
+          PARALLEL=-j$(nproc)
           make artifact
           make $PARALLEL
           make check $PARALLEL
@@ -340,6 +332,7 @@ jobs:
   macOS-arm64:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -347,11 +340,38 @@ jobs:
     runs-on: macos-latest # M1 chip
     steps:
      - uses: actions/checkout@v4
-     - name: install-dependencies
+       with:
+         submodules: 'true'
+
+     - name: Cache RISC-V Toolchain
+       id: cache-toolchain
+       uses: actions/cache@v4
+       with:
+         path: ${{ github.workspace }}/toolchain
+         key: ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-${{ hashFiles('.ci/riscv-toolchain-install.sh') }}
+
+     - name: Cache Homebrew packages
+       id: cache-brew
+       uses: actions/cache@v4
+       with:
+         path: |
+           /opt/homebrew/Cellar/llvm@18
+           /opt/homebrew/Cellar/sdl2
+           /opt/homebrew/Cellar/dtc
+         key: ${{ runner.os }}-${{ runner.arch }}-brew-${{ hashFiles('.github/workflows/main.yml') }}
+
+     - name: Install dependencies
        run: |
              brew install make dtc expect sdl2 bc e2fsprogs p7zip llvm@18 dcfldd
              brew install sdl2_mixer || echo "Warning: sdl2_mixer installation failed, continuing without SDL_MIXER support"
+
+     - name: Install RISC-V Toolchain
+       if: steps.cache-toolchain.outputs.cache-hit != 'true'
+       run: |
              .ci/riscv-toolchain-install.sh
+
+     - name: Setup toolchain paths
+       run: |
              echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
              echo "$(brew --prefix llvm@18)/bin" >> $GITHUB_PATH
      - name: Set up Python 3.12
@@ -384,45 +404,48 @@ jobs:
      - name: fetch artifact first to reduce HTTP requests
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
+         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
        run: |
              . .ci/common.sh
              LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                    "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                                                    "Authorization: Bearer ${GH_TOKEN}" \
                                      | grep '"tag_name"' \
                                      | grep "ELF" \
                                      | head -n 1 \
                                      | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
              make LATEST_RELEASE=$LATEST_RELEASE artifact
              LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                    "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                                                    "Authorization: Bearer ${GH_TOKEN}" \
                                      | grep '"tag_name"' \
                                      | grep "Linux-Image" \
                                      | head -n 1 \
                                      | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
              make LATEST_RELEASE=$LATEST_RELEASE ENABLE_SYSTEM=1 artifact
              LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                    "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                                                    "Authorization: Bearer ${GH_TOKEN}" \
                                      | grep '"tag_name"' \
                                      | grep "sail" \
                                      | head -n 1 \
                                      | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
              make LATEST_RELEASE=$LATEST_RELEASE ENABLE_ARCH_TEST=1 artifact
              # get from rv32emu-prebuilt
-             download_to_file "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip" \
-                             "build/shareware_doom_iwad.zip"
-             unzip -d build/ build/shareware_doom_iwad.zip
-       if: ${{ always() }}
+             .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
+             unzip -o -d build/ build/shareware_doom_iwad.zip
+
      - name: default build using emcc
+       if: success()
        run: |
-             make CC=emcc $PARALLEL
-       if: ${{ always() }}
+             make CC=emcc ENABLE_JIT=0 $PARALLEL
+
      - name: default build for system emulation using emcc
+       if: success()
        run: |
              make distclean
-             make CC=emcc ENABLE_SYSTEM=1 $PARALLEL
+             make CC=emcc ENABLE_SYSTEM=1 ENABLE_JIT=0 $PARALLEL
              make distclean ENABLE_SYSTEM=1
-       if: ${{ always() }}
+
      - name: check + tests
+       if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
@@ -431,57 +454,61 @@ jobs:
              make tests $PARALLEL
              make misalign $PARALLEL
              make tool $PARALLEL
-       if: ${{ always() }}
+
      - name: diverse configurations
+       if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make ENABLE_EXT_M=0 check $PARALLEL
-             make distclean && make ENABLE_EXT_A=0 check $PARALLEL
-             make distclean && make ENABLE_EXT_F=0 check $PARALLEL
-             make distclean && make ENABLE_EXT_C=0 check $PARALLEL
-             make distclean && make ENABLE_SDL=0 check $PARALLEL
-             make distclean && make ENABLE_Zicsr=0 check $PARALLEL
-             make distclean && make ENABLE_MOP_FUSION=0 check $PARALLEL
-             make distclean && make ENABLE_BLOCK_CHAINING=0 check $PARALLEL
-             make distclean && make ENABLE_Zba=0 check $PARALLEL
-             make distclean && make ENABLE_Zbb=0 check $PARALLEL
-             make distclean && make ENABLE_Zbc=0 check $PARALLEL
-             make distclean && make ENABLE_Zbs=0 check $PARALLEL
-             make distclean && make ENABLE_Zifencei=0 check $PARALLEL
-       if: ${{ always() }}
+             set -euo pipefail
+             for config in ENABLE_EXT_M ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C \
+                           ENABLE_SDL ENABLE_Zicsr ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING \
+                           ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs ENABLE_Zifencei; do
+               echo "Testing with ${config}=0"
+               if ! (make distclean && make ${config}=0 check $PARALLEL); then
+                 echo "ERROR: Test failed with ${config}=0"
+                 exit 1
+               fi
+             done
+
      - name: gdbstub test, need RV32 toolchain
+       if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
              make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
-       if: ${{ always() }}
+
      - name: JIT test
+       if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
+             set -euo pipefail
+             # Base JIT test
              make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_EXT_M=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_Zba=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_Zbb=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_Zbc=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_Zbs=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_Zicsr=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_Zifencei=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_MOP_FUSION=0 ENABLE_JIT=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_BLOCK_CHAINING=0 ENABLE_JIT=1 check $PARALLEL
-       if: ${{ always() }}
+
+             # JIT tests with disabled extensions
+             for ext in ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C ENABLE_EXT_M \
+                        ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs \
+                        ENABLE_Zicsr ENABLE_Zifencei \
+                        ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
+               echo "JIT test with ${ext}=0"
+               if ! (make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL); then
+                 echo "ERROR: JIT test failed with ${ext}=0"
+                 exit 1
+               fi
+             done
+
      - name: undefined behavior test
+       if: (success() || failure()) && steps.install_cc.outputs.cc == 'clang'  # gcc on macOS/arm64 does not support sanitizers
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
-       if: ${{ env.CC == 'clang' && always() }} # gcc on macOS/arm64 does not support satinizers
        run: |
              make distclean && make ENABLE_UBSAN=1 check $PARALLEL
              make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
+
      - name: boot Linux kernel test
+       if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
@@ -489,22 +516,25 @@ jobs:
              make ENABLE_SYSTEM=1 artifact $PARALLEL
              bash -c "${BOOT_LINUX_TEST}"
              make ENABLE_SYSTEM=1 clean
-       if: ${{ always() }}
+
      - name: boot Linux kernel test (JIT)
+       if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
              make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
              bash -c "${BOOT_LINUX_TEST}"
              make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 clean
-       if: ${{ always() }}
+
      - name: Architecture test
+       if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
+         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
        run: |
              . .ci/common.sh
              export LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                           "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                                                           "Authorization: Bearer ${GH_TOKEN}" \
                                             | grep '"tag_name"' \
                                             | grep "sail" \
                                             | head -n 1 \
@@ -512,11 +542,11 @@ jobs:
              python3 -m venv venv
              . venv/bin/activate
              .ci/riscv-tests.sh
-       if: ${{ always() }}
 
   coding-style:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
@@ -531,15 +561,18 @@ jobs:
   static-analysis:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: 'true'
     # LLVM static analysis
     - name: set up scan-build
       run: |
             sudo apt-get update -q=2
-            sudo apt-get install -q=2 libsdl2-dev libsdl2-mixer-dev
-            wget https://apt.llvm.org/llvm.sh
+            sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev
+            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
             sudo ./llvm.sh 18
             sudo apt-get install -q=2 clang-18 clang-tools-18
@@ -558,27 +591,30 @@ jobs:
   docker-hub-build-and-publish:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+        with:
+          submodules: 'true'
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to Docker Hub
         uses: docker/login-action@v3
-        if: ${{ github.event_name == 'push'}}
+        if: github.event_name == 'push'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_ACCESS_TOKEN }}
       - name: Get short commit SHA1
-        if: ${{ github.event_name == 'push'}}
+        if: github.event_name == 'push'
         shell: bash
         run: |
           echo "short_hash=$(git rev-parse --short "$GITHUB_SHA")" >> "$GITHUB_ENV"
       - name: Build and push
-        if: ${{ github.event_name == 'push'}}
+        if: github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
           push: true

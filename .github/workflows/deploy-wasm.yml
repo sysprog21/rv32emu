@@ -12,19 +12,25 @@ on:
   repository_dispatch:   # listening to rv32emu-prebuilt events
     types: [deploy_user_wasm, deploy_system_wasm]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false  # Don't cancel deployments
+
 jobs:
   wasm-system-deploy:
     if: github.event.pull_request.merged == true ||
         github.event_name == 'workflow_dispatch' ||
         github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+        with:
+          submodules: 'true'
       - name: install-dependencies
         run: |
               sudo apt-get update -q=2
-              sudo apt-get install -q=2 device-tree-compiler
+              sudo apt-get install -q=2 curl device-tree-compiler
       - name: Verify if the JS or HTML files has been modified
         id: changed-files
         uses: tj-actions/changed-files@v46
@@ -57,14 +63,14 @@ jobs:
         run: |
               make artifact
               # get from rv32emu-prebuilt
-              wget -O build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
-              unzip -d build/ build/shareware_doom_iwad.zip
+              .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
+              unzip -o -d build/ build/shareware_doom_iwad.zip
       - name: build with emcc and move application files to /tmp
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
         run: |
-            make CC=emcc ENABLE_SYSTEM=1 ENABLE_SDL=1 INITRD_SIZE=32 -j
+            make CC=emcc ENABLE_SYSTEM=1 ENABLE_SDL=1 ENABLE_JIT=0 INITRD_SIZE=32 -j
             mkdir /tmp/rv32emu-system-demo
             mv assets/wasm/html/system.html /tmp/rv32emu-system-demo/index.html
             mv assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-system-demo
@@ -114,12 +120,22 @@ jobs:
           github_token: ${{ secrets.RV32EMU_DEMO_TOKEN }}
           branch: main
   wasm-user-deploy:
-    needs: wasm-system-deploy # run jobs sequentially since two jobs operate on same reposity: rv32emu-demo
-    if: always() # ensures wasm-user-deploy runs regardless of the outcome or condition of wasm-system-deploy
-    runs-on: ubuntu-latest
+    needs: wasm-system-deploy # run jobs sequentially since two jobs operate on same repository: rv32emu-demo
+    if: |
+      !cancelled() && (
+        needs.wasm-system-deploy.result == 'success' ||
+        (needs.wasm-system-deploy.result == 'skipped' && github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm')
+      )
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+      - name: install-dependencies
+        run: |
+              sudo apt-get update -q=2
+              sudo apt-get install -q=2 curl device-tree-compiler
       - name: Verify if the JS or HTML or ELF executable files has been modified
         id: changed-files
         uses: tj-actions/changed-files@v46
@@ -152,14 +168,14 @@ jobs:
         run: |
               make artifact
               # get from rv32emu-prebuilt
-              wget -O build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
-              unzip -d build/ build/shareware_doom_iwad.zip
+              .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
+              unzip -o -d build/ build/shareware_doom_iwad.zip
       - name: build with emcc and move application files to /tmp
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm') }}
         run: |
-            make CC=emcc ENABLE_SDL=1
+            make CC=emcc ENABLE_SDL=1 ENABLE_JIT=0
             mkdir /tmp/rv32emu-demo
             mv assets/wasm/html/user.html /tmp/rv32emu-demo/index.html
             mv assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-demo

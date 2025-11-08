@@ -47,7 +47,7 @@ However, participation requires adherence to fundamental ground rules:
   For instance, opt for "initialize" over "initialise" and "color" rather than "colour".
 
 Software requirement:
-* [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 18 or later.
+* [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 18.
 * [shfmt](https://github.com/mvdan/sh).
 * [black](https://github.com/psf/black) version 25.1.0.
 
@@ -55,6 +55,7 @@ To maintain a uniform style across languages, run:
 * `clang-format -i *.{c,h}` to apply the project’s C/C++ formatting rules from the up-to-date .clang-format file.
 * `shfmt -w $(find . -type f -name "*.sh")` to clean and standardize all shell scripts.
 * `black .` to enforce a consistent, idiomatic layout for Python code.
+* `make format` to automatically run all three formatters.
 
 ## Coding Style for Shell Script
 

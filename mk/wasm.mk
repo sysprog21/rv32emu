@@ -83,9 +83,10 @@ ifeq ($(UNAME_S),Darwin)
 SAFARI_MAJOR :=
 SAFARI_MINOR :=
 SAFARI_VERSION_CHECK_CMD :=
-SAFARI_SUPPORT_TCO_AT_MAJOR_MINOR := 18.2
+SAFARI_SUPPORT_TCO_AT_MAJOR := 18
+SAFARI_SUPPORT_TCO_AT_MINOR := 2
 SAFARI_SUPPORT_TCO_INFO := Safari supports TCO, you can use Safari to request the wasm
-SAFARI_NO_SUPPORT_TCO_WARNING := Safari not found or Safari must have at least version $(SAFARI_SUPPORT_TCO_AT_MAJOR_MINOR) to support TCO in wasm
+SAFARI_NO_SUPPORT_TCO_WARNING := Safari not found or Safari must have at least version $(SAFARI_SUPPORT_TCO_AT_MAJOR).$(SAFARI_SUPPORT_TCO_AT_MINOR) to support TCO in wasm
 endif
 
 # FIXME: for Windows
@@ -101,14 +102,14 @@ CHROME_MAJOR := $(shell $(CHROME_MAJOR_VERSION_CHECK_CMD))
 FIREFOX_MAJOR := $(shell $(FIREFOX_MAJOR_VERSION_CHECK_CMD))
 
 # Chrome
-ifeq ($(shell echo $(CHROME_MAJOR)\>=$(CHROME_SUPPORT_TCO_AT_MAJOR) | bc), 1)
+ifeq ($(call version_gte,$(CHROME_MAJOR),,,$(CHROME_SUPPORT_TCO_AT_MAJOR),,), 1)
     $(info $(call noticex, $(CHROME_SUPPORT_TCO_INFO)))
 else
     $(warning $(call warnx, $(CHROME_NO_SUPPORT_TCO_WARNING)))
 endif
 
 # Firefox
-ifeq ($(shell echo $(FIREFOX_MAJOR)\>=$(FIREFOX_SUPPORT_TCO_AT_MAJOR) | bc), 1)
+ifeq ($(call version_gte,$(FIREFOX_MAJOR),,,$(FIREFOX_SUPPORT_TCO_AT_MAJOR),,), 1)
     $(info $(call noticex, $(FIREFOX_SUPPORT_TCO_INFO)))
 else
     $(warning $(call warnx, $(FIREFOX_NO_SUPPORT_TCO_WARNING)))
@@ -120,7 +121,7 @@ ifeq ($(UNAME_S),Darwin)
 SAFARI_VERSION := $(shell $(SAFARI_VERSION_CHECK_CMD))
 SAFARI_MAJOR := $(shell echo $(SAFARI_VERSION) | cut -f1 -d.)
 SAFARI_MINOR := $(shell echo $(SAFARI_VERSION) | cut -f2 -d.)
-ifeq ($(shell echo "$(SAFARI_MAJOR).$(SAFARI_MINOR)>=$(SAFARI_SUPPORT_TCO_AT_MAJOR_MINOR)" | bc), 1)
+ifeq ($(call version_gte,$(SAFARI_MAJOR),$(SAFARI_MINOR),,$(SAFARI_SUPPORT_TCO_AT_MAJOR),$(SAFARI_SUPPORT_TCO_AT_MINOR),), 1)
     $(info $(call noticex, $(SAFARI_SUPPORT_TCO_INFO)))
 else
     $(warning $(call warnx, $(SAFARI_NO_SUPPORT_TCO_WARNING)))

@@ -488,6 +488,52 @@ quake: artifact $(quake_deps)
 endif
 endif
 
+CLANG_FORMAT := $(shell which clang-format-18 2>/dev/null)
+
+SHFMT := $(shell which shfmt 2>/dev/null)
+
+BLACK := $(shell which black 2>/dev/null)
+BLACK_VERSION := $(if $(strip $(BLACK)),$(shell $(BLACK) --version | head -n 1 | awk '{print $$2}'),)
+BLACK_MAJOR := $(shell echo $(BLACK_VERSION) | cut -f1 -d.)
+BLACK_MINOR := $(shell echo $(BLACK_VERSION) | cut -f2 -d.)
+BLACK_PATCH := $(shell echo $(BLACK_VERSION) | cut -f3 -d.)
+BLACK_ATLEAST_MAJOR := 25
+BLACK_ATLEAST_MINOR := 1
+BLACK_ATLEAST_PATCH := 0
+BLACK_FORMAT_WARNING := Python format check might fail at CI as you use version $(BLACK_VERSION). \
+                        You may switch black to version $(BLACK_ATLEAST_MAJOR).$(BLACK_ATLEAST_MINOR).$(BLACK_ATLEAST_PATCH)
+
+SUBMODULES := $(shell git config --file .gitmodules --get-regexp path | awk '{ print $$2 }')
+SUBMODULES_PRUNE_PATHS := $(shell for subm in $(SUBMODULES); do echo -n "-path \"./$$subm\" -o "; done | sed 's/ -o $$//')
+
+format:
+ifeq ($(CLANG_FORMAT),)
+	$(error clang-format-18 not found. Install clang-format version 18 and try again)
+else
+        # Skip formatting submodules and everything in $(OUT), apply the same rule for shfmt and black
+	$(Q)$(CLANG_FORMAT) -i $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path \"./$(OUT)\" \) \
+		                               -prune -o -name "*.[ch]" -print)
+endif
+ifeq ($(SHFMT),)
+	$(error shfmt not found. Install shfmt and try again)
+else
+	$(Q)$(SHFMT) -w $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path \"./$(OUT)\" \) \
+		                        -prune -o -name "*.sh" -print)
+endif
+ifeq ($(BLACK),)
+	$(error black not found. Install black version 25.1.0 or above and try again)
+else
+        ifeq ($(call version_lt,\
+                $(BLACK_MAJOR),$(BLACK_MINOR),$(BLACK_PATCH),\
+                $(BLACK_ATLEAST_MAJOR),$(BLACK_ATLEAST_MINOR),$(BLACK_ATLEAST_PATCH)), 1)
+		$(warning $(BLACK_FORMAT_WARNING))
+        else
+		$(Q)$(BLACK) --quiet $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path \"./$(OUT)\" \) \
+		                             -prune -o \( -name "*.py" -o -name "*.pyi" \) -print)
+        endif
+endif
+	$(Q)$(call notice,All files are properly formatted.)
+
 clean:
 	$(VECHO) "Cleaning... "
 	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT)
@@ -505,6 +551,6 @@ distclean: clean
 	$(Q)$(call notice, [OK])
 
 .PHONY: all config tool check check-hello misalign misalign-in-blk-emu mmu-test
-.PHONY: gdbstub-test doom quake clean distclean artifact
+.PHONY: gdbstub-test doom quake format clean distclean artifact
 
 -include $(deps)

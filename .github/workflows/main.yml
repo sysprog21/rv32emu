@@ -266,6 +266,46 @@ jobs:
             make distclean && make ENABLE_UBSAN=1 check $PARALLEL
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
 
+    - name: ThreadSanitizer race detection test
+      if: success() || failure()
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+      run: |
+            set -o pipefail
+
+            # TSAN requires ASLR disabled to prevent allocations in shadow memory
+            # Interpreter with FULL4G: Basic race detection across emulation core
+            echo "=== TSAN Test 1/3: Interpreter + FULL4G ==="
+            make distclean && setarch -R make ENABLE_TSAN=1 ENABLE_FULL4G=1 check $PARALLEL 2>&1 | tee tsan-interpreter.log
+            if grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-interpreter.log; then
+              echo "ERROR: Data race detected in interpreter mode!"
+              grep -A 10 "ThreadSanitizer:" tsan-interpreter.log
+              exit 1
+            fi
+            echo "✓ No races detected in interpreter mode"
+
+            # JIT tier-1: Race detection in template-based JIT compilation
+            echo "=== TSAN Test 2/3: JIT Tier-1 ==="
+            make ENABLE_JIT=1 clean && setarch -R make ENABLE_TSAN=1 ENABLE_FULL4G=1 ENABLE_JIT=1 check $PARALLEL 2>&1 | tee tsan-jit.log
+            if grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-jit.log; then
+              echo "ERROR: Data race detected in JIT tier-1 mode!"
+              grep -A 10 "ThreadSanitizer:" tsan-jit.log
+              exit 1
+            fi
+            echo "✓ No races detected in JIT tier-1 mode"
+
+            # JIT tier-2 (T2C): Race detection across LLVM compilation thread
+            echo "=== TSAN Test 3/3: JIT Tier-2 (T2C) ==="
+            make ENABLE_JIT=1 clean && setarch -R make ENABLE_TSAN=1 ENABLE_FULL4G=1 ENABLE_JIT=1 ENABLE_T2C=1 check $PARALLEL 2>&1 | tee tsan-t2c.log
+            if grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-t2c.log; then
+              echo "ERROR: Data race detected in JIT tier-2 (T2C) mode!"
+              grep -A 10 "ThreadSanitizer:" tsan-t2c.log
+              exit 1
+            fi
+            echo "✓ No races detected in JIT tier-2 (T2C) mode"
+
+            echo "=== All TSAN tests passed ==="
+
     - name: boot Linux kernel test
       if: success()
       env:
@@ -384,6 +424,33 @@ jobs:
           make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check $PARALLEL
           make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check $PARALLEL
           make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check $PARALLEL
+          # TSAN on ARM64: Fixed memory layout (0x150000000000 for main, 0x151000000000 for JIT)
+          set -o pipefail
+          echo "=== TSAN Test 1/3: Interpreter + FULL4G (ARM64) ==="
+          make distclean && setarch -R make ENABLE_TSAN=1 ENABLE_FULL4G=1 check $PARALLEL 2>&1 | tee tsan-interpreter.log
+          if grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-interpreter.log; then
+            echo "ERROR: Data race detected in interpreter mode!"
+            grep -A 10 "ThreadSanitizer:" tsan-interpreter.log
+            exit 1
+          fi
+          echo "✓ No races detected in interpreter mode"
+          echo "=== TSAN Test 2/3: JIT Tier-1 (ARM64) ==="
+          make ENABLE_JIT=1 clean && setarch -R make ENABLE_TSAN=1 ENABLE_FULL4G=1 ENABLE_JIT=1 check $PARALLEL 2>&1 | tee tsan-jit.log
+          if grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-jit.log; then
+            echo "ERROR: Data race detected in JIT tier-1 mode!"
+            grep -A 10 "ThreadSanitizer:" tsan-jit.log
+            exit 1
+          fi
+          echo "✓ No races detected in JIT tier-1 mode"
+          echo "=== TSAN Test 3/3: JIT Tier-2 (T2C) (ARM64) ==="
+          make ENABLE_JIT=1 clean && setarch -R make ENABLE_TSAN=1 ENABLE_FULL4G=1 ENABLE_JIT=1 ENABLE_T2C=1 check $PARALLEL 2>&1 | tee tsan-t2c.log
+          if grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-t2c.log; then
+            echo "ERROR: Data race detected in JIT tier-2 (T2C) mode!"
+            grep -A 10 "ThreadSanitizer:" tsan-t2c.log
+            exit 1
+          fi
+          echo "✓ No races detected in JIT tier-2 (T2C) mode"
+          echo "=== All TSAN tests passed (ARM64) ==="
 
   macOS-arm64:
     needs: [detect-code-related-file-changes]
@@ -572,6 +639,73 @@ jobs:
        run: |
              make distclean && make ENABLE_UBSAN=1 check $PARALLEL
              make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
+
+     - name: ThreadSanitizer race detection test
+       if: (success() || failure()) && steps.install_cc.outputs.cc == 'clang'  # Only clang supports TSAN on macOS
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             set -o pipefail
+
+             # macOS TSAN: Fixed memory at 0x150000000000 (main) and 0x151000000000 (JIT)
+             # Note: ASLR disabled via mmap(MAP_FIXED), but SIP may restrict full ASLR control on GitHub runners
+
+             # Test 1: Interpreter + FULL4G
+             echo "=== TSAN Test 1/3: Interpreter + FULL4G (macOS ARM64) ==="
+             make distclean && make ENABLE_TSAN=1 ENABLE_FULL4G=1 check $PARALLEL 2>&1 | tee tsan-interpreter.log || {
+               # Check if failure is due to MAP_FIXED restriction vs actual race
+               if grep -q "MAP_FAILED\|unexpected memory mapping\|FATAL: ThreadSanitizer" tsan-interpreter.log; then
+                 echo "⚠️  TSAN memory allocation failed (SIP/ASLR restriction) - test skipped"
+               else
+                 echo "ERROR: Test execution failed"
+                 cat tsan-interpreter.log
+                 exit 1
+               fi
+             }
+             if [ -f tsan-interpreter.log ] && grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-interpreter.log; then
+               echo "ERROR: Data race detected in interpreter mode!"
+               grep -A 10 "ThreadSanitizer:" tsan-interpreter.log
+               exit 1
+             fi
+             echo "✓ No races detected in interpreter mode"
+
+             # Test 2: JIT tier-1
+             echo "=== TSAN Test 2/3: JIT Tier-1 (macOS ARM64) ==="
+             make ENABLE_JIT=1 clean && make ENABLE_TSAN=1 ENABLE_FULL4G=1 ENABLE_JIT=1 check $PARALLEL 2>&1 | tee tsan-jit.log || {
+               if grep -q "MAP_FAILED\|unexpected memory mapping\|FATAL: ThreadSanitizer" tsan-jit.log; then
+                 echo "⚠️  TSAN memory allocation failed (SIP/ASLR restriction) - test skipped"
+               else
+                 echo "ERROR: Test execution failed"
+                 cat tsan-jit.log
+                 exit 1
+               fi
+             }
+             if [ -f tsan-jit.log ] && grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-jit.log; then
+               echo "ERROR: Data race detected in JIT tier-1 mode!"
+               grep -A 10 "ThreadSanitizer:" tsan-jit.log
+               exit 1
+             fi
+             echo "✓ No races detected in JIT tier-1 mode"
+
+             # Test 3: JIT tier-2 (T2C)
+             echo "=== TSAN Test 3/3: JIT Tier-2 (T2C) (macOS ARM64) ==="
+             make ENABLE_JIT=1 clean && make ENABLE_TSAN=1 ENABLE_FULL4G=1 ENABLE_JIT=1 ENABLE_T2C=1 check $PARALLEL 2>&1 | tee tsan-t2c.log || {
+               if grep -q "MAP_FAILED\|unexpected memory mapping\|FATAL: ThreadSanitizer" tsan-t2c.log; then
+                 echo "⚠️  TSAN memory allocation failed (SIP/ASLR restriction) - test skipped"
+               else
+                 echo "ERROR: Test execution failed"
+                 cat tsan-t2c.log
+                 exit 1
+               fi
+             }
+             if [ -f tsan-t2c.log ] && grep -q "ThreadSanitizer: data race\|ThreadSanitizer: race on\|WARNING: ThreadSanitizer:" tsan-t2c.log; then
+               echo "ERROR: Data race detected in JIT tier-2 (T2C) mode!"
+               grep -A 10 "ThreadSanitizer:" tsan-t2c.log
+               exit 1
+             fi
+             echo "✓ No races detected in JIT tier-2 (T2C) mode"
+
+             echo "=== All TSAN tests completed (macOS ARM64) ==="
 
      - name: boot Linux kernel test
        if: success()

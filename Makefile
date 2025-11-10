@@ -107,8 +107,10 @@ override ENABLE_LTO := 0       # LTO interferes with TSAN instrumentation
 CFLAGS += -DTSAN_ENABLED       # Signal code to use TSAN-compatible allocations
 # Disable ASLR for TSAN tests to prevent allocations in TSAN shadow memory
 # Note: setarch is Linux-only; macOS requires different approach (SIP disable)
+# In containers (GitHub Actions), setarch may fail due to missing capabilities.
+# We use a wrapper script that falls back gracefully if setarch is unavailable.
 ifeq ($(UNAME_S),Linux)
-BIN_WRAPPER = setarch $(shell uname -m) -R
+BIN_WRAPPER = sh -c 'setarch $(shell uname -m) -R "$$@" 2>/dev/null || "$$@"' --
 else
 BIN_WRAPPER =
 endif

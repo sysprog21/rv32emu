@@ -190,8 +190,22 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
  */
-static uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
+static uint32_t csr_csrrw(riscv_t *rv,
+                          uint32_t csr,
+                          uint32_t val,
+                          uint64_t cycle)
 {
+    /* Sync cycle counter for cycle-related CSRs only */
+    switch (csr & 0xFFF) {
+    case CSR_CYCLE:
+    case CSR_CYCLEH:
+    case CSR_INSTRET:
+    case CSR_INSTRETH:
+        if (rv->csr_cycle != cycle)
+            rv->csr_cycle = cycle;
+        break;
+    }
+
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
@@ -222,8 +236,21 @@ static uint32_t csr_csrrw(riscv_t *rv, uint32_t csr, uint32_t val)
 }
 
 /* perform csrrs (atomic read and set) */
-static uint32_t csr_csrrs(riscv_t *rv, uint32_t csr, uint32_t val)
+static uint32_t csr_csrrs(riscv_t *rv,
+                          uint32_t csr,
+                          uint32_t val,
+                          uint64_t cycle)
 {
+    /* Sync cycle counter for cycle-related CSRs only */
+    switch (csr & 0xFFF) {
+    case CSR_CYCLE:
+    case CSR_CYCLEH:
+    case CSR_INSTRET:
+    case CSR_INSTRETH:
+        if (rv->csr_cycle != cycle)
+            rv->csr_cycle = cycle;
+        break;
+    }
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
@@ -243,8 +270,22 @@ static uint32_t csr_csrrs(riscv_t *rv, uint32_t csr, uint32_t val)
  * Read old value of CSR, zero-extend to XLEN bits, write to rd.
  * Read value from rs1, use as bit mask to clear bits in CSR.
  */
-static uint32_t csr_csrrc(riscv_t *rv, uint32_t csr, uint32_t val)
+static uint32_t csr_csrrc(riscv_t *rv,
+                          uint32_t csr,
+                          uint32_t val,
+                          uint64_t cycle)
 {
+    /* Sync cycle counter for cycle-related CSRs only */
+    switch (csr & 0xFFF) {
+    case CSR_CYCLE:
+    case CSR_CYCLEH:
+    case CSR_INSTRET:
+    case CSR_INSTRETH:
+        if (rv->csr_cycle != cycle)
+            rv->csr_cycle = cycle;
+        break;
+    }
+
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;

@@ -431,6 +431,11 @@ jobs:
           fi
 
           echo "✓ All critical build tools installed successfully"
+
+          # Ensure clean exit: run-on-arch-action captures shell's final $? which may
+          # still be non-zero from 'set +e' context. Re-enable errexit after verification.
+          set -e
+          true  # Guarantee exit 0 if we reach here
         # FIXME: gcc build fails on Aarch64/Linux hosts
         env: |
           CC: clang-18

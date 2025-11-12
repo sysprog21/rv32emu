@@ -69,8 +69,14 @@ jobs:
 
     - name: Install dependencies
       run: |
-            sudo apt-get update -q=2
-            sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
+            # Retry apt-get update to handle transient mirror sync issues
+            for i in 1 2 3; do
+              sudo apt-get update -q=2 -o Acquire::Retries=3 && break || {
+                echo "apt-get update attempt $i failed, retrying..."
+                sleep 5
+              }
+            done
+            sudo apt-get install -q=2 -o Acquire::Retries=3 curl libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
       shell: bash
 
     - name: Install RISC-V Toolchain
@@ -301,8 +307,14 @@ jobs:
         githubToken: ${{ github.token }}
         # No 'sudo' is available
         install: |
-          apt update -qq
-          apt install -yqq make git curl wget clang libsdl2-dev libsdl2-mixer-dev lsb-release software-properties-common gnupg bc
+          # Retry apt update to handle transient mirror sync issues
+          for i in 1 2 3; do
+            apt update -qq -o Acquire::Retries=3 && break || {
+              echo "apt update attempt $i failed, retrying..."
+              sleep 5
+            }
+          done
+          apt install -yqq -o Acquire::Retries=3 make git curl wget clang libsdl2-dev libsdl2-mixer-dev lsb-release software-properties-common gnupg bc
           which wget || echo "WARNING: wget not found after installation"
         # FIXME: gcc build fails on Aarch64/Linux hosts
         env: |
@@ -311,7 +323,10 @@ jobs:
         run: |
           # Verify and install wget if needed (workaround for install step issues)
           if ! command -v wget > /dev/null 2>&1; then
-            apt update -qq && apt install -yqq wget
+            for i in 1 2 3; do
+              apt update -qq -o Acquire::Retries=3 && break || sleep 5
+            done
+            apt install -yqq -o Acquire::Retries=3 wget
           fi
           git config --global --add safe.directory ${{ github.workspace }}
           git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
@@ -570,12 +585,18 @@ jobs:
     # LLVM static analysis
     - name: set up scan-build
       run: |
-            sudo apt-get update -q=2
-            sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev
+            # Retry apt-get update to handle transient mirror sync issues
+            for i in 1 2 3; do
+              sudo apt-get update -q=2 -o Acquire::Retries=3 && break || {
+                echo "apt-get update attempt $i failed, retrying..."
+                sleep 5
+              }
+            done
+            sudo apt-get install -q=2 -o Acquire::Retries=3 curl libsdl2-dev libsdl2-mixer-dev
             .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
             sudo ./llvm.sh 18
-            sudo apt-get install -q=2 clang-18 clang-tools-18
+            sudo apt-get install -q=2 -o Acquire::Retries=3 clang-18 clang-tools-18
       shell: bash
     - name: run scan-build without JIT
       env:

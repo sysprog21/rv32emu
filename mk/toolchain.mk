@@ -14,18 +14,10 @@ ifneq ($(shell $(CC) --version | head -n 1 | grep emcc),)
     SDL_MUSIC_PLAY_AT_EMCC_MINOR := 1
     SDL_MUSIC_PLAY_AT_EMCC_PATCH := 51
     SDL_MUSIC_CANNOT_PLAY_WARNING := Video games music might not be played. You may switch emcc to version $(SDL_MUSIC_PLAY_AT_EMCC_MAJOR).$(SDL_MUSIC_PLAY_AT_EMCC_MINOR).$(SDL_MUSIC_PLAY_AT_EMCC_PATCH)
-    ifeq ($(shell echo $(EMCC_MAJOR)\==$(SDL_MUSIC_PLAY_AT_EMCC_MAJOR) | bc), 1)
-        ifeq ($(shell echo $(EMCC_MINOR)\==$(SDL_MUSIC_PLAY_AT_EMCC_MINOR) | bc), 1)
-            ifeq ($(shell echo $(EMCC_PATCH)\==$(SDL_MUSIC_PLAY_AT_EMCC_PATCH) | bc), 1)
-	        # do nothing
-            else
-                $(warning $(SDL_MUSIC_CANNOT_PLAY_WARNING))
-            endif
-        else
-	    $(warning $(SDL_MUSIC_CANNOT_PLAY_WARNING))
-        endif
-    else
-	$(warning $(SDL_MUSIC_CANNOT_PLAY_WARNING))
+    ifeq ($(call version_eq,\
+	    $(EMCC_MAJOR),$(EMCC_MINOR),$(EMCC_PATCH),\
+	    $(SDL_MUSIC_PLAY_AT_EMCC_MAJOR),$(SDL_MUSIC_PLAY_AT_EMCC_MINOR),$(SDL_MUSIC_PLAY_AT_EMCC_PATCH)), 0)
+        $(warning $(SDL_MUSIC_CANNOT_PLAY_WARNING))
     endif
 
     # see commit 165c1a3 of emscripten
@@ -33,16 +25,10 @@ ifneq ($(shell $(CC) --version | head -n 1 | grep emcc),)
     MIMALLOC_SUPPORT_SINCE_MINOR := 1
     MIMALLOC_SUPPORT_SINCE_PATCH := 50
     MIMALLOC_UNSUPPORTED_WARNING := mimalloc is supported after version $(MIMALLOC_SUPPORT_SINCE_MAJOR).$(MIMALLOC_SUPPORT_SINCE_MINOR).$(MIMALLOC_SUPPORT_SINCE_PATCH)
-    ifeq ($(shell echo $(EMCC_MAJOR)\>=$(MIMALLOC_SUPPORT_SINCE_MAJOR) | bc), 1)
-        ifeq ($(shell echo $(EMCC_MINOR)\>=$(MIMALLOC_SUPPORT_SINCE_MINOR) | bc), 1)
-            ifeq ($(shell echo $(EMCC_PATCH)\>=$(MIMALLOC_SUPPORT_SINCE_PATCH) | bc), 1)
-                CFLAGS_emcc += -sMALLOC=mimalloc
-            else
-                $(warning $(MIMALLOC_UNSUPPORTED_WARNING))
-            endif
-        else
-            $(warning $(MIMALLOC_UNSUPPORTED_WARNING))
-        endif
+    ifeq ($(call version_gte,\
+	    $(EMCC_MAJOR),$(EMCC_MINOR),$(EMCC_PATCH),\
+	    $(MIMALLOC_SUPPORT_SINCE_MAJOR),$(MIMALLOC_SUPPORT_SINCE_MINOR),$(MIMALLOC_SUPPORT_SINCE_PATCH)), 1)
+        CFLAGS_emcc += -sMALLOC=mimalloc
     else
         $(warning $(MIMALLOC_UNSUPPORTED_WARNING))
     endif

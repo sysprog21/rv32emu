@@ -53,6 +53,20 @@ warn = $(PRINTF) "$(YELLOW)$(strip $1)$(NC)\n"
 # Used inside $(warning) or $(error)
 warnx = $(shell echo "$(YELLOW)$(strip $1)$(NC)\n")
 
+# Version checking
+version_num = $(shell printf "%d%03d%03d" $(1) $(2) $(3))
+# Compare two versions with bc
+# Returns 1 if first == second else 0
+version_eq = $(shell echo "$$(($(call version_num,$(1),$(2),$(3)) == $(call version_num,$(4),$(5),$(6))))" | bc)
+# Returns 1 if first < second else 0
+version_lt = $(shell echo "$$(($(call version_num,$(1),$(2),$(3)) < $(call version_num,$(4),$(5),$(6))))" | bc)
+# Returns 1 if first <= second else 0
+version_lte = $(shell echo "$$(($(call version_num,$(1),$(2),$(3)) <= $(call version_num,$(4),$(5),$(6))))" | bc)
+# Returns 1 if first > second else 0
+version_gt = $(shell echo "$$(($(call version_num,$(1),$(2),$(3)) > $(call version_num,$(4),$(5),$(6))))" | bc)
+# Returns 1 if first >= second else 0
+version_gte = $(shell echo "$$(($(call version_num,$(1),$(2),$(3)) >= $(call version_num,$(4),$(5),$(6))))" | bc)
+
 # File utilities
 SHA1SUM = sha1sum
 SHA1SUM := $(shell which $(SHA1SUM))

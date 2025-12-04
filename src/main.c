@@ -131,6 +131,11 @@ static bool parse_args(int argc, char **args)
             emu_argc++;
             break;
         case 'x':
+            if (opt_virtio_blk_idx >= VBLK_DEV_MAX) {
+                rv_log_error("Too many virtio-blk devices. Maximum is %d.\n",
+                             VBLK_DEV_MAX);
+                return false;
+            }
             if (!strncmp("vblk:", optarg, 5))
                 opt_virtio_blk_img[opt_virtio_blk_idx++] =
                     optarg + 5; /* strlen("vblk:") */

@@ -44,7 +44,7 @@ uint32_t plic_read(plic_t *plic, const uint32_t addr)
         {
             uint32_t intr_candidate = plic->ip & plic->ie;
             if (intr_candidate) {
-                plic_read_val = ilog2(intr_candidate);
+                plic_read_val = rv_ctz(intr_candidate);
                 plic->ip &= ~(1U << (plic_read_val));
             }
             break;

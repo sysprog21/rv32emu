@@ -50,12 +50,24 @@ Software requirement:
 * [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 18.
 * [shfmt](https://github.com/mvdan/sh).
 * [black](https://github.com/psf/black) version 25.1.0.
+* [dtsfmt](https://github.com/mskelton/dtsfmt).
 
 To maintain a uniform style across languages, run:
 * `clang-format -i *.{c,h}` to apply the project’s C/C++ formatting rules from the up-to-date .clang-format file.
 * `shfmt -w $(find . -type f -name "*.sh")` to clean and standardize all shell scripts.
 * `black .` to enforce a consistent, idiomatic layout for Python code.
-* `make format` to automatically run all three formatters.
+* `dtsfmt ./src/devices/` to enforce a consistent layout for device tree source (and include).
+* `make format` to automatically run all four formatters.
+
+## Coding Style for Device Tree Source and Device Tree Source Include
+
+Device Tree Source (and Include) must be clean, consistent, and portable. The following `dtsfmt` rules(check `.dtsfmtrc.toml` file) are enforced project-wide:
+* Use spaces for indentation.
+* Indent with 4 spaces.
+* Use multi-line comments.
+* Use Unix-style line endings (LF).
+* Remove trailing whitespace at the end of lines.
+* Ensure the file ends with a newline.
 
 ## Coding Style for Shell Script
 

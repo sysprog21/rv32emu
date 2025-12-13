@@ -8,24 +8,24 @@
     aliases {
         serial0 = "/soc@F0000000/serial@4000000";
     };
-
     chosen {
         bootargs = "earlycon console=ttyS0";
         stdout-path = "serial0";
         linux,initrd-start = <INITRD_START>;
         linux,initrd-end = <INITRD_END>;
     };
-
     cpus {
         #address-cells = <1>;
         #size-cells = <0>;
         timebase-frequency = <65000000>;
+
         cpu0: cpu@0 {
             device_type = "cpu";
             compatible = "riscv";
             reg = <0>;
             riscv,isa = "rv32ima";
             mmu-type = "riscv,sv32";
+
             cpu0_intc: interrupt-controller {
                 #interrupt-cells = <1>;
                 #address-cells = <0>;
@@ -34,13 +34,11 @@
             };
         };
     };
-
     sram: memory@0 {
         device_type = "memory";
         reg = <MEM_START MEM_END>;
         reg-names = "sram0";
     };
-
     soc: soc@F0000000 {
         #address-cells = <1>;
         #size-cells = <1>;
@@ -57,13 +55,14 @@
             interrupts-extended = <&cpu0_intc 9>;
             riscv,ndev = <31>;
         };
-
         serial@4000000 {
             compatible = "ns16550";
             reg = <0x4000000 0x100000>;
             interrupts = <1>;
             no-loopback-test;
-            clock-frequency = <5000000>; /* the baudrate divisor is ignored */
+            clock-frequency = <5000000>;
+
+            /* the baudrate divisor is ignored */
         };
 
         /*

@@ -4,8 +4,6 @@
 
 set -u -o pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-
 # Use git ls-files to exclude submodules and untracked files
 C_SOURCES=()
 while IFS= read -r file; do
@@ -58,4 +56,20 @@ else
     PY_FORMAT_EXIT=0
 fi
 
-exit $((C_FORMAT_EXIT + SH_FORMAT_EXIT + PY_FORMAT_EXIT))
+DTS_SOURCES=()
+while IFS= read -r file; do
+    [ -n "$file" ] && DTS_SOURCES+=("$file")
+done < <(git ls-files -- '*.dts' '*.dtsi')
+
+if [ ${#DTS_SOURCES[@]} -gt 0 ]; then
+    echo "Checking DTS/DTSI files..."
+    DTS_FORMAT_EXIT=0
+    for dts_src in "${DTS_SOURCES[@]}"; do
+        dtsfmt --check "${dts_src}"
+        DTS_FORMAT_EXIT=$((DTS_FORMAT_EXIT + $?))
+    done
+else
+    DTS_FORMAT_EXIT=0
+fi
+
+exit $((C_FORMAT_EXIT + SH_FORMAT_EXIT + PY_FORMAT_EXIT + DTS_FORMAT_EXIT))

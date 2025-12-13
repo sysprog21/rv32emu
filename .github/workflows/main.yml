@@ -594,6 +594,7 @@ jobs:
       run: |
             sudo apt-get install -q=2 clang-format-18 shfmt python3-pip
             pip3 install black==25.1.0
+            curl -LSfs https://go.mskelton.dev/dtsfmt/install | sh -s -- -y
             .ci/check-newline.sh
             .ci/check-format.sh
       shell: bash

@@ -492,6 +492,8 @@ CLANG_FORMAT := $(shell which clang-format-18 2>/dev/null)
 
 SHFMT := $(shell which shfmt 2>/dev/null)
 
+DTSFMT := $(shell which dtsfmt 2>/dev/null)
+
 BLACK := $(shell which black 2>/dev/null)
 BLACK_VERSION := $(if $(strip $(BLACK)),$(shell $(BLACK) --version | head -n 1 | awk '{print $$2}'),)
 BLACK_MAJOR := $(shell echo $(BLACK_VERSION) | cut -f1 -d.)
@@ -519,6 +521,15 @@ ifeq ($(SHFMT),)
 else
 	$(Q)$(SHFMT) -w $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path \"./$(OUT)\" \) \
 		                        -prune -o -name "*.sh" -print)
+endif
+ifeq ($(DTSFMT),)
+	$(error dtsfmt not found. Install dtsfmt and try again)
+else
+	$(Q)for dts_src in $$(find . \( $(SUBMODULES_PRUNE_PATHS) -o -path "./$(OUT)" \) \
+					-prune -o \( -name "*.dts" -o -name "*.dtsi" \) -print); \
+	do \
+		$(DTSFMT) $$dts_src; \
+	done
 endif
 ifeq ($(BLACK),)
 	$(error black not found. Install black version 25.1.0 or above and try again)

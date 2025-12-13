@@ -9,7 +9,7 @@ ifneq ($(shell $(CC) --version | head -n 1 | grep emcc),)
     EMCC_MINOR := $(shell echo $(EMCC_VERSION) | cut -f2 -d.)
     EMCC_PATCH := $(shell echo $(EMCC_VERSION) | cut -f3 -d.)
 
-    # When the emcc version is not 3.1.51, the latest SDL2_mixer library is fetched by emcc and music might not be played in the web browser
+    # When the emcc version is not 3.1.51, the latest SDL2_mixer library is fetched by emcc and music might not be played in the web browser
     SDL_MUSIC_PLAY_AT_EMCC_MAJOR := 3
     SDL_MUSIC_PLAY_AT_EMCC_MINOR := 1
     SDL_MUSIC_PLAY_AT_EMCC_PATCH := 51

@@ -167,3 +167,21 @@ start-web: $(start_web_deps)
 .PHONY: check-demo-dir-exist start-web
 
 endif
+
+# For SYSTEM mode, DTB needs to be built regardless of whether we're using emcc
+# DTB is only built when SYSTEM=1 and ELF_LOADER=0
+ifeq ($(call has, SYSTEM), 1)
+ifeq ($(call has, ELF_LOADER), 0)
+# Add DTB as dependency for compilation stages
+# This is used by mk/system.mk for device object files
+deps_emcc += $(BUILD_DTB) $(BUILD_DTB2C)
+
+# For emcc builds: ensure DTB exists before emcc embeds it
+# Make BIN directly depend on DTB files as regular prerequisites
+# This will cause them to be built, but they'll also be passed to the linker
+# We need to filter them out in the linker command
+ifeq ("$(CC_IS_EMCC)", "1")
+$(BIN): $(BUILD_DTB) $(BUILD_DTB2C)
+endif
+endif
+endif

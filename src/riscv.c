@@ -343,7 +343,7 @@ static char *realloc_property(char *fdt,
     return fdt;
 }
 
-static void load_dtb(char **ram_loc, vm_attr_t *attr)
+void load_dtb(char **ram_loc, vm_attr_t *attr)
 {
 #include "minimal_dtb.h"
     char *bootargs = attr->data.system.bootargs;
@@ -608,364 +608,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     /* copy over the attr */
     rv->data = rv_attr;
 
-    vm_attr_t *attr = PRIV(rv);
-    attr->mem = memory_new(attr->mem_size);
-    assert(attr->mem);
-    assert(!(((uintptr_t) attr->mem) & 0b11));
-
-    /* reset */
-    rv_reset(rv, 0U);
-
-    /*
-     * default standard stream.
-     * rv_remap_stdstream() can be called to overwrite them
-     *
-     * The logging stdout stream will be remapped as well
-     *
-     */
-    attr->fd_map = map_init(int, FILE *, map_cmp_int);
-    rv_remap_stdstream(rv,
-                       (fd_stream_pair_t[]) {
-                           {STDIN_FILENO, stdin},
-                           {STDOUT_FILENO, stdout},
-                           {STDERR_FILENO, stderr},
-                       },
-                       3);
-
-    rv_log_set_level(attr->log_level);
-    rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
-
-#if !RV32_HAS(SYSTEM_MMIO)
-    elf_t *elf = elf_new();
-    assert(elf);
-
-    if (!elf_open(elf, attr->data.user.elf_program)) {
-        rv_log_fatal("elf_open() failed");
-        map_delete(attr->fd_map);
-        memory_delete(attr->mem);
-        free(rv);
-        exit(EXIT_FAILURE);
-    }
-    rv_log_info("%s ELF loaded", attr->data.user.elf_program);
-
-    const struct Elf32_Sym *end;
-    if ((end = elf_get_symbol(elf, "_end")))
-        attr->break_addr = end->st_value;
-
-#if !RV32_HAS(SYSTEM)
-    /* set not exiting */
-    attr->on_exit = false;
-    attr->exit_addr = 0;
-
-    /* Try to find exit address from symbols. Check multiple names since
-     * different toolchains/libc implementations may use different symbols.
-     */
-    const struct Elf32_Sym *exit_sym;
-    if ((exit_sym = elf_get_symbol(elf, "exit")))
-        attr->exit_addr = exit_sym->st_value;
-    else if ((exit_sym = elf_get_symbol(elf, "_exit")))
-        attr->exit_addr = exit_sym->st_value;
-#endif
-
-    assert(elf_load(elf, attr->mem));
-
-    /* set the entry pc */
-    const struct Elf32_Ehdr UNUSED *hdr = get_elf_header(elf);
-    assert(rv_set_pc(rv, hdr->e_entry));
-
-    elf_delete(elf);
-
-/* combine with USE_ELF for system test suite */
-#if RV32_HAS(SYSTEM)
-    /* this variable has external linkage to mmu_io defined in system.c */
-    extern riscv_io_t mmu_io;
-    /* install the MMU I/O handlers */
-    memcpy(&rv->io, &mmu_io, sizeof(riscv_io_t));
-#else
-    /* install the I/O handlers */
-    const riscv_io_t io = {
-        /* memory read interface */
-        .mem_ifetch = MEMIO(ifetch),
-        .mem_read_w = MEMIO(read_w),
-        .mem_read_s = MEMIO(read_s),
-        .mem_read_b = MEMIO(read_b),
-
-        /* memory write interface */
-        .mem_write_w = MEMIO(write_w),
-        .mem_write_s = MEMIO(write_s),
-        .mem_write_b = MEMIO(write_b),
-
-        /* system services or essential routines */
-        .on_ecall = ecall_handler,
-        .on_ebreak = ebreak_handler,
-        .on_memcpy = memcpy_handler,
-        .on_memset = memset_handler,
-        .on_trap = trap_handler,
-    };
-    memcpy(&rv->io, &io, sizeof(riscv_io_t));
-#endif /* RV32_HAS(SYSTEM) */
-
-#else
-    /* *-----------------------------------------*
-     * |              Memory layout              |
-     * *----------------*----------------*-------*
-     * |  kernel image  |  initrd image  |  dtb  |
-     * *----------------*----------------*-------*
-     */
-
-    /* load_dtb needs the count to add the virtio block subnode dynamically */
-    attr->vblk_cnt = attr->data.system.vblk_device_cnt;
-
-    char *ram_loc = (char *) attr->mem->mem_base;
-    map_file(&ram_loc, attr->data.system.kernel, 0);
-    rv_log_info("Kernel loaded");
-
-    uint32_t dtb_addr = attr->mem->mem_size - DTB_SIZE;
-    ram_loc = ((char *) attr->mem->mem_base) + dtb_addr;
-    load_dtb(&ram_loc, attr);
-    rv_log_info("DTB loaded");
-    /* Load optional initrd image before the dtb region.
-     * The initrd region size is defined by INITRD_SIZE at compile time.
-     */
-    if (attr->data.system.initrd) {
-        /* Ensure memory is large enough to hold initrd region */
-        if (dtb_addr < INITRD_SIZE) {
-            rv_log_fatal(
-                "Memory too small for INITRD_SIZE (%u MiB). Increase MEM_SIZE.",
-                INITRD_SIZE / (1024 * 1024));
-            exit(EXIT_FAILURE);
-        }
-        uint32_t initrd_addr = dtb_addr - INITRD_SIZE;
-        ram_loc = ((char *) attr->mem->mem_base) + initrd_addr;
-        off_t initrd_size =
-            map_file(&ram_loc, attr->data.system.initrd, INITRD_SIZE);
-        if (initrd_size < 0) {
-            /* map_file returns -1 when file exceeds max_size */
-            rv_log_fatal(
-                "Initrd file exceeds INITRD_SIZE (%u MiB).\n"
-                "Please rebuild with a larger INITRD_SIZE, e.g.:\n"
-                "  make ENABLE_SYSTEM=1 INITRD_SIZE=64 system",
-                INITRD_SIZE / (1024 * 1024));
-            exit(EXIT_FAILURE);
-        }
-        rv_log_info("Rootfs loaded (%ld bytes)", (long) initrd_size);
-    }
-
-    /* this variable has external linkage to mmu_io defined in system.c */
-    extern riscv_io_t mmu_io;
-    memcpy(&rv->io, &mmu_io, sizeof(riscv_io_t));
-
-    /* setup RISC-V hart */
-    rv_set_reg(rv, rv_reg_a0, 0);
-    rv_set_reg(rv, rv_reg_a1, dtb_addr);
-
-    /* setup timer */
-    attr->timer = 0xFFFFFFFFFFFFFFF;
-
-    /* setup PLIC */
-    attr->plic = plic_new();
-    assert(attr->plic);
-    attr->plic->rv = rv;
-
-    /* setup UART */
-    attr->uart = u8250_new();
-    assert(attr->uart);
-    attr->uart->in_fd = attr->fd_stdin;
-    attr->uart->out_fd = attr->fd_stdout;
-
-    /* setup rtc */
-#if RV32_HAS(GOLDFISH_RTC)
-    attr->rtc = rtc_new();
-    assert(attr->rtc);
-#endif /* RV32_HAS(GOLDFISH_RTC) */
-
-    attr->vblk = calloc(attr->vblk_cnt, sizeof(virtio_blk_state_t *));
-    assert(attr->vblk);
-    attr->disk = calloc(attr->vblk_cnt, sizeof(uint32_t *));
-    assert(attr->disk);
-
-    if (attr->vblk_cnt) {
-        for (int i = 0; i < attr->vblk_cnt; i++) {
-/* Currently, only used for block image path and permission */
-#define MAX_OPTS 2
-            char *vblk_device_str = attr->data.system.vblk_device[i];
-            if (!vblk_device_str[0]) {
-                rv_log_error("Disk path cannot be empty");
-                exit(EXIT_FAILURE);
-            }
-
-            char *vblk_opts[MAX_OPTS] = {NULL};
-            int vblk_opt_idx = 0;
-            char *opt = strtok(vblk_device_str, ",");
-            while (opt) {
-                if (vblk_opt_idx == MAX_OPTS) {
-                    rv_log_error("Too many arguments for vblk");
-                    break;
-                }
-                vblk_opts[vblk_opt_idx++] = opt;
-                opt = strtok(NULL, ",");
-            }
-
-            char *vblk_device;
-            char *vblk_readonly = vblk_opts[1];
-            bool readonly = false;
-
-            if (vblk_opts[0][0] == '~') {
-                /* HOME environment variable should be common in macOS and Linux
-                 * distribution and it is set by the login program
-                 */
-                const char *home = getenv("HOME");
-                if (!home) {
-                    rv_log_error(
-                        "HOME environment variable is not set, cannot access "
-                        "the disk %s",
-                        vblk_opts[0]);
-                    exit(EXIT_FAILURE);
-                }
-
-                const char *suffix = vblk_opts[0] + 1; /* skip ~ */
-                size_t home_len = strlen(home);
-                size_t suffix_len = strlen(suffix);
-                if (home_len > SIZE_MAX - suffix_len - 1) {
-                    rv_log_error("Disk path too long");
-                    exit(EXIT_FAILURE);
-                }
-                size_t path_len = home_len + suffix_len + 1;
-                vblk_device = malloc(path_len);
-                if (!vblk_device) {
-                    rv_log_error("Failed to allocate memory for disk path");
-                    exit(EXIT_FAILURE);
-                }
-                snprintf(vblk_device, path_len, "%s%s", home, suffix);
-            } else {
-                vblk_device = vblk_opts[0];
-            }
-
-            if (vblk_readonly) {
-                if (strcmp(vblk_readonly, "readonly") != 0) {
-                    rv_log_error("Unknown vblk option: %s", vblk_readonly);
-                    exit(EXIT_FAILURE);
-                }
-                readonly = true;
-            }
-
-            attr->vblk[i] = vblk_new();
-            attr->vblk[i]->ram = (uint32_t *) attr->mem->mem_base;
-            attr->disk[i] =
-                virtio_blk_init(attr->vblk[i], vblk_device, readonly);
-
-            if (vblk_opts[0][0] == '~')
-                free(vblk_device);
-        }
-    }
-
-    capture_keyboard_input();
-#endif /* !RV32_HAS(SYSTEM_MMIO) */
-
-    /* create block and IRs memory pool */
-    rv->block_mp = mpool_create(sizeof(block_t) << BLOCK_MAP_CAPACITY_BITS,
-                                sizeof(block_t));
-    rv->block_ir_mp = mpool_create(
-        sizeof(rv_insn_t) << BLOCK_IR_MAP_CAPACITY_BITS, sizeof(rv_insn_t));
-    /* Fuse pool: fixed-size slots for macro-op fusion arrays.
-     * Each slot holds up to FUSE_MAX_ENTRIES opcode_fuse_t structures.
-     */
-    rv->fuse_mp = mpool_create(FUSE_SLOT_SIZE << BLOCK_IR_MAP_CAPACITY_BITS,
-                               FUSE_SLOT_SIZE);
-    if (!rv->block_mp || !rv->block_ir_mp || !rv->fuse_mp) {
-        rv_log_fatal("Failed to create memory pool");
-        goto fail_mpool;
-    }
-
-#if !RV32_HAS(JIT)
-    /* initialize the block map */
-    block_map_init(&rv->block_map, BLOCK_MAP_CAPACITY_BITS);
-
-    /* initialize L1 block cache with invalid tags */
-    for (int i = 0; i < BLOCK_L1_SIZE; i++)
-        rv->block_l1.tags[i] = BLOCK_L1_INVALID_TAG;
-    memset(rv->block_l1.ptrs, 0, sizeof(rv->block_l1.ptrs));
-#else
-    INIT_LIST_HEAD(&rv->block_list);
-    rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
-    if (!rv->jit_state) {
-        rv_log_fatal("Failed to initialize JIT state");
-        goto fail_jit_state;
-    }
-    rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
-    if (!rv->block_cache) {
-        rv_log_fatal("Failed to create block cache");
-        goto fail_block_cache;
-    }
-#if RV32_HAS(T2C)
-    rv->quit = false;
-    rv->jit_cache = jit_cache_init();
-    if (!rv->jit_cache) {
-        rv_log_fatal("Failed to initialize JIT cache");
-        goto fail_jit_cache;
-    }
-    rv->inline_cache = inline_cache_init();
-    if (!rv->inline_cache) {
-        rv_log_fatal("Failed to initialize inline cache");
-        goto fail_inline_cache;
-    }
-    /* prepare wait queue. */
-    pthread_mutex_init(&rv->wait_queue_lock, NULL);
-    pthread_mutex_init(&rv->cache_lock, NULL);
-    pthread_cond_init(&rv->wait_queue_cond, NULL);
-    INIT_LIST_HEAD(&rv->wait_queue);
-    /* Activate the background compilation thread.
-     * Use larger stack (8MB) to handle deep recursion in t2c_trace_ebb
-     * and LLVM's internal stack usage during compilation.
-     */
-    pthread_attr_t t2c_attr;
-    pthread_attr_init(&t2c_attr);
-    pthread_attr_setstacksize(&t2c_attr, 8 * 1024 * 1024); /* 8MB stack */
-    pthread_create(&t2c_thread, &t2c_attr, t2c_runloop, rv);
-    pthread_attr_destroy(&t2c_attr);
-#endif
-#endif
-
-    return rv;
-
-#if RV32_HAS(JIT)
-#if RV32_HAS(T2C)
-fail_inline_cache:
-    jit_cache_exit(rv->jit_cache);
-fail_jit_cache:
-    cache_free(rv->block_cache);
-#endif
-fail_block_cache:
-    if (rv->jit_state)
-        jit_state_exit(rv->jit_state);
-fail_jit_state:
-#endif
-fail_mpool:
-    mpool_destroy(rv->block_ir_mp);
-    mpool_destroy(rv->block_mp);
-    mpool_destroy(rv->fuse_mp);
-#if RV32_HAS(SYSTEM_MMIO)
-    if (attr->uart)
-        u8250_delete(attr->uart);
-    if (attr->plic)
-        plic_delete(attr->plic);
-#if RV32_HAS(GOLDFISH_RTC)
-    if (attr->rtc)
-        rtc_delete(attr->rtc);
-#endif
-    if (attr->vblk) {
-        for (int i = 0; i < attr->vblk_cnt; i++) {
-            if (attr->vblk[i])
-                vblk_delete(attr->vblk[i]);
-        }
-        free(attr->vblk);
-    }
-    free(attr->disk);
-#endif
-    map_delete(attr->fd_map);
-    memory_delete(attr->mem);
-    free(rv);
-    return NULL;
+    return rv_cold_reboot(rv, 0U) ? rv : NULL;
 }
 
 #if !RV32_HAS(SYSTEM_MMIO)
@@ -1046,91 +689,139 @@ void rv_halt(riscv_t *rv)
     rv->halt = true;
 }
 
-bool rv_has_halted(riscv_t *rv)
+/* Common hart reset logic shared by cold and warm reboot */
+static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 {
-    return rv->halt;
-}
-
-#if RV32_HAS(ARCH_TEST)
-void rv_set_tohost_addr(riscv_t *rv, uint32_t addr)
-{
-    rv->tohost_addr = addr;
-}
-
-void rv_set_fromhost_addr(riscv_t *rv, uint32_t addr)
-{
-    rv->fromhost_addr = addr;
-}
-#endif
-
-void rv_delete(riscv_t *rv)
-{
-    assert(rv);
-#if !RV32_HAS(JIT) || (RV32_HAS(SYSTEM_MMIO))
-    vm_attr_t *attr = PRIV(rv);
-#endif
-#if !RV32_HAS(JIT)
-    map_delete(attr->fd_map);
-    memory_delete(attr->mem);
-    block_map_destroy(rv);
-#else
-#if RV32_HAS(T2C)
-    /* Signal the thread to quit */
-    pthread_mutex_lock(&rv->wait_queue_lock);
-    rv->quit = true;
-    pthread_cond_signal(&rv->wait_queue_cond);
-    pthread_mutex_unlock(&rv->wait_queue_lock);
-
-    pthread_join(t2c_thread, NULL);
-
-    /* Clean up any remaining entries in wait queue */
-    queue_entry_t *entry, *safe;
-    list_for_each_entry_safe (entry, safe, &rv->wait_queue, list) {
-        list_del(&entry->list);
-        free(entry);
-    }
-
-    pthread_mutex_destroy(&rv->wait_queue_lock);
-    pthread_mutex_destroy(&rv->cache_lock);
-    pthread_cond_destroy(&rv->wait_queue_cond);
-    jit_cache_exit(rv->jit_cache);
-    inline_cache_exit(rv->inline_cache);
-
-    /* Dispose LLVM engines for all remaining blocks before freeing cache */
-    clear_cache_hot(rv->block_cache, t2c_dispose_block_engine);
-#endif
-    jit_state_exit(rv->jit_state);
-    cache_free(rv->block_cache);
-    mpool_destroy(rv->block_ir_mp);
-    mpool_destroy(rv->block_mp);
-    mpool_destroy(rv->fuse_mp);
-#endif
-#if RV32_HAS(SYSTEM_MMIO)
-    u8250_delete(attr->uart);
-    plic_delete(attr->plic);
-#if RV32_HAS(GOLDFISH_RTC)
-    rtc_delete(attr->rtc);
-#endif /* RV32_HAS(GOLDFISH_RTC) */
-    /* sync device, cleanup inside the callee */
-    rv_fsync_device();
-#endif
-    free(rv);
-}
-
-void rv_reset(riscv_t *rv, riscv_word_t pc)
-{
-    assert(rv);
+    /* Reset general-purpose registers */
     memset(rv->X, 0, sizeof(uint32_t) * N_RV_REGS);
 
+    /* Reset timer */
+    rv->timer = 0;
+
+    /* Reset privilege mode */
+#if RV32_HAS(SYSTEM)
+    /*
+     * System simulation defaults to S-mode as
+     * it does not rely on M-mode software like OpenSBI.
+     */
+    rv->priv_mode = RV_PRIV_S_MODE;
+#else
+    /* ISA simulation defaults to M-mode */
+    rv->priv_mode = RV_PRIV_M_MODE;
+#endif
+
+#if RV32_HAS(SYSTEM)
+    /* Not being trap */
+    rv->is_trapped = false;
+
+    /* reset the csrs (full system emulation) */
+    rv->csr_cycle = 0;
+    rv->csr_time[0] = 0;
+    rv->csr_time[1] = 0;
+    rv->csr_mstatus = 0;
+    rv->csr_mtvec = 0;
+    rv->csr_misa = 0;
+    rv->csr_mtval = 0;
+    rv->csr_mcause = 0;
+    rv->csr_mscratch = 0;
+    rv->csr_mepc = 0;
+    rv->csr_mip = 0;
+    rv->csr_mie = 0;
+    rv->csr_mideleg = 0;
+    rv->csr_medeleg = 0;
+    rv->csr_mvendorid = 0;
+    rv->csr_marchid = 0;
+    rv->csr_mimpid = 0;
+    rv->csr_mbadaddr = 0;
+
+    rv->csr_sstatus = 0;
+    rv->csr_stvec = 0;
+    rv->csr_sip = 0;
+    rv->csr_sie = 0;
+    rv->csr_scounteren = 0;
+    rv->csr_sscratch = 0;
+    rv->csr_sepc = 0;
+    rv->csr_scause = 0;
+    rv->csr_stval = 0;
+
+    /* Reset address translation: clear SATP and flush both TLBs to prevent
+     * stale translations from previous execution.
+     */
+    rv->csr_satp = 0;
+    memset(rv->dtlb, 0, sizeof(rv->dtlb));
+    memset(rv->itlb, 0, sizeof(rv->itlb));
+#else
+    /* reset the csrs (baremetal) */
+    rv->csr_mtvec = 0;
+    rv->csr_mstatus = 0;
+    rv->csr_cycle = 0;
+    rv->csr_misa = 0;
+    rv->csr_mtval = 0;
+    rv->csr_mcause = 0;
+    rv->csr_mscratch = 0;
+    rv->csr_mepc = 0;
+    rv->csr_mip = 0;
+    rv->csr_mie = 0;
+    rv->csr_mideleg = 0;
+    rv->csr_medeleg = 0;
+    rv->csr_mvendorid = 0;
+    rv->csr_marchid = 0;
+    rv->csr_mimpid = 0;
+    rv->csr_mbadaddr = 0;
+#endif
+
+#if RV32_HAS(SYSTEM)
+    rv->timer_offset = 0;
+#endif
+
+    rv->csr_misa |= MISA_SUPER | MISA_USER;
+    rv->csr_mvendorid = RV_MVENDORID;
+    rv->csr_marchid = RV_MARCHID;
+    rv->csr_mimpid = RV_MIMPID;
+#if !RV32_HAS(RV32E)
+    rv->csr_misa |= MISA_I;
+#else
+    rv->csr_misa |= MISA_E;
+#endif
+#if RV32_HAS(EXT_A)
+    rv->csr_misa |= MISA_A;
+#endif
+#if RV32_HAS(EXT_C)
+    rv->csr_misa |= MISA_C;
+#endif
+#if RV32_HAS(EXT_F)
+    rv->csr_misa |= MISA_F;
+    /* Reset float registers */
+    for (int i = 0; i < N_RV_REGS; i++)
+        rv->F[i].v = 0;
+    rv->csr_fcsr = 0;
+#endif
+#if RV32_HAS(EXT_M)
+    rv->csr_misa |= MISA_M;
+#endif
+
+    /* Not being halted */
+    rv->halt = false;
+
+    /* Clear block cache - translated blocks are stale after reset */
+#if !RV32_HAS(JIT)
+    block_map_clear(rv);
+#else
+    /* For JIT, we need to clear the cache as well */
+    /* TODO: implement cache clearing for JIT mode */
+#endif
+
+    /* Set the reset address */
+    rv->PC = pc;
+
+#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+    /* Setup argc/argv for ELF programs */
     vm_attr_t *attr = PRIV(rv);
 #if !RV32_HAS(SYSTEM_MMIO)
     int argc = attr->argc;
     char **args = attr->argv;
     memory_t *mem = attr->mem;
 #endif
-
-    /* set the reset address */
-    rv->PC = pc;
 
     /* set the default stack pointer */
     rv->X[rv_reg_sp] =
@@ -1142,8 +833,7 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
      * memory layout of arguments as below:
      * -----------------------
      * |    NULL            |
-     * -----------------------
-     * |    envp[n]         |
+     * ----------------------- * |    envp[n]         |
      * -----------------------
      * |    envp[n - 1]     |
      * -----------------------
@@ -1224,63 +914,541 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     /* reset sp pointing to argc */
     rv->X[rv_reg_sp] = stack_top;
 #endif /* !RV32_HAS(SYSTEM_MMIO) */
+#endif
+}
 
-    /* reset privilege mode */
-#if RV32_HAS(SYSTEM)
+bool rv_has_halted(riscv_t *rv)
+{
+    return rv->halt;
+}
+
+#if RV32_HAS(ARCH_TEST)
+void rv_set_tohost_addr(riscv_t *rv, uint32_t addr)
+{
+    rv->tohost_addr = addr;
+}
+
+void rv_set_fromhost_addr(riscv_t *rv, uint32_t addr)
+{
+    rv->fromhost_addr = addr;
+}
+#endif
+
+void rv_delete(riscv_t *rv)
+{
+    assert(rv);
+#if !RV32_HAS(JIT) || (RV32_HAS(SYSTEM_MMIO))
+    vm_attr_t *attr = PRIV(rv);
+#endif
+#if !RV32_HAS(JIT)
+    map_delete(attr->fd_map);
+    memory_delete(attr->mem);
+    block_map_destroy(rv);
+#else
+#if RV32_HAS(T2C)
+    /* Signal the thread to quit */
+    pthread_mutex_lock(&rv->wait_queue_lock);
+    rv->quit = true;
+    pthread_cond_signal(&rv->wait_queue_cond);
+    pthread_mutex_unlock(&rv->wait_queue_lock);
+
+    pthread_join(t2c_thread, NULL);
+
+    /* Clean up any remaining entries in wait queue */
+    queue_entry_t *entry, *safe;
+    list_for_each_entry_safe (entry, safe, &rv->wait_queue, list) {
+        list_del(&entry->list);
+        free(entry);
+    }
+
+    pthread_mutex_destroy(&rv->wait_queue_lock);
+    pthread_mutex_destroy(&rv->cache_lock);
+    pthread_cond_destroy(&rv->wait_queue_cond);
+    jit_cache_exit(rv->jit_cache);
+    inline_cache_exit(rv->inline_cache);
+
+    /* Dispose LLVM engines for all remaining blocks before freeing cache */
+    clear_cache_hot(rv->block_cache, t2c_dispose_block_engine);
+#endif
+    jit_state_exit(rv->jit_state);
+    cache_free(rv->block_cache);
+    mpool_destroy(rv->block_ir_mp);
+    mpool_destroy(rv->block_mp);
+    mpool_destroy(rv->fuse_mp);
+#endif
+#if RV32_HAS(SYSTEM_MMIO)
+    u8250_delete(attr->uart);
+    plic_delete(attr->plic);
+#if RV32_HAS(GOLDFISH_RTC)
+    rtc_delete(attr->rtc);
+#endif /* RV32_HAS(GOLDFISH_RTC) */
+    /* sync device, cleanup inside the callee */
+    rv_fsync_device();
+#endif
+    free(rv);
+}
+
+#if RV32_HAS(SYSTEM_MMIO)
+/*
+ * Load kernel image, DTB, and initrd into memory.
+ * Sets attr->dtb_addr for setting up hart registers.
+ */
+static void load_boot_images(vm_attr_t *attr)
+{
+    /* Load kernel at the beginning of memory */
+    char *ram_loc = (char *) attr->mem->mem_base;
+    map_file(&ram_loc, attr->data.system.kernel, 0);
+    rv_log_info("Kernel loaded");
+
+    /* Load DTB at the end of memory */
+    attr->dtb_addr = attr->mem->mem_size - DTB_SIZE;
+    ram_loc = ((char *) attr->mem->mem_base) + attr->dtb_addr;
+    load_dtb(&ram_loc, attr);
+    rv_log_info("DTB loaded");
+
+    /* Load optional initrd image before DTB region */
+    if (attr->data.system.initrd) {
+        /* Ensure memory is large enough to hold initrd region */
+        if (attr->dtb_addr < INITRD_SIZE) {
+            rv_log_fatal(
+                "Memory too small for INITRD_SIZE (%u MiB). Increase MEM_SIZE.",
+                INITRD_SIZE / (1024 * 1024));
+            exit(EXIT_FAILURE);
+        }
+        uint32_t initrd_addr = attr->dtb_addr - INITRD_SIZE;
+        ram_loc = ((char *) attr->mem->mem_base) + initrd_addr;
+        off_t initrd_size =
+            map_file(&ram_loc, attr->data.system.initrd, INITRD_SIZE);
+        if (initrd_size < 0) {
+            /* map_file returns -1 when file exceeds max_size */
+            rv_log_fatal(
+                "Initrd file exceeds INITRD_SIZE (%u MiB).\n"
+                "Please rebuild with a larger INITRD_SIZE, e.g.:\n"
+                "  make ENABLE_SYSTEM=1 INITRD_SIZE=64 system",
+                INITRD_SIZE / (1024 * 1024));
+            exit(EXIT_FAILURE);
+        }
+        rv_log_info("Rootfs loaded (%ld bytes)", (long) initrd_size);
+    }
+}
+
+/* Clear memory, load kernel/DTB/initrd and reset the hart.
+ *
+ * The "warm" aspect is that skipping peripheral
+ * reinitialization for faster reboot.
+ */
+void rv_warm_reboot(riscv_t *rv, riscv_word_t pc)
+{
+    rv_log_info("Warm reboot: reloading kernel (skipping peripheral reset)");
+    assert(rv);
+
+    vm_attr_t *attr = PRIV(rv);
+
+    /* clear memory */
+    memory_fill(attr->mem, 0, attr->mem->mem_size, 0);
+
+    /* reload kernel, DTB, and initrd */
+    load_boot_images(attr);
+
+    /* Reset hart state (general purpose registers, CSRs, PC, argc/argv, etc.)
+     */
+    rv_reset_hart(rv, pc);
+
+    /* Setup timer */
+    attr->timer = 0xFFFFFFFFFFFFFFF;
+
+    /* setup RISC-V hart */
+    rv_set_reg(rv, rv_reg_a0, 0);
+    rv_set_reg(rv, rv_reg_a1, attr->dtb_addr);
+}
+#endif /* RV32_HAS(SYSTEM_MMIO) */
+
+bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
+{
+    assert(rv);
+    vm_attr_t *attr = PRIV(rv);
+
+    /* Initialize memory */
+    if (attr->mem) /* check for reboot */
+        memory_fill(attr->mem, 0, attr->mem->mem_size, 0);
+    else {
+        attr->mem = memory_new(attr->mem_size);
+        assert(attr->mem);
+        assert(!(((uintptr_t) attr->mem) & 0b11));
+    }
+
+    /* Reset hart state (general purpose registers, CSRs, PC, argc/argv, etc.)
+     */
+    rv_reset_hart(rv, pc);
+
     /*
-     * System simulation defaults to S-mode as
-     * it does not rely on M-mode software like OpenSBI.
+     * default standard stream.
+     * rv_remap_stdstream() can be called to overwrite them
+     *
+     * The logging stdout stream will be remapped as well
+     *
      */
-    rv->priv_mode = RV_PRIV_S_MODE;
+    if (!attr->fd_map) { /* check for reboot */
+        attr->fd_map = map_init(int, FILE *, map_cmp_int);
+        rv_remap_stdstream(rv,
+                           (fd_stream_pair_t[]) {
+                               {STDIN_FILENO, stdin},
+                               {STDOUT_FILENO, stdout},
+                               {STDERR_FILENO, stderr},
+                           },
+                           3);
+    }
 
-    /* not being trapped */
-    rv->is_trapped = false;
+    /* Log level */
+    rv_log_set_level(attr->log_level);
+    rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
 
-    /* Reset address translation: clear SATP and flush both TLBs to prevent
-     * stale translations from previous execution.
-     */
-    rv->csr_satp = 0;
-    memset(rv->dtlb, 0, sizeof(rv->dtlb));
-    memset(rv->itlb, 0, sizeof(rv->itlb));
-#else
-    /* ISA simulation defaults to M-mode */
-    rv->priv_mode = RV_PRIV_M_MODE;
+#if !RV32_HAS(SYSTEM_MMIO)
+    elf_t *elf = elf_new();
+    assert(elf);
+
+    if (!elf_open(elf, attr->data.user.elf_program)) {
+        rv_log_fatal("elf_open() failed");
+        map_delete(attr->fd_map);
+        memory_delete(attr->mem);
+        free(rv);
+        exit(EXIT_FAILURE);
+    }
+    rv_log_info("%s ELF loaded", attr->data.user.elf_program);
+
+    const struct Elf32_Sym *end;
+    if ((end = elf_get_symbol(elf, "_end")))
+        attr->break_addr = end->st_value;
+
+#if !RV32_HAS(SYSTEM)
+    /* set not exiting */
+    attr->on_exit = false;
+
+    const struct Elf32_Sym *exit;
+    if ((exit = elf_get_symbol(elf, "exit")))
+        attr->exit_addr = exit->st_value;
 #endif
 
-    /* reset the csrs */
-    rv->csr_mtvec = 0;
-    rv->csr_cycle = 0;
+    assert(elf_load(elf, attr->mem));
+
+    /* set the entry pc */
+    const struct Elf32_Ehdr UNUSED *hdr = get_elf_header(elf);
+    assert(rv_set_pc(rv, hdr->e_entry));
+
+    elf_delete(elf);
+
+/* combine with USE_ELF for system test suite */
 #if RV32_HAS(SYSTEM)
-    rv->timer_offset = 0;
-#endif
-    rv->csr_mstatus = 0;
-    rv->csr_misa |= MISA_SUPER | MISA_USER;
-    rv->csr_mvendorid = RV_MVENDORID;
-    rv->csr_marchid = RV_MARCHID;
-    rv->csr_mimpid = RV_MIMPID;
-#if !RV32_HAS(RV32E)
-    rv->csr_misa |= MISA_I;
+    /* this variable has external linkage to mmu_io defined in system.c */
+    extern riscv_io_t mmu_io;
+    /* install the MMU I/O handlers */
+    memcpy(&rv->io, &mmu_io, sizeof(riscv_io_t));
 #else
-    rv->csr_misa |= MISA_E;
+    /* install the I/O handlers */
+    const riscv_io_t io = {
+        /* memory read interface */
+        .mem_ifetch = MEMIO(ifetch),
+        .mem_read_w = MEMIO(read_w),
+        .mem_read_s = MEMIO(read_s),
+        .mem_read_b = MEMIO(read_b),
+
+        /* memory write interface */
+        .mem_write_w = MEMIO(write_w),
+        .mem_write_s = MEMIO(write_s),
+        .mem_write_b = MEMIO(write_b),
+
+        /* system services or essential routines */
+        .on_ecall = ecall_handler,
+        .on_ebreak = ebreak_handler,
+        .on_memcpy = memcpy_handler,
+        .on_memset = memset_handler,
+        .on_trap = trap_handler,
+    };
+    memcpy(&rv->io, &io, sizeof(riscv_io_t));
+#endif /* RV32_HAS(SYSTEM) */
+
+#else
+    /* *-----------------------------------------*
+     * |              Memory layout              |
+     * *----------------*----------------*-------*
+     * |  kernel image  |  initrd image  |  dtb  |
+     * *----------------*----------------*-------*
+     */
+
+    /* load_dtb needs the count to add the virtio block subnode dynamically */
+    attr->vblk_cnt = attr->data.system.vblk_device_cnt;
+
+    /* Load kernel, DTB, and initrd */
+    load_boot_images(attr);
+
+    /* this variable has external linkage to mmu_io defined in system.c */
+    extern riscv_io_t mmu_io;
+    memcpy(&rv->io, &mmu_io, sizeof(riscv_io_t));
+
+    /* setup RISC-V hart */
+    rv_set_reg(rv, rv_reg_a0, 0);
+    rv_set_reg(rv, rv_reg_a1, attr->dtb_addr);
+
+    /* setup timer */
+    attr->timer = 0xFFFFFFFFFFFFFFF;
+
+    /* setup PLIC */
+    if (attr->plic)             /* check for reboot */
+        plic_reset(attr->plic); /* reset plic state */
+    else {
+        attr->plic = plic_new();
+        assert(attr->plic);
+    }
+    attr->plic->rv = rv;
+
+    /* setup UART */
+    if (attr->uart)              /* check for reboot */
+        u8250_reset(attr->uart); /* reset uart state */
+    else {
+        attr->uart = u8250_new();
+        assert(attr->uart);
+    }
+    attr->uart->in_fd = attr->fd_stdin;
+    attr->uart->out_fd = attr->fd_stdout;
+
+    /* No need to reset the Goldfish RTC when reboot to emulate the monotonic
+     * property */
+#if RV32_HAS(GOLDFISH_RTC)
+    if (!attr->rtc) { /* check for reboot */
+        attr->rtc = rtc_new();
+    }
+    assert(attr->rtc);
+#endif /* RV32_HAS(GOLDFISH_RTC) */
+
+    /* setup virtio-blk */
+    if (!attr->vblk) { /* check for reboot */
+        attr->vblk = calloc(attr->vblk_cnt, sizeof(virtio_blk_state_t *));
+        assert(attr->vblk);
+        attr->disk = calloc(attr->vblk_cnt, sizeof(uint32_t *));
+        assert(attr->disk);
+    }
+
+    if (attr->vblk_cnt) {
+        for (int i = 0; i < attr->vblk_cnt; i++) {
+/* Currently, only used for block image path and permission */
+#define MAX_OPTS 2
+            char *vblk_device_str = attr->data.system.vblk_device[i];
+            if (!vblk_device_str[0]) {
+                rv_log_error("Disk path cannot be empty");
+                exit(EXIT_FAILURE);
+            }
+
+            char *vblk_opts[MAX_OPTS] = {NULL};
+            int vblk_opt_idx = 0;
+            char *opt = strtok(vblk_device_str, ",");
+            while (opt) {
+                if (vblk_opt_idx == MAX_OPTS) {
+                    rv_log_error("Too many arguments for vblk");
+                    break;
+                }
+                vblk_opts[vblk_opt_idx++] = opt;
+                opt = strtok(NULL, ",");
+            }
+
+            char *vblk_device;
+            char *vblk_readonly = vblk_opts[1];
+            bool readonly = false;
+
+            if (vblk_opts[0][0] == '~') {
+                /* HOME environment variable should be common in macOS and Linux
+                 * distribution and it is set by the login program
+                 */
+                const char *home = getenv("HOME");
+                if (!home) {
+                    rv_log_error(
+                        "HOME environment variable is not set, cannot access "
+                        "the disk %s",
+                        vblk_opts[0]);
+                    exit(EXIT_FAILURE);
+                }
+
+                const char *suffix = vblk_opts[0] + 1; /* skip ~ */
+                size_t home_len = strlen(home);
+                size_t suffix_len = strlen(suffix);
+                if (home_len > SIZE_MAX - suffix_len - 1) {
+                    rv_log_error("Disk path too long");
+                    exit(EXIT_FAILURE);
+                }
+                size_t path_len = home_len + suffix_len + 1;
+                vblk_device = malloc(path_len);
+                if (!vblk_device) {
+                    rv_log_error("Failed to allocate memory for disk path");
+                    exit(EXIT_FAILURE);
+                }
+                snprintf(vblk_device, path_len, "%s%s", home, suffix);
+            } else {
+                vblk_device = vblk_opts[0];
+            }
+
+            if (vblk_readonly) {
+                if (strcmp(vblk_readonly, "readonly") != 0) {
+                    rv_log_error("Unknown vblk option: %s", vblk_readonly);
+                    exit(EXIT_FAILURE);
+                }
+                readonly = true;
+            }
+
+            if (attr->vblk[i]) { /* check for reboot */
+                /*
+                 * Reset virtio block state.
+                 *
+                 * The attr->vblk[i]->priv could be pre-allocated.
+                 * When rebooting, the pre-allocated pointer can
+                 * be reused.
+                 *
+                 * See virtio_blk_init in src/devices/virtio-blk.c
+                 */
+                void *tmp_priv = attr->vblk[i]->priv;
+                memset(attr->vblk[i], 0, sizeof(virtio_blk_state_t));
+                attr->vblk[i]->priv = tmp_priv;
+            } else {
+                attr->vblk[i] = vblk_new();
+                assert(attr->vblk[i]);
+            }
+            attr->vblk[i]->ram = (uint32_t *) attr->mem->mem_base;
+            attr->disk[i] =
+                virtio_blk_init(attr->vblk[i], vblk_device, readonly);
+
+            if (vblk_opts[0][0] == '~')
+                free(vblk_device);
+        }
+    }
+
+    capture_keyboard_input();
+#endif /* !RV32_HAS(SYSTEM_MMIO) */
+
+    /* create block, IRs, fuse_IRs memory pool */
+    if (!rv->block_mp) { /* check for reboot */
+        rv->block_mp = mpool_create(sizeof(block_t) << BLOCK_MAP_CAPACITY_BITS,
+                                    sizeof(block_t));
+    }
+    if (!rv->block_ir_mp) { /* check for reboot */
+        rv->block_ir_mp = mpool_create(
+            sizeof(rv_insn_t) << BLOCK_IR_MAP_CAPACITY_BITS, sizeof(rv_insn_t));
+    }
+    if (!rv->fuse_mp) { /* check for reboot */
+        /* Fuse pool: fixed-size slots for macro-op fusion arrays.
+         * Each slot holds up to FUSE_MAX_ENTRIES opcode_fuse_t structures.
+         */
+        rv->fuse_mp = mpool_create(FUSE_SLOT_SIZE << BLOCK_IR_MAP_CAPACITY_BITS,
+                                   FUSE_SLOT_SIZE);
+    }
+    if (!rv->block_mp || !rv->block_ir_mp || !rv->fuse_mp) {
+        rv_log_fatal("Failed to create memory pool");
+        goto fail_mpool;
+    }
+
+#if !RV32_HAS(JIT)
+    /* initialize the block map */
+    if (!rv->block_map.map) { /* check for reboot */
+        block_map_init(&rv->block_map, BLOCK_MAP_CAPACITY_BITS);
+    }
+#else
+    rv_log_info("init block map");
+    if (!rv->jit_state) { /* check for reboot */
+        INIT_LIST_HEAD(&rv->block_list);
+    } else {
+        jit_state_exit(rv->jit_state);
+    }
+    rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
+    if (!rv->jit_state) {
+        rv_log_fatal("Failed to initialize JIT state");
+        goto fail_jit_state;
+    }
+
+    if (rv->block_cache) { /* check for reboot */
+        cache_free(rv->block_cache);
+    }
+    rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
+    if (!rv->block_cache) {
+        rv_log_fatal("Failed to create block cache");
+        goto fail_block_cache;
+    }
+#if RV32_HAS(T2C)
+    if (rv->jit_cache) { /* check for reboot */
+        jit_cache_exit(rv->jit_cache);
+    }
+    rv->jit_cache = jit_cache_init();
+    if (!rv->jit_cache) {
+        rv_log_fatal("Failed to initialize JIT cache");
+        goto fail_jit_cache;
+    }
+    if (rv->inline_cache) { /* check for reboot */
+        inline_cache_exit(rv->inline_cache);
+    }
+    rv->inline_cache = inline_cache_init();
+    if (!rv->inline_cache) {
+        rv_log_fatal("Failed to initialize inline cache");
+        goto fail_inline_cache;
+    }
+
+    if (rv->quit) {
+        pthread_mutex_destroy(&rv->wait_queue_lock);
+        pthread_mutex_destroy(&rv->cache_lock);
+    }
+    rv->quit = false;
+    /* prepare wait queue. */
+    pthread_mutex_init(&rv->wait_queue_lock, NULL);
+    pthread_mutex_init(&rv->cache_lock, NULL);
+    pthread_cond_init(&rv->wait_queue_cond, NULL);
+    INIT_LIST_HEAD(&rv->wait_queue);
+    /* Activate the background compilation thread.
+     * Use larger stack (8MB) to handle deep recursion in t2c_trace_ebb
+     * and LLVM's internal stack usage during compilation.
+     */
+    pthread_attr_t t2c_attr;
+    pthread_attr_init(&t2c_attr);
+    pthread_attr_setstacksize(&t2c_attr, 8 * 1024 * 1024); /* 8MB stack */
+    pthread_create(&t2c_thread, &t2c_attr, t2c_runloop, rv);
+    pthread_attr_destroy(&t2c_attr);
 #endif
-#if RV32_HAS(EXT_A)
-    rv->csr_misa |= MISA_A;
-#endif
-#if RV32_HAS(EXT_C)
-    rv->csr_misa |= MISA_C;
-#endif
-#if RV32_HAS(EXT_F)
-    rv->csr_misa |= MISA_F;
-    /* reset float registers */
-    for (int i = 0; i < N_RV_REGS; i++)
-        rv->F[i].v = 0;
-    rv->csr_fcsr = 0;
-#endif
-#if RV32_HAS(EXT_M)
-    rv->csr_misa |= MISA_M;
 #endif
 
-    rv->halt = false;
+    return true;
+
+#if RV32_HAS(JIT)
+#if RV32_HAS(T2C)
+fail_inline_cache:
+    jit_cache_exit(rv->jit_cache);
+fail_jit_cache:
+    cache_free(rv->block_cache);
+#endif
+fail_block_cache:
+    if (rv->jit_state)
+        jit_state_exit(rv->jit_state);
+fail_jit_state:
+#endif
+fail_mpool:
+    mpool_destroy(rv->block_ir_mp);
+    mpool_destroy(rv->block_mp);
+    mpool_destroy(rv->fuse_mp);
+#if RV32_HAS(SYSTEM_MMIO)
+    if (attr->uart)
+        u8250_delete(attr->uart);
+    if (attr->plic)
+        plic_delete(attr->plic);
+#if RV32_HAS(GOLDFISH_RTC)
+    if (attr->rtc)
+        rtc_delete(attr->rtc);
+#endif
+    if (attr->vblk) {
+        for (int i = 0; i < attr->vblk_cnt; i++) {
+            if (attr->vblk[i])
+                vblk_delete(attr->vblk[i]);
+        }
+        free(attr->vblk);
+    }
+    free(attr->disk);
+#endif
+    map_delete(attr->fd_map);
+    memory_delete(attr->mem);
+    free(rv);
+    return NULL;
 }
 
 static const char *insn_name_table[] = {

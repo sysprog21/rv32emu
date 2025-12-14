@@ -197,3 +197,8 @@ void u8250_delete(u8250_state_t *uart)
 {
     free(uart);
 }
+
+void u8250_reset(u8250_state_t *uart)
+{
+    memset(uart, 0, sizeof(u8250_state_t));
+}

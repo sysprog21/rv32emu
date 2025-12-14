@@ -39,3 +39,6 @@ plic_t *plic_new();
 
 /* delete a PLIC instance */
 void plic_delete(plic_t *plic);
+
+/* reset a PLIC instance */
+void plic_reset(plic_t *plic);

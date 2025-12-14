@@ -89,3 +89,8 @@ void plic_delete(plic_t *plic)
 {
     free(plic);
 }
+
+void plic_reset(plic_t *plic)
+{
+    memset(plic, 0, sizeof(plic_t));
+}

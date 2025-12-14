@@ -1093,7 +1093,6 @@ static void rv_check_interrupt(riscv_t *rv)
     vm_attr_t *attr = PRIV(rv);
     if (peripheral_update_ctr-- == 0) {
         peripheral_update_ctr = 64;
-
 #if defined(__EMSCRIPTEN__)
     escape_seq:
 #endif
@@ -1143,7 +1142,24 @@ void rv_step(void *arg)
     /* find or translate a block for starting PC */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 
-    /* loop until hitting the cycle target */
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    /* Set up the jump point for handling reboots */
+    if (setjmp(rv->reboot_jmp) != 0) {
+        /* longjmp to here after a reboot happens */
+#if !RV32_HAS(JIT)
+        need_clear_block_map = false;
+#endif
+        is_branch_taken = false;
+        reloc_enable_mmu_jalr_addr = 0;
+        reloc_enable_mmu = false;
+        need_retranslate = false;
+        need_handle_signal = false;
+        prev = NULL;
+        last_pc = 0;
+    }
+#endif
+
+    /* loop until hitting the cycle target or hart is halted */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
         /* check for any interrupt after every block emulation */

@@ -63,8 +63,6 @@ ASSERT()
     fi
 }
 
-cleanup
-
 ENABLE_VBLK=1
 VBLK_IMGS=(
     build/disk_ext4.img
@@ -84,31 +82,32 @@ for disk_img in "${VBLK_IMGS[@]}"; do
 done
 
 TIMEOUT=50
-OPTS_BASE=" -k build/linux-image/Image"
-OPTS_BASE+=" -i build/linux-image/rootfs.cpio"
-
-TEST_OPTIONS=("base (${OPTS_BASE})")
-EXPECT_CMDS=('
-    expect "buildroot login:" { send "root\n" } timeout { exit 1 }
-    expect "# " { send "uname -a\n" } timeout { exit 2 }
-    expect "riscv32 GNU/Linux" { send "\x01"; send "x" } timeout { exit 3 }
-')
+OPTS_BASE=" -k build/linux-image/Image -i build/linux-image/rootfs.cpio"
 
 COLOR_G='\e[32;01m' # Green
 COLOR_R='\e[31;01m' # Red
 COLOR_Y='\e[33;01m' # Yellow
 COLOR_N='\e[0m'     # No color
 
+MESSAGES=("${COLOR_G}OK!"
+    "${COLOR_R}Fail to boot"
+    "${COLOR_R}Fail to login"
+    "${COLOR_R}Fail to run commands"
+)
+
+cleanup
+
+# Reboot tests in a subshell ()
+(. "${SCRIPT_DIR}/reboot.sh")
+RET=$?
+
+# VirtIO block tests
 for disk_img in "${VBLK_IMGS[@]}"; do
     TEST_OPTIONS=()
     EXPECT_CMDS=()
 
-    MESSAGES=("${COLOR_G}OK!"
-        "${COLOR_R}Fail to boot"
-        "${COLOR_R}Fail to login"
-        "${COLOR_R}Fail to run commands"
-        "${COLOR_R}Fail to find emu.txt in ${disk_img}"
-    )
+    # VirtIO Block Tests specific error message
+    MESSAGES+=("${COLOR_R}Fail to find emu.txt in ${disk_img}")
 
     if [ "${ENABLE_VBLK}" -eq "1" ]; then
         # Read-only
@@ -298,6 +297,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
 	DONE
 
         ret=$?
+        RET=$((${RET} + ${ret}))
         cleanup
 
         printf "\nBoot Linux Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
@@ -317,4 +317,4 @@ for disk_img in "${VBLK_IMGS[@]}"; do
     done
 done
 
-exit ${ret}
+exit ${RET}

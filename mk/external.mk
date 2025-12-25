@@ -107,7 +107,7 @@ QUAKE_DATA_SHA = 36b42dc7b6313fd9cabc0be8b9e9864840929735
 QUAKE_DATA_SHA_CMD = $(SHA1SUM)
 
 # Timidity software synthesizer configuration for SDL2_mixer
-TIMIDITY_DATA_URL = http://www.libsdl.org/projects/mixer/timidity/timidity.tar.gz
+TIMIDITY_DATA_URL = https://www.libsdl.org/projects/old/SDL_mixer/timidity/timidity.tar.gz
 TIMIDITY_DATA_DEST = $(OUT)
 TIMIDITY_DATA = $(TIMIDITY_DATA_DEST)/timidity
 TIMIDITY_DATA_SKIP_DIR_LEVEL = 0

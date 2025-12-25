@@ -29,7 +29,9 @@ enum SUPPORTED_MMIO {
     MMIO_PLIC,
     MMIO_UART,
     MMIO_VIRTIOBLK,
+#if RV32_HAS(GOLDFISH_RTC)
     MMIO_RTC,
+#endif /* RV32_HAS(GOLDFISH_RTC) */
 };
 
 /* clang-format off */
@@ -68,6 +70,7 @@ enum SUPPORTED_MMIO {
                 return;                                                               \
             )                                                                         \
             break;                                                                    \
+        IIF(RV32_FEATURE_GOLDFISH_RTC)(                                               \
         case MMIO_RTC:                                                                \
             IIF(rw)( /* read */                                                       \
                 mmio_read_val = rtc_read(PRIV(rv)->rtc, addr & 0xFFFFF);              \
@@ -79,76 +82,83 @@ enum SUPPORTED_MMIO {
                 return;                                                               \
             )                                                                         \
             break;                                                                    \
+        ,)                                                                            \
         default:                                                                      \
             rv_log_error("unknown MMIO type %d\n", io);                               \
             break;                                                                    \
     }
+
+#define MMIO_READ()                                                           \
+    do {                                                                      \
+        uint32_t mmio_read_val;                                               \
+        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */                   \
+            /* 256 regions of 1MiB */                                         \
+            uint32_t hi = (addr >> 20) & MASK(8);                             \
+            if (PRIV(rv)->vblk_cnt && hi >= PRIV(rv)->vblk_mmio_base_hi &&    \
+                hi <= PRIV(rv)->vblk_mmio_max_hi) {                           \
+                PRIV(rv)->vblk_curr =                                         \
+                    PRIV(rv)->vblk[hi - PRIV(rv)->vblk_mmio_base_hi];         \
+                MMIO_OP(MMIO_VIRTIOBLK, MMIO_R);                              \
+            } else {                                                          \
+                switch (hi) {                                                 \
+                case 0x0:                                                     \
+                case 0x2: /* PLIC (0 - 0x3F) */                               \
+                    MMIO_OP(MMIO_PLIC, MMIO_R);                               \
+                    break;                                                    \
+                case 0x40: /* UART */                                         \
+                    MMIO_OP(MMIO_UART, MMIO_R);                               \
+                    break;                                                    \
+                IIF(RV32_FEATURE_GOLDFISH_RTC)(                               \
+                case 0x41 : /* RTC */                                         \
+                    MMIO_OP(MMIO_RTC, MMIO_R);                                \
+                    break;                                                    \
+                ,)                                                            \
+                default:                                                      \
+                    __UNREACHABLE;                                            \
+                    break;                                                    \
+                }                                                             \
+            }                                                                 \
+        }                                                                     \
+    } while (0)
+
+#define MMIO_WRITE()                                                          \
+    do {                                                                      \
+        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */                   \
+            /* 256 regions of 1MiB */                                         \
+            uint32_t hi = (addr >> 20) & MASK(8);                             \
+            if (PRIV(rv)->vblk_cnt && hi >= PRIV(rv)->vblk_mmio_base_hi &&    \
+                hi <= PRIV(rv)->vblk_mmio_max_hi) {                           \
+                PRIV(rv)->vblk_curr =                                         \
+                    PRIV(rv)->vblk[hi - PRIV(rv)->vblk_mmio_base_hi];         \
+                MMIO_OP(MMIO_VIRTIOBLK, MMIO_W);                              \
+            } else {                                                          \
+                switch (hi) {                                                 \
+                case 0x0:                                                     \
+                case 0x2: /* PLIC (0 - 0x3F) */                               \
+                    MMIO_OP(MMIO_PLIC, MMIO_W);                               \
+                    break;                                                    \
+                case 0x40: /* UART */                                         \
+                    MMIO_OP(MMIO_UART, MMIO_W);                               \
+                    break;                                                    \
+                IIF(RV32_FEATURE_GOLDFISH_RTC)(                               \
+                case 0x41 : /* RTC */                                         \
+                    MMIO_OP(MMIO_RTC, MMIO_W);                                \
+                    break;                                                    \
+                ,)                                                            \
+                default:                                                      \
+                    __UNREACHABLE;                                            \
+                    break;                                                    \
+                }                                                             \
+            }                                                                 \
+        }                                                                     \
+    } while (0)
 /* clang-format on */
-
-#define MMIO_READ()                                                        \
-    do {                                                                   \
-        uint32_t mmio_read_val;                                            \
-        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */                \
-            /* 256 regions of 1MiB */                                      \
-            uint32_t hi = (addr >> 20) & MASK(8);                          \
-            if (PRIV(rv)->vblk_cnt && hi >= PRIV(rv)->vblk_mmio_base_hi && \
-                hi <= PRIV(rv)->vblk_mmio_max_hi) {                        \
-                PRIV(rv)->vblk_curr =                                      \
-                    PRIV(rv)->vblk[hi - PRIV(rv)->vblk_mmio_base_hi];      \
-                MMIO_OP(MMIO_VIRTIOBLK, MMIO_R);                           \
-            } else {                                                       \
-                switch (hi) {                                              \
-                case 0x0:                                                  \
-                case 0x2: /* PLIC (0 - 0x3F) */                            \
-                    MMIO_OP(MMIO_PLIC, MMIO_R);                            \
-                    break;                                                 \
-                case 0x40: /* UART */                                      \
-                    MMIO_OP(MMIO_UART, MMIO_R);                            \
-                    break;                                                 \
-                case 0x41: /* RTC */                                       \
-                    MMIO_OP(MMIO_RTC, MMIO_R);                             \
-                    break;                                                 \
-                default:                                                   \
-                    __UNREACHABLE;                                         \
-                    break;                                                 \
-                }                                                          \
-            }                                                              \
-        }                                                                  \
-    } while (0)
-
-#define MMIO_WRITE()                                                       \
-    do {                                                                   \
-        if ((addr >> 28) == 0xF) { /* MMIO at 0xF_______ */                \
-            /* 256 regions of 1MiB */                                      \
-            uint32_t hi = (addr >> 20) & MASK(8);                          \
-            if (PRIV(rv)->vblk_cnt && hi >= PRIV(rv)->vblk_mmio_base_hi && \
-                hi <= PRIV(rv)->vblk_mmio_max_hi) {                        \
-                PRIV(rv)->vblk_curr =                                      \
-                    PRIV(rv)->vblk[hi - PRIV(rv)->vblk_mmio_base_hi];      \
-                MMIO_OP(MMIO_VIRTIOBLK, MMIO_W);                           \
-            } else {                                                       \
-                switch (hi) {                                              \
-                case 0x0:                                                  \
-                case 0x2: /* PLIC (0 - 0x3F) */                            \
-                    MMIO_OP(MMIO_PLIC, MMIO_W);                            \
-                    break;                                                 \
-                case 0x40: /* UART */                                      \
-                    MMIO_OP(MMIO_UART, MMIO_W);                            \
-                    break;                                                 \
-                case 0x41: /* RTC */                                       \
-                    MMIO_OP(MMIO_RTC, MMIO_W);                             \
-                    break;                                                 \
-                default:                                                   \
-                    __UNREACHABLE;                                         \
-                    break;                                                 \
-                }                                                          \
-            }                                                              \
-        }                                                                  \
-    } while (0)
 
 void emu_update_uart_interrupts(riscv_t *rv);
 void emu_update_vblk_interrupts(riscv_t *rv);
+#if RV32_HAS(GOLDFISH_RTC)
 void emu_update_rtc_interrupts(riscv_t *rv);
+#endif /* RV32_HAS(GOLDFISH_RTC) */
 
 #define CHECK_PENDING_SIGNAL(rv, signal_flag)              \
     do {                                                   \

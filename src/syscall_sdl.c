@@ -379,7 +379,7 @@ void syscall_draw_frame(riscv_t *rv)
     int actual_width, actual_height;
     SDL_GetWindowSize(window, &actual_width, &actual_height);
     SDL_RenderCopy(renderer, texture, NULL,
-                   &(SDL_Rect){0, 0, actual_width, actual_height});
+                   &(SDL_Rect) {0, 0, actual_width, actual_height});
     SDL_RenderPresent(renderer);
 }
 

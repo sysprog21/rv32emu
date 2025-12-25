@@ -86,17 +86,16 @@ static inline void check_tohost_write(riscv_t *rv,
  * @compress: compressed instruction or not
  * @IO: whether the misaligned handler is for load/store or insn.
  */
-#define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)       \
-    IIF(IO)                                                           \
-    (if (!PRIV(rv)->allow_misalign && unlikely(addr & (mask_or_pc))), \
-     if (unlikely(insn_is_misaligned(PC))))                           \
-    {                                                                 \
-        rv->compressed = compress;                                    \
-        rv->csr_cycle = cycle;                                        \
-        rv->PC = PC;                                                  \
-        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, type##_MISALIGNED,           \
-                                     IIF(IO)(addr, mask_or_pc));      \
-        return false;                                                 \
+#define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)              \
+    IIF(IO)(if (!PRIV(rv)->allow_misalign && unlikely(addr & (mask_or_pc))), \
+            if (unlikely(insn_is_misaligned(PC))))                           \
+    {                                                                        \
+        rv->compressed = compress;                                           \
+        rv->csr_cycle = cycle;                                               \
+        rv->PC = PC;                                                         \
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, type##_MISALIGNED,                  \
+                                     IIF(IO)(addr, mask_or_pc));             \
+        return false;                                                        \
     }
 
 /* FIXME: use more precise methods for updating time, e.g., RTC */
@@ -306,7 +305,7 @@ static uint32_t csr_csrrc(riscv_t *rv,
 void rv_debug(riscv_t *rv)
 {
     if (!gdbstub_init(&rv->gdbstub, &gdbstub_ops,
-                      (arch_info_t){
+                      (arch_info_t) {
                           .reg_num = 33,
                           .target_desc = TARGET_RV32,
                       },
@@ -444,21 +443,19 @@ static uint32_t peripheral_update_ctr = 64;
     {                                                                     \
         IIF(RV32_HAS(SYSTEM))(rv->timer++;, ) cycle++;                    \
         code;                                                             \
-        IIF(RV32_HAS(SYSTEM))                                             \
-        (                                                                 \
+        IIF(RV32_HAS(SYSTEM))(                                            \
             if (need_handle_signal) {                                     \
                 need_handle_signal = false;                               \
                 return true;                                              \
             }, ) nextop : PC += __rv_insn_##inst##_len;                   \
-        IIF(RV32_HAS(SYSTEM))                                             \
-        (IIF(RV32_HAS(JIT))(                                              \
-             , if (unlikely(need_clear_block_map)) {                      \
-                 block_map_clear(rv);                                     \
-                 need_clear_block_map = false;                            \
-                 rv->csr_cycle = cycle;                                   \
-                 rv->PC = PC;                                             \
-                 return false;                                            \
-             }), );                                                       \
+        IIF(RV32_HAS(SYSTEM))(IIF(RV32_HAS(JIT))(                         \
+                                  , if (unlikely(need_clear_block_map)) { \
+                                      block_map_clear(rv);                \
+                                      need_clear_block_map = false;       \
+                                      rv->csr_cycle = cycle;              \
+                                      rv->PC = PC;                        \
+                                      return false;                       \
+                                  }), );                                  \
         if (unlikely(RVOP_NO_NEXT(ir)))                                   \
             goto end_op;                                                  \
         const rv_insn_t *next = ir->next;                                 \
@@ -1184,11 +1181,11 @@ void rv_step(void *arg)
             PRIV(rv)->on_exit = true;
 #endif
 
-            /* After emulating the previous block, it is determined whether the
-             * branch is taken or not. The IR array of the current block is then
-             * assigned to either the branch_taken or branch_untaken pointer of
-             * the previous block.
-             */
+        /* After emulating the previous block, it is determined whether the
+         * branch is taken or not. The IR array of the current block is then
+         * assigned to either the branch_taken or branch_untaken pointer of
+         * the previous block.
+         */
 
 #if RV32_HAS(BLOCK_CHAINING)
         if (prev

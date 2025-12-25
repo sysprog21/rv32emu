@@ -238,8 +238,7 @@ T2C_MMU_STORE(sw, mmu_write_w);
 #endif
 
 T2C_OP(lb, {
-    IIF(RV32_HAS(SYSTEM))
-    (
+    IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lb)(builder, start, ir); },
         {
             LLVMValueRef mem_loc =
@@ -253,8 +252,7 @@ T2C_OP(lb, {
 })
 
 T2C_OP(lh, {
-    IIF(RV32_HAS(SYSTEM))
-    (
+    IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lh)(builder, start, ir); },
         {
             LLVMValueRef mem_loc =
@@ -269,8 +267,7 @@ T2C_OP(lh, {
 
 
 T2C_OP(lw, {
-    IIF(RV32_HAS(SYSTEM))
-    (
+    IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lw)(builder, start, ir); },
         {
             LLVMValueRef mem_loc =
@@ -282,8 +279,7 @@ T2C_OP(lw, {
 })
 
 T2C_OP(lbu, {
-    IIF(RV32_HAS(SYSTEM))
-    (
+    IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lbu)(builder, start, ir); },
         {
             LLVMValueRef mem_loc =
@@ -297,8 +293,7 @@ T2C_OP(lbu, {
 })
 
 T2C_OP(lhu, {
-    IIF(RV32_HAS(SYSTEM))
-    (
+    IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lhu)(builder, start, ir); },
         {
             LLVMValueRef mem_loc =
@@ -312,8 +307,7 @@ T2C_OP(lhu, {
 })
 
 T2C_OP(sb, {
-    IIF(RV32_HAS(SYSTEM))
-    (
+    IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(sb)(builder, start, ir); },
         {
             LLVMValueRef mem_loc =
@@ -325,8 +319,7 @@ T2C_OP(sb, {
 })
 
 T2C_OP(sh, {
-    IIF(RV32_HAS(SYSTEM))
-    (
+    IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(sh)(builder, start, ir); },
         {
             LLVMValueRef mem_loc =
@@ -338,8 +331,7 @@ T2C_OP(sh, {
 })
 
 T2C_OP(sw, {
-    IIF(RV32_HAS(SYSTEM))
-    (
+    IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(sw)(builder, start, ir); },
         {
             LLVMValueRef mem_loc =

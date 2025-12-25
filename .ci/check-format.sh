@@ -11,12 +11,12 @@ while IFS= read -r file; do
 done < <(git ls-files -- '*.c' '*.cxx' '*.cpp' '*.h' '*.hpp')
 
 if [ ${#C_SOURCES[@]} -gt 0 ]; then
-    if command -v clang-format-18 > /dev/null 2>&1; then
+    if command -v clang-format-20 > /dev/null 2>&1; then
         echo "Checking C/C++ files..."
-        clang-format-18 -n --Werror "${C_SOURCES[@]}"
+        clang-format-20 -n --Werror "${C_SOURCES[@]}"
         C_FORMAT_EXIT=$?
     else
-        echo "Skipping C/C++ format check: clang-format-18 not found" >&2
+        echo "Skipping C/C++ format check: clang-format-20 not found" >&2
         C_FORMAT_EXIT=0
     fi
 else

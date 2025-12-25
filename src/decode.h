@@ -384,7 +384,10 @@ typedef struct rv_insn {
      * compiler to leverage TCO.
      */
     struct rv_insn *next;
-    bool (*impl)(riscv_t *, const struct rv_insn *, uint64_t, uint32_t);
+    PRESERVE_NONE bool (*impl)(riscv_t *,
+                               const struct rv_insn *,
+                               uint64_t,
+                               uint32_t);
 
     /* Two pointers, 'branch_taken' and 'branch_untaken', are employed to
      * avoid the overhead associated with aggressive memory copying. Instead

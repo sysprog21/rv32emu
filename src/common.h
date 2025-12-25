@@ -191,13 +191,20 @@ static inline uint8_t ilog2(uint32_t x)
  * even without optimizations enabled.
  */
 #if defined(__has_attribute) && __has_attribute(musttail)
-#if __has_attribute(preserve_none)
-#define MUST_TAIL __attribute__((musttail)) __attribute__((preserve_none))
-#else
 #define MUST_TAIL __attribute__((musttail))
-#endif
 #else
 #define MUST_TAIL
+#endif
+
+/* The preserve_none calling convention minimizes register preservation overhead
+ * in the interpreter's threaded dispatch. It must be applied to function
+ * declarations, not return statements. macOS clang falsely reports support.
+ */
+#if defined(__has_attribute) && __has_attribute(preserve_none) && \
+    !defined(__APPLE__)
+#define PRESERVE_NONE __attribute__((preserve_none))
+#else
+#define PRESERVE_NONE
 #endif
 
 /* Assume that all POSIX-compatible environments provide mmap system call. */

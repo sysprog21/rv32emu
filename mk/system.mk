@@ -37,6 +37,12 @@ $(DEV_OUT):
 	$(Q)mkdir -p $@
 
 DEV_OBJS := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c))
+# Enable goldfish rtc peripheral
+ENABLE_GOLDFISH_RTC ?= 1
+$(call set-feature, GOLDFISH_RTC)
+ifeq ($(call has, GOLDFISH_RTC), 0)
+DEV_OBJS := $(filter-out $(DEV_OUT)/rtc.o, $(DEV_OBJS))
+endif
 deps := $(DEV_OBJS:%.o=%.o.d)
 
 OBJS_EXT += system.o

@@ -68,6 +68,7 @@ enum SUPPORTED_MMIO {
                 return;                                                               \
             )                                                                         \
             break;                                                                    \
+        IIF(RV32_FEATURE_GOLDFISH_RTC)(                                               \
         case MMIO_RTC:                                                                \
             IIF(rw)( /* read */                                                       \
                 mmio_read_val = rtc_read(PRIV(rv)->rtc, addr & 0xFFFFF);              \
@@ -79,6 +80,7 @@ enum SUPPORTED_MMIO {
                 return;                                                               \
             )                                                                         \
             break;                                                                    \
+        ,)                                                                            \
         default:                                                                      \
             rv_log_error("unknown MMIO type %d\n", io);                               \
             break;                                                                    \
@@ -148,7 +150,9 @@ enum SUPPORTED_MMIO {
 
 void emu_update_uart_interrupts(riscv_t *rv);
 void emu_update_vblk_interrupts(riscv_t *rv);
+#if RV32_HAS(GOLDFISH_RTC)
 void emu_update_rtc_interrupts(riscv_t *rv);
+#endif /* RV32_HAS(GOLDFISH_RTC) */
 
 /*
  * Linux kernel might create signal frame when returning from trap

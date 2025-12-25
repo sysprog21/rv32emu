@@ -1102,12 +1102,14 @@ static void rv_check_interrupt(riscv_t *rv)
         if (PRIV(rv)->uart->in_ready)
             emu_update_uart_interrupts(rv);
 
+#if RV32_HAS(GOLDFISH_RTC)
         uint64_t now_nsec = rtc_get_now_nsec(PRIV(rv)->rtc);
         if (rtc_alarm_fire(PRIV(rv)->rtc, now_nsec)) {
             PRIV(rv)->rtc->alarm_status = 1;
             PRIV(rv)->rtc->interrupt_status = 1;
             emu_update_rtc_interrupts(rv);
         }
+#endif /* RV32_HAS(GOLDFISH_RTC) */
     }
 
     if (rv->timer > attr->timer)

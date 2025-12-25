@@ -2214,8 +2214,8 @@ static void resolve_jumps(struct jit_state *state)
             target_loc = jump.offset_loc + sizeof(uint32_t);
             for (int i = 0; i < state->n_blocks; i++) {
                 if (jump.target_pc == state->offset_map[i].pc) {
-                    IIF(RV32_HAS(SYSTEM))
-                    (if (jump.target_satp == state->offset_map[i].satp), )
+                    IIF(RV32_HAS(SYSTEM))(
+                        if (jump.target_satp == state->offset_map[i].satp), )
                     {
                         target_loc = state->offset_map[i].offset;
                         break;
@@ -2256,8 +2256,7 @@ static void translate_chained_block(struct jit_state *state,
         block_t *block1 =
             cache_get(rv->block_cache, ir->branch_untaken->pc, false);
         if (block1->translatable) {
-            IIF(RV32_HAS(SYSTEM))
-            (if (block1->satp == rv->csr_satp), )
+            IIF(RV32_HAS(SYSTEM))(if (block1->satp == rv->csr_satp), )
                 translate_chained_block(state, rv, block1);
         }
     }
@@ -2265,8 +2264,7 @@ static void translate_chained_block(struct jit_state *state,
         block_t *block1 =
             cache_get(rv->block_cache, ir->branch_taken->pc, false);
         if (block1->translatable) {
-            IIF(RV32_HAS(SYSTEM))
-            (if (block1->satp == rv->csr_satp), )
+            IIF(RV32_HAS(SYSTEM))(if (block1->satp == rv->csr_satp), )
                 translate_chained_block(state, rv, block1);
         }
     }
@@ -2287,8 +2285,7 @@ static void translate_chained_block(struct jit_state *state,
                 block_t *block1 =
                     cache_get(rv->block_cache, bt->PC[max_idx], false);
                 if (block1 && block1->translatable) {
-                    IIF(RV32_HAS(SYSTEM))
-                    (if (block1->satp == rv->csr_satp), )
+                    IIF(RV32_HAS(SYSTEM))(if (block1->satp == rv->csr_satp), )
                         translate_chained_block(state, rv, block1);
                 }
             }

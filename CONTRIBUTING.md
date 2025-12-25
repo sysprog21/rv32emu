@@ -47,7 +47,7 @@ However, participation requires adherence to fundamental ground rules:
   For instance, opt for "initialize" over "initialise" and "color" rather than "colour".
 
 Software requirement:
-* [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 18.
+* [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 20 or later.
 * [shfmt](https://github.com/mvdan/sh).
 * [black](https://github.com/psf/black) version 25.1.0.
 * [dtsfmt](https://github.com/mskelton/dtsfmt).

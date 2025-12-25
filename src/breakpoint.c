@@ -24,7 +24,7 @@ breakpoint_map_t breakpoint_map_new()
 
 bool breakpoint_map_insert(breakpoint_map_t map, riscv_word_t addr)
 {
-    breakpoint_t bp = (breakpoint_t){.addr = addr, .orig_insn = 0};
+    breakpoint_t bp = (breakpoint_t) {.addr = addr, .orig_insn = 0};
     map_iter_t it;
     map_find(map, &it, &addr);
     /* breakpoints are not expected to be set at duplicate addresses */

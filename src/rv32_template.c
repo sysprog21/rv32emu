@@ -161,7 +161,7 @@ RVOP(
         /* link with return address */
         if (ir->rd)
             rv->X[ir->rd] = pc + 4;
-        /* check instruction misaligned */
+    /* check instruction misaligned */
 #if !RV32_HAS(EXT_C)
         RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0);
 #endif
@@ -170,8 +170,8 @@ RVOP(
 #if RV32_HAS(JIT)
             IIF(RV32_HAS(SYSTEM)(if (!rv->is_trapped && !reloc_enable_mmu), ))
             {
-                IIF(RV32_HAS(SYSTEM))
-                (block_t *next =, ) cache_get(rv->block_cache, PC, true);
+                IIF(RV32_HAS(SYSTEM))(block_t *next =, )
+                    cache_get(rv->block_cache, PC, true);
                 IIF(RV32_HAS(SYSTEM))(if (next->satp == rv->csr_satp), )
                 {
                     if (!set_add(&pc_set, PC))
@@ -263,8 +263,8 @@ RVOP(
         if (block) {                                                         \
             for (int i = 0; i < HISTORY_SIZE; i++) {                         \
                 if (ir->branch_table->PC[i] == PC) {                         \
-                    IIF(RV32_HAS(SYSTEM))                                    \
-                    (if (ir->branch_table->satp[i] == rv->csr_satp), )       \
+                    IIF(RV32_HAS(SYSTEM))(                                   \
+                        if (ir->branch_table->satp[i] == rv->csr_satp), )    \
                     {                                                        \
                         ir->branch_table->times[i]++;                        \
                         if (cache_hot(rv->block_cache, PC))                  \
@@ -285,8 +285,8 @@ RVOP(
             }                                                                \
             ir->branch_table->times[min_idx] = 1;                            \
             ir->branch_table->PC[min_idx] = PC;                              \
-            IIF(RV32_HAS(SYSTEM))                                            \
-            (ir->branch_table->satp[min_idx] = rv->csr_satp, );              \
+            IIF(RV32_HAS(SYSTEM))(                                           \
+                ir->branch_table->satp[min_idx] = rv->csr_satp, );           \
             if (cache_hot(rv->block_cache, PC))                              \
                 goto end_op;                                                 \
             MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, \
@@ -311,7 +311,7 @@ RVOP(
         /* link */
         if (ir->rd)
             rv->X[ir->rd] = pc + 4;
-        /* check instruction misaligned */
+    /* check instruction misaligned */
 #if !RV32_HAS(EXT_C)
         RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0);
 #endif
@@ -367,8 +367,7 @@ RVOP(
 #define BRANCH_FUNC(type, cond)                                             \
     IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                        \
     if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {          \
-        IIF(RV32_HAS(SYSTEM))                                               \
-        (                                                                   \
+        IIF(RV32_HAS(SYSTEM))(                                              \
             {                                                               \
                 if (!rv->is_trapped) {                                      \
                     is_branch_taken = false;                                \
@@ -378,8 +377,7 @@ RVOP(
         struct rv_insn *untaken = ir->branch_untaken;                       \
         if (!untaken)                                                       \
             goto nextop;                                                    \
-        IIF(RV32_HAS(JIT))                                                  \
-        (                                                                   \
+        IIF(RV32_HAS(JIT))(                                                 \
             {                                                               \
                 block_t *next = cache_get(rv->block_cache, PC + 4, true);   \
                 if (next IIF(RV32_HAS(SYSTEM))(                             \
@@ -391,8 +389,7 @@ RVOP(
                 }                                                           \
             }, );                                                           \
         PC += 4;                                                            \
-        IIF(RV32_HAS(SYSTEM))                                               \
-        (                                                                   \
+        IIF(RV32_HAS(SYSTEM))(                                              \
             {                                                               \
                 if (!rv->is_trapped) {                                      \
                     last_pc = PC;                                           \
@@ -401,8 +398,7 @@ RVOP(
             }, );                                                           \
         goto end_op;                                                        \
     }                                                                       \
-    IIF(RV32_HAS(SYSTEM))                                                   \
-    (                                                                       \
+    IIF(RV32_HAS(SYSTEM))(                                                  \
         {                                                                   \
             if (!rv->is_trapped) {                                          \
                 is_branch_taken = true;                                     \
@@ -411,12 +407,10 @@ RVOP(
         is_branch_taken = true;);                                           \
     PC += ir->imm;                                                          \
     /* check instruction misaligned */                                      \
-    IIF(RV32_HAS(EXT_C))                                                    \
-    (, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););                       \
+    IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););   \
     struct rv_insn *taken = ir->branch_taken;                               \
     if (taken) {                                                            \
-        IIF(RV32_HAS(JIT))                                                  \
-        (                                                                   \
+        IIF(RV32_HAS(JIT))(                                                 \
             {                                                               \
                 block_t *next = cache_get(rv->block_cache, PC, true);       \
                 if (next IIF(RV32_HAS(SYSTEM))(                             \
@@ -427,8 +421,7 @@ RVOP(
                         goto end_op;                                        \
                 }                                                           \
             }, );                                                           \
-        IIF(RV32_HAS(SYSTEM))                                               \
-        (                                                                   \
+        IIF(RV32_HAS(SYSTEM))(                                              \
             {                                                               \
                 if (!rv->is_trapped) {                                      \
                     last_pc = PC;                                           \
@@ -2158,8 +2151,8 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
-            IIF(RV32_HAS(SYSTEM))
-            (block_t *next =, ) cache_get(rv->block_cache, PC, true);
+            IIF(RV32_HAS(SYSTEM))(block_t *next =, )
+                cache_get(rv->block_cache, PC, true);
             IIF(RV32_HAS(SYSTEM))(if (next->satp == rv->csr_satp), )
             {
                 if (!set_add(&pc_set, PC))
@@ -2329,8 +2322,8 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
-            IIF(RV32_HAS(SYSTEM))
-            (block_t *next =, ) cache_get(rv->block_cache, PC, true);
+            IIF(RV32_HAS(SYSTEM))(block_t *next =, )
+                cache_get(rv->block_cache, PC, true);
             IIF(RV32_HAS(SYSTEM))(if (next->satp == rv->csr_satp), )
             {
                 if (!set_add(&pc_set, PC))
@@ -2371,8 +2364,8 @@ RVOP(
             if (!untaken)
                 goto nextop;
 #if RV32_HAS(JIT)
-            IIF(RV32_HAS(SYSTEM))
-            (block_t *next =, ) cache_get(rv->block_cache, PC + 2, true);
+            IIF(RV32_HAS(SYSTEM))(block_t *next =, )
+                cache_get(rv->block_cache, PC + 2, true);
             IIF(RV32_HAS(SYSTEM))(if (next->satp == rv->csr_satp), )
             {
                 if (!set_add(&pc_set, PC + 2))
@@ -2397,8 +2390,8 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
-            IIF(RV32_HAS(SYSTEM))
-            (block_t *next =, ) cache_get(rv->block_cache, PC, true);
+            IIF(RV32_HAS(SYSTEM))(block_t *next =, )
+                cache_get(rv->block_cache, PC, true);
             IIF(RV32_HAS(SYSTEM))(if (next->satp == rv->csr_satp), )
             {
                 if (!set_add(&pc_set, PC))
@@ -2448,8 +2441,8 @@ RVOP(
             if (!untaken)
                 goto nextop;
 #if RV32_HAS(JIT)
-            IIF(RV32_HAS(SYSTEM))
-            (block_t *next =, ) cache_get(rv->block_cache, PC + 2, true);
+            IIF(RV32_HAS(SYSTEM))(block_t *next =, )
+                cache_get(rv->block_cache, PC + 2, true);
             IIF(RV32_HAS(SYSTEM))(if (next->satp == rv->csr_satp), )
             {
                 if (!set_add(&pc_set, PC + 2))
@@ -2474,8 +2467,8 @@ RVOP(
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(JIT)
-            IIF(RV32_HAS(SYSTEM))
-            (block_t *next =, ) cache_get(rv->block_cache, PC, true);
+            IIF(RV32_HAS(SYSTEM))(block_t *next =, )
+                cache_get(rv->block_cache, PC, true);
             IIF(RV32_HAS(SYSTEM))(if (next->satp == rv->csr_satp), )
             {
                 if (!set_add(&pc_set, PC))

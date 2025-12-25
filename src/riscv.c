@@ -173,15 +173,15 @@ void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
 }
 
 #define MEMIO(op) on_mem_##op
-#define IO_HANDLER_IMPL(type, op, RW)                                     \
-    static IIF(RW)(                                                       \
-        /* W */ void MEMIO(op)(UNUSED riscv_t * rv, riscv_word_t addr,    \
-                               riscv_##type##_t data),                    \
-        /* R */ riscv_##type##_t MEMIO(op)(UNUSED riscv_t * rv,           \
-                                           riscv_word_t addr))            \
-    {                                                                     \
-        IIF(RW)                                                           \
-        (memory_##op(addr, (uint8_t *) &data), return memory_##op(addr)); \
+#define IO_HANDLER_IMPL(type, op, RW)                                  \
+    static IIF(RW)(                                                    \
+        /* W */ void MEMIO(op)(UNUSED riscv_t * rv, riscv_word_t addr, \
+                               riscv_##type##_t data),                 \
+        /* R */ riscv_##type##_t MEMIO(op)(UNUSED riscv_t * rv,        \
+                                           riscv_word_t addr))         \
+    {                                                                  \
+        IIF(RW)(memory_##op(addr, (uint8_t *) &data),                  \
+                return memory_##op(addr));                             \
     }
 
 #if !RV32_HAS(SYSTEM)
@@ -541,7 +541,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
      */
     attr->fd_map = map_init(int, FILE *, map_cmp_int);
     rv_remap_stdstream(rv,
-                       (fd_stream_pair_t[]){
+                       (fd_stream_pair_t[]) {
                            {STDIN_FILENO, stdin},
                            {STDOUT_FILENO, stdout},
                            {STDERR_FILENO, stderr},

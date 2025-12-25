@@ -186,15 +186,15 @@ char *format_rate(double rate)
 
 vec2 f1(ullong i, ullong j)
 {
-    return (vec2){0.0f, (float) i / (float) j};
+    return (vec2) {0.0f, (float) i / (float) j};
 }
 vec2 f2(ullong i, ullong j)
 {
-    return (vec2){(float) i / (float) j, 0.0f};
+    return (vec2) {(float) i / (float) j, 0.0f};
 }
 vec2 f3(ullong i, ullong j)
 {
-    return (vec2){(float) i / (float) j, (float) i / (float) j};
+    return (vec2) {(float) i / (float) j, (float) i / (float) j};
 }
 
 void test_maj(const char *name,

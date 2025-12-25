@@ -488,7 +488,7 @@ quake: artifact $(quake_deps)
 endif
 endif
 
-CLANG_FORMAT := $(shell which clang-format-18 2>/dev/null)
+CLANG_FORMAT := $(shell which clang-format-20 2>/dev/null)
 
 SHFMT := $(shell which shfmt 2>/dev/null)
 
@@ -510,7 +510,7 @@ SUBMODULES_PRUNE_PATHS := $(shell for subm in $(SUBMODULES); do echo -n "-path \
 
 format:
 ifeq ($(CLANG_FORMAT),)
-	$(error clang-format-18 not found. Install clang-format version 18 and try again)
+	$(error clang-format-20 not found. Install clang-format version 20 and try again)
 else
         # Skip formatting submodules and everything in $(OUT), apply the same rule for shfmt and black
 	$(Q)$(CLANG_FORMAT) -i $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path \"./$(OUT)\" \) \

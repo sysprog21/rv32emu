@@ -3,6 +3,11 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#if !RV32_HAS(GOLDFISH_RTC)
+#error \
+    "Do not manage to build this file unless you enable GOLDFISH RTC support."
+#endif
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>

@@ -7,6 +7,7 @@
 
     aliases {
         serial0 = "/soc@F0000000/serial@4000000";
+        rtc0 = "/soc@F0000000/rtc@4100000";
     };
     chosen {
         bootargs = "earlycon console=ttyS0";
@@ -64,7 +65,6 @@
 
             /* the baudrate divisor is ignored */
         };
-
         rtc0: rtc@4100000 {
             compatible = "google,goldfish-rtc";
             reg = <0x4100000 0x1000>;

@@ -52,7 +52,11 @@ $(DEV_OUT)/%.o: $(DEV_SRC)/%.c | $(DEV_OUT)
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
 DEV_OBJS := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c))
-deps += $(DEV_OBJS:%.o=%.o.d)
+# Enable Goldfish RTC peripheral
+ifneq ($(CONFIG_GOLDFISH_RTC),y)
+DEV_OBJS := $(filter-out $(DEV_OUT)/rtc.o, $(DEV_OBJS))
+endif
+deps := $(DEV_OBJS:%.o=%.o.d)
 
 OBJS_EXT += system.o
 OBJS_EXT += dtc/libfdt/fdt.o dtc/libfdt/fdt_ro.o dtc/libfdt/fdt_rw.o dtc/libfdt/fdt_wip.o

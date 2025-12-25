@@ -350,6 +350,19 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         assert(!err);
     }
 
+/* Remove the rtc node if it is not enabled during compile time */
+#if !RV32_HAS(GOLDFISH_RTC)
+    const char *rtc_path = fdt_get_alias(dtb_buf, "rtc0");
+    assert(rtc_path);
+
+    node = fdt_path_offset(dtb_buf, rtc_path);
+    assert(node > 0);
+
+    err = fdt_del_node(dtb_buf, node);
+    if (err < 0)
+        rv_log_warn("Failed to remove rtc node from DTB");
+#endif
+
     if (vblk) {
         int node = fdt_path_offset(dtb_buf, "/soc@F0000000");
         assert(node >= 0);
@@ -719,8 +732,10 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->uart->out_fd = attr->fd_stdout;
 
     /* setup rtc */
+#if RV32_HAS(GOLDFISH_RTC)
     attr->rtc = rtc_new();
     assert(attr->rtc);
+#endif /* RV32_HAS(GOLDFISH_RTC) */
 
     attr->vblk = malloc(sizeof(virtio_blk_state_t *) * attr->vblk_cnt);
     assert(attr->vblk);
@@ -981,7 +996,9 @@ void rv_delete(riscv_t *rv)
 #if RV32_HAS(SYSTEM_MMIO)
     u8250_delete(attr->uart);
     plic_delete(attr->plic);
+#if RV32_HAS(GOLDFISH_RTC)
     rtc_delete(attr->rtc);
+#endif /* RV32_HAS(GOLDFISH_RTC) */
     /* sync device, cleanup inside the callee */
     rv_fsync_device();
 #endif

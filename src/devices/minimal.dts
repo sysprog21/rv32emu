@@ -65,14 +65,21 @@
             /* the baudrate divisor is ignored */
         };
 
+        rtc0: rtc@4100000 {
+            compatible = "google,goldfish-rtc";
+            reg = <0x4100000 0x1000>;
+            interrupts = <2>;
+            interrupt-parent = <&plic0>;
+        };
+
         /*
          * Virtio block example subnode
          * The actual subnode are generated dynamically depends on the CLI -x vblk option
          */
-        /*blk0: virtio@4100000 {
+        /*blk0: virtio@4200000 {
             compatible = "virtio,mmio";
-            reg = <0x4100000 0x200>;
-            interrupts = <2>;
+            reg = <0x4200000 0x200>;
+            interrupts = <3>;
         };*/
     };
 };

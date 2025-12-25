@@ -15,6 +15,7 @@
 
 #if RV32_HAS(SYSTEM)
 #include "devices/plic.h"
+#include "devices/rtc.h"
 #include "devices/uart.h"
 #include "devices/virtio.h"
 #endif /* RV32_HAS(SYSTEM) */
@@ -488,6 +489,9 @@ typedef struct {
 
     /* plic object */
     plic_t *plic;
+
+    /* rtc object */
+    rtc_t *rtc;
 
     /* virtio-blk device */
     uint32_t **disk;

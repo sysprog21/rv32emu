@@ -433,6 +433,7 @@ static bool has_loops = false;
 
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
 extern void emu_update_uart_interrupts(riscv_t *rv);
+extern void emu_update_rtc_interrupts(riscv_t *rv);
 static uint32_t peripheral_update_ctr = 64;
 #endif
 
@@ -1100,6 +1101,13 @@ static void rv_check_interrupt(riscv_t *rv)
         u8250_check_ready(PRIV(rv)->uart);
         if (PRIV(rv)->uart->in_ready)
             emu_update_uart_interrupts(rv);
+
+        uint64_t now_nsec = rtc_get_now_nsec(PRIV(rv)->rtc);
+        if (rtc_alarm_fire(PRIV(rv)->rtc, now_nsec)) {
+            PRIV(rv)->rtc->alarm_status = 1;
+            PRIV(rv)->rtc->interrupt_status = 1;
+            emu_update_rtc_interrupts(rv);
+        }
     }
 
     if (rv->timer > attr->timer)

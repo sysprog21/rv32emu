@@ -393,6 +393,7 @@ void syscall_setup_queue(riscv_t *rv)
      */
     event_queue.base = event_queue.end = 0;
     submission_queue.base = submission_queue.start = 0;
+    PRIV(rv)->running_sdl = true;
 #endif
 
     /* setup_queue(base, capacity, event_count) */

@@ -1444,19 +1444,32 @@ void ecall_handler(riscv_t *rv)
     syscall_handler(rv);
 #elif RV32_HAS(SYSTEM)
     if (rv->priv_mode == RV_PRIV_U_MODE) {
-        switch (rv_get_reg(
-            rv,
-            rv_reg_a7)) { /* trap guestOS's SDL-oriented application syscall */
+        uint32_t reg_a7 = rv_get_reg(rv, rv_reg_a7);
+        switch (reg_a7) { /* trap guestOS's SDL-oriented application syscall */
         case 0xBEEF:
         case 0xC0DE:
         case 0xFEED:
         case 0xBABE:
         case 0xD00D:
-        case 93:
             syscall_handler(rv);
             rv->PC += 4;
             break;
         default:
+#if RV32_HAS(SDL) && RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+            /*
+             * The guestOS may repeatedly open and close the SDL window,
+             * and the user could close the application using the application’s
+             * built-in exit function. Need to trap the built-in exit and
+             * ensure the SDL window and SDL mixer are destroyed properly.
+             */
+            {
+                extern void sdl_video_audio_cleanup();
+                if (unlikely(PRIV(rv)->running_sdl && reg_a7 == 93)) {
+                    sdl_video_audio_cleanup();
+                    PRIV(rv)->running_sdl = false;
+                }
+            }
+#endif
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ECALL_U, 0);
             break;
         }

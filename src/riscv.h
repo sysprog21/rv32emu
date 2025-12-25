@@ -568,6 +568,11 @@ typedef struct {
     bool on_exit;
 #endif
 
+#if RV32_HAS(SDL) && RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    /* flag to determine if running SDL program in guestOS */
+    bool running_sdl;
+#endif /* SDL */
+
     /* SBI timer */
     uint64_t timer;
 } vm_attr_t;

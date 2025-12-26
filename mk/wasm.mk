@@ -26,6 +26,14 @@ OBJS_EXT += syscall_sdl.o
 LDFLAGS += -pthread
 endif
 
+# setjmp/longjmp needs -pthread
+ifeq ($(call has, SYSTEM), 1)
+ifeq ($(call has, ELF_LOADER), 0)
+$(OUT)/emulate.o: CFLAGS += -pthread
+$(OUT)/syscall.o: CFLAGS += -pthread
+endif
+endif
+
 # More build flags
 CFLAGS_emcc += -sINITIAL_MEMORY=2GB \
 	       -sALLOW_MEMORY_GROWTH \

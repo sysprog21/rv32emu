@@ -24,6 +24,7 @@ jobs:
         with:
           files: |
             mk/external.mk
+            tests/system/br_pkgs/**/*.c
       - name: Set alias
         id: has_changed_files
         run: |

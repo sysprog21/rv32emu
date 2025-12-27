@@ -332,6 +332,19 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         assert(!err);
     }
 
+/* Remove the rtc node if it is not enabled during compile time */
+#if !RV32_HAS(GOLDFISH_RTC)
+    const char *rtc_path = fdt_get_alias(dtb_buf, "rtc0");
+    assert(rtc_path);
+
+    node = fdt_path_offset(dtb_buf, rtc_path);
+    assert(node > 0);
+
+    err = fdt_del_node(dtb_buf, node);
+    if (err < 0)
+        rv_log_warn("Failed to remove rtc node from DTB");
+#endif
+
     if (vblk) {
         int node = fdt_path_offset(dtb_buf, "/soc@F0000000");
         assert(node >= 0);
@@ -350,7 +363,10 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             const char *name = fdt_get_name(dtb_buf, subnode, NULL);
             assert(name);
 
-            uint32_t addr = strtoul(name + 7, NULL, 16);
+            char *at_pos = strchr(name, '@');
+            assert(at_pos);
+
+            uint32_t addr = strtoul(at_pos + 1, NULL, 16);
             if (addr == next_addr)
                 next_addr = addr + addr_offset;
 
@@ -364,6 +380,10 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         }
         /* set IRQ for virtio block, see devices/virtio.h */
         attr->vblk_irq_base = next_irq;
+
+        /* set the VBLK MMIO valid range */
+        attr->vblk_mmio_base_hi = next_addr >> 20;
+        attr->vblk_mmio_max_hi = attr->vblk_mmio_base_hi + attr->vblk_cnt;
 
         /* adding new virtio block nodes */
         for (int i = 0; i < attr->vblk_cnt; i++) {
@@ -667,9 +687,10 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->uart->in_fd = attr->fd_stdin;
     attr->uart->out_fd = attr->fd_stdout;
 
-    /* setup virtio-blk */
-    attr->vblk_mmio_base_hi = 0x41;
-    attr->vblk_mmio_max_hi = attr->vblk_mmio_base_hi + attr->vblk_cnt;
+    /* setup rtc */
+#if RV32_HAS(GOLDFISH_RTC)
+    attr->rtc = rtc_new();
+#endif /* RV32_HAS(GOLDFISH_RTC) */
 
     attr->vblk = malloc(sizeof(virtio_blk_state_t *) * attr->vblk_cnt);
     assert(attr->vblk);
@@ -922,6 +943,9 @@ void rv_delete(riscv_t *rv)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     u8250_delete(attr->uart);
     plic_delete(attr->plic);
+#if RV32_HAS(GOLDFISH_RTC)
+    rtc_delete(attr->rtc);
+#endif /* RV32_HAS(GOLDFISH_RTC) */
     /* sync device, cleanup inside the callee */
     rv_fsync_device();
 #endif

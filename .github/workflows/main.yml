@@ -13,10 +13,10 @@ jobs:
       has_code_related_changes: ${{ steps.set_has_code_related_changes.outputs.has_code_related_changes }}
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Test changed files
         id: changed-files
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v47
         with:
           files: |
               .ci/**
@@ -47,13 +47,13 @@ jobs:
         compiler: [gcc, clang]
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: 'true'
 
     - name: Cache LLVM 18
       id: cache-llvm
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: /usr/lib/llvm-18
         key: ${{ runner.os }}-${{ runner.arch }}-llvm-18-v2
@@ -62,7 +62,7 @@ jobs:
 
     - name: Cache RISC-V Toolchain
       id: cache-toolchain
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ github.workspace }}/toolchain
         key: ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-${{ hashFiles('.ci/riscv-toolchain-install.sh') }}
@@ -130,7 +130,7 @@ jobs:
                                            BLK_DEV_SIMPLEFS=\${BLK_DEV_SIMPLEFS} .ci/boot-linux-prepare.sh cleanup; \
                                   exit \${EXIT_CODE};" >> "$GITHUB_ENV"
     - name: Cache build artifacts
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: build/
         key: rv32emu-artifacts-${{ runner.os }}-${{ hashFiles('mk/artifact.mk', 'mk/external.mk') }}
@@ -299,86 +299,88 @@ jobs:
                                            | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
             .ci/riscv-tests.sh
 
+  # Native AArch64 on GitHub ARM runners - fast, no QEMU overhead
   host-arm64:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    timeout-minutes: 45
-    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04-arm
     steps:
     - name: checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         submodules: 'true'
-    - name: build artifact
-      # The GitHub Action for non-x86 CPU
-      uses: uraimo/run-on-arch-action@v3
-      with:
-        arch: aarch64
-        distro: ubuntu24.04
-        githubToken: ${{ github.token }}
-        # No 'sudo' is available
-        install: |
-          set +e  # Disable errexit for entire install block
-          # Configure apt to tolerate mirror sync failures
-          cat > /etc/apt/apt.conf.d/99-ci-reliability << 'APTCONF'
-          APT::Update::Error-Mode "any";
-          Acquire::IndexTargets::deb::DEP-11::DefaultEnabled "false";
-          Acquire::IndexTargets::deb::DEP-11-icons::DefaultEnabled "false";
-          Acquire::IndexTargets::deb::DEP-11-icons-hidpi::DefaultEnabled "false";
-          Acquire::Retries "3";
-          Acquire::Check-Valid-Until "false";
-          APTCONF
-          # Update with error tolerance - may fail during mirror sync
-          apt update -qq 2>&1
-          UPDATE_EXIT=$?
-          if [ $UPDATE_EXIT -ne 0 ]; then
-            echo "WARNING: apt update exited with code $UPDATE_EXIT (mirror sync likely in progress)"
-            echo "Continuing with installation using cached/partial indexes..."
-          fi
-          # Install packages - will use whatever indexes are available
-          apt install -yqq make git curl wget clang libsdl2-dev libsdl2-mixer-dev lsb-release software-properties-common gnupg bc || {
-            echo "WARNING: Some packages may have failed to install, retrying critical ones..."
-            apt install -yqq --no-download make git curl wget clang || true
-          }
-          which wget || echo "WARNING: wget not found after installation"
-          set -e  # Re-enable errexit
-          exit 0  # Force success exit code
-        # FIXME: gcc build fails on Aarch64/Linux hosts
-        env:
-          CC: clang-18
-        # Append custom commands here
-        run: |
-          # Verify and install wget if needed (workaround for install step issues)
-          if ! command -v wget > /dev/null 2>&1; then
-            # Config file should already exist from install step, but apt may still fail
-            apt update -qq 2>&1 || true
-            apt install -yqq wget || { echo "wget install failed, trying without update..."; apt install -yqq wget --no-download || true; }
-          fi
-          git config --global --add safe.directory ${{ github.workspace }}
-          git config --global --add safe.directory ${{ github.workspace }}/src/softfloat
-          git config --global --add safe.directory ${{ github.workspace }}/src/mini-gdbstub
-          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-          chmod +x /tmp/llvm.sh
-          /tmp/llvm.sh 18
-          export PATH=/usr/lib/llvm-18/bin:$PATH
-          PARALLEL=-j$(nproc)
-          # Fetch LATEST_RELEASE to avoid GitHub API rate limiting
-          # Scope token to download command only for security
-          . .ci/common.sh
-          LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest" \
-                                                 "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-                          | jq -r '.tag_name')
-          if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
-              echo "Error: Failed to fetch LATEST_RELEASE from GitHub API"
-              exit 1
-          fi
-          make LATEST_RELEASE=$LATEST_RELEASE artifact
-          make $PARALLEL
-          make check $PARALLEL
-          make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
-          make ENABLE_JIT=1 clean && make ENABLE_EXT_A=0 ENABLE_JIT=1 check $PARALLEL
-          make ENABLE_JIT=1 clean && make ENABLE_EXT_F=0 ENABLE_JIT=1 check $PARALLEL
-          make ENABLE_JIT=1 clean && make ENABLE_EXT_C=0 ENABLE_JIT=1 check $PARALLEL
+
+    - name: Install dependencies
+      run: |
+            # Configure apt to tolerate ARM mirror sync failures
+            sudo tee /etc/apt/apt.conf.d/99-ci-reliability > /dev/null << 'EOF'
+            APT::Update::Error-Mode "any";
+            Acquire::IndexTargets::deb::DEP-11::DefaultEnabled "false";
+            Acquire::IndexTargets::deb::DEP-11-icons::DefaultEnabled "false";
+            Acquire::IndexTargets::deb::DEP-11-icons-hidpi::DefaultEnabled "false";
+            Acquire::Retries "3";
+            Acquire::Check-Valid-Until "false";
+            EOF
+            # Update with error tolerance
+            sudo apt-get update -q=2 || {
+              echo "WARNING: apt update failed, continuing with cached indexes..."
+            }
+            # Install packages with retry for critical ones
+            sudo apt-get install -q=2 -y make curl wget libsdl2-dev libsdl2-mixer-dev \
+                 lsb-release software-properties-common gnupg bc || {
+              echo "WARNING: Some packages failed, retrying critical ones..."
+              sudo apt-get install -q=2 -y --no-download make curl wget || true
+            }
+
+    - name: Install LLVM 18
+      run: |
+            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x ./llvm.sh
+            sudo ./llvm.sh 18
+
+    - name: Setup LLVM PATH
+      run: echo "/usr/lib/llvm-18/bin" >> $GITHUB_PATH
+
+    - name: Set parallel jobs variable
+      run: echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
+
+    - name: Fetch artifacts
+      env:
+        CC: clang-18
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+            . .ci/common.sh
+            LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
+                                                   "Authorization: Bearer ${GH_TOKEN}" \
+                            | grep '"tag_name"' \
+                            | grep "ELF" \
+                            | head -n 1 \
+                            | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+            if [ -z "$LATEST_RELEASE" ]; then
+                echo "Error: Failed to fetch LATEST_RELEASE from GitHub API"
+                exit 1
+            fi
+            make LATEST_RELEASE=$LATEST_RELEASE artifact
+
+    # FIXME: gcc build fails on AArch64/Linux hosts
+    - name: check + tests
+      env:
+        CC: clang-18
+      run: |
+            make $PARALLEL
+            make check $PARALLEL
+
+    - name: JIT tests
+      env:
+        CC: clang-18
+      run: |
+            set -euo pipefail
+            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
+            for ext in ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C; do
+              echo "JIT test with ${ext}=0"
+              make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL
+            done
 
   macOS-arm64:
     needs: [detect-code-related-file-changes]
@@ -390,20 +392,20 @@ jobs:
         compiler: [gcc-15, clang]
     runs-on: macos-latest # M1 chip
     steps:
-     - uses: actions/checkout@v4
+     - uses: actions/checkout@v6
        with:
          submodules: 'true'
 
      - name: Cache RISC-V Toolchain
        id: cache-toolchain
-       uses: actions/cache@v4
+       uses: actions/cache@v5
        with:
          path: ${{ github.workspace }}/toolchain
          key: ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-${{ hashFiles('.ci/riscv-toolchain-install.sh') }}
 
      - name: Cache Homebrew packages
        id: cache-brew
-       uses: actions/cache@v4
+       uses: actions/cache@v5
        with:
          path: |
            /opt/homebrew/Cellar/llvm@18
@@ -604,7 +606,7 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: coding convention
       run: |
             wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.gpg >/dev/null
@@ -623,7 +625,7 @@ jobs:
     timeout-minutes: 45
     runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
       with:
         submodules: 'true'
     # LLVM static analysis
@@ -670,7 +672,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: 'true'
       - name: Set up QEMU

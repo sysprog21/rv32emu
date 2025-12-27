@@ -97,6 +97,11 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
 
     LLVMBuildCondBr(*builder, cmp, true_path, false_path);
 
+    /* Acquire fence to ensure we see the entry written by jit_cache_update.
+     * This pairs with the release fence in jit_cache_update().
+     */
+    LLVMBuildFence(true_builder, LLVMAtomicOrderingAcquire, false, "");
+
     /* get jit_cache_t::entry */
     LLVMValueRef entry_ptr = LLVMBuildStructGEP2(
         true_builder, t2c_jit_cache_struct_type, element_ptr, 1, "");

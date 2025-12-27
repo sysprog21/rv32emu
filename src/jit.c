@@ -179,6 +179,7 @@ typedef enum {
     BR_Bcond = 0x54000000U,
     /* DP2Opcode */
     DP2_UDIV = 0x1ac00800U, /* 0001_1010_1100_0000_0000_1000_0000_0000 */
+    DP2_SDIV = 0x1ac00c00U, /* 0001_1010_1100_0000_0000_1100_0000_0000 */
     DP2_LSLV = 0x1ac02000U, /* 0001_1010_1100_0000_0010_0000_0000_0000 */
     DP2_LSRV = 0x1ac02400U, /* 0001_1010_1100_0000_0010_0100_0000_0000 */
     DP2_ASRV = 0x1ac02800U, /* 0001_1010_1100_0000_0010_1000_0000_0000 */
@@ -257,12 +258,17 @@ static int temp_reg = R8;
  *   r19 - r23 Callee-saved registers
  *   r24       Temp - used for generating 32-bit immediates
  *   r25       Temp - used for modulous calculations
+ *
+ * Note: R18 is reserved on Apple and Windows platforms (platform register) and
+ * must not be used. R16/R17 (IP0/IP1) are intra-procedure-call scratch
+ * registers that may be corrupted by linker veneers across BLR calls; they are
+ * safe for use within straight-line JIT code but values must not be expected to
+ * survive function calls.
  */
 static struct host_reg register_map[] = {
     {R5, -1, 0, 0},  {R6, -1, 0, 0},  {R7, -1, 0, 0},  {R9, -1, 0, 0},
     {R11, -1, 0, 0}, {R12, -1, 0, 0}, {R13, -1, 0, 0}, {R14, -1, 0, 0},
-    {R15, -1, 0, 0}, {R16, -1, 0, 0}, {R17, -1, 0, 0}, {R18, -1, 0, 0},
-    {R26, -1, 0, 0},
+    {R15, -1, 0, 0}, {R16, -1, 0, 0}, {R17, -1, 0, 0}, {R26, -1, 0, 0},
 };
 #endif
 
@@ -299,6 +305,37 @@ static inline void offset_map_insert(struct jit_state *state, block_t *block)
 #endif
 
 static bool should_flush = false;
+
+#if defined(__APPLE__) && defined(__aarch64__)
+/* Track JIT write mode to batch write protection toggling.
+ * On Apple Silicon, rapid toggling of write protection can cause
+ * cache coherency issues. We enable write mode at the start of
+ * translation and disable it only after all code generation and
+ * jump patching is complete.
+ *
+ * Must be thread-local because pthread_jit_write_protect_np operates
+ * per-thread. A shared flag would cause race conditions if multiple
+ * threads translate simultaneously.
+ */
+static __thread bool jit_write_mode = false;
+
+static inline void jit_enter_write_mode(void)
+{
+    if (!jit_write_mode) {
+        pthread_jit_write_protect_np(false);
+        jit_write_mode = true;
+    }
+}
+
+static inline void jit_exit_write_mode(void)
+{
+    if (jit_write_mode) {
+        pthread_jit_write_protect_np(true);
+        jit_write_mode = false;
+    }
+}
+#endif
+
 static void emit_bytes(struct jit_state *state, void *data, uint32_t len)
 {
     if (unlikely((state->offset + len) > state->size)) {
@@ -310,12 +347,21 @@ static void emit_bytes(struct jit_state *state, void *data, uint32_t len)
         return;
     }
 #if defined(__APPLE__) && defined(__aarch64__)
-    pthread_jit_write_protect_np(false);
-#endif
+    /* If not in write mode (e.g., during initial setup), toggle temporarily.
+     * During normal translation, jit_translate maintains write mode to avoid
+     * rapid toggling which can cause cache coherency issues.
+     */
+    bool need_toggle = !jit_write_mode;
+    if (need_toggle)
+        pthread_jit_write_protect_np(false);
+    memcpy(state->buf + state->offset, data, len);
+    if (need_toggle) {
+        sys_icache_invalidate(state->buf + state->offset, len);
+        pthread_jit_write_protect_np(true);
+    }
+#else
     memcpy(state->buf + state->offset, data, len);
     sys_icache_invalidate(state->buf + state->offset, len);
-#if defined(__APPLE__) && defined(__aarch64__)
-    pthread_jit_write_protect_np(true);
 #endif
     state->offset += len;
 }
@@ -586,9 +632,12 @@ static void emit_dataproc_3source(struct jit_state *state,
 }
 #endif
 
-static void update_branch_imm(struct jit_state *state,
-                              uint32_t offset,
-                              int32_t imm)
+/* Patch branch instruction without write protection toggle.
+ * Caller must handle write protection and cache maintenance.
+ */
+static void patch_branch_imm(struct jit_state *state,
+                             uint32_t offset,
+                             int32_t imm)
 {
     assert((imm & 3) == 0);
     uint32_t insn;
@@ -607,14 +656,9 @@ static void update_branch_imm(struct jit_state *state,
         assert(false);
         insn = BAD_OPCODE;
     }
-#if defined(__APPLE__) && defined(__aarch64__)
-    pthread_jit_write_protect_np(false);
-#endif
     memcpy(state->buf + offset, &insn, sizeof(uint32_t));
-#if defined(__APPLE__) && defined(__aarch64__)
-    pthread_jit_write_protect_np(true);
-#endif
 }
+
 #endif
 
 static inline void emit_jump_target_offset(struct jit_state *state,
@@ -780,17 +824,20 @@ static inline void emit_alu64_imm8(struct jit_state *state,
 }
 #endif
 
-/* Register to register mov */
+/* Register to register mov (preserves all 64 bits including sign extension) */
 static inline void emit_mov(struct jit_state *state, int src, int dst)
 {
 #if defined(__x86_64__)
     emit_alu64(state, 0x89, src, dst);
 #elif defined(__aarch64__)
-    emit_load_imm(state, R10, 0);
-    emit_addsub_register(state, false, AS_ADD, dst, src, R10);
+    /* Use 64-bit ORR with zero register: MOV Xd, Xm = ORR Xd, XZR, Xm
+     * This preserves all 64 bits including any sign extension in the upper 32.
+     * Previous implementation used 32-bit ADD which zero-extended the result.
+     */
+    emit_logical_register(state, true, LOG_ORR, dst, RZ, src);
+    set_dirty(dst, true);
 #endif
 }
-
 
 #if defined(__x86_64__)
 /* REX.W prefix, ModRM byte, and 32-bit immediate */
@@ -979,6 +1026,24 @@ static inline void emit_load_sext(struct jit_state *state,
 #endif
 
     set_dirty(dst, !offset);
+}
+
+/* Sign-extend 32-bit value in register to 64-bit (in-place) */
+static inline void UNUSED emit_sxtw(struct jit_state *state, int reg)
+{
+#if defined(__x86_64__)
+    /* MOVSXD reg, reg (sign-extend 32-bit to 64-bit) */
+    emit_basic_rex(state, 1, reg, reg);
+    emit1(state, 0x63);
+    emit_modrm_reg2reg(state, reg, reg);
+#elif defined(__aarch64__)
+    /* SXTW Xd, Wn is SBFM Xd, Xn, #0, #31
+     * Encoding: sf=1, opc=00, N=1, immr=0, imms=31
+     * = 0x93407C00 | (Rn << 5) | Rd
+     */
+    uint32_t insn = 0x93407C00 | ((uint32_t) reg << 5) | (uint32_t) reg;
+    emit_a64(state, insn);
+#endif
 }
 
 /* Load 32-bit immediate into register (zero-extend) */
@@ -1219,7 +1284,9 @@ static void divmod(struct jit_state *state,
     if (sign)
         emit_cmp_imm32(state, rd, 0x80000000); /* overflow checking */
 
-    emit_dataproc_2source(state, is64, DP2_UDIV, div_dest, rn, rm);
+    /* Use SDIV for signed operations, UDIV for unsigned */
+    emit_dataproc_2source(state, is64, sign ? DP2_SDIV : DP2_UDIV, div_dest, rn,
+                          rm);
     if (mod)
         emit_dataproc_3source(state, is64, DP3_MSUB, rd, rm, div_dest, rn);
 
@@ -1634,7 +1701,23 @@ static inline void candidate_queue_init()
 
 static int liveness_cmp(const void *l, const void *r)
 {
-    return liveness[*(uint8_t *) l] - liveness[*(uint8_t *) r];
+    int liveness_l = liveness[*(uint8_t *) l];
+    int liveness_r = liveness[*(uint8_t *) r];
+
+    /* Use explicit comparisons to avoid potential overflow from subtraction */
+    if (liveness_l < liveness_r)
+        return -1;
+    if (liveness_l > liveness_r)
+        return 1;
+
+    /* Use register index as tie-breaker for stable sorting */
+    uint8_t reg_l = *(uint8_t *) l;
+    uint8_t reg_r = *(uint8_t *) r;
+    if (reg_l < reg_r)
+        return -1;
+    if (reg_l > reg_r)
+        return 1;
+    return 0;
 }
 
 /* TODO: this function could be generated by "tools/gen-jit-template.py" */
@@ -1675,6 +1758,7 @@ static inline void liveness_calc(block_t *block)
         case rv_insn_sh:
         case rv_insn_sw:
             liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
             break;
         case rv_insn_addi:
         case rv_insn_slti:
@@ -1725,6 +1809,7 @@ static inline void liveness_calc(block_t *block)
             break;
         case rv_insn_csw:
             liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
             break;
         case rv_insn_cnop:
             break;
@@ -1852,6 +1937,39 @@ end_pick_reg:
     return idx;
 }
 
+/* return the index in the register_map, avoiding two reserved registers */
+static inline int reg_pick2(int reserved1, int reserved2)
+{
+    /* pick an available register */
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].reg_idx == reserved1 ||
+            register_map[i].reg_idx == reserved2)
+            continue;
+        if (!register_map[i].alive)
+            return i;
+    }
+
+    /* If registers are exhausted, pick the one which has farthest liveness. */
+    int idx = -1;
+    for (int i = 0; i < N_RV_REGS; i++) {
+        uint8_t candidate = candidate_queue[i];
+        for (int j = 0; j < n_host_regs; j++) {
+            if (register_map[j].reg_idx == reserved1 ||
+                register_map[j].reg_idx == reserved2)
+                continue;
+            if (register_map[j].vm_reg_idx == candidate) {
+                idx = j;
+                goto end_pick_reg2;
+            }
+        }
+    }
+    __UNREACHABLE;
+
+end_pick_reg2:
+    assert(idx > -1 && idx < n_host_regs);
+    return idx;
+}
+
 /* Unmap the vm register to the host register. */
 static inline void unmap_vm_reg(int idx)
 {
@@ -1929,6 +2047,31 @@ static inline int map_vm_reg_reserved(struct jit_state *state,
     return target_reg;
 }
 
+/* Map a vm register while protecting two already-allocated host registers.
+ * This prevents the register allocator from evicting either of the reserved
+ * registers when allocating a third register (e.g., for rd after loading rs1
+ * and rs2).
+ */
+static inline int map_vm_reg_reserved2(struct jit_state *state,
+                                       int vm_reg_idx,
+                                       int reserved_reg_idx1,
+                                       int reserved_reg_idx2)
+{
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx != vm_reg_idx)
+            continue;
+        return register_map[i].reg_idx;
+    }
+
+    int idx = reg_pick2(reserved_reg_idx1, reserved_reg_idx2);
+    int target_reg = register_map[idx].reg_idx;
+
+    save_reg(state, idx);
+    unmap_vm_reg(idx);
+    set_vm_reg(idx, vm_reg_idx);
+    return target_reg;
+}
+
 static void ra_load2(struct jit_state *state, int vm_reg_idx1, int vm_reg_idx2)
 {
     int origin1 = -1, origin2 = -1;
@@ -1982,7 +2125,7 @@ static void ra_load2_sext(struct jit_state *state,
         vm_reg[0] = vm_reg[1] = map_vm_reg(state, vm_reg_idx1);
     } else {
         vm_reg[0] = map_vm_reg(state, vm_reg_idx1);
-        vm_reg[1] = map_vm_reg_reserved(state, vm_reg_idx2, vm_reg[1]);
+        vm_reg[1] = map_vm_reg_reserved(state, vm_reg_idx2, vm_reg[0]);
         assert(vm_reg[0] != vm_reg[1]);
     }
 
@@ -1993,6 +2136,12 @@ static void ra_load2_sext(struct jit_state *state,
         else
             emit_load(state, S32, parameter_reg[0], vm_reg[0],
                       offsetof(riscv_t, X) + 4 * vm_reg_idx1);
+    } else if (sext1) {
+        /* Register already mapped but may not be sign-extended.
+         * On ARM64, emit_mov uses 32-bit ops which zero-extend,
+         * so we must explicitly sign-extend for signed operations.
+         */
+        emit_sxtw(state, vm_reg[0]);
     }
     if (origin2 != vm_reg[1]) {
         if (sext2)
@@ -2001,6 +2150,9 @@ static void ra_load2_sext(struct jit_state *state,
         else
             emit_load(state, S32, parameter_reg[0], vm_reg[1],
                       offsetof(riscv_t, X) + 4 * vm_reg_idx2);
+    } else if (sext2) {
+        /* Register already mapped but may not be sign-extended. */
+        emit_sxtw(state, vm_reg[1]);
     }
 }
 #endif
@@ -2078,7 +2230,7 @@ static void do_fuse2(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
     emit_load_imm(state, vm_reg[0], ir->imm);
     emit_mov(state, vm_reg[0], temp_reg);
     vm_reg[1] = ra_load(state, ir->rs1);
-    vm_reg[2] = map_vm_reg(state, ir->rs2);
+    vm_reg[2] = map_vm_reg_reserved(state, ir->rs2, vm_reg[1]);
     emit_mov(state, vm_reg[1], vm_reg[2]);
     emit_alu32(state, 0x01, temp_reg, vm_reg[2]);
 }
@@ -2118,21 +2270,21 @@ static void do_fuse5(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
         switch (fuse[i].opcode) {
         case rv_insn_slli:
             vm_reg[0] = ra_load(state, fuse[i].rs1);
-            vm_reg[1] = map_vm_reg(state, fuse[i].rd);
+            vm_reg[1] = map_vm_reg_reserved(state, fuse[i].rd, vm_reg[0]);
             if (vm_reg[0] != vm_reg[1])
                 emit_mov(state, vm_reg[0], vm_reg[1]);
             emit_alu32_imm8(state, 0xc1, 4, vm_reg[1], fuse[i].imm & 0x1f);
             break;
         case rv_insn_srli:
             vm_reg[0] = ra_load(state, fuse[i].rs1);
-            vm_reg[1] = map_vm_reg(state, fuse[i].rd);
+            vm_reg[1] = map_vm_reg_reserved(state, fuse[i].rd, vm_reg[0]);
             if (vm_reg[0] != vm_reg[1])
                 emit_mov(state, vm_reg[0], vm_reg[1]);
             emit_alu32_imm8(state, 0xc1, 5, vm_reg[1], fuse[i].imm & 0x1f);
             break;
         case rv_insn_srai:
             vm_reg[0] = ra_load(state, fuse[i].rs1);
-            vm_reg[1] = map_vm_reg(state, fuse[i].rd);
+            vm_reg[1] = map_vm_reg_reserved(state, fuse[i].rd, vm_reg[0]);
             if (vm_reg[0] != vm_reg[1])
                 emit_mov(state, vm_reg[0], vm_reg[1]);
             emit_alu32_imm8(state, 0xc1, 7, vm_reg[1], fuse[i].imm & 0x1f);
@@ -2196,6 +2348,13 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
 
 static void resolve_jumps(struct jit_state *state)
 {
+    if (state->n_jumps == 0)
+        return;
+
+#if defined(__APPLE__) && defined(__aarch64__)
+    /* Write mode is maintained by jit_translate during translation. */
+#endif
+
     for (int i = 0; i < state->n_jumps; i++) {
         struct jump jump = state->jumps[i];
         int target_loc;
@@ -2212,12 +2371,12 @@ static void resolve_jumps(struct jit_state *state)
 #endif
         else {
             target_loc = jump.offset_loc + sizeof(uint32_t);
-            for (int i = 0; i < state->n_blocks; i++) {
-                if (jump.target_pc == state->offset_map[i].pc) {
+            for (int j = 0; j < state->n_blocks; j++) {
+                if (jump.target_pc == state->offset_map[j].pc) {
                     IIF(RV32_HAS(SYSTEM))(
-                        if (jump.target_satp == state->offset_map[i].satp), )
+                        if (jump.target_satp == state->offset_map[j].satp), )
                     {
-                        target_loc = state->offset_map[i].offset;
+                        target_loc = state->offset_map[j].offset;
                         break;
                     }
                 }
@@ -2231,7 +2390,7 @@ static void resolve_jumps(struct jit_state *state)
         memcpy(offset_ptr, &rel, sizeof(uint32_t));
 #elif defined(__aarch64__)
         int32_t rel = target_loc - jump.offset_loc;
-        update_branch_imm(state, jump.offset_loc, rel);
+        patch_branch_imm(state, jump.offset_loc, rel);
 #endif
     }
 }
@@ -2297,6 +2456,7 @@ void jit_translate(riscv_t *rv, block_t *block)
 {
     struct jit_state *state = rv->jit_state;
     if (set_has(&state->set, RV_HASH_KEY(block))) {
+        /* Block already translated - skip */
         for (int i = 0; i < state->n_blocks; i++) {
             if (block->pc_start == state->offset_map[i].pc
 #if RV32_HAS(SYSTEM)
@@ -2315,12 +2475,41 @@ restart:
     memset(state->jumps, 0, MAX_JUMPS * sizeof(struct jump));
     state->n_jumps = 0;
     block->offset = state->offset;
+#if defined(__APPLE__) && defined(__aarch64__)
+    /* Enter write mode for the entire translation phase.
+     * This batches all write protection toggling into a single operation,
+     * avoiding potential cache coherency issues from rapid toggling.
+     */
+    jit_enter_write_mode();
+#endif
     translate_chained_block(state, rv, block);
     if (unlikely(should_flush)) {
+#if defined(__APPLE__) && defined(__aarch64__)
+        jit_exit_write_mode();
+#endif
         code_cache_flush(state, rv);
         goto restart;
     }
     resolve_jumps(state);
+#if defined(__aarch64__)
+    /* Cache maintenance after patching branch immediates.
+     * On Apple: sys_icache_invalidate performs DC CVAU + DSB + IC IVAU + DSB +
+     * ISB. On Linux: __builtin___clear_cache performs similar cache
+     * maintenance.
+     */
+#if defined(__APPLE__)
+    __asm__ volatile("dmb ish" ::: "memory");
+#endif
+    sys_icache_invalidate(state->buf + block->offset,
+                          state->offset - block->offset);
+#if defined(__APPLE__)
+    /* Exit write mode - page becomes executable. */
+    jit_exit_write_mode();
+#endif
+    /* Full barrier sequence to ensure instruction coherency. */
+    __asm__ volatile("dsb ish" ::: "memory");
+    __asm__ volatile("isb" ::: "memory");
+#endif
     block->hot = true;
 }
 
@@ -2350,6 +2539,14 @@ struct jit_state *jit_state_init(size_t size)
     set_reset(&state->set);
     reset_reg();
     prepare_translate(state);
+#if defined(__APPLE__) && defined(__aarch64__)
+    /* Final cache flush for prologue/epilogue code.
+     * emit_bytes handles per-instruction cache maintenance, but a final
+     * flush ensures the entire region is coherent.
+     */
+    __builtin___clear_cache((char *) state->buf,
+                            (char *) (state->buf + state->offset));
+#endif
 
     state->offset_map = calloc(MAX_BLOCKS, sizeof(struct offset_map));
     if (!state->offset_map) {

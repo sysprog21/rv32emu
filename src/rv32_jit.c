@@ -556,7 +556,7 @@ GEN(sw, {
 })
 GEN(addi, {
     vm_reg[0] = ra_load(state, ir->rs1);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     }
@@ -565,7 +565,7 @@ GEN(addi, {
 GEN(slti, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_cmp_imm32(state, vm_reg[0], ir->imm);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     emit_load_imm(state, vm_reg[1], 1);
     uint32_t jump_loc_0 = state->offset;
     emit_jcc_offset(state, 0x8c);
@@ -575,7 +575,7 @@ GEN(slti, {
 GEN(sltiu, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_cmp_imm32(state, vm_reg[0], ir->imm);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     emit_load_imm(state, vm_reg[1], 1);
     uint32_t jump_loc_0 = state->offset;
     emit_jcc_offset(state, 0x82);
@@ -584,7 +584,7 @@ GEN(sltiu, {
 })
 GEN(xori, {
     vm_reg[0] = ra_load(state, ir->rs1);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     }
@@ -592,7 +592,7 @@ GEN(xori, {
 })
 GEN(ori, {
     vm_reg[0] = ra_load(state, ir->rs1);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     }
@@ -600,7 +600,7 @@ GEN(ori, {
 })
 GEN(andi, {
     vm_reg[0] = ra_load(state, ir->rs1);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     }
@@ -608,7 +608,7 @@ GEN(andi, {
 })
 GEN(slli, {
     vm_reg[0] = ra_load(state, ir->rs1);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     }
@@ -616,7 +616,7 @@ GEN(slli, {
 })
 GEN(srli, {
     vm_reg[0] = ra_load(state, ir->rs1);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     }
@@ -624,7 +624,7 @@ GEN(srli, {
 })
 GEN(srai, {
     vm_reg[0] = ra_load(state, ir->rs1);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     }
@@ -632,21 +632,21 @@ GEN(srai, {
 })
 GEN(add, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x01, temp_reg, vm_reg[2]);
 })
 GEN(sub, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x29, temp_reg, vm_reg[2]);
 })
 GEN(sll, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32_imm32(state, 0x81, 4, temp_reg, 0x1f);
@@ -654,7 +654,7 @@ GEN(sll, {
 })
 GEN(slt, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_cmp32(state, vm_reg[1], vm_reg[0]);
     emit_load_imm(state, vm_reg[2], 1);
     uint32_t jump_loc_0 = state->offset;
@@ -664,7 +664,7 @@ GEN(slt, {
 })
 GEN(sltu, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_cmp32(state, vm_reg[1], vm_reg[0]);
     emit_load_imm(state, vm_reg[2], 1);
     uint32_t jump_loc_0 = state->offset;
@@ -674,14 +674,14 @@ GEN(sltu, {
 })
 GEN(xor, {
   ra_load2(state, ir->rs1, ir->rs2);
-  vm_reg[2] = map_vm_reg(state, ir->rd);
+  vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
   emit_mov(state, vm_reg[1], temp_reg);
   emit_mov(state, vm_reg[0], vm_reg[2]);
   emit_alu32(state, 0x31, temp_reg, vm_reg[2]);
 })
 GEN(srl, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32_imm32(state, 0x81, 4, temp_reg, 0x1f);
@@ -689,7 +689,7 @@ GEN(srl, {
 })
 GEN(sra, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32_imm32(state, 0x81, 4, temp_reg, 0x1f);
@@ -697,14 +697,14 @@ GEN(sra, {
 })
 GEN(or, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x09, temp_reg, vm_reg[2]);
 })
 GEN(and, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x21, temp_reg, vm_reg[2]);
@@ -746,14 +746,14 @@ GEN(csrrci, { assert(NULL); })
 #if RV32_HAS(EXT_M)
 GEN(mul, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     muldivmod(state, 0x28, temp_reg, vm_reg[2], 0);
 })
 GEN(mulh, {
     ra_load2_sext(state, ir->rs1, ir->rs2, true, true);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
@@ -761,7 +761,7 @@ GEN(mulh, {
 })
 GEN(mulhsu, {
     ra_load2_sext(state, ir->rs1, ir->rs2, true, false);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
@@ -769,7 +769,7 @@ GEN(mulhsu, {
 })
 GEN(mulhu, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
@@ -777,28 +777,28 @@ GEN(mulhu, {
 })
 GEN(div, {
     ra_load2_sext(state, ir->rs1, ir->rs2, true, true);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     muldivmod(state, 0x38, temp_reg, vm_reg[2], 1);
 })
 GEN(divu, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     muldivmod(state, 0x38, temp_reg, vm_reg[2], 0);
 })
 GEN(rem, {
     ra_load2_sext(state, ir->rs1, ir->rs2, true, true);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     muldivmod(state, 0x98, temp_reg, vm_reg[2], 1);
 })
 GEN(remu, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     muldivmod(state, 0x98, temp_reg, vm_reg[2], 0);
@@ -848,7 +848,7 @@ GEN(fmvwx, { assert(NULL); })
 #if RV32_HAS(EXT_C)
 GEN(caddi4spn, {
     vm_reg[0] = ra_load(state, rv_reg_sp);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     }
@@ -910,28 +910,28 @@ GEN(candi, {
 })
 GEN(csub, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x29, temp_reg, vm_reg[2]);
 })
 GEN(cxor, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x31, temp_reg, vm_reg[2]);
 })
 GEN(cor, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x09, temp_reg, vm_reg[2]);
 })
 GEN(cand, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x21, temp_reg, vm_reg[2]);
@@ -1005,7 +1005,7 @@ GEN(cjr, {
 })
 GEN(cmv, {
     vm_reg[0] = ra_load(state, ir->rs2);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
     if (vm_reg[0] != vm_reg[1]) {
         emit_mov(state, vm_reg[0], vm_reg[1]);
     } else {
@@ -1031,7 +1031,7 @@ GEN(cjalr, {
 })
 GEN(cadd, {
     ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg(state, ir->rd);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mov(state, vm_reg[1], temp_reg);
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x01, temp_reg, vm_reg[2]);

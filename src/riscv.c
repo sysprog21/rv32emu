@@ -207,12 +207,19 @@ static void *t2c_runloop(void *arg)
 {
     riscv_t *rv = (riscv_t *) arg;
     while (!rv->quit) {
+        queue_entry_t *entry = NULL;
+
+        /* Acquire lock before checking and accessing the queue to prevent
+         * race conditions with the main thread adding entries.
+         */
+        pthread_mutex_lock(&rv->wait_queue_lock);
         if (!list_empty(&rv->wait_queue)) {
-            queue_entry_t *entry =
-                list_last_entry(&rv->wait_queue, queue_entry_t, list);
-            pthread_mutex_lock(&rv->wait_queue_lock);
+            entry = list_last_entry(&rv->wait_queue, queue_entry_t, list);
             list_del_init(&entry->list);
-            pthread_mutex_unlock(&rv->wait_queue_lock);
+        }
+        pthread_mutex_unlock(&rv->wait_queue_lock);
+
+        if (entry) {
             pthread_mutex_lock(&rv->cache_lock);
             t2c_compile(rv, entry->block);
             pthread_mutex_unlock(&rv->cache_lock);

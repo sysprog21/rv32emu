@@ -344,7 +344,7 @@ jobs:
           set -e  # Re-enable errexit
           exit 0  # Force success exit code
         # FIXME: gcc build fails on Aarch64/Linux hosts
-        env: |
+        env:
           CC: clang-18
         # Append custom commands here
         run: |
@@ -362,7 +362,17 @@ jobs:
           /tmp/llvm.sh 18
           export PATH=/usr/lib/llvm-18/bin:$PATH
           PARALLEL=-j$(nproc)
-          make artifact
+          # Fetch LATEST_RELEASE to avoid GitHub API rate limiting
+          # Scope token to download command only for security
+          . .ci/common.sh
+          LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases/latest" \
+                                                 "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                          | jq -r '.tag_name')
+          if [ -z "$LATEST_RELEASE" ] || [ "$LATEST_RELEASE" = "null" ]; then
+              echo "Error: Failed to fetch LATEST_RELEASE from GitHub API"
+              exit 1
+          fi
+          make LATEST_RELEASE=$LATEST_RELEASE artifact
           make $PARALLEL
           make check $PARALLEL
           make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
@@ -405,6 +415,9 @@ jobs:
        run: |
              brew install make dtc expect sdl2 bc e2fsprogs p7zip llvm@18 dcfldd
              brew install sdl2_mixer || echo "Warning: sdl2_mixer installation failed, continuing without SDL_MIXER support"
+             # Ensure symlinks exist after cache restore (cached Cellar may lack /opt/homebrew/bin links)
+             brew link dtc --overwrite 2>/dev/null || true
+             command -v dtc || { echo "ERROR: dtc not found in PATH after install"; exit 1; }
 
      - name: Install RISC-V Toolchain
        if: steps.cache-toolchain.outputs.cache-hit != 'true'

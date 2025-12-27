@@ -32,5 +32,5 @@
 	shallow = true
 [submodule "src/dtc"]
 	path = src/dtc
-	url = https://git.kernel.org/pub/scm/utils/dtc/dtc.git
+	url = https://github.com/dgibson/dtc
 	shallow = true

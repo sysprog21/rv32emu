@@ -1212,7 +1212,14 @@ void rv_step(void *arg)
 #if RV32_HAS(JIT)
 #if RV32_HAS(T2C)
         /* executed through the tier-2 JIT compiler */
-        if (block->hot2) {
+        if (__atomic_load_n(&block->hot2, __ATOMIC_ACQUIRE)) {
+            /* Atomic load-acquire pairs with store-release in t2c_compile().
+             * Ensures we see the updated block->func after observing hot2=true.
+             */
+#if defined(__aarch64__)
+            /* Ensure instruction cache coherency before executing T2C code */
+            __asm__ volatile("isb" ::: "memory");
+#endif
             ((exec_t2c_func_t) block->func)(rv);
             prev = NULL;
             continue;
@@ -1240,6 +1247,10 @@ void rv_step(void *arg)
          */
         if (block->hot) {
             block->n_invoke++;
+#if defined(__aarch64__)
+            /* Ensure instruction cache coherency before executing JIT code */
+            __asm__ volatile("isb" ::: "memory");
+#endif
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
             prev = NULL;
@@ -1251,6 +1262,10 @@ void rv_step(void *arg)
 #endif
         ) {
             jit_translate(rv, block);
+#if defined(__aarch64__)
+            /* Ensure instruction cache coherency before executing JIT code */
+            __asm__ volatile("isb" ::: "memory");
+#endif
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
             prev = NULL;

@@ -4,6 +4,7 @@
  */
 
 #pragma once
+#include <setjmp.h>
 #include <stdbool.h>
 
 #if RV32_HAS(GDBSTUB)
@@ -228,6 +229,9 @@ struct riscv_internal {
      * executing signal handler.
      */
     uint32_t last_csr_sepc;
+
+    /* Jump buffer for restarting the main loop after a reboot */
+    jmp_buf reboot_jmp;
 #endif
 
 #if RV32_HAS(ARCH_TEST)

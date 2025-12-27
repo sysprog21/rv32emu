@@ -1216,6 +1216,10 @@ void rv_step(void *arg)
             /* Atomic load-acquire pairs with store-release in t2c_compile().
              * Ensures we see the updated block->func after observing hot2=true.
              */
+#if defined(__aarch64__)
+            /* Ensure instruction cache coherency before executing T2C code */
+            __asm__ volatile("isb" ::: "memory");
+#endif
             ((exec_t2c_func_t) block->func)(rv);
             prev = NULL;
             continue;

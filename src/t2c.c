@@ -346,7 +346,11 @@ void t2c_compile(riscv_t *rv, block_t *block)
 
     jit_cache_update(rv->jit_cache, key, block->func);
 
-    block->hot2 = true;
+    /* Atomic store-release ensures all writes to block->func and jit_cache
+     * are visible to other threads before they observe hot2=true.
+     * Pairs with atomic load-acquire in rv_step().
+     */
+    __atomic_store_n(&block->hot2, true, __ATOMIC_RELEASE);
 }
 
 struct jit_cache *jit_cache_init()
@@ -363,8 +367,13 @@ void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry)
 {
     uint32_t pos = key & (N_JIT_CACHE_ENTRIES - 1);
 
-    cache[pos].key = key;
+    /* Write entry first, then key with release semantics.
+     * The atomic store-release ensures that when another thread sees the new
+     * key (via acquire load in LLVM-generated lookup), the corresponding
+     * entry is guaranteed to be visible.
+     */
     cache[pos].entry = entry;
+    __atomic_store_n(&cache[pos].key, key, __ATOMIC_RELEASE);
 }
 
 void jit_cache_clear(struct jit_cache *cache)

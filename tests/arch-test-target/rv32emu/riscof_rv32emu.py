@@ -44,6 +44,9 @@ class rv32emu(pluginTemplate):
         # parallel on the DUT executable. Can also be used in the build function if required.
         self.num_jobs = str(config["jobs"] if "jobs" in config else 1)
 
+        # Timeout in seconds for the make command execution
+        self.timeout = int(config["timeout"]) if "timeout" in config else 300
+
         # Path to the directory where this python file is located. Collect it from the config.ini
         self.pluginpath = os.path.abspath(config["pluginpath"])
 
@@ -178,7 +181,7 @@ class rv32emu(pluginTemplate):
 
         # once the make-targets are done and the makefile has been created, run all the targets in
         # parallel using the make command set above.
-        make.execute_all(self.work_dir)
+        make.execute_all(self.work_dir, self.timeout)
 
         # if target runs are not required then we simply exit as this point after running all
         # the makefile targets.

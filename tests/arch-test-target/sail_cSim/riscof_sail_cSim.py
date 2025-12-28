@@ -28,6 +28,7 @@ class sail_cSim(pluginTemplate):
             logger.error("Config node for sail_cSim missing.")
             raise SystemExit(1)
         self.num_jobs = str(config["jobs"] if "jobs" in config else 1)
+        self.timeout = int(config["timeout"]) if "timeout" in config else 300
         self.pluginpath = os.path.abspath(config["pluginpath"])
         self.sail_exe = {
             "32": os.path.join(
@@ -181,4 +182,4 @@ class sail_cSim(pluginTemplate):
             execute += coverage_cmd
 
             make.add_target(execute)
-        make.execute_all(self.work_dir)
+        make.execute_all(self.work_dir, self.timeout)

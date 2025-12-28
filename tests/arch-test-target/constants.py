@@ -25,8 +25,12 @@ ispec={3}/{2}_isa.yaml
 pspec={3}/{2}_platform.yaml
 path={4}/build
 target_run=1
+jobs=3
+timeout=600
 
 [{0}]
 pluginpath={1}
 path={1}
+jobs=3
+timeout=900
 """

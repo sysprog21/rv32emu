@@ -397,6 +397,9 @@ $(BIN): $(OBJS) $(DEV_OBJS) | $(OUT)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $^ $(LDFLAGS)
 
+# Skip config file rebuild when SKIP_PREREQ=1 to avoid race conditions in parallel make.
+# The config file is only needed for building $(BIN), not for arch-test with SKIP_PREREQ=1.
+ifneq ($(SKIP_PREREQ),1)
 $(CONFIG_FILE): FORCE
 	$(Q)mkdir -p $(OUT)
 	$(Q)echo "$(CFLAGS)" | xargs -n1 | sort | sed -n 's/^RV32_FEATURE/ENABLE/p' > $@.tmp
@@ -406,6 +409,7 @@ $(CONFIG_FILE): FORCE
 	else \
 		$(RM) $@.tmp; \
 	fi
+endif
 
 .PHONY: FORCE config
 FORCE:

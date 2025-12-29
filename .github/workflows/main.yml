@@ -51,14 +51,16 @@ jobs:
       with:
         submodules: 'true'
 
-    - name: Cache LLVM 18
+    - name: Read LLVM Version
+      id: llvm-version
+      run: echo "version=$(cat .ci/llvm-version)" >> $GITHUB_OUTPUT
+
+    - name: Cache LLVM
       id: cache-llvm
       uses: actions/cache@v5
       with:
-        path: /usr/lib/llvm-18
-        key: ${{ runner.os }}-${{ runner.arch }}-llvm-18-v2
-        restore-keys: |
-          ${{ runner.os }}-${{ runner.arch }}-llvm-18-
+        path: /usr/lib/llvm-${{ steps.llvm-version.outputs.version }}
+        key: ${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.llvm-version.outputs.version }}
 
     - name: Cache RISC-V Toolchain
       id: cache-toolchain
@@ -97,16 +99,15 @@ jobs:
     - name: Setup RISC-V Toolchain PATH
       run: echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
 
-    - name: Install LLVM 18
+    - name: Install LLVM
       if: steps.cache-llvm.outputs.cache-hit != 'true'
       run: |
             .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
-            sudo ./llvm.sh 18
+            sudo ./llvm.sh ${{ steps.llvm-version.outputs.version }}
 
     - name: Setup LLVM PATH
-      run: echo "/usr/lib/llvm-18/bin" >> $GITHUB_PATH
-      shell: bash
+      run: echo "/usr/lib/llvm-${{ steps.llvm-version.outputs.version }}/bin" >> $GITHUB_PATH
 
     - name: Install compiler
       id: install_cc
@@ -324,6 +325,9 @@ jobs:
       with:
         submodules: 'true'
 
+    - name: Set LLVM version
+      run: echo "LLVM_VERSION=$(cat .ci/llvm-version)" >> $GITHUB_ENV
+
     - name: Install dependencies
       run: |
             # Configure apt to tolerate ARM mirror sync failures
@@ -346,21 +350,21 @@ jobs:
               sudo apt-get install -q=2 -y --no-download make curl wget || true
             }
 
-    - name: Install LLVM 18
+    - name: Install LLVM
       run: |
             .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
-            sudo ./llvm.sh 18
+            sudo ./llvm.sh $LLVM_VERSION
 
     - name: Setup LLVM PATH
-      run: echo "/usr/lib/llvm-18/bin" >> $GITHUB_PATH
+      run: echo "/usr/lib/llvm-${LLVM_VERSION}/bin" >> $GITHUB_PATH
 
     - name: Set parallel jobs variable
       run: echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
 
     - name: Fetch artifacts
       env:
-        CC: clang-18
+        CC: clang-${{ env.LLVM_VERSION }}
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
             . .ci/common.sh
@@ -379,14 +383,14 @@ jobs:
     # FIXME: gcc build fails on AArch64/Linux hosts
     - name: check + tests
       env:
-        CC: clang-18
+        CC: clang-${{ env.LLVM_VERSION }}
       run: |
             make $PARALLEL
             make check $PARALLEL
 
     - name: JIT tests
       env:
-        CC: clang-18
+        CC: clang-${{ env.LLVM_VERSION }}
       run: |
             set -euo pipefail
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
@@ -409,6 +413,10 @@ jobs:
        with:
          submodules: 'true'
 
+     - name: Read LLVM Version
+       id: llvm-version
+       run: echo "version=$(cat .ci/llvm-version)" >> $GITHUB_OUTPUT
+
      - name: Cache RISC-V Toolchain
        id: cache-toolchain
        uses: actions/cache@v5
@@ -421,14 +429,14 @@ jobs:
        uses: actions/cache@v5
        with:
          path: |
-           /opt/homebrew/Cellar/llvm@18
+           /opt/homebrew/Cellar/llvm@${{ steps.llvm-version.outputs.version }}
            /opt/homebrew/Cellar/sdl2
            /opt/homebrew/Cellar/dtc
-         key: ${{ runner.os }}-${{ runner.arch }}-brew-${{ hashFiles('.github/workflows/main.yml') }}
+         key: ${{ runner.os }}-${{ runner.arch }}-brew-llvm${{ steps.llvm-version.outputs.version }}-${{ hashFiles('.github/workflows/main.yml') }}
 
      - name: Install dependencies
        run: |
-             brew install make dtc expect sdl2 bc e2fsprogs p7zip llvm@18 dcfldd
+             brew install make dtc expect sdl2 bc e2fsprogs p7zip llvm@${{ steps.llvm-version.outputs.version }} dcfldd
              brew install sdl2_mixer || echo "Warning: sdl2_mixer installation failed, continuing without SDL_MIXER support"
              # Ensure symlinks exist after cache restore (cached Cellar may lack /opt/homebrew/bin links)
              brew link dtc --overwrite 2>/dev/null || true
@@ -442,7 +450,7 @@ jobs:
      - name: Setup toolchain paths
        run: |
              echo "${{ github.workspace }}/toolchain/bin" >> $GITHUB_PATH
-             echo "$(brew --prefix llvm@18)/bin" >> $GITHUB_PATH
+             echo "$(brew --prefix llvm@${{ steps.llvm-version.outputs.version }})/bin" >> $GITHUB_PATH
      - name: Set up Python 3.12
        uses: actions/setup-python@v6
        with:
@@ -635,21 +643,25 @@ jobs:
               echo "WARNING: apt update exited with code $UPDATE_EXIT, continuing..."
             fi
             sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev
+            LLVM_VERSION=$(cat .ci/llvm-version)
             .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
             chmod +x ./llvm.sh
-            sudo ./llvm.sh 18
-            sudo apt-get install -q=2 clang-18 clang-tools-18
+            sudo ./llvm.sh $LLVM_VERSION
+            sudo apt-get install -q=2 clang-${LLVM_VERSION} clang-tools-${LLVM_VERSION}
             set -e  # Re-enable errexit
       shell: bash
     - name: run scan-build without JIT
       env:
         LATEST_RELEASE: dummy
-      run: make distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
+      run: |
+          LLVM_VERSION=$(cat .ci/llvm-version)
+          make distclean && scan-build-${LLVM_VERSION} -v -o ~/scan-build --status-bugs --use-cc=clang-${LLVM_VERSION} --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
     - name: run scan-build with JIT
       env:
         LATEST_RELEASE: dummy
       run: |
-          make ENABLE_JIT=1 distclean && scan-build-18 -v -o ~/scan-build --status-bugs --use-cc=clang-18 --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
+          LLVM_VERSION=$(cat .ci/llvm-version)
+          make ENABLE_JIT=1 distclean && scan-build-${LLVM_VERSION} -v -o ~/scan-build --status-bugs --use-cc=clang-${LLVM_VERSION} --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
 
   # https://docs.docker.com/build/ci/github-actions/multi-platform/
   docker-hub-build-and-publish:

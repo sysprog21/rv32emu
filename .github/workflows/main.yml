@@ -205,21 +205,38 @@ jobs:
             make misalign $PARALLEL
             make tool $PARALLEL
 
-    - name: diverse configurations
+    - name: core extension disable tests (interpreter + JIT)
       if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             set -euo pipefail
-            for config in ENABLE_EXT_M ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C \
-                          ENABLE_SDL ENABLE_Zicsr ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING \
-                          ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs ENABLE_Zifencei; do
-              echo "Testing with ${config}=0"
-              if ! (make distclean && make ${config}=0 check $PARALLEL); then
-                echo "ERROR: Test failed with ${config}=0"
+            # Core extensions + bit manipulation + CSR/fence + performance features
+            # Tests both interpreter and JIT modes (12 × 2 = 24 builds)
+            # Consolidated from 25 separate builds (13 interpreter + 12 JIT)
+            for ext in ENABLE_EXT_M ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C \
+                       ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs \
+                       ENABLE_Zicsr ENABLE_Zifencei \
+                       ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
+              echo "Testing ${ext}=0 (interpreter)"
+              if ! (make distclean && make ${ext}=0 check $PARALLEL); then
+                echo "ERROR: Interpreter test failed with ${ext}=0"
+                exit 1
+              fi
+              echo "Testing ${ext}=0 (JIT)"
+              if ! (make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL); then
+                echo "ERROR: JIT test failed with ${ext}=0"
                 exit 1
               fi
             done
+
+    - name: SDL disable test
+      if: success()
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+      run: |
+            # SDL is graphics subsystem, interpreter-only test sufficient
+            make distclean && make ENABLE_SDL=0 check $PARALLEL
 
     - name: misalignment test in block emulation
       if: success()
@@ -244,26 +261,13 @@ jobs:
       run: |
             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
 
-    - name: JIT test
+    - name: JIT base test
       if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            set -euo pipefail
-            # Base JIT test
+            # Base JIT test (extension disable tests handled in consolidated step above)
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
-
-            # JIT tests with disabled extensions
-            for ext in ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C ENABLE_EXT_M \
-                       ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs \
-                       ENABLE_Zicsr ENABLE_Zifencei \
-                       ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
-              echo "JIT test with ${ext}=0"
-              if ! (make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL); then
-                echo "ERROR: JIT test failed with ${ext}=0"
-                exit 1
-              fi
-            done
 
     - name: undefined behavior test
       if: success() || failure()
@@ -502,21 +506,38 @@ jobs:
              make misalign $PARALLEL
              make tool $PARALLEL
 
-     - name: diverse configurations
+     - name: core extension disable tests (interpreter + JIT)
        if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
              set -euo pipefail
-             for config in ENABLE_EXT_M ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C \
-                           ENABLE_SDL ENABLE_Zicsr ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING \
-                           ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs ENABLE_Zifencei; do
-               echo "Testing with ${config}=0"
-               if ! (make distclean && make ${config}=0 check $PARALLEL); then
-                 echo "ERROR: Test failed with ${config}=0"
+             # Core extensions + bit manipulation + CSR/fence + performance features
+             # Tests both interpreter and JIT modes (12 × 2 = 24 builds)
+             # Consolidated from 25 separate builds (13 interpreter + 12 JIT)
+             for ext in ENABLE_EXT_M ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C \
+                        ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs \
+                        ENABLE_Zicsr ENABLE_Zifencei \
+                        ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
+               echo "Testing ${ext}=0 (interpreter)"
+               if ! (make distclean && make ${ext}=0 check $PARALLEL); then
+                 echo "ERROR: Interpreter test failed with ${ext}=0"
+                 exit 1
+               fi
+               echo "Testing ${ext}=0 (JIT)"
+               if ! (make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL); then
+                 echo "ERROR: JIT test failed with ${ext}=0"
                  exit 1
                fi
              done
+
+     - name: SDL disable test
+       if: success()
+       env:
+         CC: ${{ steps.install_cc.outputs.cc }}
+       run: |
+             # SDL is graphics subsystem, interpreter-only test sufficient
+             make distclean && make ENABLE_SDL=0 check $PARALLEL
 
      - name: gdbstub test, need RV32 toolchain
        if: success()
@@ -525,26 +546,13 @@ jobs:
        run: |
              make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
 
-     - name: JIT test
+     - name: JIT base test
        if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             set -euo pipefail
-             # Base JIT test
+             # Base JIT test (extension disable tests handled in consolidated step above)
              make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
-
-             # JIT tests with disabled extensions
-             for ext in ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C ENABLE_EXT_M \
-                        ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs \
-                        ENABLE_Zicsr ENABLE_Zifencei \
-                        ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
-               echo "JIT test with ${ext}=0"
-               if ! (make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL); then
-                 echo "ERROR: JIT test failed with ${ext}=0"
-                 exit 1
-               fi
-             done
 
      - name: undefined behavior test
        if: (success() || failure()) && steps.install_cc.outputs.cc == 'clang'  # gcc on macOS/arm64 does not support sanitizers

@@ -140,10 +140,13 @@ jobs:
     - name: Fetch artifacts
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-            make artifact
-            make ENABLE_SYSTEM=1 artifact
-            make ENABLE_ARCH_TEST=1 artifact
+            . .ci/common.sh
+            fetch_artifact ELF
+            fetch_artifact Linux-Image ENABLE_SYSTEM=1
+            rm -f build/.config  # Clean config after ENABLE_SYSTEM=1 to prevent contamination
+            fetch_artifact sail ENABLE_ARCH_TEST=1
             # get from rv32emu-prebuilt
             .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
             unzip -o -d build/ build/shareware_doom_iwad.zip
@@ -263,6 +266,8 @@ jobs:
     - name: undefined behavior test
       if: success() || failure()
       run: |
+            # Clear cached config from previous steps to avoid ENABLE_SYSTEM=1 contamination
+            rm -f build/.config
             make distclean && make ENABLE_UBSAN=1 check $PARALLEL
             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
 
@@ -463,27 +468,10 @@ jobs:
          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
        run: |
              . .ci/common.sh
-             LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                    "Authorization: Bearer ${GH_TOKEN}" \
-                                     | grep '"tag_name"' \
-                                     | grep "ELF" \
-                                     | head -n 1 \
-                                     | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-             make LATEST_RELEASE=$LATEST_RELEASE artifact
-             LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                    "Authorization: Bearer ${GH_TOKEN}" \
-                                     | grep '"tag_name"' \
-                                     | grep "Linux-Image" \
-                                     | head -n 1 \
-                                     | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-             make LATEST_RELEASE=$LATEST_RELEASE ENABLE_SYSTEM=1 artifact
-             LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                    "Authorization: Bearer ${GH_TOKEN}" \
-                                     | grep '"tag_name"' \
-                                     | grep "sail" \
-                                     | head -n 1 \
-                                     | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-             make LATEST_RELEASE=$LATEST_RELEASE ENABLE_ARCH_TEST=1 artifact
+             fetch_artifact ELF
+             fetch_artifact Linux-Image ENABLE_SYSTEM=1
+             rm -f build/.config  # Clean config after ENABLE_SYSTEM=1 to prevent contamination
+             fetch_artifact sail ENABLE_ARCH_TEST=1
              # get from rv32emu-prebuilt
              .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
              unzip -o -d build/ build/shareware_doom_iwad.zip
@@ -561,6 +549,8 @@ jobs:
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
+             # Clear cached config from previous steps to avoid ENABLE_SYSTEM=1 contamination
+             rm -f build/.config
              make distclean && make ENABLE_UBSAN=1 check $PARALLEL
              make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
 

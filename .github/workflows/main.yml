@@ -151,6 +151,8 @@ jobs:
             .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
             unzip -o -d build/ build/shareware_doom_iwad.zip
 
+    # emcc builds run on x64 only - WebAssembly output is platform-independent
+    # This validates Emscripten compatibility without redundant builds on macOS
     - name: default build using emcc
       if: success()
       run: |
@@ -450,11 +452,7 @@ jobs:
        uses: rlalik/setup-cpp-compiler@master
        with:
          compiler: ${{ matrix.compiler }}
-     - name: Setup emsdk
-       uses: mymindstorm/setup-emsdk@v14
-       with:
-         version: 3.1.51
-         actions-cache-folder: 'emsdk-cache'
+     # NOTE: emsdk removed - emcc builds run on host-x64 only (WebAssembly is platform-independent)
      - name: Set parallel jobs variable
        run: |
              echo "PARALLEL=-j$(sysctl -n hw.logicalcpu)" >> "$GITHUB_ENV"
@@ -482,18 +480,7 @@ jobs:
              .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
              unzip -o -d build/ build/shareware_doom_iwad.zip
 
-     - name: default build using emcc
-       if: success()
-       run: |
-             make distclean
-             make CC=emcc ENABLE_JIT=0 $PARALLEL
-
-     - name: default build for system emulation using emcc
-       if: success()
-       run: |
-             make distclean
-             make CC=emcc ENABLE_SYSTEM=1 ENABLE_JIT=0 $PARALLEL
-             make distclean ENABLE_SYSTEM=1
+     # NOTE: emcc builds removed - they run on host-x64 only since WebAssembly output is platform-independent
 
      - name: check + tests
        if: success()

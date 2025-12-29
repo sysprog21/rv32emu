@@ -34,3 +34,27 @@ path={1}
 jobs=3
 timeout=900
 """
+
+# Template with explicit ispec path and isolated DUT path for parallel execution
+# {5} = ispec_path, {6} = dut_path (device-specific work directory)
+config_temp_with_ispec = """[RISCOF]
+ReferencePlugin={0}
+ReferencePluginPath={1}
+DUTPlugin={2}
+DUTPluginPath={3}
+
+[{2}]
+pluginpath={3}
+ispec={5}
+pspec={3}/{2}_platform.yaml
+path={6}
+target_run=1
+jobs=3
+timeout=600
+
+[{0}]
+pluginpath={1}
+path={1}
+jobs=3
+timeout=900
+"""

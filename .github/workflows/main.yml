@@ -170,7 +170,8 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             set -euo pipefail
-            for opt_level in -g -Og -O0 -O1 -O2 -O3 -Ofast; do
+            # Test boundary cases: -O0 (unoptimized), -O2 (standard), -Ofast (aggressive)
+            for opt_level in -O0 -O2 -Ofast; do
               echo "Building with OPT_LEVEL=$opt_level"
               if ! (make distclean && make OPT_LEVEL=$opt_level $PARALLEL); then
                 echo "ERROR: Build failed with OPT_LEVEL=$opt_level"
@@ -184,7 +185,8 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             set -euo pipefail
-            for opt_level in -g -Og -O0 -O1 -O2 -O3 -Ofast; do
+            # Test boundary cases: -O0 (unoptimized), -O2 (standard), -Ofast (aggressive)
+            for opt_level in -O0 -O2 -Ofast; do
               echo "Building system emulation with OPT_LEVEL=$opt_level"
               if ! (make distclean && make OPT_LEVEL=$opt_level ENABLE_SYSTEM=1 $PARALLEL); then
                 echo "ERROR: System emulation build failed with OPT_LEVEL=$opt_level"

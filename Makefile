@@ -85,7 +85,9 @@ CFLAGS += -DMEM_SIZE=0x$(call compute_size, $(USER_MEM_SIZE))ULL
 endif
 else
 # Non-SYSTEM mode: user-mode emulation
-USER_MEM_SIZE ?= 256 # unit in MiB (demand paging keeps physical usage minimal)
+# 4GB virtual address space (physical usage minimal via demand paging)
+# Required for arch-tests and user programs with high load addresses
+USER_MEM_SIZE ?= 4096 # unit in MiB
 CFLAGS += -DMEM_SIZE=0x$(call compute_size, $(USER_MEM_SIZE))ULL
 endif
 

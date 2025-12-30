@@ -19,8 +19,8 @@ faithfully implementing the RISC-V instruction set architecture (ISA).
 It serves as an exercise in modeling a modern RISC-based processor, demonstrating
 the device's operations without the complexities of a hardware implementation.
 The code is designed to be accessible and expandable, making it an ideal educational
-tool and starting point for customization. It is primarily written in C99, with
-a focus on efficiency and readability.
+tool and starting point for customization. It is primarily written in C99, utilizing
+C11 atomics for memory management, with a focus on efficiency and readability.
 
 Features:
 * Fast interpreter for executing the RV32 ISA
@@ -210,7 +210,6 @@ $ build/rv32emu-system \
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
 * `ENABLE_GDBSTUB` : GDB remote debugging support
-* `ENABLE_FULL4G` : Full access to 4 GiB address space
 * `ENABLE_SDL` : Experimental Display and Event System Calls
 * `ENABLE_JIT` : Experimental JIT compiler
 * `ENABLE_SYSTEM`: Experimental system emulation, allowing booting Linux kernel. To enable this feature, additional features must also be enabled. However, by default, when `ENABLE_SYSTEM` is enabled, CSR, fence, integer multiplication/division, and atomic Instructions are automatically enabled
@@ -260,7 +259,7 @@ $ .ci/riscv-tests.sh
 
 Or run it with the configuration you want:
 ```shell
-$ make arch-test ENABLE_ARCH_TEST=1 ENABLE_FULL4G=1 <your-config>
+$ make arch-test ENABLE_ARCH_TEST=1 <your-config>
 ```
 
 For macOS users, installing `sdiff` might be required:

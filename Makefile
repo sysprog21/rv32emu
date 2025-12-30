@@ -52,15 +52,18 @@ endif
 #   src/io.c(memory init)
 #   src/riscv.c(system emulation layout init)
 # Note: These memory settings are for SYSTEM mode only (when ELF_LOADER=0)
+# Memory configuration
+MiB = 1024*1024
+compute_size = $(shell echo "obase=16; ibase=10; $(1)*$(MiB)" | bc)
+
 ifeq ($(call has, SYSTEM), 1)
 ifeq ($(call has, ELF_LOADER), 0)
-MiB = 1024*1024
+# SYSTEM mode without ELF loader: kernel emulation with dedicated memory layout
 MEM_START ?= 0
 MEM_SIZE ?= 512 # unit in MiB
 DTB_SIZE ?= 1 # unit in MiB
 INITRD_SIZE ?= 8 # unit in MiB
 
-compute_size = $(shell echo "obase=16; ibase=10; $(1)*$(MiB)" | bc)
 REAL_MEM_SIZE = $(call compute_size, $(MEM_SIZE))
 REAL_DTB_SIZE = $(call compute_size, $(DTB_SIZE))
 REAL_INITRD_SIZE = $(call compute_size, $(INITRD_SIZE))
@@ -72,9 +75,24 @@ CFLAGS_dt += -DMEM_START=0x$(MEM_START) \
              -DINITRD_END=0x$(shell echo "obase=16; ibase=16; \
                             $(REAL_MEM_SIZE) - $(call compute_size, $(DTB_SIZE)) - 1" | bc)
 
-# Memory size for SYSTEM mode (may be overridden by FULL4G if ENABLE_ELF_LOADER=1)
 CFLAGS += -DMEM_SIZE=0x$(REAL_MEM_SIZE) -DDTB_SIZE=0x$(REAL_DTB_SIZE) -DINITRD_SIZE=0x$(REAL_INITRD_SIZE)
+else
+# SYSTEM mode with ELF loader: user-mode emulation
+# 4GB virtual address space (physical usage minimal via demand paging)
+# Required for tests like vm.elf that load at addresses above 2GB
+USER_MEM_SIZE ?= 4096 # unit in MiB
+CFLAGS += -DMEM_SIZE=0x$(call compute_size, $(USER_MEM_SIZE))ULL
 endif
+else
+# Non-SYSTEM mode: user-mode emulation
+USER_MEM_SIZE ?= 256 # unit in MiB (demand paging keeps physical usage minimal)
+CFLAGS += -DMEM_SIZE=0x$(call compute_size, $(USER_MEM_SIZE))ULL
+endif
+
+# Emscripten doesn't support mmap - cap memory to 512MB
+ifeq ("$(CC_IS_EMCC)", "1")
+CFLAGS := $(filter-out -DMEM_SIZE=%,$(CFLAGS))
+CFLAGS += -DMEM_SIZE=0x20000000ULL
 endif
 
 ENABLE_ARCH_TEST ?= 0
@@ -195,8 +213,6 @@ $(call set-feature, Zbc)
 ENABLE_Zbs ?= 1
 $(call set-feature, Zbs)
 
-ENABLE_FULL4G ?= 0
-
 # Experimental SDL oriented system calls
 ENABLE_SDL ?= 1
 ENABLE_SDL_MIXER ?= 1
@@ -219,44 +235,12 @@ OBJS_EXT += syscall_sdl.o
 ifneq ("$(CC_IS_EMCC)", "1")
 $(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
 endif
-# 4 GiB of memory is required to run video games.
-ENABLE_FULL4G := 1
 ifneq ("$(CC_IS_EMCC)", "1")
 LDFLAGS += $(shell sdl2-config --libs) -pthread
 ifeq ($(call has, SDL_MIXER), 1)
 LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
 endif
 endif
-endif
-
-# If SYSTEM is enabled and ELF_LOADER is not, then skip FULL4G bacause guestOS
-# has dedicated memory mapping range.
-ifeq ($(call has, SYSTEM), 1)
-ifeq ($(call has, ELF_LOADER), 0)
-override ENABLE_FULL4G := 0
-endif
-endif
-
-# Full access to a 4 GiB address space, necessitating more memory mapping
-# during emulator initialization.
-$(call set-feature, FULL4G)
-
-# Configuration validation and conflict detection
-ifeq ($(call has, SDL), 1)
-ifeq ($(call has, SYSTEM), 1)
-ifeq ($(call has, ELF_LOADER), 0)
-ifeq ($(call has, FULL4G), 0)
-    $(warning SDL requires FULL4G=1 but SYSTEM forces FULL4G=0. Set ENABLE_ELF_LOADER=1 or disable SDL/SYSTEM)
-endif
-endif
-endif
-endif
-
-ifeq ($(call has, FULL4G), 1)
-# Note: If both SYSTEM and FULL4G are enabled with ELF_LOADER=1,
-# this MEM_SIZE definition will override the SYSTEM mode definition.
-# This is intentional for ELF loader use cases.
-CFLAGS += -DMEM_SIZE=0xFFFFFFFFULL # 2^{32} - 1
 endif
 
 ENABLE_GDBSTUB ?= 0

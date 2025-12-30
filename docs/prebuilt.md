@@ -72,10 +72,8 @@ There are still some prebuilt standalone RISC-V binaries under `build/` director
 
 ## Run benchmarks
 
-Some benchmarks need the pre-allocated 4GB address space. Use the following command to enable it:
-
 ```shell
-$ make ENABLE_FULL4G=1 <your-config>
+$ make <your-config>
 $ build/rv32emu <benchmark>
 ```
 

@@ -24,6 +24,7 @@ extern struct target_ops gdbstub_ops;
 #endif
 
 #include "decode.h"
+#include "io.h"
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -1287,6 +1288,13 @@ void rv_step(void *arg)
 #endif
         prev = block;
     }
+
+    /* Incremental memory maintenance: reclaim unused pages periodically.
+     * Using a 16-bit counter, this runs every 65536 rv_step() calls.
+     */
+    static uint16_t gc_counter = 0;
+    if (unlikely(++gc_counter == 0))
+        memory_gc();
 
 #ifdef __EMSCRIPTEN__
     if (rv_has_halted(rv)) {

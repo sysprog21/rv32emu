@@ -88,7 +88,8 @@ static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
 static inline uint32_t vblk_preprocess(virtio_blk_state_t *vblk UNUSED,
                                        uint32_t addr)
 {
-    if ((addr >= MEM_SIZE) || (addr & 0b11)) {
+    /* Cast to uint64_t for comparison since MEM_SIZE may be 4GB */
+    if (((uint64_t) addr >= MEM_SIZE) || (addr & 0b11)) {
         virtio_blk_set_fail(vblk);
         return 0;
     }

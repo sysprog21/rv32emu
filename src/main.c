@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <inttypes.h>
 #include <libgen.h>
 #include <limits.h>
 #include <stdio.h>
@@ -16,6 +17,7 @@
 #endif
 
 #include "elf.h"
+#include "io.h"
 #include "riscv.h"
 #include "utils.h"
 
@@ -243,10 +245,13 @@ static void dump_test_signature(const char UNUSED *prog_name)
 #ifndef CYCLE_PER_STEP
 #define CYCLE_PER_STEP 100
 #endif
-/* FIXME: MEM_SIZE shall be defined on different runtime */
+/* MEM_SIZE is defined by Makefile:
+ * - SYSTEM mode (kernel): configurable, default 512 MiB
+ * - User-mode: configurable via USER_MEM_SIZE, default 256 MiB
+ * With demand paging, physical memory is allocated only when accessed.
+ */
 #ifndef MEM_SIZE
-/* Allocate 2^{19} bytes, which is ample for all selective benchmarks. */
-#define MEM_SIZE 0x80000ULL
+#define MEM_SIZE (256ULL * 1024 * 1024) /* 256 MiB default */
 #endif
 #define STACK_SIZE 0x1000       /* 4096 */
 #define ARGS_OFFSET_SIZE 0x1000 /* 4096 */
@@ -359,6 +364,9 @@ int main(int argc, char **args)
      * to prevent multiple atexit()'s callback be called.
      */
     rv = NULL;
+    uint64_t mem_usage = memory_get_usage();
+    rv_log_info("Peak memory usage: %" PRIu64 " KB (%" PRIu64 " MB)",
+                mem_usage / 1024, mem_usage / (1024 * 1024));
     rv_log_info("RISC-V emulator is destroyed");
 
 end:

@@ -15,10 +15,19 @@ typedef struct {
 } memory_t;
 
 /* create a memory instance */
-memory_t *memory_new(uint32_t size);
+memory_t *memory_new(uint64_t size);
 
 /* delete a memory instance */
 void memory_delete(memory_t *m);
+
+/* reclaim unused memory pages (incremental GC) */
+void memory_gc(void);
+
+/* get peak physical memory usage in bytes
+ * With MMAP: actual physical memory via demand paging
+ * Without MMAP: total allocated size (capped at 512MB)
+ */
+uint64_t memory_get_usage(void);
 
 /* read an instruction from memory */
 uint32_t memory_ifetch(uint32_t addr);

@@ -207,8 +207,11 @@ static inline uint8_t ilog2(uint32_t x)
 #define PRESERVE_NONE
 #endif
 
-/* Assume that all POSIX-compatible environments provide mmap system call. */
-#if defined(_WIN32)
+/* Assume that all POSIX-compatible environments provide mmap system call.
+ * Emscripten is excluded because it lacks signal-based demand paging support
+ * and C11 atomics require special compilation flags not enabled by default.
+ */
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
 #define HAVE_MMAP 0
 #else
 /* Assume POSIX-compatible runtime */

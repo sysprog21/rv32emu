@@ -8,6 +8,9 @@
 #if HAVE_MMAP
 #include <sys/mman.h>
 #include <unistd.h>
+#else
+/* Fallback for systems without mmap: use common page size for alignment */
+#define getpagesize() 4096
 #endif
 
 #include "mpool.h"
@@ -33,7 +36,16 @@ static void *mem_arena(size_t sz)
 {
     void *p;
 #if HAVE_MMAP
-    p = mmap(0, sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    /*
+     * Use MAP_NORESERVE to enable demand paging: the OS allocates physical
+     * pages only when accessed. This reduces memory footprint for pools that
+     * may not use all pre-allocated space.
+     */
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
+    p = mmap(0, sz, PROT_READ | PROT_WRITE,
+             MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
     if (p == MAP_FAILED)
         return NULL;
 #else

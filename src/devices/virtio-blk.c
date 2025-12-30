@@ -88,7 +88,14 @@ static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
 static inline uint32_t vblk_preprocess(virtio_blk_state_t *vblk UNUSED,
                                        uint32_t addr)
 {
+    /* When MEM_SIZE is 4GB, all 32-bit addresses are in bounds by definition.
+     * Use compile-time check to avoid GCC -Wtype-limits warning.
+     */
+#if MEM_SIZE < 0x100000000ULL
     if ((addr >= MEM_SIZE) || (addr & 0b11)) {
+#else
+    if (addr & 0b11) {
+#endif
         virtio_blk_set_fail(vblk);
         return 0;
     }

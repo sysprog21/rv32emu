@@ -502,11 +502,11 @@ typedef struct {
     /* vm memory object */
     memory_t *mem;
 
-    /* max memory size is 2^32 - 1 bytes.
-     * It is for portable on both 32-bit and 64-bit platforms. In this way,
-     * emulator can access any segment of the memory on either platform.
+    /* max memory size is 2^32 bytes (4GB).
+     * Use uint64_t to support full 4GB address space with demand paging.
+     * Physical memory is allocated on-demand, keeping actual usage minimal.
      */
-    uint32_t mem_size;
+    uint64_t mem_size;
 
     /* vm main stack size */
     uint32_t stack_size;

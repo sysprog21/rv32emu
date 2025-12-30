@@ -34,3 +34,11 @@
 	path = src/dtc
 	url = https://github.com/dgibson/dtc
 	shallow = true
+[submodule "tests/system/br_pkgs/doom_riscv"]
+	path = tests/system/br_pkgs/doom_riscv
+	url = https://github.com/sysprog21/doom_riscv
+	shallow = true
+[submodule "tests/system/br_pkgs/quake"]
+	path = tests/system/br_pkgs/quake
+	url = https://github.com/sysprog21/quake-embedded/
+	shallow = true

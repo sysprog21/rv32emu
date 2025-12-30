@@ -102,6 +102,12 @@ static inline void check_tohost_write(riscv_t *rv,
 #if RV32_HAS(Zicsr)
 static inline void update_time(riscv_t *rv)
 {
+#if !RV32_HAS(SYSTEM)
+    struct timeval tv;
+
+    rv_gettimeofday(&tv);
+    rv->timer = (uint64_t) tv.tv_sec * 1e6 + (uint32_t) tv.tv_usec;
+#endif
     rv->csr_time[0] = rv->timer & 0xFFFFFFFF;
     rv->csr_time[1] = rv->timer >> 32;
 }

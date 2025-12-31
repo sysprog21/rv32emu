@@ -720,12 +720,20 @@ riscv_t *rv_create(riscv_user_t rv_attr)
                     exit(EXIT_FAILURE);
                 }
 
-                vblk_device = malloc(strlen(vblk_opts[0]) - 1 /* skip ~ */ +
-                                     strlen(home) + 1);
-                assert(vblk_device);
-
-                strcpy(vblk_device, home);
-                strcat(vblk_device, vblk_opts[0] + 1 /* skip ~ */);
+                const char *suffix = vblk_opts[0] + 1; /* skip ~ */
+                size_t home_len = strlen(home);
+                size_t suffix_len = strlen(suffix);
+                if (home_len > SIZE_MAX - suffix_len - 1) {
+                    rv_log_error("Disk path too long");
+                    exit(EXIT_FAILURE);
+                }
+                size_t path_len = home_len + suffix_len + 1;
+                vblk_device = malloc(path_len);
+                if (!vblk_device) {
+                    rv_log_error("Failed to allocate memory for disk path");
+                    exit(EXIT_FAILURE);
+                }
+                snprintf(vblk_device, path_len, "%s%s", home, suffix);
             } else {
                 vblk_device = vblk_opts[0];
             }

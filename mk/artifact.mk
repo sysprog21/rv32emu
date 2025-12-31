@@ -55,6 +55,10 @@ endef
 
 LATEST_RELEASE ?=
 
+# Only fetch releases when artifact-related targets are requested
+# This prevents network calls during unrelated targets like 'make defconfig'
+ARTIFACT_TARGETS := artifact fetch-checksum scimark2 ieeelib
+ifneq ($(filter $(ARTIFACT_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(call has, PREBUILT), 1)
     # On macOS/arm64 Github runner, let's leverage the ${{ secrets.GITHUB_TOKEN }} to prevent 403 rate limit error.
     # Thus, the LATEST_RELEASE tag is defined at Github job steps, no need to fetch them here.
@@ -67,6 +71,10 @@ ifeq ($(call has, PREBUILT), 1)
              $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
          endif
     endif
+endif
+endif
+
+ifeq ($(call has, PREBUILT), 1)
     PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
 else
   # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,

@@ -1,0 +1,3 @@
+# CI configuration with architecture tests
+# CONFIG_LTO is not set
+CONFIG_ARCH_TEST=y

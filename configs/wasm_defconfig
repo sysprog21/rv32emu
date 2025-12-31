@@ -1,0 +1,3 @@
+# WebAssembly build with Emscripten
+# CONFIG_LTO is not set
+CONFIG_OPTIMIZE_LEVEL=3

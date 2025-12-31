@@ -1,5 +1,6 @@
 # external files
 build/DOOM1.WAD*
+tools/kconfig/
 shareware_doom_iwad.zip*
 quakesw-1.0.6.zip*
 build/id1/
@@ -8,7 +9,8 @@ build/doomrc
 toolchain/
 
 # built objects
-build/.config
+.config
+.config.old
 build/rv32emu
 build/arch-test
 build/mini-gdbstub
@@ -31,3 +33,4 @@ tests/arch-test-target/sail_cSim/riscv_sim_RV32
 tests/scimark2/
 __pycache__/
 src/minimal_dtb.h
+src/rv32emu_config.h

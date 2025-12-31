@@ -1,0 +1,2 @@
+# System emulation for Linux kernel
+CONFIG_SYSTEM=y

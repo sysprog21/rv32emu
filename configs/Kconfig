@@ -1,0 +1,350 @@
+# rv32emu Configuration
+#
+# RISC-V RV32 Emulator with tiered JIT compilation
+
+mainmenu "rv32emu Configuration"
+
+# Environment Detection (read-only, set by tools/detect-env.py)
+
+menu "Toolchain Detection"
+
+config COMPILER_TYPE
+    string
+    default "$(shell,tools/detect-env.py --compiler 2>/dev/null || echo Unknown)"
+
+config CC_IS_EMCC
+    def_bool $(shell,tools/detect-env.py --is-emcc 2>/dev/null)
+
+config CC_IS_CLANG
+    def_bool $(shell,tools/detect-env.py --is-clang 2>/dev/null)
+
+config CC_IS_GCC
+    def_bool $(shell,tools/detect-env.py --is-gcc 2>/dev/null)
+
+comment "Build mode: WebAssembly (Emscripten)"
+    depends on CC_IS_EMCC
+
+comment "Build mode: Native"
+    depends on !CC_IS_EMCC
+
+endmenu
+
+# Dependency Detection
+
+config HAVE_SDL2
+    bool
+    default n if CC_IS_EMCC
+    default $(shell,tools/detect-env.py --have-sdl2 2>/dev/null)
+
+config HAVE_SDL2_MIXER
+    bool
+    default n if CC_IS_EMCC
+    default $(shell,tools/detect-env.py --have-sdl2-mixer 2>/dev/null)
+
+config HAVE_LLVM18
+    bool
+    default $(shell,tools/detect-env.py --have-llvm18 2>/dev/null)
+
+config HAVE_RISCV_TOOLCHAIN
+    bool
+    default $(shell,tools/detect-env.py --have-riscv-toolchain 2>/dev/null)
+
+# RISC-V ISA Extensions
+
+menu "RISC-V ISA Configuration"
+
+choice
+    prompt "Base Integer Instruction Set"
+    default RV32I
+
+config RV32I
+    bool "RV32I (Standard 32 registers)"
+    help
+      Standard RISC-V 32-bit base integer instruction set
+      with 32 general-purpose registers.
+
+config RV32E
+    bool "RV32E (Embedded 16 registers)"
+    help
+      Reduced RISC-V base integer instruction set for embedded
+      systems with only 16 general-purpose registers.
+
+endchoice
+
+comment "Standard Extensions"
+
+config EXT_M
+    bool "M - Integer Multiplication and Division"
+    default y
+    help
+      Enable integer multiplication and division instructions.
+      Required for most practical programs.
+
+config EXT_A
+    bool "A - Atomic Instructions"
+    default y
+    help
+      Enable atomic memory operation instructions.
+      Required for multi-threading and synchronization.
+
+config EXT_F
+    bool "F - Single-Precision Floating-Point"
+    default y
+    help
+      Enable single-precision (32-bit) floating-point instructions.
+      Uses Berkeley SoftFloat for IEEE 754 compliance.
+
+config EXT_C
+    bool "C - Compressed Instructions"
+    default y
+    help
+      Enable 16-bit compressed instruction encoding.
+      Reduces code size by approximately 25-30%.
+
+comment "Zicsr and Zifencei Extensions"
+
+config Zicsr
+    bool "Zicsr - Control and Status Register"
+    default y
+    help
+      Enable CSR (Control and Status Register) instructions.
+      Required for privileged mode and system emulation.
+
+config Zifencei
+    bool "Zifencei - Instruction-Fetch Fence"
+    default y
+    help
+      Enable instruction-fetch fence for self-modifying code.
+      Required for JIT compilation support.
+
+comment "Bit Manipulation Extensions (Zb*)"
+
+config Zba
+    bool "Zba - Address Generation"
+    default y
+    help
+      Enable address generation bit manipulation instructions.
+      Provides efficient shifted-add operations.
+
+config Zbb
+    bool "Zbb - Basic Bit Manipulation"
+    default y
+    help
+      Enable basic bit manipulation instructions.
+      Includes count, rotate, byte-reverse operations.
+
+config Zbc
+    bool "Zbc - Carry-less Multiplication"
+    default y
+    help
+      Enable carry-less multiplication instructions.
+      Useful for cryptographic applications (GCM, CRC).
+
+config Zbs
+    bool "Zbs - Single-bit Instructions"
+    default y
+    help
+      Enable single-bit manipulation instructions.
+      Provides efficient bit test, set, clear operations.
+
+endmenu
+
+# Execution Modes
+
+menu "Execution Modes"
+
+comment "Emulation Mode"
+
+choice
+    prompt "Execution Engine"
+    default INTERPRETER_ONLY
+    help
+      Select the execution engine for RISC-V instruction emulation.
+
+config INTERPRETER_ONLY
+    bool "Interpreter Only"
+    help
+      Pure interpreter mode using threaded code dispatch.
+      Most portable, works on all platforms.
+
+      Uses computed goto for efficient instruction dispatch.
+
+config JIT
+    bool "JIT Compilation (Hybrid)"
+    depends on !CC_IS_EMCC
+    help
+      Hybrid interpreter + Just-In-Time compilation.
+      Tier-1 JIT uses template-based code generation for hot paths.
+
+      JIT is only available on x86_64 and ARM64 platforms.
+      Falls back to interpreter for cold code.
+
+endchoice
+
+config T2C
+    bool "Tier-2 LLVM Compiler"
+    default y
+    depends on JIT && HAVE_LLVM18
+    help
+      Enable tier-2 JIT compiler powered by LLVM 18.
+      Provides advanced optimizations for hot code paths.
+
+      Requires LLVM 18 development libraries.
+
+comment "System Emulation"
+
+config SYSTEM
+    bool "System Emulation Mode"
+    default n
+    help
+      Enable system emulation mode for running the Linux kernel.
+      Includes MMU, timer, UART, and virtio device emulation.
+
+      When enabled, rv32emu can boot a complete Linux system.
+      Requires additional kernel image and rootfs.
+
+config ELF_LOADER
+    bool "ELF Loader for System Mode"
+    default n
+    depends on SYSTEM
+    help
+      Use ELF loader in system mode instead of raw kernel image.
+      Required for running ELF executables in system mode tests.
+
+endmenu
+
+# Performance Optimizations
+
+menu "Performance Options"
+
+config MOP_FUSION
+    bool "Macro-op Fusion"
+    default y
+    help
+      Enable macro-operation fusion for common instruction sequences.
+      Fuses consecutive instructions into optimized handlers.
+
+      Improves performance by reducing dispatch overhead.
+
+config BLOCK_CHAINING
+    bool "Block Chaining"
+    default y
+    help
+      Enable basic block chaining for translated code.
+      Links consecutive blocks to avoid dispatch overhead.
+
+      Improves JIT performance significantly.
+
+config LTO
+    bool "Link-Time Optimization"
+    default y
+    depends on CC_IS_GCC || CC_IS_CLANG
+    help
+      Enable link-time optimization for smaller, faster binaries.
+      Increases build time but improves runtime performance.
+
+endmenu
+
+# Debugging and Development
+
+menu "Debugging"
+
+config GDBSTUB
+    bool "GDB Remote Debugging"
+    default n
+    depends on !CC_IS_EMCC
+    help
+      Enable GDB remote debugging stub.
+      Allows debugging RISC-V programs with gdb.
+
+      Connect with: riscv32-unknown-elf-gdb -ex "target remote :1234"
+
+config LOG_COLOR
+    bool "Colored Log Output"
+    default y
+    help
+      Enable ANSI color codes in log output.
+      Improves readability of debug messages.
+
+config UBSAN
+    bool "Undefined Behavior Sanitizer"
+    default n
+    depends on CC_IS_GCC || CC_IS_CLANG
+    help
+      Enable UndefinedBehaviorSanitizer for detecting UB at runtime.
+      Useful for development and debugging, not for production.
+
+endmenu
+
+# SDL Graphics and Audio
+
+menu "Graphics and Audio"
+
+config SDL
+    bool "SDL2 Graphics Support"
+    default y
+    depends on HAVE_SDL2 || CC_IS_EMCC
+    help
+      Enable SDL2-based graphics and input support.
+      Required for graphical applications like Doom and Quake.
+
+      For WebAssembly builds, uses Emscripten SDL2 port.
+
+config SDL_MIXER
+    bool "SDL2_mixer Audio Support"
+    default y
+    depends on SDL && (HAVE_SDL2_MIXER || CC_IS_EMCC)
+    help
+      Enable SDL2_mixer for audio playback.
+      Supports WAV and MIDI formats.
+
+endmenu
+
+# Testing
+
+menu "Testing"
+
+config ARCH_TEST
+    bool "RISC-V Architecture Tests"
+    default n
+    help
+      Build for RISC-V architecture compliance testing.
+      Used by 'make arch-test' target.
+
+endmenu
+
+# Build Options
+
+menu "Build Options"
+
+config OPTIMIZE_LEVEL
+    int "Optimization Level (0-3)"
+    default 2
+    range 0 3
+    help
+      Compiler optimization level:
+        0 - No optimization (fastest compile)
+        1 - Basic optimization
+        2 - Standard optimization (default)
+        3 - Aggressive optimization
+
+config OPTIMIZE_SIZE
+    bool "Optimize for Size (-Os)"
+    default n
+    help
+      Trade speed for smaller binary size.
+      Recommended for embedded or WebAssembly deployments.
+
+config DEBUG_SYMBOLS
+    bool "Include Debug Symbols (-g)"
+    default n
+    help
+      Generate debug information for gdb/lldb.
+      Increases binary size significantly.
+
+endmenu
+
+# Configuration marker
+config CONFIGURED
+    bool
+    default y

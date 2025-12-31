@@ -56,6 +56,15 @@ case "$ACTION" in
                     # Setup a /dev/ block device with ext4 fs to test guestOS access to hostOS /dev/ block device
                     dd if=/dev/zero of=${disk_img} bs=4M count=32
                     $(brew --prefix e2fsprogs)/sbin/mkfs.ext4 ${disk_img}
+                    # Write simplefs.ko BEFORE hdiutil attach (hdiutil locks the image file)
+                    DEBUGFS_CMD="$(brew --prefix e2fsprogs)/sbin/debugfs"
+                    if [ ! -x "${DEBUGFS_CMD}" ]; then
+                        echo "Error: debugfs not found at ${DEBUGFS_CMD}"
+                        exit 1
+                    fi
+                    "${DEBUGFS_CMD}" -w -R \
+                        "write build/linux-image/simplefs.ko simplefs.ko" "${disk_img}" \
+                        || exit 1
                     BLK_DEV=$(hdiutil attach -nomount ${disk_img})
                     ;;
             esac
@@ -78,12 +87,14 @@ case "$ACTION" in
             fi
         done
 
-        # Put simplefs.ko into ext4 fs
-        mkdir -p mnt
-        mount ${VBLK_IMGS[0]} mnt
-        cp build/linux-image/simplefs.ko mnt
-        umount mnt
-        rm -rf mnt
+        # Put simplefs.ko into ext4 fs (Linux only; Darwin handled above before hdiutil attach)
+        if [ "${OS_TYPE}" = "Linux" ]; then
+            mkdir -p mnt
+            mount "${VBLK_IMGS[0]}" mnt
+            cp build/linux-image/simplefs.ko mnt
+            umount mnt
+            rm -rf mnt
+        fi
         ;;
     cleanup)
         # Remove simplefs repo

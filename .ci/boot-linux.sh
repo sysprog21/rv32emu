@@ -113,7 +113,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
     if [ "${ENABLE_VBLK}" -eq "1" ]; then
         # Read-only
         if [[ ${disk_img} =~ simplefs ]]; then
-            TEST_OPTION="${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img},readonly"
+            TEST_OPTION=" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img},readonly"
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -125,7 +125,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
         else
-            TEST_OPTION="${OPTS_BASE} -x vblk:${disk_img},readonly"
+            TEST_OPTION=" -x vblk:${disk_img},readonly"
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -139,8 +139,13 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         EXPECT_CMDS+=("${EXPECT_CMD}")
 
         # multiple blocks, Read-only, one disk image, one loop device (/dev/loopx(Linux) or /dev/diskx(Darwin))
-        if [[ ${disk_img} =~ simplefs ]]; then
-            TEST_OPTION=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img},readonly -x vblk:${BLK_DEV_SIMPLEFS},readonly")
+        # FIXME: On macOS, block devices (/dev/diskX) require pread() fallback instead of mmap().
+        # Combined with JIT compilation (especially gcc), this results in significantly slower
+        # I/O performance that exceeds the boot timeout. Skip multi-device tests on macOS.
+        if [[ "${OS_TYPE}" == "Darwin" ]]; then
+            print_warning "Skipping multi-device readonly test on macOS (block device pread fallback too slow)"
+        elif [[ ${disk_img} =~ simplefs ]]; then
+            TEST_OPTION=(" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img},readonly -x vblk:${BLK_DEV_SIMPLEFS},readonly")
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -154,8 +159,10 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         expect -ex "-sh: can'\''t create mnt2/emu.txt: Read-only file system" {} timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
+            TEST_OPTIONS+=("${TEST_OPTION}")
+            EXPECT_CMDS+=("${EXPECT_CMD}")
         else
-            TEST_OPTION=("${OPTS_BASE} -x vblk:${disk_img},readonly -x vblk:${BLK_DEV_EXT4},readonly")
+            TEST_OPTION=(" -x vblk:${disk_img},readonly -x vblk:${BLK_DEV_EXT4},readonly")
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -167,13 +174,13 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         expect -ex "-sh: can'\''t create mnt2/emu.txt: Read-only file system" {} timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
+            TEST_OPTIONS+=("${TEST_OPTION}")
+            EXPECT_CMDS+=("${EXPECT_CMD}")
         fi
-        TEST_OPTIONS+=("${TEST_OPTION}")
-        EXPECT_CMDS+=("${EXPECT_CMD}")
 
         # Read-write using disk image with ~ home directory symbol
         if [[ ${disk_img} =~ simplefs ]]; then
-            TEST_OPTION=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:~$(pwd | sed "s|$HOME||")/${disk_img}")
+            TEST_OPTION=(" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:~$(pwd | sed "s|$HOME||")/${disk_img}")
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -187,7 +194,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
         else
-            TEST_OPTION=("${OPTS_BASE} -x vblk:~$(pwd | sed "s|$HOME||")/${disk_img}")
+            TEST_OPTION=(" -x vblk:~$(pwd | sed "s|$HOME||")/${disk_img}")
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -203,7 +210,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
 
         # Read-write using disk image
         if [[ ${disk_img} =~ simplefs ]]; then
-            TEST_OPTION=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img}")
+            TEST_OPTION=(" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img}")
             VBLK_EXPECT_CMDS='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -218,7 +225,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
     '
             EXPECT_CMD=("${VBLK_EXPECT_CMDS}")
         else
-            TEST_OPTION=("${OPTS_BASE} -x vblk:${disk_img}")
+            TEST_OPTION=(" -x vblk:${disk_img}")
             VBLK_EXPECT_CMDS='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -235,16 +242,21 @@ for disk_img in "${VBLK_IMGS[@]}"; do
 
         # Read-write using /dev/loopx(Linux) or /dev/diskx(Darwin) block device
         if [[ ${disk_img} =~ simplefs ]]; then
-            TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${BLK_DEV_SIMPLEFS}")
+            TEST_OPTIONS+=(" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${BLK_DEV_SIMPLEFS}")
             EXPECT_CMDS+=("${EXPECT_CMD}")
         else
-            TEST_OPTIONS+=("${OPTS_BASE} -x vblk:${BLK_DEV_EXT4}")
+            TEST_OPTIONS+=(" -x vblk:${BLK_DEV_EXT4}")
             EXPECT_CMDS+=("${EXPECT_CMD}")
         fi
 
         # multiple blocks, Read-write, one disk image and one loop device (/dev/loopx(Linux) or /dev/diskx(Darwin))
-        if [[ ${disk_img} =~ simplefs ]]; then
-            TEST_OPTION=("${OPTS_BASE} -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img} -x vblk:${BLK_DEV_SIMPLEFS}")
+        # FIXME: On macOS, hdiutil locks the disk image file when attached as a block device.
+        # Opening both the original file and its attached block device for read-write access
+        # simultaneously causes pread() to block indefinitely. Skip this test on macOS.
+        if [[ "${OS_TYPE}" == "Darwin" ]]; then
+            print_warning "Skipping combined disk image + block device read-write test on macOS (file locking conflict)"
+        elif [[ ${disk_img} =~ simplefs ]]; then
+            TEST_OPTION=(" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${disk_img} -x vblk:${BLK_DEV_SIMPLEFS}")
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -261,8 +273,10 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         expect "rv32emu" { send "umount mnt2\n" } timeout { exit 4 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
+            TEST_OPTIONS+=("${TEST_OPTION}")
+            EXPECT_CMDS+=("${EXPECT_CMD}")
         else
-            TEST_OPTION=("${OPTS_BASE} -x vblk:${disk_img} -x vblk:${BLK_DEV_EXT4}")
+            TEST_OPTION=(" -x vblk:${disk_img} -x vblk:${BLK_DEV_EXT4}")
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -276,9 +290,9 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         expect "# " { send "umount mnt2\n" } timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
+            TEST_OPTIONS+=("${TEST_OPTION}")
+            EXPECT_CMDS+=("${EXPECT_CMD}")
         fi
-        TEST_OPTIONS+=("${TEST_OPTION}")
-        EXPECT_CMDS+=("${EXPECT_CMD}")
     fi
 
     for i in "${!TEST_OPTIONS[@]}"; do

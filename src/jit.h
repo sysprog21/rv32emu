@@ -56,6 +56,15 @@ void jit_state_exit(struct jit_state *state);
 void jit_translate(riscv_t *rv, block_t *block);
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 
+/* JIT misaligned memory access handler.
+ * Performs misaligned load/store operations using byte-level memory accesses.
+ */
+void jit_misaligned_handler(riscv_t *rv,
+                            uint32_t addr,
+                            uint32_t vreg_idx,
+                            uint32_t type,
+                            bool is_store);
+
 #if RV32_HAS(T2C)
 void t2c_compile(riscv_t *, block_t *);
 typedef void (*exec_t2c_func_t)(riscv_t *);

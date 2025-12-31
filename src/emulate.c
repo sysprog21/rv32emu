@@ -52,8 +52,140 @@ bool need_retranslate = false;
 bool need_handle_signal = false;
 #endif
 
+/* Emulate misaligned load operation.
+ * Fast-path: Use halfword operations for 2-byte aligned word accesses.
+ * Slow-path: Fall back to byte-level operations for odd addresses.
+ */
+static bool emulate_misaligned_load(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint32_t addr)
+{
+    uint32_t value = 0;
+
+    switch (ir->opcode) {
+    case rv_insn_lw:
+#if RV32_HAS(EXT_C)
+    case rv_insn_clw:
+    case rv_insn_clwsp:
+#endif
+        /* Load word: fast-path for 2-byte aligned, slow-path for odd */
+        if ((addr & 1) == 0) {
+            /* 2-byte aligned: use two halfword reads */
+            value = (uint32_t) rv->io.mem_read_s(rv, addr);
+            value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
+        } else {
+            /* Odd address: use four byte reads */
+            for (int i = 0; i < 4; i++)
+                value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
+                         << (i * 8);
+        }
+        rv->X[ir->rd] = value;
+        break;
+
+    case rv_insn_lh:
+        /* Load halfword (signed): 2 bytes - always use byte reads for odd */
+        for (int i = 0; i < 2; i++)
+            value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
+        rv->X[ir->rd] = sign_extend_h(value);
+        break;
+
+    case rv_insn_lhu:
+        /* Load halfword unsigned: 2 bytes - always use byte reads for odd */
+        for (int i = 0; i < 2; i++)
+            value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
+        rv->X[ir->rd] = value;
+        break;
+
+    default:
+        return false;
+    }
+
+    return true;
+}
+
+/* Emulate misaligned store operation.
+ * Fast-path: Use halfword operations for 2-byte aligned word accesses.
+ * Slow-path: Fall back to byte-level operations for odd addresses.
+ */
+static bool emulate_misaligned_store(riscv_t *rv,
+                                     const rv_insn_t *ir,
+                                     uint32_t addr)
+{
+    uint32_t value;
+
+    switch (ir->opcode) {
+    case rv_insn_sw:
+#if RV32_HAS(EXT_C)
+    case rv_insn_csw:
+    case rv_insn_cswsp:
+#endif
+        /* Store word: fast-path for 2-byte aligned, slow-path for odd */
+        value = rv->X[ir->rs2];
+        if ((addr & 1) == 0) {
+            /* 2-byte aligned: use two halfword writes */
+            rv->io.mem_write_s(rv, addr, value & 0xFFFF);
+            rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
+        } else {
+            /* Odd address: use four byte writes */
+            for (int i = 0; i < 4; i++)
+                rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
+        }
+        break;
+
+    case rv_insn_sh:
+        /* Store halfword: 2 bytes - always use byte writes for odd */
+        value = rv->X[ir->rs2];
+        for (int i = 0; i < 2; i++)
+            rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
+        break;
+
+    default:
+        return false;
+    }
+
+    return true;
+}
+
+/* Default trap handler for userspace simulation without a configured trap
+ * vector. When misaligned memory operations occur, this handler emulates them
+ * using byte-level accesses instead of simply skipping the instruction.
+ */
 static void rv_trap_default_handler(riscv_t *rv)
 {
+    uint32_t cause = rv->csr_mcause;
+    uint32_t tval = rv->csr_mtval; /* Contains the misaligned address */
+    uint32_t insn_addr = rv->csr_mepc;
+
+    /* Handle misaligned load/store by emulating with byte operations */
+    if (cause == LOAD_MISALIGNED || cause == STORE_MISALIGNED) {
+        /* Fetch the faulting instruction */
+        uint32_t insn = rv->io.mem_ifetch(rv, insn_addr);
+        if (!insn)
+            goto skip_insn;
+
+        /* Decode the instruction to determine operation type and registers */
+        rv_insn_t ir;
+        memset(&ir, 0, sizeof(rv_insn_t));
+        if (!rv_decode(&ir, insn))
+            goto skip_insn;
+
+        /* Emulate the misaligned operation */
+        bool handled = false;
+        if (cause == LOAD_MISALIGNED)
+            handled = emulate_misaligned_load(rv, &ir, tval);
+        else
+            handled = emulate_misaligned_store(rv, &ir, tval);
+
+        if (handled) {
+            /* Advance PC past the handled instruction */
+            rv->csr_mepc += rv->compressed ? 2 : 4;
+            rv->PC = rv->csr_mepc;
+            return;
+        }
+    }
+
+skip_insn:
+    /* For other exceptions or if emulation failed, skip the instruction */
     rv->csr_mepc += rv->compressed ? 2 : 4;
     rv->PC = rv->csr_mepc; /* mret */
 }

@@ -1462,6 +1462,91 @@ static void muldivmod(struct jit_state *state,
 }
 #endif /* RV32_HAS(EXT_M) */
 
+/* JIT misaligned memory access handler.
+ * This function performs misaligned load/store operations using byte-level
+ * memory accesses. It mirrors the behavior of the interpreter's default
+ * trap handler for misaligned operations.
+ * @rv: RISC-V emulator state
+ * @addr: The misaligned memory address
+ * @vreg_idx: Register index (rd for loads, rs2 for stores)
+ * @type: Instruction type (rv_insn_lw, rv_insn_lh, etc.)
+ * @is_store: true for store operations, false for loads
+ *
+ * Note: This handler is called when JIT-generated code detects a misaligned
+ * memory access and the emulator is configured to handle misalignment
+ * (allow_misalign is false).
+ */
+void jit_misaligned_handler(riscv_t *rv,
+                            uint32_t addr,
+                            uint32_t vreg_idx,
+                            uint32_t type,
+                            bool is_store)
+{
+    assert(vreg_idx < 32);
+
+    if (is_store) {
+        /* Misaligned store */
+        uint32_t value = rv->X[vreg_idx];
+        switch (type) {
+        case rv_insn_sw:
+#if RV32_HAS(EXT_C)
+        case rv_insn_csw:
+        case rv_insn_cswsp:
+#endif
+            /* Fast-path for 2-byte aligned, slow-path for odd addresses */
+            if ((addr & 1) == 0) {
+                rv->io.mem_write_s(rv, addr, value & 0xFFFF);
+                rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
+            } else {
+                for (int i = 0; i < 4; i++)
+                    rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
+            }
+            break;
+        case rv_insn_sh:
+            for (int i = 0; i < 2; i++)
+                rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
+            break;
+        default:
+            break;
+        }
+    } else {
+        /* Misaligned load */
+        uint32_t value = 0;
+        switch (type) {
+        case rv_insn_lw:
+#if RV32_HAS(EXT_C)
+        case rv_insn_clw:
+        case rv_insn_clwsp:
+#endif
+            /* Fast-path for 2-byte aligned, slow-path for odd addresses */
+            if ((addr & 1) == 0) {
+                value = (uint32_t) rv->io.mem_read_s(rv, addr);
+                value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
+            } else {
+                for (int i = 0; i < 4; i++)
+                    value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
+                             << (i * 8);
+            }
+            rv->X[vreg_idx] = value;
+            break;
+        case rv_insn_lh:
+            for (int i = 0; i < 2; i++)
+                value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
+                         << (i * 8);
+            rv->X[vreg_idx] = (int32_t) ((int16_t) value); /* sign extend */
+            break;
+        case rv_insn_lhu:
+            for (int i = 0; i < 2; i++)
+                value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
+                         << (i * 8);
+            rv->X[vreg_idx] = value;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 #if RV32_HAS(SYSTEM_MMIO)
 uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
 {

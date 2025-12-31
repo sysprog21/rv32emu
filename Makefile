@@ -62,7 +62,20 @@ ifeq ($(call has, ELF_LOADER), 0)
 MEM_START ?= 0
 MEM_SIZE ?= 512 # unit in MiB
 DTB_SIZE ?= 1 # unit in MiB
-INITRD_SIZE ?= 8 # unit in MiB
+
+# Auto-detect INITRD_SIZE from actual rootfs.cpio if available.
+# Rounds up to next MiB + 1 MiB headroom for safety.
+INITRD_FILE := $(OUT)/linux-image/rootfs.cpio
+ifneq ($(wildcard $(INITRD_FILE)),)
+    INITRD_ACTUAL_BYTES := $(shell stat -f%z $(INITRD_FILE) 2>/dev/null || stat -c%s $(INITRD_FILE) 2>/dev/null)
+    ifneq ($(INITRD_ACTUAL_BYTES),)
+        INITRD_SIZE ?= $(shell echo "$$(( ($(INITRD_ACTUAL_BYTES) / 1048576) + 2 ))")
+    else
+        INITRD_SIZE ?= 32
+    endif
+else
+    INITRD_SIZE ?= 32 # fallback when rootfs.cpio not yet downloaded
+endif
 
 REAL_MEM_SIZE = $(call compute_size, $(MEM_SIZE))
 REAL_DTB_SIZE = $(call compute_size, $(DTB_SIZE))

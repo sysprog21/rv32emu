@@ -231,7 +231,12 @@ static void *t2c_runloop(void *arg)
 #endif
 
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
-static void map_file(char **ram_loc, const char *name)
+/* Map a file into memory at the specified location.
+ * If max_size > 0, validates that file size does not exceed max_size.
+ * Returns the actual file size on success, or -1 when file exceeds max_size
+ * (caller handles the error message). Other errors cause program exit.
+ */
+static off_t map_file(char **ram_loc, const char *name, off_t max_size)
 {
     int fd = open(name, O_RDONLY);
     if (fd < 0)
@@ -239,7 +244,14 @@ static void map_file(char **ram_loc, const char *name)
 
     /* get file size */
     struct stat st;
-    fstat(fd, &st);
+    if (fstat(fd, &st) < 0)
+        goto cleanup;
+
+    /* Validate file size if max_size constraint is specified */
+    if (max_size > 0 && st.st_size > max_size) {
+        close(fd);
+        return -1; /* Caller handles the error message */
+    }
 
 #if HAVE_MMAP
     /* Remap file to memory region. Emscripten/Windows use fallback read path
@@ -261,7 +273,8 @@ static void map_file(char **ram_loc, const char *name)
      * the mapping.
      */
     *ram_loc += st.st_size;
-    return;
+    close(fd);
+    return st.st_size;
 
 cleanup:
     close(fd);
@@ -632,22 +645,38 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->vblk_cnt = attr->data.system.vblk_device_cnt;
 
     char *ram_loc = (char *) attr->mem->mem_base;
-    map_file(&ram_loc, attr->data.system.kernel);
+    map_file(&ram_loc, attr->data.system.kernel, 0);
     rv_log_info("Kernel loaded");
 
     uint32_t dtb_addr = attr->mem->mem_size - DTB_SIZE;
     ram_loc = ((char *) attr->mem->mem_base) + dtb_addr;
     load_dtb(&ram_loc, attr);
     rv_log_info("DTB loaded");
-    /*
-     * Load optional initrd image at last 8 MiB before the dtb region to
-     * prevent kernel from overwritting it
+    /* Load optional initrd image before the dtb region.
+     * The initrd region size is defined by INITRD_SIZE at compile time.
      */
     if (attr->data.system.initrd) {
+        /* Ensure memory is large enough to hold initrd region */
+        if (dtb_addr < INITRD_SIZE) {
+            rv_log_fatal(
+                "Memory too small for INITRD_SIZE (%u MiB). Increase MEM_SIZE.",
+                INITRD_SIZE / (1024 * 1024));
+            exit(EXIT_FAILURE);
+        }
         uint32_t initrd_addr = dtb_addr - INITRD_SIZE;
         ram_loc = ((char *) attr->mem->mem_base) + initrd_addr;
-        map_file(&ram_loc, attr->data.system.initrd);
-        rv_log_info("Rootfs loaded");
+        off_t initrd_size =
+            map_file(&ram_loc, attr->data.system.initrd, INITRD_SIZE);
+        if (initrd_size < 0) {
+            /* map_file returns -1 when file exceeds max_size */
+            rv_log_fatal(
+                "Initrd file exceeds INITRD_SIZE (%u MiB).\n"
+                "Please rebuild with a larger INITRD_SIZE, e.g.:\n"
+                "  make ENABLE_SYSTEM=1 INITRD_SIZE=64 system",
+                INITRD_SIZE / (1024 * 1024));
+            exit(EXIT_FAILURE);
+        }
+        rv_log_info("Rootfs loaded (%ld bytes)", (long) initrd_size);
     }
 
     /* this variable has external linkage to mmu_io defined in system.c */

@@ -9,6 +9,18 @@ set -e -u -o pipefail
 # Install RISCOF
 pip3 install -r .ci/requirements.txt
 
+# Workaround for RISCOF bug: dbgen.py line 158 uses 'list' (Python built-in)
+# instead of 'flist' (file list variable). This causes TypeError when the
+# database deletion code path is triggered. Fix by patching the installed file.
+# See: https://github.com/riscv/riscof - dbgen.py generate() function
+DBGEN_PATH=$(python3 -c "import riscof; import os; print(os.path.join(os.path.dirname(riscof.__file__), 'dbgen.py'))")
+if grep -q 'if key not in list:' "$DBGEN_PATH" 2> /dev/null; then
+    echo "Patching RISCOF dbgen.py: fixing 'list' -> 'flist' bug"
+    # Use portable sed in-place: create temp file, then move (works on both Linux and macOS)
+    sed 's/if key not in list:/if key not in flist:/' "$DBGEN_PATH" > "${DBGEN_PATH}.tmp" \
+        && mv "${DBGEN_PATH}.tmp" "$DBGEN_PATH"
+fi
+
 set -x
 
 export PATH=$(pwd)/toolchain/bin:$PATH

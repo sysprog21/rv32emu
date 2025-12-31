@@ -60,6 +60,7 @@ jobs:
           echo "$PWD/toolchain/bin" >> $GITHUB_PATH
       - name: Build binaries
         run: |
+          make defconfig
           make artifact ENABLE_PREBUILT=0
           mkdir -p /tmp/rv32emu-prebuilt
           mv build/sha1sum-linux-x86-softfp /tmp

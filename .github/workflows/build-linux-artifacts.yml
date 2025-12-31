@@ -58,7 +58,8 @@ jobs:
       - name: Build Linux image
         run: |
           make build-linux-image
-          make artifact ENABLE_PREBUILT=0 ENABLE_SYSTEM=1
+          make system_defconfig
+          make artifact ENABLE_PREBUILT=0
       - name: Create tarball
         run: |
           cd /tmp

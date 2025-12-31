@@ -50,9 +50,10 @@ exit:
     ecall
 
 misaligned_insn_fetch_handler:
-    # simply jump back to caller since no really handling it
-    # since the rest of instruction are also misaligned
-    jalr zero, ra, 0
+    # Return to caller by setting sepc to ra and using sret
+    # This properly exits trap mode and clears is_trapped
+    csrw sepc, ra
+    sret
 
 misaligned_load_handler:
     # Handle load misalignment: skip load

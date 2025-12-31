@@ -131,19 +131,20 @@ enum SUPPORTED_MMIO {
 void emu_update_uart_interrupts(riscv_t *rv);
 void emu_update_vblk_interrupts(riscv_t *rv);
 
-/*
- * Linux kernel might create signal frame when returning from trap
- * handling, which modifies the SEPC CSR. Thus, the fault instruction
- * cannot always redo. For example, invalid memory access causes SIGSEGV.
- */
-extern bool need_handle_signal;
-
 #define CHECK_PENDING_SIGNAL(rv, signal_flag)              \
     do {                                                   \
         signal_flag = (rv->csr_sepc != rv->last_csr_sepc); \
     } while (0)
 
-#endif
+#endif /* !RV32_HAS(ELF_LOADER) */
+
+/*
+ * Signal to RVOP macro that inline trap handling occurred.
+ * When set, the instruction should return without advancing PC to allow retry.
+ * Used both for Linux kernel signal handling (modifies SEPC) and ELF loader
+ * mode inline trap handling (page fault resolved, instruction needs retry).
+ */
+extern bool need_handle_signal;
 
 /* Walk through page tables and get the corresponding PTE by virtual address if
  * exists
@@ -172,10 +173,15 @@ MMU_FAULT_CHECK_DECL(read);
 MMU_FAULT_CHECK_DECL(write);
 
 /*
- * TODO: dTLB can be introduced here to
- * cache the gVA to gPA tranlation.
+ * Translate virtual address to physical address with TLB caching.
  */
 uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw);
+
+/*
+ * TLB management functions for SFENCE.VMA and SATP changes.
+ */
+void mmu_tlb_flush_all(riscv_t *rv);
+void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr);
 
 uint32_t *mmu_walk(riscv_t *rv, const uint32_t addr, uint32_t *level);
 

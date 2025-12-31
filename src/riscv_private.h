@@ -110,6 +110,35 @@ typedef struct {
 } queue_entry_t;
 #endif
 
+#if RV32_HAS(SYSTEM)
+/* Translation Lookaside Buffer (TLB) for caching VA-to-PA translations.
+ * This reduces the overhead of page table walks in system simulation mode.
+ *
+ * TLB design:
+ * - Direct-mapped cache indexed by VPN lower bits
+ * - 64 entries for ~256KB working set coverage
+ * - Each entry caches: VPN, PPN, permissions, and page level
+ * - Separate dTLB (data) and iTLB (instruction) for better hit rates
+ * - Superpages tracked via level field for selective SFENCE.VMA
+ * - Invalidated on SFENCE.VMA or SATP changes
+ */
+#define TLB_SIZE 64
+#define TLB_MASK (TLB_SIZE - 1)
+
+/* Sv32 page levels: 1 = 4MB superpage, 2 = 4KB page */
+#define TLB_PAGE_LEVEL_SUPER 1
+#define TLB_PAGE_LEVEL_4K 2
+
+typedef struct {
+    uint32_t vpn, ppn; /* Virtual/Physical page number (upper 20 bits of VA) */
+    uint32_t pte_addr; /* Physical address of PTE for A/D bit updates */
+    uint8_t perm;      /* Permission bits: R(1), W(2), X(4), U(16) */
+    uint8_t valid;     /* Entry validity flag */
+    uint8_t dirty;     /* Cached dirty bit state (avoid repeated PTE writes) */
+    uint8_t level;     /* Page level: 1=superpage (4MB), 2=4KB page */
+} tlb_entry_t;
+#endif
+
 typedef struct {
     uint32_t block_capacity; /**< max number of entries in the block map */
     uint32_t size;           /**< number of entries currently in the map */
@@ -223,11 +252,20 @@ struct riscv_internal {
     /* The flag is used to indicate the current emulation is in a trap */
     bool is_trapped;
 
-    /*
-     * The flag that stores the SEPC CSR at the trap point for corectly
+    /* The flag that stores the SEPC CSR at the trap point for corectly
      * executing signal handler.
      */
     uint32_t last_csr_sepc;
+
+    /* Data TLB for caching virtual-to-physical address translations.
+     * Reduces page table walk overhead for repeated memory accesses.
+     */
+    tlb_entry_t dtlb[TLB_SIZE];
+
+    /* Instruction TLB for caching instruction fetch translations.
+     * Separate from dTLB for better hit rates and simpler permission checks.
+     */
+    tlb_entry_t itlb[TLB_SIZE];
 #endif
 
 #if RV32_HAS(ARCH_TEST)

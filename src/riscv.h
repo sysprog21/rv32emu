@@ -446,6 +446,14 @@ void rv_set_tohost_addr(riscv_t *rv, uint32_t addr);
 void rv_set_fromhost_addr(riscv_t *rv, uint32_t addr);
 #endif
 
+#if RV32_HAS(SYSTEM)
+/* TLB management functions for SFENCE.VMA instruction and SATP changes.
+ * Invalidate cached address translations when page tables are modified.
+ */
+void mmu_tlb_flush_all(riscv_t *rv);
+void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr);
+#endif
+
 enum {
     /* run and trace instructions and print them out during emulation */
     RV_RUN_TRACE = 1,

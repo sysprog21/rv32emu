@@ -1023,7 +1023,7 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     uintptr_t args_size = (1 + argc + 1) * sizeof(uint32_t);
     uintptr_t args_bottom = attr->mem_size - attr->stack_size;
     uintptr_t args_top = args_bottom - args_size;
-    args_top &= 16;
+    args_top &= -16;
 
     /* argc */
     uintptr_t *args_p = (uintptr_t *) args_top;
@@ -1086,6 +1086,13 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 
     /* not being trapped */
     rv->is_trapped = false;
+
+    /* Reset address translation: clear SATP and flush both TLBs to prevent
+     * stale translations from previous execution.
+     */
+    rv->csr_satp = 0;
+    memset(rv->dtlb, 0, sizeof(rv->dtlb));
+    memset(rv->itlb, 0, sizeof(rv->itlb));
 #else
     /* ISA simulation defaults to M-mode */
     rv->priv_mode = RV_PRIV_M_MODE;

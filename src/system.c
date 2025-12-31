@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <string.h>
 
 #include "system.h"
 
@@ -37,6 +38,24 @@ static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
     vm_attr_t *attr = PRIV(rv);
     const uint32_t nr_pg_max = attr->mem_size / RV_PG_SIZE;
     return ppn < nr_pg_max;
+}
+
+void mmu_tlb_flush_all(riscv_t *rv)
+{
+    memset(rv->dtlb, 0, sizeof(rv->dtlb));
+    memset(rv->itlb, 0, sizeof(rv->itlb));
+}
+
+void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr)
+{
+    uint32_t vpn = vaddr >> RV_PG_SHIFT;
+    uint32_t idx = vpn & TLB_MASK;
+
+    if (rv->dtlb[idx].valid && rv->dtlb[idx].vpn == vpn)
+        rv->dtlb[idx].valid = 0;
+
+    if (rv->itlb[idx].valid && rv->itlb[idx].vpn == vpn)
+        rv->itlb[idx].valid = 0;
 }
 
 #define PAGE_TABLE(ppn)                                               \
@@ -199,20 +218,59 @@ static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t vaddr)
     if (!rv->csr_satp)
         return memory_ifetch(vaddr);
 
+    uint32_t vpn = vaddr >> RV_PG_SHIFT;
+    uint32_t idx = vpn & TLB_MASK;
+    tlb_entry_t *entry = &rv->itlb[idx];
+
+    /* TLB Hit */
+    if (likely(entry->valid && entry->vpn == vpn)) {
+        /* Check 1: User mode can only access U-page */
+        if (rv->priv_mode == RV_PRIV_U_MODE && !(entry->perm & PTE_U))
+            goto miss;
+
+        /* Check 2: S-mode execution from U-page (fetch fault) */
+        if (rv->priv_mode == RV_PRIV_S_MODE && (entry->perm & PTE_U))
+            goto miss;
+
+        /* Check 3: Executable permission */
+        if (!(entry->perm & PTE_X))
+            goto miss;
+
+        return memory_ifetch((entry->ppn << RV_PG_SHIFT) |
+                             (vaddr & MASK(RV_PG_SHIFT)));
+    }
+
+miss:;
     uint32_t level;
     pte_t *pte = mmu_walk(rv, vaddr, &level);
     bool ok = MMU_FAULT_CHECK(ifetch, rv, pte, vaddr, PTE_X);
     if (unlikely(!ok)) {
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
-        CHECK_PENDING_SIGNAL(rv, need_handle_signal);
-        if (need_handle_signal)
-            return 0;
-#endif
-        pte = mmu_walk(rv, vaddr, &level);
+        need_retranslate = true;
+        return 0;
     }
 
     if (need_retranslate)
         return 0;
+
+    /* Populate TLB and update A bit per RISC-V Sv32 spec */
+    if (likely(pte)) {
+        /* Update A bit on instruction fetch */
+        if (!(*pte & PTE_A))
+            *pte |= PTE_A;
+
+        entry->vpn = vpn;
+        entry->perm = (uint8_t) (*pte & 0xFF);
+        entry->valid = 1;
+        entry->level = (uint8_t) level;
+
+        if (level == 1) { /* Superpage */
+            uint32_t pte_ppn = *pte >> 10;
+            uint32_t page_offset = vpn & MASK(10);
+            entry->ppn = pte_ppn | page_offset;
+        } else {
+            entry->ppn = *pte >> 10;
+        }
+    }
 
     get_ppn_and_offset();
     return memory_ifetch(ppn | offset);
@@ -222,7 +280,10 @@ uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return 0;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return 0;
 #endif
@@ -241,7 +302,10 @@ uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return 0;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return 0;
 #endif
@@ -260,7 +324,10 @@ uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return 0;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return 0;
 #endif
@@ -279,7 +346,10 @@ void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return;
 #endif
@@ -300,7 +370,10 @@ void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return;
 #endif
@@ -321,7 +394,10 @@ void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return;
 #endif
@@ -347,17 +423,86 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
     if (!rv->csr_satp)
         return vaddr;
 
+    uint32_t vpn = vaddr >> RV_PG_SHIFT;
+    uint32_t idx = vpn & TLB_MASK;
+    tlb_entry_t *entry = &rv->dtlb[idx];
+
+    if (likely(entry->valid && entry->vpn == vpn)) {
+        /* Check 1: User mode access to non-U page */
+        if (rv->priv_mode == RV_PRIV_U_MODE && !(entry->perm & PTE_U))
+            goto miss;
+
+        /* Check 2: Supervisor mode access to U page (SUM check) */
+        if (rv->priv_mode == RV_PRIV_S_MODE && (entry->perm & PTE_U) &&
+            !(rv->csr_sstatus & SSTATUS_SUM))
+            goto miss;
+
+        if (rw) { /* Read */
+            /* Check 3: Read permission.
+             * If MXR=0: Must be R.
+             * If MXR=1: Must be R or X.
+             */
+            bool readable =
+                (entry->perm & PTE_R) ||
+                ((rv->csr_sstatus & SSTATUS_MXR) && (entry->perm & PTE_X));
+            if (!readable)
+                goto miss;
+        } else { /* Write */
+            /* Check 4: Write permission */
+            if (!(entry->perm & PTE_W))
+                goto miss;
+
+            /* Update D bit on write hits if not already set */
+            if (!entry->dirty) {
+                vm_attr_t *attr = PRIV(rv);
+                pte_t *pte_ptr =
+                    (pte_t *) (attr->mem->mem_base + entry->pte_addr);
+                if (!(*pte_ptr & PTE_D))
+                    *pte_ptr |= PTE_D;
+                entry->dirty = 1;
+            }
+        }
+
+        return (entry->ppn << RV_PG_SHIFT) | (vaddr & MASK(RV_PG_SHIFT));
+    }
+
+miss:;
     uint32_t level;
     pte_t *pte = mmu_walk(rv, vaddr, &level);
     bool ok = rw ? MMU_FAULT_CHECK(read, rv, pte, vaddr, PTE_R)
                  : MMU_FAULT_CHECK(write, rv, pte, vaddr, PTE_W);
     if (unlikely(!ok)) {
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
-        CHECK_PENDING_SIGNAL(rv, need_handle_signal);
-        if (need_handle_signal)
-            return 0;
+#if RV32_HAS(ELF_LOADER)
+        need_retranslate = true;
 #endif
-        pte = mmu_walk(rv, vaddr, &level);
+        return 0;
+    }
+
+    /* Populate TLB and update A/D bits per RISC-V Sv32 spec */
+    if (likely(pte)) {
+        vm_attr_t *attr = PRIV(rv);
+
+        /* Update A bit on any access, D bit on writes */
+        if (!(*pte & PTE_A))
+            *pte |= PTE_A;
+        if (!rw && !(*pte & PTE_D)) /* Write access */
+            *pte |= PTE_D;
+
+        entry->vpn = vpn;
+        entry->perm = (uint8_t) (*pte & 0xFF);
+        entry->valid = 1;
+        entry->level = (uint8_t) level;
+        entry->pte_addr =
+            (uint32_t) ((uintptr_t) pte - (uintptr_t) attr->mem->mem_base);
+        entry->dirty = (*pte & PTE_D) ? 1 : 0;
+
+        if (level == 1) {
+            uint32_t pte_ppn = *pte >> 10;
+            uint32_t page_offset = vpn & MASK(10);
+            entry->ppn = pte_ppn | page_offset;
+        } else {
+            entry->ppn = *pte >> 10;
+        }
     }
 
     get_ppn_and_offset();

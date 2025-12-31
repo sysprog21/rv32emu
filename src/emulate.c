@@ -354,9 +354,16 @@ static uint32_t csr_csrrw(riscv_t *rv,
         out &= FFLAG_MASK;
 #endif
 
+#if RV32_HAS(SYSTEM)
+    uint32_t old_satp = *c;
+#endif
     *c = val;
 
-#if !RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(SYSTEM)
+    /* Flush TLB when SATP actually changes: address space changed */
+    if (c == &rv->csr_satp && *c != old_satp)
+        mmu_tlb_flush_all(rv);
+#if !RV32_HAS(JIT)
     /*
      * guestOS's process might have same VA, so block map cannot be reused
      *
@@ -368,6 +375,7 @@ static uint32_t csr_csrrw(riscv_t *rv,
      */
     if (c == &rv->csr_satp)
         need_clear_block_map = true;
+#endif
 #endif
 
     return out;
@@ -399,7 +407,16 @@ static uint32_t csr_csrrs(riscv_t *rv,
         out &= FFLAG_MASK;
 #endif
 
+#if RV32_HAS(SYSTEM)
+    uint32_t old_satp = *c;
+#endif
     *c |= val;
+
+#if RV32_HAS(SYSTEM)
+    /* Flush TLB when SATP actually changes */
+    if (c == &rv->csr_satp && *c != old_satp)
+        mmu_tlb_flush_all(rv);
+#endif
 
     return out;
 }
@@ -434,7 +451,16 @@ static uint32_t csr_csrrc(riscv_t *rv,
         out &= FFLAG_MASK;
 #endif
 
+#if RV32_HAS(SYSTEM)
+    uint32_t old_satp = *c;
+#endif
     *c &= ~val;
+
+#if RV32_HAS(SYSTEM)
+    /* Flush TLB when SATP actually changes */
+    if (c == &rv->csr_satp && *c != old_satp)
+        mmu_tlb_flush_all(rv);
+#endif
 
     return out;
 }

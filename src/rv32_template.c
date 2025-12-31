@@ -1176,13 +1176,31 @@ RVOP(
     }))
 
 /* SFENCE.VMA: synchronize updates to in-memory memory-management data
- * structures with current execution
+ * structures with current execution.
+ * This instruction invalidates TLB entries:
+ * - rs1 = 0: all TLB entries (global flush)
+ * - rs1 != 0: only the entry for virtual address in rs1
+ * The rs2 field specifies ASID (not implemented, treated as global).
  */
 RVOP(
     sfencevma,
     {
         PC += 4;
-        /* FIXME: fill real implementations */
+#if RV32_HAS(SYSTEM)
+        if (ir->rs1 == 0) {
+            /* Global flush: invalidate all TLB entries */
+            mmu_tlb_flush_all(rv);
+        } else {
+            /* Selective flush: invalidate TLB entry for specific VA */
+            mmu_tlb_flush(rv, rv->X[ir->rs1]);
+        }
+    /* Invalidate translated block cache: PTE changes require re-translation
+     * since memory mappings may have changed without SATP modification.
+     */
+#if !RV32_HAS(JIT)
+        need_clear_block_map = true;
+#endif
+#endif
         goto end_op;
     },
     GEN({

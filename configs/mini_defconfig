@@ -1,0 +1,9 @@
+# Minimal build without SDL for embedded use
+# CONFIG_EXT_F is not set
+# CONFIG_Zba is not set
+# CONFIG_Zbb is not set
+# CONFIG_Zbc is not set
+# CONFIG_Zbs is not set
+# CONFIG_SDL is not set
+# CONFIG_SDL_MIXER is not set
+CONFIG_OPTIMIZE_SIZE=y

@@ -41,6 +41,19 @@ and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
 * macOS: `brew install sdl2 sdl2_mixer`
 * Ubuntu Linux / Debian: `sudo apt install libsdl2-dev libsdl2-mixer-dev`
 
+### Quick Start
+```shell
+$ make defconfig      # Apply default configuration
+$ make                # Build rv32emu
+$ make check          # Run tests
+```
+
+For interactive configuration with a menu-driven interface:
+```shell
+$ make config         # Configure build options interactively
+$ make
+```
+
 ### Experimental JIT compilation
 The tier-2 JIT compiler in `rv32emu` leverages LLVM for powerful optimization.
 Therefore, the target system must have [`LLVM`](https://llvm.org/) installed, with version 18 recommended.
@@ -49,13 +62,20 @@ If `LLVM` is not installed, only the tier-1 JIT compiler will be used for perfor
 * macOS: `brew install llvm@18`
 * Ubuntu Linux / Debian: `sudo apt-get install llvm-18`
 
-Build the emulator with experimental JIT compiler:
+Build the emulator with JIT compiler using the predefined configuration:
+```shell
+$ make jit_defconfig
+$ make
+```
+
+Alternatively, use the legacy command-line option (for backward compatibility):
 ```shell
 $ make ENABLE_JIT=1
 ```
 
 If you don't want the JIT compilation feature, simply build with the following:
 ```shell
+$ make defconfig
 $ make
 ```
 
@@ -197,7 +217,32 @@ $ build/rv32emu-system \
 ```
 
 ### Customization
-`rv32emu` is configurable, and you can override the below variable(s) to fit your expectations:
+`rv32emu` uses a [Kconfig](https://github.com/sysprog21/Kconfiglib)-based build system for configuration.
+There are three ways to customize the build:
+
+#### 1. Predefined Configurations
+Use predefined configurations for common use cases:
+```shell
+$ make defconfig          # Default: SDL enabled, all extensions
+$ make mini_defconfig     # Minimal: no SDL, basic extensions only
+$ make jit_defconfig      # JIT: enables tiered JIT compilation
+$ make system_defconfig   # System: enables Linux system emulation
+```
+
+#### 2. Interactive Configuration
+Use the menu-driven interface to customize options:
+```shell
+$ make config
+```
+
+#### 3. Command-line Override (Legacy)
+Override individual options on the command line (for backward compatibility):
+```shell
+$ make ENABLE_EXT_F=0     # Build without floating-point support
+$ make ENABLE_SDL=0       # Build without SDL support
+```
+
+Available configuration options:
 * `ENABLE_RV32E`: RV32E Base Integer Instruction Set
 * `ENABLE_EXT_M`: Standard Extension for Integer Multiplication and Division
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
@@ -209,23 +254,12 @@ $ build/rv32emu-system \
 * `ENABLE_Zbs`: Standard Extension for Single-Bit Instructions
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
-* `ENABLE_GDBSTUB` : GDB remote debugging support
-* `ENABLE_SDL` : Experimental Display and Event System Calls
-* `ENABLE_JIT` : Experimental JIT compiler
-* `ENABLE_SYSTEM`: Experimental system emulation, allowing booting Linux kernel. To enable this feature, additional features must also be enabled. However, by default, when `ENABLE_SYSTEM` is enabled, CSR, fence, integer multiplication/division, and atomic Instructions are automatically enabled
-* `ENABLE_MOP_FUSION` : Macro-operation fusion
-* `ENABLE_BLOCK_CHAINING` : Block chaining of translated blocks
-* `ENABLE_LOG_COLOR` : Logging with colors (default)
-
-e.g., run `make ENABLE_EXT_F=0` for the build without floating-point support.
-
-Alternatively, configure the above items in advance by executing `make config` and
-specifying them in a configuration file. Subsequently, run `make` according to the provided
-configurations. For example, employ the following commands:
-```shell
-$ make config ENABLE_SDL=0
-$ make
-```
+* `ENABLE_GDBSTUB`: GDB remote debugging support
+* `ENABLE_SDL`: Experimental Display and Event System Calls
+* `ENABLE_JIT`: Experimental JIT compiler
+* `ENABLE_SYSTEM`: Experimental system emulation, allowing booting Linux kernel
+* `ENABLE_MOP_FUSION`: Macro-operation fusion
+* `ENABLE_BLOCK_CHAINING`: Block chaining of translated blocks
 
 ### RISCOF
 [RISCOF](https://github.com/riscv-software-src/riscof) (RISC-V Compatibility Framework) is

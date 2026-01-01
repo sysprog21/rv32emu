@@ -1,0 +1,47 @@
+# rv32emu default configuration
+# Standard desktop build with all extensions enabled
+
+# RISC-V ISA Configuration
+CONFIG_RV32I=y
+# CONFIG_RV32E is not set
+CONFIG_EXT_M=y
+CONFIG_EXT_A=y
+CONFIG_EXT_F=y
+CONFIG_EXT_C=y
+CONFIG_Zicsr=y
+CONFIG_Zifencei=y
+CONFIG_Zba=y
+CONFIG_Zbb=y
+CONFIG_Zbc=y
+CONFIG_Zbs=y
+
+# Execution Modes
+CONFIG_INTERPRETER_ONLY=y
+# CONFIG_JIT is not set
+# CONFIG_T2C is not set
+# CONFIG_SYSTEM is not set
+# CONFIG_ELF_LOADER is not set
+
+# Performance Options
+CONFIG_MOP_FUSION=y
+CONFIG_BLOCK_CHAINING=y
+CONFIG_LTO=y
+
+# Debugging
+# CONFIG_GDBSTUB is not set
+CONFIG_LOG_COLOR=y
+# CONFIG_UBSAN is not set
+
+# Graphics and Audio
+CONFIG_SDL=y
+CONFIG_SDL_MIXER=y
+
+# Testing
+# CONFIG_ARCH_TEST is not set
+
+# Build Options
+CONFIG_OPTIMIZE_LEVEL=2
+# CONFIG_OPTIMIZE_SIZE is not set
+# CONFIG_DEBUG_SYMBOLS is not set
+
+CONFIG_CONFIGURED=y

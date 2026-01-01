@@ -9,14 +9,27 @@ set -e -u -o pipefail
 # Install RISCOF
 pip3 install -r .ci/requirements.txt
 
+# Workaround for RISCOF bug: dbgen.py line 158 uses 'list' (Python built-in)
+# instead of 'flist' (file list variable). This causes TypeError when the
+# database deletion code path is triggered. Fix by patching the installed file.
+# See: https://github.com/riscv/riscof - dbgen.py generate() function
+DBGEN_PATH=$(python3 -c "import riscof; import os; print(os.path.join(os.path.dirname(riscof.__file__), 'dbgen.py'))")
+if grep -q 'if key not in list:' "$DBGEN_PATH" 2> /dev/null; then
+    echo "Patching RISCOF dbgen.py: fixing 'list' -> 'flist' bug"
+    # Use portable sed in-place: create temp file, then move (works on both Linux and macOS)
+    sed 's/if key not in list:/if key not in flist:/' "$DBGEN_PATH" > "${DBGEN_PATH}.tmp" \
+        && mv "${DBGEN_PATH}.tmp" "$DBGEN_PATH"
+fi
+
 set -x
 
 export PATH=$(pwd)/toolchain/bin:$PATH
 
 make distclean
-# Rebuild with all RISC-V extensions
+# Rebuild with all RISC-V extensions (including B-extension: Zba/Zbb/Zbc/Zbs)
 make ENABLE_ARCH_TEST=1 ENABLE_EXT_M=1 ENABLE_EXT_A=1 ENABLE_EXT_F=1 ENABLE_EXT_C=1 \
-    ENABLE_Zicsr=1 ENABLE_Zifencei=1 $PARALLEL
+    ENABLE_Zicsr=1 ENABLE_Zifencei=1 \
+    ENABLE_Zba=1 ENABLE_Zbb=1 ENABLE_Zbc=1 ENABLE_Zbs=1 $PARALLEL
 
 # Pre-fetch shared resources before parallel execution to avoid race conditions
 make ENABLE_ARCH_TEST=1 artifact
@@ -61,7 +74,7 @@ fi
 # Rebuild with RV32E
 make distclean
 make ENABLE_ARCH_TEST=1 ENABLE_RV32E=1 $PARALLEL
-make arch-test RISCV_DEVICE=E $PARALLEL || exit 1
+make ENABLE_ARCH_TEST=1 arch-test RISCV_DEVICE=E SKIP_PREREQ=1 $PARALLEL || exit 1
 
 # Rebuild with JIT
 # Do not run the architecture test with "Zicsr" extension. It ignores
@@ -70,4 +83,4 @@ make distclean
 make ENABLE_ARCH_TEST=1 ENABLE_JIT=1 ENABLE_T2C=0 \
     ENABLE_EXT_M=1 ENABLE_EXT_A=1 ENABLE_EXT_F=1 ENABLE_EXT_C=1 \
     ENABLE_Zicsr=1 ENABLE_Zifencei=1 $PARALLEL
-make arch-test RISCV_DEVICE=IMC hw_data_misaligned_support=0 $PARALLEL || exit 1
+make ENABLE_ARCH_TEST=1 arch-test RISCV_DEVICE=IMC hw_data_misaligned_support=0 SKIP_PREREQ=1 $PARALLEL || exit 1

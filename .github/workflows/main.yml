@@ -21,7 +21,9 @@ jobs:
           files: |
               .ci/**
               build/**
+              configs/**
               mk/**
+              scripts/**
               src/**
               tests/**
               tools/**
@@ -158,14 +160,16 @@ jobs:
       if: success()
       run: |
             make distclean
-            make CC=emcc ENABLE_JIT=0 $PARALLEL
+            make wasm_defconfig
+            make CC=emcc $PARALLEL
 
     - name: default build for system emulation using emcc
       if: success()
       run: |
             make distclean
-            make CC=emcc ENABLE_SYSTEM=1 ENABLE_JIT=0 $PARALLEL
-            make distclean ENABLE_SYSTEM=1
+            make wasm_defconfig
+            make CC=emcc ENABLE_SYSTEM=1 $PARALLEL
+            make distclean
 
     - name: Build with various optimization levels
       if: success()
@@ -176,7 +180,7 @@ jobs:
             # Test boundary cases: -O0 (unoptimized), -O2 (standard), -Ofast (aggressive)
             for opt_level in -O0 -O2 -Ofast; do
               echo "Building with OPT_LEVEL=$opt_level"
-              if ! (make distclean && make OPT_LEVEL=$opt_level $PARALLEL); then
+              if ! (make distclean && make defconfig && make OPT_LEVEL=$opt_level $PARALLEL); then
                 echo "ERROR: Build failed with OPT_LEVEL=$opt_level"
                 exit 1
               fi
@@ -191,7 +195,7 @@ jobs:
             # Test boundary cases: -O0 (unoptimized), -O2 (standard), -Ofast (aggressive)
             for opt_level in -O0 -O2 -Ofast; do
               echo "Building system emulation with OPT_LEVEL=$opt_level"
-              if ! (make distclean && make OPT_LEVEL=$opt_level ENABLE_SYSTEM=1 $PARALLEL); then
+              if ! (make distclean && make system_defconfig && make OPT_LEVEL=$opt_level $PARALLEL); then
                 echo "ERROR: System emulation build failed with OPT_LEVEL=$opt_level"
                 exit 1
               fi
@@ -203,6 +207,7 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make distclean
+            make defconfig
             make check $PARALLEL
             make tests $PARALLEL
             make misalign $PARALLEL
@@ -222,12 +227,12 @@ jobs:
                        ENABLE_Zicsr ENABLE_Zifencei \
                        ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
               echo "Testing ${ext}=0 (interpreter)"
-              if ! (make distclean && make ${ext}=0 check $PARALLEL); then
+              if ! (make distclean && make defconfig && make ${ext}=0 check $PARALLEL); then
                 echo "ERROR: Interpreter test failed with ${ext}=0"
                 exit 1
               fi
               echo "Testing ${ext}=0 (JIT)"
-              if ! (make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL); then
+              if ! (make distclean && make jit_defconfig && make ${ext}=0 check $PARALLEL); then
                 echo "ERROR: JIT test failed with ${ext}=0"
                 exit 1
               fi
@@ -239,7 +244,7 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             # SDL is graphics subsystem, interpreter-only test sufficient
-            make distclean && make ENABLE_SDL=0 check $PARALLEL
+            make distclean && make defconfig && make ENABLE_SDL=0 check $PARALLEL
 
     - name: misalignment test in block emulation
       if: success()
@@ -247,7 +252,7 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/alignment/
-            make distclean && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 ENABLE_SYSTEM=1 misalign-in-blk-emu $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 misalign-in-blk-emu $PARALLEL
 
     - name: MMU test
       if: success()
@@ -255,14 +260,14 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             make -C tests/system/mmu/
-            make distclean && make ENABLE_ELF_LOADER=1 ENABLE_SYSTEM=1 mmu-test $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test $PARALLEL
 
     - name: gdbstub test
       if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
+            make distclean && make defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
 
     - name: JIT base test
       if: success()
@@ -270,33 +275,31 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
             # Base JIT test (extension disable tests handled in consolidated step above)
-            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
+            make distclean && make jit_defconfig && make check $PARALLEL
 
     - name: undefined behavior test
       if: success() || failure()
       run: |
-            # Clear cached config from previous steps to avoid ENABLE_SYSTEM=1 contamination
-            rm -f build/.config
-            make distclean && make ENABLE_UBSAN=1 check $PARALLEL
-            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
+            make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+            make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
     - name: boot Linux kernel test
       if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
+            make distclean && make system_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
             bash -c "${BOOT_LINUX_TEST}"
-            make ENABLE_SYSTEM=1 clean
+            make clean
 
     - name: boot Linux kernel test (JIT)
       if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
+            make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
             bash -c "${BOOT_LINUX_TEST}"
-            make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 clean
+            make clean
 
     - name: Architecture test
       if: success()
@@ -385,7 +388,8 @@ jobs:
       env:
         CC: clang-${{ env.LLVM_VERSION }}
       run: |
-            make $PARALLEL
+            make distclean
+            make defconfig
             make check $PARALLEL
 
     - name: JIT tests
@@ -393,7 +397,7 @@ jobs:
         CC: clang-${{ env.LLVM_VERSION }}
       run: |
             set -euo pipefail
-            make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
+            make distclean && make jit_defconfig && make check $PARALLEL
             for ext in ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C; do
               echo "JIT test with ${ext}=0"
               make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL
@@ -496,6 +500,7 @@ jobs:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
              make distclean
+             make defconfig
              make check $PARALLEL
              make tests $PARALLEL
              make misalign $PARALLEL
@@ -515,12 +520,12 @@ jobs:
                         ENABLE_Zicsr ENABLE_Zifencei \
                         ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
                echo "Testing ${ext}=0 (interpreter)"
-               if ! (make distclean && make ${ext}=0 check $PARALLEL); then
+               if ! (make distclean && make defconfig && make ${ext}=0 check $PARALLEL); then
                  echo "ERROR: Interpreter test failed with ${ext}=0"
                  exit 1
                fi
                echo "Testing ${ext}=0 (JIT)"
-               if ! (make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL); then
+               if ! (make distclean && make jit_defconfig && make ${ext}=0 check $PARALLEL); then
                  echo "ERROR: JIT test failed with ${ext}=0"
                  exit 1
                fi
@@ -532,14 +537,14 @@ jobs:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
              # SDL is graphics subsystem, interpreter-only test sufficient
-             make distclean && make ENABLE_SDL=0 check $PARALLEL
+             make distclean && make defconfig && make ENABLE_SDL=0 check $PARALLEL
 
      - name: gdbstub test, need RV32 toolchain
        if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
+             make distclean && make defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
 
      - name: JIT base test
        if: success()
@@ -547,36 +552,34 @@ jobs:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
              # Base JIT test (extension disable tests handled in consolidated step above)
-             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 check $PARALLEL
+             make distclean && make jit_defconfig && make check $PARALLEL
 
      - name: undefined behavior test
        if: (success() || failure()) && steps.install_cc.outputs.cc == 'clang'  # gcc on macOS/arm64 does not support sanitizers
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             # Clear cached config from previous steps to avoid ENABLE_SYSTEM=1 contamination
-             rm -f build/.config
-             make distclean && make ENABLE_UBSAN=1 check $PARALLEL
-             make ENABLE_JIT=1 clean && make ENABLE_JIT=1 ENABLE_UBSAN=1 check $PARALLEL
+             make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+             make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
      - name: boot Linux kernel test
        if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 $PARALLEL && \
-             make ENABLE_SYSTEM=1 artifact $PARALLEL
+             make distclean && make system_defconfig && make INITRD_SIZE=32 $PARALLEL && \
+             make artifact $PARALLEL
              bash -c "${BOOT_LINUX_TEST}"
-             make ENABLE_SYSTEM=1 clean
+             make clean
 
      - name: boot Linux kernel test (JIT)
        if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make INITRD_SIZE=32 ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make ENABLE_SYSTEM=1 artifact $PARALLEL
+             make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
              bash -c "${BOOT_LINUX_TEST}"
-             make ENABLE_SYSTEM=1 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 clean
+             make clean
 
      - name: Architecture test
        if: success()
@@ -655,13 +658,13 @@ jobs:
         LATEST_RELEASE: dummy
       run: |
           LLVM_VERSION=$(cat .ci/llvm-version)
-          make distclean && scan-build-${LLVM_VERSION} -v -o ~/scan-build --status-bugs --use-cc=clang-${LLVM_VERSION} --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
+          make distclean && make defconfig && scan-build-${LLVM_VERSION} -v -o ~/scan-build --status-bugs --use-cc=clang-${LLVM_VERSION} --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=0
     - name: run scan-build with JIT
       env:
         LATEST_RELEASE: dummy
       run: |
           LLVM_VERSION=$(cat .ci/llvm-version)
-          make ENABLE_JIT=1 distclean && scan-build-${LLVM_VERSION} -v -o ~/scan-build --status-bugs --use-cc=clang-${LLVM_VERSION} --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
+          make distclean && make jit_defconfig && scan-build-${LLVM_VERSION} -v -o ~/scan-build --status-bugs --use-cc=clang-${LLVM_VERSION} --force-analyze-debug-code --show-description -analyzer-config stable-report-filename=true -enable-checker valist,nullability make ENABLE_EXT_F=0 ENABLE_SDL=0 ENABLE_JIT=1
 
   # https://docs.docker.com/build/ci/github-actions/multi-platform/
   docker-hub-build-and-publish:

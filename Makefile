@@ -1,175 +1,208 @@
+# Build system for rv32emu
+#
+# Quick start:
+#   make defconfig    # Apply default configuration
+#   make              # Build rv32emu
+#   make check        # Run tests
+#
+# Configuration:
+#   make config       # Interactive menuconfig
+#   make defconfig    # Default (SDL, all extensions)
+#   make oldconfig    # Update config after Kconfig changes
+#   make savedefconfig # Save current config as defconfig
+#
+# Named configurations (in configs/):
+#   make defconfig CONFIG=mini       # Apply configs/mini_defconfig
+#   make defconfig CONFIG=system     # Apply configs/system_defconfig
+#   make defconfig CONFIG=jit        # Apply configs/jit_defconfig
+#   make defconfig CONFIG=wasm       # Apply configs/wasm_defconfig
+#   make defconfig CONFIG=ci         # Apply configs/ci_defconfig
+
+.DEFAULT_GOAL := all
+
+# Build Framework Setup
+
+# Include build utilities first (sets Q, VECHO, OUT, etc.)
 include mk/common.mk
 include mk/toolchain.mk
+include mk/deps.mk
 
-# Verify GNU make version (3.80+ required for order-only prerequisites)
+# Verify GNU Make version (3.80+ required for order-only prerequisites)
 ifeq ($(filter 3.80 3.81 3.82 3.83 3.84 4.% 5.%,$(MAKE_VERSION)),)
-$(error GNU make 3.80 or higher is required. Current version: $(MAKE_VERSION))
+$(error GNU Make 3.80 or higher is required. Current version: $(MAKE_VERSION))
 endif
+
+# Kconfig Integration
+
+KCONFIG_DIR := tools/kconfig
+KCONFIG := configs/Kconfig
+CONFIG_HEADER := src/rv32emu_config.h
+
+# Kconfig tool source (kconfiglib)
+KCONFIGLIB_REPO := https://github.com/sysprog21/Kconfiglib
+
+# Download and setup Kconfig tools if missing
+$(KCONFIG_DIR)/kconfiglib.py:
+	$(VECHO) "Downloading Kconfig tools...\n"
+	$(Q)git clone --depth=1 -q $(KCONFIGLIB_REPO) $(KCONFIG_DIR)
+	@echo "Kconfig tools installed to $(KCONFIG_DIR)"
+
+# Ensure all Kconfig tools exist
+$(KCONFIG_DIR)/menuconfig.py $(KCONFIG_DIR)/defconfig.py $(KCONFIG_DIR)/genconfig.py \
+$(KCONFIG_DIR)/oldconfig.py $(KCONFIG_DIR)/savedefconfig.py: $(KCONFIG_DIR)/kconfiglib.py
+
+# Load existing configuration (safe include)
+-include .config
+
+# Auto-generate .config at parse time if missing (for ENABLE_* backward compatibility)
+# This ensures CONFIG_* values from defconfig are available during set-feature evaluation.
+# Without this, features not explicitly passed via ENABLE_* would default to 0 instead
+# of their defconfig values.
+# Skip for config-related targets that don't need or will generate .config themselves.
+# Note: Empty MAKECMDGOALS means default goal (all), which needs .config
+ifneq ($(CONFIG_CONFIGURED),y)
+ifeq ($(filter $(CONFIG_TARGETS) $(DEFCONFIG_GOALS),$(MAKECMDGOALS)),)
+ifneq ($(wildcard $(KCONFIG_DIR)/defconfig.py),)
+$(shell python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/defconfig >/dev/null 2>&1)
+# Re-include .config now that it's been generated
+-include .config
+endif
+endif
+endif
+
+# Backward compatibility for ENABLE_* flags (allows CI to work without changes)
+include mk/compat.mk
+
+# Configuration validation (only for build targets)
+$(eval $(require-config))
+
+# Kconfig Targets
+
+# Run environment detection before showing menu
+env-check:
+	@echo "Checking build environment..."
+	@python3 tools/detect-env.py --summary
+	@echo ""
+
+# Interactive configuration (depends on Kconfig tools)
+config: env-check $(KCONFIG_DIR)/menuconfig.py
+	@python3 $(KCONFIG_DIR)/menuconfig.py $(KCONFIG)
+	@python3 $(KCONFIG_DIR)/genconfig.py --header-path $(CONFIG_HEADER) $(KCONFIG)
+	@echo "Configuration saved to .config and $(CONFIG_HEADER)"
+
+# Apply default configuration (supports CONFIG=name for named configs)
+defconfig: $(KCONFIG_DIR)/defconfig.py
+	@if [ -n "$(CONFIG)" ]; then \
+		if [ -f "configs/$(CONFIG)_defconfig" ]; then \
+			echo "Applying configs/$(CONFIG)_defconfig..."; \
+			python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/$(CONFIG)_defconfig; \
+		else \
+			echo "Error: configs/$(CONFIG)_defconfig not found"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "Applying default configuration..."; \
+		python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/defconfig; \
+	fi
+	@python3 $(KCONFIG_DIR)/genconfig.py --header-path $(CONFIG_HEADER) $(KCONFIG)
+	@echo "Configuration applied."
+
+# Pattern rule for named defconfigs (e.g., make jit_defconfig, make mini_defconfig)
+%_defconfig: $(KCONFIG_DIR)/defconfig.py
+	@if [ -f "configs/$*_defconfig" ]; then \
+		echo "Applying configs/$*_defconfig..."; \
+		python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/$*_defconfig; \
+		python3 $(KCONFIG_DIR)/genconfig.py --header-path $(CONFIG_HEADER) $(KCONFIG); \
+		echo "Configuration applied."; \
+	else \
+		echo "Error: configs/$*_defconfig not found"; \
+		exit 1; \
+	fi
+
+# Update configuration after Kconfig changes
+oldconfig: $(KCONFIG_DIR)/oldconfig.py
+	@python3 $(KCONFIG_DIR)/oldconfig.py $(KCONFIG)
+	@python3 $(KCONFIG_DIR)/genconfig.py --header-path $(CONFIG_HEADER) $(KCONFIG)
+
+# Save current configuration as minimal defconfig
+savedefconfig: $(KCONFIG_DIR)/savedefconfig.py
+	@python3 $(KCONFIG_DIR)/savedefconfig.py --kconfig $(KCONFIG) --out defconfig.new
+	@echo "Saved minimal config to defconfig.new"
+
+# Explicit target to download/update Kconfig tools
+kconfig-tools: $(KCONFIG_DIR)/kconfiglib.py
+	@echo "Kconfig tools are ready in $(KCONFIG_DIR)"
+
+# Explicit rule to generate .config if missing (fallback for cases where
+# parse-time generation didn't run, e.g., kconfig tools weren't present yet)
+# Use order-only prerequisite (|) to only check existence, not timestamp,
+# so user-customized .config isn't overwritten when defconfig.py is updated.
+.config: | $(KCONFIG_DIR)/defconfig.py
+	@python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/defconfig
+	@echo "Generated .config from default configuration"
+
+# Auto-generate config header from .config
+$(CONFIG_HEADER): .config $(KCONFIG_DIR)/genconfig.py
+	@python3 $(KCONFIG_DIR)/genconfig.py --header-path $(CONFIG_HEADER) $(KCONFIG)
+	@echo "Generated $(CONFIG_HEADER)"
+
+# Build Configuration
 
 OUT ?= build
 BIN := $(OUT)/rv32emu
 
-CONFIG_FILE := $(OUT)/.config
--include $(CONFIG_FILE)
-
-OPT_LEVEL ?= -O2
-
-CFLAGS = -std=gnu99 $(OPT_LEVEL) -Wall -Wextra -Werror
+CFLAGS = -std=gnu99 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
 CFLAGS += -Wno-unused-label
 CFLAGS += -include src/common.h -Isrc/
 
-OBJS_EXT :=
-
-# In the system test suite, the executable is an ELF file (e.g., MMU).
-# However, the Linux kernel emulation includes the Image, DT, and
-# root filesystem (rootfs). Therefore, the test suite needs this
-# flag to load the ELF and differentiate it from the kernel emulation.
-ENABLE_ELF_LOADER ?= 0
-$(call set-feature, ELF_LOADER)
-
-# Enable MOP fusion, easier for ablation study
-ENABLE_MOP_FUSION ?= 1
-$(call set-feature, MOP_FUSION)
-
-# Enable block chaining, easier for ablation study
-ENABLE_BLOCK_CHAINING ?= 1
-$(call set-feature, BLOCK_CHAINING)
-
-# Enable logging with color
-ENABLE_LOG_COLOR ?= 1
-$(call set-feature, LOG_COLOR)
-
-# Enable system emulation
-ENABLE_SYSTEM ?= 0
-$(call set-feature, SYSTEM)
-
-ifeq ($(call has, SYSTEM), 1)
-    OBJS_EXT += system.o
-endif
-
-# Definition that bridges:
-#   Device Tree(initrd, memory range)
-#   src/io.c(memory init)
-#   src/riscv.c(system emulation layout init)
-# Note: These memory settings are for SYSTEM mode only (when ELF_LOADER=0)
-# Memory configuration
-MiB = 1024*1024
-compute_size = $(shell echo "obase=16; ibase=10; $(1)*$(MiB)" | bc)
-
-ifeq ($(call has, SYSTEM), 1)
-ifeq ($(call has, ELF_LOADER), 0)
-# SYSTEM mode without ELF loader: kernel emulation with dedicated memory layout
-MEM_START ?= 0
-MEM_SIZE ?= 512 # unit in MiB
-DTB_SIZE ?= 1 # unit in MiB
-
-# Auto-detect INITRD_SIZE from actual rootfs.cpio if available.
-# Rounds up to next MiB + 1 MiB headroom for safety.
-INITRD_FILE := $(OUT)/linux-image/rootfs.cpio
-ifneq ($(wildcard $(INITRD_FILE)),)
-    INITRD_ACTUAL_BYTES := $(shell stat -f%z $(INITRD_FILE) 2>/dev/null || stat -c%s $(INITRD_FILE) 2>/dev/null)
-    ifneq ($(INITRD_ACTUAL_BYTES),)
-        INITRD_SIZE ?= $(shell echo "$$(( ($(INITRD_ACTUAL_BYTES) / 1048576) + 2 ))")
-    else
-        INITRD_SIZE ?= 32
-    endif
-else
-    INITRD_SIZE ?= 32 # fallback when rootfs.cpio not yet downloaded
-endif
-
-REAL_MEM_SIZE = $(call compute_size, $(MEM_SIZE))
-REAL_DTB_SIZE = $(call compute_size, $(DTB_SIZE))
-REAL_INITRD_SIZE = $(call compute_size, $(INITRD_SIZE))
-
-CFLAGS_dt += -DMEM_START=0x$(MEM_START) \
-             -DMEM_END=0x$(shell echo "obase=16; ibase=16; $(MEM_START)+$(REAL_MEM_SIZE)" | bc) \
-             -DINITRD_START=0x$(shell echo "obase=16; ibase=16; \
-                              $(REAL_MEM_SIZE) - $(call compute_size, ($(INITRD_SIZE)+$(DTB_SIZE)))" | bc) \
-             -DINITRD_END=0x$(shell echo "obase=16; ibase=16; \
-                            $(REAL_MEM_SIZE) - $(call compute_size, $(DTB_SIZE)) - 1" | bc)
-
-CFLAGS += -DMEM_SIZE=0x$(REAL_MEM_SIZE) -DDTB_SIZE=0x$(REAL_DTB_SIZE) -DINITRD_SIZE=0x$(REAL_INITRD_SIZE)
-else
-# SYSTEM mode with ELF loader: user-mode emulation
-# 4GB virtual address space (physical usage minimal via demand paging)
-# Required for tests like vm.elf that load at addresses above 2GB
-USER_MEM_SIZE ?= 4096 # unit in MiB
-CFLAGS += -DMEM_SIZE=0x$(call compute_size, $(USER_MEM_SIZE))ULL
-endif
-else
-# Non-SYSTEM mode: user-mode emulation
-# 4GB virtual address space (physical usage minimal via demand paging)
-# Required for arch-tests and user programs with high load addresses
-USER_MEM_SIZE ?= 4096 # unit in MiB
-CFLAGS += -DMEM_SIZE=0x$(call compute_size, $(USER_MEM_SIZE))ULL
-endif
-
-# Emscripten doesn't support mmap - cap memory to 512MB
-ifeq ("$(CC_IS_EMCC)", "1")
-CFLAGS := $(filter-out -DMEM_SIZE=%,$(CFLAGS))
-CFLAGS += -DMEM_SIZE=0x20000000ULL
-endif
-
-ENABLE_ARCH_TEST ?= 0
-$(call set-feature, ARCH_TEST)
-
-# Enable link-time optimization (LTO)
-ENABLE_LTO ?= 1
-ifeq ($(call has, LTO), 1)
-ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)$(CC_IS_EMCC)", "")
-$(warning LTO is only supported in clang, gcc and emcc.)
-override ENABLE_LTO := 0
-endif
-endif
-$(call set-feature, LTO)
-ifeq ($(call has, LTO), 1)
-ifeq ("$(CC_IS_EMCC)", "1")
-ifeq ($(call has, SDL), 1)
-$(warning LTO is not supported to build emscripten-port SDL using emcc.)
-else
-CFLAGS += -flto
-endif
-endif
-ifeq ("$(CC_IS_GCC)", "1")
-CFLAGS += -flto=auto
-endif
-ifeq ("$(CC_IS_CLANG)", "1")
-CFLAGS += -flto=thin -fsplit-lto-unit
-LDFLAGS += -flto=thin
-endif
-endif
-
-# Disable Intel's Control-flow Enforcement Technology (CET)
+# Disable Intel CET for JIT compatibility
 CFLAGS += $(CFLAGS_NO_CET)
 
-# Integer Multiplication and Division instructions
-ENABLE_EXT_M ?= 1
+LDFLAGS += $(KCONFIG_LDFLAGS)
+OBJS_EXT :=
+deps :=
+
+# Feature Flags from Kconfig
+
+# Convert Kconfig options to RV32_FEATURE_* compiler flags
+$(call set-feature, ELF_LOADER)
+$(call set-feature, MOP_FUSION)
+$(call set-feature, BLOCK_CHAINING)
+$(call set-feature, LOG_COLOR)
+$(call set-feature, SYSTEM)
+$(call set-feature, ARCH_TEST)
 $(call set-feature, EXT_M)
-
-# Atomic Instructions
-ENABLE_EXT_A ?= 1
 $(call set-feature, EXT_A)
-
-# Single-precision floating point instructions
-ENABLE_EXT_F ?= 1
 $(call set-feature, EXT_F)
-ifeq ($(call has, EXT_F), 1)
+$(call set-feature, EXT_C)
+$(call set-feature, RV32E)
+$(call set-feature, Zicsr)
+$(call set-feature, Zifencei)
+$(call set-feature, Zba)
+$(call set-feature, Zbb)
+$(call set-feature, Zbc)
+$(call set-feature, Zbs)
+$(call set-feature, SDL)
+$(call set-feature, SDL_MIXER)
+$(call set-feature, GDBSTUB)
+$(call set-feature, JIT)
+# Note: T2C is set conditionally after LLVM detection in JIT section
+
+# Extension: Floating Point (F)
+
+ifeq ($(CONFIG_EXT_F),y)
 AR := ar
 ifeq ("$(CC_IS_CLANG)", "1")
-    # On macOS, system ar works with Apple Clang's LTO
     ifeq ($(UNAME_S),Darwin)
         # macOS: system ar is sufficient
     else
-        # Non-macOS with Clang: check if LTO is enabled
-        ifeq ($(call has, LTO), 1)
-            # LTO requires llvm-ar to handle LLVM bitcode in object files
+        ifeq ($(CONFIG_LTO),y)
             LLVM_AR := $(shell which llvm-ar 2>/dev/null)
             ifeq ($(LLVM_AR),)
-                $(error llvm-ar not found. Install LLVM or disable LTO with ENABLE_LTO=0)
+                $(error llvm-ar required for LTO with Clang. Install LLVM or disable LTO.)
             endif
             AR = llvm-ar
         else
-            # LTO disabled: prefer llvm-ar if available, otherwise use system ar
             LLVM_AR := $(shell which llvm-ar 2>/dev/null)
             ifneq ($(LLVM_AR),)
                 AR = llvm-ar
@@ -184,173 +217,119 @@ endif
 # Berkeley SoftFloat
 include mk/softfloat.mk
 
-ifeq ($(call has, SYSTEM), 1)
+OBJS_NEED_SOFTFLOAT := $(OUT)/decode.o $(OUT)/riscv.o
+ifeq ($(CONFIG_SYSTEM),y)
 DEV_OUT := $(OUT)/devices
+OBJS_NEED_SOFTFLOAT += $(DEV_OUT)/uart.o $(DEV_OUT)/plic.o
 endif
-OBJS_NEED_SOFTFLOAT := $(OUT)/decode.o \
-                       $(OUT)/riscv.o \
-                       $(DEV_OUT)/uart.o \
-                       $(DEV_OUT)/plic.o
 $(OBJS_NEED_SOFTFLOAT): $(SOFTFLOAT_LIB)
 LDFLAGS += $(SOFTFLOAT_LIB)
 LDFLAGS += -lm
 endif
 
-# Compressed extension instructions
-ENABLE_EXT_C ?= 1
-$(call set-feature, EXT_C)
+# Extension: SDL Graphics
 
-# RV32E Base Integer Instruction Set
-ENABLE_RV32E ?= 0
-$(call set-feature, RV32E)
-
-# Control and Status Register (CSR)
-ENABLE_Zicsr ?= 1
-$(call set-feature, Zicsr)
-
-# Instruction-Fetch Fence
-ENABLE_Zifencei ?= 1
-$(call set-feature, Zifencei)
-
-# Zba Address generation instructions
-ENABLE_Zba ?= 1
-$(call set-feature, Zba)
-
-# Zbb Basic bit-manipulation
-ENABLE_Zbb ?= 1
-$(call set-feature, Zbb)
-
-# Zbc Carry-less multiplication
-ENABLE_Zbc ?= 1
-$(call set-feature, Zbc)
-
-# Zbs Single-bit instructions
-ENABLE_Zbs ?= 1
-$(call set-feature, Zbs)
-
-# Experimental SDL oriented system calls
-ENABLE_SDL ?= 1
-ENABLE_SDL_MIXER ?= 1
-ifneq ("$(CC_IS_EMCC)", "1") # note that emcc generates port SDL headers/library, so it does not requires system SDL headers/library
-ifeq ($(call has, SDL), 1)
-ifeq (, $(shell which sdl2-config))
-$(warning No sdl2-config in $$PATH. Check SDL2 installation in advance)
-override ENABLE_SDL := 0
-endif
-ifeq (1, $(shell pkg-config --exists SDL2_mixer; echo $$?))
-$(warning No SDL2_mixer lib installed. SDL2_mixer support will be disabled)
-override ENABLE_SDL_MIXER := 0
-endif
-endif
-endif
-$(call set-feature, SDL)
-$(call set-feature, SDL_MIXER)
-ifeq ($(call has, SDL), 1)
-OBJS_EXT += syscall_sdl.o
+ifeq ($(CONFIG_SDL),y)
 ifneq ("$(CC_IS_EMCC)", "1")
-$(OUT)/syscall_sdl.o: CFLAGS += $(shell sdl2-config --cflags)
-endif
-ifneq ("$(CC_IS_EMCC)", "1")
-LDFLAGS += $(shell sdl2-config --libs) -pthread
-ifeq ($(call has, SDL_MIXER), 1)
-LDFLAGS += $(shell pkg-config --libs SDL2_mixer)
-endif
+    # Native SDL
+    ifeq ($(HAVE_SDL2),)
+        $(warning SDL2 not found. Run 'make config' to disable SDL.)
+    else
+        OBJS_EXT += syscall_sdl.o
+        $(OUT)/syscall_sdl.o: CFLAGS += $(SDL2_CFLAGS)
+        LDFLAGS += $(SDL2_LIBS) -pthread
+        ifeq ($(CONFIG_SDL_MIXER),y)
+            ifeq ($(HAVE_SDL2_MIXER),y)
+                LDFLAGS += $(SDL2_MIXER_LIBS)
+            else
+                $(warning SDL2_mixer not found. Audio disabled.)
+            endif
+        endif
+    endif
 endif
 endif
 
-ENABLE_GDBSTUB ?= 0
-$(call set-feature, GDBSTUB)
-ifeq ($(call has, GDBSTUB), 1)
+# Extension: GDB Stub
+
+ifeq ($(CONFIG_GDBSTUB),y)
 GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
+
 src/mini-gdbstub/Makefile:
 	git submodule update --init $(dir $@)
+
 GDBSTUB_LIB := $(GDBSTUB_OUT)/libgdbstub.a
 $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 	$(MAKE) -C $(dir $<) O=$(dir $@)
+
 OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB) -pthread
+
 gdbstub-test: $(BIN)
 	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif
 
-ENABLE_JIT ?= 0
-$(call set-feature, JIT)
-ifeq ($(call has, JIT), 1)
+# Extension: JIT Compilation
+
+ifeq ($(CONFIG_JIT),y)
     OBJS_EXT += jit.o
-    ENABLE_T2C ?= 1
-    $(call set-feature, T2C)
-    ifeq ($(call has, T2C), 1)
-        # tier-2 JIT compiler is powered by LLVM
-        LLVM_CONFIG = llvm-config-18
-        LLVM_CONFIG := $(shell which $(LLVM_CONFIG))
-        ifndef LLVM_CONFIG
-            # Try Homebrew on macOS
-            LLVM_CONFIG = /opt/homebrew/opt/llvm@18/bin/llvm-config
-            LLVM_CONFIG := $(shell which $(LLVM_CONFIG))
-            ifdef LLVM_CONFIG
-                LDFLAGS += -L/opt/homebrew/opt/llvm@18/lib
+
+    # Tier-2 LLVM compiler - uses centralized detection from mk/toolchain.mk
+    T2C_ENABLED := 0
+    ifeq ($(CONFIG_T2C),y)
+        ifneq ($(LLVM_CONFIG),)
+            CHECK_LLVM := $(shell $(LLVM_CONFIG) --libs 2>/dev/null 1>&2; echo $$?)
+            ifeq ($(CHECK_LLVM),0)
+                T2C_ENABLED := 1
+                OBJS_EXT += t2c.o
+                CFLAGS += -g $(shell $(LLVM_CONFIG) --cflags)
+                LDFLAGS += $(shell $(LLVM_CONFIG) --libfiles)
+            else
+                $(warning LLVM 18 libraries not found. T2C disabled.)
             endif
-        endif
-        ifeq ("$(LLVM_CONFIG)", "")
-            $(error No llvm-config-18 installed. Check llvm-config-18 installation in advance, or use "ENABLE_T2C=0" to disable tier-2 LLVM compiler)
-        endif
-        ifeq ("$(findstring -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS, "$(shell $(LLVM_CONFIG) --cflags)")", "")
-            $(error No llvm-config-18 installed. Check llvm-config-18 installation in advance, or use "ENABLE_T2C=0" to disable tier-2 LLVM compiler)
-        endif
-        CHECK_LLVM_LIBS := $(shell $(LLVM_CONFIG) --libs 2>/dev/null 1>&2; echo $$?)
-        ifeq ("$(CHECK_LLVM_LIBS)", "0")
-            OBJS_EXT += t2c.o
-            CFLAGS += -g $(shell $(LLVM_CONFIG) --cflags)
-            LDFLAGS += $(shell $(LLVM_CONFIG) --libfiles)
         else
-            $(error No llvm-config-18 installed. Check llvm-config-18 installation in advance, or use "ENABLE_T2C=0" to disable tier-2 LLVM compiler)
+            $(warning llvm-config-18 not found. T2C disabled.)
         endif
-    else
-        $(warning T2C (tier-2 compiler) is disabled. Using tier-1 JIT only.)
     endif
-    ifneq ($(processor),$(filter $(processor),x86_64 aarch64 arm64))
-        $(error JIT mode only supports for x64 and arm64 target currently.)
+    CFLAGS += -DRV32_FEATURE_T2C=$(T2C_ENABLED)
+
+    # Platform check (use UNAME_M for raw architecture, not HOST_PLATFORM which maps for artifacts)
+    ifneq ($(UNAME_M),$(filter $(UNAME_M),x86_64 aarch64 arm64))
+        $(error JIT only supports x86_64 and ARM64 platforms.)
     endif
 
-$(OUT)/jit.o: src/jit.c src/rv32_jit.c
+$(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 
-$(OUT)/t2c.o: src/t2c.c src/t2c_template.c
+$(OUT)/t2c.o: src/t2c.c src/t2c_template.c $(CONFIG_HEADER)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
-endif
-# For tail-call elimination, we need a specific set of build flags applied.
-# FIXME: On macOS + Apple Silicon, -fno-stack-protector might have a negative impact.
-
-ENABLE_UBSAN ?= 0
-ifeq ("$(ENABLE_UBSAN)", "1")
-CFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
-LDFLAGS += -fsanitize=undefined -fno-sanitize=alignment -fno-sanitize-recover=all
+else
+    # T2C disabled when JIT is disabled
+    CFLAGS += -DRV32_FEATURE_T2C=0
 endif
 
+# Tail-call optimization flags
 $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-stack-check -fno-stack-protector
 
-# .DEFAULT_GOAL should be set to all since the very first target is not all
-# after including "mk/external.mk"
-.DEFAULT_GOAL := all
-
+# External Dependencies
 include mk/external.mk
 include mk/artifact.mk
 include mk/system.mk
 include mk/wasm.mk
 
+# Build Targets
+
 DTB_DEPS :=
-ifeq ($(call has, SYSTEM), 1)
-ifeq ($(call has, ELF_LOADER), 0)
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
 DTB_DEPS := $(BUILD_DTB) $(BUILD_DTB2C)
 endif
 endif
 
-all: config $(DTB_DEPS) $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
-
+# Core objects
 OBJS := \
     map.o \
     utils.o \
@@ -358,7 +337,7 @@ OBJS := \
     io.o \
     syscall.o
 
-# em_runtime.o should prior to emulate.o, otherwise wasm-ld fails to link
+# Emscripten runtime (must precede emulate.o)
 ifeq ($(CC_IS_EMCC), 1)
 OBJS += em_runtime.o
 endif
@@ -374,17 +353,19 @@ OBJS += \
     main.o
 
 OBJS := $(addprefix $(OUT)/, $(OBJS))
-deps += $(OBJS:%.o=%.o.d) # mk/system.mk includes prior this line, so declare deps at there
+deps += $(OBJS:%.o=%.o.d)
 
-ifeq ($(call has, EXT_F), 1)
+# Object dependencies
+ifeq ($(CONFIG_EXT_F),y)
 $(OBJS): $(SOFTFLOAT_LIB)
 endif
 
-ifeq ($(call has, GDBSTUB), 1)
+ifeq ($(CONFIG_GDBSTUB),y)
 $(OBJS): $(GDBSTUB_LIB)
 endif
 
-$(OUT)/%.o: src/%.c $(CONFIG_FILE) $(deps_emcc) | $(OUT)
+# Compilation rules
+$(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) | $(OUT)
 	$(Q)mkdir -p $(dir $@)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
@@ -396,40 +377,22 @@ $(BIN): $(OBJS) $(DEV_OBJS) | $(OUT)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $^ $(LDFLAGS)
 
-# Skip config file rebuild when SKIP_PREREQ=1 to avoid race conditions in parallel make.
-# The config file is only needed for building $(BIN), not for arch-test with SKIP_PREREQ=1.
-ifneq ($(SKIP_PREREQ),1)
-$(CONFIG_FILE): FORCE
-	$(Q)mkdir -p $(OUT)
-	$(Q)echo "$(CFLAGS)" | xargs -n1 | sort | sed -n 's/^RV32_FEATURE/ENABLE/p' > $@.tmp
-	$(Q)if ! cmp -s $@ $@.tmp 2>/dev/null; then \
-		mv $@.tmp $@; \
-		$(PRINTF) "Configuration updated. Check $(OUT)/.config for configured items.\n"; \
-	else \
-		$(RM) $@.tmp; \
-	fi
-endif
-
-.PHONY: FORCE config
-FORCE:
-config: $(CONFIG_FILE)
+# Main target
+all: $(DTB_DEPS) $(BIN)
+	@$(call notice, Build complete: $(BIN))
 
 # Tools
 include mk/tools.mk
 tool: $(TOOLS_BIN)
 
-# RISC-V Architecture Tests
+# Testing
+
 include mk/riscv-arch-test.mk
 include mk/tests.mk
 
-# the prebuilt executables are built for "rv32im"
 CHECK_ELF_FILES :=
-
-ifeq ($(call has, EXT_M), 1)
-CHECK_ELF_FILES += \
-	puzzle \
-	fcalc \
-	pi
+ifeq ($(CONFIG_EXT_M),y)
+CHECK_ELF_FILES += puzzle fcalc pi
 endif
 
 EXPECTED_hello = Hello World!
@@ -439,11 +402,6 @@ EXPECTED_pi = 3.1415926535897932384626433832795028841971693993751058209749445923
 
 LOG_FILTER=sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'
 
-# $(1): rv32emu's extra CLI parameter
-# $(2): ELF executable
-# $(3): ELF executable name
-# $(4): extra command in the pipeline
-# $(5): expected output
 define check-test
 $(Q)true; \
 $(PRINTF) "Running $(3) ... "; \
@@ -476,14 +434,15 @@ EXPECTED_mmu = STORE PAGE FAULT TEST PASSED!
 mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
-# Non-trivial demonstration programs
-ifeq ($(call has, SDL), 1)
+# Demo Applications
+
+ifeq ($(CONFIG_SDL),y)
 doom_action := (cd $(OUT); LC_ALL=C ../$(BIN) riscv32/doom)
 doom_deps += $(DOOM_DATA) $(BIN)
 doom: artifact $(doom_deps)
 	$(doom_action)
 
-ifeq ($(call has, EXT_F), 1)
+ifeq ($(CONFIG_EXT_F),y)
 quake_action := (cd $(OUT); LC_ALL=C ../$(BIN) riscv32/quake)
 quake_deps += $(QUAKE_DATA) $(BIN)
 quake: artifact $(quake_deps)
@@ -491,62 +450,42 @@ quake: artifact $(quake_deps)
 endif
 endif
 
+# Code Formatting
+
 CLANG_FORMAT := $(shell which clang-format-20 2>/dev/null)
-
 SHFMT := $(shell which shfmt 2>/dev/null)
-
 DTSFMT := $(shell which dtsfmt 2>/dev/null)
-
 BLACK := $(shell which black 2>/dev/null)
-BLACK_VERSION := $(if $(strip $(BLACK)),$(shell $(BLACK) --version | head -n 1 | awk '{print $$2}'),)
-BLACK_MAJOR := $(shell echo $(BLACK_VERSION) | cut -f1 -d.)
-BLACK_MINOR := $(shell echo $(BLACK_VERSION) | cut -f2 -d.)
-BLACK_PATCH := $(shell echo $(BLACK_VERSION) | cut -f3 -d.)
-BLACK_ATLEAST_MAJOR := 25
-BLACK_ATLEAST_MINOR := 1
-BLACK_ATLEAST_PATCH := 0
-BLACK_FORMAT_WARNING := Python format check might fail at CI as you use version $(BLACK_VERSION). \
-                        You may switch black to version $(BLACK_ATLEAST_MAJOR).$(BLACK_ATLEAST_MINOR).$(BLACK_ATLEAST_PATCH)
 
-SUBMODULES := $(shell git config --file .gitmodules --get-regexp path | awk '{ print $$2 }')
+SUBMODULES := $(shell git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{ print $$2 }')
 SUBMODULES_PRUNE_PATHS := $(shell for subm in $(SUBMODULES); do echo -n "-path \"./$$subm\" -o "; done | sed 's/ -o $$//')
 
 format:
 ifeq ($(CLANG_FORMAT),)
-	$(error clang-format-20 not found. Install clang-format version 20 and try again)
-else
-        # Skip formatting submodules and everything in $(OUT), apply the same rule for shfmt and black
-	$(Q)$(CLANG_FORMAT) -i $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path \"./$(OUT)\" \) \
-		                               -prune -o -name "*.[ch]" -print)
+	$(error clang-format-20 not found. Install clang-format version 20.)
 endif
+	$(Q)$(CLANG_FORMAT) -i $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path "./$(OUT)" \) \
+	                                   -prune -o -name "*.[ch]" -print)
 ifeq ($(SHFMT),)
-	$(error shfmt not found. Install shfmt and try again)
-else
-	$(Q)$(SHFMT) -w $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path \"./$(OUT)\" \) \
-		                        -prune -o -name "*.sh" -print)
+	$(error shfmt not found.)
 endif
+	$(Q)$(SHFMT) -w $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path "./$(OUT)" \) \
+	                            -prune -o -name "*.sh" -print)
 ifeq ($(DTSFMT),)
-	$(error dtsfmt not found. Install dtsfmt and try again)
-else
+	$(error dtsfmt not found.)
+endif
 	$(Q)for dts_src in $$(find . \( $(SUBMODULES_PRUNE_PATHS) -o -path "./$(OUT)" \) \
-					-prune -o \( -name "*.dts" -o -name "*.dtsi" \) -print); \
-	do \
+	                -prune -o \( -name "*.dts" -o -name "*.dtsi" \) -print); do \
 		$(DTSFMT) $$dts_src; \
 	done
-endif
 ifeq ($(BLACK),)
-	$(error black not found. Install black version 25.1.0 or above and try again)
-else
-        ifeq ($(call version_lt,\
-                $(BLACK_MAJOR),$(BLACK_MINOR),$(BLACK_PATCH),\
-                $(BLACK_ATLEAST_MAJOR),$(BLACK_ATLEAST_MINOR),$(BLACK_ATLEAST_PATCH)), 1)
-		$(warning $(BLACK_FORMAT_WARNING))
-        else
-		$(Q)$(BLACK) --quiet $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path \"./$(OUT)\" \) \
-		                             -prune -o \( -name "*.py" -o -name "*.pyi" \) -print)
-        endif
+	$(error black not found. Install black version 25.1.0+.)
 endif
-	$(Q)$(call notice,All files are properly formatted.)
+	$(Q)$(BLACK) --quiet $(shell find . \( $(SUBMODULES_PRUNE_PATHS) -o -path "./$(OUT)" \) \
+	                             -prune -o \( -name "*.py" -o -name "*.pyi" \) -print)
+	$(Q)$(call notice, All files formatted.)
+
+# Clean Targets
 
 clean:
 	$(VECHO) "Cleaning... "
@@ -560,11 +499,13 @@ distclean: clean
 	$(Q)$(RM) -r $(DEMO_DIR)
 	$(Q)$(RM) *.zip
 	$(Q)$(RM) -r $(OUT)/mini-gdbstub
-	$(Q)-$(RM) $(OUT)/.config
+	$(Q)$(RM) -r $(OUT)/devices
+	$(Q)-$(RM) .config $(CONFIG_HEADER)
 	$(Q)-$(RM) -r $(SOFTFLOAT_DUMMY_PLAT) $(OUT)/softfloat
 	$(Q)$(call notice, [OK])
 
-.PHONY: all config tool check check-hello misalign misalign-in-blk-emu mmu-test
+.PHONY: all config defconfig oldconfig savedefconfig env-check kconfig-tools
+.PHONY: tool check check-hello misalign misalign-in-blk-emu mmu-test
 .PHONY: gdbstub-test doom quake format clean distclean artifact
 
 -include $(deps)

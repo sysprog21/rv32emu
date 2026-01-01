@@ -34,6 +34,15 @@ uint32_t rtc_read(rtc_t *rtc, uint32_t addr)
 {
     uint32_t rtc_read_val = 0;
 
+    /*
+     * To read the value, the kernel must perform an IO_READ(TIME_LOW), which
+     * returns an unsigned 32-bit value, before an IO_READ(TIME_HIGH), which
+     * returns a signed 32-bit value, corresponding to the higher half of the
+     * full value. [1]
+     *
+     * [1]
+     * https://android.googlesource.com/platform/external/qemu/+/refs/heads/emu-2.0-release/docs/GOLDFISH-VIRTUAL-HARDWARE.TXT
+     */
     switch (addr) {
     case RTC_TIME_LOW:
         now_nsec = rtc_get_now_nsec(rtc);

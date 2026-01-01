@@ -31,7 +31,11 @@ fi
 
 OPTS=
 tmpfile=/tmp/rv32emu-gdbstub.$PID
-breakpoints=(0x10500 0x10600 0x10700)
+# Use main() function addresses that are identical across platforms:
+# - 0x100e0: main entry (addi sp,sp,-16)
+# - 0x100e8: jal run_puzzle (call to puzzle solver)
+# - 0x100f0: li a0,0 (after run_puzzle returns, set exit code)
+breakpoints=(0x100e0 0x100e8 0x100f0)
 bkpt_count=${#breakpoints[@]}
 OPTS+="-ex 'file build/riscv32/puzzle' "
 OPTS+="-ex 'target remote :1234' "

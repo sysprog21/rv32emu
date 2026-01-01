@@ -53,11 +53,50 @@ define fetch-releases-tag
     )
 endef
 
+# Verify prebuilt files against a SHA checksum file.
+# $(1): SHA checksum file path
+# $(2): prefix path for files (can be empty)
+define verify-prebuilt-files
+	$(if $(shell test -s $(1) || echo missing),$(error Checksum file $(1) is missing or empty))
+	$(Q)$(eval PREBUILT_FILES := $(shell cat $(1) | awk '{ print $$2 };'))
+	$(Q)$(eval $(foreach FILE,$(PREBUILT_FILES), \
+	    $(call verify,$(SHA1SUM),$(shell grep -F -w $(FILE) $(1) | awk '{ print $$1 };'),$(2)$(FILE),RES) \
+	))
+endef
+
+# Handle SHA-1 verification result: re-fetch if failed, report status.
+# $(1): whether to extract tarball (yes/no)
+define handle-sha1-result
+	$(Q)if [ "$(RES)" = "1" ]; then \
+	    $(call warn, SHA-1 verification failed!); \
+	    $(PRINTF) "Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n"; \
+	    wget -q --show-progress "$(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL)" -O "build/$(RV32EMU_PREBUILT_TARBALL)" || exit 1; \
+	    $(if $(filter yes,$(1)),tar --strip-components=1 -zxf "build/$(RV32EMU_PREBUILT_TARBALL)" -C build || exit 1;) \
+	else \
+	    $(call notice, [OK]); \
+	fi
+endef
+
+# Fetch checksum file if tarball doesn't exist.
+# $(1): tarball path to check
+# $(2): checksum file(s) to download (space-separated base names)
+define fetch-checksum-files
+	$(Q)if [ ! -f "$(1)" ]; then \
+	    $(foreach f,$(2),wget -q -O "$(BIN_DIR)/$(f)" "$(PREBUILT_BLOB_URL)/$(f)" || exit 1;) \
+	    $(call notice, [OK]); \
+	else \
+	    $(call warn, skipped); \
+	fi
+endef
+
 LATEST_RELEASE ?=
 
-# Only fetch releases when artifact-related targets are requested
-# This prevents network calls during unrelated targets like 'make defconfig'
-ARTIFACT_TARGETS := artifact fetch-checksum scimark2 ieeelib
+# Only fetch releases when artifact-related targets are requested.
+# This prevents network calls during unrelated targets like 'make defconfig'.
+# IMPORTANT: When adding new targets that depend on 'artifact' in the main
+# Makefile, they must also be added here to trigger release fetching.
+ARTIFACT_TARGETS := artifact fetch-checksum scimark2 ieeelib \
+                    check misalign doom quake
 ifneq ($(filter $(ARTIFACT_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(call has, PREBUILT), 1)
     # On macOS/arm64 Github runner, let's leverage the ${{ secrets.GITHUB_TOKEN }} to prevent 403 rate limit error.
@@ -77,13 +116,14 @@ endif
 ifeq ($(call has, PREBUILT), 1)
     PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
 else
-  # Since rv32emu only supports the dynamic binary translation of integer instruction in tiered compilation currently,
-  # we disable the hardware floating-point and the related SIMD operation of x86.
-  CFLAGS := -m32 -mno-sse -mno-sse2 -msoft-float -O2 -Wno-unused-result -L$(BIN_DIR)
-  LDFLAGS := -lsoft-fp -lm
+    # Since rv32emu only supports the dynamic binary translation of integer
+    # instruction in tiered compilation currently, we disable the hardware
+    # floating-point and the related SIMD operation of x86.
+    CFLAGS := -m32 -mno-sse -mno-sse2 -msoft-float -O2 -Wno-unused-result -L$(BIN_DIR)
+    LDFLAGS := -lsoft-fp -lm
 
-  CFLAGS_CROSS := -march=rv32im -mabi=ilp32 -O2 -Wno-implicit-function-declaration
-  LDFLAGS_CROSS := -lm -lsemihost
+    CFLAGS_CROSS := -march=rv32im -mabi=ilp32 -O2 -Wno-implicit-function-declaration
+    LDFLAGS_CROSS := -lm -lsemihost
 endif
 
 .PHONY: artifact fetch-checksum scimark2 ieeelib
@@ -94,52 +134,21 @@ ifeq ($(call has, PREBUILT), 1)
 	$(Q)$(eval RES := 0)
 
 ifeq ($(call has, SYSTEM), 1)
-	$(Q)$(eval PREBUILT_LINUX_IMAGE_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-linux-image | awk '{  print $$2 };'))
-
-	$(Q)$(eval $(foreach FILE,$(PREBUILT_LINUX_IMAGE_FILENAME), \
-	    $(call verify,$(SHA1SUM),$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-image | awk '{ print $$1 };'),$(BIN_DIR)/$(FILE),RES) \
-	))
-
+	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-linux-image,$(BIN_DIR)/)
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-linux-image-prebuilt.tar.gz)
 else ifeq ($(call has, ARCH_TEST), 1)
-	$(Q)$(eval PREBUILT_SAIL_FILENAME := $(shell cat $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha | awk '{  print $$2 };'))
-
-	$(Q)$(eval $(foreach FILE,$(PREBUILT_SAIL_FILENAME), \
-	    $(call verify,$(SHA1SUM),$(shell grep -w $(FILE) $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha | awk '{ print $$1 };'),$(BIN_DIR)/$(FILE),RES) \
-	))
-
+	$(call verify-prebuilt-files,$(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha,$(BIN_DIR)/)
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt-sail-$(HOST_PLATFORM))
 else
-	$(Q)$(eval PREBUILT_X86_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{  print $$2 };'))
-	$(Q)$(eval PREBUILT_RV32_FILENAME := $(shell cat $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$2 };'))
-
-	$(Q)$(eval $(foreach FILE,$(PREBUILT_X86_FILENAME), \
-	    $(call verify,$(SHA1SUM),$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-linux-x86-softfp | awk '{ print $$1 };'),$(BIN_DIR)/linux-x86-softfp/$(FILE),RES) \
-	))
-	$(Q)$(eval $(foreach FILE,$(PREBUILT_RV32_FILENAME), \
-	    $(call verify,$(SHA1SUM),$(shell grep -w $(FILE) $(BIN_DIR)/sha1sum-riscv32 | awk '{ print $$1 };'),$(BIN_DIR)/riscv32/$(FILE),RES) \
-	))
-
+	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-linux-x86-softfp,$(BIN_DIR)/linux-x86-softfp/)
+	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-riscv32,$(BIN_DIR)/riscv32/)
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt.tar.gz)
 endif
 
 ifeq ($(call has, ARCH_TEST), 1)
-	$(Q)if [ "$(RES)" = "1" ]; then \
-	    $(call warn, SHA-1 verification failed!); \
-	    $(PRINTF) "Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n"; \
-	    wget -q --show-progress $(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL) -O build/$(RV32EMU_PREBUILT_TARBALL); \
-	else \
-	    $(call notice, [OK]); \
-	fi
+	$(call handle-sha1-result,no)
 else
-	$(Q)if [ "$(RES)" = "1" ]; then \
-	    $(call warn, SHA-1 verification failed!); \
-	    $(PRINTF) "Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n"; \
-	    wget -q --show-progress $(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL) -O build/$(RV32EMU_PREBUILT_TARBALL); \
-	    tar --strip-components=1 -zxf build/$(RV32EMU_PREBUILT_TARBALL) -C build; \
-	else \
-	    $(call notice, [OK]); \
-	fi
+	$(call handle-sha1-result,yes)
 endif
 else
 ifeq ($(call has, SYSTEM), 1)
@@ -189,27 +198,11 @@ fetch-checksum:
 ifeq ($(call has, PREBUILT), 1)
 	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ... "
 ifeq ($(call has, SYSTEM), 1)
-    ifeq ($(wildcard $(BIN_DIR)/rv32emu-linux-image-prebuilt.tar.gz),)
-		$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-image $(PREBUILT_BLOB_URL)/sha1sum-linux-image
-		$(Q)$(call notice, [OK])
-    else
-		$(Q)$(call warn, skipped)
-    endif
+	$(call fetch-checksum-files,$(BIN_DIR)/rv32emu-linux-image-prebuilt.tar.gz,sha1sum-linux-image)
 else ifeq ($(call has, ARCH_TEST), 1)
-    ifeq ($(wildcard $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM)),)
-		$(Q)wget -q -O $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha $(PREBUILT_BLOB_URL)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha
-		$(Q)$(call notice, [OK])
-    else
-		$(Q)$(call warn, skipped)
-    endif
+	$(call fetch-checksum-files,$(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM),rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha)
 else
-    ifeq ($(wildcard $(BIN_DIR)/rv32emu-prebuilt.tar.gz),)
-		$(Q)wget -q -O $(BIN_DIR)/sha1sum-linux-x86-softfp $(PREBUILT_BLOB_URL)/sha1sum-linux-x86-softfp
-		$(Q)wget -q -O $(BIN_DIR)/sha1sum-riscv32 $(PREBUILT_BLOB_URL)/sha1sum-riscv32
-		$(Q)$(call notice, [OK])
-    else
-		$(Q)$(call warn , skipped)
-    endif
+	$(call fetch-checksum-files,$(BIN_DIR)/rv32emu-prebuilt.tar.gz,sha1sum-linux-x86-softfp sha1sum-riscv32)
 endif
 endif
 

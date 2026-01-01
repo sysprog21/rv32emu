@@ -64,7 +64,7 @@ error_msg = $(PRINTF) "$(RED)$(strip $1)$(NC)\n"
 # Note: 'artifact' is included because it only downloads prebuilt binaries
 # and determines what to download from ENABLE_* flags (via compat.mk)
 CONFIG_TARGETS := config menuconfig defconfig oldconfig savedefconfig \
-                  clean distclean help env-check artifact fetch-checksum
+                  clean distclean help env-check artifact fetch-checksum build-linux-image
 
 # Targets that generate .config
 CONFIG_GENERATORS := config menuconfig defconfig oldconfig

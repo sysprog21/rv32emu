@@ -994,15 +994,19 @@ static void match_pattern(riscv_t *rv, block_t *block)
                 break;
             }
             break;
-        /* If the memory addresses of a sequence of store or load instructions
-         * are contiguous, combine these instructions.
-         */
+            /* If the memory addresses of a sequence of store or load
+             * instructions are contiguous, combine these instructions.
+             * NOTE: Disabled in SYSTEM_MMIO because fused memory ops bypass
+             * MMU translation and bounds checking.
+             */
+#if !RV32_HAS(SYSTEM_MMIO)
         case rv_insn_sw:
             COMBINE_MEM_OPS(0);
             break;
         case rv_insn_lw:
             COMBINE_MEM_OPS(1);
             break;
+#endif
             /* TODO: mixture of SW and LW */
             /* TODO: reorder insturction to match pattern */
         case rv_insn_slli:

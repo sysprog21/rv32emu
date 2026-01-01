@@ -14,6 +14,14 @@ typedef struct {
     uint64_t mem_size;
 } memory_t;
 
+/* Check if address range [addr, addr+size) is within guest RAM.
+ * Prevents buffer overflow on multi-byte accesses near memory boundary.
+ * Use size=0 for address-only validation (single byte or pre-validated size).
+ */
+#define GUEST_RAM_CONTAINS(mem, addr, size) \
+    ((uint64_t) (addr) < (mem)->mem_size && \
+     (uint64_t) (size) <= (mem)->mem_size - (uint64_t) (addr))
+
 /* create a memory instance */
 memory_t *memory_new(uint64_t size);
 

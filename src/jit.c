@@ -1559,6 +1559,29 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
     assert(vreg_idx < 32);
 
     uint32_t addr;
+    uint32_t access_size;
+
+    /* Determine access size based on instruction type */
+    switch (rv->jit_mmu.type) {
+    case rv_insn_lb:
+    case rv_insn_lbu:
+    case rv_insn_sb:
+        access_size = 1;
+        break;
+    case rv_insn_lh:
+    case rv_insn_lhu:
+    case rv_insn_sh:
+        access_size = 2;
+        break;
+    case rv_insn_lw:
+    case rv_insn_sw:
+        access_size = 4;
+        break;
+    default:
+        /* Catch unhandled instruction types early */
+        assert(!"Unhandled JIT MMU instruction type");
+        __UNREACHABLE;
+    }
 
     if (rv->jit_mmu.type == rv_insn_lb || rv->jit_mmu.type == rv_insn_lh ||
         rv->jit_mmu.type == rv_insn_lbu || rv->jit_mmu.type == rv_insn_lhu ||
@@ -1567,7 +1590,11 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
     else
         addr = rv->io.mem_translate(rv, rv->jit_mmu.vaddr, W);
 
-    if (addr == rv->jit_mmu.vaddr || addr < PRIV(rv)->mem->mem_size) {
+    /* Only treat as RAM if entire access range [addr, addr+size) is within
+     * valid guest memory bounds. This prevents buffer overflow on multi-byte
+     * accesses near the memory boundary.
+     */
+    if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, access_size)) {
         rv->jit_mmu.is_mmio = 0;
         rv->jit_mmu.paddr = addr;
         return;

@@ -227,7 +227,7 @@ uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
         return 0;
 #endif
 
-    if (addr == vaddr || addr < PRIV(rv)->mem->mem_size)
+    if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 4))
         return memory_read_w(addr);
 
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
@@ -246,7 +246,14 @@ uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr)
         return 0;
 #endif
 
-    return memory_read_s(addr);
+    if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 2))
+        return memory_read_s(addr);
+
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    MMIO_READ();
+#endif
+
+    __UNREACHABLE;
 }
 
 uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
@@ -258,7 +265,7 @@ uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
         return 0;
 #endif
 
-    if (addr == vaddr || addr < PRIV(rv)->mem->mem_size)
+    if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 1))
         return memory_read_b(addr);
 
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
@@ -277,7 +284,7 @@ void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
         return;
 #endif
 
-    if (addr == vaddr || addr < PRIV(rv)->mem->mem_size) {
+    if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 4)) {
         memory_write_w(addr, (uint8_t *) &val);
         return;
     }
@@ -285,6 +292,8 @@ void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     MMIO_WRITE();
 #endif
+
+    __UNREACHABLE;
 }
 
 void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
@@ -296,10 +305,16 @@ void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
         return;
 #endif
 
-    if (addr == vaddr)
-        return memory_write_s(addr, (uint8_t *) &val);
+    if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 2)) {
+        memory_write_s(addr, (uint8_t *) &val);
+        return;
+    }
 
-    memory_write_s(addr, (uint8_t *) &val);
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    MMIO_WRITE();
+#endif
+
+    __UNREACHABLE;
 }
 
 void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
@@ -311,7 +326,7 @@ void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
         return;
 #endif
 
-    if (addr == vaddr || addr < PRIV(rv)->mem->mem_size) {
+    if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 1)) {
         memory_write_b(addr, (uint8_t *) &val);
         return;
     }
@@ -319,6 +334,8 @@ void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     MMIO_WRITE();
 #endif
+
+    __UNREACHABLE;
 }
 
 /*

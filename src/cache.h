@@ -66,3 +66,28 @@ void clear_cache_hot(const struct cache *cache, clear_func_t func);
 #endif
 
 uint32_t cache_freq(const struct cache *cache, uint32_t key);
+
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+/**
+ * cache_invalidate_satp - invalidate all blocks matching the given SATP
+ * @cache: a pointer to target cache
+ * @satp: the SATP value to match
+ * @return: number of blocks invalidated
+ *
+ * This is used by SFENCE.VMA with rs1=0 (global flush) to invalidate
+ * JIT-compiled blocks that may contain stale VA→PA mappings.
+ */
+uint32_t cache_invalidate_satp(struct cache *cache, uint32_t satp);
+
+/**
+ * cache_invalidate_va - invalidate blocks within a VA page matching SATP
+ * @cache: a pointer to target cache
+ * @va: the virtual address (page will be derived)
+ * @satp: the SATP value to match
+ * @return: number of blocks invalidated
+ *
+ * This is used by SFENCE.VMA with rs1!=0 (address-specific flush) to
+ * invalidate JIT-compiled blocks in a specific virtual page.
+ */
+uint32_t cache_invalidate_va(struct cache *cache, uint32_t va, uint32_t satp);
+#endif

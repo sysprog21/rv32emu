@@ -12,6 +12,8 @@
 
 #include "cache.h"
 #include "mpool.h"
+#include "riscv.h"
+#include "riscv_private.h"
 #include "utils.h"
 
 static uint32_t cache_size, cache_size_bits;
@@ -424,5 +426,76 @@ void clear_cache_hot(const struct cache *cache, clear_func_t func)
     {
         func(entry->value);
     }
+}
+#endif
+
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+/* Thread safety note: These invalidation functions assume single-threaded
+ * execution. The rv32emu JIT operates in a single-threaded model where
+ * compilation and execution do not occur concurrently. If this assumption
+ * changes, appropriate locking must be added around cache->list traversal.
+ */
+
+uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
+{
+    if (unlikely(!cache->capacity))
+        return 0;
+
+    uint32_t count = 0;
+    cache_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    list_for_each_entry (entry, &cache->list, list)
+#else
+    list_for_each_entry (entry, &cache->list, list, cache_entry_t)
+#endif
+    {
+        block_t *block = (block_t *) entry->value;
+        if (block && block->satp == satp && !block->invalidated) {
+            block->invalidated = true;
+            count++;
+        }
+    }
+    return count;
+}
+
+uint32_t cache_invalidate_va(cache_t *cache, uint32_t va, uint32_t satp)
+{
+    if (unlikely(!cache->capacity))
+        return 0;
+
+    /* Extract page-aligned VA for the target address */
+    uint32_t va_page = va & ~(RV_PG_SIZE - 1);
+    uint32_t count = 0;
+
+    cache_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    list_for_each_entry (entry, &cache->list, list)
+#else
+    list_for_each_entry (entry, &cache->list, list, cache_entry_t)
+#endif
+    {
+        block_t *block = (block_t *) entry->value;
+        if (!block || block->satp != satp || block->invalidated)
+            continue;
+
+        /* Check if target VA page overlaps with block's address range.
+         * A block may span multiple pages, so we check if va_page falls
+         * within [block_start_page, block_end_page].
+         *
+         * Note: pc_end is exclusive (address after last instruction), so we
+         * use (pc_end - 1) to get the page containing the last byte. This
+         * avoids false invalidation when pc_end falls exactly on a page
+         * boundary.
+         */
+        uint32_t block_start_page = block->pc_start & ~(RV_PG_SIZE - 1);
+        uint32_t last_byte = block->pc_end > block->pc_start ? block->pc_end - 1
+                                                             : block->pc_start;
+        uint32_t block_end_page = last_byte & ~(RV_PG_SIZE - 1);
+        if (va_page >= block_start_page && va_page <= block_end_page) {
+            block->invalidated = true;
+            count++;
+        }
+    }
+    return count;
 }
 #endif

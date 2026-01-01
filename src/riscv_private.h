@@ -92,6 +92,8 @@ typedef struct block {
     bool has_loops;   /**< Determine the block has loop or not */
 #if RV32_HAS(SYSTEM)
     uint32_t satp;
+    bool invalidated; /**< Block invalidated by SFENCE.VMA, needs recompilation
+                       */
 #endif
 #if RV32_HAS(T2C)
     bool compiled; /**< The T2C request is enqueued or not */

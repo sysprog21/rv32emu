@@ -2527,7 +2527,8 @@ static void translate_chained_block(struct jit_state *state,
         block_t *block1 =
             cache_get(rv->block_cache, ir->branch_untaken->pc, false);
         if (block1->translatable) {
-            IIF(RV32_HAS(SYSTEM))(if (block1->satp == rv->csr_satp), )
+            IIF(RV32_HAS(SYSTEM))(
+                if (block1->satp == rv->csr_satp && !block1->invalidated), )
                 translate_chained_block(state, rv, block1);
         }
     }
@@ -2535,7 +2536,8 @@ static void translate_chained_block(struct jit_state *state,
         block_t *block1 =
             cache_get(rv->block_cache, ir->branch_taken->pc, false);
         if (block1->translatable) {
-            IIF(RV32_HAS(SYSTEM))(if (block1->satp == rv->csr_satp), )
+            IIF(RV32_HAS(SYSTEM))(
+                if (block1->satp == rv->csr_satp && !block1->invalidated), )
                 translate_chained_block(state, rv, block1);
         }
     }
@@ -2556,7 +2558,8 @@ static void translate_chained_block(struct jit_state *state,
                 block_t *block1 =
                     cache_get(rv->block_cache, bt->PC[max_idx], false);
                 if (block1 && block1->translatable) {
-                    IIF(RV32_HAS(SYSTEM))(if (block1->satp == rv->csr_satp), )
+                    IIF(RV32_HAS(SYSTEM))(if (block1->satp == rv->csr_satp &&
+                                              !block1->invalidated), )
                         translate_chained_block(state, rv, block1);
                 }
             }

@@ -183,8 +183,6 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw);
 void mmu_tlb_flush_all(riscv_t *rv);
 void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr);
 
-uint32_t *mmu_walk(riscv_t *rv, const uint32_t addr, uint32_t *level);
-
 #define get_ppn_and_offset()                                   \
     uint32_t ppn;                                              \
     uint32_t offset;                                           \

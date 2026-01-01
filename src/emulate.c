@@ -1114,8 +1114,8 @@ static block_t *block_find_or_translate(riscv_t *rv)
     /* lookup the next block in the block cache */
     block_t *next_blk = (block_t *) cache_get(rv->block_cache, rv->PC, true);
 #if RV32_HAS(SYSTEM)
-    /* discard cache if satp is not matched */
-    if (next_blk && next_blk->satp != rv->csr_satp)
+    /* discard cache if satp mismatch or block was invalidated by SFENCE.VMA */
+    if (next_blk && (next_blk->satp != rv->csr_satp || next_blk->invalidated))
         next_blk = NULL;
 #endif
 #endif
@@ -1144,6 +1144,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
      * in "block_alloc()"
      */
     next_blk->satp = rv->csr_satp;
+    next_blk->invalidated = false;
 #endif
 
     optimize_constant(rv, next_blk);
@@ -1341,7 +1342,7 @@ void rv_step(void *arg)
         assert(block);
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-        assert(block->satp == rv->csr_satp);
+        assert(block->satp == rv->csr_satp && !block->invalidated);
 #endif
 
 #if !RV32_HAS(SYSTEM)
@@ -1359,7 +1360,7 @@ void rv_step(void *arg)
 #if RV32_HAS(BLOCK_CHAINING)
         if (prev
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-            && prev->satp == rv->csr_satp
+            && prev->satp == rv->csr_satp && !prev->invalidated
 #endif
         ) {
             rv_insn_t *last_ir = prev->ir_tail;

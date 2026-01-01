@@ -18,6 +18,7 @@ build/softfloat
 build/cache/
 build/map/
 build/path/
+build/rv32emu-prebuilt.tar.gz
 build/linux-x86-softfp/
 build/riscv32/
 build/sail_cSim/

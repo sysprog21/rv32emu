@@ -5,19 +5,19 @@ set -e -u -o pipefail
 export PATH=$(pwd)/toolchain/bin:$PATH
 
 GDB=
-prefixes=("${CROSS_COMPILE}" "riscv32-unknown-elf-" "riscv-none-elf-")
+prefixes=("${CROSS_COMPILE:-}" "riscv32-unknown-elf-" "riscv-none-elf-")
 for prefix in "${prefixes[@]}"; do
+    # Skip empty prefix to avoid matching host gdb
+    [ -z "${prefix}" ] && continue
     utility=${prefix}gdb
-    set +e # temporarily disable exit on error
-    command -v "${utility}" > /dev/null 2>&1
-    if [ $? = 0 ]; then
+    if command -v "${utility}" > /dev/null 2>&1; then
         GDB=${utility}
+        break
     fi
-    set -e
 done
 
 # Check if GDB is available
-if [ -z ${GDB} ]; then
+if [ -z "${GDB}" ]; then
     exit 1
 fi
 

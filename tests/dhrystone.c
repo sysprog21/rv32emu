@@ -312,7 +312,7 @@ void Proc5()
     BoolGlob = false;
 }
 
-extern boolean Func3();
+extern boolean Func3(Enumeration);
 
 void Proc6(Enumeration EnumParIn, Enumeration *EnumParOut)
 {

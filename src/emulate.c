@@ -1457,6 +1457,12 @@ void rv_step_debug(void *arg)
     rv_check_interrupt(rv);
 #endif
 
+#if !RV32_HAS(SYSTEM)
+    /* on exit */
+    if (unlikely(rv->PC == PRIV(rv)->exit_addr))
+        PRIV(rv)->on_exit = true;
+#endif
+
     rv_insn_t ir;
 
 retranslate:

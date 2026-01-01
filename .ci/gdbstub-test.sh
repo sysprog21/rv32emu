@@ -5,19 +5,19 @@ set -e -u -o pipefail
 export PATH=$(pwd)/toolchain/bin:$PATH
 
 GDB=
-prefixes=("${CROSS_COMPILE}" "riscv32-unknown-elf-" "riscv-none-elf-")
+prefixes=("${CROSS_COMPILE:-}" "riscv32-unknown-elf-" "riscv-none-elf-")
 for prefix in "${prefixes[@]}"; do
+    # Skip empty prefix to avoid matching host gdb
+    [ -z "${prefix}" ] && continue
     utility=${prefix}gdb
-    set +e # temporarily disable exit on error
-    command -v "${utility}" > /dev/null 2>&1
-    if [ $? = 0 ]; then
+    if command -v "${utility}" > /dev/null 2>&1; then
         GDB=${utility}
+        break
     fi
-    set -e
 done
 
 # Check if GDB is available
-if [ -z ${GDB} ]; then
+if [ -z "${GDB}" ]; then
     exit 1
 fi
 
@@ -31,7 +31,11 @@ fi
 
 OPTS=
 tmpfile=/tmp/rv32emu-gdbstub.$PID
-breakpoints=(0x10500 0x10600 0x10700)
+# Use main() function addresses that are identical across platforms:
+# - 0x100e0: main entry (addi sp,sp,-16)
+# - 0x100e8: jal run_puzzle (call to puzzle solver)
+# - 0x100f0: li a0,0 (after run_puzzle returns, set exit code)
+breakpoints=(0x100e0 0x100e8 0x100f0)
 bkpt_count=${#breakpoints[@]}
 OPTS+="-ex 'file build/riscv32/puzzle' "
 OPTS+="-ex 'target remote :1234' "

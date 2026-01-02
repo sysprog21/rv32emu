@@ -1104,7 +1104,17 @@ retranslate:
         }
 #endif
 
-        assert(insn);
+        /* If instruction fetch failed due to trap (page fault, etc.), break.
+         * The caller checks rv->is_trapped and invokes trap handler.
+         * Note: insn==0 alone is ambiguous; we verify trap state explicitly.
+         */
+        if (!insn) {
+#if RV32_HAS(SYSTEM)
+            assert(rv->is_trapped &&
+                   "insn fetch returned 0 without setting trap state");
+#endif
+            break;
+        }
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
@@ -1947,6 +1957,16 @@ void rv_step(void *arg)
         block_t *block = block_find_or_translate(rv);
         /* by now, a block should be available */
         if (unlikely(!block)) {
+#if RV32_HAS(SYSTEM)
+            /* Check if a trap is pending (page fault during translation).
+             * If so, invoke trap handler and continue instead of halting.
+             */
+            if (rv->is_trapped) {
+                trap_handler(rv);
+                prev = NULL;
+                continue;
+            }
+#endif
             rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
                          rv->PC);
             rv->halt = true;
@@ -2116,7 +2136,18 @@ retranslate:
         goto retranslate;
     }
 #endif
-    assert(insn);
+
+    /* If instruction fetch failed (page fault, etc.), invoke trap handler.
+     * In SYSTEM mode, insn==0 should always coincide with trap state.
+     */
+    if (!insn) {
+#if RV32_HAS(SYSTEM)
+        assert(rv->is_trapped &&
+               "insn fetch returned 0 without setting trap state");
+        trap_handler(rv);
+#endif
+        return;
+    }
 
     /* decode the instruction */
     if (!rv_decode(&ir, insn)) {

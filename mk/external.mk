@@ -111,6 +111,11 @@ TIMIDITY_DATA_URL = https://www.libsdl.org/projects/old/SDL_mixer/timidity/timid
 TIMIDITY_DATA_DEST = $(OUT)
 TIMIDITY_DATA = $(TIMIDITY_DATA_DEST)/timidity
 TIMIDITY_DATA_SKIP_DIR_LEVEL = 0
+# find $(TIMIDITY_DATA_DEST)/timidity -type f -not -path '*/.git/*' -print0 | \
+	LC_ALL=C sort -z | \
+	xargs -0 sha1sum | \
+	LC_ALL=C sort | \
+	sha1sum
 TIMIDITY_DATA_SHA = cf6217a5d824b717ec4a07e15e6c129a4657ca25
 TIMIDITY_DATA_SHA_CMD = $(SHA1SUM)
 
@@ -146,6 +151,11 @@ LINUX_DATA_SHA_CMD = $(SHA256SUM)
 SIMPLEFS_VERSION = rel2025.0
 SIMPLEFS_DATA = /tmp/simplefs
 SIMPLEFS_DATA_URL = git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
+# find /tmp/simplefs -type f -not -path '*/.git/*' -print0 | \
+	LC_ALL=C sort -z | \
+	xargs -0 sha1sum | \
+	LC_ALL=C sort | \
+	sha1sum
 SIMPLEFS_DATA_SHA = 863936f72e0781b240c5ec4574510c57f0394b99
 SIMPLEFS_DATA_SHA_CMD = $(SHA1SUM)
 

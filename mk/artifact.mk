@@ -40,17 +40,16 @@ SHELL_HACK := $(shell mkdir -p $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32 $(
 # $(2): name of GitHub releases
 # $(3): name showing in terminal
 define fetch-releases-tag
+    $(eval LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
+                                     | grep '"tag_name"' \
+                                     | grep "$(1)" \
+                                     | head -n 1 \
+                                     | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')) \
+    $(if $(LATEST_RELEASE),, \
+        $(error Fetching tag of latest releases failed) \
+    ) \
     $(if $(wildcard $(BIN_DIR)/$(2)), \
-        $(info $(call warnx, $(3) is found. Skipping downloading.)), \
-        $(eval LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
-                                         | grep '"tag_name"' \
-                                         | grep "$(1)" \
-                                         | head -n 1 \
-                                         | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')) \
-        $(if $(LATEST_RELEASE),, \
-            $(error Fetching tag of latest releases failed) \
-        ) \
-    )
+        $(info $(call warnx, $(3) is found. Skipping downloading.)))
 endef
 
 # Verify prebuilt files against a SHA checksum file.
@@ -96,18 +95,27 @@ LATEST_RELEASE ?=
 # IMPORTANT: When adding new targets that depend on 'artifact' in the main
 # Makefile, they must also be added here to trigger release fetching.
 ARTIFACT_TARGETS := artifact fetch-checksum scimark2 ieeelib \
-                    check misalign doom quake
+                    check misalign doom quake arch-test system
 ifneq ($(filter $(ARTIFACT_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(call has, PREBUILT), 1)
     # On macOS/arm64 Github runner, let's leverage the ${{ secrets.GITHUB_TOKEN }} to prevent 403 rate limit error.
     # Thus, the LATEST_RELEASE tag is defined at Github job steps, no need to fetch them here.
+    # Also skip fetching if prebuilt artifacts already exist (cached from previous artifact fetch).
+    # Use checksum files as sentinels - they indicate a complete artifact fetch and are required
+    # for SHA verification. If missing, we need LATEST_RELEASE to construct download URLs.
     ifeq ($(LATEST_RELEASE),)
          ifeq ($(call has, SYSTEM), 1)
-             $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
+             ifeq ($(wildcard $(BIN_DIR)/sha1sum-linux-image),)
+                 $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
+             endif
          else ifeq ($(call has, ARCH_TEST), 1)
-             $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
+             ifeq ($(wildcard $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha),)
+                 $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
+             endif
          else
-             $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
+             ifeq ($(wildcard $(BIN_DIR)/sha1sum-riscv32),)
+                 $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
+             endif
          endif
     endif
 endif

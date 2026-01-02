@@ -258,6 +258,7 @@ Available configuration options:
 * `ENABLE_SDL`: Experimental Display and Event System Calls
 * `ENABLE_JIT`: Experimental JIT compiler
 * `ENABLE_SYSTEM`: Experimental system emulation, allowing booting Linux kernel
+* `ENABLE_GOLDFISH_RTC`: Enable Goldfish RTC peripheral when running the Linux kernel
 * `ENABLE_MOP_FUSION`: Macro-operation fusion
 * `ENABLE_BLOCK_CHAINING`: Block chaining of translated blocks
 

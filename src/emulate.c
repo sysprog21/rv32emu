@@ -503,6 +503,10 @@ static block_t *block_alloc(riscv_t *rv)
         return NULL;
     assert(block);
     block->n_insn = 0;
+#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(MOP_FUSION)
+    block->n_lazy_candidates = 0;
+    block->lazy_fusion_done = false;
+#endif
 #if RV32_HAS(JIT)
     block->translatable = true;
     block->hot = false;
@@ -634,6 +638,42 @@ static uint32_t peripheral_update_ctr = 64;
 #include "rv32_template.c"
 #undef RVOP
 
+/* Helper for fused instruction tail: continue to next or stop.
+ * Matches RVOP macro signal handling and block map clearing logic.
+ * Note: RVOP returns without saving cycle/PC on signal handling, so we do too.
+ */
+static inline bool fuse_next_or_stop(riscv_t *rv,
+                                     const rv_insn_t *ir,
+                                     uint64_t cycle,
+                                     uint32_t PC)
+{
+#if RV32_HAS(SYSTEM)
+    if (need_handle_signal) {
+        need_handle_signal = false;
+        /* Match RVOP: return without saving cycle/PC. The signal handler
+         * will determine the appropriate PC from rv->PC (unchanged).
+         */
+        return true;
+    }
+#if !RV32_HAS(JIT)
+    if (unlikely(need_clear_block_map)) {
+        block_map_clear(rv);
+        need_clear_block_map = false;
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return false;
+    }
+#endif
+#endif
+    if (unlikely(RVOP_NO_NEXT(ir))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return true;
+    }
+    const rv_insn_t *next = ir->next;
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
+}
+
 /* multiple LUI */
 static PRESERVE_NONE bool do_fuse1(riscv_t *rv,
                                    const rv_insn_t *ir,
@@ -645,13 +685,7 @@ static PRESERVE_NONE bool do_fuse1(riscv_t *rv,
     for (int i = 0; i < ir->imm2; i++)
         rv->X[fuse[i].rd] = fuse[i].imm;
     PC += ir->imm2 * 4;
-    if (unlikely(RVOP_NO_NEXT(ir))) {
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
-    }
-    const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next, cycle, PC);
+    return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
 /* LUI + ADD */
@@ -664,13 +698,7 @@ static PRESERVE_NONE bool do_fuse2(riscv_t *rv,
     rv->X[ir->rd] = ir->imm;
     rv->X[ir->rs2] = rv->X[ir->rd] + rv->X[ir->rs1];
     PC += 8;
-    if (unlikely(RVOP_NO_NEXT(ir))) {
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
-    }
-    const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next, cycle, PC);
+    return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
 /* multiple SW */
@@ -681,27 +709,17 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
 {
     cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
-    /* The memory addresses of the sw instructions are contiguous, thus only
-     * the first SW instruction needs to be checked to determine if its memory
-     * address is misaligned or if the memory chunk does not exist.
-     */
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         uint32_t value = rv->X[fuse[i].rs2];
-        rv->io.mem_write_w(rv, addr, value);
+        MEM_WRITE_W(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
     }
     PC += ir->imm2 * 4;
-    if (unlikely(RVOP_NO_NEXT(ir))) {
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
-    }
-    const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next, cycle, PC);
+    return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
 /* multiple LW */
@@ -712,23 +730,34 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
 {
     cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
-    /* The memory addresses of the lw instructions are contiguous, therefore
-     * only the first LW instruction needs to be checked to determine if its
-     * memory address is misaligned or if the memory chunk does not exist.
-     */
     for (int i = 0; i < ir->imm2; i++) {
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        rv->X[fuse[i].rd] = rv->io.mem_read_w(rv, addr);
+        rv->X[fuse[i].rd] = MEM_READ_W(rv, addr);
     }
     PC += ir->imm2 * 4;
-    if (unlikely(RVOP_NO_NEXT(ir))) {
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+/* Execute shift operation from fused instruction data.
+ * This avoids the unsafe cast from opcode_fuse_t* to rv_insn_t*.
+ */
+static inline void fuse_shift_exec(riscv_t *rv, const opcode_fuse_t *f)
+{
+    switch (f->opcode) {
+    case rv_insn_slli:
+        rv->X[f->rd] = rv->X[f->rs1] << (f->imm & 0x1f);
+        break;
+    case rv_insn_srli:
+        rv->X[f->rd] = rv->X[f->rs1] >> (f->imm & 0x1f);
+        break;
+    case rv_insn_srai:
+        rv->X[f->rd] = ((int32_t) rv->X[f->rs1]) >> (f->imm & 0x1f);
+        break;
+    default:
+        __UNREACHABLE;
+        break;
     }
-    const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next, cycle, PC);
 }
 
 /* multiple shift immediate */
@@ -740,15 +769,216 @@ static PRESERVE_NONE bool do_fuse5(riscv_t *rv,
     cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++)
-        shift_func(rv, (const rv_insn_t *) (&fuse[i]));
+        fuse_shift_exec(rv, &fuse[i]);
     PC += ir->imm2 * 4;
-    if (unlikely(RVOP_NO_NEXT(ir))) {
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return true;
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+/* fused LI + ECALL: li a7, imm; ecall
+ * This fusion is only available in standard RV32I/M/A/F/C since RV32E
+ * uses a different syscall convention (t0 instead of a7).
+ */
+#if !RV32_HAS(RV32E)
+static PRESERVE_NONE bool do_fuse6(riscv_t *rv,
+                                   const rv_insn_t *ir,
+                                   uint64_t cycle,
+                                   uint32_t PC)
+{
+    cycle += 2;
+    rv->X[rv_reg_a7] = ir->imm;
+    rv->compressed = false;
+    rv->csr_cycle = cycle;
+    /* ECALL is at PC+4 (second instruction in fused pair).
+     * on_ecall expects rv->PC to be the ECALL address for trap handling.
+     */
+    rv->PC = PC + 4;
+    rv->io.on_ecall(rv);
+    return true;
+}
+#else
+/* RV32E stub: fuse6 pattern is never generated for RV32E.
+ * Defensive fallback in case of unexpected dispatch.
+ */
+static PRESERVE_NONE bool do_fuse6(riscv_t *rv UNUSED,
+                                   const rv_insn_t *ir UNUSED,
+                                   uint64_t cycle UNUSED,
+                                   uint32_t PC UNUSED)
+{
+    assert(!"fuse6 should not be called in RV32E mode");
+    return false;
+}
+#endif
+
+/* fused multiple ADDI */
+static PRESERVE_NONE bool do_fuse7(riscv_t *rv,
+                                   const rv_insn_t *ir,
+                                   uint64_t cycle,
+                                   uint32_t PC)
+{
+    cycle += ir->imm2;
+    opcode_fuse_t *fuse = ir->fuse;
+    for (int i = 0; i < ir->imm2; i++)
+        /* Use unsigned arithmetic to avoid signed overflow UB.
+         * The cast of imm to uint32_t preserves two's complement semantics.
+         */
+        rv->X[fuse[i].rd] =
+            (uint32_t) rv->X[fuse[i].rs1] + (uint32_t) fuse[i].imm;
+    PC += ir->imm2 * 4;
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+/* fused LUI + ADDI: lui rd, imm20; addi rd, rd, imm12
+ * This is the standard pattern for loading 32-bit constants (li pseudo-op).
+ * ir->imm = lui immediate (already shifted << 12)
+ * ir->imm2 = addi immediate (sign-extended 12-bit)
+ * ir->rd = destination register
+ */
+static PRESERVE_NONE bool do_fuse8(riscv_t *rv,
+                                   const rv_insn_t *ir,
+                                   uint64_t cycle,
+                                   uint32_t PC)
+{
+    cycle += 2;
+    /* Cast to uint32_t to avoid signed overflow UB */
+    rv->X[ir->rd] = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    PC += 8;
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+/* fused LUI + LW: lui rd, imm20; lw rd2, imm12(rd)
+ * Common pattern for absolute/PC-relative loads (after AUIPC->LUI constopt).
+ * ir->imm = lui immediate (already shifted << 12)
+ * ir->imm2 = lw offset (sign-extended 12-bit)
+ * ir->rd = lui destination (used as base)
+ * ir->rs2 = lw destination register
+ */
+static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
+                                   const rv_insn_t *ir,
+                                   uint64_t cycle,
+                                   uint32_t PC)
+{
+    cycle += 2;
+    /* Write LUI result to rd - required when rd != LW destination.
+     * LUI completes before LW, so this write happens even if LW faults.
+     */
+    rv->X[ir->rd] = ir->imm;
+    /* Cast to uint32_t to avoid signed overflow UB */
+    uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    rv->X[ir->rs2] = MEM_READ_W(rv, addr);
+    PC += 8;
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+/* fused LUI + SW: lui rd, imm20; sw rs2, imm12(rd)
+ * Common pattern for absolute/PC-relative stores.
+ * ir->imm = lui immediate (already shifted << 12)
+ * ir->imm2 = sw offset (sign-extended 12-bit)
+ * ir->rd = lui destination (used as base, dead after)
+ * ir->rs1 = sw source register (data to store)
+ */
+static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint64_t cycle,
+                                    uint32_t PC)
+{
+    cycle += 2;
+    /* Write LUI result to rd - SW doesn't write registers, so rd may be
+     * used later. LUI completes before SW, so this write happens even if
+     * SW faults.
+     */
+    rv->X[ir->rd] = ir->imm;
+    /* Cast to uint32_t to avoid signed overflow UB */
+    uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
+    uint32_t value = rv->X[ir->rs1];
+    MEM_WRITE_W(rv, addr, value);
+#if RV32_HAS(ARCH_TEST)
+    check_tohost_write(rv, addr, value);
+#endif
+    PC += 8;
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+/* fused LW + ADDI (post-increment): lw rd, 0(rs1); addi rs1, rs1, step
+ * Common loop pattern for pointer walking (memcpy, string ops).
+ * ir->rd = load destination
+ * ir->rs1 = base register (also incremented)
+ * ir->imm = load offset
+ * ir->imm2 = increment step
+ */
+static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint64_t cycle,
+                                    uint32_t PC)
+{
+    cycle += 2;
+    uint32_t addr = rv->X[ir->rs1] + ir->imm;
+    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    /* Only increment rs1 if load succeeded (no trap in SYSTEM mode).
+     * In non-SYSTEM mode, RAM access never faults so this always executes.
+     */
+#if RV32_HAS(SYSTEM)
+    if (!rv->is_trapped)
+#endif
+        rv->X[ir->rs1] = rv->X[ir->rs1] + ir->imm2;
+    PC += 8;
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+/* fused ADDI + BNE: addi rd, rs1, imm; bne rd, x0, offset
+ * Common loop counter pattern (countdown loops).
+ * ir->rd = counter register (written by addi, tested by bne)
+ * ir->rs1 = source register for addi
+ * ir->imm = addi immediate (usually -1 for countdown)
+ * ir->imm2 = branch offset
+ */
+static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint64_t cycle,
+                                    uint32_t PC)
+{
+    cycle += 2;
+    rv->X[ir->rd] = rv->X[ir->rs1] + ir->imm;
+
+    if (rv->X[ir->rd] != 0) {
+        /* Branch taken */
+        is_branch_taken = true;
+        PC += 4 + ir->imm2; /* ADDI len + branch offset */
+        struct rv_insn *taken = ir->branch_taken;
+        if (taken) {
+#if RV32_HAS(SYSTEM)
+            if (!rv->is_trapped) {
+                last_pc = PC;
+                MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+            }
+#else
+            last_pc = PC;
+            MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+#endif
+        }
+    } else {
+        /* Branch not taken */
+        is_branch_taken = false;
+        PC += 8; /* Skip both ADDI and BNE */
+        struct rv_insn *untaken = ir->branch_untaken;
+        if (untaken) {
+#if RV32_HAS(SYSTEM)
+            if (!rv->is_trapped) {
+                last_pc = PC;
+                MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
+            }
+#else
+            last_pc = PC;
+            MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
+#endif
+        }
     }
-    const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next, cycle, PC);
+
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
+    return true;
 }
 
 /* clang-format off */
@@ -909,42 +1139,20 @@ retranslate:
             return false;
     }
 
-    assert(prev_ir);
+    /* If no instructions were successfully decoded (e.g., first instruction
+     * was illegal), free the allocated IR and return failure.
+     */
+    if (unlikely(!prev_ir)) {
+        mpool_free(rv->block_ir_mp, block->ir_head);
+        return false;
+    }
+
     block->ir_tail = prev_ir;
     block->ir_tail->next = NULL;
     return true;
 }
 
 #if RV32_HAS(MOP_FUSION)
-#define COMBINE_MEM_OPS(RW)                                           \
-    next_ir = ir->next;                                               \
-    count = 1;                                                        \
-    while (1) {                                                       \
-        if (next_ir->opcode != IIF(RW)(rv_insn_lw, rv_insn_sw))       \
-            break;                                                    \
-        count++;                                                      \
-        if (!next_ir->next)                                           \
-            break;                                                    \
-        next_ir = next_ir->next;                                      \
-    }                                                                 \
-    if (count > 1) {                                                  \
-        ir->opcode = IIF(RW)(rv_insn_fuse4, rv_insn_fuse3);           \
-        ir->fuse = malloc(count * sizeof(opcode_fuse_t));             \
-        if (unlikely(!ir->fuse)) {                                    \
-            ir->opcode = IIF(RW)(rv_insn_lw, rv_insn_sw);             \
-            count = 1; /* Degrade to non-fused operation */           \
-        } else {                                                      \
-            assert(ir->fuse);                                         \
-            ir->imm2 = count;                                         \
-            memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));              \
-            ir->impl = dispatch_table[ir->opcode];                    \
-            next_ir = ir->next;                                       \
-            for (int j = 1; j < count; j++, next_ir = next_ir->next)  \
-                memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t)); \
-            remove_next_nth_ir(rv, ir, block, count - 1);             \
-        }                                                             \
-    }
-
 static inline void remove_next_nth_ir(const riscv_t *rv,
                                       rv_insn_t *ir,
                                       block_t *block,
@@ -960,6 +1168,150 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
     block->n_insn -= n;
 }
 
+/* Count consecutive instructions with same opcode */
+static inline int count_consecutive_insn(rv_insn_t *ir, uint8_t opcode)
+{
+    int count = 1;
+    rv_insn_t *next = ir->next;
+    while (next && next->opcode == opcode) {
+        count++;
+        if (!next->next)
+            break;
+        next = next->next;
+    }
+    return count;
+}
+
+/* Check if instruction is a shift immediate */
+static inline bool is_shift_imm(const rv_insn_t *ir)
+{
+    return IF_insn(ir, slli) || IF_insn(ir, srli) || IF_insn(ir, srai);
+}
+
+/* Count consecutive shift immediate instructions */
+static inline int count_consecutive_shift(rv_insn_t *ir)
+{
+    int count = 1;
+    rv_insn_t *next = ir->next;
+    while (next && is_shift_imm(next)) {
+        count++;
+        if (!next->next)
+            break;
+        next = next->next;
+    }
+    return count;
+}
+
+/* Allocate and rewrite a fused sequence.
+ * Returns true on success, false on malloc failure (graceful degradation).
+ */
+static inline bool try_fuse_sequence(riscv_t *rv,
+                                     block_t *block,
+                                     rv_insn_t *ir,
+                                     int count,
+                                     uint8_t fuse_opcode)
+{
+    if (count <= 1)
+        return false;
+
+    /* Overflow check for allocation size */
+    if (unlikely((size_t) count > SIZE_MAX / sizeof(opcode_fuse_t)))
+        return false;
+
+    opcode_fuse_t *fuse_data = malloc((size_t) count * sizeof(opcode_fuse_t));
+    if (unlikely(!fuse_data))
+        return false;
+
+    ir->fuse = fuse_data;
+    /* Copy original instruction BEFORE changing opcode (preserves original
+     * opcode in fuse[0] for handlers like shift_func that need it) */
+    memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
+    ir->opcode = fuse_opcode;
+    ir->imm2 = count;
+    ir->impl = dispatch_table[ir->opcode];
+
+    rv_insn_t *next_ir = ir->next;
+    for (int j = 1; j < count; j++, next_ir = next_ir->next)
+        memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));
+
+    remove_next_nth_ir(rv, ir, block, count - 1);
+    return true;
+}
+
+#if RV32_HAS(SYSTEM_MMIO)
+/* Function argument registers (a0-a7) - likely to change between calls.
+ * Lazy fusion verified once may become invalid if these registers
+ * point to MMIO on subsequent invocations.
+ */
+#define ARG_REG_MASK                                                  \
+    ((1u << 10) | (1u << 11) | (1u << 12) | (1u << 13) | (1u << 14) | \
+     (1u << 15) | (1u << 16) | (1u << 17))
+
+/* Check if a LW/SW sequence is safe for lazy fusion verification.
+ *
+ * Safety requirements:
+ * 1. No preceding instruction in the block writes to any rs1 used by sequence
+ *    (checked via modified_regs_before - O(1) lookup instead of O(N) scan)
+ * 2. No intra-sequence dependency: instruction i's rd != instruction j's rs1
+ *    for any j > i (prevents pointer chasing patterns like:
+ *    lw x10, 0(x11); lw x12, 0(x10) where x10 changes mid-sequence)
+ * 3. No function argument registers (a0-a7) used as base - these may point to
+ *    different memory regions (RAM vs MMIO) across function invocations
+ *
+ * Returns true if safe, false otherwise.
+ */
+static bool lazy_fusion_safe_base_regs(uint32_t modified_regs_before,
+                                       rv_insn_t *seq_start,
+                                       int count,
+                                       bool is_load)
+{
+    /* Collect all rs1 registers used by the sequence */
+    uint32_t rs1_mask = 0;
+    rv_insn_t *ir = seq_start;
+    for (int i = 0; i < count && ir; i++, ir = ir->next) {
+        if (ir->rs1 < 32)
+            rs1_mask |= (1u << ir->rs1);
+    }
+
+    /* x0 is never written, remove from mask */
+    rs1_mask &= ~1u;
+
+    if (rs1_mask == 0)
+        return true; /* Only uses x0, always safe */
+
+    /* Reject sequences using function argument registers (a0-a7).
+     * These may point to RAM in one call and MMIO in another,
+     * making cached verification unsafe across invocations.
+     */
+    if (rs1_mask & ARG_REG_MASK)
+        return false;
+
+    /* O(1) check: any rs1 written before this sequence? */
+    if (rs1_mask & modified_regs_before)
+        return false;
+
+    /* Check for intra-sequence dependencies (LW only - SW doesn't write rd).
+     * If instruction i writes to rd, and instruction j (j > i) uses rd as rs1,
+     * the verification would compute wrong addresses (pointer chasing).
+     */
+    if (is_load) {
+        uint32_t written_mask = 0;
+        ir = seq_start;
+        for (int i = 0; i < count && ir; i++, ir = ir->next) {
+            /* Check if this instruction's rs1 was written by earlier insn */
+            if (ir->rs1 != 0 && (written_mask & (1u << ir->rs1))) {
+                return false; /* Intra-sequence dependency detected */
+            }
+            /* Track this instruction's write */
+            if (ir->rd != 0)
+                written_mask |= (1u << ir->rd);
+        }
+    }
+
+    return true;
+}
+#endif
+
 /* Check if instructions in a block match a specific pattern. If they do,
  * rewrite them as fused instructions.
  *
@@ -970,6 +1322,10 @@ static void match_pattern(riscv_t *rv, block_t *block)
 {
     uint32_t i;
     rv_insn_t *ir;
+#if RV32_HAS(SYSTEM_MMIO)
+    /* Track registers modified so far for O(1) lazy fusion safety check */
+    uint32_t modified_regs = 0;
+#endif
     for (i = 0, ir = block->ir_head; i < block->n_insn - 1;
          i++, ir = ir->next) {
         assert(ir);
@@ -978,97 +1334,347 @@ static void match_pattern(riscv_t *rv, block_t *block)
         switch (ir->opcode) {
         case rv_insn_lui:
             next_ir = ir->next;
+            if (!next_ir)
+                break;
             switch (next_ir->opcode) {
             case rv_insn_add:
+                /* LUI + ADD fusion (fuse2) */
                 if (ir->rd == next_ir->rs2 || ir->rd == next_ir->rs1) {
+#if RV32_HAS(SYSTEM_MMIO)
+                    /* Track both LUI's rd and ADD's rd before fusion */
+                    if (ir->rd != 0)
+                        modified_regs |= (1u << ir->rd);
+                    if (next_ir->rd != 0)
+                        modified_regs |= (1u << next_ir->rd);
+#endif
                     ir->opcode = rv_insn_fuse2;
                     ir->rs2 = next_ir->rd;
-                    if (ir->rd == next_ir->rs2)
-                        ir->rs1 = next_ir->rs1;
-                    else
-                        ir->rs1 = next_ir->rs2;
+                    ir->rs1 =
+                        (ir->rd == next_ir->rs2) ? next_ir->rs1 : next_ir->rs2;
                     ir->impl = dispatch_table[ir->opcode];
                     remove_next_nth_ir(rv, ir, block, 1);
                 }
                 break;
+            case rv_insn_addi:
+                /* LUI + ADDI fusion (fuse8): lui rd, imm; addi rd, rd, imm
+                 * This is the standard 32-bit constant load (li pseudo-op).
+                 * Skip if rd == x0: LUI x0 produces 0, not imm << 12.
+                 */
+                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1 &&
+                    ir->rd == next_ir->rd) {
+                    /* ir->imm already has lui's upper immediate (shifted)
+                     * Store addi's immediate in imm2 for the handler
+                     */
+                    ir->imm2 = next_ir->imm;
+                    ir->opcode = rv_insn_fuse8;
+                    ir->impl = dispatch_table[ir->opcode];
+                    remove_next_nth_ir(rv, ir, block, 1);
+                }
+                break;
+            case rv_insn_lw:
+                /* LUI + LW fusion (fuse9): lui rd, imm20; lw rd2, imm12(rd)
+                 * Common pattern for absolute/PC-relative loads.
+                 * The lui result is used as base address for lw.
+                 * Skip if rd == x0: LUI x0 produces 0, not imm << 12.
+                 *
+                 * Note: In JIT+SYSTEM mode, skip this fusion because JIT
+                 * computes host addresses at compile time, bypassing MMU.
+                 * The interpreter handles SYSTEM mode correctly via io
+                 * callbacks.
+                 */
+#if !(RV32_HAS(JIT) && RV32_HAS(SYSTEM))
+                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
+                    ir->imm2 = next_ir->imm; /* lw offset */
+                    ir->rs2 = next_ir->rd;   /* lw destination */
+                    ir->opcode = rv_insn_fuse9;
+                    ir->impl = dispatch_table[ir->opcode];
+                    remove_next_nth_ir(rv, ir, block, 1);
+#if RV32_HAS(SYSTEM_MMIO)
+                    /* Track rs2 (lw dest) for lazy fusion safety */
+                    if (ir->rs2 != 0)
+                        modified_regs |= (1u << ir->rs2);
+#endif
+                }
+#endif /* !(JIT && SYSTEM) */
+                break;
+            case rv_insn_sw:
+                /* LUI + SW fusion (fuse10): lui rd, imm20; sw rs2, imm12(rd)
+                 * Common pattern for absolute/PC-relative stores.
+                 * The lui result is used as base address for sw.
+                 * Skip if rd == x0: LUI x0 produces 0, not imm << 12.
+                 *
+                 * Note: In JIT+SYSTEM mode, skip this fusion because JIT
+                 * computes host addresses at compile time, bypassing MMU.
+                 */
+#if !(RV32_HAS(JIT) && RV32_HAS(SYSTEM))
+                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
+                    ir->imm2 = next_ir->imm; /* sw offset */
+                    ir->rs1 = next_ir->rs2;  /* sw source (data to store) */
+                    ir->opcode = rv_insn_fuse10;
+                    ir->impl = dispatch_table[ir->opcode];
+                    remove_next_nth_ir(rv, ir, block, 1);
+                }
+#endif /* !(JIT && SYSTEM) */
+                break;
             case rv_insn_lui:
-                count = 1;
-                while (1) {
-                    if (!IF_insn(next_ir, lui))
-                        break;
-                    count++;
-                    if (!next_ir->next)
-                        break;
-                    next_ir = next_ir->next;
-                }
-                if (count > 1) {
-                    ir->fuse = malloc(count * sizeof(opcode_fuse_t));
-                    if (likely(ir->fuse)) {
-                        ir->opcode = rv_insn_fuse1;
-                        assert(ir->fuse);
-                        ir->imm2 = count;
-                        memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
-                        ir->impl = dispatch_table[ir->opcode];
-                        next_ir = ir->next;
-                        for (int j = 1; j < count; j++, next_ir = next_ir->next)
-                            memcpy(ir->fuse + j, next_ir,
-                                   sizeof(opcode_fuse_t));
-                        remove_next_nth_ir(rv, ir, block, count - 1);
+                /* Multiple LUI fusion (fuse1) */
+                count = count_consecutive_insn(ir, rv_insn_lui);
+#if RV32_HAS(SYSTEM_MMIO)
+                /* Track all rd values before fusion removes instructions */
+                {
+                    rv_insn_t *tmp = ir;
+                    for (int j = 0; j < count && tmp; j++, tmp = tmp->next) {
+                        if (tmp->rd != 0)
+                            modified_regs |= (1u << tmp->rd);
                     }
-                    /* If malloc failed, degrade gracefully to non-fused ops */
                 }
+#endif
+                try_fuse_sequence(rv, block, ir, count, rv_insn_fuse1);
                 break;
             }
             break;
-            /* If the memory addresses of a sequence of store or load
-             * instructions are contiguous, combine these instructions.
-             * NOTE: Disabled in SYSTEM_MMIO because fused memory ops bypass
-             * MMU translation and bounds checking.
+            /* Fuse consecutive SW or LW instructions to reduce dispatch
+             * overhead. Memory addresses are not required to be contiguous;
+             * each fused instruction's address is calculated independently at
+             * runtime.
              */
-#if !RV32_HAS(SYSTEM_MMIO)
         case rv_insn_sw:
-            COMBINE_MEM_OPS(0);
+            /* Multiple SW fusion (fuse3) */
+            count = count_consecutive_insn(ir, rv_insn_sw);
+#if RV32_HAS(SYSTEM_MMIO)
+            /* In SYSTEM_MMIO mode, mark as lazy fusion candidate.
+             * Fusion will be performed after verifying all addresses are RAM.
+             * Skip if base registers are modified before this sequence.
+             */
+            if (count > 1 && block->n_lazy_candidates < MAX_LAZY_CANDIDATES &&
+                lazy_fusion_safe_base_regs(modified_regs, ir, count, false)) {
+                lazy_fusion_candidate_t *cand =
+                    &block->lazy_candidates[block->n_lazy_candidates++];
+                cand->ir = ir;
+                cand->count = (uint8_t) count;
+                cand->opcode = rv_insn_sw;
+                cand->verified = false;
+                cand->failed = false;
+                /* Skip past sequence to avoid overlapping candidates.
+                 * SW doesn't write rd, so no modified_regs update needed.
+                 */
+                for (int skip = 1; skip < count && ir->next; skip++) {
+                    ir = ir->next;
+                    i++;
+                }
+            }
+#else
+            try_fuse_sequence(rv, block, ir, count, rv_insn_fuse3);
+#endif
             break;
         case rv_insn_lw:
-            COMBINE_MEM_OPS(1);
-            break;
+            /* Check for LW + ADDI post-increment fusion (fuse11) first.
+             * In JIT+SYSTEM mode, skip this fusion because JIT computes
+             * host addresses directly, bypassing MMU translation.
+             */
+#if !(RV32_HAS(JIT) && RV32_HAS(SYSTEM))
+            next_ir = ir->next;
+            if (next_ir && IF_insn(next_ir, addi) && ir->rs1 == next_ir->rs1 &&
+                next_ir->rs1 == next_ir->rd && ir->rd != ir->rs1) {
+                /* Pattern: lw rd, imm(rs1); addi rs1, rs1, step
+                 * Constraint: rd != rs1 to avoid clobbering base before use
+                 */
+                ir->imm2 = next_ir->imm; /* increment step */
+                ir->opcode = rv_insn_fuse11;
+                ir->impl = dispatch_table[ir->opcode];
+                remove_next_nth_ir(rv, ir, block, 1);
+#if RV32_HAS(SYSTEM_MMIO)
+                /* Track both rd (lw dest) and rs1 (post-increment) */
+                if (ir->rd != 0)
+                    modified_regs |= (1u << ir->rd);
+                if (ir->rs1 != 0)
+                    modified_regs |= (1u << ir->rs1);
 #endif
+                break;
+            }
+#endif /* !(JIT && SYSTEM) */
+            /* Multiple LW fusion (fuse4) */
+            count = count_consecutive_insn(ir, rv_insn_lw);
+#if RV32_HAS(SYSTEM_MMIO)
+            /* In SYSTEM_MMIO mode, mark as lazy fusion candidate.
+             * Fusion will be performed after verifying all addresses are RAM.
+             * Skip if base registers are modified before or within sequence.
+             */
+            if (count > 1 && block->n_lazy_candidates < MAX_LAZY_CANDIDATES &&
+                lazy_fusion_safe_base_regs(modified_regs, ir, count, true)) {
+                lazy_fusion_candidate_t *cand =
+                    &block->lazy_candidates[block->n_lazy_candidates++];
+                cand->ir = ir;
+                cand->count = (uint8_t) count;
+                cand->opcode = rv_insn_lw;
+                cand->verified = false;
+                cand->failed = false;
+                /* Skip past sequence to avoid overlapping candidates.
+                 * Track all rd writes for subsequent safety checks.
+                 */
+                for (int skip = 1; skip < count && ir->next; skip++) {
+                    if (ir->rd != 0)
+                        modified_regs |= (1u << ir->rd);
+                    ir = ir->next;
+                    i++;
+                }
+            }
+#else
+            try_fuse_sequence(rv, block, ir, count, rv_insn_fuse4);
+#endif
+            break;
             /* TODO: mixture of SW and LW */
-            /* TODO: reorder insturction to match pattern */
+            /* TODO: reorder instruction to match pattern */
         case rv_insn_slli:
         case rv_insn_srli:
         case rv_insn_srai:
-            count = 1;
-            next_ir = ir->next;
-            while (1) {
-                if (!IF_insn(next_ir, slli) && !IF_insn(next_ir, srli) &&
-                    !IF_insn(next_ir, srai))
-                    break;
-                count++;
-                if (!next_ir->next)
-                    break;
-                next_ir = next_ir->next;
-            }
-            if (count > 1) {
-                ir->fuse = malloc(count * sizeof(opcode_fuse_t));
-                if (likely(ir->fuse)) {
-                    assert(ir->fuse);
-                    memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
-                    ir->opcode = rv_insn_fuse5;
-                    ir->imm2 = count;
-                    ir->impl = dispatch_table[ir->opcode];
-                    next_ir = ir->next;
-                    for (int j = 1; j < count; j++, next_ir = next_ir->next)
-                        memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t));
-                    remove_next_nth_ir(rv, ir, block, count - 1);
+            /* Multiple shift immediate fusion (fuse5) */
+            count = count_consecutive_shift(ir);
+#if RV32_HAS(SYSTEM_MMIO)
+            /* Track all rd values before fusion removes instructions */
+            {
+                rv_insn_t *tmp = ir;
+                for (int j = 0; j < count && tmp; j++, tmp = tmp->next) {
+                    if (tmp->rd != 0)
+                        modified_regs |= (1u << tmp->rd);
                 }
-                /* If malloc failed, degrade gracefully to non-fused ops */
             }
+#endif
+            try_fuse_sequence(rv, block, ir, count, rv_insn_fuse5);
+            break;
+        case rv_insn_addi:
+            next_ir = ir->next;
+#if !RV32_HAS(RV32E)
+            /* LI a7 + ECALL fusion (fuse6): li a7, imm; ecall */
+            if (ir->rd == rv_reg_a7 && ir->rs1 == rv_reg_zero && next_ir &&
+                IF_insn(next_ir, ecall)) {
+                ir->opcode = rv_insn_fuse6;
+                ir->impl = dispatch_table[ir->opcode];
+                remove_next_nth_ir(rv, ir, block, 1);
+                break;
+            }
+#endif
+            /* ADDI + BNE loop counter fusion (fuse12):
+             * addi rd, rs1, imm; bne rd, x0, offset
+             * Common pattern for countdown loops.
+             * Skip if rd == x0: ADDI x0 produces 0, breaking branch logic.
+             */
+            if (next_ir && IF_insn(next_ir, bne) && ir->rd != rv_reg_zero &&
+                ir->rd == next_ir->rs1 && next_ir->rs2 == rv_reg_zero) {
+                ir->imm2 = next_ir->imm; /* branch offset */
+                ir->opcode = rv_insn_fuse12;
+                ir->impl = dispatch_table[ir->opcode];
+                /* Copy branch targets for block chaining */
+                ir->branch_taken = next_ir->branch_taken;
+                ir->branch_untaken = next_ir->branch_untaken;
+                remove_next_nth_ir(rv, ir, block, 1);
+                break;
+            }
+            /* Multiple ADDI fusion (fuse7) */
+            count = count_consecutive_insn(ir, rv_insn_addi);
+#if RV32_HAS(SYSTEM_MMIO)
+            /* Track all rd values before fusion removes instructions */
+            {
+                rv_insn_t *tmp = ir;
+                for (int j = 0; j < count && tmp; j++, tmp = tmp->next) {
+                    if (tmp->rd != 0)
+                        modified_regs |= (1u << tmp->rd);
+                }
+            }
+#endif
+            try_fuse_sequence(rv, block, ir, count, rv_insn_fuse7);
             break;
         }
+#if RV32_HAS(SYSTEM_MMIO)
+        /* Track register modification for non-fused instructions.
+         * Fused instructions track their writes explicitly above.
+         */
+        if (ir->rd != 0)
+            modified_regs |= (1u << ir->rd);
+#endif
     }
 }
+
+#if RV32_HAS(SYSTEM_MMIO)
+/* Minimum block executions before attempting lazy fusion.
+ * Avoids verification overhead on cold blocks.
+ */
+#define LAZY_FUSION_HOTNESS_THRESHOLD 8
+
+/* Verify addresses for lazy fusion candidates and fuse if all are RAM.
+ * Called on cache hit when lazy_fusion_done is false.
+ * Uses current register values to compute addresses.
+ *
+ * Safety guards:
+ * - Disabled when MMU is active (virtual addresses unreliable)
+ * - Only runs after block is "hot" (executed multiple times)
+ * - Base register mutation checked at candidate marking time
+ */
+static void try_lazy_fusion(riscv_t *rv, block_t *block)
+{
+    if (block->lazy_fusion_done || block->n_lazy_candidates == 0)
+        return;
+
+#if RV32_HAS(SYSTEM)
+    /* Disable lazy fusion when MMU is active.
+     * Virtual addresses may not correspond to physical RAM regions,
+     * and we cannot do side-effect-free address translation here.
+     */
+    if (rv->csr_satp != 0) {
+        block->lazy_fusion_done = true; /* Never retry with MMU */
+        return;
+    }
 #endif
+
+#if RV32_HAS(JIT)
+    /* Only attempt fusion for hot blocks to avoid cold block overhead */
+    if (block->n_invoke < LAZY_FUSION_HOTNESS_THRESHOLD)
+        return;
+#endif
+
+    /* Check if all candidates have reached a final state */
+    bool all_finalized = true;
+
+    for (uint8_t i = 0; i < block->n_lazy_candidates; i++) {
+        lazy_fusion_candidate_t *cand = &block->lazy_candidates[i];
+        if (cand->failed || cand->verified)
+            continue;
+
+        /* Verify all addresses in this candidate are RAM (not MMIO) */
+        bool all_ram = true;
+        rv_insn_t *ir = cand->ir;
+        for (int j = 0; j < cand->count && ir; j++, ir = ir->next) {
+            /* Compute address: base + offset */
+            uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
+
+            /* Check if address is within RAM bounds */
+            if (!GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 4)) {
+                all_ram = false;
+                cand->failed = true;
+                break;
+            }
+        }
+
+        if (all_ram) {
+            /* Attempt fusion - may fail due to allocation */
+            uint8_t fuse_opcode =
+                (cand->opcode == rv_insn_lw) ? rv_insn_fuse4 : rv_insn_fuse3;
+            if (try_fuse_sequence(rv, block, cand->ir, cand->count,
+                                  fuse_opcode)) {
+                cand->verified = true;
+            } else {
+                /* Allocation failed, can retry later */
+                all_finalized = false;
+            }
+        }
+    }
+
+    /* Only mark done when all candidates have final state */
+    if (all_finalized)
+        block->lazy_fusion_done = true;
+}
+#endif /* RV32_HAS(SYSTEM_MMIO) */
+#endif /* RV32_HAS(MOP_FUSION) */
 
 typedef struct {
     bool is_constant[N_RV_REGS];
@@ -1120,8 +1726,15 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #endif
 #endif
 
-    if (next_blk)
+    if (next_blk) {
+#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(MOP_FUSION)
+        /* On cache hit (second execution onwards), attempt lazy fusion
+         * for LW/SW sequences after verifying addresses are RAM.
+         */
+        try_lazy_fusion(rv, next_blk);
+#endif
         return next_blk;
+    }
 
 #if !RV32_HAS(JIT)
     /* clear block list if it is going to be filled */

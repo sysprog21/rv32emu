@@ -5,6 +5,7 @@
 
 #pragma once
 #include <stdbool.h>
+#include <string.h>
 
 #if RV32_HAS(GDBSTUB)
 #include "breakpoint.h"
@@ -78,18 +79,41 @@ enum {
     CSR_INSTRETH = 0xC82,
 };
 
+/* Lazy fusion candidate for memory operations in SYSTEM_MMIO mode.
+ * At decode time, consecutive LW/SW sequences are marked as candidates.
+ * During first execution, addresses are verified as RAM (not MMIO).
+ * Only proven-safe sequences are fused for subsequent executions.
+ */
+#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(MOP_FUSION)
+typedef struct {
+    rv_insn_t *ir;  /**< first instruction of candidate sequence */
+    uint8_t count;  /**< number of consecutive instructions */
+    uint8_t opcode; /**< rv_insn_lw or rv_insn_sw */
+    bool verified;  /**< addresses verified as RAM during first exec */
+    bool failed;    /**< at least one MMIO address detected */
+} lazy_fusion_candidate_t;
+
+#define MAX_LAZY_CANDIDATES 8
+#endif
+
 /* translated basic block */
 typedef struct block {
-    uint32_t n_insn;           /**< number of instructions encompased */
+    uint32_t n_insn;           /**< number of instructions encompassed */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
+
+#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(MOP_FUSION)
+    uint8_t n_lazy_candidates; /**< number of lazy fusion candidates */
+    lazy_fusion_candidate_t lazy_candidates[MAX_LAZY_CANDIDATES];
+    bool lazy_fusion_done; /**< lazy fusion already attempted */
+#endif
+
 #if RV32_HAS(JIT)
-    bool hot;  /**< Determine the block is potential hotspot or not */
-    bool hot2; /**< Determine the block is strong hotspot or not */
-    bool
-        translatable; /**< Determine the block has RV32AF insturctions or not */
-    bool has_loops;   /**< Determine the block has loop or not */
+    bool hot;          /**< Determine the block is potential hotspot or not */
+    bool hot2;         /**< Determine the block is strong hotspot or not */
+    bool translatable; /**< Determine the block has RV32AF or not */
+    bool has_loops;    /**< Determine the block has loop or not */
 #if RV32_HAS(SYSTEM)
     uint32_t satp;
     bool invalidated; /**< Block invalidated by SFENCE.VMA, needs recompilation
@@ -294,3 +318,70 @@ FORCE_INLINE bool is_compressed(uint32_t insn)
 {
     return (insn & FC_OPCODE) != 3;
 }
+
+/* RAM Fast-Path Memory Access
+ *
+ * For userspace emulation (non-SYSTEM mode), memory accesses always go to
+ * RAM, making the io callback indirection pure overhead. These inline
+ * functions provide direct memory access, bypassing the function pointer
+ * dispatch.
+ *
+ * Performance benefit: Eliminates indirect call overhead (~5-10 cycles per
+ * memory access on modern CPUs due to branch predictor penalties).
+ *
+ * These functions perform NO bounds checking - they trust that 'addr' is
+ * valid within mem_base. This invariant is maintained by:
+ * 1. ELF loader validation: All program segments must fit within RAM bounds
+ *    (see elf_load() in elf.c which rejects out-of-bounds segments)
+ * 2. Memory layout: mem_base is allocated with sufficient size for the
+ *    configured memory map (see memory_new() in riscv.c)
+ * 3. Stack/heap bounds: Initial SP and brk limits are within RAM
+ *
+ * DO NOT relax ELF loader validation or memory allocation without adding
+ * explicit bounds checks here. Out-of-bounds access leads to undefined
+ * behavior (host memory corruption).
+ *
+ * Note: Only used when SYSTEM mode is disabled. SYSTEM mode requires MMU/TLB
+ * translation which must go through the io callbacks.
+ */
+#if !RV32_HAS(SYSTEM)
+FORCE_INLINE uint32_t ram_read_w(const riscv_t *rv, uint32_t addr)
+{
+    vm_attr_t *attr = PRIV(rv);
+    uint32_t val;
+    memcpy(&val, attr->mem->mem_base + addr, sizeof(val));
+    return val;
+}
+
+FORCE_INLINE uint16_t ram_read_s(const riscv_t *rv, uint32_t addr)
+{
+    vm_attr_t *attr = PRIV(rv);
+    uint16_t val;
+    memcpy(&val, attr->mem->mem_base + addr, sizeof(val));
+    return val;
+}
+
+FORCE_INLINE uint8_t ram_read_b(const riscv_t *rv, uint32_t addr)
+{
+    vm_attr_t *attr = PRIV(rv);
+    return attr->mem->mem_base[addr];
+}
+
+FORCE_INLINE void ram_write_w(const riscv_t *rv, uint32_t addr, uint32_t val)
+{
+    vm_attr_t *attr = PRIV(rv);
+    memcpy(attr->mem->mem_base + addr, &val, sizeof(val));
+}
+
+FORCE_INLINE void ram_write_s(const riscv_t *rv, uint32_t addr, uint16_t val)
+{
+    vm_attr_t *attr = PRIV(rv);
+    memcpy(attr->mem->mem_base + addr, &val, sizeof(val));
+}
+
+FORCE_INLINE void ram_write_b(const riscv_t *rv, uint32_t addr, uint8_t val)
+{
+    vm_attr_t *attr = PRIV(rv);
+    attr->mem->mem_base[addr] = val;
+}
+#endif /* !RV32_HAS(SYSTEM) */

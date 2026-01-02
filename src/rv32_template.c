@@ -598,6 +598,28 @@ RVOP(
         exit;
     }))
 
+/* RAM Fast-Path Memory Access Macros
+ *
+ * In non-SYSTEM mode, bypass io callback indirection for direct RAM access.
+ * This eliminates ~5-10 cycles of function pointer dispatch overhead per
+ * memory operation. In SYSTEM mode, use io callbacks for MMU/TLB handling.
+ */
+#if !RV32_HAS(SYSTEM)
+#define MEM_READ_W(rv, addr) ram_read_w(rv, addr)
+#define MEM_READ_S(rv, addr) ram_read_s(rv, addr)
+#define MEM_READ_B(rv, addr) ram_read_b(rv, addr)
+#define MEM_WRITE_W(rv, addr, val) ram_write_w(rv, addr, val)
+#define MEM_WRITE_S(rv, addr, val) ram_write_s(rv, addr, val)
+#define MEM_WRITE_B(rv, addr, val) ram_write_b(rv, addr, val)
+#else
+#define MEM_READ_W(rv, addr) (rv)->io.mem_read_w(rv, addr)
+#define MEM_READ_S(rv, addr) (rv)->io.mem_read_s(rv, addr)
+#define MEM_READ_B(rv, addr) (rv)->io.mem_read_b(rv, addr)
+#define MEM_WRITE_W(rv, addr, val) (rv)->io.mem_write_w(rv, addr, val)
+#define MEM_WRITE_S(rv, addr, val) (rv)->io.mem_write_s(rv, addr, val)
+#define MEM_WRITE_B(rv, addr, val) (rv)->io.mem_write_b(rv, addr, val)
+#endif
+
 /* There are 5 types of loads: two for byte and halfword sizes, and one for word
  * size. Two instructions are required for byte and halfword loads because they
  * can be either zero-extended or sign-extended to fill the register. However,
@@ -610,7 +632,7 @@ RVOP(
     lb,
     {
         uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        rv->X[ir->rd] = sign_extend_b(rv->io.mem_read_b(rv, addr));
+        rv->X[ir->rd] = sign_extend_b(MEM_READ_B(rv, addr));
     },
     GEN({
         mem;
@@ -627,7 +649,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-        rv->X[ir->rd] = sign_extend_h(rv->io.mem_read_s(rv, addr));
+        rv->X[ir->rd] = sign_extend_h(MEM_READ_S(rv, addr));
     },
     GEN({
         mem;
@@ -644,7 +666,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
+        rv->X[ir->rd] = MEM_READ_W(rv, addr);
     },
     GEN({
         mem;
@@ -660,7 +682,7 @@ RVOP(
     lbu,
     {
         uint32_t addr = rv->X[ir->rs1] + ir->imm;
-        rv->X[ir->rd] = rv->io.mem_read_b(rv, addr);
+        rv->X[ir->rd] = MEM_READ_B(rv, addr);
     },
     GEN({
         mem;
@@ -677,7 +699,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-        rv->X[ir->rd] = rv->io.mem_read_s(rv, addr);
+        rv->X[ir->rd] = MEM_READ_S(rv, addr);
     },
     GEN({
         mem;
@@ -700,7 +722,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         const uint32_t value = rv->X[ir->rs2];
-        rv->io.mem_write_b(rv, addr, value);
+        MEM_WRITE_B(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -721,7 +743,7 @@ RVOP(
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(1, STORE, false, 1);
         const uint32_t value = rv->X[ir->rs2];
-        rv->io.mem_write_s(rv, addr, value);
+        MEM_WRITE_S(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -742,7 +764,7 @@ RVOP(
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         const uint32_t value = rv->X[ir->rs2];
-        rv->io.mem_write_w(rv, addr, value);
+        MEM_WRITE_W(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -1514,7 +1536,7 @@ RVOP(
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
         if (ir->rd)
-            rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
+            rv->X[ir->rd] = MEM_READ_W(rv, addr);
         /* skip registration of the 'reservation set'
          * FIXME: unimplemented
          */
@@ -1533,7 +1555,7 @@ RVOP(
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         const uint32_t value = rv->X[ir->rs2];
-        rv->io.mem_write_w(rv, addr, value);
+        MEM_WRITE_W(rv, addr, value);
         rv->X[ir->rd] = 0;
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
@@ -1549,11 +1571,11 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
-        rv->io.mem_write_w(rv, addr, value2);
+        MEM_WRITE_W(rv, addr, value2);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value2);
 #endif
@@ -1568,12 +1590,12 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t res = value1 + value2;
-        rv->io.mem_write_w(rv, addr, res);
+        MEM_WRITE_W(rv, addr, res);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, res);
 #endif
@@ -1588,12 +1610,12 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t res = value1 ^ value2;
-        rv->io.mem_write_w(rv, addr, res);
+        MEM_WRITE_W(rv, addr, res);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, res);
 #endif
@@ -1608,12 +1630,12 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t res = value1 & value2;
-        rv->io.mem_write_w(rv, addr, res);
+        MEM_WRITE_W(rv, addr, res);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, res);
 #endif
@@ -1628,12 +1650,12 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t res = value1 | value2;
-        rv->io.mem_write_w(rv, addr, res);
+        MEM_WRITE_W(rv, addr, res);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, res);
 #endif
@@ -1648,14 +1670,14 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const int32_t a = value1;
         const int32_t b = value2;
         const uint32_t res = a < b ? value1 : value2;
-        rv->io.mem_write_w(rv, addr, res);
+        MEM_WRITE_W(rv, addr, res);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, res);
 #endif
@@ -1670,14 +1692,14 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const int32_t a = value1;
         const int32_t b = value2;
         const uint32_t res = a > b ? value1 : value2;
-        rv->io.mem_write_w(rv, addr, res);
+        MEM_WRITE_W(rv, addr, res);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, res);
 #endif
@@ -1692,12 +1714,12 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t ures = value1 < value2 ? value1 : value2;
-        rv->io.mem_write_w(rv, addr, ures);
+        MEM_WRITE_W(rv, addr, ures);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, ures);
 #endif
@@ -1712,12 +1734,12 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1];
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        const uint32_t value1 = rv->io.mem_read_w(rv, addr);
+        const uint32_t value1 = MEM_READ_W(rv, addr);
         const uint32_t value2 = rv->X[ir->rs2];
         if (ir->rd)
             rv->X[ir->rd] = value1;
         const uint32_t ures = value1 > value2 ? value1 : value2;
-        rv->io.mem_write_w(rv, addr, ures);
+        MEM_WRITE_W(rv, addr, ures);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, ures);
 #endif
@@ -1737,7 +1759,7 @@ RVOP(
         /* copy into the float register */
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        rv->F[ir->rd].v = rv->io.mem_read_w(rv, addr);
+        rv->F[ir->rd].v = MEM_READ_W(rv, addr);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -1751,7 +1773,7 @@ RVOP(
         const uint32_t addr = rv->X[ir->rs1] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         const uint32_t value = rv->F[ir->rs2].v;
-        rv->io.mem_write_w(rv, addr, value);
+        MEM_WRITE_W(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -2115,7 +2137,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
-        rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
+        rv->X[ir->rd] = MEM_READ_W(rv, addr);
     },
     GEN({
         mem;
@@ -2137,7 +2159,7 @@ RVOP(
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, true, 1);
         const uint32_t value = rv->X[ir->rs2];
-        rv->io.mem_write_w(rv, addr, value);
+        MEM_WRITE_W(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -2558,7 +2580,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
-        rv->X[ir->rd] = rv->io.mem_read_w(rv, addr);
+        rv->X[ir->rd] = MEM_READ_W(rv, addr);
     },
     GEN({
         mem;
@@ -2668,7 +2690,7 @@ RVOP(
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, true, 1);
         const uint32_t value = rv->X[ir->rs2];
-        rv->io.mem_write_w(rv, addr, value);
+        MEM_WRITE_W(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -2690,7 +2712,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        rv->F[ir->rd].v = rv->io.mem_read_w(rv, addr);
+        rv->F[ir->rd].v = MEM_READ_W(rv, addr);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -2703,7 +2725,7 @@ RVOP(
         const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         const uint32_t value = rv->F[ir->rs2].v;
-        rv->io.mem_write_w(rv, addr, value);
+        MEM_WRITE_W(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -2718,7 +2740,7 @@ RVOP(
     {
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        rv->F[ir->rd].v = rv->io.mem_read_w(rv, addr);
+        rv->F[ir->rd].v = MEM_READ_W(rv, addr);
     },
     GEN({
         assert; /* FIXME: Implement */
@@ -2731,7 +2753,7 @@ RVOP(
         const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         const uint32_t value = rv->F[ir->rs2].v;
-        rv->io.mem_write_w(rv, addr, value);
+        MEM_WRITE_W(rv, addr, value);
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif

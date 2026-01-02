@@ -6,6 +6,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "riscv.h"
@@ -244,7 +245,29 @@ enum op_field {
     _(fuse2)           \
     _(fuse3)           \
     _(fuse4)           \
-    _(fuse5)
+    _(fuse5)           \
+    _(fuse6)           \
+    _(fuse7)           \
+    _(fuse8)           \
+    _(fuse9)           \
+    _(fuse10)          \
+    _(fuse11)          \
+    _(fuse12)
+
+/* Fusion pattern descriptions:
+ * fuse1:  Multiple LUI              - Batch upper immediate loads
+ * fuse2:  LUI + ADD                 - Upper immediate + register add
+ * fuse3:  Multiple SW               - Batch stores
+ * fuse4:  Multiple LW               - Batch loads
+ * fuse5:  Multiple shift-imm        - Batch SLLI/SRLI/SRAI
+ * fuse6:  LI a7 + ECALL             - Syscall dispatch
+ * fuse7:  Multiple ADDI             - Batch immediate adds
+ * fuse8:  LUI + ADDI                - 32-bit constant load (li)
+ * fuse9:  LUI + LW                  - Absolute/PC-relative load
+ * fuse10: LUI + SW                  - Absolute/PC-relative store
+ * fuse11: LW + ADDI (post-inc)      - Load with pointer increment
+ * fuse12: ADDI + BNE                - Loop counter decrement-branch
+ */
 
 /* clang-format off */
 /* IR (intermediate representation) is exclusively represented by RISC-V
@@ -318,11 +341,29 @@ enum {
 };
 /* clang-format on */
 
+/* Fused instruction data - must match first 8 bytes of rv_insn_t layout.
+ * This structure is used in fuse arrays and handlers access fields directly.
+ * WARNING: Never cast opcode_fuse_t* to rv_insn_t* - use dedicated functions.
+ */
 typedef struct {
     int32_t imm;
     uint8_t rd, rs1, rs2;
     uint8_t opcode;
 } opcode_fuse_t;
+
+/* Compile-time layout verification */
+_Static_assert(sizeof(opcode_fuse_t) == 8,
+               "opcode_fuse_t must be exactly 8 bytes");
+_Static_assert(offsetof(opcode_fuse_t, imm) == 0,
+               "opcode_fuse_t.imm must be at offset 0");
+_Static_assert(offsetof(opcode_fuse_t, rd) == 4,
+               "opcode_fuse_t.rd must be at offset 4");
+_Static_assert(offsetof(opcode_fuse_t, rs1) == 5,
+               "opcode_fuse_t.rs1 must be at offset 5");
+_Static_assert(offsetof(opcode_fuse_t, rs2) == 6,
+               "opcode_fuse_t.rs2 must be at offset 6");
+_Static_assert(offsetof(opcode_fuse_t, opcode) == 7,
+               "opcode_fuse_t.opcode must be at offset 7");
 
 #define HISTORY_SIZE 16
 typedef struct {

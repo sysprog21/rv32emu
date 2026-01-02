@@ -1088,3 +1088,166 @@ T2C_OP(fuse5, {
         }
     }
 })
+
+/* fused LI a7, imm + ECALL
+ * This fusion is only available in standard RV32I/M/A/F/C since RV32E
+ * uses a different syscall convention (t0 instead of a7).
+ */
+#if !RV32_HAS(RV32E)
+T2C_OP(fuse6, {
+    /* Store syscall number (imm) to a7 register */
+    LLVMValueRef a7_offset = LLVMConstInt(
+        LLVMInt32Type(), offsetof(riscv_t, X) / sizeof(int) + rv_reg_a7, true);
+    LLVMValueRef addr_a7 =
+        LLVMBuildInBoundsGEP2(*builder, LLVMInt32Type(), LLVMGetParam(start, 0),
+                              &a7_offset, 1, "addr_a7");
+    LLVMBuildStore(*builder, LLVMConstInt(LLVMInt32Type(), ir->imm, true),
+                   addr_a7);
+    /* Store PC and call ecall handler.
+     * ECALL is at ir->pc + 4 (second instruction in fused pair).
+     */
+    T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 4,
+                             t2c_gen_PC_addr(start, builder, ir));
+    t2c_gen_call_io_func(start, builder, param_types, 8);
+    LLVMBuildRetVoid(*builder);
+})
+#else
+/* RV32E stub: fuse6 pattern is never generated for RV32E.
+ * Defensive fallback - return void if unexpectedly reached.
+ */
+T2C_OP(fuse6, {
+    assert(!"fuse6 should not be called in RV32E mode");
+    LLVMBuildRetVoid(*builder);
+})
+#endif
+
+/* fused multiple ADDI */
+T2C_OP(fuse7, {
+    opcode_fuse_t *fuse = ir->fuse;
+    for (int i = 0; i < ir->imm2; i++) {
+        LLVMValueRef rs1_offset = LLVMConstInt(
+            LLVMInt32Type(), offsetof(riscv_t, X) / sizeof(int) + fuse[i].rs1,
+            true);
+        LLVMValueRef addr_rs1 = LLVMBuildInBoundsGEP2(
+            *builder, LLVMInt32Type(), LLVMGetParam(start, 0), &rs1_offset, 1,
+            "addr_rs1");
+        LLVMValueRef val_rs1 =
+            LLVMBuildLoad2(*builder, LLVMInt32Type(), addr_rs1, "val_rs1");
+        LLVMValueRef res = LLVMBuildAdd(
+            *builder, val_rs1, LLVMConstInt(LLVMInt32Type(), fuse[i].imm, true),
+            "add");
+        LLVMValueRef rd_offset =
+            LLVMConstInt(LLVMInt32Type(),
+                         offsetof(riscv_t, X) / sizeof(int) + fuse[i].rd, true);
+        LLVMValueRef addr_rd = LLVMBuildInBoundsGEP2(*builder, LLVMInt32Type(),
+                                                     LLVMGetParam(start, 0),
+                                                     &rd_offset, 1, "addr_rd");
+        LLVMBuildStore(*builder, res, addr_rd);
+    }
+})
+
+/* fused LUI + ADDI: 32-bit constant load (li pseudo-op)
+ * rd = (lui_imm << 12) + addi_imm = ir->imm + ir->imm2
+ */
+T2C_OP(fuse8, {
+    /* Compute combined immediate and store to rd.
+     * Cast to uint32_t to avoid signed overflow UB.
+     */
+    uint32_t combined_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    LLVMValueRef rd_offset = LLVMConstInt(
+        LLVMInt32Type(), offsetof(riscv_t, X) / sizeof(int) + ir->rd, true);
+    LLVMValueRef addr_rd =
+        LLVMBuildInBoundsGEP2(*builder, LLVMInt32Type(), LLVMGetParam(start, 0),
+                              &rd_offset, 1, "addr_rd");
+    LLVMBuildStore(*builder, LLVMConstInt(LLVMInt32Type(), combined_imm, true),
+                   addr_rd);
+})
+
+/* fused LUI + LW: absolute address load
+ * addr = ir->imm (lui << 12) + ir->imm2 (lw offset)
+ * ir->rs2 = destination register for load
+ */
+T2C_OP(fuse9, {
+    uint32_t addr_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    LLVMValueRef addr =
+        LLVMConstInt(LLVMInt64Type(), (uint64_t) addr_imm + mem_base, false);
+    LLVMValueRef cast_addr = LLVMBuildIntToPtr(
+        *builder, addr, LLVMPointerType(LLVMInt32Type(), 0), "cast");
+    LLVMValueRef res =
+        LLVMBuildLoad2(*builder, LLVMInt32Type(), cast_addr, "res");
+    LLVMBuildStore(*builder, res, t2c_gen_rs2_addr(start, builder, ir));
+})
+
+/* fused LUI + SW: absolute address store
+ * addr = ir->imm (lui << 12) + ir->imm2 (sw offset)
+ * ir->rs1 = source register for store
+ */
+T2C_OP(fuse10, {
+    uint32_t addr_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    LLVMValueRef addr =
+        LLVMConstInt(LLVMInt64Type(), (uint64_t) addr_imm + mem_base, false);
+    LLVMValueRef cast_addr = LLVMBuildIntToPtr(
+        *builder, addr, LLVMPointerType(LLVMInt32Type(), 0), "cast");
+    T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
+    LLVMBuildStore(*builder, val_rs1, cast_addr);
+})
+
+/* fused LW + ADDI (post-increment load)
+ * addr = rv->X[ir->rs1] + ir->imm
+ * ir->rd = load destination
+ * ir->rs1 += ir->imm2 (increment)
+ *
+ * Note: Pattern matching in match_pattern() requires rd != rs1 to avoid
+ * clobbering the base register before use in the increment. This lets us
+ * safely use the original rs1 value for the post-increment.
+ */
+T2C_OP(fuse11, {
+    LLVMValueRef addr_rs1 = t2c_gen_rs1_addr(start, builder, ir);
+    T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, addr_rs1);
+    /* Compute address and load */
+    LLVMValueRef mem_loc = t2c_gen_mem_loc(start, builder, ir, mem_base);
+    LLVMValueRef res =
+        LLVMBuildLoad2(*builder, LLVMInt32Type(), mem_loc, "res");
+    LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+    /* Increment rs1 by imm2 (rd != rs1 guaranteed by fusion constraint) */
+    LLVMValueRef inc_val = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm2);
+    LLVMBuildStore(*builder, inc_val, addr_rs1);
+})
+
+/* fused ADDI + BNE (loop counter decrement-branch)
+ * rd = rs1 + imm
+ * if rd != 0, branch to PC + 4 + imm2
+ */
+T2C_OP(fuse12, {
+    LLVMValueRef addr_PC = t2c_gen_PC_addr(start, builder, ir);
+    /* Compute rd = rs1 + imm */
+    T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
+    LLVMValueRef res = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);
+    LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+    /* Compare rd with 0 */
+    T2C_LLVM_GEN_CMP_IMM32(NE, res, 0);
+    /* Create taken and untaken branches */
+    LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");
+    LLVMBuilderRef builder2 = LLVMCreateBuilder();
+    LLVMPositionBuilderAtEnd(builder2, taken);
+    if (ir->branch_taken &&
+        t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
+        *taken_builder = builder2;
+    } else {
+        /* PC = ir->pc + 4 + ir->imm2 (ADDI is 4 bytes, then branch offset) */
+        T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + 4 + ir->imm2, addr_PC);
+        LLVMBuildRetVoid(builder2);
+    }
+    LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken");
+    LLVMBuilderRef builder3 = LLVMCreateBuilder();
+    LLVMPositionBuilderAtEnd(builder3, untaken);
+    if (ir->branch_untaken &&
+        t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
+        *untaken_builder = builder3;
+    } else {
+        /* PC = ir->pc + 8 (skip both ADDI and BNE, each 4 bytes) */
+        T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 8, addr_PC);
+        LLVMBuildRetVoid(builder3);
+    }
+    LLVMBuildCondBr(*builder, cmp, taken, untaken);
+})

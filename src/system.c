@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <string.h>
 
 #include "system.h"
 
@@ -37,6 +38,138 @@ static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
     vm_attr_t *attr = PRIV(rv);
     const uint32_t nr_pg_max = attr->mem_size / RV_PG_SIZE;
     return ppn < nr_pg_max;
+}
+
+void mmu_tlb_flush_all(riscv_t *rv)
+{
+    memset(rv->dtlb, 0, sizeof(rv->dtlb));
+    memset(rv->itlb, 0, sizeof(rv->itlb));
+}
+
+void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr)
+{
+    uint32_t vpn = vaddr >> RV_PG_SHIFT;
+    uint32_t idx = vpn & TLB_MASK;
+
+    if (rv->dtlb[idx].valid && rv->dtlb[idx].vpn == vpn)
+        rv->dtlb[idx].valid = 0;
+
+    if (rv->itlb[idx].valid && rv->itlb[idx].vpn == vpn)
+        rv->itlb[idx].valid = 0;
+}
+
+/* TLB lookup for data accesses (read/write).
+ * Returns physical address if TLB hit, 0 if miss.
+ * Updates A/D bits in PTE on successful lookup.
+ */
+static inline uint32_t dtlb_lookup(riscv_t *rv,
+                                   uint32_t vaddr,
+                                   bool write,
+                                   bool *hit)
+{
+    uint32_t vpn = vaddr >> RV_PG_SHIFT;
+    uint32_t idx = vpn & TLB_MASK;
+    tlb_entry_t *entry = &rv->dtlb[idx];
+
+    if (entry->valid && entry->vpn == vpn) {
+        /* Check permissions */
+        uint8_t needed = write ? PTE_W : PTE_R;
+        if (!(entry->perm & needed)) {
+            *hit = false;
+            return 0;
+        }
+
+        /* Handle dirty bit for writes */
+        if (write && !entry->dirty) {
+            /* Update PTE dirty bit in memory */
+            vm_attr_t *attr = PRIV(rv);
+            pte_t *pte = (pte_t *) (attr->mem->mem_base + entry->pte_addr);
+            *pte |= PTE_D;
+            entry->dirty = 1;
+        }
+
+        *hit = true;
+        /* ppn stores the page-aligned physical address base */
+        uint32_t offset = (entry->level == TLB_PAGE_LEVEL_SUPER)
+                              ? (vaddr & MASK(RV_PG_SHIFT + 10))
+                              : (vaddr & MASK(RV_PG_SHIFT));
+        return entry->ppn | offset;
+    }
+
+    *hit = false;
+    return 0;
+}
+
+/* TLB lookup for instruction fetches.
+ * Returns physical address if TLB hit, 0 if miss.
+ */
+static inline uint32_t itlb_lookup(riscv_t *rv, uint32_t vaddr, bool *hit)
+{
+    uint32_t vpn = vaddr >> RV_PG_SHIFT;
+    uint32_t idx = vpn & TLB_MASK;
+    tlb_entry_t *entry = &rv->itlb[idx];
+
+    if (entry->valid && entry->vpn == vpn) {
+        /* Check execute permission */
+        if (!(entry->perm & PTE_X)) {
+            *hit = false;
+            return 0;
+        }
+
+        *hit = true;
+        /* ppn stores the page-aligned physical address base */
+        uint32_t offset = (entry->level == TLB_PAGE_LEVEL_SUPER)
+                              ? (vaddr & MASK(RV_PG_SHIFT + 10))
+                              : (vaddr & MASK(RV_PG_SHIFT));
+        return entry->ppn | offset;
+    }
+
+    *hit = false;
+    return 0;
+}
+
+/* Populate dTLB entry after successful page walk */
+static inline void dtlb_populate(riscv_t *rv,
+                                 uint32_t vaddr,
+                                 pte_t *pte,
+                                 uint32_t level)
+{
+    vm_attr_t *attr = PRIV(rv);
+    uint32_t vpn = vaddr >> RV_PG_SHIFT;
+    uint32_t idx = vpn & TLB_MASK;
+    tlb_entry_t *entry = &rv->dtlb[idx];
+
+    entry->vpn = vpn;
+    /* Store page-aligned physical address base (PPN extracted from PTE bits
+     * [31:10], shifted left by 12) */
+    entry->ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;
+    entry->pte_addr = (uint8_t *) pte - attr->mem->mem_base;
+    entry->perm = *pte & (PTE_R | PTE_W | PTE_X | PTE_U);
+    entry->dirty = (*pte & PTE_D) ? 1 : 0;
+    entry->level = level;
+    entry->valid = 1;
+}
+
+/* Populate iTLB entry after successful page walk */
+static inline void itlb_populate(riscv_t *rv,
+                                 uint32_t vaddr,
+                                 pte_t *pte,
+                                 uint32_t level)
+{
+    vm_attr_t *attr = PRIV(rv);
+    uint32_t vpn = vaddr >> RV_PG_SHIFT;
+    uint32_t idx = vpn & TLB_MASK;
+    tlb_entry_t *entry = &rv->itlb[idx];
+
+    entry->vpn = vpn;
+    /* Store page-aligned physical address base (PPN extracted from PTE bits
+     * [31:10], shifted left by 12) */
+    entry->ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;
+    entry->pte_addr = (uint8_t *) pte - attr->mem->mem_base;
+    entry->perm = *pte & (PTE_R | PTE_W | PTE_X | PTE_U);
+    entry->dirty = (*pte & PTE_D) ? 1 : 0;
+    entry->level = level;
+    entry->valid = 1;
 }
 
 #define PAGE_TABLE(ppn)                                               \
@@ -199,6 +332,16 @@ static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t vaddr)
     if (!rv->csr_satp)
         return memory_ifetch(vaddr);
 
+    if (need_retranslate)
+        return 0;
+
+    /* Try iTLB first for fast path */
+    bool hit;
+    uint32_t paddr = itlb_lookup(rv, vaddr, &hit);
+    if (hit)
+        return memory_ifetch(paddr);
+
+    /* TLB miss - do full page walk */
     uint32_t level;
     pte_t *pte = mmu_walk(rv, vaddr, &level);
     bool ok = MMU_FAULT_CHECK(ifetch, rv, pte, vaddr, PTE_X);
@@ -208,11 +351,23 @@ static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t vaddr)
         if (need_handle_signal)
             return 0;
 #endif
+        /* Retry walk after trap handler has set up the page */
         pte = mmu_walk(rv, vaddr, &level);
+        /* Re-validate permissions after retry */
+        if (!pte || !MMU_FAULT_CHECK(ifetch, rv, pte, vaddr, PTE_X)) {
+            need_retranslate = true;
+            /* Also set need_handle_signal so RVOP macro returns for retry */
+            need_handle_signal = true;
+            return 0;
+        }
     }
 
-    if (need_retranslate)
-        return 0;
+    /* Update Accessed bit per RISC-V Sv32 spec */
+    if (!(*pte & PTE_A))
+        *pte |= PTE_A;
+
+    /* Populate iTLB for future accesses */
+    itlb_populate(rv, vaddr, pte, level);
 
     get_ppn_and_offset();
     return memory_ifetch(ppn | offset);
@@ -222,7 +377,10 @@ uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return 0;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return 0;
 #endif
@@ -241,7 +399,10 @@ uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return 0;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return 0;
 #endif
@@ -260,7 +421,10 @@ uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return 0;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return 0;
 #endif
@@ -279,7 +443,10 @@ void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return;
 #endif
@@ -300,7 +467,10 @@ void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return;
 #endif
@@ -321,7 +491,10 @@ void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
+    if (need_retranslate)
+        return;
+#elif RV32_HAS(SYSTEM)
     if (need_handle_signal)
         return;
 #endif
@@ -338,15 +511,18 @@ void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
     __UNREACHABLE;
 }
 
-/*
- * TODO: dTLB can be introduced here to
- * cache the gVA to gPA tranlation.
- */
 uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
 {
     if (!rv->csr_satp)
         return vaddr;
 
+    /* Try dTLB first for fast path */
+    bool hit;
+    uint32_t paddr = dtlb_lookup(rv, vaddr, !rw, &hit);
+    if (hit)
+        return paddr;
+
+    /* TLB miss - do full page walk */
     uint32_t level;
     pte_t *pte = mmu_walk(rv, vaddr, &level);
     bool ok = rw ? MMU_FAULT_CHECK(read, rv, pte, vaddr, PTE_R)
@@ -357,8 +533,31 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
         if (need_handle_signal)
             return 0;
 #endif
+        /* Retry walk after trap handler has set up the page */
         pte = mmu_walk(rv, vaddr, &level);
+        /* Re-validate permissions after retry */
+        ok = rw ? MMU_FAULT_CHECK(read, rv, pte, vaddr, PTE_R)
+                : MMU_FAULT_CHECK(write, rv, pte, vaddr, PTE_W);
+        if (!pte || !ok) {
+#if RV32_HAS(ELF_LOADER)
+            need_retranslate = true;
+            /* Also set need_handle_signal so RVOP macro returns for retry */
+            need_handle_signal = true;
+#else
+            need_handle_signal = true;
+#endif
+            return 0;
+        }
     }
+
+    /* Update A/D bits per RISC-V Sv32 spec */
+    if (!(*pte & PTE_A))
+        *pte |= PTE_A;
+    if (!rw && !(*pte & PTE_D)) /* Write access needs Dirty bit */
+        *pte |= PTE_D;
+
+    /* Populate dTLB for future accesses */
+    dtlb_populate(rv, vaddr, pte, level);
 
     get_ppn_and_offset();
     return ppn | offset;

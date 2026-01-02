@@ -116,8 +116,10 @@ static void memory_fault_handler(int sig, siginfo_t *si, void *context)
         }
 
         /* Activate the chunk with read/write permissions */
-        if (mprotect((void *) chunk_start, chunk_len, PROT_READ | PROT_WRITE) ==
-            0) {
+        int result =
+            mprotect((void *) chunk_start, chunk_len, PROT_READ | PROT_WRITE);
+
+        if (result == 0) {
             /* Only count if not already active (handles re-fault edge cases) */
             if (!bitmap_test(chunk_idx)) {
                 bitmap_set(chunk_idx);
@@ -145,7 +147,7 @@ static void memory_fault_handler(int sig, siginfo_t *si, void *context)
     if (prev->sa_flags & SA_SIGINFO) {
         prev->sa_sigaction(sig, si, context);
     } else if (prev->sa_handler == SIG_DFL) {
-        /* Restore default handler and re-raise using sigaction (async-safe) */
+        /* Restore default handler and re-raise */
         struct sigaction dfl;
         dfl.sa_handler = SIG_DFL;
         sigemptyset(&dfl.sa_mask);

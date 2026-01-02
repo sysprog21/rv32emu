@@ -15,9 +15,9 @@ define prologue
     $(info $(_))
 endef
 
-# $(1), $(2), $(3): files to be deleted
+# $(1), $(2): files to be deleted
 define epilogue
-    $(RM) $(1) $(2) $(3)
+    $(RM) $(1) $(2)
 endef
 
 # $(1): compressed source URL
@@ -155,7 +155,7 @@ $($(T)_DATA):
 	$(Q)$$(call download,$(strip $($(T)_DATA_URL)))
 	$(Q)$$(call extract,$($(T)_DATA_DEST),$(notdir $($(T)_DATA_URL)),$($(T)_DATA_SKIP_DIR_LEVEL))
 	$(Q)$$(call verify,$($(T)_DATA_SHA_CMD),$($(T)_DATA_SHA),$($(T)_DATA))
-	$(Q)$$(call epilogue,$(notdir $($(T)_DATA_URL)),$(SHA_FILE1),$(SHA_FILE2))
+	$(Q)$$(call epilogue,$(SHA_FILE1),$(SHA_FILE2))
 endef
 
 EXTERNAL_DATA = DOOM QUAKE TIMIDITY BUILDROOT LINUX SIMPLEFS

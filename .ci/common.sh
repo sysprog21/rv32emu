@@ -47,19 +47,27 @@ print_warning()
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-# Assertion function for tests
-# Usage: ASSERT <condition> <error_message>
+# Assertion function for tests - executes command and exits on failure
+# Usage: ASSERT <command...>
+# Example: ASSERT expect <<- DONE
+#              spawn ./program
+#              expect "output"
+#          DONE
 ASSERT()
 {
-    local condition=$1
-    shift
-    local message="$*"
-
-    if ! eval "${condition}"; then
-        print_error "Assertion failed: ${message}"
-        print_error "Condition: ${condition}"
-        return 1
+    "$@"
+    local RES=$?
+    if [ ${RES} -ne 0 ]; then
+        print_error "Assert failed: $*"
+        exit ${RES}
     fi
+}
+
+# Kill rv32emu processes - use in test cleanup
+cleanup_emulator()
+{
+    sleep 1
+    pkill -9 rv32emu 2> /dev/null || true
 }
 
 # Cleanup function registry

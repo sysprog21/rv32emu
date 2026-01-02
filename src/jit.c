@@ -1999,6 +1999,33 @@ static inline void liveness_calc(block_t *block)
                 liveness[ir->fuse[i].rs1] = idx;
             }
             break;
+        case rv_insn_fuse6:
+            /* LI a7 + ECALL: no registers to track (a7 is set internally) */
+            break;
+        case rv_insn_fuse7:
+            /* Multiple ADDI: track rs1 for each operation */
+            for (int i = 0; i < ir->imm2; i++) {
+                liveness[ir->fuse[i].rs1] = idx;
+            }
+            break;
+        case rv_insn_fuse8:
+            /* LUI + ADDI: no source registers (rd = imm + imm2) */
+            break;
+        case rv_insn_fuse9:
+            /* LUI + LW: no source registers (absolute address load) */
+            break;
+        case rv_insn_fuse10:
+            /* LUI + SW: rs1 is source (value to store) */
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_fuse11:
+            /* LW + ADDI: rs1 is source (base address and increment source) */
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_fuse12:
+            /* ADDI + BNE: rs1 is source */
+            liveness[ir->rs1] = idx;
+            break;
         default:
             __UNREACHABLE;
         }
@@ -2406,6 +2433,146 @@ static void do_fuse5(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
             break;
         }
     }
+}
+
+/* fused LI a7, imm + ECALL
+ * This fusion is only available in standard RV32I/M/A/F/C since RV32E
+ * uses a different syscall convention (t0 instead of a7).
+ */
+#if !RV32_HAS(RV32E)
+static void do_fuse6(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
+{
+    /* Set a7 = syscall number (imm) */
+    vm_reg[0] = map_vm_reg(state, rv_reg_a7);
+    emit_load_imm(state, vm_reg[0], ir->imm);
+    /* Store back all registers and call ecall handler.
+     * ECALL is at ir->pc + 4 (second instruction in fused pair).
+     */
+    store_back(state);
+    emit_load_imm(state, temp_reg, ir->pc + 4);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_call(state, (intptr_t) rv->io.on_ecall);
+    emit_exit(state);
+}
+#else
+/* RV32E stub: fuse6 pattern is never generated for RV32E.
+ * Defensive fallback - emit exit if unexpectedly reached.
+ */
+static void do_fuse6(struct jit_state *state,
+                     riscv_t *rv UNUSED,
+                     rv_insn_t *ir UNUSED)
+{
+    assert(!"fuse6 should not be called in RV32E mode");
+    emit_exit(state);
+}
+#endif
+
+/* fused multiple ADDI */
+static void do_fuse7(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
+{
+    opcode_fuse_t *fuse = ir->fuse;
+    for (int i = 0; i < ir->imm2; i++) {
+        vm_reg[0] = ra_load(state, fuse[i].rs1);
+        vm_reg[1] = map_vm_reg_reserved(state, fuse[i].rd, vm_reg[0]);
+        if (vm_reg[0] != vm_reg[1])
+            emit_mov(state, vm_reg[0], vm_reg[1]);
+        emit_alu32_imm32(state, 0x81, 0, vm_reg[1], fuse[i].imm);
+    }
+}
+
+/* fused LUI + ADDI: 32-bit constant load (li pseudo-op)
+ * rd = (lui_imm << 12) + addi_imm = ir->imm + ir->imm2
+ */
+static void do_fuse8(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
+{
+    vm_reg[0] = map_vm_reg(state, ir->rd);
+    /* Compute combined immediate at JIT compile time.
+     * Cast to uint32_t to avoid signed overflow UB.
+     */
+    uint32_t combined_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    emit_load_imm(state, vm_reg[0], combined_imm);
+}
+
+/* fused LUI + LW: absolute address load
+ * addr = ir->imm (lui << 12) + ir->imm2 (lw offset)
+ * ir->rs2 = destination register for load
+ */
+static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
+{
+    memory_t *m = PRIV(rv)->mem;
+    uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + addr));
+    vm_reg[0] = map_vm_reg(state, ir->rs2);
+    emit_load(state, S32, temp_reg, vm_reg[0], 0);
+}
+
+/* fused LUI + SW: absolute address store
+ * addr = ir->imm (lui << 12) + ir->imm2 (sw offset)
+ * ir->rs1 = source register for store
+ */
+static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
+{
+    memory_t *m = PRIV(rv)->mem;
+    uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+    vm_reg[0] = ra_load(state, ir->rs1);
+    emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + addr));
+    emit_store(state, S32, vm_reg[0], temp_reg, 0);
+}
+
+/* fused LW + ADDI (post-increment load)
+ * addr = rv->X[ir->rs1] + ir->imm
+ * ir->rd = load destination
+ * ir->rs1 += ir->imm2 (increment)
+ */
+static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
+{
+    memory_t *m = PRIV(rv)->mem;
+    vm_reg[0] = ra_load(state, ir->rs1);
+    /* Compute address: mem_base + rs1 + imm */
+    emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + ir->imm));
+    emit_alu64(state, 0x01, vm_reg[0], temp_reg);
+    /* Load value into rd */
+    vm_reg[1] = map_vm_reg(state, ir->rd);
+    emit_load(state, S32, temp_reg, vm_reg[1], 0);
+    /* Increment rs1 by imm2 */
+    vm_reg[0] = map_vm_reg(state, ir->rs1);
+    emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
+}
+
+/* fused ADDI + BNE (loop counter decrement-branch)
+ * rd = rs1 + imm
+ * if rd != 0, branch to PC + 4 + imm2
+ * This is a branching instruction, so we must store back and exit
+ */
+static void do_fuse12(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
+{
+    /* Compute rd = rs1 + imm */
+    vm_reg[0] = ra_load(state, ir->rs1);
+    vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);
+    if (vm_reg[0] != vm_reg[1])
+        emit_mov(state, vm_reg[0], vm_reg[1]);
+    emit_alu32_imm32(state, 0x81, 0, vm_reg[1], ir->imm);
+    /* Compare rd with 0 for branch decision */
+    emit_cmp_imm32(state, vm_reg[1], 0);
+    store_back(state);
+    /* jne (jump if not equal) to taken path: 0x85 = JNE */
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, 0x85);
+    /* Untaken path: rd == 0, fall through to PC + 8 */
+    if (ir->branch_untaken) {
+        emit_jmp(state, ir->pc + 8, rv->csr_satp);
+    }
+    emit_load_imm(state, temp_reg, ir->pc + 8);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_exit(state);
+    /* Taken path: rd != 0, branch to PC + 4 + imm2 */
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+    if (ir->branch_taken) {
+        emit_jmp(state, ir->pc + 4 + ir->imm2, rv->csr_satp);
+    }
+    emit_load_imm(state, temp_reg, ir->pc + 4 + ir->imm2);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_exit(state);
 }
 
 /* clang-format off */

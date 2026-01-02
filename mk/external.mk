@@ -65,9 +65,9 @@ define verify
             ($(eval VERIFIER :=  \
                 echo $(2) > $(SHA_FILE1) \
                 | find $(3) -type f -not -path '*/.git/*' -print0 \
-                | sort -z \
+                | LC_ALL=C sort -z \
                 | xargs -0 $(1) \
-                | sort \
+                | LC_ALL=C sort \
                 | $(1) \
                 | cut -f 1 -d ' ' > $(SHA_FILE2) && cmp $(SHA_FILE1) $(SHA_FILE2))), \
             ($(eval VERIFIER := (ls $(3) >/dev/null 2>&1 || echo FAILED) && echo "$(strip $(2))  $(strip $(3))" | $(1) -c -)) \

@@ -115,10 +115,15 @@ TIMIDITY_DATA_SHA = cf6217a5d824b717ec4a07e15e6c129a4657ca25
 TIMIDITY_DATA_SHA_CMD = $(SHA1SUM)
 
 # Buildroot
-BUILDROOT_VERSION = 2024.11
+BUILDROOT_VERSION = 2025.11
 BUILDROOT_DATA = /tmp/buildroot
 BUILDROOT_DATA_URL = git clone https://github.com/buildroot/buildroot $(BUILDROOT_DATA) -b $(BUILDROOT_VERSION) --depth=1
-BUILDROOT_DATA_SHA = e678801287ab68369af1731dcf1acc39e4adccff
+# find /tmp/buildroot -type f -not -path '*/.git/*' -print0 | \
+	LC_ALL=C sort -z | \
+	xargs -0 sha1sum | \
+	LC_ALL=C sort | \
+	sha1sum
+BUILDROOT_DATA_SHA = 70999b51eb4034eb96457a0ac210365c9cc7c2bb
 BUILDROOT_DATA_SHA_CMD = $(SHA1SUM)
 
 # Linux kernel

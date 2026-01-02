@@ -15,9 +15,9 @@ define prologue
     $(info $(_))
 endef
 
-# $(1), $(2), $(3): files to be deleted
+# $(1), $(2): files to be deleted
 define epilogue
-    $(RM) $(1) $(2) $(3)
+    $(RM) $(1) $(2)
 endef
 
 # $(1): compressed source URL
@@ -65,9 +65,9 @@ define verify
             ($(eval VERIFIER :=  \
                 echo $(2) > $(SHA_FILE1) \
                 | find $(3) -type f -not -path '*/.git/*' -print0 \
-                | sort -z \
+                | LC_ALL=C sort -z \
                 | xargs -0 $(1) \
-                | sort \
+                | LC_ALL=C sort \
                 | $(1) \
                 | cut -f 1 -d ' ' > $(SHA_FILE2) && cmp $(SHA_FILE1) $(SHA_FILE2))), \
             ($(eval VERIFIER := (ls $(3) >/dev/null 2>&1 || echo FAILED) && echo "$(strip $(2))  $(strip $(3))" | $(1) -c -)) \
@@ -111,14 +111,24 @@ TIMIDITY_DATA_URL = https://www.libsdl.org/projects/old/SDL_mixer/timidity/timid
 TIMIDITY_DATA_DEST = $(OUT)
 TIMIDITY_DATA = $(TIMIDITY_DATA_DEST)/timidity
 TIMIDITY_DATA_SKIP_DIR_LEVEL = 0
+# find $(TIMIDITY_DATA_DEST)/timidity -type f -not -path '*/.git/*' -print0 | \
+	LC_ALL=C sort -z | \
+	xargs -0 sha1sum | \
+	LC_ALL=C sort | \
+	sha1sum
 TIMIDITY_DATA_SHA = cf6217a5d824b717ec4a07e15e6c129a4657ca25
 TIMIDITY_DATA_SHA_CMD = $(SHA1SUM)
 
 # Buildroot
-BUILDROOT_VERSION = 2024.11
+BUILDROOT_VERSION = 2025.11
 BUILDROOT_DATA = /tmp/buildroot
 BUILDROOT_DATA_URL = git clone https://github.com/buildroot/buildroot $(BUILDROOT_DATA) -b $(BUILDROOT_VERSION) --depth=1
-BUILDROOT_DATA_SHA = e678801287ab68369af1731dcf1acc39e4adccff
+# find /tmp/buildroot -type f -not -path '*/.git/*' -print0 | \
+	LC_ALL=C sort -z | \
+	xargs -0 sha1sum | \
+	LC_ALL=C sort | \
+	sha1sum
+BUILDROOT_DATA_SHA = 70999b51eb4034eb96457a0ac210365c9cc7c2bb
 BUILDROOT_DATA_SHA_CMD = $(SHA1SUM)
 
 # Linux kernel
@@ -141,6 +151,11 @@ LINUX_DATA_SHA_CMD = $(SHA256SUM)
 SIMPLEFS_VERSION = rel2025.0
 SIMPLEFS_DATA = /tmp/simplefs
 SIMPLEFS_DATA_URL = git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
+# find /tmp/simplefs -type f -not -path '*/.git/*' -print0 | \
+	LC_ALL=C sort -z | \
+	xargs -0 sha1sum | \
+	LC_ALL=C sort | \
+	sha1sum
 SIMPLEFS_DATA_SHA = 863936f72e0781b240c5ec4574510c57f0394b99
 SIMPLEFS_DATA_SHA_CMD = $(SHA1SUM)
 
@@ -150,7 +165,7 @@ $($(T)_DATA):
 	$(Q)$$(call download,$(strip $($(T)_DATA_URL)))
 	$(Q)$$(call extract,$($(T)_DATA_DEST),$(notdir $($(T)_DATA_URL)),$($(T)_DATA_SKIP_DIR_LEVEL))
 	$(Q)$$(call verify,$($(T)_DATA_SHA_CMD),$($(T)_DATA_SHA),$($(T)_DATA))
-	$(Q)$$(call epilogue,$(notdir $($(T)_DATA_URL)),$(SHA_FILE1),$(SHA_FILE2))
+	$(Q)$$(call epilogue,$(SHA_FILE1),$(SHA_FILE2))
 endef
 
 EXTERNAL_DATA = DOOM QUAKE TIMIDITY BUILDROOT LINUX SIMPLEFS

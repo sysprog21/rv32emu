@@ -6,11 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 check_platform
 
-cleanup()
-{
-    sleep 1
-    pkill -9 rv32emu
-}
+# Register emulator cleanup for trap on EXIT
+register_cleanup cleanup_emulator
 
 check_image_for_file()
 {
@@ -53,15 +50,7 @@ check_image_for_file()
     return 1
 }
 
-ASSERT()
-{
-    $*
-    local RES=$?
-    if [ ${RES} -ne 0 ]; then
-        echo 'Assert failed: "' $* '"'
-        exit ${RES}
-    fi
-}
+# Use ASSERT from common.sh
 
 cleanup
 

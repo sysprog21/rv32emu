@@ -13,6 +13,7 @@ Options:
     --is-emcc           Check if compiler is Emscripten (prints y/n)
     --is-clang          Check if compiler is Clang (prints y/n)
     --is-gcc            Check if compiler is GCC (prints y/n)
+    --have-emcc         Check if Emscripten (emcc) is available (prints y/n)
     --have-sdl2         Check if SDL2 is available (prints y/n)
     --have-sdl2-mixer   Check if SDL2_mixer is available (prints y/n)
     --have-llvm18       Check if LLVM 18 is available (prints y/n)
@@ -97,6 +98,19 @@ def have_sdl2_mixer():
     return check_pkg_config("SDL2_mixer")
 
 
+def have_emcc():
+    """Check if Emscripten (emcc) is available."""
+    emcc = shutil.which("emcc")
+    if emcc:
+        # Verify it works by checking version
+        # Some Emscripten builds emit version info to stderr, so check both
+        ret, stdout, stderr = run_cmd([emcc, "--version"])
+        combined = (stdout + stderr).lower()
+        if ret == 0 and "emcc" in combined:
+            return True
+    return False
+
+
 def have_llvm18():
     """Check if LLVM 18 is available."""
     # Check for llvm-config-18
@@ -165,6 +179,7 @@ def print_summary():
 
     print(f"Compiler: {compiler}")
     print(f"Type: {comp_type}")
+    print(f"Emscripten: {'yes' if have_emcc() else 'no'}")
     print(f"SDL2: {'yes' if have_sdl2() else 'no'}")
     print(f"SDL2_mixer: {'yes' if have_sdl2_mixer() else 'no'}")
     print(f"LLVM 18: {'yes' if have_llvm18() else 'no'}")
@@ -190,6 +205,8 @@ def main():
         print("y" if comp_type == "Clang" else "n")
     elif arg == "--is-gcc":
         print("y" if comp_type == "GCC" else "n")
+    elif arg == "--have-emcc":
+        print("y" if have_emcc() else "n")
     elif arg == "--have-sdl2":
         print("y" if have_sdl2() else "n")
     elif arg == "--have-sdl2-mixer":

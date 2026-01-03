@@ -30,6 +30,10 @@ jobs:
               .clang-format
               Dockerfile
               Makefile
+              # Build system configuration
+              mk/kconfig.mk
+              mk/toolchain.mk
+              tools/detect-env.py
       - name: Set has_code_related_changes
         id: set_has_code_related_changes
         run: |
@@ -156,19 +160,20 @@ jobs:
 
     # emcc builds run on x64 only - WebAssembly output is platform-independent
     # This validates Emscripten compatibility without redundant builds on macOS
+    # Note: wasm_defconfig sets CONFIG_BUILD_WASM=y which auto-selects CC=emcc
     - name: default build using emcc
       if: success()
       run: |
             make distclean
             make wasm_defconfig
-            make CC=emcc $PARALLEL
+            make $PARALLEL
 
     - name: default build for system emulation using emcc
       if: success()
       run: |
             make distclean
             make wasm_defconfig
-            make CC=emcc ENABLE_SYSTEM=1 $PARALLEL
+            make ENABLE_SYSTEM=1 $PARALLEL
             make distclean
 
     - name: Build with various optimization levels

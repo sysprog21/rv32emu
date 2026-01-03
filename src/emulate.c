@@ -600,7 +600,7 @@ static set_t pc_set;
 static bool has_loops = false;
 #endif
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 extern void emu_update_uart_interrupts(riscv_t *rv);
 static uint32_t peripheral_update_ctr = 64;
 #endif
@@ -1898,7 +1898,7 @@ static bool runtime_profiler(riscv_t *rv, block_t *block)
 }
 #endif
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 static bool rv_has_plic_trap(riscv_t *rv)
 {
     return ((rv->csr_sstatus & SSTATUS_SIE || !rv->priv_mode) &&
@@ -1962,7 +1962,7 @@ void rv_step(void *arg)
 
     /* loop until hitting the cycle target */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
         /* check for any interrupt after every block emulation */
         rv_check_interrupt(rv);
 #endif
@@ -2137,7 +2137,7 @@ void rv_step_debug(void *arg)
     assert(arg);
     riscv_t *rv = arg;
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     rv_check_interrupt(rv);
 #endif
 
@@ -2321,7 +2321,7 @@ void ecall_handler(riscv_t *rv)
             rv->PC += 4;
             break;
         default:
-#if RV32_HAS(SDL) && RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SDL) && RV32_HAS(SYSTEM_MMIO)
             /*
              * The guestOS may repeatedly open and close the SDL window,
              * and the user could close the application using the application’s

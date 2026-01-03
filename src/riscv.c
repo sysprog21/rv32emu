@@ -12,7 +12,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 #include <termios.h>
 #include "dtc/libfdt/libfdt.h"
 #endif
@@ -230,7 +230,7 @@ static void *t2c_runloop(void *arg)
 }
 #endif
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 /* Map a file into memory at the specified location.
  * If max_size > 0, validates that file size does not exceed max_size.
  * Returns the actual file size on success, or -1 when file exceeds max_size
@@ -458,7 +458,7 @@ static void capture_keyboard_input()
 
 #endif
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 /*
  *
  * atexit() registers void (*)(void) callbacks, so no parameters can be passed.
@@ -521,7 +521,7 @@ static void rv_fsync_device()
         free(attr->disk);
     }
 }
-#endif /* RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER) */
+#endif /* RV32_HAS(SYSTEM_MMIO) */
 
 riscv_t *rv_create(riscv_user_t rv_attr)
 {
@@ -532,7 +532,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
         return NULL;
     assert(rv);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     /* register cleaning callback for CTRL+a+x exit */
     atexit(rv_async_block_clear);
     /* register device sync callback for CTRL+a+x exit */
@@ -569,7 +569,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     rv_log_set_level(attr->log_level);
     rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
 
-#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(SYSTEM_MMIO)
     elf_t *elf = elf_new();
     assert(elf);
 
@@ -786,7 +786,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     }
 
     capture_keyboard_input();
-#endif /* !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)) */
+#endif /* !RV32_HAS(SYSTEM_MMIO) */
 
     /* create block and IRs memory pool */
     rv->block_mp = mpool_create(sizeof(block_t) << BLOCK_MAP_CAPACITY_BITS,
@@ -845,7 +845,7 @@ fail_jit_state:
 #endif
 }
 
-#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(SYSTEM_MMIO)
 /*
  * TODO: enable to trace Linux kernel symbol
  */
@@ -887,7 +887,7 @@ void rv_run(riscv_t *rv)
 
     vm_attr_t *attr = PRIV(rv);
     assert(attr &&
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
            attr->data.system.kernel && attr->data.system.initrd
 #else
            attr->data.user.elf_program
@@ -903,7 +903,7 @@ void rv_run(riscv_t *rv)
             rv_step(rv);            /* step instructions */
 #endif
     }
-#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(SYSTEM_MMIO)
     else if (attr->run_flag & RV_RUN_TRACE)
         rv_run_and_trace(rv);
 #endif
@@ -943,7 +943,7 @@ void rv_set_fromhost_addr(riscv_t *rv, uint32_t addr)
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
-#if !RV32_HAS(JIT) || (RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(JIT) || (RV32_HAS(SYSTEM_MMIO))
     vm_attr_t *attr = PRIV(rv);
 #endif
 #if !RV32_HAS(JIT)
@@ -961,7 +961,7 @@ void rv_delete(riscv_t *rv)
     jit_state_exit(rv->jit_state);
     cache_free(rv->block_cache);
 #endif
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     u8250_delete(attr->uart);
     plic_delete(attr->plic);
     /* sync device, cleanup inside the callee */

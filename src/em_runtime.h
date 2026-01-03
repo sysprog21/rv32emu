@@ -11,7 +11,7 @@
 /* To terminate the main loop of CPU */
 void indirect_rv_halt();
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 /* To bridge xterm.js terminal with UART */
 extern uint8_t input_buf_size;
 

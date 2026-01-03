@@ -1,7 +1,13 @@
+# Prebuilt artifacts and benchmark building
+#
+# Handles downloading prebuilt binaries or building from source.
+
+ifndef _MK_ARTIFACT_INCLUDED
+_MK_ARTIFACT_INCLUDED := 1
+
 ENABLE_PREBUILT ?= 1
 
-CC ?= gcc
-CROSS_COMPILE ?= riscv-none-elf-
+# Note: CC and CROSS_COMPILE are already set in mk/toolchain.mk
 
 BIN_DIR := $(abspath $(OUT))
 
@@ -34,7 +40,9 @@ TEST_BENCHES += \
 SCIMARK2_URL := https://math.nist.gov/scimark2/scimark2_1c.zip
 SCIMARK2_SHA1 := de278c5b8cef84ab6dda41855052c7bfef919e36
 
-SHELL_HACK := $(shell mkdir -p $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32 $(BIN_DIR)/linux-image)
+# Create output directories (using order-only prerequisite pattern)
+$(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32 $(BIN_DIR)/linux-image:
+	$(Q)mkdir -p $@
 
 # $(1): tag of GitHub releases
 # $(2): name of GitHub releases
@@ -53,27 +61,46 @@ define fetch-releases-tag
 endef
 
 # Verify prebuilt files against a SHA checksum file.
+# Sets result to "1" in temp file if any verification fails.
 # $(1): SHA checksum file path
 # $(2): prefix path for files (can be empty)
+# $(3): temp file to store result (writes "1" on failure, preserves existing failures)
+# Note: All checks use shell commands to defer until recipe execution.
+# $(error) and $(shell) in $(eval) run at Makefile parse time,
+# before prerequisites (like fetch-checksum) execute.
 define verify-prebuilt-files
-	$(if $(shell test -s $(1) || echo missing),$(error Checksum file $(1) is missing or empty))
-	$(Q)$(eval PREBUILT_FILES := $(shell cat $(1) | awk '{ print $$2 };'))
-	$(Q)$(eval $(foreach FILE,$(PREBUILT_FILES), \
-	    $(call verify,$(SHA1SUM),$(shell grep -F -w $(FILE) $(1) | awk '{ print $$1 };'),$(2)$(FILE),RES) \
-	))
+	$(Q)if [ ! -s "$(1)" ]; then \
+		echo "Error: Checksum file $(1) is missing or empty" >&2; \
+		exit 1; \
+	fi; \
+	verify_failed=$$(cat "$(3)" 2>/dev/null || echo 0); \
+	if [ "$$verify_failed" != "1" ]; then \
+		while read expected_sha filename; do \
+			filepath="$(2)$$filename"; \
+			if [ ! -e "$$filepath" ]; then \
+				verify_failed=1; break; \
+			fi; \
+			if ! echo "$$expected_sha  $$filepath" | $(SHA1SUM) -c - >/dev/null 2>&1; then \
+				verify_failed=1; break; \
+			fi; \
+		done < "$(1)"; \
+	fi; \
+	echo $$verify_failed > "$(3)"
 endef
 
 # Handle SHA-1 verification result: re-fetch if failed, report status.
 # $(1): whether to extract tarball (yes/no)
+# $(2): temp file containing verification result
 define handle-sha1-result
-	$(Q)if [ "$(RES)" = "1" ]; then \
+	$(Q)if [ "$$(cat "$(2)" 2>/dev/null || echo 0)" = "1" ]; then \
 	    $(call warn, SHA-1 verification failed!); \
 	    $(PRINTF) "Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n"; \
 	    wget -q --show-progress "$(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL)" -O "build/$(RV32EMU_PREBUILT_TARBALL)" || exit 1; \
 	    $(if $(filter yes,$(1)),tar --strip-components=1 -zxf "build/$(RV32EMU_PREBUILT_TARBALL)" -C build || exit 1;) \
 	else \
 	    $(call notice, [OK]); \
-	fi
+	fi; \
+	rm -f "$(2)"
 endef
 
 # Fetch checksum file if tarball doesn't exist.
@@ -136,27 +163,32 @@ endif
 
 .PHONY: artifact fetch-checksum scimark2 ieeelib
 
+# Temp file for verification result.
+# Safe for normal use: Make deduplicates targets and runs recipe lines sequentially.
+# Initialized with "0" (success) and set to "1" on verification failure.
+VERIFY_RESULT_FILE := $(BIN_DIR)/.verify_result
+
 artifact: fetch-checksum ieeelib scimark2
 ifeq ($(call has, PREBUILT), 1)
 	$(Q)$(PRINTF) "Checking SHA-1 of prebuilt binaries ... "
-	$(Q)$(eval RES := 0)
+	$(Q)rm -f $(VERIFY_RESULT_FILE) && echo 0 > $(VERIFY_RESULT_FILE)
 
 ifeq ($(call has, SYSTEM), 1)
-	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-linux-image,$(BIN_DIR)/)
+	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-linux-image,$(BIN_DIR)/,$(VERIFY_RESULT_FILE))
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-linux-image-prebuilt.tar.gz)
 else ifeq ($(call has, ARCH_TEST), 1)
-	$(call verify-prebuilt-files,$(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha,$(BIN_DIR)/)
+	$(call verify-prebuilt-files,$(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha,$(BIN_DIR)/,$(VERIFY_RESULT_FILE))
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt-sail-$(HOST_PLATFORM))
 else
-	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-linux-x86-softfp,$(BIN_DIR)/linux-x86-softfp/)
-	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-riscv32,$(BIN_DIR)/riscv32/)
+	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-linux-x86-softfp,$(BIN_DIR)/linux-x86-softfp/,$(VERIFY_RESULT_FILE))
+	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-riscv32,$(BIN_DIR)/riscv32/,$(VERIFY_RESULT_FILE))
 	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt.tar.gz)
 endif
 
 ifeq ($(call has, ARCH_TEST), 1)
-	$(call handle-sha1-result,no)
+	$(call handle-sha1-result,no,$(VERIFY_RESULT_FILE))
 else
-	$(call handle-sha1-result,yes)
+	$(call handle-sha1-result,yes,$(VERIFY_RESULT_FILE))
 endif
 else
 ifeq ($(call has, SYSTEM), 1)
@@ -217,11 +249,11 @@ endif
 scimark2:
 ifeq ($(call has, PREBUILT), 0)
 ifeq ($(call has, SYSTEM), 0)
-	$(Q)$(call prologue,"scimark2")
+	$(call prologue,scimark2)
 	$(Q)$(call download,$(SCIMARK2_URL))
-	$(Q)$(call verify,$(SHA1SUM),$(SCIMARK2_SHA1),$(notdir $(SCIMARK2_URL)))
-	$(Q)$(call extract,"./tests/scimark2",$(notdir $(SCIMARK2_URL)))
-	$(Q)$(call epilogue,$(notdir $(SCIMARK2_URL)),$(SHA1_FILE1),$(SHA1_FILE2))
+	$(call verify-sha,$(SHA1SUM),$(SCIMARK2_SHA1),$(notdir $(SCIMARK2_URL)))
+	$(Q)$(call extract,./tests/scimark2,$(notdir $(SCIMARK2_URL)),0)
+	$(call epilogue,$(notdir $(SCIMARK2_URL)))
 	$(Q)$(PRINTF) "Building scimark2 ...\n"
 	$(Q)$(MAKE) -C ./tests/scimark2 CC=$(CC) CFLAGS="-m32 -O2"
 	$(Q)cp ./tests/scimark2/scimark2 $(BIN_DIR)/linux-x86-softfp/scimark2
@@ -236,3 +268,5 @@ ifeq ($(call has, PREBUILT), 0)
 	git submodule update --init ./src/ieeelib
 	$(Q)$(MAKE) -C ./src/ieeelib CC=$(CC) CFLAGS="$(CFLAGS)" BINDIR=$(BIN_DIR)
 endif
+
+endif # _MK_ARTIFACT_INCLUDED

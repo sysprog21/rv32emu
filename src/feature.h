@@ -5,7 +5,30 @@
 
 #pragma once
 
-/* enable/disable (compile time) features in this header */
+/* Feature Configuration
+ *
+ * Features are controlled via Kconfig (configs/Kconfig) and passed as
+ * compiler flags (-DRV32_FEATURE_*). The defaults below are used only
+ * if the feature flag is not set by the build system.
+ *
+ * Kconfig Constraints (invalid combinations are prevented at config time):
+ *   - T2C requires JIT && LLVM18 (enforced below and in Kconfig)
+ *   - JIT is incompatible with Emscripten (WASM uses interpreter only)
+ *   - GDBSTUB is incompatible with Emscripten
+ *   - SDL requires SDL2 library or Emscripten
+ *   - SDL_MIXER requires SDL
+ *   - ELF_LOADER requires SYSTEM mode
+ *
+ * Derived Features (computed from other features):
+ *   - SYSTEM_MMIO = SYSTEM && !ELF_LOADER (for kernel boot with MMIO devices)
+ *
+ * Simplification Rules (Kconfig guarantees these):
+ *   - RV32_HAS(T2C) implies RV32_HAS(JIT) - no need to check both
+ *   - RV32_HAS(ELF_LOADER) implies RV32_HAS(SYSTEM)
+ *   - RV32_HAS(SDL_MIXER) implies RV32_HAS(SDL)
+ *   - Use RV32_HAS(SYSTEM_MMIO) instead of RV32_HAS(SYSTEM) &&
+ *     !RV32_HAS(ELF_LOADER)
+ */
 
 /* Standard Extension for Integer Multiplication and Division */
 #ifndef RV32_FEATURE_EXT_M
@@ -82,7 +105,10 @@
 #define RV32_FEATURE_T2C 0
 #endif
 
-/* T2C depends on JIT configuration */
+/* T2C (tier-2 compiler) requires JIT (tier-1 compiler).
+ * Kconfig also enforces this, but we double-check here for safety.
+ * This allows source code to use just RV32_HAS(T2C) without also checking JIT.
+ */
 #if !RV32_FEATURE_JIT
 #undef RV32_FEATURE_T2C
 #define RV32_FEATURE_T2C 0

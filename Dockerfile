@@ -7,12 +7,12 @@ WORKDIR /home/root/rv32emu
 COPY . .
 
 # build and rename executables: rv32emu-user, rv32emu-system, and rv32emu-histogram
-RUN make -j"$(nproc)"
+RUN make defconfig && make -j"$(nproc)"
 RUN make tool -j"$(nproc)"
 RUN mv ./build/rv32emu ./build/rv32emu-user
 RUN mv ./build/rv_histogram ./build/rv32emu-histogram
 RUN make distclean
-RUN make ENABLE_SYSTEM=1 INITRD_SIZE=32 -j"$(nproc)"
+RUN make system_defconfig && make INITRD_SIZE=32 -j"$(nproc)"
 
 FROM alpine:3.21 AS final
 

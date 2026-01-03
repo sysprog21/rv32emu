@@ -24,6 +24,10 @@ jobs:
         with:
           files: |
             mk/external.mk
+            # Build system configuration
+            mk/kconfig.mk
+            mk/toolchain.mk
+            tools/detect-env.py
       - name: Set alias
         id: has_changed_files
         run: |

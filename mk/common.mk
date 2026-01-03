@@ -64,7 +64,12 @@ error_msg = $(PRINTF) "$(RED)$(strip $1)$(NC)\n"
 # Note: 'artifact' is included because it only downloads prebuilt binaries
 # and determines what to download from ENABLE_* flags (via compat.mk)
 CONFIG_TARGETS := config menuconfig defconfig oldconfig savedefconfig \
-                  clean distclean help env-check artifact fetch-checksum build-linux-image
+                  clean distclean env-check artifact fetch-checksum build-linux-image
+
+# Targets where we can skip expensive dependency detection (pkg-config, llvm-config, etc.)
+# This speeds up 'make clean', etc. significantly
+SKIP_DEPS_TARGETS := clean distclean
+SKIP_DEPS_CHECK := $(filter $(SKIP_DEPS_TARGETS),$(MAKECMDGOALS))
 
 # Targets that generate .config
 CONFIG_GENERATORS := config menuconfig defconfig oldconfig
@@ -73,22 +78,16 @@ CONFIG_GENERATORS := config menuconfig defconfig oldconfig
 DEFCONFIG_GOALS := $(filter %_defconfig,$(MAKECMDGOALS))
 
 # Check if we need configuration
+# Note: Empty MAKECMDGOALS means default goal (all), which is a build goal
 BUILD_GOALS := $(filter-out $(CONFIG_TARGETS) $(DEFCONFIG_GOALS),$(MAKECMDGOALS))
+IS_DEFAULT_BUILD := $(if $(MAKECMDGOALS),,yes)
+NEEDS_CONFIG := $(if $(or $(BUILD_GOALS),$(IS_DEFAULT_BUILD)),yes,)
 HAS_CONFIG_GEN := $(filter $(CONFIG_GENERATORS),$(MAKECMDGOALS))$(DEFCONFIG_GOALS)
 
-# Require .config for build targets (unless a config generator is present)
+# Placeholder for require-config (actual dependency added in main Makefile)
+# This macro is kept for compatibility but the real work is done via
+# the .config prerequisite on $(BIN) in the main Makefile
 define require-config
-ifneq ($(BUILD_GOALS),)
-ifeq ($(HAS_CONFIG_GEN),)
-ifneq "$(CONFIG_CONFIGURED)" "y"
-    $$(info )
-    $$(info *** Configuration file ".config" not found!)
-    $$(info *** Please run 'make config' or 'make defconfig' first.)
-    $$(info )
-    $$(error Configuration required)
-endif
-endif
-endif
 endef
 
 # Build Directory
@@ -98,6 +97,115 @@ OUT ?= build
 # Standard Phony Targets
 
 .PHONY: config menuconfig defconfig oldconfig savedefconfig
-.PHONY: clean distclean help env-check
+.PHONY: clean distclean env-check
+
+# Reusable Templates
+
+# Directory creation template
+# Usage: $(eval $(call make-dir,$(OUT)/subdir))
+define make-dir
+$(1):
+	$$(Q)mkdir -p $$@
+endef
+
+# Generic object compilation rule
+# $(1): output directory variable name (e.g., OUT)
+# $(2): source directory (e.g., src)
+# $(3): extra CFLAGS (optional)
+# $(4): extra prerequisites (optional)
+# Usage: $(eval $(call compile-rule,OUT,src,$(EXTRA_CFLAGS)))
+define compile-rule
+$$($(1))/%.o: $(2)/%.c $(4) $$(CONFIG_HEADER) | $$($(1))
+	$$(Q)mkdir -p $$(dir $$@)
+	$$(VECHO) "  CC\t$$@\n"
+	$$(Q)$$(CC) -o $$@ $$(CFLAGS) $(3) -c -MMD -MF $$@.d $$<
+endef
+
+# Test Framework Templates
+
+# Generic test framework
+# $(1): test name (e.g., cache, map, path)
+# $(2): list of test object basenames (e.g., test-cache.o)
+# $(3): additional object dependencies from src/ (full paths)
+# $(4): extra subdirectories to create (optional)
+#
+# Creates:
+#   - $(1)_TEST_SRCDIR, $(1)_TEST_OUTDIR, $(1)_TEST_TARGET, $(1)_TEST_OBJS
+#   - Compilation rules for test objects
+#   - Link rule for test binary
+#
+# Usage: $(eval $(call test-framework,cache,test-cache.o,$(OUT)/cache.o $(OUT)/mpool.o))
+define test-framework
+$(1)_TEST_SRCDIR := tests/$(1)
+$(1)_TEST_OUTDIR := $$(OUT)/$(1)
+$(1)_TEST_TARGET := $$($(1)_TEST_OUTDIR)/test-$(1)
+$(1)_TEST_OBJS := $$(addprefix $$($(1)_TEST_OUTDIR)/, $(2)) $(3)
+
+# Create output directory
+$$($(1)_TEST_OUTDIR) $(4):
+	$$(Q)mkdir -p $$@
+
+# Compile test objects
+$$($(1)_TEST_OUTDIR)/%.o: $$($(1)_TEST_SRCDIR)/%.c $$(CONFIG_HEADER) | $$($(1)_TEST_OUTDIR) $(4)
+	$$(VECHO) "  CC\t$$@\n"
+	$$(Q)$$(CC) -o $$@ $$(CFLAGS) -I./src -c -MMD -MF $$@.d $$<
+
+# Link test binary
+$$($(1)_TEST_TARGET): $$($(1)_TEST_OBJS)
+	$$(VECHO) "  LD\t$$@\n"
+	$$(Q)$$(CC) $$^ -o $$@ $$(LDFLAGS)
+
+# Track dependencies
+deps += $$($(1)_TEST_OBJS:%.o=%.o.d)
+endef
+
+# Simple test runner (just runs binary and checks exit code)
+# $(1): test name
+# Usage: $(eval $(call run-test-simple,map))
+define run-test-simple
+run-test-$(1): $$($(1)_TEST_TARGET)
+	$$(VECHO) "Running test-$(1) ... "
+	$$(Q)$$< && $$(call notice, [OK]) || { $$(PRINTF) "Failed.\n"; exit 1; }
+endef
+
+# Single test action rule (generates one .out file)
+# $(1): test name
+# $(2): action name
+define run-test-action
+$$($(1)_TEST_OUTDIR)/$(2).out: $$($(1)_TEST_TARGET) $$($(1)_TEST_SRCDIR)/$(2).in $$($(1)_TEST_SRCDIR)/$(2).expect
+	$$(Q)$$($(1)_TEST_TARGET) $$($(1)_TEST_SRCDIR)/$(2).in > $$@
+endef
+
+# Comparison test runner (compares output against expected files)
+# $(1): test name
+# $(2): list of test action names
+# Usage: $(eval $(call run-test-compare,cache,cache-new cache-put cache-get))
+define run-test-compare
+$(1)_TEST_ACTIONS := $(2)
+$(1)_TEST_OUT := $$(addprefix $$($(1)_TEST_OUTDIR)/, $$($(1)_TEST_ACTIONS:%=%.out))
+
+# Generate individual rules for each action (enables parallelism)
+$$(foreach e,$(2),$$(eval $$(call run-test-action,$(1),$$(e))))
+
+run-test-$(1): $$($(1)_TEST_OUT)
+	$$(Q)$$(foreach e,$$($(1)_TEST_ACTIONS),\
+		$$(PRINTF) "Running $$(e) ... "; \
+		if cmp $$($(1)_TEST_SRCDIR)/$$(e).expect $$($(1)_TEST_OUTDIR)/$$(e).out; then \
+			$$(call notice, [OK]); \
+		else \
+			$$(PRINTF) "Failed.\n"; \
+			exit 1; \
+		fi; \
+	)
+endef
+
+# Feature Extension Templates
+
+# Set feature flags for extensions
+# $(1): list of extension names
+# Usage: $(call set-features,EXT_M EXT_A EXT_F EXT_C)
+define set-features
+$(foreach ext,$(1),$(call set-feature,$(ext)))
+endef
 
 endif # _MK_COMMON_INCLUDED

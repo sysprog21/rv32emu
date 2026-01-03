@@ -1,123 +1,93 @@
-CACHE_TEST_SRCDIR := tests/cache
-CACHE_TEST_OUTDIR := build/cache
-CACHE_TEST_TARGET := $(CACHE_TEST_OUTDIR)/test-cache
+# Unit tests for rv32emu components
+#
+# Uses test-framework templates from mk/common.mk
 
-MAP_TEST_SRCDIR := tests/map
-MAP_TEST_OUTDIR:= build/map
-MAP_TEST_TARGET := $(MAP_TEST_OUTDIR)/test-map
+ifndef _MK_TESTS_INCLUDED
+_MK_TESTS_INCLUDED := 1
 
-PATH_TEST_SRCDIR := tests/path
-PATH_TEST_OUTDIR := build/path
-PATH_TEST_TARGET := $(PATH_TEST_OUTDIR)/test-path
+# Test Definitions using Templates
 
-CACHE_TEST_OBJS := \
-	test-cache.o
+# Cache test: tests LFU cache implementation
+# Extra subdir needed for lfu outputs
+$(eval $(call test-framework,cache,test-cache.o,$(OUT)/cache.o $(OUT)/mpool.o,$(OUT)/cache/lfu))
 
-MAP_TEST_OBJS := \
-	test-map.o \
-	mt19937.o
+# Map test: tests red-black tree map implementation
+$(eval $(call test-framework,map,test-map.o mt19937.o,$(OUT)/map.o,))
 
-PATH_TEST_OBJS := \
-	test-path.o 
+# Path test: tests path utility functions
+$(eval $(call test-framework,path,test-path.o,$(OUT)/utils.o,))
 
-CACHE_TEST_OBJS := $(addprefix $(CACHE_TEST_OUTDIR)/, $(CACHE_TEST_OBJS)) \
-		   $(OUT)/cache.o $(OUT)/mpool.o
-OBJS += $(CACHE_TEST_OBJS)
-deps += $(CACHE_TEST_OBJS:%.o=%.o.d)
+# Test Runners
 
-MAP_TEST_OBJS := $(addprefix $(MAP_TEST_OUTDIR)/, $(MAP_TEST_OBJS)) \
-		 $(OUT)/map.o
-OBJS += $(MAP_TEST_OBJS)
-deps += $(MAP_TEST_OBJS:%.o=%.o.d)
+# Cache test uses file comparison (input -> output -> compare with expected)
+$(eval $(call run-test-compare,cache,cache-new cache-put cache-get cache-replace))
 
-PATH_TEST_OBJS := $(addprefix $(PATH_TEST_OUTDIR)/, $(PATH_TEST_OBJS)) \
-		   $(OUT)/utils.o 
-OBJS += $(PATH_TEST_OBJS)
-deps += $(PATH_TEST_OBJS:%.o=%.o.d)
+# Map and path tests use simple exit code checking
+$(eval $(call run-test-simple,map))
+$(eval $(call run-test-simple,path))
 
-CACHE_TEST_ACTIONS := \
-	cache-new \
-	cache-put \
-	cache-get \
-	cache-replace
+# Main Test Target
 
-CACHE_TEST_OUT = $(addprefix $(CACHE_TEST_OUTDIR)/, $(CACHE_TEST_ACTIONS:%=%.out))
-MAP_TEST_OUT = $(MAP_TEST_TARGET).out
-PATH_TEST_OUT = $(PATH_TEST_TARGET).out
+tests: run-test-cache run-test-map run-test-path
 
-tests : run-test-cache run-test-map run-test-path
+# Integration Tests (run emulator with test programs)
 
-run-test-cache: $(CACHE_TEST_OUT)
-	$(Q)$(foreach e,$(CACHE_TEST_ACTIONS),\
-	    $(PRINTF) "Running $(e) ... "; \
-	    if cmp $(CACHE_TEST_SRCDIR)/$(e).expect $(CACHE_TEST_OUTDIR)/$(e).out; then \
-	    $(call notice, [OK]); \
-	    else \
-	    $(PRINTF) "Failed.\n"; \
-	    exit 1; \
-	    fi; \
-	)
+LOG_FILTER := sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'
 
-run-test-map: $(MAP_TEST_OUT)
-	$(Q)$(MAP_TEST_TARGET)
-	$(VECHO) "Running test-map ... "; \
-	if [ $$? -eq 0 ]; then \
-	$(call notice, [OK]); \
-	else \
-	$(PRINTF) "Failed.\n"; \
-	fi;
+# check-test(flags, binary, name, filter, expected)
+define check-test
+$(Q)true; \
+$(PRINTF) "Running $(3) ... "; \
+OUTPUT_FILE="$$(mktemp)"; \
+trap '$(RM) "$$OUTPUT_FILE"' 0; \
+if (LC_ALL=C $(BIN) $(1) $(2) > "$$OUTPUT_FILE") && \
+   [ "$$(cat "$$OUTPUT_FILE" | $(LOG_FILTER) | $(4))" = "$(5)" ]; then \
+    $(call notice, [OK]); \
+else \
+    $(PRINTF) "Failed.\n"; \
+    exit 1; \
+fi
+endef
 
-run-test-path: $(PATH_TEST_OUT)
-	$(Q)$(PATH_TEST_TARGET)
-	$(VECHO) "Running test-path ... "; \
-	if [ $$? -eq 0 ]; then \
-	$(call notice, [OK]); \
-	else \
-	$(PRINTF) "Failed.\n"; \
-	fi;
+# Check test definitions
+CHECK_ELF_FILES :=
+ifeq ($(CONFIG_EXT_M),y)
+CHECK_ELF_FILES += puzzle fcalc pi
+endif
 
-$(CACHE_TEST_OUT): $(CACHE_TEST_TARGET)
-	$(Q)$(foreach e,$(CACHE_TEST_ACTIONS),\
-	    $(CACHE_TEST_TARGET) $(CACHE_TEST_SRCDIR)/$(e).in > $(CACHE_TEST_OUTDIR)/$(e).out; \
-	)
+EXPECTED_hello = Hello World!
+EXPECTED_puzzle = success in 2005 trials
+EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
+EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 
-$(CACHE_TEST_TARGET): $(CACHE_TEST_OBJS)
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
+check-hello: $(BIN)
+	$(call check-test, , $(OUT)/hello.elf, hello.elf, uniq,$(EXPECTED_hello))
 
-$(CACHE_TEST_OUTDIR)/%.o: $(CACHE_TEST_SRCDIR)/%.c $(CONFIG_FILE) | $(CACHE_TEST_OUTDIR) $(CACHE_TEST_OUTDIR)/lfu
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
+# Per-ELF check targets for parallelism (supports make -j)
+define make-check-target
+check-$(1): $(BIN) artifact
+	$$(call check-test, , $$(OUT)/riscv32/$(1), $(1), uniq,$$(EXPECTED_$(1)))
+endef
+$(foreach e,$(CHECK_ELF_FILES),$(eval $(call make-check-target,$(e))))
 
-$(CACHE_TEST_OUTDIR) $(CACHE_TEST_OUTDIR)/lfu:
-	$(Q)mkdir -p $@
+CHECK_TARGETS := check-hello $(addprefix check-,$(CHECK_ELF_FILES))
+check: $(CHECK_TARGETS)
 
-$(MAP_TEST_OUT): $(MAP_TEST_TARGET)
-	$(Q)touch $@
+# System tests
+EXPECTED_aes_sha1 = 89169ec034bec1c6bb2c556b26728a736d350ca3  -
+misalign: $(BIN) artifact
+	$(call check-test, -m, $(OUT)/riscv32/uaes, uaes.elf, $(SHA1SUM),$(EXPECTED_aes_sha1))
 
-$(MAP_TEST_TARGET): $(MAP_TEST_OBJS)
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
+EXPECTED_misalign = MISALIGNED INSTRUCTION FETCH TEST PASSED!
+misalign-in-blk-emu: $(BIN)
+	$(call check-test, , tests/system/alignment/misalign.elf, misalign.elf, tail -n 1,$(EXPECTED_misalign))
 
-$(MAP_TEST_OUTDIR)/%.o: $(MAP_TEST_SRCDIR)/%.c $(CONFIG_FILE) | $(MAP_TEST_OUTDIR)
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
-
-$(MAP_TEST_OUTDIR):
-	$(Q)mkdir -p $@
-
-$(PATH_TEST_OUT): $(PATH_TEST_TARGET)
-	$(Q)touch $@
-
-$(PATH_TEST_TARGET): $(PATH_TEST_OBJS)
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) $^ -o $@ $(LDFLAGS)
-
-$(PATH_TEST_OUTDIR)/%.o: $(PATH_TEST_SRCDIR)/%.c $(CONFIG_FILE) | $(PATH_TEST_OUTDIR)
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -I./src -c -MMD -MF $@.d $<
-
-$(PATH_TEST_OUTDIR):
-	$(Q)mkdir -p $@
+EXPECTED_mmu = Store page fault test passed!
+mmu-test: $(BIN)
+	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
 .PHONY: tests run-test-cache run-test-map run-test-path
+.PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
+
+endif # _MK_TESTS_INCLUDED
+

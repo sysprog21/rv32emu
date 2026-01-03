@@ -33,6 +33,11 @@ endif
 
 # Compiler Detection
 
+# WebAssembly build: override CC to emcc when BUILD_WASM is enabled via Kconfig
+ifeq ($(CONFIG_BUILD_WASM),y)
+    CC     := emcc
+endif
+
 # Set defaults
 CC      ?= cc
 AR      ?= ar
@@ -53,31 +58,32 @@ endif
 HOSTCC  ?= cc
 HOSTAR  ?= ar
 
-# Detect compiler type from version string
-# Note: Pipe directly to grep instead of storing in variable to avoid shell escaping issues
-CC_IS_EMCC  :=
-CC_IS_CLANG :=
-CC_IS_GCC   :=
+# Detect compiler type from version string (cached to avoid repeated shell calls)
+CC_VERSION_OUTPUT := $(shell $(CC) --version 2>&1)
 
-ifneq ($(shell $(CC) --version | head -n 1 | grep emcc),)
-    CC_IS_EMCC := 1
-else ifneq ($(shell $(CC) --version | head -n 1 | grep clang),)
-    CC_IS_CLANG := 1
-else ifneq ($(shell $(CC) --version 2>&1 | grep "Free Software Foundation"),)
-    CC_IS_GCC := 1
-endif
+CC_IS_EMCC  := $(if $(findstring emcc,$(CC_VERSION_OUTPUT)),1,)
+CC_IS_CLANG := $(if $(and $(findstring clang,$(CC_VERSION_OUTPUT)),$(if $(CC_IS_EMCC),,1)),1,)
+CC_IS_GCC   := $(if $(and $(findstring Free Software Foundation,$(CC_VERSION_OUTPUT)),$(if $(CC_IS_EMCC)$(CC_IS_CLANG),,1)),1,)
 
 # Verify supported compiler
 ifeq ("$(CC_IS_CLANG)$(CC_IS_GCC)$(CC_IS_EMCC)", "")
 $(error Unsupported compiler. Only GCC, Clang, and Emscripten are supported.)
 endif
 
-# Emscripten version detection
+# Consistency check: warn if CONFIG_BUILD_WASM but CC is not emcc
+ifeq ($(CONFIG_BUILD_WASM),y)
+    ifneq ($(CC_IS_EMCC),1)
+        $(warning [Config Mismatch] CONFIG_BUILD_WASM is enabled, but CC is not Emscripten.)
+        $(warning Current compiler: $(CC). Run 'make defconfig' to reset or check your CC override.)
+    endif
+endif
+
+# Emscripten version detection (reuses cached CC_VERSION_OUTPUT)
 ifeq ("$(CC_IS_EMCC)", "1")
-    EMCC_VERSION := $(shell $(CC) --version | head -n 1 | cut -f10 -d ' ')
-    EMCC_MAJOR := $(shell echo $(EMCC_VERSION) | cut -f1 -d.)
-    EMCC_MINOR := $(shell echo $(EMCC_VERSION) | cut -f2 -d.)
-    EMCC_PATCH := $(shell echo $(EMCC_VERSION) | cut -f3 -d.)
+    EMCC_VERSION := $(word 10,$(CC_VERSION_OUTPUT))
+    EMCC_MAJOR := $(word 1,$(subst ., ,$(EMCC_VERSION)))
+    EMCC_MINOR := $(word 2,$(subst ., ,$(EMCC_VERSION)))
+    EMCC_PATCH := $(word 3,$(subst ., ,$(EMCC_VERSION)))
 
     # Override toolchain for Emscripten
     AR     := emar
@@ -105,11 +111,10 @@ ifeq ($(CROSS_COMPILE),)
 endif
 export CROSS_COMPILE
 
-# CET Protection Flags
+# CET Protection Flags (reuses UNAME_M from platform detection)
 
 CFLAGS_NO_CET :=
-processor := $(shell uname -m)
-ifeq ($(processor),$(filter $(processor),i386 x86_64))
+ifeq ($(UNAME_M),$(filter $(UNAME_M),i386 x86_64))
     # Disable Intel's Control-flow Enforcement Technology for JIT
     CFLAGS_NO_CET := -fcf-protection=none
 endif
@@ -120,7 +125,7 @@ ifeq ($(UNAME_S),Darwin)
     ifneq ("$(CC_IS_CLANG)$(CC_IS_GCC)", "")
         # Xcode 15+ warns about duplicate -l options
         LD_VERSION := $(shell ld -version_details 2>/dev/null | head -n 1)
-        ifneq ($(shell echo "$(LD_VERSION)" | grep -E "15\.[0-9]"),)
+        ifneq ($(shell echo "$(LD_VERSION)" | grep -E "(15|16|17|18|19|[2-9][0-9])\.[0-9]"),)
             LDFLAGS += -Wl,-no_warn_duplicate_libraries
         endif
     endif
@@ -174,30 +179,9 @@ ifneq ($(SYSROOT),)
     KCONFIG_LDFLAGS += --sysroot=$(SYSROOT)
 endif
 
-# LLVM 18 Detection for T2C
-
-# Find LLVM 18 config (centralized detection)
-# Priority: llvm-config-18 > Homebrew llvm@18 > llvm-config with version check
-# Note: Each fallback is independent - brew presence doesn't block llvm-config check
-define find-llvm-config
-$(strip \
-    $(or \
-        $(shell which llvm-config-18 2>/dev/null),\
-        $(shell brew --prefix llvm@18 2>/dev/null | xargs -I{} sh -c 'test -x {}/bin/llvm-config && echo {}/bin/llvm-config' 2>/dev/null),\
-        $(shell which llvm-config 2>/dev/null | xargs -I{} sh -c '{} --version 2>/dev/null | grep -q "^18\." && echo {}' 2>/dev/null)))
-endef
-
-# Simpler Homebrew detection for library path
-HOMEBREW_LLVM_PREFIX := $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@18 2>/dev/null)
-
-# Export for use in Makefile
-LLVM_CONFIG := $(call find-llvm-config)
-LLVM_FROM_HOMEBREW := $(if $(and $(HOMEBREW_LLVM_PREFIX),$(findstring $(HOMEBREW_LLVM_PREFIX),$(LLVM_CONFIG))),yes,)
-
-# Add Homebrew library path if using Homebrew LLVM
-ifeq ($(LLVM_FROM_HOMEBREW),yes)
-    LDFLAGS += -L$(HOMEBREW_LLVM_PREFIX)/lib
-endif
+# Note: LLVM 18 detection for T2C is done inline in Makefile,
+# guarded by ifeq ($(CONFIG_T2C),y) to avoid expensive shell calls
+# when T2C is disabled (most builds).
 
 # Version Comparison Utilities
 

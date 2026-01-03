@@ -107,7 +107,7 @@ static uint8_t u8250_handle_in(u8250_state_t *uart)
         }
     }
 
-#if RV32_HAS(SDL) && RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SDL) && RV32_HAS(SYSTEM_MMIO)
     /*
      * The guestOS may repeatedly open and close the SDL window,
      * and the user could close the application by pressing the ctrl-c key.

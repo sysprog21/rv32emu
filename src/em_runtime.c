@@ -22,7 +22,7 @@ EM_JS(void, disable_run_button, (), {
 });
 #endif
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 extern uint8_t input_buf_size;
 
 char *get_input_buf();

@@ -39,6 +39,11 @@ jobs:
               assets/wasm/html/system.html
               assets/wasm/js/system-pre.js
               src/em_runtime.c
+              # Build system configuration
+              mk/kconfig.mk
+              mk/wasm.mk
+              configs/wasm_defconfig
+              tools/detect-env.py
               # Files below may have a potential performance impact (reference from benchmark.yml)
               src/devices/*.c
               src/system.c
@@ -62,13 +67,14 @@ jobs:
       - name: fetch artifact
         run: |
               make artifact ENABLE_SYSTEM=1
+      # Note: wasm_defconfig sets CONFIG_BUILD_WASM=y which auto-selects CC=emcc
       - name: build with emcc and move application files to /tmp
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
         run: |
             make wasm_defconfig
-            make CC=emcc ENABLE_SYSTEM=1 INITRD_SIZE=32 -j
+            make ENABLE_SYSTEM=1 INITRD_SIZE=32 -j
             mkdir /tmp/rv32emu-system-demo
             mv assets/wasm/html/system.html /tmp/rv32emu-system-demo/index.html
             mv assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-system-demo
@@ -144,6 +150,11 @@ jobs:
               build/*.elf
               tools/gen-elf-list-js.py
               src/em_runtime.c
+              # Build system configuration
+              mk/kconfig.mk
+              mk/wasm.mk
+              configs/wasm_defconfig
+              tools/detect-env.py
               # Files below may have a potential performance impact (reference from benchmark.yml)
               src/riscv.c
               src/decode.c
@@ -168,13 +179,14 @@ jobs:
               # get from rv32emu-prebuilt
               .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
               unzip -o -d build/ build/shareware_doom_iwad.zip
+      # Note: wasm_defconfig sets CONFIG_BUILD_WASM=y which auto-selects CC=emcc
       - name: build with emcc and move application files to /tmp
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm') }}
         run: |
             make wasm_defconfig
-            make CC=emcc -j
+            make -j
             mkdir /tmp/rv32emu-demo
             mv assets/wasm/html/user.html /tmp/rv32emu-demo/index.html
             mv assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-demo

@@ -1,3 +1,10 @@
+# Berkeley SoftFloat library for floating-point emulation
+#
+# Provides IEEE 754 compliant software floating-point for F extension.
+
+ifndef _MK_SOFTFLOAT_INCLUDED
+_MK_SOFTFLOAT_INCLUDED := 1
+
 SOFTFLOAT_DIR := src/softfloat/source
 
 # FIXME: Suppress compilation warnings in upstream SoftFloat 3
@@ -330,7 +337,7 @@ $(SOFTFLOAT_SENTINEL):
 	$(Q)git submodule update --init $(dir $@)
 SOFTFLOAT_DUMMY_PLAT := $(OUT)/softfloat/platform.h
 $(SOFTFLOAT_DUMMY_PLAT):
-	$(Q)mkdir -p $(shell dirname $@)
+	$(Q)mkdir -p $(dir $@)
 	$(Q)touch $@
 
 $(SOFTFLOAT_FILES): $(SOFTFLOAT_SENTINEL)
@@ -345,3 +352,5 @@ SOFTFLOAT_LIB := $(OUT)/softfloat/softfloat.a
 $(SOFTFLOAT_LIB): $(SOFTFLOAT_OBJS)
 	$(VECHO) "  AR\t$@\n"
 	$(Q)$(AR) crs $@ $(SOFTFLOAT_OBJS)
+
+endif # _MK_SOFTFLOAT_INCLUDED

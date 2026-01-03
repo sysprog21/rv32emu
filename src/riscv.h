@@ -481,16 +481,16 @@ typedef struct {
 #endif /* RV32_HAS(SYSTEM) */
 
 typedef struct {
-#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(SYSTEM_MMIO)
     vm_user_t user;
 #else
     vm_system_t system;
-#endif /* !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)) */
+#endif /* !RV32_HAS(SYSTEM_MMIO) */
 
 } vm_data_t;
 
 typedef struct {
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     /* uart object */
     u8250_state_t *uart;
 
@@ -505,7 +505,7 @@ typedef struct {
     uint32_t vblk_mmio_max_hi;
     int vblk_irq_base;
     int vblk_cnt;
-#endif /* RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER) */
+#endif /* RV32_HAS(SYSTEM_MMIO) */
 
     /* vm memory object */
     memory_t *mem;
@@ -576,7 +576,7 @@ typedef struct {
     bool on_exit;
 #endif
 
-#if RV32_HAS(SDL) && RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SDL) && RV32_HAS(SYSTEM_MMIO)
     /* flag to determine if running SDL program in guestOS */
     bool running_sdl;
 #endif /* SDL */

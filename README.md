@@ -227,6 +227,7 @@ $ make defconfig          # Default: SDL enabled, all extensions
 $ make mini_defconfig     # Minimal: no SDL, basic extensions only
 $ make jit_defconfig      # JIT: enables tiered JIT compilation
 $ make system_defconfig   # System: enables Linux system emulation
+$ make wasm_defconfig     # WebAssembly: build for browser deployment
 ```
 
 #### 2. Interactive Configuration

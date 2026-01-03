@@ -1,3 +1,10 @@
+# RISC-V Architecture Compliance Testing
+#
+# Uses riscof framework to run official RISC-V architecture tests.
+
+ifndef _MK_RISCV_ARCH_TEST_INCLUDED
+_MK_RISCV_ARCH_TEST_INCLUDED := 1
+
 riscof-check:
 	$(Q)if [ "$(shell pip show riscof 2>&1 | head -n 1 | cut -d' ' -f1)" = "WARNING:" ]; then \
 		$(PRINTF) "Run 'pip3 install -r requirements.txt' to install dependencies.\n"; \
@@ -7,7 +14,8 @@ riscof-check:
 ARCH_TEST_DIR ?= tests/riscv-arch-test
 ARCH_TEST_SUITE ?= $(ARCH_TEST_DIR)/riscv-test-suite
 export RISCV_TARGET := tests/arch-test-target
-export TARGETDIR := $(shell pwd)
+# Use built-in CURDIR instead of $(shell pwd) to avoid shell invocation
+export TARGETDIR := $(CURDIR)
 export RISCV_DEVICE ?= IMACFZicsrZifencei
 # Use device-specific work directory to enable parallel arch-test execution
 export WORK := $(TARGETDIR)/build/arch-test-$(RISCV_DEVICE)
@@ -53,3 +61,5 @@ endif
 			--env=$(ARCH_TEST_DIR)/riscv-test-suite/env
 
 .PHONY: riscof-check arch-test
+
+endif # _MK_RISCV_ARCH_TEST_INCLUDED

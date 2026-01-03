@@ -22,7 +22,7 @@
 #include "utils.h"
 
 /* enable program trace mode */
-#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(SYSTEM_MMIO)
 static bool opt_trace = false;
 #endif
 
@@ -57,7 +57,7 @@ static bool opt_misaligned = false;
 static bool opt_prof_data = false;
 static char *prof_out_file;
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 /* Linux kernel data */
 static char *opt_kernel_img;
 static char *opt_rootfs_img;
@@ -74,13 +74,13 @@ static void print_usage(const char *filename)
         "\nRV32I[MAFC] Emulator which loads an ELF file to execute.\n"
         "Usage: %s [options] [filename] [arguments]\n"
         "Options:\n"
-#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(SYSTEM_MMIO)
         "  -t : print executable trace\n"
 #endif
 #if RV32_HAS(GDBSTUB)
         "  -g : allow remote GDB connections (as gdbstub)\n"
 #endif
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
         "  -k <image> : use <image> as kernel image\n"
         "  -i <image> : use <image> as rootfs\n"
         "  -x vblk:<image>[,readonly]: use "
@@ -109,7 +109,7 @@ static bool parse_args(int argc, char **args)
         emu_argc++;
 
         switch (opt) {
-#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(SYSTEM_MMIO)
         case 't':
             opt_trace = true;
             break;
@@ -119,7 +119,7 @@ static bool parse_args(int argc, char **args)
             opt_gdbstub = true;
             break;
 #endif
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
         case 'k':
             opt_kernel_img = optarg;
             emu_argc++;
@@ -278,7 +278,7 @@ int main(int argc, char **args)
     }
 
     int run_flag = 0;
-#if !RV32_HAS(SYSTEM) || (RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER))
+#if !RV32_HAS(SYSTEM_MMIO)
     run_flag |= opt_trace;
 #endif
 #if RV32_HAS(GDBSTUB)
@@ -298,7 +298,7 @@ int main(int argc, char **args)
         .cycle_per_step = CYCLE_PER_STEP,
         .allow_misalign = opt_misaligned,
     };
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     attr.data.system.kernel = opt_kernel_img;
     attr.data.system.initrd = opt_rootfs_img;
     attr.data.system.bootargs = opt_bootargs;

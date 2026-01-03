@@ -1,3 +1,8 @@
+# Development tools (histogram generator, Linux image builder)
+
+ifndef _MK_TOOLS_INCLUDED
+_MK_TOOLS_INCLUDED := 1
+
 HIST_BIN := $(OUT)/rv_histogram
 
 # On macOS, gcc-14 requires linking symbols from emulate.o, syscall.o, syscall_sdl.o, io.o, and log.o.
@@ -40,4 +45,28 @@ build-linux-image: $(LINUX_IMAGE_SRC)
 	$(Q)./tools/build-linux-image.sh
 	$(Q)$(PRINTF) "Build done.\n"
 
-.PHONY: build-linux-image
+# Code Formatting (tool detection deferred to recipe)
+# Uses find -print0 | xargs -0 for safe handling of paths with special characters
+format:
+	$(Q)CLANG_FORMAT=$$(which clang-format-20 2>/dev/null) && \
+	SHFMT=$$(which shfmt 2>/dev/null) && \
+	DTSFMT=$$(which dtsfmt 2>/dev/null) && \
+	BLACK=$$(which black 2>/dev/null) && \
+	if [ -z "$$CLANG_FORMAT" ]; then echo "clang-format-20 not found."; exit 1; fi && \
+	if [ -z "$$SHFMT" ]; then echo "shfmt not found."; exit 1; fi && \
+	if [ -z "$$DTSFMT" ]; then echo "dtsfmt not found."; exit 1; fi && \
+	if [ -z "$$BLACK" ]; then echo "black not found."; exit 1; fi && \
+	SUBMODULES=$$(git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{ print $$2 }') && \
+	PRUNE_PATHS="./$(OUT)" && \
+	for subm in $$SUBMODULES; do PRUNE_PATHS="$$PRUNE_PATHS ./$$subm"; done && \
+	PRUNE_ARGS=$$(echo "$$PRUNE_PATHS" | tr ' ' '\n' | sed 's/^/-path /;s/$$/ -o/' | tr '\n' ' ' | sed 's/ -o $$//') && \
+	find . \( $$PRUNE_ARGS \) -prune -o -name '*.[ch]' -print0 | xargs -0 $$CLANG_FORMAT -i && \
+	find . \( $$PRUNE_ARGS \) -prune -o -name '*.sh' -print0 | xargs -0 $$SHFMT -w && \
+	find . \( $$PRUNE_ARGS \) -prune -o \( -name '*.dts' -o -name '*.dtsi' \) -print0 | xargs -0 -I{} $$DTSFMT {} && \
+	find . \( $$PRUNE_ARGS \) -prune -o \( -name '*.py' -o -name '*.pyi' \) -print0 | xargs -0 $$BLACK --quiet
+	$(Q)$(call notice, All files formatted.)
+
+.PHONY: build-linux-image format
+
+endif # _MK_TOOLS_INCLUDED
+

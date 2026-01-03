@@ -43,7 +43,7 @@
 #define R 1
 #define W 0
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
 #define get_offset_by_addr(addr) (addr) & (MASK(RV_PG_SHIFT))
 static uint32_t offset;
 static uint32_t curr_page_data_size;
@@ -355,7 +355,7 @@ void syscall_draw_frame(riscv_t *rv)
         return;
 
     uint32_t total_size = width * height * 4;
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     static uint8_t tmp_buf[256 * RV_PG_SIZE];
     uint8_t *tmp_buf_ptr = &tmp_buf[0];
     uint32_t screen_vaddr = screen;
@@ -369,7 +369,7 @@ void syscall_draw_frame(riscv_t *rv)
     void *pixels_ptr;
     if (SDL_LockTexture(texture, NULL, &pixels_ptr, &pitch))
         exit(EXIT_FAILURE);
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     memcpy(pixels_ptr, tmp_buf_ptr, total_size);
 #else
     memory_read(attr->mem, pixels_ptr, screen, total_size);
@@ -385,7 +385,7 @@ void syscall_draw_frame(riscv_t *rv)
 
 void syscall_setup_queue(riscv_t *rv)
 {
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     /*
      * The guestOS might exit and execute the SDL-based program again
      * thus clearing the queue is required to avoid using the
@@ -401,7 +401,7 @@ void syscall_setup_queue(riscv_t *rv)
     queues_capacity = rv_get_reg(rv, rv_reg_a1);
     event_count = rv_get_reg(rv, rv_reg_a2);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     uint32_t submission_queue_addr =
         rv->io.mem_translate(rv, base + sizeof(event_t) * queues_capacity, R);
 
@@ -443,7 +443,7 @@ void syscall_submit_queue(riscv_t *rv)
             if (unlikely(!title))
                 return;
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
             uint32_t addr = rv->io.mem_translate(rv, submission.title.title, R);
             memory_read(PRIV(rv)->mem, (uint8_t *) title, addr,
                         submission.title.size);
@@ -809,7 +809,7 @@ static void play_sfx(riscv_t *rv)
 
     sfxinfo_t sfxinfo;
     uint8_t sfx_data[SFX_SAMPLE_SIZE];
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     uint32_t addr = rv->io.mem_translate(rv, sfxinfo_addr, R);
     memory_read(attr->mem, (uint8_t *) &sfxinfo, addr, sizeof(sfxinfo_t));
 
@@ -866,7 +866,7 @@ static void play_music(riscv_t *rv)
 
     musicinfo_t musicinfo;
     uint8_t music_data[MUSIC_MAX_SIZE];
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+#if RV32_HAS(SYSTEM_MMIO)
     uint32_t addr = rv->io.mem_translate(rv, musicinfo_addr, R);
     memory_read(attr->mem, (uint8_t *) &musicinfo, addr, sizeof(musicinfo_t));
 

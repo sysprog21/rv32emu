@@ -30,6 +30,10 @@ jobs:
               src/cache.c
               src/io.c
               src/jit.c
+              # Build system configuration (may affect optimization flags)
+              mk/kconfig.mk
+              mk/toolchain.mk
+              tools/detect-env.py
 
       - name: Cache benchmark artifacts
         if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'

@@ -129,7 +129,8 @@ typedef struct block {
 #endif
 } block_t;
 
-#if RV32_HAS(JIT) && RV32_HAS(T2C)
+/* T2C implies JIT (enforced by Kconfig and feature.h) */
+#if RV32_HAS(T2C)
 typedef struct {
     block_t *block;
     struct list_head list;

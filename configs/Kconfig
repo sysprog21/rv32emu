@@ -12,8 +12,9 @@ config COMPILER_TYPE
     string
     default "$(shell,tools/detect-env.py --compiler 2>/dev/null || echo Unknown)"
 
-config CC_IS_EMCC
-    def_bool $(shell,tools/detect-env.py --is-emcc 2>/dev/null)
+config HAVE_EMCC
+    bool
+    default $(shell,tools/detect-env.py --have-emcc 2>/dev/null)
 
 config CC_IS_CLANG
     def_bool $(shell,tools/detect-env.py --is-clang 2>/dev/null)
@@ -21,11 +22,52 @@ config CC_IS_CLANG
 config CC_IS_GCC
     def_bool $(shell,tools/detect-env.py --is-gcc 2>/dev/null)
 
+comment "Emscripten detected - WebAssembly build available"
+    depends on HAVE_EMCC
+
+comment "Emscripten not found - install emsdk for WebAssembly builds"
+    depends on !HAVE_EMCC
+
+endmenu
+
+# Build Target Selection
+
+menu "Build Target"
+
+choice
+    prompt "Build Target"
+    default BUILD_NATIVE
+    help
+      Select the build target platform.
+
+config BUILD_NATIVE
+    bool "Native (Linux/macOS/Windows)"
+    help
+      Build native executable for the host platform.
+      Uses system compiler (GCC or Clang).
+
+config BUILD_WASM
+    bool "WebAssembly (Emscripten)"
+    depends on HAVE_EMCC
+    help
+      Build WebAssembly module for web browsers.
+      Requires Emscripten SDK (emsdk) to be installed and activated.
+
+      The build will use 'emcc' as the compiler.
+      Run in browser with: make start-web
+
+endchoice
+
+# Internal: Set CC_IS_EMCC when BUILD_WASM is selected
+config CC_IS_EMCC
+    bool
+    default BUILD_WASM
+
 comment "Build mode: WebAssembly (Emscripten)"
-    depends on CC_IS_EMCC
+    depends on BUILD_WASM
 
 comment "Build mode: Native"
-    depends on !CC_IS_EMCC
+    depends on BUILD_NATIVE
 
 endmenu
 

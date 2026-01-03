@@ -25,6 +25,10 @@ jobs:
           fetch_additional_submodule_history: 'true'
           files: |
             mk/artifact.mk
+            # Build system configuration
+            mk/kconfig.mk
+            mk/toolchain.mk
+            tools/detect-env.py
             tests/ansibench/**
             tests/rv8-bench/**
             tests/doom/**

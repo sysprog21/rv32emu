@@ -7,7 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -e -u -o pipefail
 
 # Install RISCOF
-pip3 install -r .ci/requirements.txt
+# Note: riscv-config 3.18.3 pins pyyaml==5.2, but PyYAML 5.x fails to build on
+# Python 3.12 (Cython compatibility). Since requirements.txt is a full freeze
+# of all transitive dependencies, use --no-deps to bypass resolver conflicts.
+# riscof also depends on riscv-config, so --no-deps prevents re-triggering.
+pip3 install --no-deps riscv-config==3.18.3
+pip3 install --no-deps -r .ci/requirements.txt
+# Smoke test: verify riscv-config works with PyYAML 6.x
+python3 -c "import riscv_config; print('riscv-config import OK')"
 
 # Workaround for RISCOF bug: dbgen.py line 158 uses 'list' (Python built-in)
 # instead of 'flist' (file list variable). This causes TypeError when the

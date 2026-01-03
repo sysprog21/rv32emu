@@ -45,15 +45,15 @@ define is-git-clone
 $(filter git,$(firstword $(1)))
 endef
 
-# Detect wget --show-progress support (GNU wget extension)
-WGET_HAS_PROGRESS := $(shell wget --help 2>&1 | grep -q show-progress && echo yes)
+# HTTP utilities are provided by mk/http.mk (included before this file)
+# Provides: HTTP_TOOL, HTTP_GET, HTTP_DOWNLOAD, HTTP_DOWNLOAD_QUIET
 
-# Download from URL (supports git clone or wget)
+# Download from URL (supports git clone or HTTP download with retry)
 # $(1): URL or git command
 define download
 $(if $(call is-git-clone,$(1)),\
 	$(1),\
-	wget -q $(if $(WGET_HAS_PROGRESS),--show-progress) --continue "$(strip $(1))")
+	$(call HTTP_DOWNLOAD,"$(strip $(1))","$(notdir $(1))"))
 endef
 
 # Extract archive to destination

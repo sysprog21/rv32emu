@@ -82,7 +82,13 @@ $(OUT)/elf_list.js: artifact tools/gen-elf-list-js.py
 	$(Q)tools/gen-elf-list-js.py > $@
 
 # Dependencies for WASM build
+# System mode only needs artifact (linux-image) and timidity (audio)
+# User mode needs elf_list.js for demo selection and game data for embedding
+ifeq ($(CONFIG_SYSTEM),y)
+deps_emcc += artifact $(TIMIDITY_DATA)
+else
 deps_emcc += artifact $(OUT)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
+endif
 
 # Browser TCO Support Detection
 

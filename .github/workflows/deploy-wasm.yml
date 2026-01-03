@@ -61,10 +61,7 @@ jobs:
         shell: bash
       - name: fetch artifact
         run: |
-              make artifact
-              # get from rv32emu-prebuilt
-              .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
-              unzip -o -d build/ build/shareware_doom_iwad.zip
+              make artifact ENABLE_SYSTEM=1
       - name: build with emcc and move application files to /tmp
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||

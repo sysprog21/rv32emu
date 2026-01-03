@@ -4,7 +4,7 @@ click==8.1.8
 colorlog==6.9.0
 DataProperty==1.1.0
 gitdb==4.0.12
-GitPython==3.1.17
+GitPython==3.1.41
 iniconfig==2.0.0
 Jinja2==3.1.5
 MarkupSafe==3.0.2

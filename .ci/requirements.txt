@@ -17,9 +17,9 @@ pytablewriter==1.2.1
 pytest==8.3.4
 python-dateutil==2.9.0.post0
 pytz==2025.1
-PyYAML==5.4
+PyYAML==6.0.2
 riscof @ git+https://github.com/riscv/riscof.git@d38859f85fe407bcacddd2efcd355ada4683aee4
-riscv-config==3.18.3
+# riscv-config installed separately in riscv-tests.sh (--no-deps) due to pyyaml==5.2 conflict
 riscv-isac==0.18.0
 ruamel.yaml==0.18.10
 ruamel.yaml.clib==0.2.12

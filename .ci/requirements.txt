@@ -17,7 +17,7 @@ pytablewriter==1.2.1
 pytest==8.3.4
 python-dateutil==2.9.0.post0
 pytz==2025.1
-PyYAML==5.2
+PyYAML==5.4
 riscof @ git+https://github.com/riscv/riscof.git@d38859f85fe407bcacddd2efcd355ada4683aee4
 riscv-config==3.18.3
 riscv-isac==0.18.0

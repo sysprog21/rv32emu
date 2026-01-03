@@ -430,7 +430,7 @@ EXPECTED_misalign = MISALIGNED INSTRUCTION FETCH TEST PASSED!
 misalign-in-blk-emu: $(BIN)
 	$(call check-test, , tests/system/alignment/misalign.elf, misalign.elf, tail -n 1,$(EXPECTED_misalign))
 
-EXPECTED_mmu = STORE PAGE FAULT TEST PASSED!
+EXPECTED_mmu = Store page fault test passed!
 mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 

@@ -1,7 +1,19 @@
 .section .text.setup
 TRAPFRAME_SIZE = 35 * 4
 PG_SIZE = 4096
-STACK_TOP = _end + PG_SIZE
+/* Separate stack areas for user and kernel/trap handler to avoid corruption.
+ * Kernel stack: _end + PG_SIZE (for trap handler/trapframe)
+ * User stack: _end + 3*PG_SIZE (2 pages above kernel stack, grows down)
+ *
+ * Layout: [kernel BSS][gap][trapframe|kernel stack][gap][user stack grows down]
+ *                     _end  _end+PG_SIZE          _end+2*PG_SIZE  _end+3*PG_SIZE
+ *
+ * Note: User stack uses physical address for syscall compatibility.
+ * The emulator's syscall handlers (ELF_LOADER mode) access guest memory
+ * via physical addresses, not virtual addresses.
+ */
+KERNEL_STACK_TOP = _end + PG_SIZE
+USER_STACK_TOP = _end + 3 * PG_SIZE
 
 # FIXME: implement proper machine trap vector
 # Since I assume that all interrupts and exceptions are
@@ -45,7 +57,7 @@ _start:
     li x30, 0
     li x31, 0
 
-    la sp, STACK_TOP - TRAPFRAME_SIZE
+    la sp, KERNEL_STACK_TOP - TRAPFRAME_SIZE
     csrw mscratch, sp;
 
     #la t0, machine_trap_vector
@@ -62,8 +74,8 @@ _exit:
 
 .globl user_entry
 user_entry:
-    la sp, STACK_TOP - TRAPFRAME_SIZE
-    jalr x0, 0x4  # jump to user space main
+    la sp, USER_STACK_TOP  # Use separate user stack
+    jr x0  # jump to user space main at VA 0x0
 
 .globl supervisor_trap_entry
 supervisor_trap_entry:
@@ -99,7 +111,7 @@ supervisor_trap_entry:
     sw x27, 26*4(a0);
     sw x28, 27*4(a0);
     sw x29, 28*4(a0);
-    sw x20, 29*4(a0);
+    sw x30, 29*4(a0);
     sw x31, 30*4(a0);
 
     # load stack pointer and save trapframe pointer into scratch
@@ -153,10 +165,15 @@ pop_tf:
     lw x27, 26*4(a0)
     lw x28, 27*4(a0)
     lw x29, 28*4(a0)
-    lw x20, 29*4(a0)
+    lw x30, 29*4(a0)
     lw x31, 30*4(a0)
 
-    # save trapframe pointer to sscratch
-    csrrw a0, sscratch, a0;
+    # Properly restore a0: load saved a0 into sscratch before swap
+    lw t0, 9*4(a0)       # Load saved a0 from trapframe
+    csrw sscratch, t0    # Put saved a0 into sscratch
+    lw t0, 4*4(a0)       # Reload t0 (corrupted by above)
+
+    # swap trapframe pointer with restored a0
+    csrrw a0, sscratch, a0
 
     sret

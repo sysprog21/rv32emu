@@ -138,13 +138,19 @@ LINUX_CDN_BASE_URL = https://cdn.kernel.org/pub/linux/kernel
 LINUX_CDN_VERSION_URL = $(LINUX_CDN_BASE_URL)/v$(LINUX_VERSION).x
 $(shell mkdir -p /tmp/linux)
 LINUX_DATA_DEST = /tmp/linux
-LINUX_DATA := $(shell wget -q -O- $(LINUX_CDN_VERSION_URL) | \
-                     grep -o 'linux-$(LINUX_VERSION).$(LINUX_PATCHLEVEL).[0-9]\+\.tar.gz' | \
-                     sort -V | tail -n 1)
+# Only fetch Linux artifact for build-linux-image target
+ifneq ($(filter build-linux-image,$(MAKECMDGOALS)),)
+    LINUX_DATA := $(shell wget -q -O- $(LINUX_CDN_VERSION_URL) | \
+                         grep -o 'linux-$(LINUX_VERSION).$(LINUX_PATCHLEVEL).[0-9]\+\.tar.gz' | \
+                         sort -V | tail -n 1)
+    LINUX_DATA_SHA := $(shell wget -q -O- $(LINUX_CDN_VERSION_URL)/sha256sums.asc | \
+                             grep $(LINUX_DATA) | awk '{print $$1}')
+else
+    LINUX_DATA :=
+    LINUX_DATA_SHA :=
+endif
 LINUX_DATA_URL = $(LINUX_CDN_VERSION_URL)/$(LINUX_DATA)
 LINUX_DATA_SKIP_DIR_LEVEL = 1
-LINUX_DATA_SHA := $(shell wget -q -O- $(LINUX_CDN_VERSION_URL)/sha256sums.asc | \
-                         grep $(LINUX_DATA) | awk '{print $$1}')
 LINUX_DATA_SHA_CMD = $(SHA256SUM)
 
 # simplefs

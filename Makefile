@@ -24,8 +24,8 @@ include mk/kconfig.mk
 # .config is required for build targets - run 'make defconfig' to generate
 ifeq ($(NEEDS_CONFIG),yes)
 ifeq ($(wildcard .config),)
-$(info )
 $(info No .config found. Please run one of:)
+$(info )
 $(info   make defconfig        - Apply default configuration)
 $(info   make config           - Interactive configuration menu)
 $(info   make ci_defconfig     - CI with architecture tests)
@@ -129,7 +129,7 @@ $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB) -pthread
-gdbstub-test: $(BIN)
+gdbstub-test: $(BIN) artifact
 	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif
 
@@ -245,6 +245,9 @@ distclean: clean
 	$(Q)$(RM) *.zip
 	$(Q)-$(RM) .config $(CONFIG_HEADER)
 	$(Q)-$(RM) -r $(SOFTFLOAT_DUMMY_PLAT) $(OUT)/softfloat
+	$(Q)$(RM) -r $(OUT)/linux-x86-softfp $(OUT)/riscv32 $(OUT)/linux-image
+	$(Q)$(RM) $(OUT)/sha1sum-* $(OUT)/.stamp-* $(OUT)/.verify_result
+	$(Q)$(RM) $(OUT)/rv32emu-prebuilt*.tar.gz $(OUT)/rv32emu-prebuilt-sail-*
 	$(Q)$(call notice, [OK])
 
 .PHONY: all tool clean distclean gdbstub-test

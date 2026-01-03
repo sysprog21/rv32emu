@@ -246,7 +246,7 @@ else
 endif
 endif
 
-scimark2:
+scimark2: | $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32
 ifeq ($(call has, PREBUILT), 0)
 ifeq ($(call has, SYSTEM), 0)
 	$(call prologue,scimark2)

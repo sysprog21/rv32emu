@@ -72,7 +72,8 @@ for disk_img in "${VBLK_IMGS[@]}"; do
     fi
 done
 
-TIMEOUT=50
+# Allow timeout override for JIT tests (JIT compilation adds significant overhead)
+TIMEOUT=${BOOT_TIMEOUT:-50}
 OPTS_BASE=" -k build/linux-image/Image"
 OPTS_BASE+=" -i build/linux-image/rootfs.cpio"
 

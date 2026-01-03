@@ -23,7 +23,7 @@ riscv-config==3.18.3
 riscv-isac==0.18.0
 ruamel.yaml==0.18.10
 ruamel.yaml.clib==0.2.12
-setuptools==75.8.0
+setuptools==78.1.1
 six==1.17.0
 smmap==5.0.2
 tabledata==1.3.4

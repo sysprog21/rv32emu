@@ -130,7 +130,8 @@ TIMIDITY_DATA_SHA_CMD := $(SHA1SUM)
 
 # Buildroot (for Linux image building)
 BUILDROOT_VERSION := 2025.11
-BUILDROOT_DATA := /tmp/buildroot
+BUILDROOT_DATA_DEST := /tmp
+BUILDROOT_DATA := $(BUILDROOT_DATA_DEST)/buildroot
 BUILDROOT_DATA_URL := git clone https://github.com/buildroot/buildroot $(BUILDROOT_DATA) -b $(BUILDROOT_VERSION) --depth=1
 # find /tmp/buildroot -type f -not -path '*/.git/*' -print0 | \
 #	LC_ALL=C sort -z | \
@@ -151,7 +152,8 @@ LINUX_DATA_SHA_CMD := $(SHA256SUM)
 
 # simplefs kernel module
 SIMPLEFS_VERSION := rel2025.0
-SIMPLEFS_DATA := /tmp/simplefs
+SIMPLEFS_DATA_DEST := /tmp
+SIMPLEFS_DATA := $(SIMPLEFS_DATA_DEST)/simplefs
 SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
 # find /tmp/simplefs -type f -not -path '*/.git/*' -print0 | \
 #	LC_ALL=C sort -z | \

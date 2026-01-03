@@ -29,7 +29,7 @@
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
-#define MASK(n) (~((~0U << (n))))
+#define MASK(n) ((n) >= 64 ? ~0ULL : ~(~0ULL << (n)))
 
 #if defined(_MSC_VER)
 #include <intrin.h>

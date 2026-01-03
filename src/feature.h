@@ -124,6 +124,10 @@
  * with virtual devices (UART, PLIC, virtio-blk).
  */
 #if RV32_FEATURE_SYSTEM && !RV32_FEATURE_ELF_LOADER
+/* Goldfish RTC */
+#ifndef RV32_FEATURE_GOLDFISH_RTC
+#define RV32_FEATURE_GOLDFISH_RTC 1
+#endif
 #define RV32_FEATURE_SYSTEM_MMIO 1
 #else
 #define RV32_FEATURE_SYSTEM_MMIO 0

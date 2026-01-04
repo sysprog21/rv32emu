@@ -74,7 +74,7 @@ jobs:
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
         run: |
             make wasm_defconfig
-            make ENABLE_SYSTEM=1 INITRD_SIZE=32 -j
+            make ENABLE_SYSTEM=1 ENABLE_GOLDFISH_RTC=1 INITRD_SIZE=32 -j
             mkdir /tmp/rv32emu-system-demo
             mv assets/wasm/html/system.html /tmp/rv32emu-system-demo/index.html
             mv assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-system-demo

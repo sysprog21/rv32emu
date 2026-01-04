@@ -22,6 +22,7 @@ SRC_DIR=/tmp
 PARALLEL="-j$(nproc)"
 
 OUTPUT_DIR=./build/linux-image/
+mkdir -p $OUTPUT_DIR
 
 function do_buildroot
 {

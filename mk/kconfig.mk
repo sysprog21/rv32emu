@@ -37,12 +37,6 @@ env-check:
 	@echo "Checking build environment..."
 	@python3 tools/detect-env.py --summary
 	@echo ""
-	@if python3 tools/detect-env.py --have-emcc 2>/dev/null | grep -q y; then \
-		echo "[WebAssembly] Emscripten detected. 'WebAssembly' build target available in 'make config'."; \
-	else \
-		echo "[WebAssembly] Emscripten not found. Install emsdk to enable WASM builds."; \
-	fi
-	@echo ""
 
 # Interactive configuration
 config: env-check $(KCONFIG_DIR)/menuconfig.py

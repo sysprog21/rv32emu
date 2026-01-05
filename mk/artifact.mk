@@ -44,116 +44,201 @@ SCIMARK2_SHA1 := de278c5b8cef84ab6dda41855052c7bfef919e36
 $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32 $(BIN_DIR)/linux-image:
 	$(Q)mkdir -p $@
 
-# $(1): tag of GitHub releases
-# $(2): name of GitHub releases
-# $(3): name showing in terminal
+# URL and API Configuration (single source of truth)
+PREBUILT_REPO := sysprog21/rv32emu-prebuilt
+GITHUB_API_URL := https://api.github.com/repos/$(PREBUILT_REPO)/releases
+GITHUB_BLOB_URL := https://github.com/$(PREBUILT_REPO)/releases/download
+
+# Build blob URL from tag
+# $(1): release tag
+prebuilt-url = $(GITHUB_BLOB_URL)/$(1)
+
+# HTTP utilities are provided by mk/http.mk (included before this file)
+# Provides: HTTP_TOOL, HTTP_GET, HTTP_DOWNLOAD, HTTP_DOWNLOAD_QUIET
+
+# Mode Configuration (consolidates all mode-specific settings)
+# Each mode defines: TAG, STAMP, CHECKSUMS, TARBALL, SENTINEL, EXTRACT, VERIFY_SPECS
+
+# SYSTEM mode (Linux kernel boot)
+MODE_SYSTEM_TAG        := Linux-Image
+MODE_SYSTEM_STAMP      := $(BIN_DIR)/.stamp-linux-image
+MODE_SYSTEM_CHECKSUMS  := sha1sum-linux-image
+MODE_SYSTEM_TARBALL    := rv32emu-linux-image-prebuilt.tar.gz
+MODE_SYSTEM_SENTINEL   := $(BIN_DIR)/linux-image/Image
+MODE_SYSTEM_EXTRACT    := yes
+MODE_SYSTEM_VERIFY     := $(BIN_DIR)/sha1sum-linux-image:$(BIN_DIR)/
+
+# ARCH_TEST mode (RISC-V compliance tests)
+MODE_ARCH_TAG          := sail
+MODE_ARCH_STAMP        := $(BIN_DIR)/.stamp-sail
+MODE_ARCH_CHECKSUMS    := rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha
+MODE_ARCH_TARBALL      := rv32emu-prebuilt-sail-$(HOST_PLATFORM)
+MODE_ARCH_SENTINEL     := $(BIN_DIR)/riscv_sim_RV32
+MODE_ARCH_EXTRACT      := no
+MODE_ARCH_VERIFY       := $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha:$(BIN_DIR)/
+
+# ELF mode (default prebuilt binaries)
+MODE_ELF_TAG           := ELF
+MODE_ELF_STAMP         := $(BIN_DIR)/.stamp-prebuilt
+MODE_ELF_CHECKSUMS     := sha1sum-linux-x86-softfp sha1sum-riscv32
+MODE_ELF_TARBALL       := rv32emu-prebuilt.tar.gz
+MODE_ELF_SENTINEL      := $(BIN_DIR)/riscv32/coremark
+MODE_ELF_EXTRACT       := yes
+MODE_ELF_VERIFY        := $(BIN_DIR)/sha1sum-linux-x86-softfp:$(BIN_DIR)/linux-x86-softfp/ $(BIN_DIR)/sha1sum-riscv32:$(BIN_DIR)/riscv32/
+
+# Select active mode configuration
+ifeq ($(call has, SYSTEM), 1)
+    ACTIVE_TAG       := $(MODE_SYSTEM_TAG)
+    ACTIVE_STAMP     := $(MODE_SYSTEM_STAMP)
+    ACTIVE_CHECKSUMS := $(MODE_SYSTEM_CHECKSUMS)
+    ACTIVE_TARBALL   := $(MODE_SYSTEM_TARBALL)
+    ACTIVE_SENTINEL  := $(MODE_SYSTEM_SENTINEL)
+    ACTIVE_EXTRACT   := $(MODE_SYSTEM_EXTRACT)
+    ACTIVE_VERIFY    := $(MODE_SYSTEM_VERIFY)
+else ifeq ($(call has, ARCH_TEST), 1)
+    ACTIVE_TAG       := $(MODE_ARCH_TAG)
+    ACTIVE_STAMP     := $(MODE_ARCH_STAMP)
+    ACTIVE_CHECKSUMS := $(MODE_ARCH_CHECKSUMS)
+    ACTIVE_TARBALL   := $(MODE_ARCH_TARBALL)
+    ACTIVE_SENTINEL  := $(MODE_ARCH_SENTINEL)
+    ACTIVE_EXTRACT   := $(MODE_ARCH_EXTRACT)
+    ACTIVE_VERIFY    := $(MODE_ARCH_VERIFY)
+else
+    ACTIVE_TAG       := $(MODE_ELF_TAG)
+    ACTIVE_STAMP     := $(MODE_ELF_STAMP)
+    ACTIVE_CHECKSUMS := $(MODE_ELF_CHECKSUMS)
+    ACTIVE_TARBALL   := $(MODE_ELF_TARBALL)
+    ACTIVE_SENTINEL  := $(MODE_ELF_SENTINEL)
+    ACTIVE_EXTRACT   := $(MODE_ELF_EXTRACT)
+    ACTIVE_VERIFY    := $(MODE_ELF_VERIFY)
+endif
+
+# Core Macros
+
+# Shell command to fetch tag from GitHub API
+# $(1): tag pattern
+FETCH_TAG_CMD = $(call HTTP_GET,$(GITHUB_API_URL)) | grep '"tag_name"' | grep "$(1)" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/'
+
+# Fetch the latest release tag from GitHub API (parse-time)
+# $(1): tag pattern to match (e.g., "ELF", "Linux-Image", "sail")
 define fetch-releases-tag
-    $(eval LATEST_RELEASE := $(shell wget -q https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases -O- \
-                                     | grep '"tag_name"' \
-                                     | grep "$(1)" \
-                                     | head -n 1 \
-                                     | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')) \
+    $(eval LATEST_RELEASE := $(shell $(call FETCH_TAG_CMD,$(1)))) \
     $(if $(LATEST_RELEASE),, \
         $(error Fetching tag of latest releases failed) \
-    ) \
-    $(if $(wildcard $(BIN_DIR)/$(2)), \
-        $(info $(call warnx, $(3) is found. Skipping downloading.)))
+    )
 endef
 
-# Verify prebuilt files against a SHA checksum file.
-# Sets result to "1" in temp file if any verification fails.
-# $(1): SHA checksum file path
-# $(2): prefix path for files (can be empty)
-# $(3): temp file to store result (writes "1" on failure, preserves existing failures)
-# Note: All checks use shell commands to defer until recipe execution.
-# $(error) and $(shell) in $(eval) run at Makefile parse time,
-# before prerequisites (like fetch-checksum) execute.
-define verify-prebuilt-files
-	$(Q)if [ ! -s "$(1)" ]; then \
-		echo "Error: Checksum file $(1) is missing or empty" >&2; \
-		exit 1; \
-	fi; \
-	verify_failed=$$(cat "$(3)" 2>/dev/null || echo 0); \
-	if [ "$$verify_failed" != "1" ]; then \
-		while read expected_sha filename; do \
-			filepath="$(2)$$filename"; \
-			if [ ! -e "$$filepath" ]; then \
-				verify_failed=1; break; \
-			fi; \
-			if ! echo "$$expected_sha  $$filepath" | $(SHA1SUM) -c - >/dev/null 2>&1; then \
-				verify_failed=1; break; \
-			fi; \
-		done < "$(1)"; \
-	fi; \
-	echo $$verify_failed > "$(3)"
-endef
+# Check if artifacts are fully present (stamp + checksums + binary)
+# Note: Uses wildcard which only checks existence, not content.
+# Empty checksum files are handled at recipe time by fetch-checksum-files.
+# $(1): Stamp file
+# $(2): Checksum file(s) - space-separated base names
+# $(3): Representative binary
+# Note: The foreach/if combo emits "x" for each MISSING file. If any "x" exists,
+# the outer $(if ...) returns empty; otherwise returns "yes" (all files present).
+check-sentinels = $(and $(wildcard $(1)),$(if $(foreach f,$(2),$(if $(wildcard $(BIN_DIR)/$(f)),,x)),,yes),$(wildcard $(3)))
 
-# Handle SHA-1 verification result: re-fetch if failed, report status.
+# Handle SHA-1 verification result: re-fetch if failed, re-verify after fetch
 # $(1): whether to extract tarball (yes/no)
 # $(2): temp file containing verification result
+# $(3): stamp file to create on success
+# $(4): tag pattern for recovery fetch
+# $(5): tarball filename
+# $(6): verification specs as "checksum_file:verify_dir" pairs
 define handle-sha1-result
 	$(Q)if [ "$$(cat "$(2)" 2>/dev/null || echo 0)" = "1" ]; then \
 	    $(call warn, SHA-1 verification failed!); \
-	    $(PRINTF) "Re-fetching prebuilt binaries from \"rv32emu-prebuilt\" ...\n"; \
-	    wget -q --show-progress "$(PREBUILT_BLOB_URL)/$(RV32EMU_PREBUILT_TARBALL)" -O "build/$(RV32EMU_PREBUILT_TARBALL)" || exit 1; \
-	    $(if $(filter yes,$(1)),tar --strip-components=1 -zxf "build/$(RV32EMU_PREBUILT_TARBALL)" -C build || exit 1;) \
+	    blob_url="$(PREBUILT_BLOB_URL)"; \
+	    if [ -z "$(LATEST_RELEASE)" ]; then \
+	        echo "Attempting to recover by fetching latest tag for $(4)..."; \
+	        tag=$$($(call FETCH_TAG_CMD,$(4))); \
+	        if [ -z "$$tag" ]; then \
+	             echo "Error: Recovery failed. Cannot fetch tag." >&2; \
+	             rm -f "$(2)" "$(3)"; exit 1; \
+	        fi; \
+	        blob_url="$(call prebuilt-url,$$tag)"; \
+	    fi; \
+	    $(PRINTF) "Re-fetching prebuilt binaries from $$blob_url ...\n"; \
+	    rm -f "$(3)"; \
+	    $(call HTTP_DOWNLOAD,"$$blob_url/$(5)","$(BIN_DIR)/$(5)") || exit 1; \
+	    $(if $(filter yes,$(1)),tar --strip-components=1 -zxf "$(BIN_DIR)/$(5)" -C "$(BIN_DIR)" || exit 1;) \
+	    $(PRINTF) "Re-verifying after re-fetch ... "; \
+	    reverify_ok=1; \
+	    for spec in $(6); do \
+	        checksum=$$(echo "$$spec" | cut -d: -f1); \
+	        dir=$$(echo "$$spec" | cut -d: -f2); \
+	        if ! (cd "$$dir" && $(SHA1SUM) -c "$$checksum" >/dev/null 2>&1); then \
+	            reverify_ok=0; break; \
+	        fi; \
+	    done; \
+	    if [ "$$reverify_ok" = "1" ]; then \
+	        $(call notice, [OK]); \
+	        touch "$(3)"; \
+	    else \
+	        echo "FAILED" >&2; \
+	        echo "Error: Re-fetch succeeded but verification still fails." >&2; \
+	        echo "The downloaded archive may be corrupted." >&2; \
+	        rm -f "$(2)"; exit 1; \
+	    fi; \
 	else \
 	    $(call notice, [OK]); \
+	    touch "$(3)"; \
 	fi; \
 	rm -f "$(2)"
 endef
 
-# Fetch checksum file if tarball doesn't exist.
-# $(1): tarball path to check
-# $(2): checksum file(s) to download (space-separated base names)
+# Fetch checksum files if any are missing or empty
+# Handles edge case where checksums exist but are empty (fetch tag if needed)
+# $(1): checksum file(s) to download (space-separated base names)
+# $(2): tag pattern for recovery fetch
 define fetch-checksum-files
-	$(Q)if [ ! -f "$(1)" ]; then \
-	    $(foreach f,$(2),wget -q -O "$(BIN_DIR)/$(f)" "$(PREBUILT_BLOB_URL)/$(f)" || exit 1;) \
+	$(Q)missing=0; \
+	for f in $(1); do \
+	    if [ ! -s "$(BIN_DIR)/$$f" ]; then missing=1; break; fi; \
+	done; \
+	if [ "$$missing" = "1" ]; then \
+	    blob_url="$(PREBUILT_BLOB_URL)"; \
+	    if [ -z "$(LATEST_RELEASE)" ]; then \
+	        tag=$$($(call FETCH_TAG_CMD,$(2))); \
+	        if [ -z "$$tag" ]; then \
+	            echo "Error: Cannot fetch release tag." >&2; exit 1; \
+	        fi; \
+	        blob_url="$(call prebuilt-url,$$tag)"; \
+	    fi; \
+	    $(foreach f,$(1),$(call HTTP_DOWNLOAD_QUIET,"$$blob_url/$(f)","$(BIN_DIR)/$(f)") || exit 1;) \
 	    $(call notice, [OK]); \
 	else \
-	    $(call warn, skipped); \
+	    $(call notice, [cached]); \
 	fi
 endef
 
+# Release Tag Fetching (conditional on artifact targets)
 LATEST_RELEASE ?=
 
 # Only fetch releases when artifact-related targets are requested.
 # This prevents network calls during unrelated targets like 'make defconfig'.
-# IMPORTANT: When adding new targets that depend on 'artifact' in the main
-# Makefile, they must also be added here to trigger release fetching.
 ARTIFACT_TARGETS := artifact fetch-checksum scimark2 ieeelib \
-                    check misalign doom quake arch-test system
+                    check misalign doom quake arch-test system gdbstub-test
+
 ifneq ($(filter $(ARTIFACT_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(call has, PREBUILT), 1)
-    # On macOS/arm64 Github runner, let's leverage the ${{ secrets.GITHUB_TOKEN }} to prevent 403 rate limit error.
-    # Thus, the LATEST_RELEASE tag is defined at Github job steps, no need to fetch them here.
-    # Also skip fetching if prebuilt artifacts already exist (cached from previous artifact fetch).
-    # Use checksum files as sentinels - they indicate a complete artifact fetch and are required
-    # for SHA verification. If missing, we need LATEST_RELEASE to construct download URLs.
+    # Verify HTTP download tool is available
+    ifeq ($(HTTP_TOOL),)
+        $(error No HTTP download tool found. Please install curl or wget)
+    endif
+    # Skip LATEST_RELEASE fetch only when artifacts are fully present
     ifeq ($(LATEST_RELEASE),)
-         ifeq ($(call has, SYSTEM), 1)
-             ifeq ($(wildcard $(BIN_DIR)/sha1sum-linux-image),)
-                 $(call fetch-releases-tag,Linux-Image,rv32emu-linux-image-prebuilt.tar.gz,Linux image)
-             endif
-         else ifeq ($(call has, ARCH_TEST), 1)
-             ifeq ($(wildcard $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha),)
-                 $(call fetch-releases-tag,sail,rv32emu-prebuilt-sail-$(HOST_PLATFORM),Sail model)
-             endif
-         else
-             ifeq ($(wildcard $(BIN_DIR)/sha1sum-riscv32),)
-                 $(call fetch-releases-tag,ELF,rv32emu-prebuilt.tar.gz,Prebuilt benchmark)
-             endif
-         endif
+        ifeq ($(call check-sentinels,$(ACTIVE_STAMP),$(ACTIVE_CHECKSUMS),$(ACTIVE_SENTINEL)),)
+            $(call fetch-releases-tag,$(ACTIVE_TAG))
+        endif
     endif
 endif
 endif
 
 ifeq ($(call has, PREBUILT), 1)
-    PREBUILT_BLOB_URL = https://github.com/sysprog21/rv32emu-prebuilt/releases/download/$(LATEST_RELEASE)
+    PREBUILT_BLOB_URL = $(call prebuilt-url,$(LATEST_RELEASE))
 else
-    # Since rv32emu only supports the dynamic binary translation of integer
-    # instruction in tiered compilation currently, we disable the hardware
-    # floating-point and the related SIMD operation of x86.
+    # Build from source: disable hardware floating-point for x86 compatibility
     CFLAGS := -m32 -mno-sse -mno-sse2 -msoft-float -O2 -Wno-unused-result -L$(BIN_DIR)
     LDFLAGS := -lsoft-fp -lm
 
@@ -161,35 +246,26 @@ else
     LDFLAGS_CROSS := -lm -lsemihost
 endif
 
+# Build Targets
 .PHONY: artifact fetch-checksum scimark2 ieeelib
 
-# Temp file for verification result.
-# Safe for normal use: Make deduplicates targets and runs recipe lines sequentially.
-# Initialized with "0" (success) and set to "1" on verification failure.
+# Temp file for verification result
 VERIFY_RESULT_FILE := $(BIN_DIR)/.verify_result
 
 artifact: fetch-checksum ieeelib scimark2
 ifeq ($(call has, PREBUILT), 1)
-	$(Q)$(PRINTF) "Checking SHA-1 of prebuilt binaries ... "
-	$(Q)rm -f $(VERIFY_RESULT_FILE) && echo 0 > $(VERIFY_RESULT_FILE)
-
-ifeq ($(call has, SYSTEM), 1)
-	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-linux-image,$(BIN_DIR)/,$(VERIFY_RESULT_FILE))
-	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-linux-image-prebuilt.tar.gz)
-else ifeq ($(call has, ARCH_TEST), 1)
-	$(call verify-prebuilt-files,$(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha,$(BIN_DIR)/,$(VERIFY_RESULT_FILE))
-	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt-sail-$(HOST_PLATFORM))
-else
-	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-linux-x86-softfp,$(BIN_DIR)/linux-x86-softfp/,$(VERIFY_RESULT_FILE))
-	$(call verify-prebuilt-files,$(BIN_DIR)/sha1sum-riscv32,$(BIN_DIR)/riscv32/,$(VERIFY_RESULT_FILE))
-	$(Q)$(eval RV32EMU_PREBUILT_TARBALL := rv32emu-prebuilt.tar.gz)
-endif
-
-ifeq ($(call has, ARCH_TEST), 1)
-	$(call handle-sha1-result,no,$(VERIFY_RESULT_FILE))
-else
-	$(call handle-sha1-result,yes,$(VERIFY_RESULT_FILE))
-endif
+	$(Q)$(PRINTF) "Verifying prebuilt binaries ... "
+	$(Q)rm -f "$(VERIFY_RESULT_FILE)" && echo 0 > "$(VERIFY_RESULT_FILE)"
+	$(Q)for spec in $(ACTIVE_VERIFY); do \
+	    checksum=$$(echo "$$spec" | cut -d: -f1); \
+	    dir=$$(echo "$$spec" | cut -d: -f2); \
+	    if [ ! -s "$$checksum" ]; then \
+	        echo 1 > "$(VERIFY_RESULT_FILE)"; break; \
+	    elif ! (cd "$$dir" && $(SHA1SUM) -c "$$checksum" >/dev/null 2>&1); then \
+	        echo 1 > "$(VERIFY_RESULT_FILE)"; break; \
+	    fi; \
+	done
+	$(call handle-sha1-result,$(ACTIVE_EXTRACT),$(VERIFY_RESULT_FILE),$(ACTIVE_STAMP),$(ACTIVE_TAG),$(ACTIVE_TARBALL),$(ACTIVE_VERIFY))
 else
 ifeq ($(call has, SYSTEM), 1)
 	$(Q)(mkdir -p /tmp/rv32emu-linux-image-prebuilt/linux-image)
@@ -236,14 +312,8 @@ endif
 
 fetch-checksum:
 ifeq ($(call has, PREBUILT), 1)
-	$(Q)$(PRINTF) "Fetching SHA-1 of prebuilt binaries ... "
-ifeq ($(call has, SYSTEM), 1)
-	$(call fetch-checksum-files,$(BIN_DIR)/rv32emu-linux-image-prebuilt.tar.gz,sha1sum-linux-image)
-else ifeq ($(call has, ARCH_TEST), 1)
-	$(call fetch-checksum-files,$(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM),rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha)
-else
-	$(call fetch-checksum-files,$(BIN_DIR)/rv32emu-prebuilt.tar.gz,sha1sum-linux-x86-softfp sha1sum-riscv32)
-endif
+	$(Q)$(PRINTF) "Fetching checksum files ... "
+	$(call fetch-checksum-files,$(ACTIVE_CHECKSUMS),$(ACTIVE_TAG))
 endif
 
 scimark2: | $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32

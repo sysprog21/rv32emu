@@ -52,6 +52,8 @@ jobs:
       matrix:
         compiler: [gcc, clang]
     runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - uses: actions/checkout@v6
       with:
@@ -147,7 +149,6 @@ jobs:
     - name: Fetch artifacts
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
             . .ci/common.sh
             fetch_artifact ELF
@@ -211,7 +212,7 @@ jobs:
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
       run: |
-            make distclean
+            make cleanconfig
             make defconfig
             make check $PARALLEL
             make tests $PARALLEL
@@ -227,17 +228,18 @@ jobs:
             # Core extensions + bit manipulation + CSR/fence + performance features
             # Tests both interpreter and JIT modes (12 × 2 = 24 builds)
             # Consolidated from 25 separate builds (13 interpreter + 12 JIT)
+            # Use cleanconfig instead of distclean to preserve artifacts across iterations
             for ext in ENABLE_EXT_M ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C \
                        ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs \
                        ENABLE_Zicsr ENABLE_Zifencei \
                        ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
               echo "Testing ${ext}=0 (interpreter)"
-              if ! (make distclean && make defconfig && make ${ext}=0 check $PARALLEL); then
+              if ! (make cleanconfig && make defconfig && make ${ext}=0 check $PARALLEL); then
                 echo "ERROR: Interpreter test failed with ${ext}=0"
                 exit 1
               fi
               echo "Testing ${ext}=0 (JIT)"
-              if ! (make distclean && make jit_defconfig && make ${ext}=0 check $PARALLEL); then
+              if ! (make cleanconfig && make jit_defconfig && make ${ext}=0 check $PARALLEL); then
                 echo "ERROR: JIT test failed with ${ext}=0"
                 exit 1
               fi
@@ -285,8 +287,8 @@ jobs:
     - name: undefined behavior test
       if: success() || failure()
       run: |
-            make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
-            make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+            make cleanconfig && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+            make cleanconfig && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
     - name: boot Linux kernel test
       if: success()
@@ -311,15 +313,9 @@ jobs:
       if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
             . .ci/common.sh
-            export LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                          "Authorization: Bearer ${GH_TOKEN}" \
-                                           | grep '"tag_name"' \
-                                           | grep "sail" \
-                                           | head -n 1 \
-                                           | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+            export LATEST_RELEASE=$(fetch_latest_release sail)
             .ci/riscv-tests.sh
 
   # Native AArch64 on GitHub ARM runners - fast, no QEMU overhead
@@ -328,6 +324,8 @@ jobs:
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     timeout-minutes: 30
     runs-on: ubuntu-24.04-arm
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
     - name: checkout code
       uses: actions/checkout@v6
@@ -374,27 +372,16 @@ jobs:
     - name: Fetch artifacts
       env:
         CC: clang-${{ env.LLVM_VERSION }}
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
             . .ci/common.sh
-            LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                   "Authorization: Bearer ${GH_TOKEN}" \
-                            | grep '"tag_name"' \
-                            | grep "ELF" \
-                            | head -n 1 \
-                            | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-            if [ -z "$LATEST_RELEASE" ]; then
-                echo "Error: Failed to fetch LATEST_RELEASE from GitHub API"
-                exit 1
-            fi
-            make LATEST_RELEASE=$LATEST_RELEASE artifact
+            fetch_artifact ELF
 
     # FIXME: gcc build fails on AArch64/Linux hosts
     - name: check + tests
       env:
         CC: clang-${{ env.LLVM_VERSION }}
       run: |
-            make distclean
+            make cleanconfig
             make defconfig
             make check $PARALLEL
 
@@ -418,6 +405,8 @@ jobs:
       matrix:
         compiler: [gcc-15, clang]
     runs-on: macos-latest # M1 chip
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
      - uses: actions/checkout@v6
        with:
@@ -484,10 +473,16 @@ jobs:
      - name: Symlink gcc-15 due to the default /usr/local/bin/gcc links to system's clang
        run: |
              ln -s /opt/homebrew/opt/gcc/bin/gcc-15 /usr/local/bin/gcc-15
+     - name: Cache build artifacts
+       uses: actions/cache@v5
+       with:
+         path: build/
+         key: rv32emu-artifacts-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mk/artifact.mk', 'mk/external.mk') }}
+         restore-keys: |
+           rv32emu-artifacts-${{ runner.os }}-${{ runner.arch }}-
      - name: fetch artifact first to reduce HTTP requests
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
-         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
        run: |
              . .ci/common.sh
              fetch_artifact ELF
@@ -505,7 +500,7 @@ jobs:
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean
+             make cleanconfig
              make defconfig
              make check $PARALLEL
              make tests $PARALLEL
@@ -521,17 +516,18 @@ jobs:
              # Core extensions + bit manipulation + CSR/fence + performance features
              # Tests both interpreter and JIT modes (12 × 2 = 24 builds)
              # Consolidated from 25 separate builds (13 interpreter + 12 JIT)
+             # Use cleanconfig instead of distclean to preserve artifacts across iterations
              for ext in ENABLE_EXT_M ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C \
                         ENABLE_Zba ENABLE_Zbb ENABLE_Zbc ENABLE_Zbs \
                         ENABLE_Zicsr ENABLE_Zifencei \
                         ENABLE_MOP_FUSION ENABLE_BLOCK_CHAINING; do
                echo "Testing ${ext}=0 (interpreter)"
-               if ! (make distclean && make defconfig && make ${ext}=0 check $PARALLEL); then
+               if ! (make cleanconfig && make defconfig && make ${ext}=0 check $PARALLEL); then
                  echo "ERROR: Interpreter test failed with ${ext}=0"
                  exit 1
                fi
                echo "Testing ${ext}=0 (JIT)"
-               if ! (make distclean && make jit_defconfig && make ${ext}=0 check $PARALLEL); then
+               if ! (make cleanconfig && make jit_defconfig && make ${ext}=0 check $PARALLEL); then
                  echo "ERROR: JIT test failed with ${ext}=0"
                  exit 1
                fi
@@ -565,8 +561,8 @@ jobs:
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
-             make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+             make cleanconfig && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+             make cleanconfig && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
      - name: boot Linux kernel test
        if: success()
@@ -592,15 +588,9 @@ jobs:
        if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
-         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
        run: |
              . .ci/common.sh
-             export LATEST_RELEASE=$(download_with_headers "https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases" \
-                                                           "Authorization: Bearer ${GH_TOKEN}" \
-                                            | grep '"tag_name"' \
-                                            | grep "sail" \
-                                            | head -n 1 \
-                                            | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+             export LATEST_RELEASE=$(fetch_latest_release sail)
              python3 -m venv venv
              . venv/bin/activate
              .ci/riscv-tests.sh

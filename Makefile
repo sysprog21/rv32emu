@@ -24,8 +24,8 @@ include mk/kconfig.mk
 # .config is required for build targets - run 'make defconfig' to generate
 ifeq ($(NEEDS_CONFIG),yes)
 ifeq ($(wildcard .config),)
-$(info )
 $(info No .config found. Please run one of:)
+$(info )
 $(info   make defconfig        - Apply default configuration)
 $(info   make config           - Interactive configuration menu)
 $(info   make ci_defconfig     - CI with architecture tests)
@@ -129,7 +129,7 @@ $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB) -pthread
-gdbstub-test: $(BIN)
+gdbstub-test: $(BIN) artifact
 	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif
 
@@ -179,6 +179,9 @@ endif
 
 # Tail-call optimization
 $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-stack-check -fno-stack-protector
+
+# HTTP Utilities (shared by external.mk and artifact.mk)
+include mk/http.mk
 
 # External Dependencies & System Emulation
 include mk/external.mk
@@ -239,14 +242,22 @@ clean:
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
 	$(Q)$(call notice, [OK])
 
-distclean: clean
-	$(VECHO) "Deleting all generated files... "
-	$(Q)$(RM) -r $(OUT)/id1 $(DEMO_DIR) $(OUT)/mini-gdbstub $(OUT)/devices
-	$(Q)$(RM) *.zip
+# Clean build objects and config (preserves artifacts for CI efficiency)
+cleanconfig: clean
+	$(VECHO) "Removing config files... "
 	$(Q)-$(RM) .config $(CONFIG_HEADER)
 	$(Q)-$(RM) -r $(SOFTFLOAT_DUMMY_PLAT) $(OUT)/softfloat
 	$(Q)$(call notice, [OK])
 
-.PHONY: all tool clean distclean gdbstub-test
+distclean: cleanconfig
+	$(VECHO) "Deleting all generated files... "
+	$(Q)$(RM) -r $(OUT)/id1 $(DEMO_DIR) $(OUT)/mini-gdbstub $(OUT)/devices
+	$(Q)$(RM) *.zip
+	$(Q)$(RM) -r $(OUT)/linux-x86-softfp $(OUT)/riscv32 $(OUT)/linux-image
+	$(Q)$(RM) $(OUT)/sha1sum-* $(OUT)/.stamp-* $(OUT)/.verify_result
+	$(Q)$(RM) $(OUT)/rv32emu-prebuilt*.tar.gz $(OUT)/rv32emu-prebuilt-sail-*
+	$(Q)$(call notice, [OK])
+
+.PHONY: all tool clean cleanconfig distclean gdbstub-test
 
 -include $(deps)

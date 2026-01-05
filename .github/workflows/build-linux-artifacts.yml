@@ -23,18 +23,24 @@ jobs:
         uses: tj-actions/changed-files@v47
         with:
           files: |
+            assets/system/configs/*
+            tools/build-linux-image.sh
             mk/external.mk
-            # Build system configuration
-            mk/kconfig.mk
-            mk/toolchain.mk
-            tools/detect-env.py
             tests/system/br_pkgs/rtc/*.c
       - name: Set alias
         id: has_changed_files
         run: |
           if [[ ${{ steps.test-linux-image-version-change.outputs.any_modified }} == true ]]; then
-            # Determine if the changes are from Buildroot or the Linux version (The Linux might have several patches, so also need to check the SHA value)
-            echo -n $(git --no-pager diff HEAD^ HEAD | grep -e "+BUILDROOT_VERSION" -e "+LINUX_VERSION" -e "+LINUX_PATCHLEVEL") >> linux-image-version-change
+            # Determine if the changes are from the Buildroot patching or the Buildroot or the Linux version
+            # Others file changes need to trigger the rebuilt via workflow_dispatch event
+            echo -n $(git --no-pager diff HEAD^ HEAD | grep \
+                        -e "assets/system/configs/" \
+                        -e "tools/build-linux-image.sh" \
+                        -e "tests/system/br_pkgs/rtc/" \
+                        -e "+BUILDROOT_VERSION" \
+                        -e "+LINUX_VERSION" \
+                        -e "+LINUX_PATCHLEVEL" \
+                     ) >> linux-image-version-change
             if [[ -s linux-image-version-change ]]; then
                 echo "has_changed_linux_image_version=true" >> $GITHUB_OUTPUT
             else

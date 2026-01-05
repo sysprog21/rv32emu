@@ -56,7 +56,7 @@ jobs:
       - name: Run benchmark
         if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
         run: |
-          tests/bench-aggregator.py
+          python3 tests/bench.py --json --quiet
 
       - name: Store benchmark results
         if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'

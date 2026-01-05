@@ -57,7 +57,7 @@ deps :=
 
 # Feature Flags (Kconfig -> RV32_FEATURE_*)
 $(call set-features, ELF_LOADER MOP_FUSION BLOCK_CHAINING LOG_COLOR)
-$(call set-features, SYSTEM ARCH_TEST)
+$(call set-features, SYSTEM GOLDFISH_RTC ARCH_TEST)
 $(call set-features, EXT_M EXT_A EXT_F EXT_C RV32E)
 $(call set-features, Zicsr Zifencei Zba Zbb Zbc Zbs)
 $(call set-features, SDL SDL_MIXER GDBSTUB JIT)

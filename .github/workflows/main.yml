@@ -174,7 +174,7 @@ jobs:
       run: |
             make distclean
             make wasm_defconfig
-            make ENABLE_SYSTEM=1 $PARALLEL
+            make ENABLE_SYSTEM=1 ENABLE_GOLDFISH_RTC=1 $PARALLEL
             make distclean
 
     - name: Build with various optimization levels

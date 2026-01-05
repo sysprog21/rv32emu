@@ -63,6 +63,7 @@ $(eval $(call enable-to-config,Zifencei))
 # Execution modes
 # Note: JIT is handled separately below (requires CONFIG_INTERPRETER_ONLY coordination)
 $(eval $(call enable-to-config,SYSTEM))
+$(eval $(call enable-to-config,GOLDFISH_RTC))
 $(eval $(call enable-to-config,ELF_LOADER))
 $(eval $(call enable-to-config,T2C))
 

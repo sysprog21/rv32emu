@@ -245,6 +245,13 @@ config SYSTEM
       When enabled, rv32emu can boot a complete Linux system.
       Requires additional kernel image and rootfs.
 
+config GOLDFISH_RTC
+    bool "Enable Goldfish RTC"
+    default y
+    depends on SYSTEM
+    help
+      Enable Goldfish RTC peripheral when running the Linux system.
+
 config ELF_LOADER
     bool "ELF Loader for System Mode"
     default n

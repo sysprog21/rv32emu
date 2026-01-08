@@ -240,6 +240,11 @@ static inline void update_time(riscv_t *rv)
 
     rv_gettimeofday(&tv);
     rv->timer = (uint64_t) tv.tv_sec * 1e6 + (uint32_t) tv.tv_usec;
+#else
+    /* SYSTEM mode: derive timer from cycle counter.
+     * Timer is computed on-demand rather than incremented per-instruction.
+     */
+    rv->timer = rv->csr_cycle + rv->timer_offset;
 #endif
     rv->csr_time[0] = rv->timer & 0xFFFFFFFF;
     rv->csr_time[1] = rv->timer >> 32;
@@ -333,12 +338,16 @@ static uint32_t csr_csrrw(riscv_t *rv,
                           uint32_t val,
                           uint64_t cycle)
 {
-    /* Sync cycle counter for cycle-related CSRs only */
+    /* Sync cycle counter for cycle-related and time-related CSRs.
+     * TIME CSRs need cycle synced so update_time() derives correct timer.
+     */
     switch (csr & 0xFFF) {
     case CSR_CYCLE:
     case CSR_CYCLEH:
     case CSR_INSTRET:
     case CSR_INSTRETH:
+    case CSR_TIME:
+    case CSR_TIMEH:
         if (rv->csr_cycle != cycle)
             rv->csr_cycle = cycle;
         break;
@@ -387,12 +396,16 @@ static uint32_t csr_csrrs(riscv_t *rv,
                           uint32_t val,
                           uint64_t cycle)
 {
-    /* Sync cycle counter for cycle-related CSRs only */
+    /* Sync cycle counter for cycle-related and time-related CSRs.
+     * TIME CSRs need cycle synced so update_time() derives correct timer.
+     */
     switch (csr & 0xFFF) {
     case CSR_CYCLE:
     case CSR_CYCLEH:
     case CSR_INSTRET:
     case CSR_INSTRETH:
+    case CSR_TIME:
+    case CSR_TIMEH:
         if (rv->csr_cycle != cycle)
             rv->csr_cycle = cycle;
         break;
@@ -430,12 +443,16 @@ static uint32_t csr_csrrc(riscv_t *rv,
                           uint32_t val,
                           uint64_t cycle)
 {
-    /* Sync cycle counter for cycle-related CSRs only */
+    /* Sync cycle counter for cycle-related and time-related CSRs.
+     * TIME CSRs need cycle synced so update_time() derives correct timer.
+     */
     switch (csr & 0xFFF) {
     case CSR_CYCLE:
     case CSR_CYCLEH:
     case CSR_INSTRET:
     case CSR_INSTRETH:
+    case CSR_TIME:
+    case CSR_TIMEH:
         if (rv->csr_cycle != cycle)
             rv->csr_cycle = cycle;
         break;
@@ -606,7 +623,11 @@ extern void emu_update_rtc_interrupts(riscv_t *rv);
 static uint32_t peripheral_update_ctr = 64;
 #endif
 
-/* Interpreter-based execution path */
+/* Interpreter-based execution path.
+ * Block-level cycle counting: cycle is pre-incremented at block entry,
+ * so per-instruction cycle++ is removed. Timer is derived from cycle at
+ * interrupt check points (rv_check_interrupt) rather than per-instruction.
+ */
 #if RV32_HAS(SYSTEM)
 #define RVOP_SYNC_PC(rv, PC) \
     do {                     \
@@ -618,34 +639,70 @@ static uint32_t peripheral_update_ctr = 64;
     } while (0)
 #endif
 
-#define RVOP(inst, code)                                                  \
-    static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir, \
-                                        uint64_t cycle, uint32_t PC)      \
-    {                                                                     \
-        RVOP_SYNC_PC(rv, PC);                                             \
-        IIF(RV32_HAS(SYSTEM))(rv->timer++;, ) cycle++;                    \
-        code;                                                             \
-        IIF(RV32_HAS(SYSTEM))(                                            \
-            if (need_handle_signal) {                                     \
-                need_handle_signal = false;                               \
-                return true;                                              \
-            }, ) nextop : PC += __rv_insn_##inst##_len;                   \
-        IIF(RV32_HAS(SYSTEM))(IIF(RV32_HAS(JIT))(                         \
-                                  , if (unlikely(need_clear_block_map)) { \
-                                      block_map_clear(rv);                \
-                                      need_clear_block_map = false;       \
-                                      rv->csr_cycle = cycle;              \
-                                      rv->PC = PC;                        \
-                                      return false;                       \
-                                  }), );                                  \
-        if (unlikely(RVOP_NO_NEXT(ir)))                                   \
-            goto end_op;                                                  \
-        const rv_insn_t *next = ir->next;                                 \
-        MUST_TAIL return next->impl(rv, next, cycle, PC);                 \
-    end_op:                                                               \
-        rv->csr_cycle = cycle;                                            \
-        rv->PC = PC;                                                      \
-        return true;                                                      \
+FORCE_INLINE bool insn_is_branch(uint8_t opcode)
+{
+    switch (opcode) {
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
+    IIF(can_branch)(case rv_insn_##inst:, )
+        RV_INSN_LIST
+#undef _
+        return true;
+    }
+    return false;
+}
+
+#define RVOP(inst, code)                                                       \
+    static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir,      \
+                                        uint64_t cycle, uint32_t PC)           \
+    {                                                                          \
+        RVOP_SYNC_PC(rv, PC);                                                  \
+        cycle++;                                                               \
+        code;                                                                  \
+        IIF(RV32_HAS(SYSTEM))(                                                 \
+            if (need_handle_signal) {                                          \
+                need_handle_signal = false;                                    \
+                return true;                                                   \
+            }, ) nextop : PC += __rv_insn_##inst##_len;                        \
+        IIF(RV32_HAS(SYSTEM))(IIF(RV32_HAS(JIT))(                              \
+                                  , if (unlikely(need_clear_block_map)) {      \
+                                      block_map_clear(rv);                     \
+                                      need_clear_block_map = false;            \
+                                      rv->csr_cycle = cycle;                   \
+                                      rv->PC = PC;                             \
+                                      return false;                            \
+                                  }), );                                       \
+        if (unlikely(RVOP_NO_NEXT(ir)))                                        \
+            goto end_op;                                                       \
+        const rv_insn_t *next = ir->next;                                      \
+        MUST_TAIL return next->impl(rv, next, cycle, PC);                      \
+    end_op:                                                                    \
+        IIF(RV32_HAS(BLOCK_CHAINING))(                                         \
+            {                                                                  \
+                /* Page-terminated block fallthrough: if branch_taken is       \
+                 * set AND this is NOT a branch instruction, tail-call         \
+                 * to next block. Branch instructions use branch_taken         \
+                 * for the taken path, not fallthrough.                        \
+                 */                                                            \
+                if (!insn_is_branch(ir->opcode)) {                             \
+                    struct rv_insn *taken = ir->branch_taken;                  \
+                    if (taken) {                                               \
+                        IIF(RV32_HAS(SYSTEM))(                                 \
+                            if (!rv->is_trapped) {                             \
+                                last_pc = PC;                                  \
+                                MUST_TAIL return taken->impl(rv, taken, cycle, \
+                                                             PC);              \
+                            },                                                 \
+                            {                                                  \
+                                last_pc = PC;                                  \
+                                MUST_TAIL return taken->impl(rv, taken, cycle, \
+                                                             PC);              \
+                            });                                                \
+                    }                                                          \
+                }                                                              \
+            }, );                                                              \
+        rv->csr_cycle = cycle;                                                 \
+        rv->PC = PC;                                                           \
+        return true;                                                           \
     }
 
 #include "rv32_template.c"
@@ -1019,18 +1076,6 @@ static const void *dispatch_table[] = {
 };
 /* clang-format on */
 
-FORCE_INLINE bool insn_is_branch(uint8_t opcode)
-{
-    switch (opcode) {
-#define _(inst, can_branch, insn_len, translatable, reg_mask) \
-    IIF(can_branch)(case rv_insn_##inst:, )
-        RV_INSN_LIST
-#undef _
-        return true;
-    }
-    return false;
-}
-
 #if RV32_HAS(JIT)
 FORCE_INLINE bool insn_is_translatable(uint8_t opcode)
 {
@@ -1106,6 +1151,9 @@ static bool block_translate(riscv_t *rv, block_t *block)
 {
 retranslate:
     block->pc_start = block->pc_end = rv->PC;
+#if RV32_HAS(BLOCK_CHAINING)
+    block->page_terminated = false;
+#endif
 
     rv_insn_t *prev_ir = NULL;
     rv_insn_t *ir = mpool_calloc(rv->block_ir_mp);
@@ -1169,6 +1217,21 @@ retranslate:
             break;
         }
 
+#if RV32_HAS(BLOCK_CHAINING)
+        /* Terminate block at page boundary to enable O(1) cache invalidation.
+         * Each block fits entirely within one 4KB page, so SFENCE.VMA can
+         * invalidate blocks by page address without scanning entire cache.
+         */
+        {
+            const uint32_t page_end =
+                (block->pc_start & ~(RV_PG_SIZE - 1)) + RV_PG_SIZE;
+            if (block->pc_end >= page_end) {
+                block->page_terminated = true;
+                break;
+            }
+        }
+#endif
+
         ir = mpool_calloc(rv->block_ir_mp);
         if (unlikely(!ir))
             return false;
@@ -1184,6 +1247,11 @@ retranslate:
 
     block->ir_tail = prev_ir;
     block->ir_tail->next = NULL;
+    /* Set cycle cost before macro-op fusion. This intentionally counts
+     * original instructions for accurate timing - fused operations still
+     * represent the same logical work as unfused sequences.
+     */
+    block->cycle_cost = block->n_insn;
     return true;
 }
 
@@ -1415,12 +1483,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  * The lui result is used as base address for lw.
                  * Skip if rd == x0: LUI x0 produces 0, not imm << 12.
                  *
-                 * Note: In JIT+SYSTEM mode, skip this fusion because JIT
-                 * computes host addresses at compile time, bypassing MMU.
-                 * The interpreter handles SYSTEM mode correctly via io
-                 * callbacks.
+                 * In SYSTEM mode, JIT uses MMU handler for address translation.
                  */
-#if !(RV32_HAS(JIT) && RV32_HAS(SYSTEM))
                 if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
                     ir->imm2 = next_ir->imm; /* lw offset */
                     ir->rs2 = next_ir->rd;   /* lw destination */
@@ -1433,7 +1497,6 @@ static void match_pattern(riscv_t *rv, block_t *block)
                         modified_regs |= (1u << ir->rs2);
 #endif
                 }
-#endif /* !(JIT && SYSTEM) */
                 break;
             case rv_insn_sw:
                 /* LUI + SW fusion (fuse10): lui rd, imm20; sw rs2, imm12(rd)
@@ -1441,10 +1504,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  * The lui result is used as base address for sw.
                  * Skip if rd == x0: LUI x0 produces 0, not imm << 12.
                  *
-                 * Note: In JIT+SYSTEM mode, skip this fusion because JIT
-                 * computes host addresses at compile time, bypassing MMU.
+                 * In SYSTEM mode, JIT uses MMU handler for address translation.
                  */
-#if !(RV32_HAS(JIT) && RV32_HAS(SYSTEM))
                 if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
                     ir->imm2 = next_ir->imm; /* sw offset */
                     ir->rs1 = next_ir->rs2;  /* sw source (data to store) */
@@ -1452,7 +1513,6 @@ static void match_pattern(riscv_t *rv, block_t *block)
                     ir->impl = dispatch_table[ir->opcode];
                     remove_next_nth_ir(rv, ir, block, 1);
                 }
-#endif /* !(JIT && SYSTEM) */
                 break;
             case rv_insn_lui:
                 /* Multiple LUI fusion (fuse1) */
@@ -1507,10 +1567,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
             break;
         case rv_insn_lw:
             /* Check for LW + ADDI post-increment fusion (fuse11) first.
-             * In JIT+SYSTEM mode, skip this fusion because JIT computes
-             * host addresses directly, bypassing MMU translation.
+             * In SYSTEM mode, JIT uses MMU handler for address translation.
              */
-#if !(RV32_HAS(JIT) && RV32_HAS(SYSTEM))
             next_ir = ir->next;
             if (next_ir && IF_insn(next_ir, addi) && ir->rs1 == next_ir->rs1 &&
                 next_ir->rs1 == next_ir->rd && ir->rd != ir->rs1) {
@@ -1530,7 +1588,6 @@ static void match_pattern(riscv_t *rv, block_t *block)
 #endif
                 break;
             }
-#endif /* !(JIT && SYSTEM) */
             /* Multiple LW fusion (fuse4) */
             count = count_consecutive_insn(ir, rv_insn_lw);
 #if RV32_HAS(SYSTEM_MMIO)
@@ -1934,7 +1991,11 @@ static void rv_check_interrupt(riscv_t *rv)
 #endif /* RV32_HAS(GOLDFISH_RTC) */
     }
 
-    if (rv->timer > attr->timer)
+    /* Derive current timer from cycle counter for interrupt comparison.
+     * Timer is no longer incremented per-instruction; instead computed here.
+     */
+    uint64_t current_timer = rv->csr_cycle + rv->timer_offset;
+    if (current_timer > attr->timer)
         rv->csr_sip |= RV_INT_STI;
     else
         rv->csr_sip &= ~RV_INT_STI;
@@ -2037,13 +2098,21 @@ void rv_step(void *arg)
         ) {
             rv_insn_t *last_ir = prev->ir_tail;
             /* chain block */
-            if (!insn_is_unconditional_branch(last_ir->opcode)) {
+            if (prev->page_terminated) {
+                /* Page-terminated block: always falls through to next address.
+                 * Use branch_taken for fallthrough (like unconditional jump).
+                 */
+                if (!last_ir->branch_taken)
+                    last_ir->branch_taken = block->ir_head;
+            } else if (!insn_is_unconditional_branch(last_ir->opcode)) {
+                /* Conditional branch: chain based on taken/untaken path */
                 if (is_branch_taken && !last_ir->branch_taken) {
                     last_ir->branch_taken = block->ir_head;
                 } else if (!is_branch_taken && !last_ir->branch_untaken) {
                     last_ir->branch_untaken = block->ir_head;
                 }
             } else if (insn_is_direct_branch(last_ir->opcode)) {
+                /* Unconditional direct branch: always use branch_taken */
                 if (!last_ir->branch_taken) {
                     last_ir->branch_taken = block->ir_head;
                 }
@@ -2107,6 +2176,7 @@ void rv_step(void *arg)
 #endif
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
+            rv->csr_cycle += block->cycle_cost;
             prev = NULL;
             continue;
         } /* check if the execution path is potential hotspot */
@@ -2122,16 +2192,22 @@ void rv_step(void *arg)
 #endif
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
+            rv->csr_cycle += block->cycle_cost;
             prev = NULL;
             continue;
         }
         set_reset(&pc_set);
         has_loops = false;
 #endif
-        /* execute the block by interpreter */
+        /* execute the block by interpreter.
+         * Per-instruction cycle counting is used to support block chaining,
+         * where chained blocks bypass the outer loop and accumulate cycles
+         * via the cycle++ in each instruction handler.
+         */
         const rv_insn_t *ir = block->ir_head;
-        if (unlikely(!ir->impl(rv, ir, rv->csr_cycle, rv->PC))) {
-            /* block should not be extended if execption handler invoked */
+        uint64_t cycle = rv->csr_cycle;
+        if (unlikely(!ir->impl(rv, ir, cycle, rv->PC))) {
+            /* block should not be extended if exception handler invoked */
             prev = NULL;
             break;
         }

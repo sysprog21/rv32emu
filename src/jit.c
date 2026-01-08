@@ -801,7 +801,7 @@ static inline void emit_alu64(struct jit_state *state, int op, int src, int dst)
 #endif
 }
 
-#if RV32_HAS(EXT_M) || defined(__aarch64__)
+#if RV32_HAS(EXT_M)
 static inline void emit_alu64_imm8(struct jit_state *state,
                                    int op,
                                    int src UNUSED,
@@ -1590,6 +1590,16 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
     else
         addr = rv->io.mem_translate(rv, rv->jit_mmu.vaddr, W);
 
+    /* Check for trap during address translation.
+     * mem_translate may trigger a page fault which sets is_trapped=true.
+     * In this case, mark as MMIO to skip direct memory access in JIT code,
+     * but don't actually perform any MMIO operation.
+     */
+    if (rv->is_trapped) {
+        rv->jit_mmu.is_mmio = 1;
+        return;
+    }
+
     /* Only treat as RAM if entire access range [addr, addr+size) is within
      * valid guest memory bounds. This prevents buffer overflow on multi-byte
      * accesses near the memory boundary.
@@ -2326,28 +2336,15 @@ void parse_branch_history_table(struct jit_state *state,
     }
 }
 
-void emit_jit_inc_timer(struct jit_state *state)
-{
-#if defined(__x86_64__)
-    /* Increment rv->timer. *rv pointer is stored in RDI register */
-    /* INC RDI, [rv + offsetof(riscv_t, timer)] */
-    emit_rex(state, 1, 0, 0, 0);
-    emit1(state, 0xff);
-    emit1(state, 0x87);
-    emit4(state, offsetof(riscv_t, timer));
-#elif defined(__aarch64__)
-    emit_load(state, S64, parameter_reg[0], temp_reg, offsetof(riscv_t, timer));
-    emit_alu64_imm8(state, 0, 0, temp_reg, 1);
-    emit_store(state, S64, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, timer));
-#endif
-}
+/* Timer increment removed: timer is now derived from cycle counter at
+ * interrupt check points (rv_check_interrupt) rather than per-instruction.
+ * This eliminates per-instruction memory operations in the JIT hot path.
+ */
 
 #define GEN(inst, code)                                                       \
     static void do_##inst(struct jit_state *state UNUSED, riscv_t *rv UNUSED, \
                           rv_insn_t *ir UNUSED)                               \
     {                                                                         \
-        emit_jit_inc_timer(state);                                            \
         code;                                                                 \
     }
 #include "rv32_jit.c"
@@ -2500,9 +2497,59 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 {
     memory_t *m = PRIV(rv)->mem;
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+#if RV32_HAS(SYSTEM_MMIO)
+    /* Store virtual address and type for MMU translation */
+    emit_load_imm(state, temp_reg, addr);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.vaddr));
+    emit_load_imm(state, temp_reg, rv_insn_lw);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.type));
+
+    store_back(state);
+    emit_jit_mmu_handler(state, ir->rs2);
+    reset_reg();
+
+    /* Check if trap occurred during MMU translation.
+     * If trapped, skip the load entirely to avoid loading garbage.
+     */
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, is_trapped));
+    emit_cmp_imm32(state, temp_reg, 0);
+    uint32_t jump_trap = state->offset;
+    emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */
+
+    /* If MMIO, value already in X[rd]; otherwise load from translated paddr */
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.is_mmio));
+    emit_cmp_imm32(state, temp_reg, 0);
+    vm_reg[0] = map_vm_reg(state, ir->rs2);
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JE);
+
+    /* MMIO path: load from X[rd] */
+    emit_load(state, S32, parameter_reg[0], vm_reg[0],
+              offsetof(riscv_t, X) + 4 * ir->rs2);
+    uint32_t jump_loc_1 = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+
+    /* RAM path: load from mem_base + paddr */
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+    emit_load(state, S32, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.paddr));
+    emit_load_imm_sext(state, vm_reg[0], (intptr_t) m->mem_base);
+    emit_alu64(state, ALU_OP_ADD, temp_reg, vm_reg[0]);
+    vm_reg[1] = map_vm_reg(state, ir->rs2);
+    emit_load(state, S32, vm_reg[0], vm_reg[1], 0);
+    emit_jump_target_offset(state, JUMP_LOC_1, state->offset);
+
+    /* Trap exit point */
+    emit_jump_target_offset(state, jump_trap, state->offset);
+#else
     emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + addr));
     vm_reg[0] = map_vm_reg(state, ir->rs2);
     emit_load(state, S32, temp_reg, vm_reg[0], 0);
+#endif
 }
 
 /* fused LUI + SW: absolute address store
@@ -2513,9 +2560,50 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 {
     memory_t *m = PRIV(rv)->mem;
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
+#if RV32_HAS(SYSTEM_MMIO)
+    /* Store virtual address and type for MMU translation */
+    emit_load_imm(state, temp_reg, addr);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.vaddr));
+    emit_load_imm(state, temp_reg, rv_insn_sw);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.type));
+    store_back(state);
+    emit_jit_mmu_handler(state, ir->rs1);
+    reset_reg();
+
+    /* Check if trap occurred - skip store if trapped */
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, is_trapped));
+    emit_cmp_imm32(state, temp_reg, 0);
+    uint32_t jump_trap = state->offset;
+    emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */
+
+    /* If MMIO, skip store (handled by MMU handler) */
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.is_mmio));
+    emit_cmp_imm32(state, temp_reg, 1);
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JE);
+
+    /* RAM path: store to mem_base + paddr */
+    vm_reg[0] = map_vm_reg(state, rv_reg_zero); /* Allocate scratch for paddr */
+    emit_load(state, S32, parameter_reg[0], vm_reg[0],
+              offsetof(riscv_t, jit_mmu.paddr));
+    emit_load_imm_sext(state, temp_reg, (intptr_t) m->mem_base);
+    emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);
+    vm_reg[1] = ra_load(state, ir->rs1);
+    emit_store(state, S32, vm_reg[1], temp_reg, 0);
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+
+    /* Trap exit point */
+    emit_jump_target_offset(state, jump_trap, state->offset);
+    reset_reg();
+#else
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + addr));
     emit_store(state, S32, vm_reg[0], temp_reg, 0);
+#endif
 }
 
 /* fused LW + ADDI (post-increment load)
@@ -2526,6 +2614,62 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 {
     memory_t *m = PRIV(rv)->mem;
+#if RV32_HAS(SYSTEM_MMIO)
+    /* Compute virtual address: rs1 + imm */
+    vm_reg[0] = ra_load(state, ir->rs1);
+    emit_load_imm_sext(state, temp_reg, ir->imm);
+    emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.vaddr));
+    emit_load_imm(state, temp_reg, rv_insn_lw);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.type));
+
+    store_back(state);
+    emit_jit_mmu_handler(state, ir->rd);
+    reset_reg();
+
+    /* Check if trap occurred during MMU translation.
+     * If trapped, skip the load and post-increment entirely.
+     * is_trapped is set by jit_mmu_handler when mem_translate faults.
+     */
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, is_trapped));
+    emit_cmp_imm32(state, temp_reg, 0);
+    uint32_t jump_trap = state->offset;
+    emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */
+
+    /* If MMIO, value already in X[rd]; otherwise load from translated paddr */
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.is_mmio));
+    emit_cmp_imm32(state, temp_reg, 0);
+    vm_reg[0] = map_vm_reg(state, ir->rd);
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JE);
+
+    /* MMIO path: load from X[rd] */
+    emit_load(state, S32, parameter_reg[0], vm_reg[0],
+              offsetof(riscv_t, X) + 4 * ir->rd);
+    uint32_t jump_loc_1 = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+
+    /* RAM path: load from mem_base + paddr */
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+    emit_load(state, S32, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.paddr));
+    emit_load_imm_sext(state, vm_reg[0], (intptr_t) m->mem_base);
+    emit_alu64(state, ALU_OP_ADD, temp_reg, vm_reg[0]);
+    vm_reg[1] = map_vm_reg(state, ir->rd);
+    emit_load(state, S32, vm_reg[0], vm_reg[1], 0);
+    emit_jump_target_offset(state, JUMP_LOC_1, state->offset);
+
+    /* Post-increment rs1 by imm2 (only executed if no trap) */
+    vm_reg[0] = map_vm_reg(state, ir->rs1);
+    emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
+
+    /* Trap exit point - skips load and post-increment */
+    emit_jump_target_offset(state, jump_trap, state->offset);
+#else
     vm_reg[0] = ra_load(state, ir->rs1);
     /* Compute address: mem_base + rs1 + imm */
     emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + ir->imm));
@@ -2536,6 +2680,7 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     /* Increment rs1 by imm2 */
     vm_reg[0] = map_vm_reg(state, ir->rs1);
     emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
+#endif
 }
 
 /* fused ADDI + BNE (loop counter decrement-branch)
@@ -2622,6 +2767,26 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
         regs_refresh(idx);
         ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
     }
+
+#if RV32_HAS(BLOCK_CHAINING)
+    /* Page-terminated block fallthrough: emit jump to next block or exit.
+     * Unlike branch-terminated blocks, page-terminated blocks always fall
+     * through to the next sequential address (pc_end).
+     */
+    if (block->page_terminated && !should_flush) {
+        ir = block->ir_tail;
+        store_back(state);
+        if (ir->branch_taken) {
+            /* Fallthrough chain established - jump to next block */
+            emit_jmp(state, block->pc_end, rv->csr_satp);
+        }
+        /* Store PC and exit for un-chained path */
+        emit_load_imm(state, temp_reg, block->pc_end);
+        emit_store(state, S32, temp_reg, parameter_reg[0],
+                   offsetof(riscv_t, PC));
+        emit_exit(state);
+    }
+#endif
 }
 
 static void resolve_jumps(struct jit_state *state)

@@ -106,8 +106,13 @@ typedef struct {
 typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompassed */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
+    uint32_t cycle_cost;       /**< cycle cost for block-level counting */
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
+
+#if RV32_HAS(BLOCK_CHAINING)
+    bool page_terminated; /**< Block ended at page boundary (not a branch) */
+#endif
 
 #if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(MOP_FUSION)
     uint8_t n_lazy_candidates; /**< number of lazy fusion candidates */
@@ -194,14 +199,21 @@ struct riscv_internal {
 
     uint64_t timer; /* strictly increment timer */
 
+#if RV32_HAS(SYSTEM)
+    /* is_trapped must be within 256-byte offset for ARM64 JIT access.
+     * Placed early in struct to ensure accessibility from JIT-generated code.
+     */
+    bool is_trapped;
+#endif
+
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
     /*
      * Aarch64 encoder only accepts 9 bits signed offset. Do not put this
      * structure below the section.
      */
     struct {
-        uint32_t is_mmio; /* whether is MMIO or not */
-        uint32_t type;    /* 0: read, 1: write */
+        uint8_t is_mmio; /* whether is MMIO or not (0=RAM, 1=MMIO/trap) */
+        uint32_t type;   /* instruction type for MMIO handler */
         uint32_t vaddr;
         uint32_t paddr;
     } jit_mmu;
@@ -283,9 +295,6 @@ struct riscv_internal {
 #endif
 
 #if RV32_HAS(SYSTEM)
-    /* The flag is used to indicate the current emulation is in a trap */
-    bool is_trapped;
-
     /* The flag that stores the SEPC CSR at the trap point for corectly
      * executing signal handler.
      */
@@ -300,6 +309,17 @@ struct riscv_internal {
      * Separate from dTLB for better hit rates and simpler permission checks.
      */
     tlb_entry_t itlb[TLB_SIZE];
+
+    /* Timer offset for deriving timer from cycle counter.
+     * timer = csr_cycle + timer_offset
+     * This avoids per-instruction timer increments in the main loop.
+     *
+     * Note: RISC-V spec defines TIME as a separate real-time counter from
+     * MTIME hardware. This emulator approximates TIME by deriving from CYCLE,
+     * which is acceptable for emulation but differs from real hardware where
+     * TIME would be independent of CPU frequency scaling or sleep states.
+     */
+    uint64_t timer_offset;
 #endif
 
 #if RV32_HAS(ARCH_TEST)

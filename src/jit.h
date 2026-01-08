@@ -10,6 +10,19 @@
 #include "riscv_private.h"
 #include "utils.h"
 
+/* Jump condition codes for branch instruction code generation.
+ * Values match x86-64 Jcc opcodes; on Arm64, emit_jcc_offset() maps these
+ * to equivalent condition codes. Used by both architectures as symbolic
+ * constants for conditional/unconditional jumps.
+ */
+#define JCC_JE 0x84  /* Jump if Equal (conditional) */
+#define JCC_JNE 0x85 /* Jump if Not Equal (conditional) */
+#define JCC_JL 0x8c  /* Jump if Less - signed (conditional) */
+#define JCC_JGE 0x8d /* Jump if Greater or Equal - signed (conditional) */
+#define JCC_JB 0x82  /* Jump if Below - unsigned (conditional) */
+#define JCC_JAE 0x83 /* Jump if Above or Equal - unsigned (conditional) */
+#define JCC_JMP 0xe9 /* Jump unconditional */
+
 struct jump {
     uint32_t offset_loc;
     uint32_t target_pc;

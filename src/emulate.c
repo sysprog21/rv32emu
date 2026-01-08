@@ -618,7 +618,7 @@ static uint32_t peripheral_update_ctr = 64;
     } while (0)
 #endif
 
-#define RVOP(inst, code, asm)                                             \
+#define RVOP(inst, code)                                                  \
     static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir, \
                                         uint64_t cycle, uint32_t PC)      \
     {                                                                     \

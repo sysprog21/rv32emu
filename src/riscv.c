@@ -70,7 +70,8 @@ void block_map_clear(riscv_t *rv)
         rv_insn_t *ir, *next;
         for (idx = 0, ir = block->ir_head; idx < block->n_insn;
              idx++, ir = next) {
-            free(ir->fuse);
+            if (ir->fuse)
+                mpool_free(rv->fuse_mp, ir->fuse);
             free(ir->branch_table);
             next = ir->next;
             mpool_free(rv->block_ir_mp, ir);
@@ -88,6 +89,7 @@ static void block_map_destroy(riscv_t *rv)
 
     mpool_destroy(rv->block_mp);
     mpool_destroy(rv->block_ir_mp);
+    mpool_destroy(rv->fuse_mp);
 }
 #endif
 
@@ -825,6 +827,11 @@ riscv_t *rv_create(riscv_user_t rv_attr)
                                 sizeof(block_t));
     rv->block_ir_mp = mpool_create(
         sizeof(rv_insn_t) << BLOCK_IR_MAP_CAPACITY_BITS, sizeof(rv_insn_t));
+    /* Fuse pool: fixed-size slots for macro-op fusion arrays.
+     * Each slot holds up to FUSE_MAX_ENTRIES opcode_fuse_t structures.
+     */
+    rv->fuse_mp = mpool_create(FUSE_SLOT_SIZE << BLOCK_IR_MAP_CAPACITY_BITS,
+                               FUSE_SLOT_SIZE);
 
 #if !RV32_HAS(JIT)
     /* initialize the block map */
@@ -870,6 +877,7 @@ fail_block_cache:
 fail_jit_state:
     mpool_destroy(rv->block_ir_mp);
     mpool_destroy(rv->block_mp);
+    mpool_destroy(rv->fuse_mp);
     map_delete(attr->fd_map);
     memory_delete(attr->mem);
     free(rv);
@@ -992,6 +1000,9 @@ void rv_delete(riscv_t *rv)
 #endif
     jit_state_exit(rv->jit_state);
     cache_free(rv->block_cache);
+    mpool_destroy(rv->block_ir_mp);
+    mpool_destroy(rv->block_mp);
+    mpool_destroy(rv->fuse_mp);
 #endif
 #if RV32_HAS(SYSTEM_MMIO)
     u8250_delete(attr->uart);

@@ -49,7 +49,7 @@ $(eval $(require-config))
 OUT ?= build
 BIN := $(OUT)/rv32emu
 
-CFLAGS = -std=gnu99 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
+CFLAGS = -std=gnu11 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
 CFLAGS += -Wno-unused-label -include src/common.h -Isrc/ $(CFLAGS_NO_CET)
 LDFLAGS += $(KCONFIG_LDFLAGS)
 OBJS_EXT :=

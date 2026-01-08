@@ -218,6 +218,98 @@ static inline uint8_t ilog2(uint32_t x)
 #define HAVE_MMAP 1
 #endif
 
+/* Portable atomic operations
+ *
+ * Prefer GNU __atomic builtins (GCC 4.7+, Clang 3.1+) as they work with
+ * non-_Atomic types, which is required for our existing struct definitions.
+ * C11 stdatomic requires _Atomic type qualifiers on all atomic variables.
+ *
+ * Memory ordering constants:
+ *   ATOMIC_RELAXED - No synchronization, only atomicity guaranteed
+ *   ATOMIC_ACQUIRE - Prevents reordering of subsequent reads
+ *   ATOMIC_RELEASE - Prevents reordering of preceding writes
+ *   ATOMIC_SEQ_CST - Full sequential consistency (strongest)
+ */
+#if defined(__GNUC__) || defined(__clang__)
+/* GNU __atomic builtins (GCC 4.7+, Clang 3.1+) */
+#define HAVE_C11_ATOMICS 0
+
+#define ATOMIC_RELAXED __ATOMIC_RELAXED
+#define ATOMIC_ACQUIRE __ATOMIC_ACQUIRE
+#define ATOMIC_RELEASE __ATOMIC_RELEASE
+#define ATOMIC_SEQ_CST __ATOMIC_SEQ_CST
+
+#define ATOMIC_LOAD(ptr, order) __atomic_load_n(ptr, order)
+#define ATOMIC_STORE(ptr, val, order) __atomic_store_n(ptr, val, order)
+#define ATOMIC_FETCH_ADD(ptr, val, order) __atomic_fetch_add(ptr, val, order)
+#define ATOMIC_FETCH_SUB(ptr, val, order) __atomic_fetch_sub(ptr, val, order)
+#define ATOMIC_EXCHANGE(ptr, val, order) __atomic_exchange_n(ptr, val, order)
+#define ATOMIC_COMPARE_EXCHANGE_WEAK(ptr, expected, desired, succ, fail) \
+    __atomic_compare_exchange_n(ptr, expected, desired, 1, succ, fail)
+
+#elif !defined(__EMSCRIPTEN__) && defined(__STDC_VERSION__) && \
+    (__STDC_VERSION__ >= 201112L) && !defined(__STDC_NO_ATOMICS__)
+/* C11 atomics fallback - requires GNU __typeof__ extension for type inference.
+ * Note: The cast to (_Atomic T*) is technically undefined behavior per C11,
+ * but is a widely-used idiom that works correctly on GCC/Clang.
+ */
+#include <stdatomic.h>
+#define HAVE_C11_ATOMICS 1
+
+#define ATOMIC_RELAXED memory_order_relaxed
+#define ATOMIC_ACQUIRE memory_order_acquire
+#define ATOMIC_RELEASE memory_order_release
+#define ATOMIC_SEQ_CST memory_order_seq_cst
+
+#define ATOMIC_LOAD(ptr, order) \
+    atomic_load_explicit((_Atomic __typeof__(*(ptr)) *) (ptr), order)
+#define ATOMIC_STORE(ptr, val, order) \
+    atomic_store_explicit((_Atomic __typeof__(*(ptr)) *) (ptr), val, order)
+#define ATOMIC_FETCH_ADD(ptr, val, order) \
+    atomic_fetch_add_explicit((_Atomic __typeof__(*(ptr)) *) (ptr), val, order)
+#define ATOMIC_FETCH_SUB(ptr, val, order) \
+    atomic_fetch_sub_explicit((_Atomic __typeof__(*(ptr)) *) (ptr), val, order)
+#define ATOMIC_EXCHANGE(ptr, val, order) \
+    atomic_exchange_explicit((_Atomic __typeof__(*(ptr)) *) (ptr), val, order)
+#define ATOMIC_COMPARE_EXCHANGE_WEAK(ptr, expected, desired, succ, fail) \
+    atomic_compare_exchange_weak_explicit(                               \
+        (_Atomic __typeof__(*(ptr)) *) (ptr), expected, desired, succ, fail)
+
+#else
+/* No atomic support - single-threaded fallback (T2C requires atomics) */
+#define HAVE_C11_ATOMICS 0
+
+#if defined(_MSC_VER)
+#pragma message("No atomic operations available. T2C JIT will be disabled.")
+#else
+#warning "No atomic operations available. T2C JIT will be disabled."
+#endif
+
+#define ATOMIC_RELAXED 0
+#define ATOMIC_ACQUIRE 0
+#define ATOMIC_RELEASE 0
+#define ATOMIC_SEQ_CST 0
+
+/* Simple non-atomic fallback - only safe for single-threaded use.
+ * WARNING: ATOMIC_EXCHANGE returns new value (not old) without extensions.
+ * T2C/GDBSTUB require proper atomics and will have data races on these
+ * platforms - they should be disabled when atomics are unavailable.
+ */
+#define ATOMIC_LOAD(ptr, order) (*(ptr))
+#define ATOMIC_STORE(ptr, val, order) ((void) (*(ptr) = (val)))
+#define ATOMIC_FETCH_ADD(ptr, val, order) \
+    ((*(ptr) += (val)) - (val)) /* return old value */
+#define ATOMIC_FETCH_SUB(ptr, val, order) \
+    ((*(ptr) -= (val)) + (val)) /* return old value */
+/* ATOMIC_EXCHANGE cannot return old value without statement expressions.
+ * This returns NEW value - callers must not rely on return value. */
+#define ATOMIC_EXCHANGE(ptr, val, order) (*(ptr) = (val))
+/* ATOMIC_COMPARE_EXCHANGE_WEAK: non-atomic, single-threaded only */
+#define ATOMIC_COMPARE_EXCHANGE_WEAK(ptr, expected, desired, succ, fail) \
+    ((*(ptr) == *(expected)) ? (*(ptr) = (desired), 1)                   \
+                             : (*(expected) = *(ptr), 0))
+#endif
+
 /* Pattern Matching for C macros.
  * https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
  */

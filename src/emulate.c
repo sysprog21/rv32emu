@@ -2051,7 +2051,7 @@ void rv_step(void *arg)
 #if RV32_HAS(JIT)
 #if RV32_HAS(T2C)
         /* executed through the tier-2 JIT compiler */
-        if (__atomic_load_n(&block->hot2, __ATOMIC_ACQUIRE)) {
+        if (ATOMIC_LOAD(&block->hot2, ATOMIC_ACQUIRE)) {
             /* Atomic load-acquire pairs with store-release in t2c_compile().
              * Ensures we see the updated block->func after observing hot2=true.
              */
@@ -2063,17 +2063,25 @@ void rv_step(void *arg)
             prev = NULL;
             continue;
         } /* check if invoking times of t1 generated code exceed threshold */
-        else if (!block->compiled && block->n_invoke >= THRESHOLD) {
-            block->compiled = true;
+        else if (!ATOMIC_LOAD(&block->compiled, ATOMIC_RELAXED) &&
+                 ATOMIC_LOAD(&block->n_invoke, ATOMIC_RELAXED) >= THRESHOLD) {
+            ATOMIC_STORE(&block->compiled, true, ATOMIC_RELAXED);
             queue_entry_t *entry = malloc(sizeof(queue_entry_t));
             if (unlikely(!entry)) {
                 /* Malloc failed - reset compiled flag to allow retry later */
-                block->compiled = false;
+                ATOMIC_STORE(&block->compiled, false, ATOMIC_RELAXED);
                 continue;
             }
-            entry->block = block;
+            /* Store cache key instead of pointer to prevent use-after-free */
+#if RV32_HAS(SYSTEM)
+            entry->key =
+                (uint64_t) block->pc_start | ((uint64_t) block->satp << 32);
+#else
+            entry->key = (uint64_t) block->pc_start;
+#endif
             pthread_mutex_lock(&rv->wait_queue_lock);
             list_add(&entry->list, &rv->wait_queue);
+            pthread_cond_signal(&rv->wait_queue_cond);
             pthread_mutex_unlock(&rv->wait_queue_lock);
         }
 #endif
@@ -2085,7 +2093,11 @@ void rv_step(void *arg)
          *       entry in compiled binary buffer.
          */
         if (block->hot) {
+#if RV32_HAS(T2C)
+            ATOMIC_FETCH_ADD(&block->n_invoke, 1, ATOMIC_RELAXED);
+#else
             block->n_invoke++;
+#endif
 #if defined(__aarch64__)
             /* Ensure instruction cache coherency before executing JIT code */
             __asm__ volatile("isb" ::: "memory");

@@ -132,7 +132,7 @@ typedef struct block {
 /* T2C implies JIT (enforced by Kconfig and feature.h) */
 #if RV32_HAS(T2C)
 typedef struct {
-    block_t *block;
+    uint64_t key; /**< cache key (PC or PC|SATP) to look up block */
     struct list_head list;
 } queue_entry_t;
 #endif
@@ -253,7 +253,8 @@ struct riscv_internal {
 #if RV32_HAS(T2C)
     struct list_head wait_queue;
     pthread_mutex_t wait_queue_lock, cache_lock;
-    volatile bool quit; /**< Determine the main thread is terminated or not */
+    pthread_cond_t wait_queue_cond;
+    bool quit; /**< termination flag, protected by wait_queue_lock */
 #endif
     void *jit_state;
     void *jit_cache;

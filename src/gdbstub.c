@@ -78,7 +78,7 @@ static int rv_write_mem(void *args, size_t addr, size_t len, void *val)
 
 static inline bool rv_is_interrupt(riscv_t *rv)
 {
-    return __atomic_load_n(&rv->is_interrupted, __ATOMIC_RELAXED);
+    return ATOMIC_LOAD(&rv->is_interrupted, ATOMIC_RELAXED);
 }
 
 static gdb_action_t rv_cont(void *args)
@@ -94,7 +94,7 @@ static gdb_action_t rv_cont(void *args)
     }
 
     /* Clear the interrupt if it's pending */
-    __atomic_store_n(&rv->is_interrupted, false, __ATOMIC_RELAXED);
+    ATOMIC_STORE(&rv->is_interrupted, false, ATOMIC_RELAXED);
 
     return ACT_RESUME;
 }
@@ -133,7 +133,7 @@ static void rv_on_interrupt(void *args)
     riscv_t *rv = (riscv_t *) args;
 
     /* Notify the emulator to break out the for loop in rv_cont */
-    __atomic_store_n(&rv->is_interrupted, true, __ATOMIC_RELAXED);
+    ATOMIC_STORE(&rv->is_interrupted, true, ATOMIC_RELAXED);
 }
 
 const struct target_ops gdbstub_ops = {

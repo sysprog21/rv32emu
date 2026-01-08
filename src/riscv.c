@@ -208,26 +208,41 @@ static pthread_t t2c_thread;
 static void *t2c_runloop(void *arg)
 {
     riscv_t *rv = (riscv_t *) arg;
+    pthread_mutex_lock(&rv->wait_queue_lock);
     while (!rv->quit) {
-        queue_entry_t *entry = NULL;
+        /* Wait for work or quit signal */
+        while (list_empty(&rv->wait_queue) && !rv->quit)
+            pthread_cond_wait(&rv->wait_queue_cond, &rv->wait_queue_lock);
 
-        /* Acquire lock before checking and accessing the queue to prevent
-         * race conditions with the main thread adding entries.
-         */
-        pthread_mutex_lock(&rv->wait_queue_lock);
-        if (!list_empty(&rv->wait_queue)) {
-            entry = list_last_entry(&rv->wait_queue, queue_entry_t, list);
-            list_del_init(&entry->list);
-        }
+        if (rv->quit)
+            break;
+
+        /* Extract work item while holding the lock */
+        queue_entry_t *entry =
+            list_last_entry(&rv->wait_queue, queue_entry_t, list);
+        list_del_init(&entry->list);
         pthread_mutex_unlock(&rv->wait_queue_lock);
 
-        if (entry) {
-            pthread_mutex_lock(&rv->cache_lock);
-            t2c_compile(rv, entry->block);
-            pthread_mutex_unlock(&rv->cache_lock);
-            free(entry);
-        }
+        /* Perform compilation with cache lock */
+        pthread_mutex_lock(&rv->cache_lock);
+        /* Look up block from cache using the key (might have been evicted) */
+        uint32_t pc = (uint32_t) entry->key;
+        block_t *block = (block_t *) cache_get(rv->block_cache, pc, false);
+#if RV32_HAS(SYSTEM)
+        /* Verify SATP matches (for system mode) */
+        uint32_t satp = (uint32_t) (entry->key >> 32);
+        if (block && block->satp != satp)
+            block = NULL;
+#endif
+        /* Compile only if block still exists in cache */
+        if (block)
+            t2c_compile(rv, block);
+        pthread_mutex_unlock(&rv->cache_lock);
+        free(entry);
+
+        pthread_mutex_lock(&rv->wait_queue_lock);
     }
+    pthread_mutex_unlock(&rv->wait_queue_lock);
     return NULL;
 }
 #endif
@@ -858,6 +873,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     /* prepare wait queue. */
     pthread_mutex_init(&rv->wait_queue_lock, NULL);
     pthread_mutex_init(&rv->cache_lock, NULL);
+    pthread_cond_init(&rv->wait_queue_cond, NULL);
     INIT_LIST_HEAD(&rv->wait_queue);
     /* activate the background compilation thread. */
     pthread_create(&t2c_thread, NULL, t2c_runloop, rv);
@@ -992,10 +1008,24 @@ void rv_delete(riscv_t *rv)
     block_map_destroy(rv);
 #else
 #if RV32_HAS(T2C)
+    /* Signal the thread to quit */
+    pthread_mutex_lock(&rv->wait_queue_lock);
     rv->quit = true;
+    pthread_cond_signal(&rv->wait_queue_cond);
+    pthread_mutex_unlock(&rv->wait_queue_lock);
+
     pthread_join(t2c_thread, NULL);
+
+    /* Clean up any remaining entries in wait queue */
+    queue_entry_t *entry, *safe;
+    list_for_each_entry_safe (entry, safe, &rv->wait_queue, list) {
+        list_del(&entry->list);
+        free(entry);
+    }
+
     pthread_mutex_destroy(&rv->wait_queue_lock);
     pthread_mutex_destroy(&rv->cache_lock);
+    pthread_cond_destroy(&rv->wait_queue_cond);
     jit_cache_exit(rv->jit_cache);
 #endif
     jit_state_exit(rv->jit_state);

@@ -269,6 +269,10 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
 
 void t2c_compile(riscv_t *rv, block_t *block)
 {
+    /* Skip if already compiled (defensive check) */
+    if (ATOMIC_LOAD(&block->hot2, ATOMIC_ACQUIRE))
+        return;
+
     LLVMModuleRef module = LLVMModuleCreateWithName("my_module");
     /* FIXME: riscv_t structure would change according to different
      * configuration. The linked block might jump to the wrong function pointer.
@@ -350,7 +354,7 @@ void t2c_compile(riscv_t *rv, block_t *block)
      * are visible to other threads before they observe hot2=true.
      * Pairs with atomic load-acquire in rv_step().
      */
-    __atomic_store_n(&block->hot2, true, __ATOMIC_RELEASE);
+    ATOMIC_STORE(&block->hot2, true, ATOMIC_RELEASE);
 }
 
 struct jit_cache *jit_cache_init()
@@ -373,7 +377,7 @@ void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry)
      * entry is guaranteed to be visible.
      */
     cache[pos].entry = entry;
-    __atomic_store_n(&cache[pos].key, key, __ATOMIC_RELEASE);
+    ATOMIC_STORE(&cache[pos].key, key, ATOMIC_RELEASE);
 }
 
 void jit_cache_clear(struct jit_cache *cache)

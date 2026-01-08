@@ -2,6 +2,14 @@
  * rv32emu is freely redistributable under the MIT License. See the file
  * "LICENSE" for information on usage and redistribution of this file.
  */
+
+/* Fixed-size memory pool allocator.
+ *
+ * Provides O(1) allocation/free for fixed-size objects. Uses mmap with
+ * demand paging when available, falling back to malloc. Pools auto-extend
+ * when exhausted. All functions are NULL-safe.
+ */
+
 #pragma once
 
 #include <stddef.h>
@@ -9,35 +17,39 @@
 struct mpool;
 
 /**
- * mpool_create - create a new memory pool
- * @pool_size: the size of memory pool
- * @chunk_size: the size of memory chunk, pool would be divided into several
- * chunks
+ * mpool_create - create a memory pool
+ * @pool_size: initial pool size in bytes
+ * @chunk_size: size of each allocation unit
+ *
+ * Returns pointer to pool, or NULL on failure.
  */
 struct mpool *mpool_create(size_t pool_size, size_t chunk_size);
 
 /**
- * mpool_alloc - allocate a memory chunk from target memory pool
- * @mp: a pointer points to the target memory pool
+ * mpool_alloc - allocate a chunk from the pool
+ * @mp: memory pool (NULL-safe)
+ *
+ * Returns pointer to chunk, or NULL if mp is NULL or allocation fails.
  */
 void *mpool_alloc(struct mpool *mp);
 
 /**
- * mpool_calloc - allocate a memory chunk from target memory pool and set it to
- * zero
- * @mp: a pointer points to the target memory pool
+ * mpool_calloc - allocate a zero-initialized chunk from the pool
+ * @mp: memory pool (NULL-safe)
+ *
+ * Returns pointer to zeroed chunk, or NULL if mp is NULL or allocation fails.
  */
 void *mpool_calloc(struct mpool *mp);
 
 /**
- * mpool_free - free a memory pool
- * @mp: a pointer points to target memory pool
- * @target: a pointer points to the target memory chunk
+ * mpool_free - return a chunk to the pool
+ * @mp: memory pool (NULL-safe)
+ * @target: chunk to free (NULL-safe)
  */
 void mpool_free(struct mpool *mp, void *target);
 
 /**
- * mpool_destroy - destroy a memory pool
- * @mp: a pointer points to the target memory pool
+ * mpool_destroy - destroy pool and release all memory
+ * @mp: memory pool (NULL-safe)
  */
 void mpool_destroy(struct mpool *mp);

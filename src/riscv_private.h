@@ -23,6 +23,12 @@
 
 #define PRIV(x) ((vm_attr_t *) x->data)
 
+/* Maximum entries per fuse slot - limits fusion to 16 consecutive instructions.
+ * Larger sequences are rare and provide diminishing returns.
+ */
+#define FUSE_MAX_ENTRIES 16
+#define FUSE_SLOT_SIZE (FUSE_MAX_ENTRIES * sizeof(opcode_fuse_t))
+
 /* CSRs */
 enum {
     /* floating point */
@@ -258,7 +264,7 @@ struct riscv_internal {
     void *jit_state;
     void *jit_cache;
 #endif
-    struct mpool *block_mp, *block_ir_mp;
+    struct mpool *block_mp, *block_ir_mp, *fuse_mp;
 
 #if RV32_HAS(GDBSTUB)
     /* gdbstub instance */

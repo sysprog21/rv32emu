@@ -1238,7 +1238,8 @@ static inline int count_consecutive_shift(rv_insn_t *ir)
 }
 
 /* Allocate and rewrite a fused sequence.
- * Returns true on success, false on malloc failure (graceful degradation).
+ * Returns true on success, false on allocation failure (graceful degradation).
+ * Uses pooled allocation for fuse arrays up to FUSE_MAX_ENTRIES.
  */
 static inline bool try_fuse_sequence(riscv_t *rv,
                                      block_t *block,
@@ -1249,11 +1250,13 @@ static inline bool try_fuse_sequence(riscv_t *rv,
     if (count <= 1)
         return false;
 
-    /* Overflow check for allocation size */
-    if (unlikely((size_t) count > SIZE_MAX / sizeof(opcode_fuse_t)))
+    /* Reject sequences exceeding pool slot size - rare case with diminishing
+     * returns. This also handles the overflow check implicitly.
+     */
+    if (unlikely(count > FUSE_MAX_ENTRIES))
         return false;
 
-    opcode_fuse_t *fuse_data = malloc((size_t) count * sizeof(opcode_fuse_t));
+    opcode_fuse_t *fuse_data = mpool_alloc(rv->fuse_mp);
     if (unlikely(!fuse_data))
         return false;
 
@@ -1857,7 +1860,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
         next_ir = ir->next;
 
         if (ir->fuse)
-            free(ir->fuse);
+            mpool_free(rv->fuse_mp, ir->fuse);
 
         mpool_free(rv->block_ir_mp, ir);
     }

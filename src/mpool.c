@@ -2,6 +2,7 @@
  * rv32emu is freely redistributable under the MIT License. See the file
  * "LICENSE" for information on usage and redistribution of this file.
  */
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,12 +10,12 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #else
-/* Fallback for systems without mmap: use common page size for alignment */
 #define getpagesize() 4096
 #endif
 
 #include "mpool.h"
 
+/* Chunk layout: [memchunk_t next-pointer][user data] */
 typedef struct memchunk {
     struct memchunk *next;
 } memchunk_t;
@@ -32,15 +33,11 @@ typedef struct mpool {
     area_t area;
 } mpool_t;
 
+/* Allocate page-aligned memory via mmap (demand-paged) or malloc fallback */
 static void *mem_arena(size_t sz)
 {
     void *p;
 #if HAVE_MMAP
-    /*
-     * Use MAP_NORESERVE to enable demand paging: the OS allocates physical
-     * pages only when accessed. This reduces memory footprint for pools that
-     * may not use all pre-allocated space.
-     */
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
 #endif
@@ -65,20 +62,14 @@ mpool_t *mpool_create(size_t pool_size, size_t chunk_size)
     new_mp->area.next = NULL;
     size_t pgsz = getpagesize();
 
-    /* Check for overflow in chunk_size + sizeof(memchunk_t) */
+    /* Overflow checks */
     if (chunk_size > SIZE_MAX - sizeof(memchunk_t))
         goto fail_mpool;
-
     if (pool_size < chunk_size + sizeof(memchunk_t))
         pool_size += sizeof(memchunk_t);
-
-    /* Check for overflow in pool_size + pgsz - 1 */
     if (pool_size > SIZE_MAX - pgsz + 1)
         goto fail_mpool;
-
     size_t page_count = (pool_size + pgsz - 1) / pgsz;
-
-    /* Check for overflow in page_count * pgsz */
     if (page_count > SIZE_MAX / pgsz)
         goto fail_mpool;
 
@@ -90,6 +81,8 @@ mpool_t *mpool_create(size_t pool_size, size_t chunk_size)
     new_mp->page_count = page_count;
     new_mp->chunk_count = pool_size / (sizeof(memchunk_t) + chunk_size);
     new_mp->chunk_size = chunk_size;
+
+    /* Build free list */
     new_mp->free_chunk_head = (memchunk_t *) p;
     memchunk_t *cur = new_mp->free_chunk_head;
     for (size_t i = 0; i < new_mp->chunk_count - 1; i++) {
@@ -105,6 +98,7 @@ fail_mpool:
     return NULL;
 }
 
+/* Extend pool by allocating another memory area of same size */
 static void *mpool_extend(mpool_t *mp)
 {
     size_t pool_size = mp->page_count * getpagesize();
@@ -119,6 +113,8 @@ static void *mpool_extend(mpool_t *mp)
     new_area->mapped = p;
     new_area->next = NULL;
     size_t chunk_count = pool_size / (sizeof(memchunk_t) + mp->chunk_size);
+
+    /* Build free list for new area */
     mp->free_chunk_head = (memchunk_t *) p;
     memchunk_t *cur = mp->free_chunk_head;
     for (size_t i = 0; i < chunk_count - 1; i++) {
@@ -128,7 +124,7 @@ static void *mpool_extend(mpool_t *mp)
     }
     mp->chunk_count += chunk_count;
 
-    /* insert new mapped */
+    /* Append to area list */
     area_t *cur_area = &mp->area;
     while (cur_area->next)
         cur_area = cur_area->next;
@@ -155,14 +151,18 @@ FORCE_INLINE void *mpool_alloc_helper(mpool_t *mp)
 
 void *mpool_alloc(mpool_t *mp)
 {
-    if (!mp->chunk_count && !(mpool_extend(mp)))
+    if (!mp)
+        return NULL;
+    if (!mp->chunk_count && !mpool_extend(mp))
         return NULL;
     return mpool_alloc_helper(mp);
 }
 
 void *mpool_calloc(mpool_t *mp)
 {
-    if (!mp->chunk_count && !(mpool_extend(mp)))
+    if (!mp)
+        return NULL;
+    if (!mp->chunk_count && !mpool_extend(mp))
         return NULL;
     char *ptr = mpool_alloc_helper(mp);
     memset(ptr, 0, mp->chunk_size);
@@ -171,6 +171,8 @@ void *mpool_calloc(mpool_t *mp)
 
 void mpool_free(mpool_t *mp, void *target)
 {
+    if (!mp || !target)
+        return;
     memchunk_t *ptr = (memchunk_t *) ((char *) target - sizeof(memchunk_t));
     ptr->next = mp->free_chunk_head;
     mp->free_chunk_head = ptr;
@@ -179,24 +181,22 @@ void mpool_free(mpool_t *mp, void *target)
 
 void mpool_destroy(mpool_t *mp)
 {
+    if (!mp)
+        return;
 #if HAVE_MMAP
     size_t mem_size = mp->page_count * getpagesize();
-    area_t *cur = &mp->area, *tmp = NULL;
-    while (cur) {
-        tmp = cur;
-        cur = cur->next;
-        munmap(tmp->mapped, mem_size);
-        if (tmp != &mp->area)
-            free(tmp);
+    for (area_t *cur = &mp->area, *tmp; cur; cur = tmp) {
+        tmp = cur->next;
+        munmap(cur->mapped, mem_size);
+        if (cur != &mp->area)
+            free(cur);
     }
 #else
-    area_t *cur = &mp->area, *tmp = NULL;
-    while (cur) {
-        tmp = cur;
-        cur = cur->next;
-        free(tmp->mapped);
-        if (tmp != &mp->area)
-            free(tmp);
+    for (area_t *cur = &mp->area, *tmp; cur; cur = tmp) {
+        tmp = cur->next;
+        free(cur->mapped);
+        if (cur != &mp->area)
+            free(cur);
     }
 #endif
     free(mp);

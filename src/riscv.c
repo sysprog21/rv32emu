@@ -754,9 +754,9 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     assert(attr->rtc);
 #endif /* RV32_HAS(GOLDFISH_RTC) */
 
-    attr->vblk = malloc(sizeof(virtio_blk_state_t *) * attr->vblk_cnt);
+    attr->vblk = calloc(attr->vblk_cnt, sizeof(virtio_blk_state_t *));
     assert(attr->vblk);
-    attr->disk = malloc(sizeof(uint32_t *) * attr->vblk_cnt);
+    attr->disk = calloc(attr->vblk_cnt, sizeof(uint32_t *));
     assert(attr->disk);
 
     if (attr->vblk_cnt) {
@@ -847,6 +847,10 @@ riscv_t *rv_create(riscv_user_t rv_attr)
      */
     rv->fuse_mp = mpool_create(FUSE_SLOT_SIZE << BLOCK_IR_MAP_CAPACITY_BITS,
                                FUSE_SLOT_SIZE);
+    if (!rv->block_mp || !rv->block_ir_mp || !rv->fuse_mp) {
+        rv_log_fatal("Failed to create memory pool");
+        goto fail_mpool;
+    }
 
 #if !RV32_HAS(JIT)
     /* initialize the block map */
@@ -891,14 +895,33 @@ fail_block_cache:
     if (rv->jit_state)
         jit_state_exit(rv->jit_state);
 fail_jit_state:
+#endif
+fail_mpool:
     mpool_destroy(rv->block_ir_mp);
     mpool_destroy(rv->block_mp);
     mpool_destroy(rv->fuse_mp);
+#if RV32_HAS(SYSTEM_MMIO)
+    if (attr->uart)
+        u8250_delete(attr->uart);
+    if (attr->plic)
+        plic_delete(attr->plic);
+#if RV32_HAS(GOLDFISH_RTC)
+    if (attr->rtc)
+        rtc_delete(attr->rtc);
+#endif
+    if (attr->vblk) {
+        for (int i = 0; i < attr->vblk_cnt; i++) {
+            if (attr->vblk[i])
+                vblk_delete(attr->vblk[i]);
+        }
+        free(attr->vblk);
+    }
+    free(attr->disk);
+#endif
     map_delete(attr->fd_map);
     memory_delete(attr->mem);
     free(rv);
     return NULL;
-#endif
 }
 
 #if !RV32_HAS(SYSTEM_MMIO)

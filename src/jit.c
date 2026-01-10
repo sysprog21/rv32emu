@@ -1596,12 +1596,11 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
         __UNREACHABLE;
     }
 
-    /* CRITICAL: Set rv->PC to the faulting instruction's PC BEFORE calling
-     * mem_translate. This is necessary because if a page fault occurs,
-     * on_trap is called from inside mem_translate (via
-     * SET_CAUSE_AND_TVAL_THEN_TRAP) and the trap handler uses rv->PC to set
-     * sepc/mepc (the return address). Without this, the kernel would resume at
-     * the wrong instruction after sret.
+    /* Set rv->PC to the faulting instruction's PC BEFORE calling mem_translate.
+     * This is necessary because if a page fault occurs, on_trap is called from
+     * inside mem_translate (via SET_CAUSE_AND_TVAL_THEN_TRAP) and the trap
+     * handler uses rv->PC to set sepc/mepc (the return address). Without this,
+     * the kernel would resume at the wrong instruction after sret.
      */
     rv->PC = rv->jit_mmu.pc;
 

@@ -223,7 +223,17 @@ static void *t2c_runloop(void *arg)
         list_del_init(&entry->list);
         pthread_mutex_unlock(&rv->wait_queue_lock);
 
-        /* Perform compilation with cache lock */
+        /* Perform compilation with minimal lock contention.
+         *
+         * Lock strategy: Hold cache_lock only when accessing shared data:
+         * 1. Initial lookup and validation (short)
+         * 2. Final jit_cache update (short)
+         *
+         * The expensive LLVM compilation runs without holding cache_lock,
+         * allowing SFENCE.VMA/FENCE.I to proceed with minimal latency.
+         * If the block is invalidated during compilation, we detect this
+         * via the invalidated flag and discard the compiled result.
+         */
         pthread_mutex_lock(&rv->cache_lock);
         /* Look up block from cache using the key (might have been evicted) */
         uint32_t pc = (uint32_t) entry->key;
@@ -236,8 +246,9 @@ static void *t2c_runloop(void *arg)
 #endif
         /* Compile only if block still exists in cache */
         if (block)
-            t2c_compile(rv, block);
-        pthread_mutex_unlock(&rv->cache_lock);
+            t2c_compile(rv, block, &rv->cache_lock);
+        else
+            pthread_mutex_unlock(&rv->cache_lock);
         free(entry);
 
         pthread_mutex_lock(&rv->wait_queue_lock);
@@ -879,8 +890,15 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     pthread_mutex_init(&rv->cache_lock, NULL);
     pthread_cond_init(&rv->wait_queue_cond, NULL);
     INIT_LIST_HEAD(&rv->wait_queue);
-    /* activate the background compilation thread. */
-    pthread_create(&t2c_thread, NULL, t2c_runloop, rv);
+    /* Activate the background compilation thread.
+     * Use larger stack (8MB) to handle deep recursion in t2c_trace_ebb
+     * and LLVM's internal stack usage during compilation.
+     */
+    pthread_attr_t t2c_attr;
+    pthread_attr_init(&t2c_attr);
+    pthread_attr_setstacksize(&t2c_attr, 8 * 1024 * 1024); /* 8MB stack */
+    pthread_create(&t2c_thread, &t2c_attr, t2c_runloop, rv);
+    pthread_attr_destroy(&t2c_attr);
 #endif
 #endif
 
@@ -1050,6 +1068,9 @@ void rv_delete(riscv_t *rv)
     pthread_mutex_destroy(&rv->cache_lock);
     pthread_cond_destroy(&rv->wait_queue_cond);
     jit_cache_exit(rv->jit_cache);
+
+    /* Dispose LLVM engines for all remaining blocks before freeing cache */
+    clear_cache_hot(rv->block_cache, t2c_dispose_block_engine);
 #endif
     jit_state_exit(rv->jit_state);
     cache_free(rv->block_cache);
@@ -1075,9 +1096,11 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     memset(rv->X, 0, sizeof(uint32_t) * N_RV_REGS);
 
     vm_attr_t *attr = PRIV(rv);
+#if !RV32_HAS(SYSTEM_MMIO)
     int argc = attr->argc;
     char **args = attr->argv;
     memory_t *mem = attr->mem;
+#endif
 
     /* set the reset address */
     rv->PC = pc;
@@ -1086,9 +1109,8 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     rv->X[rv_reg_sp] =
         attr->mem_size - attr->stack_size - attr->args_offset_size;
 
-    /* Store 'argc' and 'args' of the target program in 'state->mem'. Thus,
-     * we can use an offset trick to emulate 32/64-bit target programs on
-     * a 64-bit built emulator.
+    /* User-mode: Store 'argc' and 'args' of the target program in 'state->mem'.
+     * System-mode: Skip this - kernel boot doesn't use argc/argv.
      *
      * memory layout of arguments as below:
      * -----------------------
@@ -1117,7 +1139,7 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
      *
      * TODO: access to envp
      */
-
+#if !RV32_HAS(SYSTEM_MMIO)
     /* copy args to RAM */
     uintptr_t args_size = (1 + argc + 1) * sizeof(uint32_t);
     uintptr_t args_bottom = attr->mem_size - attr->stack_size;
@@ -1174,6 +1196,7 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 
     /* reset sp pointing to argc */
     rv->X[rv_reg_sp] = stack_top;
+#endif /* !RV32_HAS(SYSTEM_MMIO) */
 
     /* reset privilege mode */
 #if RV32_HAS(SYSTEM)

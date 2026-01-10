@@ -329,6 +329,23 @@ typedef void (*riscv_mem_write_b)(riscv_t *rv,
 typedef riscv_word_t (*riscv_mem_translate_t)(riscv_t *rv,
                                               riscv_word_t vaddr,
                                               bool rw);
+
+/* MMU memory access function pointers for T2C runtime binding.
+ * These avoid embedding compile-time function addresses in JIT code,
+ * which would break with ASLR on x86-64 Linux.
+ */
+typedef riscv_word_t (*riscv_mmu_read_w_t)(riscv_t *rv, riscv_word_t vaddr);
+typedef riscv_half_t (*riscv_mmu_read_s_t)(riscv_t *rv, riscv_word_t vaddr);
+typedef riscv_byte_t (*riscv_mmu_read_b_t)(riscv_t *rv, riscv_word_t vaddr);
+typedef void (*riscv_mmu_write_w_t)(riscv_t *rv,
+                                    riscv_word_t vaddr,
+                                    riscv_word_t val);
+typedef void (*riscv_mmu_write_s_t)(riscv_t *rv,
+                                    riscv_word_t vaddr,
+                                    riscv_half_t val);
+typedef void (*riscv_mmu_write_b_t)(riscv_t *rv,
+                                    riscv_word_t vaddr,
+                                    riscv_byte_t val);
 #endif
 
 /* system instruction handlers */
@@ -352,6 +369,14 @@ typedef struct {
 
 #if RV32_HAS(SYSTEM)
     riscv_mem_translate_t mem_translate;
+
+    /* MMU memory access functions for T2C runtime binding */
+    riscv_mmu_read_w_t mmu_read_w;
+    riscv_mmu_read_s_t mmu_read_s;
+    riscv_mmu_read_b_t mmu_read_b;
+    riscv_mmu_write_w_t mmu_write_w;
+    riscv_mmu_write_s_t mmu_write_s;
+    riscv_mmu_write_b_t mmu_write_b;
 #endif
 
     /* system */

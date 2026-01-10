@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #if RV32_HAS(EXT_F)
 #include <math.h>
@@ -52,6 +53,11 @@ bool need_retranslate = false;
 bool need_handle_signal = false;
 #endif
 
+/* Emulate misaligned load/store operations.
+ * Only used in non-SYSTEM builds for userspace misaligned access emulation.
+ * In SYSTEM mode, misaligned access traps are handled by the guest OS.
+ */
+#if !RV32_HAS(SYSTEM)
 /* Emulate misaligned load operation.
  * Fast-path: Use halfword operations for 2-byte aligned word accesses.
  * Slow-path: Fall back to byte-level operations for odd addresses.
@@ -149,6 +155,9 @@ static bool emulate_misaligned_store(riscv_t *rv,
 /* Default trap handler for userspace simulation without a configured trap
  * vector. When misaligned memory operations occur, this handler emulates them
  * using byte-level accesses instead of simply skipping the instruction.
+ * Note: In SYSTEM mode, unconfigured trap vectors are handled differently
+ * (by restoring PC and clearing is_trapped), so this function is only used
+ * in non-SYSTEM builds.
  */
 static void rv_trap_default_handler(riscv_t *rv)
 {
@@ -189,6 +198,7 @@ skip_insn:
     rv->csr_mepc += rv->compressed ? 2 : 4;
     rv->PC = rv->csr_mepc; /* mret */
 }
+#endif /* !RV32_HAS(SYSTEM) */
 
 #if RV32_HAS(SYSTEM)
 static void __trap_handler(riscv_t *rv);
@@ -530,9 +540,13 @@ static block_t *block_alloc(riscv_t *rv)
     block->hot2 = false;
     block->has_loops = false;
     block->n_invoke = 0;
+    block->func = NULL;
     INIT_LIST_HEAD(&block->list);
 #if RV32_HAS(T2C)
     block->compiled = false;
+    block->is_compiling = false;
+    block->should_free = false;
+    block->llvm_engine = NULL;
 #endif
 #endif
     return block;
@@ -1181,13 +1195,8 @@ retranslate:
          * The caller checks rv->is_trapped and invokes trap handler.
          * Note: insn==0 alone is ambiguous; we verify trap state explicitly.
          */
-        if (!insn) {
-#if RV32_HAS(SYSTEM)
-            assert(rv->is_trapped &&
-                   "insn fetch returned 0 without setting trap state");
-#endif
+        if (!insn)
             break;
-        }
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
@@ -1244,6 +1253,13 @@ retranslate:
         mpool_free(rv->block_ir_mp, block->ir_head);
         return false;
     }
+
+    /* Free orphaned IR that was allocated at end of previous iteration but not
+     * used due to early break (fetch fail, decode fail, etc.).
+     * This IR was linked at prev_ir->next but never became prev_ir.
+     */
+    if (prev_ir->next)
+        mpool_free(rv->block_ir_mp, prev_ir->next);
 
     block->ir_tail = prev_ir;
     block->ir_tail->next = NULL;
@@ -1917,6 +1933,35 @@ static block_t *block_find_or_translate(riscv_t *rv)
          */
     }
 
+#if RV32_HAS(T2C)
+    /* Check if T2C thread is currently using this block.
+     * If so, mark for delayed freeing and skip immediate destruction.
+     * The T2C thread will free it upon completion.
+     */
+    if (replaced_blk->is_compiling) {
+        replaced_blk->should_free = true;
+
+        /* Clear jit_cache to prevent new executions, but don't dispose engine
+         * or free memory yet. T2C thread owns the engine and block memory.
+         */
+        if (replaced_blk->func) {
+#if RV32_HAS(SYSTEM)
+            uint64_t key = (uint64_t) replaced_blk->pc_start |
+                           ((uint64_t) replaced_blk->satp << 32);
+#else
+            uint64_t key = (uint64_t) replaced_blk->pc_start;
+#endif
+            jit_cache_update(rv->jit_cache, key, NULL);
+        }
+
+        /* Remove from global block list so it's not found/traversed */
+        list_del_init(&replaced_blk->list);
+
+        pthread_mutex_unlock(&rv->cache_lock);
+        return next_blk;
+    }
+#endif
+
     /* free IRs in replaced block */
     for (rv_insn_t *ir = replaced_blk->ir_head, *next_ir; ir != NULL;
          ir = next_ir) {
@@ -1927,6 +1972,26 @@ static block_t *block_find_or_translate(riscv_t *rv)
 
         mpool_free(rv->block_ir_mp, ir);
     }
+
+#if RV32_HAS(T2C)
+    /* Clear jit_cache entry before disposing LLVM engine to prevent stale
+     * function pointers. The jit_cache key includes SATP for system mode.
+     * cache_lock is already held by caller.
+     */
+    if (replaced_blk->func) {
+#if RV32_HAS(SYSTEM)
+        uint64_t key = (uint64_t) replaced_blk->pc_start |
+                       ((uint64_t) replaced_blk->satp << 32);
+#else
+        uint64_t key = (uint64_t) replaced_blk->pc_start;
+#endif
+        jit_cache_update(rv->jit_cache, key, NULL);
+    }
+    /* Dispose LLVM execution engine before freeing the block.
+     * The engine owns the memory where block->func points.
+     */
+    t2c_dispose_engine(replaced_blk->llvm_engine);
+#endif
 
     list_del_init(&replaced_blk->list);
     mpool_free(rv->block_mp, replaced_blk);
@@ -2137,6 +2202,14 @@ void rv_step(void *arg)
             /* Ensure instruction cache coherency before executing T2C code */
             __asm__ volatile("isb" ::: "memory");
 #endif
+            /* Defensive NULL check - should not occur if seqlocks work
+             * correctly but protects against races during block invalidation
+             */
+            if (unlikely(!block->func)) {
+                /* Block was invalidated, fall through to interpreter */
+                prev = NULL;
+                continue;
+            }
             ((exec_t2c_func_t) block->func)(rv);
             prev = NULL;
             continue;
@@ -2320,8 +2393,27 @@ static void __trap_handler(riscv_t *rv)
 
     /* set to false by sret implementation */
     while (rv->is_trapped && !rv_has_halted(rv)) {
-        uint32_t insn = rv->io.mem_ifetch(rv, rv->PC);
-        assert(insn);
+        uint32_t insn;
+    retry_fetch:
+        insn = rv->io.mem_ifetch(rv, rv->PC);
+
+        /* If instruction fetch returned 0 and need_retranslate is set, this
+         * indicates MMU was enabled during execution. Clear flag and retry
+         * the fetch. This matches the pattern in block_translate and rv_step
+         * for handling MMU enable during trap handling.
+         */
+        if (!insn && need_retranslate) {
+            need_retranslate = false;
+            goto retry_fetch;
+        }
+
+        /* If instruction fetch failed (insn==0), it indicates either:
+         * 1. Page fault during ifetch (need_handle_signal was set)
+         * 2. Invalid PC or other error
+         * In both cases, break out and let the main loop handle it.
+         */
+        if (!insn)
+            break;
 
         rv_decode(ir, insn);
         reloc_enable_mmu_jalr_addr = rv->PC;
@@ -2331,6 +2423,7 @@ static void __trap_handler(riscv_t *rv)
         ir->impl(rv, ir, rv->csr_cycle, rv->PC);
     }
 
+    mpool_free(rv->block_ir_mp, ir);
     prev = NULL;
 }
 #endif /* RV32_HAS(SYSTEM) */
@@ -2382,6 +2475,15 @@ static void _trap_handler(riscv_t *rv)
         rv->csr_sepc = rv->PC;
 #if RV32_HAS(SYSTEM)
         rv->last_csr_sepc = rv->csr_sepc;
+        if (!rv->csr_stvec) { /* in case CSR is not configured */
+            /* For system mode without trap vector, restore PC from sepc
+             * and clear is_trapped to continue execution. This handles
+             * spurious interrupts during early boot before handlers are set.
+             */
+            rv->PC = rv->csr_sepc;
+            rv->is_trapped = false;
+            return;
+        }
 #endif
     } else { /* machine */
         const uint32_t mstatus_mie =
@@ -2395,7 +2497,16 @@ static void _trap_handler(riscv_t *rv)
         cause = rv->csr_mcause;
         rv->csr_mepc = rv->PC;
         if (!rv->csr_mtvec) { /* in case CSR is not configured */
+#if RV32_HAS(SYSTEM)
+            /* For system mode without trap vector, restore PC from mepc
+             * and clear is_trapped to continue execution. This handles
+             * spurious interrupts during early boot before handlers are set.
+             */
+            rv->PC = rv->csr_mepc;
+            rv->is_trapped = false;
+#else
             rv_trap_default_handler(rv);
+#endif
             return;
         }
     }

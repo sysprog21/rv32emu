@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "riscv_private.h"
@@ -79,7 +80,7 @@ void jit_misaligned_handler(riscv_t *rv,
                             bool is_store);
 
 #if RV32_HAS(T2C)
-void t2c_compile(riscv_t *, block_t *);
+void t2c_compile(riscv_t *, block_t *, pthread_mutex_t *);
 typedef void (*exec_t2c_func_t)(riscv_t *);
 
 /* The jit-cache records the program counters and the entries of executable
@@ -92,14 +93,52 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
  */
 #define N_JIT_CACHE_ENTRIES (1 << 12)
 
+/* jit_cache entry for T2C compiled code lookup.
+ * Thread safety: Uses seqlock pattern for lock-free readers.
+ * - Writers (under cache_lock): increment seq to odd, write entry+key,
+ *   increment seq to even
+ * - Lock-free readers (LLVM-generated): read seq1, if odd retry; read
+ *   entry+key; read seq2; if seq1 != seq2 retry Seqlock ensures readers see
+ *   consistent (key, entry) pairs without ABA problem.
+ */
 struct jit_cache {
-    uint64_t key; /* program counter, composed to satp if it's in system
-                     simulation */
+    uint32_t seq; /* sequence counter: odd = write in progress, even = stable */
+    uint64_t key; /* program counter, composed to satp in system simulation */
     void *entry;  /* entry of JIT-ed code */
 };
+
+/* Verify struct layout requirements for lock-free seqlock reads and LLVM IR.
+ *
+ * The jit_cache struct layout must match the LLVM type definition in t2c.c:
+ *   LLVM: { i32 seq, i32 pad, i64 key, ptr entry }
+ *   Offsets: seq=0, pad=4, key=8, entry=16 (on 64-bit)
+ *
+ * The key field must be 8-byte aligned for atomic 64-bit loads without
+ * requiring libatomic. The entry field must be pointer-aligned.
+ *
+ * If this struct layout changes, the LLVM type in t2c.c must be updated to
+ * match (search for "jit_cache_memb" in t2c.c).
+ */
+static_assert(offsetof(struct jit_cache, seq) == 0,
+              "jit_cache.seq must be at offset 0 to match LLVM IR");
+static_assert(offsetof(struct jit_cache, key) == 8,
+              "jit_cache.key must be at offset 8 to match LLVM IR");
+static_assert(offsetof(struct jit_cache, entry) == 16,
+              "jit_cache.entry must be at offset 16 to match LLVM IR");
+static_assert(offsetof(struct jit_cache, key) % 8 == 0,
+              "jit_cache.key must be 8-byte aligned for atomic loads");
+static_assert(offsetof(struct jit_cache, entry) % sizeof(void *) == 0,
+              "jit_cache.entry must be pointer-aligned for atomic loads");
 
 struct jit_cache *jit_cache_init();
 void jit_cache_exit(struct jit_cache *cache);
 void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
 void jit_cache_clear(struct jit_cache *cache);
+void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp);
+
+/* Dispose LLVM execution engine when a T2C-compiled block is freed */
+void t2c_dispose_engine(void *engine);
+
+/* Wrapper for cache cleanup - disposes LLVM engine from a block */
+void t2c_dispose_block_engine(void *block);
 #endif

@@ -55,7 +55,7 @@ typedef struct {
  * entry.
  */
 
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
 /* Page index entry: links blocks in the same page bucket */
 typedef struct page_block_entry {
     void *block;                   /* pointer to block_t */
@@ -70,15 +70,19 @@ typedef struct cache {
     uint32_t size;
     uint32_t ghost_list_size;
     uint32_t capacity;
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
     /* Page index for O(1) invalidation by virtual address.
      * Each bucket contains a linked list of blocks starting in that page.
      */
     page_block_entry_t *page_index[PAGE_INDEX_SIZE];
+    /* Flag indicating page index is incomplete due to malloc failure.
+     * When set, cache_invalidate_va must use O(n) fallback scan.
+     */
+    bool page_index_incomplete;
 #endif
 } cache_t;
 
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
 /* Forward declarations for page index functions */
 static void page_index_insert(cache_t *cache, block_t *block);
 static void page_index_remove(cache_t *cache, block_t *block);
@@ -199,9 +203,10 @@ cache_t *cache_create(uint32_t size_bits)
     for (uint32_t i = 0; i < cache_size; i++)
         INIT_HLIST_HEAD(&cache->map.ht_list_head[i]);
 
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
     /* Initialize page index for O(1) invalidation lookup */
     memset(cache->page_index, 0, sizeof(cache->page_index));
+    cache->page_index_incomplete = false;
 #endif
 
     return cache;
@@ -316,7 +321,7 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
         assert(replaced->alive);
 
         replaced_value = replaced->value;
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
         /* Remove replaced block from page index before eviction */
         if (replaced_value)
             page_index_remove(cache, (block_t *) replaced_value);
@@ -364,7 +369,7 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
 
     cache->size++;
 
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
     /* Page index for O(1) invalidation - blocks are page-terminated
      * and use fallthrough chaining for non-branch block boundaries.
      */
@@ -380,7 +385,7 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
 
 void cache_free(cache_t *cache)
 {
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
     /* Free all page index entries */
     for (uint32_t i = 0; i < PAGE_INDEX_SIZE; i++) {
         page_block_entry_t *entry = cache->page_index[i];
@@ -478,11 +483,9 @@ void clear_cache_hot(const struct cache *cache, clear_func_t func)
 }
 #endif
 
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-/* Thread safety note: These invalidation functions assume single-threaded
- * execution. The rv32emu JIT operates in a single-threaded model where
- * compilation and execution do not occur concurrently. If this assumption
- * changes, appropriate locking must be added around cache->list traversal.
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
+/* Page index functions for O(1) cache invalidation.
+ * Requires BLOCK_CHAINING for page-terminated blocks.
  */
 
 /* Hash function for page index using golden ratio multiplicative hash */
@@ -495,9 +498,13 @@ static void page_index_insert(cache_t *cache, block_t *block)
     uint32_t bucket = page_index_hash(page >> RV_PG_SHIFT);
 
     page_block_entry_t *entry = malloc(sizeof(page_block_entry_t));
-    if (!entry)
-        return; /* Graceful degradation: O(1) lookup unavailable for this block
-                 */
+    if (!entry) {
+        /* Mark page index as incomplete - cache_invalidate_va must use O(n)
+         * fallback to ensure all blocks are found during SFENCE.VMA.
+         */
+        cache->page_index_incomplete = true;
+        return;
+    }
 
     entry->block = block;
     entry->next = cache->page_index[bucket];
@@ -521,6 +528,14 @@ static void page_index_remove(cache_t *cache, block_t *block)
         pp = &(*pp)->next;
     }
 }
+#endif /* RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING) */
+
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+/* Thread safety note: These invalidation functions assume single-threaded
+ * execution. The rv32emu JIT operates in a single-threaded model where
+ * compilation and execution do not occur concurrently. If this assumption
+ * changes, appropriate locking must be added around cache->list traversal.
+ */
 
 uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
 {
@@ -549,28 +564,57 @@ uint32_t cache_invalidate_va(cache_t *cache, uint32_t va, uint32_t satp)
     if (unlikely(!cache->capacity))
         return 0;
 
-    /* Extract page-aligned VA for the target address */
     uint32_t va_page = va & ~(RV_PG_SIZE - 1);
-    uint32_t bucket = page_index_hash(va_page >> RV_PG_SHIFT);
     uint32_t count = 0;
 
-    /* O(1) lookup via page index.
-     * With page-bounded blocks, each block fits entirely within one 4KB page.
-     * We only need to check the bucket for this specific page.
+#if RV32_HAS(BLOCK_CHAINING)
+    /* If page index is complete, use O(1) lookup.
+     * Otherwise fall through to O(n) scan to ensure all blocks are found.
      */
-    page_block_entry_t *entry = cache->page_index[bucket];
-    while (entry) {
-        block_t *block = (block_t *) entry->block;
+    if (!cache->page_index_incomplete) {
+        /* O(1) lookup via page index.
+         * With page-bounded blocks, each block fits entirely within one 4KB
+         * page. We only need to check the bucket for this specific page.
+         */
+        uint32_t bucket = page_index_hash(va_page >> RV_PG_SHIFT);
+        page_block_entry_t *pentry = cache->page_index[bucket];
+        while (pentry) {
+            block_t *block = (block_t *) pentry->block;
+            if (block && block->satp == satp && !block->invalidated) {
+                /* Verify block belongs to this page (hash collision check) */
+                uint32_t block_page = block->pc_start & ~(RV_PG_SIZE - 1);
+                if (block_page == va_page) {
+                    block->invalidated = true;
+                    count++;
+                }
+            }
+            pentry = pentry->next;
+        }
+        return count;
+    }
+#endif /* RV32_HAS(BLOCK_CHAINING) */
+
+    /* O(n) fallback: scan all blocks when page index is unavailable or
+     * incomplete. This ensures correctness when BLOCK_CHAINING is disabled,
+     * blocks may span pages, or malloc failed during page_index_insert.
+     */
+    cache_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    list_for_each_entry (entry, &cache->list, list)
+#else
+    list_for_each_entry (entry, &cache->list, list, cache_entry_t)
+#endif
+    {
+        block_t *block = (block_t *) entry->value;
         if (block && block->satp == satp && !block->invalidated) {
-            /* Verify block belongs to this page (hash collision check) */
             uint32_t block_page = block->pc_start & ~(RV_PG_SIZE - 1);
             if (block_page == va_page) {
                 block->invalidated = true;
                 count++;
             }
         }
-        entry = entry->next;
     }
+
     return count;
 }
-#endif
+#endif /* RV32_HAS(JIT) && RV32_HAS(SYSTEM) */

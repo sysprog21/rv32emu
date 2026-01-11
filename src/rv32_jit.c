@@ -276,10 +276,10 @@
                 uint32_t jump_normal = state->offset;                         \
                 emit_jcc_offset(state, JCC_JMP);                              \
                 /* Trap exit point - exit JIT block for trap handling */      \
-                emit_jump_target_offset(state, jump_trap, state->offset);     \
+                emit_jump_target_offset(state, JUMP_TRAP, state->offset);     \
                 emit_exit(state);                                             \
                 /* Normal continuation point */                               \
-                emit_jump_target_offset(state, jump_normal, state->offset);   \
+                emit_jump_target_offset(state, JUMP_NORMAL, state->offset);   \
             },                                                                \
             {                                                                 \
                 emit_load_imm_sext(state, temp_reg,                           \
@@ -348,10 +348,10 @@
                 uint32_t jump_normal = state->offset;                         \
                 emit_jcc_offset(state, JCC_JMP);                              \
                 /* Trap exit point - exit JIT block for trap handling */      \
-                emit_jump_target_offset(state, jump_trap, state->offset);     \
+                emit_jump_target_offset(state, JUMP_TRAP, state->offset);     \
                 emit_exit(state);                                             \
                 /* Normal continuation point */                               \
-                emit_jump_target_offset(state, jump_normal, state->offset);   \
+                emit_jump_target_offset(state, JUMP_NORMAL, state->offset);   \
                 reset_reg();                                                  \
             },                                                                \
             {                                                                 \

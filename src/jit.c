@@ -68,8 +68,14 @@
 #define MAX_BLOCKS 8192
 #define IN_JUMP_THRESHOLD 256
 #if defined(__x86_64__)
-/* indicate where the immediate value is in the emitted jump instruction */
+/* indicate where the immediate value is in the emitted jump instruction.
+ * For conditional jumps (JNE, JE, etc.), add 2 to skip the 2-byte opcode
+ * (0x0f + condition). For unconditional jumps (JMP), add 1 to skip the
+ * 1-byte opcode (0xe9).
+ */
 #define JUMP_LOC_0 jump_loc_0 + 2
+#define JUMP_TRAP jump_trap + 2
+#define JUMP_NORMAL jump_normal + 1
 #if RV32_HAS(SYSTEM)
 #define JUMP_LOC_1 jump_loc_1 + 1
 #endif
@@ -97,8 +103,13 @@ enum x64_reg {
 };
 
 #elif defined(__aarch64__)
-/* indicate where the immediate value is in the emitted jump instruction */
+/* indicate where the immediate value is in the emitted jump instruction.
+ * For ARM64, the offset is embedded within the instruction word itself,
+ * so no additional offset adjustment is needed.
+ */
 #define JUMP_LOC_0 jump_loc_0
+#define JUMP_TRAP jump_trap
+#define JUMP_NORMAL jump_normal
 #if RV32_HAS(SYSTEM)
 #define JUMP_LOC_1 jump_loc_1
 #endif
@@ -1244,8 +1255,7 @@ static inline void emit_exit(struct jit_state *state)
 {
 #if defined(__x86_64__)
     emit1(state, JCC_JMP);
-    emit_jump_target_offset(state, state->offset, state->exit_loc);
-    emit4(state, 0);
+    emit_jump_target_address(state, TARGET_PC_EXIT, 0);
 #elif defined(__aarch64__)
     emit_jmp(state, TARGET_PC_EXIT, 0);
 #endif
@@ -2579,10 +2589,10 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     uint32_t jump_normal = state->offset;
     emit_jcc_offset(state, JCC_JMP);
     /* Trap exit point - exit JIT block for trap handling */
-    emit_jump_target_offset(state, jump_trap, state->offset);
+    emit_jump_target_offset(state, JUMP_TRAP, state->offset);
     emit_exit(state);
     /* Normal continuation point */
-    emit_jump_target_offset(state, jump_normal, state->offset);
+    emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
 #else
     /* Write LUI result to rd - required when rd != LW destination */
     vm_reg[0] = map_vm_reg(state, ir->rd);
@@ -2651,10 +2661,10 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     uint32_t jump_normal = state->offset;
     emit_jcc_offset(state, JCC_JMP);
     /* Trap exit point - exit JIT block for trap handling */
-    emit_jump_target_offset(state, jump_trap, state->offset);
+    emit_jump_target_offset(state, JUMP_TRAP, state->offset);
     emit_exit(state);
     /* Normal continuation point */
-    emit_jump_target_offset(state, jump_normal, state->offset);
+    emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
     reset_reg();
 #else
     /* Write LUI result to rd - SW doesn't write registers, so rd may be used */
@@ -2739,10 +2749,10 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     uint32_t jump_normal = state->offset;
     emit_jcc_offset(state, JCC_JMP);
     /* Trap exit point - exit JIT block for trap handling */
-    emit_jump_target_offset(state, jump_trap, state->offset);
+    emit_jump_target_offset(state, JUMP_TRAP, state->offset);
     emit_exit(state);
     /* Normal continuation point */
-    emit_jump_target_offset(state, jump_normal, state->offset);
+    emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
 #else
     vm_reg[0] = ra_load(state, ir->rs1);
     /* Compute address: mem_base + rs1 + imm */

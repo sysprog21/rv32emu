@@ -1200,6 +1200,9 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
     /* reset the csrs */
     rv->csr_mtvec = 0;
     rv->csr_cycle = 0;
+#if RV32_HAS(SYSTEM)
+    rv->timer_offset = 0;
+#endif
     rv->csr_mstatus = 0;
     rv->csr_misa |= MISA_SUPER | MISA_USER;
     rv->csr_mvendorid = RV_MVENDORID;

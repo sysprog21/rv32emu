@@ -35,8 +35,9 @@ endef
 
 # Get specified feature (supports both ENABLE_* and CONFIG_*)
 POSITIVE_WORDS = 1 true yes y
+NEGATIVE_WORDS = 0 false no n
 define has
-$(if $(filter $(firstword $(ENABLE_$(strip $1))), $(POSITIVE_WORDS)),1,$(call config-to-feature,$1))
+$(if $(filter $(firstword $(ENABLE_$(strip $1))),$(NEGATIVE_WORDS)),0,$(if $(filter $(firstword $(ENABLE_$(strip $1))),$(POSITIVE_WORDS)),1,$(call config-to-feature,$1)))
 endef
 
 # Set compiler feature flag from config

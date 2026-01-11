@@ -223,52 +223,71 @@
  *   size: memory access size (S8, S16, S32)
  *   load_fn: emit_load or emit_load_sext
  */
-#define GEN_LOAD(inst, insn_type, size, load_fn)                             \
-    GEN(inst, {                                                              \
-        memory_t *m = PRIV(rv)->mem;                                         \
-        vm_reg[0] = ra_load(state, ir->rs1);                                 \
-        IIF(RV32_HAS(SYSTEM_MMIO))(                                          \
-            {                                                                \
-                emit_load_imm_sext(state, temp_reg, ir->imm);                \
-                emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);          \
-                emit_store(state, S32, temp_reg, parameter_reg[0],           \
-                           offsetof(riscv_t, jit_mmu.vaddr));                \
-                emit_load_imm(state, temp_reg, insn_type);                   \
-                emit_store(state, S32, temp_reg, parameter_reg[0],           \
-                           offsetof(riscv_t, jit_mmu.type));                 \
-                                                                             \
-                store_back(state);                                           \
-                emit_jit_mmu_handler(state, ir->rd);                         \
-                reset_reg();                                                 \
-                                                                             \
-                /* If MMIO, load from X[rd]; otherwise load from memory */   \
-                emit_load(state, S32, parameter_reg[0], temp_reg,            \
-                          offsetof(riscv_t, jit_mmu.is_mmio));               \
-                emit_cmp_imm32(state, temp_reg, 0);                          \
-                vm_reg[1] = map_vm_reg(state, ir->rd);                       \
-                uint32_t jump_loc_0 = state->offset;                         \
-                emit_jcc_offset(state, JCC_JE);                              \
-                                                                             \
-                emit_load(state, S32, parameter_reg[0], vm_reg[1],           \
-                          offsetof(riscv_t, X) + 4 * ir->rd);                \
-                uint64_t jump_loc_1 = state->offset;                         \
-                emit_jcc_offset(state, JCC_JMP);                             \
-                                                                             \
-                emit_jump_target_offset(state, JUMP_LOC_0, state->offset);   \
-                emit_load(state, S32, parameter_reg[0], vm_reg[0],           \
-                          offsetof(riscv_t, jit_mmu.paddr));                 \
-                emit_load_imm_sext(state, temp_reg, (intptr_t) m->mem_base); \
-                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);          \
-                load_fn(state, size, temp_reg, vm_reg[1], 0);                \
-                emit_jump_target_offset(state, JUMP_LOC_1, state->offset);   \
-            },                                                               \
-            {                                                                \
-                emit_load_imm_sext(state, temp_reg,                          \
-                                   (intptr_t) (m->mem_base + ir->imm));      \
-                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);          \
-                vm_reg[1] = map_vm_reg(state, ir->rd);                       \
-                load_fn(state, size, temp_reg, vm_reg[1], 0);                \
-            })                                                               \
+#define GEN_LOAD(inst, insn_type, size, load_fn)                              \
+    GEN(inst, {                                                               \
+        memory_t *m = PRIV(rv)->mem;                                          \
+        vm_reg[0] = ra_load(state, ir->rs1);                                  \
+        IIF(RV32_HAS(SYSTEM_MMIO))(                                           \
+            {                                                                 \
+                emit_load_imm_sext(state, temp_reg, ir->imm);                 \
+                emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);           \
+                emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                           offsetof(riscv_t, jit_mmu.vaddr));                 \
+                emit_load_imm(state, temp_reg, insn_type);                    \
+                emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                           offsetof(riscv_t, jit_mmu.type));                  \
+                /* Store instruction PC for trap return address */            \
+                emit_load_imm(state, temp_reg, ir->pc);                       \
+                emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                           offsetof(riscv_t, jit_mmu.pc));                    \
+                                                                              \
+                store_back(state);                                            \
+                emit_jit_mmu_handler(state, ir->rd);                          \
+                reset_reg();                                                  \
+                                                                              \
+                /* Check if trap occurred - skip load if trapped */           \
+                emit_load(state, S8, parameter_reg[0], temp_reg,              \
+                          offsetof(riscv_t, is_trapped));                     \
+                emit_cmp_imm32(state, temp_reg, 0);                           \
+                uint32_t jump_trap = state->offset;                           \
+                emit_jcc_offset(state, JCC_JNE);                              \
+                                                                              \
+                /* If MMIO, load from X[rd]; otherwise load from memory */    \
+                emit_load(state, S8, parameter_reg[0], temp_reg,              \
+                          offsetof(riscv_t, jit_mmu.is_mmio));                \
+                emit_cmp_imm32(state, temp_reg, 0);                           \
+                vm_reg[1] = map_vm_reg(state, ir->rd);                        \
+                uint32_t jump_loc_0 = state->offset;                          \
+                emit_jcc_offset(state, JCC_JE);                               \
+                                                                              \
+                emit_load(state, S32, parameter_reg[0], vm_reg[1],            \
+                          offsetof(riscv_t, X) + 4 * ir->rd);                 \
+                uint32_t jump_loc_1 = state->offset;                          \
+                emit_jcc_offset(state, JCC_JMP);                              \
+                                                                              \
+                emit_jump_target_offset(state, JUMP_LOC_0, state->offset);    \
+                emit_load(state, S32, parameter_reg[0], temp_reg,             \
+                          offsetof(riscv_t, jit_mmu.paddr));                  \
+                emit_load_imm_sext(state, vm_reg[1], (intptr_t) m->mem_base); \
+                emit_alu64(state, ALU_OP_ADD, temp_reg, vm_reg[1]);           \
+                load_fn(state, size, vm_reg[1], vm_reg[1], 0);                \
+                emit_jump_target_offset(state, JUMP_LOC_1, state->offset);    \
+                /* Jump over trap exit to continue normally */                \
+                uint32_t jump_normal = state->offset;                         \
+                emit_jcc_offset(state, JCC_JMP);                              \
+                /* Trap exit point - exit JIT block for trap handling */      \
+                emit_jump_target_offset(state, JUMP_TRAP, state->offset);     \
+                emit_exit(state);                                             \
+                /* Normal continuation point */                               \
+                emit_jump_target_offset(state, JUMP_NORMAL, state->offset);   \
+            },                                                                \
+            {                                                                 \
+                emit_load_imm_sext(state, temp_reg,                           \
+                                   (intptr_t) (m->mem_base + ir->imm));       \
+                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);           \
+                vm_reg[1] = map_vm_reg(state, ir->rd);                        \
+                load_fn(state, size, temp_reg, vm_reg[1], 0);                 \
+            })                                                                \
     })
 
 /* Store instruction handler macro - handles MMIO path when SYSTEM_MMIO enabled.
@@ -277,46 +296,71 @@
  *   insn_type: rv_insn_* constant for MMIO handler
  *   size: memory access size (S8, S16, S32)
  */
-#define GEN_STORE(inst, insn_type, size)                                     \
-    GEN(inst, {                                                              \
-        memory_t *m = PRIV(rv)->mem;                                         \
-        vm_reg[0] = ra_load(state, ir->rs1);                                 \
-        IIF(RV32_HAS(SYSTEM_MMIO))(                                          \
-            {                                                                \
-                emit_load_imm_sext(state, temp_reg, ir->imm);                \
-                emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);          \
-                emit_store(state, S32, temp_reg, parameter_reg[0],           \
-                           offsetof(riscv_t, jit_mmu.vaddr));                \
-                emit_load_imm(state, temp_reg, insn_type);                   \
-                emit_store(state, S32, temp_reg, parameter_reg[0],           \
-                           offsetof(riscv_t, jit_mmu.type));                 \
-                store_back(state);                                           \
-                emit_jit_mmu_handler(state, ir->rs2);                        \
-                reset_reg();                                                 \
-                                                                             \
-                /* If MMIO, skip store (handled by MMIO handler) */          \
-                emit_load(state, S32, parameter_reg[0], temp_reg,            \
-                          offsetof(riscv_t, jit_mmu.is_mmio));               \
-                emit_cmp_imm32(state, temp_reg, 1);                          \
-                uint32_t jump_loc_0 = state->offset;                         \
-                emit_jcc_offset(state, JCC_JE);                              \
-                                                                             \
-                emit_load(state, S32, parameter_reg[0], vm_reg[0],           \
-                          offsetof(riscv_t, jit_mmu.paddr));                 \
-                emit_load_imm_sext(state, temp_reg, (intptr_t) m->mem_base); \
-                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);          \
-                vm_reg[1] = ra_load(state, ir->rs2);                         \
-                emit_store(state, size, vm_reg[1], temp_reg, 0);             \
-                emit_jump_target_offset(state, JUMP_LOC_0, state->offset);   \
-                reset_reg();                                                 \
-            },                                                               \
-            {                                                                \
-                emit_load_imm_sext(state, temp_reg,                          \
-                                   (intptr_t) (m->mem_base + ir->imm));      \
-                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);          \
-                vm_reg[1] = ra_load(state, ir->rs2);                         \
-                emit_store(state, size, vm_reg[1], temp_reg, 0);             \
-            })                                                               \
+#define GEN_STORE(inst, insn_type, size)                                      \
+    GEN(inst, {                                                               \
+        memory_t *m = PRIV(rv)->mem;                                          \
+        vm_reg[0] = ra_load(state, ir->rs1);                                  \
+        IIF(RV32_HAS(SYSTEM_MMIO))(                                           \
+            {                                                                 \
+                emit_load_imm_sext(state, temp_reg, ir->imm);                 \
+                emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);           \
+                emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                           offsetof(riscv_t, jit_mmu.vaddr));                 \
+                emit_load_imm(state, temp_reg, insn_type);                    \
+                emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                           offsetof(riscv_t, jit_mmu.type));                  \
+                /* Store instruction PC for trap return address */            \
+                emit_load_imm(state, temp_reg, ir->pc);                       \
+                emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                           offsetof(riscv_t, jit_mmu.pc));                    \
+                store_back(state);                                            \
+                emit_jit_mmu_handler(state, ir->rs2);                         \
+                reset_reg();                                                  \
+                                                                              \
+                /* Check if trap occurred - skip store if trapped */          \
+                emit_load(state, S8, parameter_reg[0], temp_reg,              \
+                          offsetof(riscv_t, is_trapped));                     \
+                emit_cmp_imm32(state, temp_reg, 0);                           \
+                uint32_t jump_trap = state->offset;                           \
+                emit_jcc_offset(state, JCC_JNE);                              \
+                                                                              \
+                /* If MMIO, skip store (handled by MMIO handler) */           \
+                emit_load(state, S8, parameter_reg[0], temp_reg,              \
+                          offsetof(riscv_t, jit_mmu.is_mmio));                \
+                emit_cmp_imm32(state, temp_reg, 1);                           \
+                uint32_t jump_loc_0 = state->offset;                          \
+                emit_jcc_offset(state, JCC_JE);                               \
+                                                                              \
+                /* Load rs2 value BEFORE computing address to avoid register  \
+                 * allocation conflicts. ra_load could evict any allocated    \
+                 * register, so we load rs2 first, then use temp_reg for the  \
+                 * address (temp_reg is reserved and won't be evicted).       \
+                 */                                                           \
+                vm_reg[1] = ra_load(state, ir->rs2);                          \
+                emit_load(state, S32, parameter_reg[0], temp_reg,             \
+                          offsetof(riscv_t, jit_mmu.paddr));                  \
+                vm_reg[0] = map_vm_reg(state, rv_reg_zero);                   \
+                emit_load_imm_sext(state, vm_reg[0], (intptr_t) m->mem_base); \
+                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);           \
+                emit_store(state, size, vm_reg[1], temp_reg, 0);              \
+                emit_jump_target_offset(state, JUMP_LOC_0, state->offset);    \
+                /* Jump over trap exit to continue normally */                \
+                uint32_t jump_normal = state->offset;                         \
+                emit_jcc_offset(state, JCC_JMP);                              \
+                /* Trap exit point - exit JIT block for trap handling */      \
+                emit_jump_target_offset(state, JUMP_TRAP, state->offset);     \
+                emit_exit(state);                                             \
+                /* Normal continuation point */                               \
+                emit_jump_target_offset(state, JUMP_NORMAL, state->offset);   \
+                reset_reg();                                                  \
+            },                                                                \
+            {                                                                 \
+                emit_load_imm_sext(state, temp_reg,                           \
+                                   (intptr_t) (m->mem_base + ir->imm));       \
+                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);           \
+                vm_reg[1] = ra_load(state, ir->rs2);                          \
+                emit_store(state, size, vm_reg[1], temp_reg, 0);              \
+            })                                                                \
     })
 
 GEN(nop, {})

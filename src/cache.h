@@ -68,6 +68,7 @@ void clear_cache_hot(const struct cache *cache, clear_func_t func);
 uint32_t cache_freq(const struct cache *cache, uint32_t key);
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+
 /**
  * cache_invalidate_satp - invalidate all blocks matching the given SATP
  * @cache: a pointer to target cache
@@ -88,6 +89,19 @@ uint32_t cache_invalidate_satp(struct cache *cache, uint32_t satp);
  *
  * This is used by SFENCE.VMA with rs1!=0 (address-specific flush) to
  * invalidate JIT-compiled blocks in a specific virtual page.
+ * Uses O(1) page-indexed lookup when BLOCK_CHAINING is enabled,
+ * otherwise falls back to O(n) scan.
  */
 uint32_t cache_invalidate_va(struct cache *cache, uint32_t va, uint32_t satp);
-#endif
+
+#if RV32_HAS(BLOCK_CHAINING)
+/* Page index for O(1) cache invalidation by virtual address.
+ * With page-bounded blocks, each block fits entirely within one 4KB page,
+ * allowing direct lookup by page address instead of O(n) scan.
+ * Requires BLOCK_CHAINING for page-terminated blocks (see emulate.c).
+ */
+#define PAGE_INDEX_BITS 10
+#define PAGE_INDEX_SIZE (1 << PAGE_INDEX_BITS)
+#endif /* RV32_HAS(BLOCK_CHAINING) */
+
+#endif /* RV32_HAS(JIT) && RV32_HAS(SYSTEM) */

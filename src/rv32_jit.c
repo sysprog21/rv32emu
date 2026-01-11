@@ -236,6 +236,10 @@
                 emit_load_imm(state, temp_reg, insn_type);                    \
                 emit_store(state, S32, temp_reg, parameter_reg[0],            \
                            offsetof(riscv_t, jit_mmu.type));                  \
+                /* Store instruction PC for trap return address */            \
+                emit_load_imm(state, temp_reg, ir->pc);                       \
+                emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                           offsetof(riscv_t, jit_mmu.pc));                    \
                                                                               \
                 store_back(state);                                            \
                 emit_jit_mmu_handler(state, ir->rd);                          \
@@ -268,8 +272,14 @@
                 emit_alu64(state, ALU_OP_ADD, temp_reg, vm_reg[1]);           \
                 load_fn(state, size, vm_reg[1], vm_reg[1], 0);                \
                 emit_jump_target_offset(state, JUMP_LOC_1, state->offset);    \
-                /* Trap exit point */                                         \
+                /* Jump over trap exit to continue normally */                \
+                uint32_t jump_normal = state->offset;                         \
+                emit_jcc_offset(state, JCC_JMP);                              \
+                /* Trap exit point - exit JIT block for trap handling */      \
                 emit_jump_target_offset(state, jump_trap, state->offset);     \
+                emit_exit(state);                                             \
+                /* Normal continuation point */                               \
+                emit_jump_target_offset(state, jump_normal, state->offset);   \
             },                                                                \
             {                                                                 \
                 emit_load_imm_sext(state, temp_reg,                           \
@@ -299,6 +309,10 @@
                 emit_load_imm(state, temp_reg, insn_type);                    \
                 emit_store(state, S32, temp_reg, parameter_reg[0],            \
                            offsetof(riscv_t, jit_mmu.type));                  \
+                /* Store instruction PC for trap return address */            \
+                emit_load_imm(state, temp_reg, ir->pc);                       \
+                emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                           offsetof(riscv_t, jit_mmu.pc));                    \
                 store_back(state);                                            \
                 emit_jit_mmu_handler(state, ir->rs2);                         \
                 reset_reg();                                                  \
@@ -317,16 +331,27 @@
                 uint32_t jump_loc_0 = state->offset;                          \
                 emit_jcc_offset(state, JCC_JE);                               \
                                                                               \
+                /* Load rs2 value BEFORE computing address to avoid register  \
+                 * allocation conflicts. ra_load could evict any allocated    \
+                 * register, so we load rs2 first, then use temp_reg for the  \
+                 * address (temp_reg is reserved and won't be evicted).       \
+                 */                                                           \
+                vm_reg[1] = ra_load(state, ir->rs2);                          \
                 emit_load(state, S32, parameter_reg[0], temp_reg,             \
                           offsetof(riscv_t, jit_mmu.paddr));                  \
                 vm_reg[0] = map_vm_reg(state, rv_reg_zero);                   \
                 emit_load_imm_sext(state, vm_reg[0], (intptr_t) m->mem_base); \
-                emit_alu64(state, ALU_OP_ADD, temp_reg, vm_reg[0]);           \
-                vm_reg[1] = ra_load(state, ir->rs2);                          \
-                emit_store(state, size, vm_reg[1], vm_reg[0], 0);             \
+                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);           \
+                emit_store(state, size, vm_reg[1], temp_reg, 0);              \
                 emit_jump_target_offset(state, JUMP_LOC_0, state->offset);    \
-                /* Trap exit point */                                         \
+                /* Jump over trap exit to continue normally */                \
+                uint32_t jump_normal = state->offset;                         \
+                emit_jcc_offset(state, JCC_JMP);                              \
+                /* Trap exit point - exit JIT block for trap handling */      \
                 emit_jump_target_offset(state, jump_trap, state->offset);     \
+                emit_exit(state);                                             \
+                /* Normal continuation point */                               \
+                emit_jump_target_offset(state, jump_normal, state->offset);   \
                 reset_reg();                                                  \
             },                                                                \
             {                                                                 \

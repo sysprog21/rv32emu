@@ -714,6 +714,7 @@ static inline void emit_alu32(struct jit_state *state, int op, int src, int dst)
         __UNREACHABLE;
         break;
     }
+    set_dirty(dst, true);
 #endif
 }
 
@@ -749,6 +750,7 @@ static inline void emit_alu32_imm32(struct jit_state *state,
         __UNREACHABLE;
         break;
     }
+    set_dirty(dst, true);
 #endif
 }
 
@@ -780,6 +782,7 @@ static inline void emit_alu32_imm8(struct jit_state *state,
         __UNREACHABLE;
         break;
     }
+    set_dirty(dst, true);
 #endif
 }
 
@@ -1583,6 +1586,15 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
         __UNREACHABLE;
     }
 
+    /* CRITICAL: Set rv->PC to the faulting instruction's PC BEFORE calling
+     * mem_translate. This is necessary because if a page fault occurs,
+     * on_trap is called from inside mem_translate (via
+     * SET_CAUSE_AND_TVAL_THEN_TRAP) and the trap handler uses rv->PC to set
+     * sepc/mepc (the return address). Without this, the kernel would resume at
+     * the wrong instruction after sret.
+     */
+    rv->PC = rv->jit_mmu.pc;
+
     if (rv->jit_mmu.type == rv_insn_lb || rv->jit_mmu.type == rv_insn_lh ||
         rv->jit_mmu.type == rv_insn_lbu || rv->jit_mmu.type == rv_insn_lhu ||
         rv->jit_mmu.type == rv_insn_lw)
@@ -1794,6 +1806,15 @@ static inline void save_reg(struct jit_state *state, int idx)
 
     if (!register_map[idx].dirty)
         return;
+
+    /* Never save x0 - it's hardwired to zero. This allows using rv_reg_zero
+     * as a scratch register for temporary calculations without corrupting
+     * the zero register.
+     */
+    if (register_map[idx].vm_reg_idx == 0) {
+        register_map[idx].dirty = 0;
+        return;
+    }
 
     emit_store(state, S32, register_map[idx].reg_idx, parameter_reg[0],
                offsetof(riscv_t, X) + 4 * register_map[idx].vm_reg_idx);
@@ -2498,6 +2519,12 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     memory_t *m = PRIV(rv)->mem;
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
 #if RV32_HAS(SYSTEM_MMIO)
+    /* Write LUI result to rd - required when rd != LW destination.
+     * LUI completes before LW, so this write happens even if LW faults.
+     */
+    vm_reg[0] = map_vm_reg(state, ir->rd);
+    emit_load_imm(state, vm_reg[0], ir->imm);
+
     /* Store virtual address and type for MMU translation */
     emit_load_imm(state, temp_reg, addr);
     emit_store(state, S32, temp_reg, parameter_reg[0],
@@ -2505,6 +2532,10 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     emit_load_imm(state, temp_reg, rv_insn_lw);
     emit_store(state, S32, temp_reg, parameter_reg[0],
                offsetof(riscv_t, jit_mmu.type));
+    /* Store instruction PC for trap return address */
+    emit_load_imm(state, temp_reg, ir->pc);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.pc));
 
     store_back(state);
     emit_jit_mmu_handler(state, ir->rs2);
@@ -2533,22 +2564,32 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     uint32_t jump_loc_1 = state->offset;
     emit_jcc_offset(state, JCC_JMP);
 
-    /* RAM path: load from mem_base + paddr */
+    /* RAM path: load from mem_base + paddr.
+     * Reuse vm_reg[0] (already mapped to ir->rs2) for address calculation,
+     * then load into the same register - matches GEN_LOAD pattern.
+     */
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
     emit_load(state, S32, parameter_reg[0], temp_reg,
               offsetof(riscv_t, jit_mmu.paddr));
     emit_load_imm_sext(state, vm_reg[0], (intptr_t) m->mem_base);
     emit_alu64(state, ALU_OP_ADD, temp_reg, vm_reg[0]);
-    vm_reg[1] = map_vm_reg(state, ir->rs2);
-    emit_load(state, S32, vm_reg[0], vm_reg[1], 0);
+    emit_load(state, S32, vm_reg[0], vm_reg[0], 0);
     emit_jump_target_offset(state, JUMP_LOC_1, state->offset);
-
-    /* Trap exit point */
+    /* Jump over trap exit to continue normally */
+    uint32_t jump_normal = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    /* Trap exit point - exit JIT block for trap handling */
     emit_jump_target_offset(state, jump_trap, state->offset);
+    emit_exit(state);
+    /* Normal continuation point */
+    emit_jump_target_offset(state, jump_normal, state->offset);
 #else
+    /* Write LUI result to rd - required when rd != LW destination */
+    vm_reg[0] = map_vm_reg(state, ir->rd);
+    emit_load_imm(state, vm_reg[0], ir->imm);
     emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + addr));
-    vm_reg[0] = map_vm_reg(state, ir->rs2);
-    emit_load(state, S32, temp_reg, vm_reg[0], 0);
+    vm_reg[1] = map_vm_reg(state, ir->rs2);
+    emit_load(state, S32, temp_reg, vm_reg[1], 0);
 #endif
 }
 
@@ -2561,6 +2602,13 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     memory_t *m = PRIV(rv)->mem;
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
 #if RV32_HAS(SYSTEM_MMIO)
+    /* Write LUI result to rd - SW doesn't write registers, so rd may be
+     * used later. LUI completes before SW, so this write happens even if
+     * SW faults.
+     */
+    vm_reg[0] = map_vm_reg(state, ir->rd);
+    emit_load_imm(state, vm_reg[0], ir->imm);
+
     /* Store virtual address and type for MMU translation */
     emit_load_imm(state, temp_reg, addr);
     emit_store(state, S32, temp_reg, parameter_reg[0],
@@ -2568,6 +2616,10 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     emit_load_imm(state, temp_reg, rv_insn_sw);
     emit_store(state, S32, temp_reg, parameter_reg[0],
                offsetof(riscv_t, jit_mmu.type));
+    /* Store instruction PC for trap return address */
+    emit_load_imm(state, temp_reg, ir->pc);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.pc));
     store_back(state);
     emit_jit_mmu_handler(state, ir->rs1);
     reset_reg();
@@ -2595,14 +2647,22 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     vm_reg[1] = ra_load(state, ir->rs1);
     emit_store(state, S32, vm_reg[1], temp_reg, 0);
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
-
-    /* Trap exit point */
+    /* Jump over trap exit to continue normally */
+    uint32_t jump_normal = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    /* Trap exit point - exit JIT block for trap handling */
     emit_jump_target_offset(state, jump_trap, state->offset);
+    emit_exit(state);
+    /* Normal continuation point */
+    emit_jump_target_offset(state, jump_normal, state->offset);
     reset_reg();
 #else
-    vm_reg[0] = ra_load(state, ir->rs1);
+    /* Write LUI result to rd - SW doesn't write registers, so rd may be used */
+    vm_reg[0] = map_vm_reg(state, ir->rd);
+    emit_load_imm(state, vm_reg[0], ir->imm);
+    vm_reg[1] = ra_load(state, ir->rs1);
     emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + addr));
-    emit_store(state, S32, vm_reg[0], temp_reg, 0);
+    emit_store(state, S32, vm_reg[1], temp_reg, 0);
 #endif
 }
 
@@ -2624,6 +2684,10 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     emit_load_imm(state, temp_reg, rv_insn_lw);
     emit_store(state, S32, temp_reg, parameter_reg[0],
                offsetof(riscv_t, jit_mmu.type));
+    /* Store instruction PC for trap return address */
+    emit_load_imm(state, temp_reg, ir->pc);
+    emit_store(state, S32, temp_reg, parameter_reg[0],
+               offsetof(riscv_t, jit_mmu.pc));
 
     store_back(state);
     emit_jit_mmu_handler(state, ir->rd);
@@ -2653,22 +2717,32 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     uint32_t jump_loc_1 = state->offset;
     emit_jcc_offset(state, JCC_JMP);
 
-    /* RAM path: load from mem_base + paddr */
+    /* RAM path: load from mem_base + paddr.
+     * Reuse vm_reg[0] (already mapped to ir->rd) for address calculation,
+     * then load into the same register - matches GEN_LOAD pattern.
+     */
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
     emit_load(state, S32, parameter_reg[0], temp_reg,
               offsetof(riscv_t, jit_mmu.paddr));
     emit_load_imm_sext(state, vm_reg[0], (intptr_t) m->mem_base);
     emit_alu64(state, ALU_OP_ADD, temp_reg, vm_reg[0]);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
-    emit_load(state, S32, vm_reg[0], vm_reg[1], 0);
+    emit_load(state, S32, vm_reg[0], vm_reg[0], 0);
     emit_jump_target_offset(state, JUMP_LOC_1, state->offset);
 
-    /* Post-increment rs1 by imm2 (only executed if no trap) */
-    vm_reg[0] = map_vm_reg(state, ir->rs1);
+    /* Post-increment rs1 by imm2 (only executed if no trap).
+     * Must use ra_load to load rs1's value from memory since reset_reg() was
+     * called after store_back(). Without loading, we'd increment garbage.
+     */
+    vm_reg[0] = ra_load(state, ir->rs1);
     emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
-
-    /* Trap exit point - skips load and post-increment */
+    /* Jump over trap exit to continue normally */
+    uint32_t jump_normal = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    /* Trap exit point - exit JIT block for trap handling */
     emit_jump_target_offset(state, jump_trap, state->offset);
+    emit_exit(state);
+    /* Normal continuation point */
+    emit_jump_target_offset(state, jump_normal, state->offset);
 #else
     vm_reg[0] = ra_load(state, ir->rs1);
     /* Compute address: mem_base + rs1 + imm */
@@ -2680,6 +2754,7 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     /* Increment rs1 by imm2 */
     vm_reg[0] = map_vm_reg(state, ir->rs1);
     emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
+    set_dirty(vm_reg[0], true); /* Mark rs1 dirty so it's saved to memory */
 #endif
 }
 

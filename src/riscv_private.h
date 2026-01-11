@@ -216,6 +216,7 @@ struct riscv_internal {
         uint32_t type;   /* instruction type for MMIO handler */
         uint32_t vaddr;
         uint32_t paddr;
+        uint32_t pc; /* PC of the instruction (for trap return address) */
     } jit_mmu;
 #endif
     /* user provided data */

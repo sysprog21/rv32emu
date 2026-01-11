@@ -1485,6 +1485,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
                  */
+                /* LUI + LW fusion (fuse9) */
                 if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
                     ir->imm2 = next_ir->imm; /* lw offset */
                     ir->rs2 = next_ir->rd;   /* lw destination */
@@ -1506,6 +1507,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
                  */
+                /* LUI + SW fusion (fuse10) */
                 if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
                     ir->imm2 = next_ir->imm; /* sw offset */
                     ir->rs1 = next_ir->rs2;  /* sw source (data to store) */
@@ -1570,6 +1572,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
              * In SYSTEM mode, JIT uses MMU handler for address translation.
              */
             next_ir = ir->next;
+            /* fuse11: LW + ADDI post-increment fusion */
             if (next_ir && IF_insn(next_ir, addi) && ir->rs1 == next_ir->rs1 &&
                 next_ir->rs1 == next_ir->rd && ir->rd != ir->rs1) {
                 /* Pattern: lw rd, imm(rs1); addi rs1, rs1, step
@@ -2177,6 +2180,14 @@ void rv_step(void *arg)
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
             rv->csr_cycle += block->cycle_cost;
+#if RV32_HAS(SYSTEM)
+            /* Handle trap if one occurred during JIT block execution */
+            if (rv->is_trapped) {
+                trap_handler(rv);
+                prev = NULL;
+                continue;
+            }
+#endif
             prev = NULL;
             continue;
         } /* check if the execution path is potential hotspot */
@@ -2193,6 +2204,14 @@ void rv_step(void *arg)
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
             rv->csr_cycle += block->cycle_cost;
+#if RV32_HAS(SYSTEM)
+            /* Handle trap if one occurred during JIT block execution */
+            if (rv->is_trapped) {
+                trap_handler(rv);
+                prev = NULL;
+                continue;
+            }
+#endif
             prev = NULL;
             continue;
         }

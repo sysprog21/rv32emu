@@ -1504,11 +1504,14 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  * Common pattern for absolute/PC-relative stores.
                  * The lui result is used as base address for sw.
                  * Skip if rd == x0: LUI x0 produces 0, not imm << 12.
+                 * Skip if rd == rs2: JIT uses rd as scratch for address
+                 * calculation, which would overwrite the value to store.
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
                  */
                 /* LUI + SW fusion (fuse10) */
-                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
+                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1 &&
+                    ir->rd != next_ir->rs2) {
                     ir->imm2 = next_ir->imm; /* sw offset */
                     ir->rs1 = next_ir->rs2;  /* sw source (data to store) */
                     ir->opcode = rv_insn_fuse10;

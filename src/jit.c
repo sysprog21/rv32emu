@@ -2648,14 +2648,18 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     uint32_t jump_loc_0 = state->offset;
     emit_jcc_offset(state, JCC_JE);
 
-    /* RAM path: store to mem_base + paddr */
-    vm_reg[0] = map_vm_reg(state, rv_reg_zero); /* Allocate scratch for paddr */
-    emit_load(state, S32, parameter_reg[0], vm_reg[0],
+    /* RAM path: store to mem_base + paddr.
+     * SW doesn't write registers, so rd can be used as scratch.
+     * Note: Cannot use rv_reg_zero as scratch because emit_load has special
+     * handling that returns 0 for any load targeting a register mapped to x0.
+     */
+    emit_load(state, S32, parameter_reg[0], temp_reg,
               offsetof(riscv_t, jit_mmu.paddr));
-    emit_load_imm_sext(state, temp_reg, (intptr_t) m->mem_base);
-    emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);
+    vm_reg[0] = map_vm_reg(state, ir->rd);
+    emit_load_imm_sext(state, vm_reg[0], (intptr_t) m->mem_base);
+    emit_alu64(state, ALU_OP_ADD, temp_reg, vm_reg[0]);
     vm_reg[1] = ra_load(state, ir->rs1);
-    emit_store(state, S32, vm_reg[1], temp_reg, 0);
+    emit_store(state, S32, vm_reg[1], vm_reg[0], 0);
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
     /* Jump over trap exit to continue normally */
     uint32_t jump_normal = state->offset;

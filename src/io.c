@@ -11,6 +11,7 @@
 #include <string.h>
 
 #if HAVE_MMAP
+#include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <sys/mman.h>
@@ -94,7 +95,7 @@ static bool is_region_zero(const uint8_t *ptr, size_t size)
  * - Bitmap operations are on static memory with no locks
  * - No heap allocation or stdio calls in the handler
  */
-static void memory_fault_handler(int sig, siginfo_t *si, void *context)
+static void memory_fault_handler(int sig, siginfo_t *si, void *context UNUSED)
 {
     uintptr_t fault_addr = (uintptr_t) si->si_addr;
     uintptr_t base = (uintptr_t) data_memory_base;
@@ -116,10 +117,8 @@ static void memory_fault_handler(int sig, siginfo_t *si, void *context)
         }
 
         /* Activate the chunk with read/write permissions */
-        int result =
-            mprotect((void *) chunk_start, chunk_len, PROT_READ | PROT_WRITE);
-
-        if (result == 0) {
+        if (mprotect((void *) chunk_start, chunk_len, PROT_READ | PROT_WRITE) ==
+            0) {
             /* Only count if not already active (handles re-fault edge cases) */
             if (!bitmap_test(chunk_idx)) {
                 bitmap_set(chunk_idx);

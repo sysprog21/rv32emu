@@ -591,6 +591,14 @@ riscv_io_t mmu_io = {
     /* VA2PA handler */
     .mem_translate = mmu_translate,
 
+    /* MMU memory access functions for T2C runtime binding */
+    .mmu_read_w = mmu_read_w,
+    .mmu_read_s = mmu_read_s,
+    .mmu_read_b = mmu_read_b,
+    .mmu_write_w = mmu_write_w,
+    .mmu_write_s = mmu_write_s,
+    .mmu_write_b = mmu_write_b,
+
     /* system services or essential routines */
     .on_ecall = ecall_handler,
     .on_ebreak = ebreak_handler,

@@ -466,6 +466,12 @@ void cache_profile(const struct cache *cache,
     }
 }
 
+/* Disable UBSAN function pointer type check for indirect calls. When T2C is
+ * enabled, t2c_dispose_block_engine is compiled with LLVM's cflags which can
+ * cause function type metadata mismatch, triggering false positive UBSAN
+ * errors when called via clear_func_t.
+ */
+DISABLE_UBSAN_FUNC
 void clear_cache_hot(const struct cache *cache, clear_func_t func)
 {
     assert(cache);
@@ -553,6 +559,13 @@ uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
         block_t *block = (block_t *) entry->value;
         if (block && block->satp == satp && !block->invalidated) {
             block->invalidated = true;
+#if RV32_HAS(T2C)
+            /* Reset hot2 to prevent T2C execution of invalidated blocks.
+             * This ensures the T2C execution path in rv_step() will skip this
+             * block and fall through to re-translation.
+             */
+            ATOMIC_STORE(&block->hot2, false, ATOMIC_RELEASE);
+#endif
             count++;
         }
     }
@@ -585,6 +598,11 @@ uint32_t cache_invalidate_va(cache_t *cache, uint32_t va, uint32_t satp)
                 uint32_t block_page = block->pc_start & ~(RV_PG_SIZE - 1);
                 if (block_page == va_page) {
                     block->invalidated = true;
+#if RV32_HAS(T2C)
+                    /* Reset hot2 to prevent T2C execution of invalidated blocks
+                     */
+                    ATOMIC_STORE(&block->hot2, false, ATOMIC_RELEASE);
+#endif
                     count++;
                 }
             }
@@ -606,12 +624,29 @@ uint32_t cache_invalidate_va(cache_t *cache, uint32_t va, uint32_t satp)
 #endif
     {
         block_t *block = (block_t *) entry->value;
-        if (block && block->satp == satp && !block->invalidated) {
-            uint32_t block_page = block->pc_start & ~(RV_PG_SIZE - 1);
-            if (block_page == va_page) {
-                block->invalidated = true;
-                count++;
-            }
+        if (!block || block->satp != satp || block->invalidated)
+            continue;
+
+        /* Check if target VA page overlaps with block's address range.
+         * A block may span multiple pages, so we check if va_page falls
+         * within [block_start_page, block_end_page].
+         *
+         * Note: pc_end is exclusive (address after last instruction), so we
+         * use (pc_end - 1) to get the page containing the last byte. This
+         * avoids false invalidation when pc_end falls exactly on a page
+         * boundary.
+         */
+        uint32_t block_start_page = block->pc_start & ~(RV_PG_SIZE - 1);
+        uint32_t last_byte = block->pc_end > block->pc_start ? block->pc_end - 1
+                                                             : block->pc_start;
+        uint32_t block_end_page = last_byte & ~(RV_PG_SIZE - 1);
+        if (va_page >= block_start_page && va_page <= block_end_page) {
+            block->invalidated = true;
+#if RV32_HAS(T2C)
+            /* Reset hot2 to prevent T2C execution of invalidated blocks */
+            ATOMIC_STORE(&block->hot2, false, ATOMIC_RELEASE);
+#endif
+            count++;
         }
     }
 

@@ -131,11 +131,16 @@ typedef struct block {
                        */
 #endif
 #if RV32_HAS(T2C)
-    bool compiled; /**< The T2C request is enqueued or not */
+    bool compiled;     /**< The T2C request is enqueued or not */
+    bool is_compiling; /**< T2C thread is currently processing this block */
+    bool should_free;  /**< Block was evicted while compiling, freed by T2C */
 #endif
     uint32_t offset;   /**< The machine code offset in T1 code cache */
     uint32_t n_invoke; /**< The invoking times of T1 machine code */
     void *func;        /**< The function pointer of T2 machine code */
+#if RV32_HAS(T2C)
+    void *llvm_engine; /**< LLVM execution engine (keeps func memory alive) */
+#endif
     struct list_head list;
 #endif
 } block_t;

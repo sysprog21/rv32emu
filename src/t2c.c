@@ -12,6 +12,7 @@
 #include <stdlib.h>
 
 #include "jit.h"
+#include "mpool.h"
 #include "riscv_private.h"
 
 #define MAX_BLOCKS 8152
@@ -49,20 +50,33 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
     return NULL;
 }
 
+/* T2C_OP generates code for each RISC-V instruction with batched cycle updates.
+ *
+ * Cycle optimization: Instead of updating rv->csr_cycle per instruction, we
+ * increment a local counter (alloca) and store to csr_cycle only at block
+ * exits. This reduces memory traffic significantly - LLVM's mem2reg pass
+ * promotes the alloca to a register, making per-instruction increments free.
+ *
+ * The insn_counter parameter is an alloca created at function entry in
+ * t2c_compile(). Before any LLVMBuildRetVoid(), T2C_STORE_TIMER must be called
+ * to flush the accumulated count to rv->csr_cycle.
+ */
 #define T2C_OP(inst, code)                                                     \
     static void t2c_##inst(                                                    \
         LLVMBuilderRef *builder UNUSED, LLVMTypeRef *param_types UNUSED,       \
         LLVMValueRef start UNUSED, LLVMBasicBlockRef *entry UNUSED,            \
         LLVMBuilderRef *taken_builder UNUSED,                                  \
         LLVMBuilderRef *untaken_builder UNUSED, riscv_t *rv UNUSED,            \
-        uint64_t mem_base UNUSED, block_t *block UNUSED, rv_insn_t *ir UNUSED) \
+        uint64_t mem_base UNUSED, block_t *block UNUSED, rv_insn_t *ir UNUSED, \
+        LLVMValueRef insn_counter UNUSED)                                      \
     {                                                                          \
-        LLVMValueRef timer_ptr = t2c_gen_timer_addr(start, builder, ir);       \
-        LLVMValueRef timer =                                                   \
-            LLVMBuildLoad2(*builder, LLVMInt64Type(), timer_ptr, "");          \
-        timer = LLVMBuildAdd(*builder, timer,                                  \
-                             LLVMConstInt(LLVMInt64Type(), 1, false), "");     \
-        LLVMBuildStore(*builder, timer, timer_ptr);                            \
+        /* Increment local instruction counter (promoted to register by LLVM)  \
+         */                                                                    \
+        LLVMValueRef cnt =                                                     \
+            LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");       \
+        cnt = LLVMBuildAdd(*builder, cnt,                                      \
+                           LLVMConstInt(LLVMInt64Type(), 1, false), "");       \
+        LLVMBuildStore(*builder, cnt, insn_counter);                           \
         code;                                                                  \
     }
 
@@ -85,7 +99,7 @@ T2C_LLVM_GEN_ADDR(ra, X, rv_reg_ra);
 T2C_LLVM_GEN_ADDR(sp, X, rv_reg_sp);
 #endif
 T2C_LLVM_GEN_ADDR(PC, PC, 0);
-T2C_LLVM_GEN_ADDR(timer, timer, 0);
+T2C_LLVM_GEN_ADDR(csr_cycle, csr_cycle, 0);
 
 #define T2C_LLVM_GEN_STORE_IMM32(builder, val, addr) \
     LLVMBuildStore(builder, LLVMConstInt(LLVMInt32Type(), val, true), addr)
@@ -108,10 +122,33 @@ T2C_LLVM_GEN_ADDR(timer, timer, 0);
         LLVMBuildICmp(*builder, LLVMInt##cond, rs1, \
                       LLVMConstInt(LLVMInt32Type(), imm, false), "")
 
-FORCE_INLINE LLVMValueRef t2c_gen_mem_loc(LLVMValueRef start,
-                                          LLVMBuilderRef *builder,
-                                          UNUSED rv_insn_t *ir,
-                                          uint64_t mem_base)
+/* Store accumulated instruction count to rv->csr_cycle before block exit.
+ * Called before every LLVMBuildRetVoid() to flush the counter.
+ * The insn_counter is an alloca that LLVM's mem2reg promotes to a register.
+ *
+ * Uses atomic add (LLVMBuildAtomicRMW) for thread safety:
+ * - Prevents torn reads if debugger/monitor reads csr_cycle concurrently
+ * - Single atomic instruction vs non-atomic load-add-store sequence
+ * - Monotonic ordering sufficient (no synchronization with other memory ops)
+ *
+ * Using csr_cycle instead of timer ensures:
+ * - SYSTEM mode: timer interrupts work correctly (timer = csr_cycle + offset)
+ * - Non-SYSTEM mode: RDCYCLE instruction returns accurate counts
+ */
+#define T2C_STORE_TIMER(bldr, start_val, counter)                         \
+    do {                                                                  \
+        LLVMValueRef _cycle_ptr =                                         \
+            t2c_gen_csr_cycle_addr(start_val, &(bldr), NULL);             \
+        LLVMValueRef _cnt =                                               \
+            LLVMBuildLoad2(bldr, LLVMInt64Type(), counter, "");           \
+        LLVMBuildAtomicRMW(bldr, LLVMAtomicRMWBinOpAdd, _cycle_ptr, _cnt, \
+                           LLVMAtomicOrderingMonotonic, false);           \
+    } while (0)
+
+UNUSED FORCE_INLINE LLVMValueRef t2c_gen_mem_loc(LLVMValueRef start,
+                                                 LLVMBuilderRef *builder,
+                                                 UNUSED rv_insn_t *ir,
+                                                 uint64_t mem_base)
 {
     LLVMValueRef val_rs1 =
         LLVMBuildZExt(*builder,
@@ -191,7 +228,8 @@ typedef void (*t2c_codegen_block_func_t)(LLVMBuilderRef *builder UNUSED,
                                          riscv_t *rv UNUSED,
                                          uint64_t mem_base UNUSED,
                                          block_t *block UNUSED,
-                                         rv_insn_t *ir UNUSED);
+                                         rv_insn_t *ir UNUSED,
+                                         LLVMValueRef insn_counter UNUSED);
 
 static void t2c_trace_ebb(LLVMBuilderRef *builder,
                           LLVMTypeRef *param_types UNUSED,
@@ -200,7 +238,8 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                           riscv_t *rv,
                           block_t *block,
                           set_t *set,
-                          struct LLVM_block_map *map)
+                          struct LLVM_block_map *map,
+                          LLVMValueRef insn_counter)
 {
     rv_insn_t *ir = block->ir_head;
 
@@ -208,25 +247,40 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
         return;
     set_add(set, ir->pc);
     t2c_block_map_insert(map, entry, ir->pc);
-    LLVMBuilderRef tk, utk;
+    LLVMBuilderRef tk = NULL, utk = NULL;
+
+    /* Get mem_base once at the start, not on every instruction */
+    vm_attr_t *priv = PRIV(rv);
+    uint64_t mem_base = (uint64_t) ((memory_t *) priv->mem)->mem_base;
 
     while (1) {
         ((t2c_codegen_block_func_t) dispatch_table[ir->opcode])(
-            builder, param_types, start, entry, &tk, &utk, rv,
-            (uint64_t) ((memory_t *) PRIV(rv)->mem)->mem_base, block, ir);
+            builder, param_types, start, entry, &tk, &utk, rv, mem_base, block,
+            ir, insn_counter);
         if (!ir->next)
             break;
         ir = ir->next;
     }
 
     if (!t2c_insn_is_terminal(ir->opcode)) {
+        /* For non-branch instructions that have fall-through continuation,
+         * use the current builder since the instruction handler doesn't
+         * create a separate taken/untaken path.
+         * Branch instruction handlers (jal, beq, etc.) set tk/utk themselves,
+         * but non-branch instruction handlers (lw, sw, add, etc.) don't.
+         */
+        if (!tk && ir->branch_taken)
+            tk = *builder;
+        if (!utk && ir->branch_untaken)
+            utk = *builder;
+
         if (ir->branch_untaken) {
-            if (set_has(set, ir->branch_untaken->pc))
-                LLVMBuildBr(utk,
-                            t2c_block_map_search(map, ir->branch_untaken->pc));
-            else {
-                block_t *blk =
-                    cache_get(rv->block_cache, ir->branch_untaken->pc, false);
+            /* Cache untaken_pc to avoid race condition with main thread */
+            uint32_t untaken_pc = ir->branch_untaken->pc;
+            if (set_has(set, untaken_pc)) {
+                LLVMBuildBr(utk, t2c_block_map_search(map, untaken_pc));
+            } else {
+                block_t *blk = cache_get(rv->block_cache, untaken_pc, false);
                 if (blk && blk->translatable
 #if RV32_HAS(SYSTEM)
                     && blk->satp == block->satp
@@ -238,17 +292,21 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                     LLVMPositionBuilderAtEnd(untaken_builder, untaken_entry);
                     LLVMBuildBr(utk, untaken_entry);
                     t2c_trace_ebb(&untaken_builder, param_types, start,
-                                  &untaken_entry, rv, blk, set, map);
+                                  &untaken_entry, rv, blk, set, map,
+                                  insn_counter);
+                    LLVMDisposeBuilder(untaken_builder);
                 }
             }
         }
         if (ir->branch_taken) {
-            if (set_has(set, ir->branch_taken->pc))
-                LLVMBuildBr(tk,
-                            t2c_block_map_search(map, ir->branch_taken->pc));
-            else {
-                block_t *blk =
-                    cache_get(rv->block_cache, ir->branch_taken->pc, false);
+            uint32_t taken_pc = ir->branch_taken->pc;
+            if (set_has(set, taken_pc)) {
+                LLVMBuildBr(tk, t2c_block_map_search(map, taken_pc));
+            } else {
+                /* Use stored taken_pc instead of re-reading
+                 * ir->branch_taken->pc to avoid race condition with main thread
+                 */
+                block_t *blk = cache_get(rv->block_cache, taken_pc, false);
                 if (blk && blk->translatable
 #if RV32_HAS(SYSTEM)
                     && blk->satp == block->satp
@@ -260,18 +318,22 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                     LLVMPositionBuilderAtEnd(taken_builder, taken_entry);
                     LLVMBuildBr(tk, taken_entry);
                     t2c_trace_ebb(&taken_builder, param_types, start,
-                                  &taken_entry, rv, blk, set, map);
+                                  &taken_entry, rv, blk, set, map,
+                                  insn_counter);
+                    LLVMDisposeBuilder(taken_builder);
                 }
             }
         }
     }
 }
 
-void t2c_compile(riscv_t *rv, block_t *block)
+void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
 {
     /* Skip if already compiled (defensive check) */
-    if (ATOMIC_LOAD(&block->hot2, ATOMIC_ACQUIRE))
+    if (ATOMIC_LOAD(&block->hot2, ATOMIC_ACQUIRE)) {
+        pthread_mutex_unlock(cache_lock);
         return;
+    }
 
     LLVMModuleRef module = LLVMModuleCreateWithName("my_module");
     /* FIXME: riscv_t structure would change according to different
@@ -290,31 +352,72 @@ void t2c_compile(riscv_t *rv, block_t *block)
                                 LLVMInt32Type()};
     LLVMTypeRef struct_rv = LLVMStructType(rv_members, 4, false);
     LLVMTypeRef param_types[] = {LLVMPointerType(struct_rv, 0)};
-    LLVMValueRef start = LLVMAddFunction(
-        module, "start", LLVMFunctionType(LLVMVoidType(), param_types, 1, 0));
+    LLVMValueRef start =
+        LLVMAddFunction(module, "t2c_block",
+                        LLVMFunctionType(LLVMVoidType(), param_types, 1, 0));
 
-    LLVMTypeRef t2c_args[1] = {LLVMInt64Type()};
+    /* Function type for calling T2C blocks via jit_cache lookup.
+     * Must match the actual T2C block signature: void f(riscv_t *rv)
+     * Using pointer type (not i64) for correct cross-block calling. */
+    LLVMTypeRef t2c_args[1] = {LLVMPointerType(LLVMVoidType(), 0)};
     t2c_jit_cache_func_type =
         LLVMFunctionType(LLVMVoidType(), t2c_args, 1, false);
 
-    /* Notice to the alignment */
-    LLVMTypeRef jit_cache_memb[2] = {LLVMInt64Type(),
+    /* jit_cache struct: { uint32_t seq, [pad], uint64_t key, void *entry }
+     * C struct has 4 bytes padding after seq for 8-byte alignment of key.
+     * LLVM doesn't add this padding automatically, so we add explicit i32 pad.
+     * Field indices: 0=seq, 1=pad, 2=key, 3=entry */
+    LLVMTypeRef jit_cache_memb[4] = {LLVMInt32Type(), LLVMInt32Type(),
+                                     LLVMInt64Type(),
                                      LLVMPointerType(LLVMVoidType(), 0)};
-    t2c_jit_cache_struct_type = LLVMStructType(jit_cache_memb, 2, false);
+    t2c_jit_cache_struct_type = LLVMStructType(jit_cache_memb, 4, false);
 
     LLVMBasicBlockRef first_block = LLVMAppendBasicBlock(start, "first_block");
     LLVMBuilderRef first_builder = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(first_builder, first_block);
+
+    /* Create instruction counter alloca in entry block for mem2reg promotion.
+     * LLVM's mem2reg pass promotes allocas in the entry block to SSA registers,
+     * eliminating per-instruction memory traffic. The counter is initialized to
+     * 0 and incremented by each T2C_OP. Timer is updated only at block exits.
+     */
+    LLVMValueRef insn_counter =
+        LLVMBuildAlloca(first_builder, LLVMInt64Type(), "insn_counter");
+    LLVMBuildStore(first_builder, LLVMConstInt(LLVMInt64Type(), 0, false),
+                   insn_counter);
+
     LLVMBasicBlockRef entry = LLVMAppendBasicBlock(start, "entry");
     LLVMBuilderRef builder = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(builder, entry);
     LLVMBuildBr(first_builder, entry);
-    set_t set;
-    set_reset(&set);
+    /* Allocate set on HEAP to avoid stack overflow.
+     * set_t is 256KB (1024 * 32 * 8 bytes) in system mode - too large for
+     * stack.
+     */
+    set_t *set = malloc(sizeof(set_t));
+    if (!set) {
+        rv_log_error("Failed to allocate set for T2C compilation");
+        LLVMDisposeBuilder(first_builder);
+        LLVMDisposeBuilder(builder);
+        LLVMDisposeModule(module);
+        pthread_mutex_unlock(cache_lock);
+        return;
+    }
+    set_reset(set);
     struct LLVM_block_map map;
     map.count = 0;
-    /* Translate custon IR into LLVM IR */
-    t2c_trace_ebb(&builder, param_types, start, &entry, rv, block, &set, &map);
+    /* Translate custom IR into LLVM IR */
+    t2c_trace_ebb(&builder, param_types, start, &entry, rv, block, set, &map,
+                  insn_counter);
+
+    block->is_compiling = true; /* Mark block as busy to prevent eviction */
+
+    /* Release lock during expensive LLVM compilation.
+     * IR translation is complete; block fields are no longer accessed until
+     * we need to write results. SFENCE.VMA can now proceed with minimal delay.
+     */
+    pthread_mutex_unlock(cache_lock);
+
     /* Offload LLVM IR to LLVM backend */
     char *error = NULL, *triple = LLVMGetDefaultTargetTriple();
     LLVMExecutionEngineRef engine;
@@ -322,31 +425,128 @@ void t2c_compile(riscv_t *rv, block_t *block)
     LLVMLinkInMCJIT();
     LLVMInitializeNativeTarget();
     LLVMInitializeNativeAsmPrinter();
+#if defined(__aarch64__)
+    /* Initialize asm parser for inline assembly support in JIT.
+     * Required for ARM64 ISB instruction emission in t2c_jit_cache_helper.
+     */
+    LLVMInitializeNativeAsmParser();
+#endif
     if (LLVMGetTargetFromTriple(triple, &target, &error) != 0) {
         rv_log_fatal("Failed to create target");
         abort();
     }
+    /* Use PIC relocation mode for JIT code - helps with indirect calls.
+     * Use Large code model for 64-bit systems per LLVM MCJIT recommendations.
+     */
     LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
         target, triple, LLVMGetHostCPUName(), LLVMGetHostCPUFeatures(),
-        LLVMCodeGenLevelNone, LLVMRelocDefault, LLVMCodeModelJITDefault);
+        LLVMCodeGenLevelNone, LLVMRelocPIC, LLVMCodeModelLarge);
     LLVMPassBuilderOptionsRef pb_option = LLVMCreatePassBuilderOptions();
-    /* Run aggressive optimization level and some selected Passes */
-    LLVMRunPasses(module, "default<O3>,early-cse<memssa>,instcombine", tm,
-                  pb_option);
+    /* Run LLVM optimization passes on the generated IR.
+     *
+     * Current configuration uses O3 for maximum runtime performance. For system
+     * emulation where blocks may be invalidated frequently (e.g., SFENCE.VMA),
+     * a lighter pass pipeline (O1 or O2) could reduce compilation latency at
+     * the cost of slightly slower generated code.
+     *
+     * Optimization level impact:
+     *   O1: Fast compilation, basic optimizations (~50% faster compile time)
+     *   O2: Balanced compilation/runtime trade-off
+     *   O3: Aggressive optimizations, best runtime but slowest compile
+     *
+     * The O3 pipeline already includes early-cse, instcombine, and other
+     * standard optimizations. No need to append redundant passes.
+     *
+     * TODO: Consider making this configurable via runtime flag for system emu.
+     */
+    LLVMRunPasses(module, "default<O3>", tm, pb_option);
 
     if (LLVMCreateExecutionEngineForModule(&engine, module, &error) != 0) {
         rv_log_fatal("Failed to create execution engine");
         abort();
     }
 
-    /* Return the function pointer of T2C generated machine code */
-    block->func = (exec_t2c_func_t) LLVMGetPointerToGlobal(engine, start);
+    /* Get function pointer - store in local variable first.
+     * We'll write to block->func only under cache_lock to avoid data race
+     * with eviction path that reads block->func.
+     */
+    exec_t2c_func_t func =
+        (exec_t2c_func_t) LLVMGetPointerToGlobal(engine, start);
+
+    /* Cleanup LLVM resources - execution engine owns the module */
+    LLVMDisposeBuilder(first_builder);
+    LLVMDisposeBuilder(builder);
+    LLVMDisposePassBuilderOptions(pb_option);
+    LLVMDisposeTargetMachine(tm);
+    LLVMDisposeMessage(triple);
+
+    /* Reacquire lock to update shared state.
+     * All block field writes must happen under lock to avoid data races.
+     */
+    pthread_mutex_lock(cache_lock);
+
+    block->is_compiling = false;
+
+    /* Defensive check: if LLVM failed to generate code, don't mark as compiled.
+     * Must dispose the engine to prevent memory leak.
+     */
+    if (!func) {
+        /* Check if block was evicted - if so, free it and its IRs */
+        if (block->should_free) {
+            /* Free IRs that main thread skipped during deferred eviction */
+            for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
+                next_ir = ir->next;
+                if (ir->fuse)
+                    mpool_free(rv->fuse_mp, ir->fuse);
+                mpool_free(rv->block_ir_mp, ir);
+            }
+            mpool_free(rv->block_mp, block);
+        }
+        LLVMDisposeExecutionEngine(engine);
+        pthread_mutex_unlock(cache_lock);
+        free(set);
+        return;
+    }
+
+    /* Check if block was evicted while we were compiling.
+     * If so, we are responsible for freeing it.
+     */
+    if (block->should_free) {
+        /* Dispose engine (we own it) */
+        LLVMDisposeExecutionEngine(engine);
+        /* Free IRs that main thread skipped during deferred eviction */
+        for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
+            next_ir = ir->next;
+            if (ir->fuse)
+                mpool_free(rv->fuse_mp, ir->fuse);
+            mpool_free(rv->block_ir_mp, ir);
+        }
+        mpool_free(rv->block_mp, block);
+        pthread_mutex_unlock(cache_lock);
+        free(set);
+        return;
+    }
 
 #if RV32_HAS(SYSTEM)
     uint64_t key = (uint64_t) block->pc_start | ((uint64_t) block->satp << 32);
+
+    /* Check invalidated flag after reacquiring lock. If SFENCE.VMA ran while
+     * we were compiling, it set this flag and cleared jit_cache. We must not
+     * re-add a stale entry. Dispose engine to prevent leak.
+     */
+    if (block->invalidated) {
+        LLVMDisposeExecutionEngine(engine);
+        pthread_mutex_unlock(cache_lock);
+        free(set);
+        return;
+    }
 #else
     uint64_t key = (uint64_t) block->pc_start;
 #endif
+
+    /* Write to block fields under lock to avoid data race with eviction */
+    block->func = func;
+    block->llvm_engine = engine;
 
     jit_cache_update(rv->jit_cache, key, block->func);
 
@@ -355,6 +555,9 @@ void t2c_compile(riscv_t *rv, block_t *block)
      * Pairs with atomic load-acquire in rv_step().
      */
     ATOMIC_STORE(&block->hot2, true, ATOMIC_RELEASE);
+
+    pthread_mutex_unlock(cache_lock);
+    free(set);
 }
 
 struct jit_cache *jit_cache_init()
@@ -367,20 +570,112 @@ void jit_cache_exit(struct jit_cache *cache)
     free(cache);
 }
 
+/* Dispose LLVM execution engine when a T2C-compiled block is freed.
+ * The engine owns the memory where block->func points, so it must be
+ * disposed before the block is freed to prevent dangling pointers.
+ */
+void t2c_dispose_engine(void *engine)
+{
+    if (engine)
+        LLVMDisposeExecutionEngine((LLVMExecutionEngineRef) engine);
+}
+
+/* Wrapper for clear_cache_hot callback - disposes block's LLVM engine.
+ * Called during shutdown via clear_cache_hot to clean up all remaining blocks.
+ * Sets both llvm_engine and func to NULL to prevent use-after-free.
+ *
+ * DISABLE_UBSAN_FUNC: Disable UBSAN function pointer type check.
+ * LLVM's cflags can cause function type metadata mismatch between t2c.c
+ * and cache.c, triggering false positive when called via clear_func_t.
+ */
+DISABLE_UBSAN_FUNC
+void t2c_dispose_block_engine(void *block)
+{
+    block_t *blk = (block_t *) block;
+    if (blk && blk->llvm_engine) {
+        LLVMDisposeExecutionEngine((LLVMExecutionEngineRef) blk->llvm_engine);
+        blk->llvm_engine = NULL;
+        blk->func = NULL; /* func pointed into engine's memory */
+    }
+}
+
 void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry)
 {
-    uint32_t pos = key & (N_JIT_CACHE_ENTRIES - 1);
-
-    /* Write entry first, then key with release semantics.
-     * The atomic store-release ensures that when another thread sees the new
-     * key (via acquire load in LLVM-generated lookup), the corresponding
-     * entry is guaranteed to be visible.
+    /* XOR high 32 bits (satp) with low 32 bits (pc) before masking.
+     * This distributes entries from different address spaces across the table,
+     * reducing cache thrashing when multiple processes share virtual addresses.
      */
-    cache[pos].entry = entry;
+    uint32_t pos =
+        ((uint32_t) key ^ (uint32_t) (key >> 32)) & (N_JIT_CACHE_ENTRIES - 1);
+
+    /* Seqlock write pattern:
+     * 1. Increment seq to odd (signals write in progress)
+     * 2. Write entry and key (atomic relaxed to avoid data race with readers)
+     * 3. Increment seq to even (signals write complete)
+     * Release ordering on seq ensures readers see consistent state.
+     */
+    uint32_t seq = ATOMIC_LOAD(&cache[pos].seq, ATOMIC_RELAXED);
+    ATOMIC_STORE(&cache[pos].seq, seq + 1, ATOMIC_RELEASE); /* odd = writing */
+    ATOMIC_STORE(&cache[pos].entry, entry, ATOMIC_RELEASE);
     ATOMIC_STORE(&cache[pos].key, key, ATOMIC_RELEASE);
+    ATOMIC_STORE(&cache[pos].seq, seq + 2, ATOMIC_RELEASE); /* even = done */
 }
 
 void jit_cache_clear(struct jit_cache *cache)
 {
-    memset(cache, 0, N_JIT_CACHE_ENTRIES * sizeof(struct jit_cache));
+    /* Clear all entries using seqlock pattern for thread-safe invalidation. */
+    for (uint32_t i = 0; i < N_JIT_CACHE_ENTRIES; i++) {
+        uint32_t seq = ATOMIC_LOAD(&cache[i].seq, ATOMIC_RELAXED);
+        ATOMIC_STORE(&cache[i].seq, seq + 1,
+                     ATOMIC_RELEASE); /* odd = writing */
+        ATOMIC_STORE(&cache[i].entry, NULL, ATOMIC_RELEASE);
+        ATOMIC_STORE(&cache[i].key, 0, ATOMIC_RELEASE);
+        ATOMIC_STORE(&cache[i].seq, seq + 2, ATOMIC_RELEASE); /* even = done */
+    }
+}
+
+/* Selectively clear jit_cache entries for a specific VA page and SATP.
+ * This is more efficient than jit_cache_clear() for address-specific
+ * SFENCE.VMA operations, avoiding unnecessary invalidation of unrelated
+ * entries.
+ *
+ * Caller must hold cache_lock (rv->cache_lock) to synchronize with the T2C
+ * compilation thread. The T2C thread holds this lock when updating jit_cache
+ * entries via jit_cache_update(). Without this lock:
+ * 1. T2C thread could be writing an entry while we read/clear it
+ * 2. Race could cause partially-written keys to be matched incorrectly
+ * 3. Entry could be cleared right after T2C writes it, causing wasted work
+ *
+ * The seqlock pattern used here only protects the main thread's JIT cache
+ * lookups from seeing torn reads - it does not provide mutual exclusion for
+ * writers. The cache_lock provides that exclusion between the main thread
+ * (SFENCE.VMA) and T2C thread (block compilation).
+ */
+void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp)
+{
+    uint32_t va_page = va & ~(RV_PG_SIZE - 1);
+
+    for (uint32_t i = 0; i < N_JIT_CACHE_ENTRIES; i++) {
+        uint64_t key = ATOMIC_LOAD(&cache[i].key, ATOMIC_RELAXED);
+        if (!key)
+            continue;
+
+        uint32_t entry_pc = (uint32_t) key;
+        uint32_t entry_satp = (uint32_t) (key >> 32);
+
+        /* Match entries with same SATP and PC in the target page */
+        if (entry_satp == satp) {
+            uint32_t entry_page = entry_pc & ~(RV_PG_SIZE - 1);
+            if (entry_page == va_page) {
+                /* Clear using seqlock pattern */
+                uint32_t seq = ATOMIC_LOAD(&cache[i].seq, ATOMIC_RELAXED);
+                ATOMIC_STORE(&cache[i].seq, seq + 1,
+                             ATOMIC_RELEASE); /* odd = writing */
+                ATOMIC_STORE(&cache[i].entry, NULL, ATOMIC_RELEASE);
+                ATOMIC_STORE(&cache[i].key, 0, ATOMIC_RELEASE);
+                ATOMIC_STORE(&cache[i].seq, seq + 2,
+                             ATOMIC_RELEASE); /* even = done */
+            }
+        }
+    }
 }

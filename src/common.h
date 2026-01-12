@@ -207,6 +207,23 @@ static inline uint8_t ilog2(uint32_t x)
 #define PRESERVE_NONE
 #endif
 
+/* Disable UBSAN function pointer type checking.
+ * When LLVM-compiled code (T2C) is called via function pointers from
+ * non-LLVM code, UBSAN can emit false positives due to function type
+ * metadata mismatches. This attribute suppresses those checks.
+ *
+ * Note: GCC supports no_sanitize for some sanitizers but NOT for "function".
+ * Using __has_attribute(no_sanitize) would return true on GCC but applying
+ * no_sanitize("function") causes a warning/error. Therefore, we explicitly
+ * check for __clang__ only, which is the compiler that supports this variant.
+ */
+#if defined(__clang__) && defined(__has_attribute) && \
+    __has_attribute(no_sanitize)
+#define DISABLE_UBSAN_FUNC __attribute__((no_sanitize("function")))
+#else
+#define DISABLE_UBSAN_FUNC
+#endif
+
 /* Assume that all POSIX-compatible environments provide mmap system call.
  * Emscripten is excluded because it lacks signal-based demand paging support
  * and C11 atomics require special compilation flags not enabled by default.

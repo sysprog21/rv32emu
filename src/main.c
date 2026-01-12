@@ -297,6 +297,9 @@ int main(int argc, char **args)
         .profile_output_file = prof_out_file,
         .cycle_per_step = CYCLE_PER_STEP,
         .allow_misalign = opt_misaligned,
+        .fd_stdin = STDIN_FILENO,
+        .fd_stdout = STDOUT_FILENO,
+        .fd_stderr = STDERR_FILENO,
     };
 #if RV32_HAS(SYSTEM_MMIO)
     attr.data.system.kernel = opt_kernel_img;

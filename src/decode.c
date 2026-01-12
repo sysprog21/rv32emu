@@ -997,6 +997,7 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
     /* decode I-type */
     decode_itype(ir, insn);
 
+
     /* dispatch from funct3 field */
     switch (decode_funct3(insn)) {
     case 0:

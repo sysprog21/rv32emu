@@ -625,16 +625,38 @@ RVOP(sfencevma, {
         /* Global flush: invalidate all TLB entries */
         mmu_tlb_flush_all(rv);
 #if RV32_HAS(JIT)
+#if RV32_HAS(T2C)
+        /* Hold cache_lock during invalidation to prevent race with T2C
+         * compilation thread. This ensures the invalidated flag and hot2 reset
+         * are seen atomically by the T2C thread.
+         */
+        pthread_mutex_lock(&rv->cache_lock);
+#endif
         /* Invalidate JIT blocks with current SATP */
         cache_invalidate_satp(rv->block_cache, rv->csr_satp);
+#if RV32_HAS(T2C)
+        jit_cache_clear(rv->jit_cache);
+        pthread_mutex_unlock(&rv->cache_lock);
+#endif
 #endif
     } else {
         /* Selective flush: invalidate TLB entry for specific VA */
         uint32_t va = rv->X[ir->rs1];
         mmu_tlb_flush(rv, va);
 #if RV32_HAS(JIT)
+#if RV32_HAS(T2C)
+        /* Hold cache_lock during invalidation to prevent race with T2C
+         * compilation thread.
+         */
+        pthread_mutex_lock(&rv->cache_lock);
+#endif
         /* Invalidate JIT blocks in the target VA page */
         cache_invalidate_va(rv->block_cache, va, rv->csr_satp);
+#if RV32_HAS(T2C)
+        /* Selectively clear only jit_cache entries matching the VA page */
+        jit_cache_clear_page(rv->jit_cache, va, rv->csr_satp);
+        pthread_mutex_unlock(&rv->cache_lock);
+#endif
 #endif
     }
 #endif
@@ -642,9 +664,39 @@ RVOP(sfencevma, {
 })
 
 #if RV32_HAS(Zifencei) /* RV32 Zifencei Standard Extension */
+/* FENCE.I: Instruction fence for self-modifying code synchronization.
+ * Ensures that stores to instruction memory are visible to instruction fetches.
+ * Must invalidate all cached/JITed code since instruction stream may have
+ * changed.
+ *
+ * Unlike SFENCE.VMA which handles virtual memory changes, FENCE.I handles
+ * instruction cache coherence - required when code modifies itself or loads
+ * new code (e.g., dynamic linkers, JIT compilers running inside the guest).
+ */
 RVOP(fencei, {
     PC += 4;
-    /* FIXME: fill real implementations */
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(T2C)
+    /* Hold cache_lock during invalidation to prevent race with T2C
+     * compilation thread. Same locking protocol as SFENCE.VMA.
+     */
+    pthread_mutex_lock(&rv->cache_lock);
+#endif
+    /* Invalidate all JIT blocks for current address space.
+     * FENCE.I is a global instruction cache barrier - must clear all cached
+     * code since we don't know which addresses were modified.
+     * Uses same invalidation as global SFENCE.VMA (rs1=0).
+     */
+    cache_invalidate_satp(rv->block_cache, rv->csr_satp);
+#if RV32_HAS(T2C)
+    jit_cache_clear(rv->jit_cache);
+    pthread_mutex_unlock(&rv->cache_lock);
+#endif
+#endif
+    /* Note: In non-system JIT mode, self-modifying code is rare and blocks
+     * will be naturally evicted. Full cache invalidation is not implemented
+     * for this case as it would require additional infrastructure.
+     */
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;

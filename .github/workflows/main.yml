@@ -287,8 +287,8 @@ jobs:
     - name: undefined behavior test
       if: success() || failure()
       run: |
-            make cleanconfig && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
-            make cleanconfig && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+            make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+            make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
     - name: boot Linux kernel test
       if: success()
@@ -309,6 +309,20 @@ jobs:
             bash -c "${BOOT_LINUX_TEST}"
             make clean
 
+    - name: boot Linux kernel test (T2C)
+      if: success()
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+        BOOT_TIMEOUT: 150  # T2C LLVM compilation adds significant overhead
+      run: |
+            # Remove stale t2c.o before build to ensure fresh detection
+            rm -f build/t2c.o
+            make distclean && make system_jit_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
+            # Verify T2C is actually compiled (build/t2c.o only exists when LLVM 18 detection succeeds)
+            test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM 18 detection failed"; exit 1; }
+            bash -c "${BOOT_LINUX_TEST}"
+            make clean
+
     - name: Architecture test
       if: success()
       env:
@@ -322,7 +336,7 @@ jobs:
   host-arm64:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    timeout-minutes: 30
+    timeout-minutes: 45
     runs-on: ubuntu-24.04-arm
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -352,7 +366,7 @@ jobs:
             }
             # Install packages with retry for critical ones
             sudo apt-get install -q=2 -y make curl wget libsdl2-dev libsdl2-mixer-dev \
-                 lsb-release software-properties-common gnupg bc || {
+                 lsb-release software-properties-common gnupg bc device-tree-compiler expect p7zip-full e2fsprogs || {
               echo "WARNING: Some packages failed, retrying critical ones..."
               sudo apt-get install -q=2 -y --no-download make curl wget || true
             }
@@ -367,7 +381,16 @@ jobs:
       run: echo "/usr/lib/llvm-${LLVM_VERSION}/bin" >> $GITHUB_PATH
 
     - name: Set parallel jobs variable
-      run: echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
+      run: |
+            echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
+            echo "BOOT_LINUX_TEST=TMP_FILE=\$(mktemp \"$RUNNER_TEMP/tmpfile.XXXXXX\"); \
+                                  sudo env TMP_FILE=\${TMP_FILE} .ci/boot-linux-prepare.sh setup; \
+                                  . \${TMP_FILE}; \
+                                  .ci/boot-linux.sh; \
+                                  EXIT_CODE=\$?; \
+                                  sudo env TMP_FILE=\${TMP_FILE} BLK_DEV_EXT4=\${BLK_DEV_EXT4} \
+                                           BLK_DEV_SIMPLEFS=\${BLK_DEV_SIMPLEFS} .ci/boot-linux-prepare.sh cleanup; \
+                                  exit \${EXIT_CODE};" >> "$GITHUB_ENV"
 
     - name: Fetch artifacts
       env:
@@ -375,6 +398,8 @@ jobs:
       run: |
             . .ci/common.sh
             fetch_artifact ELF
+            fetch_artifact Linux-Image ENABLE_SYSTEM=1
+            rm -f build/.config  # Clean config after ENABLE_SYSTEM=1 to prevent contamination
 
     # FIXME: gcc build fails on AArch64/Linux hosts
     - name: check + tests
@@ -395,6 +420,20 @@ jobs:
               echo "JIT test with ${ext}=0"
               make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL
             done
+
+    - name: boot Linux kernel test (T2C)
+      if: success()
+      env:
+        CC: clang-${{ env.LLVM_VERSION }}
+        BOOT_TIMEOUT: 150  # T2C LLVM compilation adds significant overhead
+      run: |
+            # Remove stale t2c.o before build to ensure fresh detection
+            rm -f build/t2c.o
+            make distclean && make system_jit_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
+            # Verify T2C is actually compiled (build/t2c.o only exists when LLVM 18 detection succeeds)
+            test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM 18 detection failed"; exit 1; }
+            bash -c "${BOOT_LINUX_TEST}"
+            make clean
 
   macOS-arm64:
     needs: [detect-code-related-file-changes]
@@ -561,8 +600,8 @@ jobs:
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
        run: |
-             make cleanconfig && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
-             make cleanconfig && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+             make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+             make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
      - name: boot Linux kernel test
        if: success()

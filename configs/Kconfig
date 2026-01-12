@@ -248,9 +248,10 @@ config SYSTEM
 config GOLDFISH_RTC
     bool "Enable Goldfish RTC"
     default y
-    depends on SYSTEM
+    depends on SYSTEM && !ELF_LOADER
     help
       Enable Goldfish RTC peripheral when running the Linux system.
+      Only available in kernel boot mode (without ELF_LOADER).
 
 config ELF_LOADER
     bool "ELF Loader for System Mode"
@@ -258,7 +259,13 @@ config ELF_LOADER
     depends on SYSTEM
     help
       Use ELF loader in system mode instead of raw kernel image.
-      Required for running ELF executables in system mode tests.
+
+      This option changes the emulator's operating mode:
+      - Without ELF_LOADER: Kernel boot mode (-k/-i flags for kernel/initrd)
+      - With ELF_LOADER: User-mode ELF execution (runs ELF files directly)
+
+      Enable this for running 'make check' tests in system mode.
+      Disable this for booting Linux kernel images.
 
 endmenu
 

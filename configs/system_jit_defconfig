@@ -1,6 +1,8 @@
 # System emulation with tiered JIT compilation
 # Enables T2C (LLVM-based tier-2 JIT) for system mode
+# Uses O1 optimization for faster LLVM compilation (~50% faster than O3)
 CONFIG_SYSTEM=y
 CONFIG_GOLDFISH_RTC=y
 CONFIG_JIT=y
 CONFIG_T2C=y
+CONFIG_T2C_OPT_LEVEL=1

@@ -170,9 +170,11 @@ ifeq ($(CONFIG_JIT),y)
 $(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+# Pass T2C optimization level from Kconfig (0-3, default 3)
+T2C_OPT_LEVEL ?= $(if $(CONFIG_T2C_OPT_LEVEL),$(CONFIG_T2C_OPT_LEVEL),3)
 $(OUT)/t2c.o: src/t2c.c src/t2c_template.c $(CONFIG_HEADER)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) -DCONFIG_T2C_OPT_LEVEL=$(T2C_OPT_LEVEL) -c -MMD -MF $@.d $<
 else
     CFLAGS += -DRV32_FEATURE_T2C=0
 endif

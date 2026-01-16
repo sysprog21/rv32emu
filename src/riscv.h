@@ -133,49 +133,42 @@ enum SV32_PTE_PERM {
 #define MISA_C (1 << ('C' - 'A'))
 
 /*
- * The mstatus register keeps track of and controls the hart’s
- * current operating state
+ * The mstatus register keeps track of and controls the hart's current
+ * operating state. Using enum ensures true compile-time constants usable
+ * in switch cases, array sizes, and static assertions.
  */
-#define MSTATUS_SIE_SHIFT 1
-#define MSTATUS_MIE_SHIFT 3
-#define MSTATUS_SPIE_SHIFT 5
-#define MSTATUS_UBE_SHIFT 6
-#define MSTATUS_MPIE_SHIFT 7
-#define MSTATUS_SPP_SHIFT 8
-#define MSTATUS_MPP_SHIFT 11
-#define MSTATUS_MPRV_SHIFT 17
-#define MSTATUS_SUM_SHIFT 18
-#define MSTATUS_MXR_SHIFT 19
-#define MSTATUS_TVM_SHIFT 20
-#define MSTATUS_TW_SHIFT 21
-#define MSTATUS_TSR_SHIFT 22
-#define MSTATUS_SIE (1 << MSTATUS_SIE_SHIFT)
-#define MSTATUS_MIE (1 << MSTATUS_MIE_SHIFT)
-#define MSTATUS_SPIE (1 << MSTATUS_SPIE_SHIFT)
-#define MSTATUS_UBE (1 << MSTATUS_UBE_SHIFT)
-#define MSTATUS_MPIE (1 << MSTATUS_MPIE_SHIFT)
-#define MSTATUS_SPP (1 << MSTATUS_SPP_SHIFT)
-#define MSTATUS_MPP (3 << MSTATUS_MPP_SHIFT)
-#define MSTATUS_MPRV (1 << MSTATUS_MPRV_SHIFT)
-#define MSTATUS_SUM (1 << MSTATUS_SUM_SHIFT)
-#define MSTATUS_MXR (1 << MSTATUS_MXR_SHIFT)
-#define MSTATUS_TVM (1 << MSTATUS_TVM_SHIFT)
-#define MSTATUS_TW (1 << MSTATUS_TW_SHIFT)
-#define MSTATUS_TSR (1 << MSTATUS_TSR_SHIFT)
+/* clang-format off */
+enum {
+    /* mstatus fields: shift values and masks */
+    MSTATUS_SIE_SHIFT  = 1,  MSTATUS_SIE  = (1U << 1),
+    MSTATUS_MIE_SHIFT  = 3,  MSTATUS_MIE  = (1U << 3),
+    MSTATUS_SPIE_SHIFT = 5,  MSTATUS_SPIE = (1U << 5),
+    MSTATUS_UBE_SHIFT  = 6,  MSTATUS_UBE  = (1U << 6),
+    MSTATUS_MPIE_SHIFT = 7,  MSTATUS_MPIE = (1U << 7),
+    MSTATUS_SPP_SHIFT  = 8,  MSTATUS_SPP  = (1U << 8),
+    MSTATUS_MPP_SHIFT  = 11, MSTATUS_MPP  = (3U << 11),  /* 2-bit field */
+    MSTATUS_MPRV_SHIFT = 17, MSTATUS_MPRV = (1U << 17),
+    MSTATUS_SUM_SHIFT  = 18, MSTATUS_SUM  = (1U << 18),
+    MSTATUS_MXR_SHIFT  = 19, MSTATUS_MXR  = (1U << 19),
+    MSTATUS_TVM_SHIFT  = 20, MSTATUS_TVM  = (1U << 20),
+    MSTATUS_TW_SHIFT   = 21, MSTATUS_TW   = (1U << 21),
+    MSTATUS_TSR_SHIFT  = 22, MSTATUS_TSR  = (1U << 22),
+};
+/* clang-format on */
 
-/* sstatus, a restricted view of mstatus */
-#define SSTATUS_SIE_SHIFT 1
-#define SSTATUS_SPIE_SHIFT 5
-#define SSTATUS_UBE_SHIFT 6
-#define SSTATUS_SPP_SHIFT 8
-#define SSTATUS_SUM_SHIFT 18
-#define SSTATUS_MXR_SHIFT 19
-#define SSTATUS_SIE (1 << SSTATUS_SIE_SHIFT)
-#define SSTATUS_SPIE (1 << SSTATUS_SPIE_SHIFT)
-#define SSTATUS_UBE (1 << SSTATUS_UBE_SHIFT)
-#define SSTATUS_SPP (1 << SSTATUS_SPP_SHIFT)
-#define SSTATUS_SUM (1 << SSTATUS_SUM_SHIFT)
-#define SSTATUS_MXR (1 << SSTATUS_MXR_SHIFT)
+/* sstatus: restricted view of mstatus (same bit positions) */
+#define SSTATUS_SIE_SHIFT MSTATUS_SIE_SHIFT
+#define SSTATUS_SPIE_SHIFT MSTATUS_SPIE_SHIFT
+#define SSTATUS_UBE_SHIFT MSTATUS_UBE_SHIFT
+#define SSTATUS_SPP_SHIFT MSTATUS_SPP_SHIFT
+#define SSTATUS_SUM_SHIFT MSTATUS_SUM_SHIFT
+#define SSTATUS_MXR_SHIFT MSTATUS_MXR_SHIFT
+#define SSTATUS_SIE MSTATUS_SIE
+#define SSTATUS_SPIE MSTATUS_SPIE
+#define SSTATUS_UBE MSTATUS_UBE
+#define SSTATUS_SPP MSTATUS_SPP
+#define SSTATUS_SUM MSTATUS_SUM
+#define SSTATUS_MXR MSTATUS_MXR
 #define SIP_SSIP_SHIFT 1
 #define SIP_STIP_SHIFT 5
 #define SIP_SEIP_SHIFT 9

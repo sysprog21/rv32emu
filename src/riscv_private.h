@@ -282,6 +282,9 @@ struct riscv_internal {
 #endif
     void *jit_state;
     void *jit_cache;
+#if RV32_HAS(T2C)
+    void *inline_cache; /* Inline cache for fast indirect jump resolution */
+#endif
 #endif
     struct mpool *block_mp, *block_ir_mp, *fuse_mp;
 

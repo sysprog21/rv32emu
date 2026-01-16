@@ -57,19 +57,121 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
                                        rv_insn_t *ir,
                                        LLVMValueRef insn_counter)
 {
-    /* Seqlock read pattern for lock-free jit_cache lookup:
+    /* Inline caching + seqlock pattern for indirect jump resolution.
      *
+     * Fast path (inline cache hit):
+     *   1. Load cached key from inline_cache[hash]
+     *   2. Compare with target address - if match, call cached entry directly
+     *   3. No ISB needed on ARM64 - target was already executed successfully
+     *
+     * Slow path (inline cache miss -> jit_cache lookup):
      *   1. Load seq1 (acquire), if odd (write in progress) -> fallback
-     *   2. Load key (monotonic), compare with expected -> fallback on mismatch
+     *   2. Load key (acquire), compare with expected -> fallback on mismatch
      *   3. Load entry (acquire), ensuring all data loads complete
      *   4. Load seq2 (monotonic), if seq1 != seq2 or entry == NULL -> fallback
-     *   5. Entry is consistent, call JIT code
+     *   5. Update inline cache with (key, entry) for next time
+     *   6. ISB on ARM64 (new block), call entry
      *
-     * Memory ordering: Acquire loads on seq1 and entry provide the necessary
-     * barriers. On x86, these are plain loads (TSO provides ordering). On
-     * ARM64, they generate LDAR instructions, cheaper than separate load + dmb
-     * fence.
+     * Inline cache provides ~90% hit rate for stable branch patterns (returns,
+     * virtual calls). Removes seqlock overhead and ISB for hot paths.
      */
+    LLVMValueRef rv_param = LLVMGetParam(start, 0);
+
+    /* Compute expected key once - used by both inline cache and jit_cache */
+#if RV32_HAS(SYSTEM)
+    LLVMValueRef satp_offset_early =
+        LLVMConstInt(LLVMInt64Type(), offsetof(riscv_t, csr_satp), false);
+    LLVMValueRef satp_ptr_early = LLVMBuildInBoundsGEP2(
+        *builder, LLVMInt8Type(), rv_param, &satp_offset_early, 1, "");
+    LLVMValueRef satp_early =
+        LLVMBuildLoad2(*builder, LLVMInt32Type(), satp_ptr_early, "");
+    LLVMValueRef addr64 =
+        LLVMBuildIntCast2(*builder, addr, LLVMInt64Type(), false, "");
+    LLVMValueRef satp64 =
+        LLVMBuildIntCast2(*builder, satp_early, LLVMInt64Type(), false, "");
+    LLVMValueRef satp_shifted = LLVMBuildShl(
+        *builder, satp64, LLVMConstInt(LLVMInt64Type(), 32, false), "");
+    LLVMValueRef expected_key =
+        LLVMBuildAdd(*builder, addr64, satp_shifted, "expected_key");
+#else
+    LLVMValueRef expected_key = LLVMBuildIntCast2(
+        *builder, addr, LLVMInt64Type(), false, "expected_key");
+#endif
+
+    /* === INLINE CACHE FAST PATH === */
+
+    /* Load inline_cache base address */
+    LLVMValueRef ic_offset =
+        LLVMConstInt(LLVMInt64Type(), offsetof(riscv_t, inline_cache), false);
+    LLVMValueRef ic_ptr = LLVMBuildInBoundsGEP2(*builder, LLVMInt8Type(),
+                                                rv_param, &ic_offset, 1, "");
+    LLVMValueRef ic_base = LLVMBuildLoad2(
+        *builder, LLVMPointerType(t2c_inline_cache_struct_type, 0), ic_ptr, "");
+
+    /* Compute inline cache index: different hash from jit_cache to spread load.
+     * Use upper bits XOR lower bits for better distribution. */
+    LLVMValueRef ic_addr_high = LLVMBuildLShr(
+        *builder, addr, LLVMConstInt(LLVMInt32Type(), 12, false), "");
+    LLVMValueRef ic_addr_mixed = LLVMBuildXor(*builder, addr, ic_addr_high, "");
+#if RV32_HAS(SYSTEM)
+    LLVMValueRef ic_hash_xor =
+        LLVMBuildXor(*builder, ic_addr_mixed, satp_early, "");
+    LLVMValueRef ic_hash = LLVMBuildAnd(
+        *builder, ic_hash_xor,
+        LLVMConstInt(LLVMInt32Type(), N_INLINE_CACHE_ENTRIES - 1, false), "");
+#else
+    LLVMValueRef ic_hash = LLVMBuildAnd(
+        *builder, ic_addr_mixed,
+        LLVMConstInt(LLVMInt32Type(), N_INLINE_CACHE_ENTRIES - 1, false), "");
+#endif
+
+    /* Get inline cache element pointer */
+    LLVMValueRef ic_idx =
+        LLVMBuildIntCast2(*builder, ic_hash, LLVMInt64Type(), false, "");
+    LLVMValueRef ic_element_ptr = LLVMBuildInBoundsGEP2(
+        *builder, t2c_inline_cache_struct_type, ic_base, &ic_idx, 1, "");
+
+    /* Load cached key and entry from inline cache */
+    LLVMValueRef ic_key_ptr = LLVMBuildStructGEP2(
+        *builder, t2c_inline_cache_struct_type, ic_element_ptr, 0, "");
+    LLVMValueRef ic_key =
+        LLVMBuildLoad2(*builder, LLVMInt64Type(), ic_key_ptr, "ic_key");
+
+    LLVMValueRef ic_entry_ptr = LLVMBuildStructGEP2(
+        *builder, t2c_inline_cache_struct_type, ic_element_ptr, 1, "");
+    LLVMValueRef ic_entry = LLVMBuildLoad2(
+        *builder, LLVMPointerType(LLVMVoidType(), 0), ic_entry_ptr, "ic_entry");
+
+    /* Check if inline cache hit: key matches AND entry is not NULL */
+    LLVMValueRef ic_key_match =
+        LLVMBuildICmp(*builder, LLVMIntEQ, ic_key, expected_key, "");
+    LLVMValueRef ic_entry_valid = LLVMBuildIsNotNull(*builder, ic_entry, "");
+    LLVMValueRef ic_hit =
+        LLVMBuildAnd(*builder, ic_key_match, ic_entry_valid, "ic_hit");
+
+    /* Create basic blocks for inline cache hit and miss paths */
+    LLVMBasicBlockRef ic_hit_block = LLVMAppendBasicBlock(start, "ic_hit");
+    LLVMBuilderRef ic_hit_builder = LLVMCreateBuilder();
+    LLVMPositionBuilderAtEnd(ic_hit_builder, ic_hit_block);
+
+    LLVMBasicBlockRef ic_miss_block = LLVMAppendBasicBlock(start, "ic_miss");
+    LLVMBuilderRef ic_miss_builder = LLVMCreateBuilder();
+    LLVMPositionBuilderAtEnd(ic_miss_builder, ic_miss_block);
+
+    LLVMBuildCondBr(*builder, ic_hit, ic_hit_block, ic_miss_block);
+
+    /* === INLINE CACHE HIT PATH (fast) ===
+     * No ISB needed - we already executed this target successfully before.
+     * The instruction cache was coherent at that time.
+     */
+    T2C_STORE_TIMER(ic_hit_builder, start, insn_counter);
+    LLVMValueRef ic_call_args[1] = {rv_param};
+    LLVMBuildCall2(ic_hit_builder, t2c_jit_cache_func_type, ic_entry,
+                   ic_call_args, 1, "");
+    LLVMBuildRetVoid(ic_hit_builder);
+
+    /* === INLINE CACHE MISS PATH (slow - use seqlock jit_cache) === */
+
     LLVMBasicBlockRef seq_even = LLVMAppendBasicBlock(start, "seq_even");
     LLVMBuilderRef seq_even_builder = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(seq_even_builder, seq_even);
@@ -86,111 +188,73 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     LLVMBuilderRef fallback_builder = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(fallback_builder, fallback);
 
-    /* Get jit-cache base address from runtime rv parameter.
-     * Load rv->jit_cache using offsetof(riscv_t, jit_cache) computed at compile
-     * time. The actual offset varies depending on struct layout (e.g., ~768 on
-     * x86-64 Linux with system emulation enabled). */
-    LLVMValueRef rv_param = LLVMGetParam(start, 0);
+    /* Load jit_cache base address */
     LLVMValueRef jit_cache_offset =
         LLVMConstInt(LLVMInt64Type(), offsetof(riscv_t, jit_cache), false);
     LLVMValueRef jit_cache_ptr = LLVMBuildInBoundsGEP2(
-        *builder, LLVMInt8Type(), rv_param, &jit_cache_offset, 1, "");
-    LLVMValueRef base =
-        LLVMBuildLoad2(*builder, LLVMPointerType(t2c_jit_cache_struct_type, 0),
-                       jit_cache_ptr, "");
+        ic_miss_builder, LLVMInt8Type(), rv_param, &jit_cache_offset, 1, "");
+    LLVMValueRef base = LLVMBuildLoad2(
+        ic_miss_builder, LLVMPointerType(t2c_jit_cache_struct_type, 0),
+        jit_cache_ptr, "");
 
-    /* Compute cache index: (addr ^ satp) & mask in system mode, addr & mask
-     * otherwise. Must match jit_cache_update's indexing for correct lookup. */
+    /* Compute jit_cache index */
+    LLVMValueRef addr_high = LLVMBuildLShr(
+        ic_miss_builder, addr, LLVMConstInt(LLVMInt32Type(), 12, false), "");
+    LLVMValueRef addr_mixed =
+        LLVMBuildXor(ic_miss_builder, addr, addr_high, "");
 #if RV32_HAS(SYSTEM)
-    LLVMValueRef satp_offset_early =
-        LLVMConstInt(LLVMInt64Type(), offsetof(riscv_t, csr_satp), false);
-    LLVMValueRef satp_ptr_early = LLVMBuildInBoundsGEP2(
-        *builder, LLVMInt8Type(), rv_param, &satp_offset_early, 1, "");
-    LLVMValueRef satp_early =
-        LLVMBuildLoad2(*builder, LLVMInt32Type(), satp_ptr_early, "");
-    LLVMValueRef hash_xor = LLVMBuildXor(*builder, addr, satp_early, "");
+    LLVMValueRef hash_xor =
+        LLVMBuildXor(ic_miss_builder, addr_mixed, satp_early, "");
     LLVMValueRef hash = LLVMBuildAnd(
-        *builder, hash_xor,
+        ic_miss_builder, hash_xor,
         LLVMConstInt(LLVMInt32Type(), N_JIT_CACHE_ENTRIES - 1, false), "");
 #else
     LLVMValueRef hash = LLVMBuildAnd(
-        *builder, addr,
+        ic_miss_builder, addr_mixed,
         LLVMConstInt(LLVMInt32Type(), N_JIT_CACHE_ENTRIES - 1, false), "");
 #endif
 
-    /* Get element pointer: &cache[hash] */
+    /* Get jit_cache element pointer */
     LLVMValueRef cast =
-        LLVMBuildIntCast2(*builder, hash, LLVMInt64Type(), false, "");
+        LLVMBuildIntCast2(ic_miss_builder, hash, LLVMInt64Type(), false, "");
     LLVMValueRef element_ptr = LLVMBuildInBoundsGEP2(
-        *builder, t2c_jit_cache_struct_type, base, &cast, 1, "");
+        ic_miss_builder, t2c_jit_cache_struct_type, base, &cast, 1, "");
 
     /* Step 1: Load seq1 (acquire). Odd value means write in progress. */
     LLVMValueRef seq_ptr = LLVMBuildStructGEP2(
-        *builder, t2c_jit_cache_struct_type, element_ptr, 0, "");
-    LLVMValueRef seq1 = LLVMBuildLoad2(*builder, LLVMInt32Type(), seq_ptr, "");
+        ic_miss_builder, t2c_jit_cache_struct_type, element_ptr, 0, "");
+    LLVMValueRef seq1 =
+        LLVMBuildLoad2(ic_miss_builder, LLVMInt32Type(), seq_ptr, "");
     LLVMSetOrdering(seq1, LLVMAtomicOrderingAcquire);
     LLVMValueRef seq_odd = LLVMBuildAnd(
-        *builder, seq1, LLVMConstInt(LLVMInt32Type(), 1, false), "");
+        ic_miss_builder, seq1, LLVMConstInt(LLVMInt32Type(), 1, false), "");
     LLVMValueRef is_even =
-        LLVMBuildICmp(*builder, LLVMIntEQ, seq_odd,
+        LLVMBuildICmp(ic_miss_builder, LLVMIntEQ, seq_odd,
                       LLVMConstInt(LLVMInt32Type(), 0, false), "");
-    LLVMBuildCondBr(*builder, is_even, seq_even, fallback);
+    LLVMBuildCondBr(ic_miss_builder, is_even, seq_even, fallback);
 
-    /* Step 2: Load key (monotonic) and compare with expected.
-     * Use 8-byte alignment hint to force inline load instead of libatomic call.
-     * Struct layout: [seq:i32, pad:i32, key:i64, entry:ptr] - key is index 2.
-     */
-    LLVMValueRef key_ptr = LLVMBuildStructGEP2(
+    /* Step 2: Load key (acquire) and compare with expected. */
+    LLVMValueRef jc_key_ptr = LLVMBuildStructGEP2(
         seq_even_builder, t2c_jit_cache_struct_type, element_ptr, 2, "");
-#if RV32_HAS(SYSTEM)
-    LLVMValueRef key =
-        LLVMBuildLoad2(seq_even_builder, LLVMInt64Type(), key_ptr, "");
-    LLVMSetOrdering(key, LLVMAtomicOrderingMonotonic);
-    LLVMSetAlignment(key, 8); /* Force 8-byte alignment to avoid libatomic */
-    LLVMValueRef addr64 =
-        LLVMBuildIntCast2(seq_even_builder, addr, LLVMInt64Type(), false, "");
-    /* Reuse satp_early loaded before hash calculation to avoid spurious misses.
-     * Loading SATP twice could cause hash/key mismatch if SATP changes between
-     * loads, forcing unnecessary fallback even when valid entry exists.
-     */
-    LLVMValueRef satp64 = LLVMBuildIntCast2(seq_even_builder, satp_early,
-                                            LLVMInt64Type(), false, "");
-    LLVMValueRef satp_shifted = LLVMBuildShl(
-        seq_even_builder, satp64, LLVMConstInt(LLVMInt64Type(), 32, false), "");
-    LLVMValueRef expected_key =
-        LLVMBuildAdd(seq_even_builder, addr64, satp_shifted, "");
-#else
-    /* Non-system mode: key is still uint64_t in struct, but only lower 32 bits
-     * are meaningful (PC only). Load as i64 for type consistency, then compare
-     * with zero-extended addr to avoid type mismatch in LLVM IR.
-     */
-    LLVMValueRef key =
-        LLVMBuildLoad2(seq_even_builder, LLVMInt64Type(), key_ptr, "");
-    LLVMSetOrdering(key, LLVMAtomicOrderingMonotonic);
-    LLVMSetAlignment(key, 8); /* Force 8-byte alignment to avoid libatomic */
-    LLVMValueRef expected_key =
-        LLVMBuildIntCast2(seq_even_builder, addr, LLVMInt64Type(), false, "");
-#endif
+    LLVMValueRef jc_key =
+        LLVMBuildLoad2(seq_even_builder, LLVMInt64Type(), jc_key_ptr, "");
+    LLVMSetOrdering(jc_key, LLVMAtomicOrderingAcquire);
+    LLVMSetAlignment(jc_key, 8);
 
-    LLVMValueRef key_cmp =
-        LLVMBuildICmp(seq_even_builder, LLVMIntEQ, key, expected_key, "");
-    LLVMBuildCondBr(seq_even_builder, key_cmp, key_match, fallback);
+    LLVMValueRef jc_key_cmp =
+        LLVMBuildICmp(seq_even_builder, LLVMIntEQ, jc_key, expected_key, "");
+    LLVMBuildCondBr(seq_even_builder, jc_key_cmp, key_match, fallback);
 
-    /* Step 3: Load entry (acquire). Pointer type required for ARM64 codegen.
-     * Field index 3 (struct has explicit pad at index 1). Acquire ordering
-     * ensures data loads complete before seq2 check. On ARM64, generates LDAR.
-     */
-    LLVMValueRef entry_ptr = LLVMBuildStructGEP2(
+    /* Step 3: Load entry (acquire). */
+    LLVMValueRef jc_entry_ptr = LLVMBuildStructGEP2(
         key_match_builder, t2c_jit_cache_struct_type, element_ptr, 3, "");
-    LLVMValueRef entry = LLVMBuildLoad2(
-        key_match_builder, LLVMPointerType(LLVMVoidType(), 0), entry_ptr, "");
+    LLVMValueRef entry =
+        LLVMBuildLoad2(key_match_builder, LLVMPointerType(LLVMVoidType(), 0),
+                       jc_entry_ptr, "");
     LLVMSetOrdering(entry, LLVMAtomicOrderingAcquire);
-    LLVMSetAlignment(entry, 8); /* Pointer is 8-byte aligned on 64-bit */
+    LLVMSetAlignment(entry, 8);
 
-    /* Step 4: Load seq2 (monotonic), check seq1 == seq2 AND entry != NULL.
-     * Entry can be NULL if cache was cleared via jit_cache_clear_page.
-     * Without this check, cleared entries could cause NULL pointer call.
-     */
+    /* Step 4: Load seq2 (monotonic), check seq1 == seq2 AND entry != NULL. */
     LLVMValueRef seq2 =
         LLVMBuildLoad2(key_match_builder, LLVMInt32Type(), seq_ptr, "");
     LLVMSetOrdering(seq2, LLVMAtomicOrderingMonotonic);
@@ -203,18 +267,17 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
         LLVMBuildAnd(key_match_builder, seq_cmp, entry_not_null, "");
     LLVMBuildCondBr(key_match_builder, valid, call_jit, fallback);
 
-    /* Step 5: Entry is consistent, call JIT code. Pass runtime rv parameter
-     * (not compile-time constant) for correct chaining between T2C blocks.
+    /* Step 5: Update inline cache with the newly looked-up entry.
+     * This populates the fast path for subsequent calls to same target.
+     * No atomics needed - single-threaded update from main thread only.
      */
+    LLVMBuildStore(call_builder, expected_key, ic_key_ptr);
+    LLVMBuildStore(call_builder, entry, ic_entry_ptr);
+
 #if defined(__aarch64__)
-    /* ARM64 instruction cache synchronization barrier.
-     * When T2C-compiled code calls another T2C block via jit_cache lookup,
-     * the target block may have been compiled by the T2C thread after this
-     * block started executing. ARM64 icache is not coherent with writes from
-     * other cores, so we need ISB to ensure the CPU fetches the latest
-     * instructions. Without this, the main thread might execute stale/invalid
-     * instructions at the target address, causing crashes.
-     * This matches the ISB in emulate.c for the direct T2C call path.
+    /* ARM64 ISB required on slow path only - this is a newly-discovered block.
+     * The inline cache hit path skips ISB because we already executed the
+     * target successfully, so icache was coherent at that time.
      */
     LLVMTypeRef isb_func_type = LLVMFunctionType(LLVMVoidType(), NULL, 0, 0);
     LLVMValueRef isb_asm =
@@ -222,9 +285,7 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
                          LLVMInlineAsmDialectATT, 0);
     LLVMBuildCall2(call_builder, isb_func_type, isb_asm, NULL, 0, "");
 #endif
-    /* Store cycle count before calling next T2C block - the called block has
-     * its own counter and will add to csr_cycle. Must flush our count first.
-     */
+
     T2C_STORE_TIMER(call_builder, start, insn_counter);
     LLVMValueRef t2c_args[1] = {rv_param};
     LLVMBuildCall2(call_builder, t2c_jit_cache_func_type, entry, t2c_args, 1,
@@ -237,10 +298,9 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     T2C_STORE_TIMER(fallback_builder, start, insn_counter);
     LLVMBuildRetVoid(fallback_builder);
 
-    /* Dispose temporary builders to prevent memory leak during T2C compilation.
-     * Each builder allocates ~KB of memory; repeated compilations without
-     * cleanup can exhaust host memory.
-     */
+    /* Dispose temporary builders */
+    LLVMDisposeBuilder(ic_hit_builder);
+    LLVMDisposeBuilder(ic_miss_builder);
     LLVMDisposeBuilder(seq_even_builder);
     LLVMDisposeBuilder(key_match_builder);
     LLVMDisposeBuilder(call_builder);

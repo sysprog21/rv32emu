@@ -291,6 +291,21 @@ config BLOCK_CHAINING
 
       Improves JIT performance significantly.
 
+config T2C_OPT_LEVEL
+    int "T2C LLVM Optimization Level (0-3)"
+    default 3
+    range 0 3
+    depends on T2C
+    help
+      LLVM optimization level for T2C compiled code:
+        0 - No optimization (fastest compile, for debugging)
+        1 - Basic optimization (~50% faster compile than O3)
+        2 - Standard optimization (balanced)
+        3 - Aggressive optimization (default, best runtime performance)
+
+      For CI boot tests, O1 significantly reduces compilation time
+      while maintaining correctness. Use O3 for production.
+
 config LTO
     bool "Link-Time Optimization"
     default y

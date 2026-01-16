@@ -313,10 +313,11 @@ jobs:
       if: success()
       env:
         CC: ${{ steps.install_cc.outputs.cc }}
-        BOOT_TIMEOUT: 150  # T2C LLVM compilation adds significant overhead
+        BOOT_TIMEOUT: 120  # T2C with O1 optimization (via defconfig) is faster than O3
       run: |
             # Remove stale t2c.o before build to ensure fresh detection
             rm -f build/t2c.o
+            # system_jit_defconfig uses T2C_OPT_LEVEL=1 for faster LLVM compilation
             make distclean && make system_jit_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
             # Verify T2C is actually compiled (build/t2c.o only exists when LLVM 18 detection succeeds)
             test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM 18 detection failed"; exit 1; }
@@ -425,10 +426,11 @@ jobs:
       if: success()
       env:
         CC: clang-${{ env.LLVM_VERSION }}
-        BOOT_TIMEOUT: 150  # T2C LLVM compilation adds significant overhead
+        BOOT_TIMEOUT: 120  # T2C with O1 optimization (via defconfig) is faster than O3
       run: |
             # Remove stale t2c.o before build to ensure fresh detection
             rm -f build/t2c.o
+            # system_jit_defconfig uses T2C_OPT_LEVEL=1 for ~50% faster LLVM compilation
             make distclean && make system_jit_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
             # Verify T2C is actually compiled (build/t2c.o only exists when LLVM 18 detection succeeds)
             test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM 18 detection failed"; exit 1; }

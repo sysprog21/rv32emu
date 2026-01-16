@@ -452,22 +452,27 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     LLVMPassBuilderOptionsRef pb_option = LLVMCreatePassBuilderOptions();
     /* Run LLVM optimization passes on the generated IR.
      *
-     * Current configuration uses O3 for maximum runtime performance. For system
-     * emulation where blocks may be invalidated frequently (e.g., SFENCE.VMA),
-     * a lighter pass pipeline (O1 or O2) could reduce compilation latency at
-     * the cost of slightly slower generated code.
-     *
-     * Optimization level impact:
-     *   O1: Fast compilation, basic optimizations (~50% faster compile time)
+     * Optimization level is configurable via CONFIG_T2C_OPT_LEVEL (Kconfig):
+     *   O0: No optimization (fastest compile, for debugging only)
+     *   O1: Basic optimizations (~50% faster compile than O3)
      *   O2: Balanced compilation/runtime trade-off
-     *   O3: Aggressive optimizations, best runtime but slowest compile
+     *   O3: Aggressive optimizations, best runtime (default for production)
      *
-     * The O3 pipeline already includes early-cse, instcombine, and other
-     * standard optimizations. No need to append redundant passes.
-     *
-     * TODO: Consider making this configurable via runtime flag for system emu.
+     * system_jit_defconfig uses O1 for faster CI boot tests.
+     * jit_defconfig uses O3 (default) for production performance.
      */
-    LLVMRunPasses(module, "default<O3>", tm, pb_option);
+#ifndef CONFIG_T2C_OPT_LEVEL
+#define CONFIG_T2C_OPT_LEVEL 3
+#endif
+    static_assert(CONFIG_T2C_OPT_LEVEL >= 0 && CONFIG_T2C_OPT_LEVEL <= 3,
+                  "T2C optimization level must be 0-3");
+    static const char *const t2c_opt_passes[] = {
+        "default<O0>",
+        "default<O1>",
+        "default<O2>",
+        "default<O3>",
+    };
+    LLVMRunPasses(module, t2c_opt_passes[CONFIG_T2C_OPT_LEVEL], tm, pb_option);
 
     if (LLVMCreateExecutionEngineForModule(&engine, module, &error) != 0) {
         rv_log_fatal("Failed to create execution engine");

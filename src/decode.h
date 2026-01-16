@@ -379,6 +379,38 @@ typedef struct {
 #endif
 } branch_history_table_t;
 
+#if RV32_HAS(JIT)
+/* Find index with maximum times count in branch history table.
+ * Used by JIT to identify the most frequently taken indirect jump target.
+ */
+static inline int bht_find_max_idx(const branch_history_table_t *bt)
+{
+    int max_idx = 0;
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+        if (!bt->times[i])
+            break;
+        if (bt->times[max_idx] < bt->times[i])
+            max_idx = i;
+    }
+    return max_idx;
+}
+
+/* Find index with minimum times count for LFU replacement.
+ * Returns first empty slot if available, otherwise the least frequently used.
+ */
+static inline int bht_find_min_idx(const branch_history_table_t *bt)
+{
+    int min_idx = 0;
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+        if (!bt->times[i])
+            return i; /* empty slot found */
+        if (bt->times[min_idx] > bt->times[i])
+            min_idx = i;
+    }
+    return min_idx;
+}
+#endif
+
 typedef struct rv_insn {
     union {
         int32_t imm;

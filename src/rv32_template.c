@@ -152,17 +152,8 @@ RVOP(jal, {
                     }                                                        \
                 }                                                            \
             }                                                                \
-            /* update branch history table */                                \
-            int min_idx = 0;                                                 \
-            for (int i = 0; i < HISTORY_SIZE; i++) {                         \
-                if (!ir->branch_table->times[i]) {                           \
-                    min_idx = i;                                             \
-                    break;                                                   \
-                } else if (ir->branch_table->times[min_idx] >                \
-                           ir->branch_table->times[i]) {                     \
-                    min_idx = i;                                             \
-                }                                                            \
-            }                                                                \
+            /* update branch history table using LFU replacement */          \
+            int min_idx = bht_find_min_idx(ir->branch_table);                \
             ir->branch_table->times[min_idx] = 1;                            \
             ir->branch_table->PC[min_idx] = PC;                              \
             IIF(RV32_HAS(SYSTEM))(                                           \

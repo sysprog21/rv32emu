@@ -67,6 +67,25 @@
 #define MAX_JUMPS 1024
 #define MAX_BLOCKS 8192
 #define IN_JUMP_THRESHOLD 256
+
+/* Check if branch history table entry should trigger JIT translation */
+static inline bool bht_should_translate(const branch_history_table_t *bt,
+                                        int idx
+#if RV32_HAS(SYSTEM)
+                                        ,
+                                        uint32_t csr_satp
+#endif
+)
+{
+    if (!bt->PC[idx] || bt->times[idx] < IN_JUMP_THRESHOLD)
+        return false;
+#if RV32_HAS(SYSTEM)
+    if (bt->satp[idx] != csr_satp)
+        return false;
+#endif
+    return true;
+}
+
 #if defined(__x86_64__)
 /* indicate where the immediate value is in the emitted jump instruction.
  * For conditional jumps (JNE, JE, etc.), add 2 to skip the 2-byte opcode
@@ -2339,31 +2358,27 @@ void parse_branch_history_table(struct jit_state *state,
                                 riscv_t *rv UNUSED,
                                 rv_insn_t *ir)
 {
-    int max_idx = 0;
     branch_history_table_t *bt = ir->branch_table;
-    for (int i = 0; i < HISTORY_SIZE; i++) {
-        if (!bt->times[i])
-            break;
-        if (bt->times[max_idx] < bt->times[i])
-            max_idx = i;
-    }
-    if (bt->PC[max_idx] && bt->times[max_idx] >= IN_JUMP_THRESHOLD) {
-        IIF(RV32_HAS(SYSTEM))(if (bt->satp[max_idx] == rv->csr_satp), )
-        {
-            save_reg(state, 0);
-            unmap_vm_reg(0);
-            emit_load_imm(state, register_map[0].reg_idx, bt->PC[max_idx]);
-            emit_cmp32(state, temp_reg, register_map[0].reg_idx);
-            uint32_t jump_loc_0 = state->offset;
-            emit_jcc_offset(state, JCC_JNE);
+    int max_idx = bht_find_max_idx(bt);
 #if RV32_HAS(SYSTEM)
-            emit_jmp(state, bt->PC[max_idx], bt->satp[max_idx]);
+    if (!bht_should_translate(bt, max_idx, rv->csr_satp))
+        return;
 #else
-            emit_jmp(state, bt->PC[max_idx], 0);
+    if (!bht_should_translate(bt, max_idx))
+        return;
 #endif
-            emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
-        }
-    }
+    save_reg(state, 0);
+    unmap_vm_reg(0);
+    emit_load_imm(state, register_map[0].reg_idx, bt->PC[max_idx]);
+    emit_cmp32(state, temp_reg, register_map[0].reg_idx);
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+#if RV32_HAS(SYSTEM)
+    emit_jmp(state, bt->PC[max_idx], bt->satp[max_idx]);
+#else
+    emit_jmp(state, bt->PC[max_idx], 0);
+#endif
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
 }
 
 /* Timer increment removed: timer is now derived from cycle counter at
@@ -2963,24 +2978,20 @@ static void translate_chained_block(struct jit_state *state,
 
     branch_history_table_t *bt = ir->branch_table;
     if (bt) {
-        int max_idx = 0;
-        for (int i = 0; i < HISTORY_SIZE; i++) {
-            if (!bt->times[i])
-                break;
-            if (bt->times[max_idx] < bt->times[i])
-                max_idx = i;
-        }
-        if (bt->PC[max_idx] && bt->times[max_idx] >= IN_JUMP_THRESHOLD &&
+        int max_idx = bht_find_max_idx(bt);
+#if RV32_HAS(SYSTEM)
+        if (bht_should_translate(bt, max_idx, rv->csr_satp) &&
             !set_has(&state->set, bt->PC[max_idx])) {
-            IIF(RV32_HAS(SYSTEM))(if (bt->satp[max_idx] == rv->csr_satp), )
-            {
-                block_t *block1 =
-                    cache_get(rv->block_cache, bt->PC[max_idx], false);
-                if (block1 && block1->translatable) {
-                    IIF(RV32_HAS(SYSTEM))(if (block1->satp == rv->csr_satp &&
-                                              !block1->invalidated), )
-                        translate_chained_block(state, rv, block1);
-                }
+#else
+        if (bht_should_translate(bt, max_idx) &&
+            !set_has(&state->set, bt->PC[max_idx])) {
+#endif
+            block_t *block1 =
+                cache_get(rv->block_cache, bt->PC[max_idx], false);
+            if (block1 && block1->translatable) {
+                IIF(RV32_HAS(SYSTEM))(
+                    if (block1->satp == rv->csr_satp && !block1->invalidated), )
+                    translate_chained_block(state, rv, block1);
             }
         }
     }

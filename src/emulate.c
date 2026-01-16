@@ -336,6 +336,24 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     }
 }
 
+/* Sync cycle counter for cycle/time CSR reads.
+ * TIME CSRs need cycle synced so update_time() derives correct timer.
+ */
+static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
+{
+    switch (csr & 0xFFF) {
+    case CSR_CYCLE:
+    case CSR_CYCLEH:
+    case CSR_INSTRET:
+    case CSR_INSTRETH:
+    case CSR_TIME:
+    case CSR_TIMEH:
+        if (rv->csr_cycle != cycle)
+            rv->csr_cycle = cycle;
+        break;
+    }
+}
+
 /* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
  * zero-extends the value to XLEN bits, and then writes it to register rd.
@@ -348,21 +366,7 @@ static uint32_t csr_csrrw(riscv_t *rv,
                           uint32_t val,
                           uint64_t cycle)
 {
-    /* Sync cycle counter for cycle-related and time-related CSRs.
-     * TIME CSRs need cycle synced so update_time() derives correct timer.
-     */
-    switch (csr & 0xFFF) {
-    case CSR_CYCLE:
-    case CSR_CYCLEH:
-    case CSR_INSTRET:
-    case CSR_INSTRETH:
-    case CSR_TIME:
-    case CSR_TIMEH:
-        if (rv->csr_cycle != cycle)
-            rv->csr_cycle = cycle;
-        break;
-    }
-
+    csr_sync_cycle(rv, csr, cycle);
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
@@ -406,20 +410,7 @@ static uint32_t csr_csrrs(riscv_t *rv,
                           uint32_t val,
                           uint64_t cycle)
 {
-    /* Sync cycle counter for cycle-related and time-related CSRs.
-     * TIME CSRs need cycle synced so update_time() derives correct timer.
-     */
-    switch (csr & 0xFFF) {
-    case CSR_CYCLE:
-    case CSR_CYCLEH:
-    case CSR_INSTRET:
-    case CSR_INSTRETH:
-    case CSR_TIME:
-    case CSR_TIMEH:
-        if (rv->csr_cycle != cycle)
-            rv->csr_cycle = cycle;
-        break;
-    }
+    csr_sync_cycle(rv, csr, cycle);
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
@@ -453,21 +444,7 @@ static uint32_t csr_csrrc(riscv_t *rv,
                           uint32_t val,
                           uint64_t cycle)
 {
-    /* Sync cycle counter for cycle-related and time-related CSRs.
-     * TIME CSRs need cycle synced so update_time() derives correct timer.
-     */
-    switch (csr & 0xFFF) {
-    case CSR_CYCLE:
-    case CSR_CYCLEH:
-    case CSR_INSTRET:
-    case CSR_INSTRETH:
-    case CSR_TIME:
-    case CSR_TIMEH:
-        if (rv->csr_cycle != cycle)
-            rv->csr_cycle = cycle;
-        break;
-    }
-
+    csr_sync_cycle(rv, csr, cycle);
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;

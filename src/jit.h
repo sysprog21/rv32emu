@@ -93,6 +93,63 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
  */
 #define N_JIT_CACHE_ENTRIES (1 << 12)
 
+/* Inline cache for fast-path indirect jump resolution.
+ * Stores the most recently used (target, entry) pair per call site.
+ * Hit rate is typically >90% for stable branch patterns (returns, vtables).
+ *
+ * Thread model: The inline cache is per-riscv_t instance and accessed only
+ * by the main execution thread. No synchronization needed - single writer/
+ * reader pattern. The T2C compiler thread updates jit_cache (protected by
+ * seqlock) but never accesses inline caches.
+ *
+ * Memory model: Non-atomic loads/stores are used because:
+ * 1. Single-threaded access within each riscv_t instance
+ * 2. T2C requires 64-bit host (static_assert below) ensuring atomic 64-bit
+ *    loads - no torn reads possible for the key field
+ *
+ * satp stability: In system mode, the key includes satp. This is safe because
+ * satp changes only via CSR writes which are serialized with execution - the
+ * inline cache is always checked with the current satp value.
+ *
+ * Invalidation: Inline cache entries are cleared on:
+ * - Block eviction (inline_cache_clear_key in emulate.c)
+ * - SFENCE.VMA (inline_cache_clear_page in rv32_template.c)
+ * - FENCE.I / code_cache_flush (inline_cache_clear in jit.c)
+ *
+ * On cache hit, ISB is skipped on ARM64 since we already executed this target
+ * successfully - the instruction cache was coherent at that time.
+ */
+#define N_INLINE_CACHE_ENTRIES (1 << 10)
+
+struct inline_cache {
+    uint64_t key; /* target PC (+ satp<<32 in system mode), 0 = empty */
+    void *entry;  /* cached function pointer */
+};
+
+/* Verify inline_cache struct layout for LLVM IR generation.
+ * LLVM type: { i64 key, ptr entry }
+ * Offsets: key=0, entry=8
+ *
+ * T2C requires 64-bit host to ensure atomic 64-bit key loads (no torn reads).
+ * On 32-bit hosts, non-atomic 64-bit loads could see partial updates.
+ */
+static_assert(sizeof(void *) == 8,
+              "T2C inline cache requires 64-bit host for atomic key loads");
+static_assert(offsetof(struct inline_cache, key) == 0,
+              "inline_cache.key must be at offset 0");
+static_assert(offsetof(struct inline_cache, entry) == 8,
+              "inline_cache.entry must be at offset 8");
+static_assert(sizeof(struct inline_cache) == 16,
+              "inline_cache must be 16 bytes");
+
+struct inline_cache *inline_cache_init(void);
+void inline_cache_exit(struct inline_cache *cache);
+void inline_cache_clear(struct inline_cache *cache);
+void inline_cache_clear_key(struct inline_cache *cache, uint64_t key);
+void inline_cache_clear_page(struct inline_cache *cache,
+                             uint32_t va,
+                             uint32_t satp);
+
 /* jit_cache entry for T2C compiled code lookup.
  * Thread safety: Uses seqlock pattern for lock-free readers.
  * - Writers (under cache_lock): increment seq to odd, write entry+key,

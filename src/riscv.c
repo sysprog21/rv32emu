@@ -885,6 +885,11 @@ riscv_t *rv_create(riscv_user_t rv_attr)
         rv_log_fatal("Failed to initialize JIT cache");
         goto fail_jit_cache;
     }
+    rv->inline_cache = inline_cache_init();
+    if (!rv->inline_cache) {
+        rv_log_fatal("Failed to initialize inline cache");
+        goto fail_inline_cache;
+    }
     /* prepare wait queue. */
     pthread_mutex_init(&rv->wait_queue_lock, NULL);
     pthread_mutex_init(&rv->cache_lock, NULL);
@@ -906,6 +911,8 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 
 #if RV32_HAS(JIT)
 #if RV32_HAS(T2C)
+fail_inline_cache:
+    jit_cache_exit(rv->jit_cache);
 fail_jit_cache:
     cache_free(rv->block_cache);
 #endif
@@ -1068,6 +1075,7 @@ void rv_delete(riscv_t *rv)
     pthread_mutex_destroy(&rv->cache_lock);
     pthread_cond_destroy(&rv->wait_queue_cond);
     jit_cache_exit(rv->jit_cache);
+    inline_cache_exit(rv->inline_cache);
 
     /* Dispose LLVM engines for all remaining blocks before freeing cache */
     clear_cache_hot(rv->block_cache, t2c_dispose_block_engine);

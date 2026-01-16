@@ -183,6 +183,7 @@ FORCE_INLINE void t2c_gen_call_io_func(LLVMValueRef start,
 
 static LLVMTypeRef t2c_jit_cache_func_type;
 static LLVMTypeRef t2c_jit_cache_struct_type;
+static LLVMTypeRef t2c_inline_cache_struct_type;
 
 #include "t2c_template.c"
 #undef T2C_OP
@@ -371,6 +372,13 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
                                      LLVMInt64Type(),
                                      LLVMPointerType(LLVMVoidType(), 0)};
     t2c_jit_cache_struct_type = LLVMStructType(jit_cache_memb, 4, false);
+
+    /* inline_cache struct: { uint64_t key, void *entry }
+     * Field indices: 0=key, 1=entry
+     * No padding needed - already naturally aligned. */
+    LLVMTypeRef inline_cache_memb[2] = {LLVMInt64Type(),
+                                        LLVMPointerType(LLVMVoidType(), 0)};
+    t2c_inline_cache_struct_type = LLVMStructType(inline_cache_memb, 2, false);
 
     LLVMBasicBlockRef first_block = LLVMAppendBasicBlock(start, "first_block");
     LLVMBuilderRef first_builder = LLVMCreateBuilder();
@@ -568,6 +576,69 @@ struct jit_cache *jit_cache_init()
 void jit_cache_exit(struct jit_cache *cache)
 {
     free(cache);
+}
+
+struct inline_cache *inline_cache_init(void)
+{
+    return calloc(N_INLINE_CACHE_ENTRIES, sizeof(struct inline_cache));
+}
+
+void inline_cache_exit(struct inline_cache *cache)
+{
+    free(cache);
+}
+
+/* Clear all inline cache entries.
+ * Called on SFENCE.VMA with rs1=0 (flush all) or when resetting emulator.
+ * No seqlock needed - only main thread reads/writes inline cache.
+ */
+void inline_cache_clear(struct inline_cache *cache)
+{
+    memset(cache, 0, N_INLINE_CACHE_ENTRIES * sizeof(struct inline_cache));
+}
+
+/* Clear inline cache entries for a specific VA page.
+ * Called on SFENCE.VMA with specific address.
+ * Only clears entries whose PC falls within the target page.
+ */
+void inline_cache_clear_page(struct inline_cache *cache,
+                             uint32_t va,
+                             uint32_t satp)
+{
+    uint32_t va_page = va & ~(RV_PG_SIZE - 1);
+
+    for (uint32_t i = 0; i < N_INLINE_CACHE_ENTRIES; i++) {
+        uint64_t key = cache[i].key;
+        if (!key)
+            continue;
+
+        uint32_t entry_pc = (uint32_t) key;
+        uint32_t entry_satp = (uint32_t) (key >> 32);
+
+        if (entry_satp == satp) {
+            uint32_t entry_page = entry_pc & ~(RV_PG_SIZE - 1);
+            if (entry_page == va_page) {
+                cache[i].key = 0;
+                cache[i].entry = NULL;
+            }
+        }
+    }
+}
+
+/* Clear inline cache entries matching a specific key.
+ * Used when evicting a compiled block to prevent stale entry pointers.
+ */
+void inline_cache_clear_key(struct inline_cache *cache, uint64_t key)
+{
+    if (!key)
+        return;
+
+    for (uint32_t i = 0; i < N_INLINE_CACHE_ENTRIES; i++) {
+        if (cache[i].key == key) {
+            cache[i].key = 0;
+            cache[i].entry = NULL;
+        }
+    }
 }
 
 /* Dispose LLVM execution engine when a T2C-compiled block is freed.

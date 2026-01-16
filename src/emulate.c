@@ -1944,15 +1944,16 @@ static block_t *block_find_or_translate(riscv_t *rv)
         /* Clear jit_cache to prevent new executions, but don't dispose engine
          * or free memory yet. T2C thread owns the engine and block memory.
          */
-        if (replaced_blk->func) {
 #if RV32_HAS(SYSTEM)
-            uint64_t key = (uint64_t) replaced_blk->pc_start |
-                           ((uint64_t) replaced_blk->satp << 32);
+        uint64_t key = (uint64_t) replaced_blk->pc_start |
+                       ((uint64_t) replaced_blk->satp << 32);
 #else
-            uint64_t key = (uint64_t) replaced_blk->pc_start;
+        uint64_t key = (uint64_t) replaced_blk->pc_start;
 #endif
+        if (replaced_blk->func) {
             jit_cache_update(rv->jit_cache, key, NULL);
         }
+        inline_cache_clear_key(rv->inline_cache, key);
 
         /* Remove from global block list so it's not found/traversed */
         list_del_init(&replaced_blk->list);
@@ -1978,15 +1979,16 @@ static block_t *block_find_or_translate(riscv_t *rv)
      * function pointers. The jit_cache key includes SATP for system mode.
      * cache_lock is already held by caller.
      */
-    if (replaced_blk->func) {
 #if RV32_HAS(SYSTEM)
-        uint64_t key = (uint64_t) replaced_blk->pc_start |
-                       ((uint64_t) replaced_blk->satp << 32);
+    uint64_t key = (uint64_t) replaced_blk->pc_start |
+                   ((uint64_t) replaced_blk->satp << 32);
 #else
-        uint64_t key = (uint64_t) replaced_blk->pc_start;
+    uint64_t key = (uint64_t) replaced_blk->pc_start;
 #endif
+    if (replaced_blk->func) {
         jit_cache_update(rv->jit_cache, key, NULL);
     }
+    inline_cache_clear_key(rv->inline_cache, key);
     /* Dispose LLVM execution engine before freeing the block.
      * The engine owns the memory where block->func points.
      */

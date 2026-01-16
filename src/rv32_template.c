@@ -636,6 +636,7 @@ RVOP(sfencevma, {
         cache_invalidate_satp(rv->block_cache, rv->csr_satp);
 #if RV32_HAS(T2C)
         jit_cache_clear(rv->jit_cache);
+        inline_cache_clear(rv->inline_cache);
         pthread_mutex_unlock(&rv->cache_lock);
 #endif
 #endif
@@ -655,6 +656,7 @@ RVOP(sfencevma, {
 #if RV32_HAS(T2C)
         /* Selectively clear only jit_cache entries matching the VA page */
         jit_cache_clear_page(rv->jit_cache, va, rv->csr_satp);
+        inline_cache_clear_page(rv->inline_cache, va, rv->csr_satp);
         pthread_mutex_unlock(&rv->cache_lock);
 #endif
 #endif
@@ -690,6 +692,7 @@ RVOP(fencei, {
     cache_invalidate_satp(rv->block_cache, rv->csr_satp);
 #if RV32_HAS(T2C)
     jit_cache_clear(rv->jit_cache);
+    inline_cache_clear(rv->inline_cache);
     pthread_mutex_unlock(&rv->cache_lock);
 #endif
 #endif

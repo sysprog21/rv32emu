@@ -20,6 +20,7 @@ jobs:
         with:
           files: |
               .ci/**
+              .github/workflows/**
               build/**
               configs/**
               mk/**
@@ -290,39 +291,7 @@ jobs:
             make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
             make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
-    - name: boot Linux kernel test
-      if: success()
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-      run: |
-            make distclean && make system_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
-            bash -c "${BOOT_LINUX_TEST}"
-            make clean
-
-    - name: boot Linux kernel test (JIT)
-      if: success()
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-        BOOT_TIMEOUT: 90  # JIT compilation adds significant overhead
-      run: |
-            make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
-            bash -c "${BOOT_LINUX_TEST}"
-            make clean
-
-    - name: boot Linux kernel test (T2C)
-      if: success()
-      env:
-        CC: ${{ steps.install_cc.outputs.cc }}
-        BOOT_TIMEOUT: 120  # T2C with O1 optimization (via defconfig) is faster than O3
-      run: |
-            # Remove stale t2c.o before build to ensure fresh detection
-            rm -f build/t2c.o
-            # system_jit_defconfig uses T2C_OPT_LEVEL=1 for faster LLVM compilation
-            make distclean && make system_jit_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
-            # Verify T2C is actually compiled (build/t2c.o only exists when LLVM 18 detection succeeds)
-            test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM 18 detection failed"; exit 1; }
-            bash -c "${BOOT_LINUX_TEST}"
-            make clean
+    # Boot tests moved to boot-tests-x64 job for parallel execution
 
     - name: Architecture test
       if: success()
@@ -332,6 +301,130 @@ jobs:
             . .ci/common.sh
             export LATEST_RELEASE=$(fetch_latest_release sail)
             .ci/riscv-tests.sh
+
+  # Parallel boot tests for x64 - runs interpreter, JIT, and T2C boot tests concurrently
+  # T2C runs only on clang since it uses LLVM
+  boot-tests-x64:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 30  # T2C boot ~18min + build ~3min + setup ~3min
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            boot_type: interpreter
+            defconfig: system_defconfig
+            make_flags: ""
+            timeout: 60
+          - compiler: gcc
+            boot_type: jit
+            defconfig: system_defconfig
+            make_flags: "ENABLE_JIT=1 ENABLE_MOP_FUSION=0"
+            timeout: 90
+          - compiler: clang
+            boot_type: interpreter
+            defconfig: system_defconfig
+            make_flags: ""
+            timeout: 60
+          - compiler: clang
+            boot_type: jit
+            defconfig: system_defconfig
+            make_flags: "ENABLE_JIT=1 ENABLE_MOP_FUSION=0"
+            timeout: 90
+          - compiler: clang
+            boot_type: t2c
+            defconfig: system_jit_defconfig
+            make_flags: "ENABLE_MOP_FUSION=0"
+            timeout: 120
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: 'true'
+
+    - name: Read LLVM Version
+      if: matrix.compiler == 'clang'
+      id: llvm-version
+      run: echo "version=$(cat .ci/llvm-version)" >> $GITHUB_OUTPUT
+
+    # LLVM needed for all clang builds (llvm-ar required for LTO)
+    - name: Cache LLVM
+      if: matrix.compiler == 'clang'
+      id: cache-llvm
+      uses: actions/cache@v5
+      with:
+        path: /usr/lib/llvm-${{ steps.llvm-version.outputs.version }}
+        key: ${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.llvm-version.outputs.version }}
+
+    - name: Install dependencies
+      run: |
+            sudo apt-get update -q=2 || true
+            sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full e2fsprogs
+
+    - name: Install LLVM
+      if: matrix.compiler == 'clang' && steps.cache-llvm.outputs.cache-hit != 'true'
+      run: |
+            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x ./llvm.sh
+            sudo ./llvm.sh ${{ steps.llvm-version.outputs.version }}
+
+    - name: Setup LLVM PATH
+      if: matrix.compiler == 'clang'
+      run: echo "/usr/lib/llvm-${{ steps.llvm-version.outputs.version }}/bin" >> $GITHUB_PATH
+
+    - name: Install compiler
+      id: install_cc
+      uses: rlalik/setup-cpp-compiler@master
+      with:
+        compiler: ${{ matrix.compiler }}
+
+    - name: Set parallel jobs variable
+      run: |
+            echo "PARALLEL=-j$(nproc)" >> "$GITHUB_ENV"
+            echo "BOOT_LINUX_TEST=TMP_FILE=\$(mktemp \"$RUNNER_TEMP/tmpfile.XXXXXX\"); \
+                                  sudo env TMP_FILE=\${TMP_FILE} .ci/boot-linux-prepare.sh setup; \
+                                  . \${TMP_FILE}; \
+                                  .ci/boot-linux.sh; \
+                                  EXIT_CODE=\$?; \
+                                  sudo env TMP_FILE=\${TMP_FILE} BLK_DEV_EXT4=\${BLK_DEV_EXT4} \
+                                           BLK_DEV_SIMPLEFS=\${BLK_DEV_SIMPLEFS} .ci/boot-linux-prepare.sh cleanup; \
+                                  exit \${EXIT_CODE};" >> "$GITHUB_ENV"
+
+    # Cache key includes matrix variables to prevent cross-contamination between parallel jobs
+    - name: Cache build artifacts
+      uses: actions/cache@v5
+      with:
+        path: build/
+        key: rv32emu-boot-${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.boot_type }}-${{ hashFiles('mk/artifact.mk', 'mk/external.mk') }}
+        restore-keys: |
+          rv32emu-boot-${{ runner.os }}-${{ matrix.compiler }}-${{ matrix.boot_type }}-
+          rv32emu-artifacts-${{ runner.os }}-
+
+    - name: Fetch Linux artifacts
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+      run: |
+            . .ci/common.sh
+            fetch_artifact Linux-Image ENABLE_SYSTEM=1
+            rm -f build/.config
+
+    - name: boot Linux kernel test (${{ matrix.boot_type }})
+      env:
+        CC: ${{ steps.install_cc.outputs.cc }}
+        BOOT_TIMEOUT: ${{ matrix.timeout }}
+      run: |
+            # For T2C, verify LLVM 18 detection
+            if [ "${{ matrix.boot_type }}" = "t2c" ]; then
+              rm -f build/t2c.o
+            fi
+            make distclean && make ${{ matrix.defconfig }} && make INITRD_SIZE=32 ${{ matrix.make_flags }} $PARALLEL && make artifact $PARALLEL
+            if [ "${{ matrix.boot_type }}" = "t2c" ]; then
+              test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM 18 detection failed"; exit 1; }
+            fi
+            bash -c "${BOOT_LINUX_TEST}"
 
   # Native AArch64 on GitHub ARM runners - fast, no QEMU overhead
   host-arm64:

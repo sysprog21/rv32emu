@@ -997,7 +997,6 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
     /* decode I-type */
     decode_itype(ir, insn);
 
-
     /* dispatch from funct3 field */
     switch (decode_funct3(insn)) {
     case 0:
@@ -1113,12 +1112,10 @@ static inline bool op_misc_mem(rv_insn_t *ir, const uint32_t insn)
     case 0b001:
         ir->opcode = rv_insn_fencei;
         return true;
-#endif       /* RV32_HAS(Zifencei) */
-    default: /* illegal instruction */
+#endif /* RV32_HAS(Zifencei) */
+    default:
         return false;
     }
-
-    return false;
 }
 
 #if RV32_HAS(EXT_A)
@@ -1306,6 +1303,8 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
         case 0b00001: /* FCVT.WU.S */
             ir->opcode = rv_insn_fcvtwus;
             break;
+        default: /* illegal instruction */
+            return false;
         }
         break;
     case 0b0010100:
@@ -1614,7 +1613,7 @@ static inline bool op_cmisc_alu(rv_insn_t *ir, const uint32_t insn)
         ir->imm = c_decode_caddi_imm(insn);
         ir->opcode = rv_insn_candi;
         break;
-    case 3:; /* Arithmistic */
+    case 3: /* Arithmetic */
         ir->rs1 = c_decode_rs1c(insn) | 0x08;
         ir->rs2 = c_decode_rs2c(insn) | 0x08;
         ir->rd = ir->rs1;
@@ -1637,12 +1636,8 @@ static inline bool op_cmisc_alu(rv_insn_t *ir, const uint32_t insn)
         case 5: /* ADDW */
             assert(!"RV64/128C instructions");
             break;
-        case 6: /* Reserved */
-        case 7: /* Reserved */
+        default: /* Reserved (cases 6, 7) */
             assert(!"Instruction reserved");
-            break;
-        default:
-            __UNREACHABLE;
             break;
         }
         break;
@@ -1827,9 +1822,6 @@ static inline bool op_ccr(rv_insn_t *ir, const uint32_t insn)
             /* Hint */
             ir->opcode = rv_insn_cnop;
         }
-        break;
-    default:
-        __UNREACHABLE;
         break;
     }
     return true;

@@ -94,14 +94,18 @@ typedef struct sound {
 } sound_t;
 
 /* SDL-mixer-related and music-related variables */
-static pthread_t music_thread;
 static uint8_t *music_midi_data;
 #if RV32_HAS(SDL_MIXER)
 static Mix_Music *mid;
 
 /* SDL-mixer-related and sfx-related variables */
-static pthread_t sfx_thread;
 static Mix_Chunk *sfx_chunk;
+#endif
+
+#ifdef __EMSCRIPTEN__
+/* Thread handles only needed for EMSCRIPTEN joinable threads */
+static pthread_t music_thread;
+static pthread_t sfx_thread;
 #endif
 static uint8_t *sfx_samples;
 static uint32_t nr_sfx_samples;
@@ -742,12 +746,16 @@ static void *sfx_handler(void *arg)
 
     memcpy(sfx_samples, ptr, sizeof(uint8_t) * nr_sfx_samples);
     sfx_chunk = Mix_QuickLoad_RAW(sfx_samples, nr_sfx_samples);
-    if (!sfx_chunk)
+    if (!sfx_chunk) {
+        free(sfx);
         return NULL;
+    }
 
     chan = Mix_PlayChannel(-1, sfx_chunk, 0);
-    if (chan == -1)
+    if (chan == -1) {
+        free(sfx);
         return NULL;
+    }
 
     if (*ptr & 0x3) {
         /* Doom, multiplied by 8 because sfx->volume's max is 15 */
@@ -759,6 +767,7 @@ static void *sfx_handler(void *arg)
         Mix_Volume(chan, (sfx->volume + 1) % 128);
     }
 
+    free(sfx);
     return NULL;
 }
 
@@ -767,23 +776,35 @@ static void *music_handler(void *arg)
     sound_t *music = (sound_t *) arg;
     int looping = music->looping ? -1 : 1;
 
+    /* Free previous MIDI data */
     free(music_midi_data);
+    music_midi_data = NULL;
+
+    /* Free previous music to prevent memory leak */
+    if (mid) {
+        Mix_HaltMusic();
+        Mix_FreeMusic(mid);
+        mid = NULL;
+    }
 
     music_midi_data = mus2midi(music->data, (int *) &music->size);
     if (!music_midi_data) {
         rv_log_error("mus2midi() failed");
+        free(music);
         return NULL;
     }
 
     SDL_RWops *rwops = SDL_RWFromMem(music_midi_data, music->size);
     if (!rwops) {
         rv_log_error("SDL_RWFromMem failed: %s", SDL_GetError());
+        free(music);
         return NULL;
     }
 
     mid = Mix_LoadMUSType_RW(rwops, MUS_MID, SDL_TRUE);
     if (!mid) {
         rv_log_error("Mix_LoadMUSType_RW failed: %s", Mix_GetError());
+        free(music);
         return NULL;
     }
 
@@ -794,9 +815,11 @@ static void *music_handler(void *arg)
 
     if (Mix_PlayMusic(mid, looping) == -1) {
         rv_log_error("Mix_PlayMusic failed: %s", Mix_GetError());
+        free(music);
         return NULL;
     }
 
+    free(music);
     return NULL;
 }
 
@@ -808,21 +831,15 @@ static void play_sfx(riscv_t *rv)
     int volume = rv_get_reg(rv, rv_reg_a2);
 
     sfxinfo_t sfxinfo;
-    uint8_t sfx_data[SFX_SAMPLE_SIZE];
+    uint32_t sfx_data_size;
+
 #if RV32_HAS(SYSTEM_MMIO)
     uint32_t addr = rv->io.mem_translate(rv, sfxinfo_addr, R);
     memory_read(attr->mem, (uint8_t *) &sfxinfo, addr, sizeof(sfxinfo_t));
 
     uint32_t sfx_data_offset =
         *((uint32_t *) ((uint8_t *) attr->mem->mem_base + addr));
-    uint32_t sfx_data_size =
-        *(uint32_t *) ((uint8_t *) attr->mem->mem_base + addr + 4);
-    uint32_t sfx_data_vaddr = sfx_data_offset;
-    uint8_t *sfx_data_ptr = &sfx_data[0];
-    remain_size = sfx_data_size;
-    curr_offset = 0;
-
-    GET_SFX_DATA_FROM_RANDOM_PAGE(sfx_data_vaddr, sfx_data_ptr);
+    sfx_data_size = *(uint32_t *) ((uint8_t *) attr->mem->mem_base + addr + 4);
 #else
     memory_read(attr->mem, (uint8_t *) &sfxinfo, sfxinfo_addr,
                 sizeof(sfxinfo_t));
@@ -832,28 +849,57 @@ static void play_sfx(riscv_t *rv)
      * various applications when accessing different sfxinfo_t instances.
      */
     uint32_t sfx_data_offset = *((uint32_t *) &sfxinfo);
-    uint32_t sfx_data_size = *(uint32_t *) ((uint32_t *) &sfxinfo + 1);
-    memory_read(attr->mem, sfx_data, sfx_data_offset,
+    sfx_data_size = *(uint32_t *) ((uint32_t *) &sfxinfo + 1);
+#endif
+
+#if RV32_HAS(SDL_MIXER)
+    /* Validate size to prevent excessive allocation from untrusted guest */
+    if (sfx_data_size == 0 || sfx_data_size > SFX_SAMPLE_SIZE)
+        return;
+
+    /* Heap allocate sound_t + data buffer together (thread takes ownership) */
+    sound_t *sfx = malloc(sizeof(sound_t) + sfx_data_size);
+    if (!sfx)
+        return;
+
+    sfx->data = (uint8_t *) (sfx + 1); /* Data follows the struct */
+    sfx->size = sfx_data_size;
+    sfx->volume = volume;
+
+#if RV32_HAS(SYSTEM_MMIO)
+    uint32_t sfx_data_vaddr = sfx_data_offset;
+    uint8_t *sfx_data_ptr = sfx->data;
+    remain_size = sfx_data_size;
+    curr_offset = 0;
+
+    GET_SFX_DATA_FROM_RANDOM_PAGE(sfx_data_vaddr, sfx_data_ptr);
+#else
+    memory_read(attr->mem, sfx->data, sfx_data_offset,
                 sizeof(uint8_t) * sfx_data_size);
 #endif
 
-    sound_t sfx = {
-        .data = sfx_data,
-        .size = sfx_data_size,
-        .volume = volume,
-    };
-#if RV32_HAS(SDL_MIXER)
-    pthread_create(&sfx_thread, NULL, sfx_handler, &sfx);
-    sfx_thread_init = true;
-#endif
-    /* FIXME: In web browser runtime, web workers in thread pool do not reap
-     * after sfx_handler return, thus we have to join them. sfx_handler does not
-     * contain infinite loop,so do not worry to be stalled by it */
 #ifdef __EMSCRIPTEN__
-#if RV32_HAS(SDL_MIXER)
+    /* Web browser: use joinable thread and wait for completion */
+    if (pthread_create(&sfx_thread, NULL, sfx_handler, sfx) != 0) {
+        free(sfx);
+        return;
+    }
     pthread_join(sfx_thread, NULL);
+    /* Thread already joined - don't join again in shutdown_audio */
+#else
+    /* Native: use detached thread for non-blocking playback */
+    pthread_t thread;
+    pthread_attr_t thread_attr;
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&thread, &thread_attr, sfx_handler, sfx) != 0) {
+        pthread_attr_destroy(&thread_attr);
+        free(sfx);
+        return;
+    }
+    pthread_attr_destroy(&thread_attr);
 #endif
-#endif
+#endif /* RV32_HAS(SDL_MIXER) */
 }
 
 static void play_music(riscv_t *rv)
@@ -865,7 +911,8 @@ static void play_music(riscv_t *rv)
     int looping = rv_get_reg(rv, rv_reg_a3);
 
     musicinfo_t musicinfo;
-    uint8_t music_data[MUSIC_MAX_SIZE];
+    uint32_t music_data_size;
+
 #if RV32_HAS(SYSTEM_MMIO)
     uint32_t addr = rv->io.mem_translate(rv, musicinfo_addr, R);
     memory_read(attr->mem, (uint8_t *) &musicinfo, addr, sizeof(musicinfo_t));
@@ -876,14 +923,8 @@ static void play_music(riscv_t *rv)
      */
     uint32_t music_data_offset =
         *((uint32_t *) ((uint8_t *) attr->mem->mem_base + addr));
-    uint32_t music_data_size =
+    music_data_size =
         *(uint32_t *) ((uint8_t *) attr->mem->mem_base + addr + 4);
-    uint32_t music_data_vaddr = music_data_offset;
-    uint8_t *music_data_ptr = &music_data[0];
-    remain_size = music_data_size;
-    curr_offset = 0;
-
-    GET_MUSIC_DATA_FROM_RANDOM_PAGE(music_data_vaddr, music_data_ptr);
 #else
     memory_read(attr->mem, (uint8_t *) &musicinfo, musicinfo_addr,
                 sizeof(musicinfo_t));
@@ -893,28 +934,57 @@ static void play_music(riscv_t *rv)
      * various applications when accessing different sfxinfo_t instances.
      */
     uint32_t music_data_offset = *((uint32_t *) &musicinfo);
-    uint32_t music_data_size = *(uint32_t *) ((uint32_t *) &musicinfo + 1);
-    memory_read(attr->mem, music_data, music_data_offset, music_data_size);
+    music_data_size = *(uint32_t *) ((uint32_t *) &musicinfo + 1);
 #endif
 
-    sound_t music = {
-        .data = music_data,
-        .size = music_data_size,
-        .looping = looping,
-        .volume = volume,
-    };
 #if RV32_HAS(SDL_MIXER)
-    pthread_create(&music_thread, NULL, music_handler, &music);
-    music_thread_init = true;
+    /* Validate size to prevent excessive allocation from untrusted guest */
+    if (music_data_size == 0 || music_data_size > MUSIC_MAX_SIZE)
+        return;
+
+    /* Heap allocate sound_t + data buffer together (thread takes ownership) */
+    sound_t *music = malloc(sizeof(sound_t) + music_data_size);
+    if (!music)
+        return;
+
+    music->data = (uint8_t *) (music + 1); /* Data follows the struct */
+    music->size = music_data_size;
+    music->looping = looping;
+    music->volume = volume;
+
+#if RV32_HAS(SYSTEM_MMIO)
+    uint32_t music_data_vaddr = music_data_offset;
+    uint8_t *music_data_ptr = music->data;
+    remain_size = music_data_size;
+    curr_offset = 0;
+
+    GET_MUSIC_DATA_FROM_RANDOM_PAGE(music_data_vaddr, music_data_ptr);
+#else
+    memory_read(attr->mem, music->data, music_data_offset, music_data_size);
 #endif
-    /* FIXME: In web browser runtime, web workers in thread pool do not reap
-     * after music_handler return, thus we have to join them. music_handler does
-     * not contain infinite loop,so do not worry to be stalled by it */
+
 #ifdef __EMSCRIPTEN__
-#if RV32_HAS(SDL_MIXER)
+    /* Web browser: use joinable thread and wait for completion */
+    if (pthread_create(&music_thread, NULL, music_handler, music) != 0) {
+        free(music);
+        return;
+    }
     pthread_join(music_thread, NULL);
+    /* Thread already joined - don't join again in shutdown_audio */
+#else
+    /* Native: use detached thread for non-blocking playback */
+    pthread_t thread;
+    pthread_attr_t thread_attr;
+    pthread_attr_init(&thread_attr);
+    pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&thread, &thread_attr, music_handler, music) != 0) {
+        pthread_attr_destroy(&thread_attr);
+        free(music);
+        return;
+    }
+    pthread_attr_destroy(&thread_attr);
 #endif
-#endif
+#endif /* RV32_HAS(SDL_MIXER) */
 }
 
 static void stop_music()
@@ -965,27 +1035,34 @@ static void init_audio(void)
 
 static void shutdown_audio()
 {
-    /*
-     * sfx_thread and music_thread might contain invalid identifiers.
-     * Additionally, there is no built-in method to verify the validity
-     * of a pthread_t type. Therefore, the sfx_thread_init and music_thread_init
-     * flags are used for validation, ensuring that pthread_join always operates
-     * on a valid pthread_t identifier.
-     */
-
 #if RV32_HAS(SDL_MIXER)
-    if (music_thread_init) {
-        stop_music();
-        pthread_join(music_thread, NULL);
-        Mix_FreeMusic(mid);
-        free(music_midi_data);
-        music_midi_data = NULL;
-    }
+    /* Stop all playback first */
+    Mix_HaltMusic();
+    Mix_HaltChannel(-1);
 
-    if (sfx_thread_init) {
+#ifdef __EMSCRIPTEN__
+    /*
+     * For EMSCRIPTEN, threads are joinable. Join them if initialized to ensure
+     * handlers have completed before freeing resources.
+     */
+    if (music_thread_init)
+        pthread_join(music_thread, NULL);
+    if (sfx_thread_init)
         pthread_join(sfx_thread, NULL);
-        Mix_HaltChannel(-1);
+#endif
+
+    /* Free music resources */
+    if (mid) {
+        Mix_FreeMusic(mid);
+        mid = NULL;
+    }
+    free(music_midi_data);
+    music_midi_data = NULL;
+
+    /* Free sfx resources */
+    if (sfx_chunk) {
         Mix_FreeChunk(sfx_chunk);
+        sfx_chunk = NULL;
     }
 
     Mix_CloseAudio();

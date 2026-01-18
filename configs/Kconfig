@@ -206,10 +206,8 @@ choice
 config INTERPRETER_ONLY
     bool "Interpreter Only"
     help
-      Pure interpreter mode using threaded code dispatch.
+      Pure interpreter mode using tail-call-optimization-based instruction dispatch.
       Most portable, works on all platforms.
-
-      Uses computed goto for efficient instruction dispatch.
 
 config JIT
     bool "JIT Compilation (Hybrid)"

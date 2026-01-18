@@ -138,40 +138,44 @@ ifeq ($(CONFIG_JIT),y)
     OBJS_EXT += jit.o
     T2C_ENABLED := 0
     ifeq ($(CONFIG_T2C),y)
-        # LLVM 18 detection (only when T2C enabled)
-        LLVM_CONFIG := $(strip $(or \
-            $(shell which llvm-config-18 2>/dev/null),\
-            $(shell brew --prefix llvm@18 2>/dev/null | xargs -I{} sh -c 'test -x {}/bin/llvm-config && echo {}/bin/llvm-config' 2>/dev/null),\
-            $(shell which llvm-config 2>/dev/null | xargs -I{} sh -c '{} --version 2>/dev/null | grep -q "^18\." && echo {}' 2>/dev/null)))
-        HOMEBREW_LLVM_PREFIX := $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@18 2>/dev/null)
+        # LLVM detection using helpers from mk/toolchain.mk
+        # User can override with: make LLVM_CONFIG=/path/to/llvm-config
+        ifndef LLVM_CONFIG
+            LLVM_CONFIG := $(call detect-llvm-config)
+        endif
         ifneq ($(LLVM_CONFIG),)
-            CHECK_LLVM := $(shell $(LLVM_CONFIG) --libs 2>/dev/null 1>&2; echo $$?)
-            ifeq ($(CHECK_LLVM),0)
+            LLVM_VERSION := $(call llvm-version,$(LLVM_CONFIG))
+            ifeq ($(call llvm-check-libs,$(LLVM_CONFIG)),0)
                 T2C_ENABLED := 1
                 OBJS_EXT += t2c.o
-                CFLAGS += -g $(shell $(LLVM_CONFIG) --cflags)
-                LDFLAGS += $(shell $(LLVM_CONFIG) --libfiles)
+                CFLAGS += -g $(call llvm-cflags,$(LLVM_CONFIG))
+                LDFLAGS += $(call llvm-libfiles,$(LLVM_CONFIG))
+                # Add Homebrew library path if needed
+                HOMEBREW_LLVM_PREFIX := $(call detect-homebrew-llvm-prefix)
                 ifneq ($(HOMEBREW_LLVM_PREFIX),)
                 ifneq ($(findstring $(HOMEBREW_LLVM_PREFIX),$(LLVM_CONFIG)),)
                     LDFLAGS += -L$(HOMEBREW_LLVM_PREFIX)/lib
                 endif
                 endif
             else
-                $(warning LLVM 18 libraries not found. T2C disabled.)
+                $(warning LLVM $(LLVM_VERSION) libraries not found. T2C disabled.)
             endif
         else
-            $(warning llvm-config-18 not found. T2C disabled.)
+            $(warning llvm-config ($(LLVM_MIN_VERSION)-$(LLVM_MAX_VERSION)) not found. T2C disabled.)
         endif
     endif
     CFLAGS += -DRV32_FEATURE_T2C=$(T2C_ENABLED)
-    ifneq ($(UNAME_M),$(filter $(UNAME_M),x86_64 aarch64 arm64))
-        $(error JIT only supports x86_64 and ARM64 platforms.)
+    # JIT requires x86_64 or ARM64; skip check for WASM builds (emcc cross-compiles)
+    ifneq ($(CC_IS_EMCC),1)
+        ifneq ($(UNAME_M),$(filter $(UNAME_M),x86_64 aarch64 arm64))
+            $(error JIT only supports x86_64 and ARM64 platforms.)
+        endif
     endif
 $(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
-# Pass T2C optimization level from Kconfig (0-3, default 3)
-T2C_OPT_LEVEL ?= $(if $(CONFIG_T2C_OPT_LEVEL),$(CONFIG_T2C_OPT_LEVEL),3)
+# T2C optimization level from Kconfig (0-3, default 3)
+T2C_OPT_LEVEL ?= $(or $(CONFIG_T2C_OPT_LEVEL),3)
 $(OUT)/t2c.o: src/t2c.c src/t2c_template.c $(CONFIG_HEADER)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -DCONFIG_T2C_OPT_LEVEL=$(T2C_OPT_LEVEL) -c -MMD -MF $@.d $<

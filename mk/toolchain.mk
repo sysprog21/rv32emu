@@ -179,9 +179,87 @@ ifneq ($(SYSROOT),)
     KCONFIG_LDFLAGS += --sysroot=$(SYSROOT)
 endif
 
-# Note: LLVM 18 detection for T2C is done inline in Makefile,
-# guarded by ifeq ($(CONFIG_T2C),y) to avoid expensive shell calls
-# when T2C is disabled (most builds).
+# LLVM Detection for T2C (Tier-2 Compiler)
+#
+# Supports LLVM 18-21. Detection is deferred until CONFIG_T2C is enabled
+# to avoid expensive shell calls in most builds.
+#
+# User can override: make LLVM_CONFIG=/path/to/llvm-config
+
+# Supported LLVM version range
+LLVM_MIN_VERSION := 18
+LLVM_MAX_VERSION := 21
+
+# Check if a versioned llvm-config exists in PATH
+# Usage: $(call llvm-config-path,VERSION)
+define llvm-config-path
+$(shell which llvm-config-$(1) 2>/dev/null)
+endef
+
+# Check if Homebrew LLVM version exists
+# Usage: $(call llvm-homebrew-config,VERSION)
+define llvm-homebrew-config
+$(shell brew --prefix llvm@$(1) 2>/dev/null | xargs -I{} sh -c 'test -x {}/bin/llvm-config && echo {}/bin/llvm-config' 2>/dev/null)
+endef
+
+# Check generic llvm-config with version validation
+# Usage: $(call llvm-config-generic,MIN,MAX)
+define llvm-config-generic
+$(shell which llvm-config 2>/dev/null | xargs -I{} sh -c 'ver=$$({} --version 2>/dev/null | cut -d. -f1); [ "$$ver" -ge $(1) ] && [ "$$ver" -le $(2) ] && echo {}' 2>/dev/null)
+endef
+
+# Auto-detect LLVM configuration
+# Priority: versioned binaries (18-21), Homebrew versioned, Homebrew generic, generic with version check
+# Note: Prefers oldest supported version (18) for stability; override with LLVM_CONFIG= for newer
+define detect-llvm-config
+$(strip $(or \
+    $(call llvm-config-path,18),\
+    $(call llvm-config-path,19),\
+    $(call llvm-config-path,20),\
+    $(call llvm-config-path,21),\
+    $(call llvm-homebrew-config,18),\
+    $(call llvm-homebrew-config,19),\
+    $(call llvm-homebrew-config,20),\
+    $(call llvm-homebrew-config,21),\
+    $(shell brew --prefix llvm 2>/dev/null | xargs -I{} sh -c 'test -x {}/bin/llvm-config && echo {}/bin/llvm-config' 2>/dev/null),\
+    $(call llvm-config-generic,$(LLVM_MIN_VERSION),$(LLVM_MAX_VERSION))))
+endef
+
+# Detect Homebrew LLVM prefix for library path
+define detect-homebrew-llvm-prefix
+$(strip $(or \
+    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@18 2>/dev/null),\
+    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@19 2>/dev/null),\
+    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@20 2>/dev/null),\
+    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@21 2>/dev/null),\
+    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm 2>/dev/null)))
+endef
+
+# Get LLVM version major number
+# Usage: $(call llvm-version,LLVM_CONFIG_PATH)
+define llvm-version
+$(shell $(1) --version 2>/dev/null | cut -d. -f1)
+endef
+
+# Check if LLVM libraries are available
+# Usage: $(call llvm-check-libs,LLVM_CONFIG_PATH)
+# Returns: "0" (string) on success, non-zero string on failure
+# Example: ifeq ($(call llvm-check-libs,$(LLVM_CONFIG)),0)
+define llvm-check-libs
+$(shell $(1) --libs 2>/dev/null 1>&2; echo $$?)
+endef
+
+# Get LLVM compiler flags
+# Usage: $(call llvm-cflags,LLVM_CONFIG_PATH)
+define llvm-cflags
+$(shell $(1) --cflags 2>/dev/null)
+endef
+
+# Get LLVM library files for linking
+# Usage: $(call llvm-libfiles,LLVM_CONFIG_PATH)
+define llvm-libfiles
+$(shell $(1) --libfiles 2>/dev/null)
+endef
 
 # Version Comparison Utilities
 

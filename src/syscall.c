@@ -222,9 +222,10 @@ static void syscall_close(riscv_t *rv)
     /*
      * The crt0 closes standard file descriptor(0, 1, 2) when
      * the process exits. Thus, the operations by the crt0
-     * should not considered as error.
+     * should not be considered as error. For stripped ELFs where
+     * exit_addr is not found, allow close(fd<3) to succeed silently.
      */
-    if (fd < 3 && !PRIV(rv)->on_exit) {
+    if (fd < 3 && !PRIV(rv)->on_exit && PRIV(rv)->exit_addr) {
         rv_set_reg(rv, rv_reg_a0, -1);
         rv_log_error(
             "Attempted to close a file descriptor < 3 (fd=%u). Operation "

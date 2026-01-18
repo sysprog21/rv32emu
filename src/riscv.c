@@ -647,10 +647,16 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 #if !RV32_HAS(SYSTEM)
     /* set not exiting */
     attr->on_exit = false;
+    attr->exit_addr = 0;
 
-    const struct Elf32_Sym *exit;
-    if ((exit = elf_get_symbol(elf, "exit")))
-        attr->exit_addr = exit->st_value;
+    /* Try to find exit address from symbols. Check multiple names since
+     * different toolchains/libc implementations may use different symbols.
+     */
+    const struct Elf32_Sym *exit_sym;
+    if ((exit_sym = elf_get_symbol(elf, "exit")))
+        attr->exit_addr = exit_sym->st_value;
+    else if ((exit_sym = elf_get_symbol(elf, "_exit")))
+        attr->exit_addr = exit_sym->st_value;
 #endif
 
     assert(elf_load(elf, attr->mem));

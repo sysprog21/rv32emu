@@ -2072,7 +2072,23 @@ RVOP(
             break;                                       \
         }                                                \
     }
+/* Extract vta and vma bits from csr_vtype */
+#define GET_VTA(vtype) (((vtype) >> 6) & 0x1)
+#define GET_VMA(vtype) (((vtype) >> 7) & 0x1)
+#define GET_VSEW(vtype) (((vtype) >> 3) & 0x7)
+#define GET_VLMUL(vtype) ((vtype) & 0x7)
 
+Agnostic fill values based on SEW 
+#define AGNOSTIC_FILL_8b   0xFF
+#define AGNOSTIC_FILL_16b  0xFFFF
+#define AGNOSTIC_FILL_32b  0xFFFFFFFF 
+
+/* Get agnostic fill value for current SEW */
+#define GET_FILL_VALUE(sew_bits) \
+    ((sew_bits) == 8 ? AGNOSTIC_FILL_8b : \
+     (sew_bits) == 16 ? AGNOSTIC_FILL_16b : AGNOSTIC_FILL_32b)
+     
+     
 #define VI_LOOP(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)                 \
     uint32_t tmp_1 = rv->V[op1 + j][i];                                        \
     uint32_t tmp_d = rv->V[des + j][i];                                        \
@@ -2082,34 +2098,67 @@ RVOP(
         if (ir->vm) {                                                          \
             ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK))       \
                   << (k << (SHIFT));                                           \
-        } else {                                                               \
-            ans = (vm & (0x1 << k))                                            \
-                      ? ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK)) \
-                            << (k << (SHIFT))                                  \
-                      : (tmp_d & (MASK << (k << (SHIFT))));                    \
-        }                                                                      \
+        } else {                                                          \
+            /* mask[k]=0: Inactive element, apply vma policy */           \
+            if (vma) {                                                    \
+                /* vma=1: agnostic, write fill value */                   \
+                ans = ((fill) & (MASK)) << (k << (SHIFT));                \
+            } else {                                                      \
+                /* vma=0: undisturbed, keep old value */                  \
+                ans = (tmp_d & (MASK << (k << (SHIFT))));                 \
+            }                                                             \
+        }                                                                 \
+                                                                                  \
         rv->V[des + j][i] += ans;                                              \
     }
 
 #define VI_LOOP_LEFT(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)            \
     uint32_t tmp_1 = rv->V[op1 + j][i];                                        \
     uint32_t tmp_d = rv->V[des + j][i];                                        \
-    if (rv->csr_vl % itr) {                                                    \
-        rv->V[des + j][i] &= (0xFFFFFFFF << ((rv->csr_vl % itr) << SHIFT));    \
-    }                                                                          \
+    uint8_t body_count = rv->csr_vl % itr;                                     \
     uint32_t ans = 0;                                                          \
-    for (uint8_t k = 0; k < (rv->csr_vl % itr); k++) {                         \
-        assert((des + j) < 32);                                                \
-        if (ir->vm) {                                                          \
-            ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK))       \
-                  << (k << (SHIFT));                                           \
-        } else {                                                               \
-            ans = (vm & (0x1 << k))                                            \
-                      ? ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK)) \
-                            << (k << (SHIFT))                                  \
-                      : (tmp_d & (MASK << (k << (SHIFT))));                    \
-        }                                                                      \
-        rv->V[des + j][i] += ans;                                              \
+        /* Step 1: Initialize word based on vta for tail elements */                   \
+    if (body_count > 0) {                                                          \
+        if (vta) {                                                                 \
+            /* vta=1: agnostic, set tail bits to all 1s */                         \
+            uint32_t body_mask = (1U << (body_count << SHIFT)) - 1;                \
+            uint32_t tail_mask = ~body_mask;                                       \
+            rv->V[des + j][i] = (rv->V[des + j][i] & body_mask) | tail_mask;       \
+        }                                                                          \
+        /* vta=0: undisturbed, keep tail as-is (no action needed) */               \
+    } else {                                                                       \
+        /* No body elements in this word, entire word is tail */                   \
+        if (vta) {                                                                 \
+            rv->V[des + j][i] = 0xFFFFFFFF;                                        \
+        }                                                                          \
+        /* vta=0: keep old value */                                                \
+        return; /* No body elements to process */                                  \
+    }                                                                              \
+                                                                                   \
+    /* Step 2: Process body elements */                                            \
+    for (uint8_t k = 0; k < body_count; k++) {                                     \
+        assert((des + j) < 32);                                                    \
+        if (ir->vm) {                                                              \
+            /* No masking */                                                       \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK))           \
+                  << (k << (SHIFT));                                               \
+        } else {                                                                   \
+            /* Masking enabled */                                                  \
+            if (vm & (0x1 << k)) {                                                 \
+                /* Active element */                                               \
+                ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (op2))) & (MASK))       \
+                      << (k << (SHIFT));                                           \
+            } else {                                                               \
+                /* Inactive element, apply vma */                                  \
+                if (vma) {                                                         \
+                    ans = ((fill) & (MASK)) << (k << (SHIFT));                     \
+                } else {                                                           \
+                    ans = (tmp_d & (MASK << (k << (SHIFT))));                      \
+                }                                                                  \
+            }                                                                      \
+        }                                                                          \
+        /* Clear the target position and write new value */                        \
+        rv->V[des + j][i] = (rv->V[des + j][i] & ~(MASK << (k << SHIFT))) | ans;   \
     }
 
 #define VV_LOOP(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)                \
@@ -2124,13 +2173,20 @@ RVOP(
                             (tmp_2 >> (k << (SHIFT))))) &                     \
                    (MASK))                                                    \
                   << (k << (SHIFT));                                          \
-        } else {                                                              \
-            ans = (vm & (0x1 << k)) ? ((op_##op((tmp_1 >> (k << (SHIFT))),    \
-                                                (tmp_2 >> (k << (SHIFT))))) & \
-                                       (MASK))                                \
-                                          << (k << (SHIFT))                   \
-                                    : (tmp_d & (MASK << (k << (SHIFT))));     \
-        }                                                                     \
+        } else {                                                             \
+            if (vm & (0x1 << k)) {                                           \
+                ans = ((op_##op((tmp_1 >> (k << (SHIFT))),                   \
+                                (tmp_2 >> (k << (SHIFT))))) &                \
+                       (MASK))                                               \
+                      << (k << (SHIFT));                                     \
+            } else {                                                         \
+                if (vma) {                                                   \
+                    ans = ((fill) & (MASK)) << (k << (SHIFT));               \
+                } else {                                                     \
+                    ans = (tmp_d & (MASK << (k << (SHIFT))));                \
+                }                                                            \
+            }                                                                \
+        }                                                                          \
         rv->V[des + j][i] += ans;                                             \
     }
 
@@ -2138,25 +2194,43 @@ RVOP(
     uint32_t tmp_1 = rv->V[op1 + j][i];                                       \
     uint32_t tmp_2 = rv->V[op2 + j][i];                                       \
     uint32_t tmp_d = rv->V[des + j][i];                                       \
-    if (rv->csr_vl % itr) {                                                   \
-        rv->V[des + j][i] &= (0xFFFFFFFF << ((rv->csr_vl % itr) << SHIFT));   \
-    }                                                                         \
+    uint8_t body_count = rv->csr_vl % itr;                                    \
     uint32_t ans = 0;                                                         \
-    for (uint8_t k = 0; k < (rv->csr_vl % itr); k++) {                        \
-        assert((des + j) < 32);                                               \
-        if (ir->vm) {                                                         \
-            ans = ((op_##op((tmp_1 >> (k << (SHIFT))),                        \
-                            (tmp_2 >> (k << (SHIFT))))) &                     \
-                   (MASK))                                                    \
-                  << (k << (SHIFT));                                          \
-        } else {                                                              \
-            ans = (vm & (0x1 << k)) ? ((op_##op((tmp_1 >> (k << (SHIFT))),    \
-                                                (tmp_2 >> (k << (SHIFT))))) & \
-                                       (MASK))                                \
-                                          << (k << (SHIFT))                   \
-                                    : (tmp_d & (MASK << (k << (SHIFT))));     \
-        }                                                                     \
-        rv->V[des + j][i] += ans;                                             \
+    if (body_count > 0) {                                                          \
+        if (vta) {                                                                 \
+            uint32_t body_mask = (1U << (body_count << SHIFT)) - 1;                \
+            uint32_t tail_mask = ~body_mask;                                       \
+            rv->V[des + j][i] = (rv->V[des + j][i] & body_mask) | tail_mask;       \
+        }                                                                          \
+    } else {                                                                       \
+        if (vta) {                                                                 \
+            rv->V[des + j][i] = 0xFFFFFFFF;                                        \
+        }                                                                          \
+        return;                                                                    \
+    }                                                                              \
+                                                                                   \
+    for (uint8_t k = 0; k < body_count; k++) {                                     \
+        assert((des + j) < 32);                                                    \
+        if (ir->vm) {                                                              \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))),                             \
+                            (tmp_2 >> (k << (SHIFT))))) &                          \
+                   (MASK))                                                         \
+                  << (k << (SHIFT));                                               \
+        } else {                                                                   \
+            if (vm & (0x1 << k)) {                                                 \
+                ans = ((op_##op((tmp_1 >> (k << (SHIFT))),                         \
+                                (tmp_2 >> (k << (SHIFT))))) &                      \
+                       (MASK))                                                     \
+                      << (k << (SHIFT));                                           \
+            } else {                                                               \
+                if (vma) {                                                         \
+                    ans = ((fill) & (MASK)) << (k << (SHIFT));                     \
+                } else {                                                           \
+                    ans = (tmp_d & (MASK << (k << (SHIFT))));                      \
+                }                                                                  \
+            }                                                                      \
+        }                                                                          \
+        rv->V[des + j][i] = (rv->V[des + j][i] & ~(MASK << (k << SHIFT))) | ans;   \
     }
 
 #define VX_LOOP(des, op1, op2, op, SHIFT, MASK, i, j, itr, vm)                 \
@@ -2169,12 +2243,17 @@ RVOP(
         if (ir->vm) {                                                          \
             ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK))     \
                   << (k << (SHIFT));                                           \
-        } else {                                                               \
-            ans =                                                              \
-                (vm & (0x1 << k))                                              \
-                    ? ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK)) \
-                          << (k << (SHIFT))                                    \
-                    : (tmp_d & (MASK << (k << (SHIFT))));                      \
+        } else {                                                             \
+            if (vm & (0x1 << k)) {                                           \
+                ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK)) \
+                      << (k << (SHIFT));                                     \
+            } else {                                                         \
+                if (vma) {                                                   \
+                    ans = ((fill) & (MASK)) << (k << (SHIFT));               \
+                } else {                                                     \
+                    ans = (tmp_d & (MASK << (k << (SHIFT))));                \
+                }                                                            \
+            }                                                                \
         }                                                                      \
         rv->V[des + j][i] += ans;                                              \
     }
@@ -2183,27 +2262,46 @@ RVOP(
     uint32_t tmp_1 = rv->V[op1 + j][i];                                        \
     uint32_t tmp_2 = rv->X[op2];                                               \
     uint32_t tmp_d = rv->V[des + j][i];                                        \
-    if (rv->csr_vl % itr) {                                                    \
-        rv->V[des + j][i] &= (0xFFFFFFFF << ((rv->csr_vl % itr) << SHIFT));    \
-    }                                                                          \
+    uint8_t body_count = rv->csr_vl % itr;                                     \
     uint32_t ans = 0;                                                          \
-    for (uint8_t k = 0; k < (rv->csr_vl % itr); k++) {                         \
-        assert((des + j) < 32);                                                \
-        if (ir->vm) {                                                          \
-            ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK))     \
-                  << (k << (SHIFT));                                           \
-        } else {                                                               \
-            ans =                                                              \
-                (vm & (0x1 << k))                                              \
-                    ? ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK)) \
-                          << (k << (SHIFT))                                    \
-                    : (tmp_d & (MASK << (k << (SHIFT))));                      \
-        }                                                                      \
-        rv->V[des + j][i] += ans;                                              \
+    if (body_count > 0) {                                                          \
+        if (vta) {                                                                 \
+            uint32_t body_mask = (1U << (body_count << SHIFT)) - 1;                \
+            uint32_t tail_mask = ~body_mask;                                       \
+            rv->V[des + j][i] = (rv->V[des + j][i] & body_mask) | tail_mask;       \
+        }                                                                          \
+    } else {                                                                       \
+        if (vta) {                                                                 \
+            rv->V[des + j][i] = 0xFFFFFFFF;                                        \
+        }                                                                          \
+        return;                                                                    \
+    }                                                                              \
+                                                                                   \
+    for (uint8_t k = 0; k < body_count; k++) {                                     \
+        assert((des + j) < 32);                                                    \
+        if (ir->vm) {                                                              \
+            ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK))         \
+                  << (k << (SHIFT));                                               \
+        } else {                                                                   \
+            if (vm & (0x1 << k)) {                                                 \
+                ans = ((op_##op((tmp_1 >> (k << (SHIFT))), (tmp_2))) & (MASK))     \
+                      << (k << (SHIFT));                                           \
+            } else {                                                               \
+                if (vma) {                                                         \
+                    ans = ((fill) & (MASK)) << (k << (SHIFT));                     \
+                } else {                                                           \
+                    ans = (tmp_d & (MASK << (k << (SHIFT))));                      \
+                }                                                                  \
+            }                                                                      \
+        }                                                                          \
+        rv->V[des + j][i] = (rv->V[des + j][i] & ~(MASK << (k << SHIFT))) | ans;   \
     }
 
 #define sew_8b_handler(des, op1, op2, op, op_type)                             \
     {                                                                          \
+        uint8_t vma = GET_VMA(rv->csr_vtype);                                  \
+        uint8_t vta = GET_VTA(rv->csr_vtype);                                  \
+        uint32_t fill = AGNOSTIC_FILL_8b;                                      \
         uint8_t __i = 0;                                                       \
         uint8_t __j = 0;                                                       \
         uint8_t __m = 0;                                                       \
@@ -2227,10 +2325,31 @@ RVOP(
             }                                                                  \
         }                                                                      \
         op_type##_LOOP_LEFT(des, op1, op2, op, 3, 0xFF, __i, __j, 4, vm);      \
+        /* Handle remaining words that are entirely tail */                    \
+        if (vta && (rv->csr_vl % 4)) {                                         \
+            __i++;                                                             \
+            while (__i < VREG_U32_COUNT) {                                     \
+                assert((des + __j) < 32);                                      \
+                rv->V[des + __j][__i] = 0xFFFFFFFF;                            \
+                __i++;                                                         \
+            }                                                                  \
+            __j++;                                                             \
+            uint8_t v_lmul = GET_VLMUL(rv->csr_vtype);                         \
+            uint8_t num_regs = (v_lmul < 4) ? (1 << v_lmul) : 1;               \
+            while (__j < num_regs) {                                           \
+                for (uint8_t w = 0; w < VREG_U32_COUNT; w++) {                 \
+                    rv->V[des + __j][w] = 0xFFFFFFFF;                          \
+                }                                                              \
+                __j++;                                                         \
+            }                                                                  \
+        }                    
     }
 
 #define sew_16b_handler(des, op1, op2, op, op_type)                         \
     {                                                                       \
+        uint8_t vma = GET_VMA(rv->csr_vtype);                               \
+        uint8_t vta = GET_VTA(rv->csr_vtype);                               \
+        uint32_t fill = AGNOSTIC_FILL_16b;                                  \
         uint8_t __i = 0;                                                    \
         uint8_t __j = 0;                                                    \
         uint8_t __m = 0;                                                    \
@@ -2252,10 +2371,30 @@ RVOP(
             }                                                               \
         }                                                                   \
         op_type##_LOOP_LEFT(des, op1, op2, op, 4, 0xFFFF, __i, __j, 2, vm); \
+        if (vta && (rv->csr_vl % 2)) {                                      \
+            __i++;                                                          \
+            while (__i < VREG_U32_COUNT) {                                  \
+                assert((des + __j) < 32);                                   \
+                rv->V[des + __j][__i] = 0xFFFFFFFF;                         \
+                __i++;                                                      \
+            }                                                               \
+            __j++;                                                          \
+            uint8_t v_lmul = GET_VLMUL(rv->csr_vtype);                      \
+            uint8_t num_regs = (v_lmul < 4) ? (1 << v_lmul) : 1;            \
+            while (__j < num_regs) {                                        \
+                for (uint8_t w = 0; w < VREG_U32_COUNT; w++) {              \
+                    rv->V[des + __j][w] = 0xFFFFFFFF;                       \
+                }                                                           \
+                __j++;                                                      \
+            }                                                               \
+        }                                                                   \
     }
 
 #define sew_32b_handler(des, op1, op2, op, op_type)                            \
     {                                                                          \
+        uint8_t vma = GET_VMA(rv->csr_vtype);                                  \
+        uint8_t vta = GET_VTA(rv->csr_vtype);                                  \
+        uint32_t fill = AGNOSTIC_FILL_32b;                                     \
         uint8_t __i = 0;                                                       \
         uint8_t __j = 0;                                                       \
         uint32_t vm = rv->V[0][__i];                                           \
@@ -2270,6 +2409,23 @@ RVOP(
                 __i = 0;                                                       \
             }                                                                  \
             vm >>= 1;                                                          \
+        }                                                                      \
+                /* Handle tail words for SEW=32 */                                     \
+        if (vta) {                                                             \
+            while (__i < VREG_U32_COUNT) {                                     \
+                assert((des + __j) < 32);                                      \
+                rv->V[des + __j][__i] = 0xFFFFFFFF;                            \
+                __i++;                                                         \
+            }                                                                  \
+            __j++;                                                             \
+            uint8_t v_lmul = GET_VLMUL(rv->csr_vtype);                         \
+            uint8_t num_regs = (v_lmul < 4) ? (1 << v_lmul) : 1;               \
+            while (__j < num_regs) {                                           \
+                for (uint8_t w = 0; w < VREG_U32_COUNT; w++) {                 \
+                    rv->V[des + __j][w] = 0xFFFFFFFF;                          \
+                }                                                              \
+                __j++;                                                         \
+            }                                                                  \
         }                                                                      \
     }
 

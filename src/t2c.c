@@ -182,23 +182,41 @@ UNUSED FORCE_INLINE LLVMValueRef t2c_gen_mem_loc(LLVMValueRef start,
     return addr;
 }
 
+/* Load and call a function pointer from rv->io struct.
+ *
+ * The byte_offset parameter is the offset from the start of riscv_t to the
+ * target function pointer. Callers should use:
+ *   - offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ecall) for ecall
+ *   - offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ebreak) for ebreak
+ *
+ * This approach is correct regardless of RV32_HAS(SYSTEM) configuration,
+ * which adds extra MMU function pointers to riscv_io_t.
+ *
+ * Uses manual pointer arithmetic (PtrToInt -> Add -> IntToPtr) to compute
+ * the correct address, avoiding issues with GEP and struct layout
+ * mismatches that can cause crashes on Apple Silicon.
+ */
 FORCE_INLINE void t2c_gen_call_io_func(LLVMValueRef start,
                                        LLVMBuilderRef *builder,
                                        LLVMTypeRef *param_types,
-                                       int offset)
+                                       size_t byte_offset)
 {
-    LLVMValueRef func_offset = LLVMConstInt(LLVMInt32Type(), offset, true);
-    LLVMValueRef addr_io_func = LLVMBuildInBoundsGEP2(
-        *builder, LLVMPointerType(LLVMVoidType(), 0), LLVMGetParam(start, 0),
-        &func_offset, 1, "addr_io_func");
+    /* Convert rv pointer to integer, add offset, convert back to pointer */
+    LLVMValueRef rv_ptr = LLVMGetParam(start, 0);
+    LLVMValueRef rv_int =
+        LLVMBuildPtrToInt(*builder, rv_ptr, LLVMInt64Type(), "");
+    LLVMValueRef offset_val = LLVMConstInt(LLVMInt64Type(), byte_offset, false);
+    LLVMValueRef func_ptr_addr = LLVMBuildAdd(*builder, rv_int, offset_val, "");
+    LLVMValueRef func_ptr_ptr = LLVMBuildIntToPtr(
+        *builder, func_ptr_addr,
+        LLVMPointerType(LLVMPointerType(LLVMVoidType(), 0), 0), "");
+
+    /* Load function pointer and call */
     LLVMValueRef io_func = LLVMBuildLoad2(
-        *builder,
-        LLVMPointerType(LLVMFunctionType(LLVMVoidType(), param_types, 1, 0), 0),
-        addr_io_func, "io_func");
-    LLVMValueRef io_param = LLVMGetParam(start, 0);
+        *builder, LLVMPointerType(LLVMVoidType(), 0), func_ptr_ptr, "io_func");
     LLVMBuildCall2(*builder,
                    LLVMFunctionType(LLVMVoidType(), param_types, 1, 0), io_func,
-                   &io_param, 1, "");
+                   &rv_ptr, 1, "");
 }
 
 static LLVMTypeRef t2c_jit_cache_func_type;
@@ -357,8 +375,19 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     }
 
     LLVMModuleRef module = LLVMModuleCreateWithName("my_module");
-    /* FIXME: riscv_t structure would change according to different
-     * configuration. The linked block might jump to the wrong function pointer.
+    /* Build LLVM struct type that matches riscv_internal layout.
+     *
+     * Actual riscv_internal struct layout (see riscv_private.h):
+     *   1. bool halt (1 byte + padding)
+     *   2. uint32_t X[32] (128 bytes)
+     *   3. uint32_t PC (4 bytes)
+     *   4. uint64_t timer (8 bytes)
+     *   5. riscv_user_t data (pointer, 8 bytes)
+     *   6. riscv_io_t io (function pointers)
+     *
+     * Note: Additional fields may exist with SYSTEM/EXT_F/etc enabled.
+     * The io struct offset is computed using offsetof() in
+     * t2c_gen_call_io_func.
      */
     LLVMTypeRef io_members[] = {
         LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0),
@@ -366,12 +395,19 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0),
         LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0),
         LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0),
-        LLVMPointerType(LLVMVoidType(), 0), LLVMInt8Type()};
+        LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0)};
     LLVMTypeRef struct_io = LLVMStructType(io_members, 12, false);
     LLVMTypeRef arr_X = LLVMArrayType(LLVMInt32Type(), 32);
-    LLVMTypeRef rv_members[] = {LLVMInt8Type(), struct_io, arr_X,
-                                LLVMInt32Type()};
-    LLVMTypeRef struct_rv = LLVMStructType(rv_members, 4, false);
+    /* Match actual riscv_internal layout order */
+    LLVMTypeRef rv_members[] = {
+        LLVMInt8Type(),                     /* halt */
+        arr_X,                              /* X[32] */
+        LLVMInt32Type(),                    /* PC */
+        LLVMInt64Type(),                    /* timer */
+        LLVMPointerType(LLVMVoidType(), 0), /* data */
+        struct_io                           /* io */
+    };
+    LLVMTypeRef struct_rv = LLVMStructType(rv_members, 6, false);
     LLVMTypeRef param_types[] = {LLVMPointerType(struct_rv, 0)};
     LLVMValueRef start =
         LLVMAddFunction(module, "t2c_block",
@@ -464,11 +500,20 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         abort();
     }
     /* Use PIC relocation mode for JIT code - helps with indirect calls.
-     * Use Large code model for 64-bit systems per LLVM MCJIT recommendations.
+     * Code model selection:
+     * - Apple Silicon (ARM64 macOS): Use Small model to avoid MCJIT bugs with
+     *   movz/movk sequences that Large model generates for 64-bit constants.
+     *   ARM64's limited addressing modes make Large model problematic.
+     * - Other platforms: Use Large model per LLVM MCJIT recommendations.
      */
+#if defined(__aarch64__) && defined(__APPLE__)
+    LLVMCodeModel code_model = LLVMCodeModelSmall;
+#else
+    LLVMCodeModel code_model = LLVMCodeModelLarge;
+#endif
     LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
         target, triple, LLVMGetHostCPUName(), LLVMGetHostCPUFeatures(),
-        LLVMCodeGenLevelNone, LLVMRelocPIC, LLVMCodeModelLarge);
+        LLVMCodeGenLevelNone, LLVMRelocPIC, code_model);
     LLVMPassBuilderOptionsRef pb_option = LLVMCreatePassBuilderOptions();
     /* Run LLVM optimization passes on the generated IR.
      *
@@ -494,8 +539,19 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     };
     LLVMRunPasses(module, t2c_opt_passes[CONFIG_T2C_OPT_LEVEL], tm, pb_option);
 
-    if (LLVMCreateExecutionEngineForModule(&engine, module, &error) != 0) {
-        rv_log_fatal("Failed to create execution engine");
+    /* Use LLVMCreateMCJITCompilerForModule with explicit options.
+     * Unlike LLVMCreateExecutionEngineForModule, this respects our code model
+     * setting which is critical for Apple Silicon where Small model is needed.
+     */
+    struct LLVMMCJITCompilerOptions options;
+    LLVMInitializeMCJITCompilerOptions(&options, sizeof(options));
+    options.OptLevel = CONFIG_T2C_OPT_LEVEL;
+    options.CodeModel = code_model;
+
+    if (LLVMCreateMCJITCompilerForModule(&engine, module, &options,
+                                         sizeof(options), &error) != 0) {
+        rv_log_fatal("Failed to create MCJIT execution engine: %s", error);
+        LLVMDisposeMessage(error);
         abort();
     }
 

@@ -866,7 +866,12 @@ T2C_OP(fence, { __UNREACHABLE; })
 T2C_OP(ecall, {
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc,
                              t2c_gen_PC_addr(start, builder, ir));
-    t2c_gen_call_io_func(start, builder, param_types, 8);
+    /* Use offsetof() to compute proper byte offset for on_ecall.
+     * This works correctly regardless of SYSTEM mode (which adds MMU ptrs).
+     */
+    t2c_gen_call_io_func(
+        start, builder, param_types,
+        offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ecall));
     T2C_STORE_TIMER(*builder, start, insn_counter);
     LLVMBuildRetVoid(*builder);
 })
@@ -874,7 +879,12 @@ T2C_OP(ecall, {
 T2C_OP(ebreak, {
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc,
                              t2c_gen_PC_addr(start, builder, ir));
-    t2c_gen_call_io_func(start, builder, param_types, 9);
+    /* Use offsetof() to compute proper byte offset for on_ebreak.
+     * This works correctly regardless of SYSTEM mode (which adds MMU ptrs).
+     */
+    t2c_gen_call_io_func(
+        start, builder, param_types,
+        offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ebreak));
     T2C_STORE_TIMER(*builder, start, insn_counter);
     LLVMBuildRetVoid(*builder);
 })
@@ -1289,7 +1299,12 @@ T2C_OP(cmv, {
 T2C_OP(cebreak, {
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc,
                              t2c_gen_PC_addr(start, builder, ir));
-    t2c_gen_call_io_func(start, builder, param_types, 9);
+    /* Use offsetof() to compute proper byte offset for on_ebreak.
+     * This works correctly regardless of SYSTEM mode (which adds MMU ptrs).
+     */
+    t2c_gen_call_io_func(
+        start, builder, param_types,
+        offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ebreak));
     T2C_STORE_TIMER(*builder, start, insn_counter);
     LLVMBuildRetVoid(*builder);
 })
@@ -1514,10 +1529,13 @@ T2C_OP(fuse6, {
                    addr_a7);
     /* Store PC and call ecall handler.
      * ECALL is at ir->pc + 4 (second instruction in fused pair).
+     * Use offsetof() to compute proper byte offset for on_ecall.
      */
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 4,
                              t2c_gen_PC_addr(start, builder, ir));
-    t2c_gen_call_io_func(start, builder, param_types, 8);
+    t2c_gen_call_io_func(
+        start, builder, param_types,
+        offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ecall));
     T2C_STORE_TIMER(*builder, start, insn_counter);
     LLVMBuildRetVoid(*builder);
 })

@@ -37,6 +37,7 @@ typedef struct {
     /* Ensure the clock always progresses so RTC_SET_TIME ioctl can set any
      * arbitrary time */
     uint64_t clock_offset;
+    bool use_localtime;
 } rtc_t;
 
 #define IRQ_RTC_SHIFT 2
@@ -53,6 +54,6 @@ uint32_t rtc_read(rtc_t *rtc, uint32_t addr);
 
 void rtc_write(rtc_t *rtc, uint32_t addr, uint32_t value);
 
-rtc_t *rtc_new();
+rtc_t *rtc_new(bool use_localtime);
 
 void rtc_delete(rtc_t *rtc);

@@ -144,6 +144,15 @@ Once the guestOS is booted, insert the `simplefs.ko` kernel module. After loadin
 # mkdir -p simplefs && mount -t simplefs /dev/vda simplefs # mount the simplefs disk
 ```
 
+#### RTC Timezone Configuration
+By default, the Goldfish RTC reports time in UTC. To configure the RTC to report local time with timezone offset instead:
+```shell
+$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -x rtc:localtime
+```
+Available modes:
+* `utc` (default): RTC reports UTC time
+* `localtime`: RTC reports local time with timezone offset applied
+
 #### Customize bootargs
 Build and run with customized bootargs to boot the guestOS. Otherwise, the default bootargs defined in `src/devices/minimal.dts` will be used.
 ```shell

@@ -24,15 +24,17 @@ static uint64_t now_nsec;
 
 uint64_t rtc_get_now_nsec(rtc_t *rtc)
 {
-    /* TODO:
-     * - detects timezone and use the correct UTC offset
-     * - a new CLI option should be added to main.c to let user to select
-     *   [UTC] or [UTC + offset](localtime) time. E.g., -x rtc:utc or -x
-     *   rtc:localtime
-     */
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t) (ts.tv_sec * 1e9) + ts.tv_nsec + rtc->clock_offset;
+
+    if (rtc->use_localtime) {
+        time_t t = ts.tv_sec;
+        struct tm *lt = localtime(&t);
+        ts.tv_sec += lt->tm_gmtoff;
+    }
+
+    return (uint64_t) (ts.tv_sec * 1000000000ULL) + ts.tv_nsec +
+           rtc->clock_offset;
 }
 
 uint32_t rtc_read(rtc_t *rtc, uint32_t addr)
@@ -110,10 +112,12 @@ void rtc_write(rtc_t *rtc, uint32_t addr, uint32_t value)
     return;
 }
 
-rtc_t *rtc_new()
+rtc_t *rtc_new(bool use_localtime)
 {
     rtc_t *rtc = calloc(1, sizeof(rtc_t));
     assert(rtc);
+
+    rtc->use_localtime = use_localtime;
 
     /*
      * The rtc->time_low/high values can be updated through the RTC_SET_TIME

@@ -66,6 +66,7 @@ static char *opt_bootargs;
 #define VBLK_DEV_MAX 100
 static char *opt_virtio_blk_img[VBLK_DEV_MAX];
 static int opt_virtio_blk_idx = 0;
+static rtc_time_mode_t opt_rtc_mode = RTC_UTC;
 #endif
 
 static void print_usage(const char *filename)
@@ -87,6 +88,7 @@ static void print_usage(const char *filename)
         "<image> as virtio-blk disk image "
         "(default read and write). This option may be specified "
         "multiple times for multiple block devices\n"
+        "  -x rtc:<mode>: set RTC time mode (utc or localtime, default: utc)\n"
         "  -b <bootargs> : use customized <bootargs> for the kernel\n"
 #endif
         "  -d [filename]: dump registers as JSON to the "
@@ -141,7 +143,15 @@ static bool parse_args(int argc, char **args)
             if (!strncmp("vblk:", optarg, 5))
                 opt_virtio_blk_img[opt_virtio_blk_idx++] =
                     optarg + 5; /* strlen("vblk:") */
-            else
+            else if (!strncmp("rtc:", optarg, 4)) {
+                const char *mode = optarg + 4; /* strlen("rtc:") */
+                if (!strncmp(mode, "localtime", 9))
+                    opt_rtc_mode = RTC_LOCALTIME;
+                else if (!strncmp(mode, "utc", 3))
+                    opt_rtc_mode = RTC_UTC;
+                else
+                    return false;
+            } else
                 return false;
             emu_argc++;
             break;
@@ -311,6 +321,7 @@ int main(int argc, char **args)
     } else {
         attr.data.system.vblk_device = NULL;
     }
+    attr.data.system.rtc_mode = opt_rtc_mode;
 #else
     attr.data.user.elf_program = opt_prog_name;
 #endif

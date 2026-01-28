@@ -767,7 +767,7 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 
     /* setup rtc */
 #if RV32_HAS(GOLDFISH_RTC)
-    attr->rtc = rtc_new();
+    attr->rtc = rtc_new(attr->data.system.rtc_mode == RTC_LOCALTIME);
     assert(attr->rtc);
 #endif /* RV32_HAS(GOLDFISH_RTC) */
 

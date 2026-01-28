@@ -278,6 +278,11 @@ enum TRAP_CODE {
 /* Allows the supervisor to request system-level reboot or shutdown. */
 #define SBI_EID_RST 0x53525354
 #define SBI_RST_SYSTEM_RESET 0
+#define SBI_RST_TYPE_SHUTDOWN 0x0
+#define SBI_RST_TYPE_COLD_REBOOT 0x1
+#define SBI_RST_TYPE_WARM_REBOOT 0x2
+#define NO_REASON 0x0
+#define SYSTEM_FAILURE 0x1
 
 #define BLOCK_MAP_CAPACITY_BITS 10
 
@@ -389,8 +394,22 @@ riscv_t *rv_create(riscv_user_t attr);
 /* delete a RISC-V emulator */
 void rv_delete(riscv_t *rv);
 
-/* reset the RISC-V processor */
-void rv_reset(riscv_t *rv, riscv_word_t pc);
+/* Cold reboot the system
+ *
+ * The first power on is considered as a cold reboot
+ *
+ * Reset the RISC-V processor, memory and peripheral
+ */
+bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc);
+
+/* Only system emulation needs warm reboot */
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+/* Warm reboot the system
+ *
+ * Only reset the RISC-V processor and memory
+ */
+void rv_warm_reboot(riscv_t *rv, riscv_word_t pc);
+#endif
 
 #if RV32_HAS(GDBSTUB)
 /* Run the RISC-V emulator as gdbstub */
@@ -609,6 +628,11 @@ typedef struct {
 
     /* SBI timer */
     uint64_t timer;
+
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+    /* DTB address in memory */
+    uint32_t dtb_addr;
+#endif
 } vm_attr_t;
 
 #ifdef __cplusplus

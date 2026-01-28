@@ -4,6 +4,7 @@
  */
 
 #pragma once
+#include <setjmp.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -329,6 +330,9 @@ struct riscv_internal {
      * TIME would be independent of CPU frequency scaling or sleep states.
      */
     uint64_t timer_offset;
+
+    /* Jump buffer for restarting the main loop after a reboot */
+    jmp_buf reboot_jmp;
 #endif
 
 #if RV32_HAS(ARCH_TEST)

@@ -331,3 +331,23 @@ fetch_artifact()
     print_error "Failed to fetch $artifact_type artifact after $max_retries attempts" >&2
     return 1
 }
+
+# Common test configuration variables
+# Allow timeout override for JIT tests (JIT compilation adds significant overhead)
+TIMEOUT=${BOOT_TIMEOUT:-50}
+
+# Color codes for test output (bold variants)
+COLOR_G='\e[32;01m' # Green
+COLOR_R='\e[31;01m' # Red
+COLOR_Y='\e[33;01m' # Yellow
+COLOR_N='\e[0m'     # No color
+
+# Base options for Linux boot tests
+OPTS_BASE=" -k build/linux-image/Image -i build/linux-image/rootfs.cpio"
+
+# Common test result messages
+MESSAGES=("${COLOR_G}OK!"
+    "${COLOR_R}Fail to boot"
+    "${COLOR_R}Fail to login"
+    "${COLOR_R}Fail to run commands"
+)

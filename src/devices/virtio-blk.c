@@ -410,8 +410,12 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
     vblk->disk_fd = -1;
 
     /* Allocate memory for the private member */
-    vblk->priv = calloc(1, sizeof(struct virtio_blk_config));
-    assert(vblk->priv);
+    if (vblk->priv) { /* check for reboot */
+        memset(vblk->priv, 0, sizeof(struct virtio_blk_config));
+    } else {
+        vblk->priv = calloc(1, sizeof(struct virtio_blk_config));
+        assert(vblk->priv);
+    }
 
     /* No disk image is provided */
     if (!disk_file) {

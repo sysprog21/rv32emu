@@ -366,15 +366,18 @@ _Static_assert(offsetof(opcode_fuse_t, opcode) == 7,
                "opcode_fuse_t.opcode must be at offset 7");
 
 #define HISTORY_SIZE 16
+/* Direct-mapped BHT requires power-of-2 size for mask calculation */
+_Static_assert((HISTORY_SIZE & (HISTORY_SIZE - 1)) == 0,
+               "HISTORY_SIZE must be a power of 2");
+
 typedef struct {
-    uint32_t PC[HISTORY_SIZE];
+    uint32_t PC[HISTORY_SIZE]; /**< PC tags for direct-mapped lookup */
 #if !RV32_HAS(JIT)
-    uint8_t idx;
-    struct rv_insn *target[HISTORY_SIZE];
+    struct rv_insn *target[HISTORY_SIZE]; /**< target IR pointers */
 #else
-    uint32_t times[HISTORY_SIZE];
+    uint32_t times[HISTORY_SIZE]; /**< access counts for JIT hotness */
 #if RV32_HAS(SYSTEM)
-    uint32_t satp[HISTORY_SIZE];
+    uint32_t satp[HISTORY_SIZE]; /**< SATP for address space matching */
 #endif
 #endif
 } branch_history_table_t;
@@ -382,33 +385,19 @@ typedef struct {
 #if RV32_HAS(JIT)
 /* Find index with maximum times count in branch history table.
  * Used by JIT to identify the most frequently taken indirect jump target.
+ * Note: With direct-mapped BHT, zeros can appear at any index, so we must
+ * scan all entries (cannot break early on first zero).
  */
 static inline int bht_find_max_idx(const branch_history_table_t *bt)
 {
     int max_idx = 0;
-    for (int i = 0; i < HISTORY_SIZE; i++) {
-        if (!bt->times[i])
-            break;
-        if (bt->times[max_idx] < bt->times[i])
+    for (int i = 1; i < HISTORY_SIZE; i++) {
+        if (bt->times[i] > bt->times[max_idx])
             max_idx = i;
     }
     return max_idx;
 }
 
-/* Find index with minimum times count for LFU replacement.
- * Returns first empty slot if available, otherwise the least frequently used.
- */
-static inline int bht_find_min_idx(const branch_history_table_t *bt)
-{
-    int min_idx = 0;
-    for (int i = 0; i < HISTORY_SIZE; i++) {
-        if (!bt->times[i])
-            return i; /* empty slot found */
-        if (bt->times[min_idx] > bt->times[i])
-            min_idx = i;
-    }
-    return min_idx;
-}
 #endif
 
 typedef struct rv_insn {

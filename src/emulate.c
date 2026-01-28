@@ -530,8 +530,18 @@ static block_t *block_alloc(riscv_t *rv)
 }
 
 #if !RV32_HAS(JIT)
+/* Update L1 direct-mapped block cache.
+ * Called after block insertion to enable fast lookup for hot paths.
+ */
+static inline void block_l1_update(riscv_t *rv, block_t *block)
+{
+    uint32_t idx = (block->pc_start >> BLOCK_L1_INDEX_SHIFT) & BLOCK_L1_MASK;
+    rv->block_l1.tags[idx] = block->pc_start;
+    rv->block_l1.ptrs[idx] = block;
+}
+
 /* insert a block into block map */
-static void block_insert(block_map_t *map, const block_t *block)
+static void block_insert(block_map_t *map, riscv_t *rv, const block_t *block)
 {
     assert(map && block);
     const uint32_t mask = map->block_capacity - 1;
@@ -545,6 +555,9 @@ static void block_insert(block_map_t *map, const block_t *block)
         }
     }
     map->size++;
+
+    /* update L1 cache for fast subsequent lookups */
+    block_l1_update(rv, (block_t *) block);
 }
 
 /* try to locate an already translated block in the block map */
@@ -564,6 +577,32 @@ static block_t *block_find(const block_map_t *map, const uint32_t addr)
             return block;
     }
     return NULL;
+}
+
+/* Fast block lookup using L1 direct-mapped cache.
+ * Falls back to hash table on L1 miss.
+ * This is the hot path - optimized for tight loops.
+ *
+ * Separated arrays: tag array checked first (1KB), pointer loaded on hit.
+ * Benchmarked faster than interleaved on x86-64.
+ */
+static inline block_t *block_lookup_or_find(riscv_t *rv, uint32_t pc)
+{
+    /* L1 cache lookup - check tag first (avoids loading pointer on miss) */
+    uint32_t idx = (pc >> BLOCK_L1_INDEX_SHIFT) & BLOCK_L1_MASK;
+    if (likely(rv->block_l1.tags[idx] == pc))
+        return rv->block_l1.ptrs[idx];
+
+    /* L1 miss - fall back to hash table lookup */
+    block_t *block = block_find(&rv->block_map, pc);
+
+    /* Populate L1 cache on hash table hit for future lookups */
+    if (block) {
+        rv->block_l1.tags[idx] = pc;
+        rv->block_l1.ptrs[idx] = block;
+    }
+
+    return block;
 }
 #endif
 
@@ -1808,8 +1847,8 @@ static block_t *block_find_or_translate(riscv_t *rv)
 {
 #if !RV32_HAS(JIT)
     block_map_t *map = &rv->block_map;
-    /* lookup the next block in the block map */
-    block_t *next_blk = block_find(map, rv->PC);
+    /* lookup the next block using L1 cache with hash table fallback */
+    block_t *next_blk = block_lookup_or_find(rv, rv->PC);
 #else
     /* lookup the next block in the block cache */
     block_t *next_blk = (block_t *) cache_get(rv->block_cache, rv->PC, true);
@@ -1861,8 +1900,8 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #endif
 
 #if !RV32_HAS(JIT)
-    /* insert the block into block map */
-    block_insert(&rv->block_map, next_blk);
+    /* insert the block into block map and L1 cache */
+    block_insert(&rv->block_map, rv, next_blk);
 #else
     list_add(&next_blk->list, &rv->block_list);
 
@@ -2096,7 +2135,7 @@ void rv_step(void *arg)
         if (prev && prev->pc_start != last_pc) {
             /* update previous block */
 #if !RV32_HAS(JIT)
-            prev = block_find(&rv->block_map, last_pc);
+            prev = block_lookup_or_find(rv, last_pc);
 #else
             prev = cache_get(rv->block_cache, last_pc, false);
 #endif

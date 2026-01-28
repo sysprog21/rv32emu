@@ -80,6 +80,14 @@ void block_map_clear(riscv_t *rv)
         map->map[i] = NULL;
     }
     map->size = 0;
+
+    /* clear L1 direct-mapped block cache - use invalid tags to avoid
+     * false hits on PC=0 edge case. Separated arrays: tags first for
+     * cache-efficient miss detection, ptrs zeroed with memset.
+     */
+    for (int i = 0; i < BLOCK_L1_SIZE; i++)
+        rv->block_l1.tags[i] = BLOCK_L1_INVALID_TAG;
+    memset(rv->block_l1.ptrs, 0, sizeof(rv->block_l1.ptrs));
 }
 
 static void block_map_destroy(riscv_t *rv)
@@ -872,6 +880,11 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 #if !RV32_HAS(JIT)
     /* initialize the block map */
     block_map_init(&rv->block_map, BLOCK_MAP_CAPACITY_BITS);
+
+    /* initialize L1 block cache with invalid tags */
+    for (int i = 0; i < BLOCK_L1_SIZE; i++)
+        rv->block_l1.tags[i] = BLOCK_L1_INVALID_TAG;
+    memset(rv->block_l1.ptrs, 0, sizeof(rv->block_l1.ptrs));
 #else
     INIT_LIST_HEAD(&rv->block_list);
     rv->jit_state = jit_state_init(CODE_CACHE_SIZE);

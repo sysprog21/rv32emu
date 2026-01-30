@@ -104,7 +104,7 @@ RVOP(jal, {
 #if !RV32_HAS(JIT)
 #define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                                \
     /*                                                                         \
-     * lookup branch history table                                             \
+     * Direct-mapped branch history table lookup.                              \
      *                                                                         \
      * When handling trap, the branch history table should not be lookup since \
      * it causes return from the trap_handler.                                 \
@@ -116,20 +116,18 @@ RVOP(jal, {
     {                                                                          \
         IIF(RV32_HAS(SYSTEM)(if (!rv->is_trapped && !reloc_enable_mmu), ))     \
         {                                                                      \
-            for (int i = 0; i < HISTORY_SIZE; i++) {                           \
-                if (ir->branch_table->PC[i] == PC) {                           \
-                    MUST_TAIL return ir->branch_table->target[i]->impl(        \
-                        rv, ir->branch_table->target[i], cycle, PC);           \
-                }                                                              \
+            /* Direct-mapped lookup: O(1) instead of O(n) linear search */     \
+            const uint32_t bht_idx = (PC >> 2) & (HISTORY_SIZE - 1);           \
+            if (ir->branch_table->PC[bht_idx] == PC &&                         \
+                ir->branch_table->target[bht_idx]) {                           \
+                MUST_TAIL return ir->branch_table->target[bht_idx]->impl(      \
+                    rv, ir->branch_table->target[bht_idx], cycle, PC);         \
             }                                                                  \
             block_t *block = block_find(&rv->block_map, PC);                   \
             if (block) {                                                       \
-                /* update branch history table */                              \
-                ir->branch_table->PC[ir->branch_table->idx] = PC;              \
-                ir->branch_table->target[ir->branch_table->idx] =              \
-                    block->ir_head;                                            \
-                ir->branch_table->idx =                                        \
-                    (ir->branch_table->idx + 1) % HISTORY_SIZE;                \
+                /* Direct replacement at computed index */                     \
+                ir->branch_table->PC[bht_idx] = PC;                            \
+                ir->branch_table->target[bht_idx] = block->ir_head;            \
                 MUST_TAIL return block->ir_head->impl(rv, block->ir_head,      \
                                                       cycle, PC);              \
             }                                                                  \
@@ -141,23 +139,22 @@ RVOP(jal, {
     {                                                                        \
         block_t *block = cache_get(rv->block_cache, PC, true);               \
         if (block) {                                                         \
-            for (int i = 0; i < HISTORY_SIZE; i++) {                         \
-                if (ir->branch_table->PC[i] == PC) {                         \
-                    IIF(RV32_HAS(SYSTEM))(                                   \
-                        if (ir->branch_table->satp[i] == rv->csr_satp), )    \
-                    {                                                        \
-                        ir->branch_table->times[i]++;                        \
-                        if (cache_hot(rv->block_cache, PC))                  \
-                            goto end_op;                                     \
-                    }                                                        \
+            /* Direct-mapped lookup: O(1) instead of O(n) linear search */   \
+            const uint32_t bht_idx = (PC >> 2) & (HISTORY_SIZE - 1);         \
+            if (ir->branch_table->PC[bht_idx] == PC) {                       \
+                IIF(RV32_HAS(SYSTEM))(                                       \
+                    if (ir->branch_table->satp[bht_idx] == rv->csr_satp), )  \
+                {                                                            \
+                    ir->branch_table->times[bht_idx]++;                      \
+                    if (cache_hot(rv->block_cache, PC))                      \
+                        goto end_op;                                         \
                 }                                                            \
             }                                                                \
-            /* update branch history table using LFU replacement */          \
-            int min_idx = bht_find_min_idx(ir->branch_table);                \
-            ir->branch_table->times[min_idx] = 1;                            \
-            ir->branch_table->PC[min_idx] = PC;                              \
+            /* Direct replacement at computed index */                       \
+            ir->branch_table->times[bht_idx] = 1;                            \
+            ir->branch_table->PC[bht_idx] = PC;                              \
             IIF(RV32_HAS(SYSTEM))(                                           \
-                ir->branch_table->satp[min_idx] = rv->csr_satp, );           \
+                ir->branch_table->satp[bht_idx] = rv->csr_satp, );           \
             if (cache_hot(rv->block_cache, PC))                              \
                 goto end_op;                                                 \
             MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, \

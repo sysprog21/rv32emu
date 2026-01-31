@@ -2,7 +2,7 @@
 ![GitHub Actions](https://github.com/sysprog21/rv32emu/actions/workflows/main.yml/badge.svg)
 ```
                        /--===============------\
-      ______     __    | |⎺⎺⎺⎺⎺⎺⎺⎺⎺⎺⎺⎺⎺⎺⎺|     |
+      ______     __    | |⎺⎺⎺⎺⎺⎺⎺⎺⎺|     |
      |  _ \ \   / /    | |               |     |
      | |_) \ \ / /     | |   Emulator!   |     |
      |  _ < \ V /      | |               |     |

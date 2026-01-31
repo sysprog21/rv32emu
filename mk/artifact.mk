@@ -277,7 +277,35 @@ ifeq ($(call has, SYSTEM), 1)
 	$(Q)(mv $(BIN_DIR)/linux-image/rootfs.cpio /tmp/rv32emu-linux-image-prebuilt/linux-image)
 	$(Q)(mv $(BIN_DIR)/linux-image/simplefs.ko /tmp/rv32emu-linux-image-prebuilt/linux-image)
 else
-	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
+	$(Q)if [ -d .git ]; then \
+	    git submodule update --init --depth=1 $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb))) || { \
+	        echo "Error: Failed to update test suite submodules" >&2; \
+	        exit 1; \
+	    }; \
+	else \
+	    for tb in $(TEST_SUITES); do \
+	        case "$$tb" in \
+	            ansibench|rv8-bench) \
+	                if [ -d "./tests/$$tb" ] && [ ! -d "./tests/$$tb/.git" ]; then \
+	                    echo "Warning: Removing pre-existing ./tests/$$tb without .git" >&2; \
+	                    rm -rf "./tests/$$tb"; \
+	                fi; \
+	                if [ ! -d "./tests/$$tb/.git" ]; then \
+	                    case "$$tb" in \
+	                        ansibench) git clone --depth=1 https://github.com/sysprog21/ansibench "./tests/$$tb" ;; \
+	                        rv8-bench) git clone --depth=1 https://github.com/sysprog21/rv8-bench "./tests/$$tb" ;; \
+	                    esac || { \
+	                        echo "Error: Failed to clone test suite $$tb" >&2; \
+	                        exit 1; \
+	                    }; \
+	                fi; \
+	                ;; \
+	            *) \
+	                echo "Warning: Unknown test suite '$$tb', skipping" >&2; \
+	                ;; \
+	        esac; \
+	    done; \
+	fi
 	$(Q)for tb in $(TEST_SUITES); do \
 	    CC=$(CC) CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" BINDIR=$(BIN_DIR)/linux-x86-softfp $(MAKE) -C ./tests/$$tb; \
 	done
@@ -293,7 +321,8 @@ else
 	    $(CROSS_COMPILE)gcc $(CFLAGS_CROSS) -o $(BIN_DIR)/riscv32/$$tb ./tests/$$tb.c $(LDFLAGS_CROSS); \
 	done
 
-	git submodule update --init ./tests/doom ./tests/quake
+	$(call ensure-submodule,tests/doom,https://github.com/sysprog21/doom_riscv)
+	$(call ensure-submodule,tests/quake,https://github.com/sysprog21/quake-embedded)
 	$(Q)$(PRINTF) "Building doom ...\n"
 	$(Q)$(MAKE) -C ./tests/doom/src/riscv CROSS=$(CROSS_COMPILE)
 	$(Q)cp ./tests/doom/src/riscv/doom-riscv.elf $(BIN_DIR)/riscv32/doom
@@ -335,7 +364,7 @@ endif
 
 ieeelib:
 ifeq ($(call has, PREBUILT), 0)
-	git submodule update --init ./src/ieeelib
+	$(call ensure-submodule,src/ieeelib,https://github.com/sysprog21/ieeelib)
 	$(Q)$(MAKE) -C ./src/ieeelib CC=$(CC) CFLAGS="$(CFLAGS)" BINDIR=$(BIN_DIR)
 endif
 

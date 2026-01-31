@@ -73,23 +73,23 @@ endef
 # Returns: exits with error if verification fails; skips if no SHA tool
 define verify-sha
 	@if [ -z "$(1)" ]; then \
-		echo "Skipping SHA verification for $(3) (no SHA tool available)"; \
+	    echo "Skipping SHA verification for $(3) (no SHA tool available)"; \
 	elif [ -d "$(3)" ]; then \
-		FILE_HASHES=$$(find "$(3)" -type f -not -path '*/.git/*' -print0 | LC_ALL=C sort -z | xargs -0 $(1) 2>/dev/null | LC_ALL=C sort); \
-		if [ -z "$$FILE_HASHES" ]; then \
-			echo "SHA verification failed for directory $(3): no files found"; \
-			exit 1; \
-		fi; \
-		COMPUTED=$$(echo "$$FILE_HASHES" | $(1) | cut -f1 -d' '); \
-		if [ "$$COMPUTED" != "$(2)" ]; then \
-			echo "SHA verification failed for directory $(3)"; \
-			exit 1; \
-		fi; \
+	    FILE_HASHES=$$(find "$(3)" -type f -not -path '*/.git/*' -print0 | LC_ALL=C sort -z | xargs -0 $(1) 2>/dev/null | LC_ALL=C sort); \
+	    if [ -z "$$FILE_HASHES" ]; then \
+	        echo "SHA verification failed for directory $(3): no files found"; \
+	        exit 1; \
+	    fi; \
+	    COMPUTED=$$(echo "$$FILE_HASHES" | $(1) | cut -f1 -d' '); \
+	    if [ "$$COMPUTED" != "$(2)" ]; then \
+	        echo "SHA verification failed for directory $(3)"; \
+	        exit 1; \
+	    fi; \
 	else \
-		if ! echo "$(2)  $(3)" | $(1) -c - >/dev/null 2>&1; then \
-			echo "SHA verification failed for $(3)"; \
-			exit 1; \
-		fi; \
+	    if ! echo "$(2)  $(3)" | $(1) -c - >/dev/null 2>&1; then \
+	        echo "SHA verification failed for $(3)"; \
+	        exit 1; \
+	    fi; \
 	fi
 endef
 
@@ -132,7 +132,7 @@ TIMIDITY_DATA_SHA_CMD := $(SHA1SUM)
 BUILDROOT_VERSION := 2025.11
 BUILDROOT_DATA_DEST := /tmp
 BUILDROOT_DATA := $(BUILDROOT_DATA_DEST)/buildroot
-BUILDROOT_DATA_URL := git clone https://github.com/buildroot/buildroot $(BUILDROOT_DATA) -b $(BUILDROOT_VERSION) --depth=1
+BUILDROOT_DATA_URL := git clone https://github.com/buildroot/buildroot "$(BUILDROOT_DATA)" -b $(BUILDROOT_VERSION) --depth=1
 # find /tmp/buildroot -type f -not -path '*/.git/*' -print0 | \
 #	LC_ALL=C sort -z | \
 #	xargs -0 sha1sum | \
@@ -155,7 +155,7 @@ LINUX_DATA_SHA_CMD := $(SHA256SUM)
 SIMPLEFS_VERSION := rel2025.0
 SIMPLEFS_DATA_DEST := /tmp
 SIMPLEFS_DATA := $(SIMPLEFS_DATA_DEST)/simplefs
-SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
+SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs "$(SIMPLEFS_DATA)" -b $(SIMPLEFS_VERSION) --depth=1
 # find /tmp/simplefs -type f -not -path '*/.git/*' -print0 | \
 #	LC_ALL=C sort -z | \
 #	xargs -0 sha1sum | \
@@ -174,10 +174,10 @@ $($(1)_DATA):
 	$(Q)mkdir -p $($(1)_DATA_DEST)
 	$(Q)$$(call download,$($(1)_DATA_URL))
 	$(Q)$(if $(call is-git-clone,$($(1)_DATA_URL)),,\
-		$$(call extract,$($(1)_DATA_DEST),$(notdir $($(1)_DATA_URL)),$(or $($(1)_DATA_SKIP_DIR_LEVEL),0)))
+	    $$(call extract,$($(1)_DATA_DEST),$(notdir $($(1)_DATA_URL)),$(or $($(1)_DATA_SKIP_DIR_LEVEL),0)))
 	$$(call verify-sha,$($(1)_DATA_SHA_CMD),$($(1)_DATA_SHA),$($(1)_DATA))
 	$(if $(call is-git-clone,$($(1)_DATA_URL)),,\
-		$$(call epilogue,$(notdir $($(1)_DATA_URL))))
+	    $$(call epilogue,$(notdir $($(1)_DATA_URL))))
 endef
 
 # Generate rules for static external data (known URLs at parse time)
@@ -191,24 +191,24 @@ $(LINUX_DATA_DEST)/linux-$(LINUX_VERSION).$(LINUX_PATCHLEVEL).%.tar.gz:
 	$(Q)mkdir -p $(LINUX_DATA_DEST)
 	$(VECHO) "  GET\t$@\n"
 	$(Q)LINUX_TARBALL=$$(wget -q -O- $(LINUX_CDN_VERSION_URL) 2>/dev/null | \
-		grep -oE 'linux-$(LINUX_VERSION)\.$(LINUX_PATCHLEVEL)\.[0-9]+\.tar\.gz' | \
-		awk -F'[.-]' '{print $$4, $$0}' | sort -rn | head -1 | awk '{print $$2}'); \
+	    grep -oE 'linux-$(LINUX_VERSION)\.$(LINUX_PATCHLEVEL)\.[0-9]+\.tar\.gz' | \
+	    awk -F'[.-]' '{print $$4, $$0}' | sort -rn | head -1 | awk '{print $$2}'); \
 	if [ -z "$$LINUX_TARBALL" ]; then \
-		echo "Error: Failed to detect Linux kernel tarball from $(LINUX_CDN_VERSION_URL)"; \
-		exit 1; \
+	    echo "Error: Failed to detect Linux kernel tarball from $(LINUX_CDN_VERSION_URL)"; \
+	    exit 1; \
 	fi; \
 	LINUX_SHA=$$(wget -q -O- $(LINUX_CDN_VERSION_URL)/sha256sums.asc 2>/dev/null | \
-		grep "$$LINUX_TARBALL" | awk '{print $$1}'); \
+	    grep "$$LINUX_TARBALL" | awk '{print $$1}'); \
 	if [ -z "$$LINUX_SHA" ]; then \
-		echo "Error: Failed to fetch SHA256 for $$LINUX_TARBALL"; \
-		exit 1; \
+	    echo "Error: Failed to fetch SHA256 for $$LINUX_TARBALL"; \
+	    exit 1; \
 	fi; \
 	wget -q --show-progress --continue "$(LINUX_CDN_VERSION_URL)/$$LINUX_TARBALL" && \
 	tar -xf "$$LINUX_TARBALL" --strip-components=$(LINUX_DATA_SKIP_DIR_LEVEL) -C $(LINUX_DATA_DEST) && \
 	if [ -z "$(LINUX_DATA_SHA_CMD)" ]; then \
-		echo "Skipping SHA verification for $$LINUX_TARBALL (no SHA tool available)"; \
+	    echo "Skipping SHA verification for $$LINUX_TARBALL (no SHA tool available)"; \
 	elif ! echo "$$LINUX_SHA  $$LINUX_TARBALL" | $(LINUX_DATA_SHA_CMD) -c - >/dev/null 2>&1; then \
-		echo "SHA verification failed for $$LINUX_TARBALL"; exit 1; \
+	    echo "SHA verification failed for $$LINUX_TARBALL"; exit 1; \
 	fi && \
 	$(RM) "$$LINUX_TARBALL"
 

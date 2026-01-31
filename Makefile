@@ -122,7 +122,7 @@ ifeq ($(CONFIG_GDBSTUB),y)
 GDBSTUB_OUT = $(abspath $(OUT)/mini-gdbstub)
 GDBSTUB_COMM = 127.0.0.1:1234
 src/mini-gdbstub/Makefile:
-	git submodule update --init $(dir $@)
+	$(call ensure-submodule,src/mini-gdbstub,https://github.com/RinHizakura/mini-gdbstub)
 GDBSTUB_LIB := $(GDBSTUB_OUT)/libgdbstub.a
 $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 	$(MAKE) -C $(dir $<) O=$(dir $@)
@@ -200,6 +200,8 @@ DTB_DEPS :=
 ifeq ($(CONFIG_SYSTEM),y)
 ifneq ($(CONFIG_ELF_LOADER),y)
 DTB_DEPS := $(BUILD_DTB) $(BUILD_DTB2C)
+# Ensure DTC is cloned before building DTB
+$(BUILD_DTB) $(BUILD_DTB2C): $(DTC_SENTINEL)
 endif
 endif
 

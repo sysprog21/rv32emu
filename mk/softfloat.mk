@@ -334,7 +334,7 @@ SOFTFLOAT_OBJS := $(addprefix $(OUT)/softfloat/, \
 SOFTFLOAT_SENTINEL := src/softfloat/.git
 
 $(SOFTFLOAT_SENTINEL):
-	$(Q)git submodule update --init $(dir $@)
+	$(call ensure-submodule,src/softfloat,https://github.com/ucb-bar/berkeley-softfloat-3)
 SOFTFLOAT_DUMMY_PLAT := $(OUT)/softfloat/platform.h
 $(SOFTFLOAT_DUMMY_PLAT):
 	$(Q)mkdir -p $(dir $@)

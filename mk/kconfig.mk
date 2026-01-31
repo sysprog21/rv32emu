@@ -16,16 +16,16 @@ KCONFIGLIB_REPO := https://github.com/sysprog21/Kconfiglib
 $(KCONFIG_DIR)/kconfiglib.py:
 	$(VECHO) "Downloading Kconfig tools...\n"
 	$(Q)if [ -z "$(KCONFIG_DIR)" ]; then \
-		echo "Error: KCONFIG_DIR is empty"; exit 1; \
+	    echo "Error: KCONFIG_DIR is empty"; exit 1; \
 	fi
 	$(Q)case "$(KCONFIG_DIR)" in \
-		/*|..*) echo "Error: KCONFIG_DIR must be relative path under project"; exit 1 ;; \
+	    /*|..*) echo "Error: KCONFIG_DIR must be relative path under project"; exit 1 ;; \
 	esac
 	$(Q)if [ -d "$(KCONFIG_DIR)" ] && [ ! -f "$(KCONFIG_DIR)/kconfiglib.py" ]; then \
-		echo "Removing incomplete Kconfig directory..."; \
-		rm -rf "$(KCONFIG_DIR)"; \
+	    echo "Removing incomplete Kconfig directory..."; \
+	    rm -rf "$(KCONFIG_DIR)"; \
 	fi
-	$(Q)git clone --depth=1 -q $(KCONFIGLIB_REPO) $(KCONFIG_DIR)
+	$(Q)git clone --depth=1 -q $(KCONFIGLIB_REPO) "$(KCONFIG_DIR)"
 	@echo "Kconfig tools installed to $(KCONFIG_DIR)"
 
 # Ensure all Kconfig tools exist
@@ -47,15 +47,15 @@ config: env-check $(KCONFIG_DIR)/menuconfig.py
 # Apply default configuration (supports CONFIG=name for named configs)
 defconfig: $(KCONFIG_DIR)/defconfig.py
 	@if [ -n "$(CONFIG)" ]; then \
-		if [ -f "configs/$(CONFIG)_defconfig" ]; then \
-			echo "Applying configs/$(CONFIG)_defconfig..."; \
-			python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/$(CONFIG)_defconfig; \
-		else \
-			echo "Error: configs/$(CONFIG)_defconfig not found"; exit 1; \
-		fi; \
+	    if [ -f "configs/$(CONFIG)_defconfig" ]; then \
+	        echo "Applying configs/$(CONFIG)_defconfig..."; \
+	        python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/$(CONFIG)_defconfig; \
+	    else \
+	        echo "Error: configs/$(CONFIG)_defconfig not found"; exit 1; \
+	    fi; \
 	else \
-		echo "Applying default configuration..."; \
-		python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/defconfig; \
+	    echo "Applying default configuration..."; \
+	    python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/defconfig; \
 	fi
 	@python3 $(KCONFIG_DIR)/genconfig.py --header-path $(CONFIG_HEADER) $(KCONFIG)
 	@echo "Configuration applied."
@@ -63,12 +63,12 @@ defconfig: $(KCONFIG_DIR)/defconfig.py
 # Pattern rule for named defconfigs (e.g., make jit_defconfig)
 %_defconfig: $(KCONFIG_DIR)/defconfig.py
 	@if [ -f "configs/$*_defconfig" ]; then \
-		echo "Applying configs/$*_defconfig..."; \
-		python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/$*_defconfig; \
-		python3 $(KCONFIG_DIR)/genconfig.py --header-path $(CONFIG_HEADER) $(KCONFIG); \
-		echo "Configuration applied."; \
+	    echo "Applying configs/$*_defconfig..."; \
+	    python3 $(KCONFIG_DIR)/defconfig.py --kconfig $(KCONFIG) configs/$*_defconfig; \
+	    python3 $(KCONFIG_DIR)/genconfig.py --header-path $(CONFIG_HEADER) $(KCONFIG); \
+	    echo "Configuration applied."; \
 	else \
-		echo "Error: configs/$*_defconfig not found"; exit 1; \
+	    echo "Error: configs/$*_defconfig not found"; exit 1; \
 	fi
 
 # Update configuration after Kconfig changes

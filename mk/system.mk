@@ -14,7 +14,11 @@ compute_size = $(shell echo "obase=16; ibase=10; $(1)*$(MiB)" | bc)
 ifeq ($(CONFIG_SYSTEM),y)
 
 CFLAGS += -Isrc/dtc/libfdt
-LIBFDT_HACK := $(shell git submodule update --init src/dtc 2>/dev/null)
+
+# DTC dependency as proper target (not parse-time shell)
+DTC_SENTINEL := src/dtc/.git
+$(DTC_SENTINEL):
+	$(call ensure-submodule,src/dtc,https://github.com/dgibson/dtc)
 
 DEV_SRC := src/devices
 DEV_OUT := $(OUT)/devices
@@ -60,6 +64,9 @@ deps := $(DEV_OBJS:%.o=%.o.d)
 
 OBJS_EXT += system.o
 OBJS_EXT += dtc/libfdt/fdt.o dtc/libfdt/fdt_ro.o dtc/libfdt/fdt_rw.o dtc/libfdt/fdt_wip.o
+
+# Ensure DTC is available before compiling libfdt objects
+$(addprefix $(OUT)/,$(filter dtc/%,$(OBJS_EXT))): $(DTC_SENTINEL)
 
 # Memory Layout Configuration
 

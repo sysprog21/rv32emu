@@ -109,6 +109,35 @@ $(1):
 	$$(Q)mkdir -p $$@
 endef
 
+# Conditional submodule/clone helper for tarball compatibility
+# Handles both git repository (uses submodule) and release tarball (uses git clone)
+# $(1): target directory
+# $(2): repository URL
+# $(3): branch/tag (optional, defaults to default branch)
+define ensure-submodule
+	@if [ -d .git ]; then \
+	    git submodule update --init --depth=1 "$(1)" || { \
+	        echo "Error: Failed to update submodule $(1)" >&2; \
+	        exit 1; \
+	    }; \
+	else \
+	    if [ -d "$(1)" ] && [ ! -d "$(1)/.git" ]; then \
+	        echo "Warning: Directory $(1) exists without .git, removing..." >&2; \
+	        rm -rf "$(1)"; \
+	    fi; \
+	    if [ ! -d "$(1)/.git" ]; then \
+	        CLONE_OPTS="--depth=1"; \
+	        if [ -n "$(3)" ]; then \
+	            CLONE_OPTS="$$CLONE_OPTS --branch=$(3)"; \
+	        fi; \
+	        git clone $$CLONE_OPTS "$(2)" "$(1)" || { \
+	            echo "Error: Failed to clone $(2) to $(1)" >&2; \
+	            exit 1; \
+	        }; \
+	    fi; \
+	fi
+endef
+
 # Generic object compilation rule
 # $(1): output directory variable name (e.g., OUT)
 # $(2): source directory (e.g., src)
@@ -190,13 +219,13 @@ $$(foreach e,$(2),$$(eval $$(call run-test-action,$(1),$$(e))))
 
 run-test-$(1): $$($(1)_TEST_OUT)
 	$$(Q)$$(foreach e,$$($(1)_TEST_ACTIONS),\
-		$$(PRINTF) "Running $$(e) ... "; \
-		if cmp $$($(1)_TEST_SRCDIR)/$$(e).expect $$($(1)_TEST_OUTDIR)/$$(e).out; then \
-			$$(call notice, [OK]); \
-		else \
-			$$(PRINTF) "Failed.\n"; \
-			exit 1; \
-		fi; \
+	    $$(PRINTF) "Running $$(e) ... "; \
+	    if cmp $$($(1)_TEST_SRCDIR)/$$(e).expect $$($(1)_TEST_OUTDIR)/$$(e).out; then \
+	        $$(call notice, [OK]); \
+	    else \
+	        $$(PRINTF) "Failed.\n"; \
+	        exit 1; \
+	    fi; \
 	)
 endef
 

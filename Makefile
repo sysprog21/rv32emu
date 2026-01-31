@@ -201,7 +201,8 @@ ifeq ($(CONFIG_SYSTEM),y)
 ifneq ($(CONFIG_ELF_LOADER),y)
 DTB_DEPS := $(BUILD_DTB) $(BUILD_DTB2C)
 # Ensure DTC is cloned before building DTB
-$(BUILD_DTB) $(BUILD_DTB2C): $(DTC_SENTINEL)
+# Note: BUILD_DTB uses system dtc, only BUILD_DTB2C needs submodule headers
+$(BUILD_DTB2C): $(DTC_SENTINEL)
 endif
 endif
 

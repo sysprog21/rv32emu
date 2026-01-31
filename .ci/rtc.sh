@@ -110,6 +110,35 @@ EXPECT_CMDS+=('
     expect "# " { send "\x01"; send "x" } timeout { exit 3 }
 ')
 
+# Test explicit -x rtc:utc mode (should behave identically to default)
+TEST_OPTIONS+=("${OPTS_BASE} -x rtc:utc")
+EXPECT_CMDS+=('
+    expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+    expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+    expect "rtc0" { } timeout { exit 3 }
+    expect "# " { send "date -u +%Y\n" } timeout { exit 2 }
+    expect "${host_utc_year}" { } timeout { exit 3 }
+    expect "# " { send "uname -a\n" } timeout { exit 2 }
+    expect "riscv32 GNU/Linux" { } timeout { exit 3 }
+    expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+')
+
+# RTC localtime mode test
+# Compare UTC vs localtime offset with tolerance
+# Get host local hour (0-23)
+HOST_LOCAL_HOUR=$(date +%-H)
+TEST_OPTIONS+=("${OPTS_BASE} -x rtc:localtime")
+EXPECT_CMDS+=('
+    expect "buildroot login:" { send "root\n" } timeout { exit 1 }
+    expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
+    expect "rtc0" { } timeout { exit 3 }
+    expect "# " { send "guest_h=\$(date +%-H); exp_h=${host_local_hour}; diff=\$((guest_h - exp_h)); \[ \$diff -lt 0 \] && diff=\$((-diff)); \[ \$diff -gt 12 \] && diff=\$((24 - diff)); \[ \$diff -le 1 \] && echo OFFSET_CHECK_OK || echo OFFSET_CHECK_FAIL\n" } timeout { exit 2 }
+    expect "OFFSET_CHECK_OK" { } timeout { exit 3 }
+    expect "# " { send "uname -a\n" } timeout { exit 2 }
+    expect "riscv32 GNU/Linux" { } timeout { exit 3 }
+    expect "# " { send "\x01"; send "x" } timeout { exit 3 }
+')
+
 for i in "${!TEST_OPTIONS[@]}"; do
     printf "${COLOR_Y}===== Test option: ${TEST_OPTIONS[$i]} =====${COLOR_N}\n"
 
@@ -117,6 +146,7 @@ for i in "${!TEST_OPTIONS[@]}"; do
 
     ASSERT expect <<- DONE
 	set host_utc_year ${HOST_UTC_YEAR}
+	set host_local_hour ${HOST_LOCAL_HOUR}
 	set year1 ${YEAR1}
 	set year2 ${YEAR2}
 	set timeout ${TIMEOUT}

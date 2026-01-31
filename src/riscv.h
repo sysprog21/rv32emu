@@ -492,12 +492,16 @@ typedef struct {
 } vm_user_t;
 
 #if RV32_HAS(SYSTEM)
+/* RTC time mode: UTC or local time with timezone offset */
+typedef enum { RTC_UTC, RTC_LOCALTIME } rtc_time_mode_t;
+
 typedef struct {
     char *kernel;
     char *initrd;
     char *bootargs;
     char **vblk_device;
     int vblk_device_cnt;
+    rtc_time_mode_t rtc_mode;
 } vm_system_t;
 #endif /* RV32_HAS(SYSTEM) */
 

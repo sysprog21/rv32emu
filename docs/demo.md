@@ -3,7 +3,7 @@
 ## Doom
 **source**: [doom\_riscv](https://github.com/sysprog21/doom_riscv)
 
-**commmad**: `make doom`
+**command**: `make doom`
 
 [Doom](https://en.wikipedia.org/wiki/Doom_(franchise)), a pioneering first-person shooter game developed by [id Software](https://en.wikipedia.org/wiki/Id_Software) in 1993, is known for its open-source code and vibrant community.
 It debuted innovations like genuine 3D graphics, networked multiplayer gameplay and the ability for players to create custom expansions. 
@@ -19,7 +19,7 @@ It debuted innovations like genuine 3D graphics, networked multiplayer gameplay 
 * 1: Fist
 * 3: Shotgun
 
-### Music and sound effect
+### Music and Sound Effects
 The music and sound effects are supported.
 
 ## Quake
@@ -27,9 +27,9 @@ The music and sound effects are supported.
 
 **command**: `make quake`
 
-[Quake](https://en.wikipedia.org/wiki/Quake_(series)) was created in 1996 as a successor of the highly successful first-person shooter game Doom.
-It is built on the Doom game engine and offers 3D graphics compatibility.
-Moreover, it enhances fast-paced gameplay and supports online multiplayer over the Internet.
+[Quake](https://en.wikipedia.org/wiki/Quake_(series)) was created in 1996 as a successor to the highly successful first-person shooter game Doom.
+It features a fully 3D engine developed by id Software, offering true 3D graphics and gameplay.
+It emphasizes fast-paced gameplay and supports online multiplayer over the Internet.
 
 ![Quake Gameplay](https://imgur.com/gXKb7D0.gif)
 
@@ -44,7 +44,7 @@ Moreover, it enhances fast-paced gameplay and supports online multiplayer over t
 
 You may use the mouse to adjust the pitch and yaw angle.
 
-### Music and sound effect
+### Music and Sound Effects
 Sound effects are supported, but music is currently unavailable in Quake because it requires a CD-ROM.
 The extracted pak file lacks any music or background music files.
 

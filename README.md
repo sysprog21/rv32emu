@@ -23,13 +23,12 @@ tool and starting point for customization. It is primarily written in C99, utili
 C11 atomics for memory management, with a focus on efficiency and readability.
 
 Features:
-* Fast interpreter for executing the RV32 ISA
 * Fast interpreter that faithfully executes the complete RV32 instruction set
 * Full coverage of RV32I / RV32E plus the M (integer multiply–divide), A (atomics), F (single-precision floating-point), C (compressed), and Zba/Zbb/Zbc/Zbs bit-manipulation extensions
 * Built-in ELF loader for user-mode emulation
 * Newlib-compatible system-call layer for standalone programs
 * Minimal system emulation capable of booting an RV32 Linux kernel and running user-space binaries
-* Experimental SDL-based display/event/audio system calls for running video games
+* SDL-based display/event/audio system calls for running video games
 * WebAssembly build for user-mode and system emulation with SDL graphics and audio in modern browsers
 * Remote debugging through the GDB Remote Serial Protocol
 * Tiered JIT compilation for performance boost while maintaining a small footprint
@@ -54,13 +53,13 @@ $ make config         # Configure build options interactively
 $ make
 ```
 
-### Experimental JIT compilation
+### Tiered JIT Compilation
 The tier-2 JIT compiler in `rv32emu` leverages LLVM for powerful optimization.
-Therefore, the target system must have [`LLVM`](https://llvm.org/) installed, with version 18 recommended.
+Therefore, the target system must have [`LLVM`](https://llvm.org/) installed, with versions 18 through 21 supported.
 If `LLVM` is not installed, only the tier-1 JIT compiler will be used for performance enhancement.
 
-* macOS: `brew install llvm@18`
-* Ubuntu Linux / Debian: `sudo apt-get install llvm-18`
+* macOS: `brew install llvm@18` (or llvm@19, llvm@20, llvm@21)
+* Ubuntu Linux / Debian: `sudo apt-get install llvm-18` (or llvm-19, llvm-20, llvm-21)
 
 Build the emulator with JIT compiler using the predefined configuration:
 ```shell
@@ -94,6 +93,12 @@ Build and run using default images (the default images will be fetched from [rv3
 If `ENABLE_ARCH_TEST=1` was previously set, run `make distclean` before proceeding.
 ```shell
 $ make ENABLE_SYSTEM=1 system
+```
+
+For improved performance, JIT compilation can be enabled in system emulation mode:
+```shell
+$ make system_jit_defconfig
+$ make system
 ```
 
 Build and run using specified images (`readonly` option makes the virtual block device read-only):
@@ -223,11 +228,12 @@ There are three ways to customize the build:
 #### 1. Predefined Configurations
 Use predefined configurations for common use cases:
 ```shell
-$ make defconfig          # Default: SDL enabled, all extensions
-$ make mini_defconfig     # Minimal: no SDL, basic extensions only
-$ make jit_defconfig      # JIT: enables tiered JIT compilation
-$ make system_defconfig   # System: enables Linux system emulation
-$ make wasm_defconfig     # WebAssembly: build for browser deployment
+$ make defconfig            # Default: SDL enabled, all extensions
+$ make mini_defconfig       # Minimal: no SDL, basic extensions only
+$ make jit_defconfig        # JIT: enables tiered JIT compilation
+$ make system_defconfig     # System: enables Linux system emulation
+$ make system_jit_defconfig # System+JIT: enables Linux system emulation with JIT
+$ make wasm_defconfig       # WebAssembly: build for browser deployment
 ```
 
 #### 2. Interactive Configuration
@@ -256,12 +262,13 @@ Available configuration options:
 * `ENABLE_Zicsr`: Control and Status Register (CSR)
 * `ENABLE_Zifencei`: Instruction-Fetch Fence
 * `ENABLE_GDBSTUB`: GDB remote debugging support
-* `ENABLE_SDL`: Experimental Display and Event System Calls
-* `ENABLE_JIT`: Experimental JIT compiler
-* `ENABLE_SYSTEM`: Experimental system emulation, allowing booting Linux kernel
+* `ENABLE_SDL`: Display and Event System Calls for running video games
+* `ENABLE_JIT`: Tiered JIT compiler for performance optimization
+* `ENABLE_SYSTEM`: System emulation for booting Linux kernel
 * `ENABLE_GOLDFISH_RTC`: Enable Goldfish RTC peripheral when running the Linux kernel
 * `ENABLE_MOP_FUSION`: Macro-operation fusion
 * `ENABLE_BLOCK_CHAINING`: Block chaining of translated blocks
+* `T2C_OPT_LEVEL`: LLVM optimization level for tier-2 JIT (0-3, default varies by config)
 
 ### RISCOF
 [RISCOF](https://github.com/riscv-software-src/riscof) (RISC-V Compatibility Framework) is
@@ -330,31 +337,33 @@ Detail in riscv-arch-test:
 * [RISC-V Architecture Test Format Specification](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/spec/TestFormatSpec.adoc)
 
 ## Benchmarks
-The benchmarks are classified into three categories based on their characteristics:
-| Category                 | Benchmark  | Description |
-| -------------------------| ---------- | ----------- |
-| Computing intensive      | puzzle     | A sliding puzzle where numbered square tiles are arranged randomly with one tile missing, designed for solving the N-puzzle problem. |
-|                          | Pi         | Calculates the millionth digit of π. |
-|                          | miniz      | Compresses and decompresses 8 MiB of data. |
-|                          | primes     | Finds the largest prime number below 33333333. |
-|                          | sha512     | Computes the SHA-512 hash of 64 MiB of data. |
-| I/O intensive            | Richards   | An OS task scheduler simulation benchmark for comparing system implementations. |
-|                          | Dhrystone  | Evaluates string operations, involves frequent memory I/O, and generates the performance metric. |
-| Computing and I/O Hybrid | Mandelbrot | A benchmark based on the Mandelbrot set, which uses fixed-point arithmetic and involves numerous integer operations. |
-|                          | AES        | Includes 23 encryption and decryption algorithms adhering to the Advanced Encryption Standard. |
-|                          | Nqueens    | A puzzle benchmark where n queens are placed on an n × n chessboard without attacking each other, using deep recursion for execution. |
-|                          | qsort      | Sorts an array with 50 million items. |
+The benchmarks are classified based on their characteristics and cover various aspects of system performance. Most are derived from the industry-standard BYTEmark (nbench) suite, supplemented by cryptographic and system benchmarks:
 
-These benchmarks performed by rv32emu (interpreter-only mode) and [Spike](https://github.com/riscv-software-src/riscv-isa-sim) v1.1.0. Ran on Intel Core i7-11700 CPU running at 2.5 GHz and an Ampere [eMAG](https://en.wikichip.org/wiki/ampere_computing/emag) 8180
-microprocessor equipped with 32 Arm64 cores, capable of speeds up to 3.3 GHz. Both systems ran Ubuntu Linux 22.04.1 LTS. We utilized gcc version 12.3, configured as riscv32-unknown-elf-gcc.
+| Benchmark     | Description |
+| ------------- | ----------- |
+| numeric sort  | Focuses on sorting integer arrays using various algorithms |
+| string sort   | Evaluates string sorting capabilities |
+| bitfield      | Tests bitwise operations and integer arithmetic on data words |
+| emfloat       | Focuses on emulating floating-point calculations using integer arithmetic |
+| assignment    | Tests solving resource allocation problems (e.g., assignment algorithm) |
+| idea          | Assesses encryption and decryption using the International Data Encryption Algorithm (IDEA) |
+| huffman       | Measures performance in data compression using Huffman coding |
+| dhrystone     | Assesses general integer performance with a mix of string processing and control operations |
+| primes        | Measures efficiency in computing prime numbers using algorithms like the Sieve of Eratosthenes |
+| sha512        | Tests cryptographic hash computations |
 
-The figures below illustrate the normalized execution time of rv32emu and Spike, where **the shorter indicates better performance**.
+These benchmarks were performed by rv32emu (with tiered JIT enabled) and QEMU v9.0.0 on an Intel Core i7-11700 CPU running at 2.5 GHz with Ubuntu Linux 22.04.1 LTS. The toolchain used was GCC v14.2.0 with RV32IM extensions.
 
-_x86-64_
-![](docs/interp-bench-x64.png)
+The figure below illustrates the speedup (normalized reciprocal of average elapsed time over 200 iterations) of rv32emu with tiered JIT compilation compared to QEMU. Higher values indicate better performance.
 
-_Arm64_
-![](docs/interp-bench-arm64.png)
+![](docs/jit-bench.png)
+
+**Performance Summary:**
+- rv32emu with tiered JIT compilation outperforms QEMU v9.0.0 across all benchmarks
+- Significant performance gains in compute-intensive workloads (primes, sha512, emfloat)
+- Strong performance in optimization and cryptography benchmarks (assignment, idea, huffman)
+- Consistent advantages in sorting operations (numeric sort, string sort)
+- The tiered JIT approach effectively balances compilation overhead with code optimization quality
 
 ### Continuous Benchmarking
 Continuous benchmarking is integrated into GitHub Actions,
@@ -373,9 +382,8 @@ There are several files that have the potential to significantly impact the perf
 As a result, any modifications made to these files will trigger the benchmark CI.
 
 ## GDB Remote Debugging
-`rv32emu` is permitted to operate as gdbstub in an experimental manner since it supports
-a limited number of [GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html) (GDBRSP).
-To enable this feature, you need to build the emulator and set `ENABLE_GDBSTUB=1` when running the `make` command.
+`rv32emu` supports a subset of the [GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html) (GDBRSP).
+To enable this feature, use the configuration system (e.g., `make config` and enable `ENABLE_GDBSTUB`) or use the predefined configuration with GDB support.
 After that, you might execute it using the command below.
 ```shell
 $ build/rv32emu -g <binary>

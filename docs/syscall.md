@@ -112,7 +112,7 @@ This mechanism allows code executed on a RISC-V target to interact with and util
 
 Any other system calls will fail with an "unknown syscall" error.
 
-## Experimental Display, Event, and Sound System Calls
+## Display, Event, and Sound System Calls
 
 These system calls are solely for the convenience of accessing the [SDL library](https://www.libsdl.org/) and [SDL2_Mixer](https://wiki.libsdl.org/SDL2_mixer) and are only intended for the presentation of RISC-V graphics applications. They are not present in the ABI interface of POSIX or Linux.
 

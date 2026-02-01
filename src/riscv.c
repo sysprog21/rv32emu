@@ -264,6 +264,71 @@ static void *t2c_runloop(void *arg)
     pthread_mutex_unlock(&rv->wait_queue_lock);
     return NULL;
 }
+
+static bool rv_spawn_t2c(riscv_t *rv)
+{
+    rv->jit_cache = jit_cache_init();
+    if (!rv->jit_cache) {
+        rv_log_fatal("Failed to initialize JIT cache");
+        goto fail_jit_cache;
+    }
+    rv->inline_cache = inline_cache_init();
+    if (!rv->inline_cache) {
+        rv_log_fatal("Failed to initialize inline cache");
+        goto fail_inline_cache;
+    }
+
+    rv->quit = false;
+    /* prepare wait queue. */
+    pthread_mutex_init(&rv->wait_queue_lock, NULL);
+    pthread_mutex_init(&rv->cache_lock, NULL);
+    pthread_cond_init(&rv->wait_queue_cond, NULL);
+    INIT_LIST_HEAD(&rv->wait_queue);
+    /* Activate the background compilation thread.
+     * Use larger stack (8MB) to handle deep recursion in t2c_trace_ebb
+     * and LLVM's internal stack usage during compilation.
+     */
+    pthread_attr_t t2c_attr;
+    pthread_attr_init(&t2c_attr);
+    pthread_attr_setstacksize(&t2c_attr, 8 * 1024 * 1024); /* 8MB stack */
+    pthread_create(&t2c_thread, &t2c_attr, t2c_runloop, rv);
+    pthread_attr_destroy(&t2c_attr);
+
+    return true;
+
+fail_inline_cache:
+    jit_cache_exit(rv->jit_cache);
+fail_jit_cache:
+    cache_free(rv->block_cache);
+    return false;
+}
+
+void rv_terminate_t2c(riscv_t *rv)
+{
+    /* Signal the thread to quit */
+    pthread_mutex_lock(&rv->wait_queue_lock);
+    rv->quit = true;
+    pthread_cond_signal(&rv->wait_queue_cond);
+    pthread_mutex_unlock(&rv->wait_queue_lock);
+
+    pthread_join(t2c_thread, NULL);
+
+    /* Clean up any remaining entries in wait queue */
+    queue_entry_t *entry, *safe;
+    list_for_each_entry_safe (entry, safe, &rv->wait_queue, list) {
+        list_del(&entry->list);
+        free(entry);
+    }
+
+    pthread_mutex_destroy(&rv->wait_queue_lock);
+    pthread_mutex_destroy(&rv->cache_lock);
+    pthread_cond_destroy(&rv->wait_queue_cond);
+    jit_cache_exit(rv->jit_cache);
+    inline_cache_exit(rv->inline_cache);
+
+    /* Dispose LLVM engines for all remaining blocks before freeing cache */
+    clear_cache_hot(rv->block_cache, t2c_dispose_block_engine);
+}
 #endif
 
 #if RV32_HAS(SYSTEM_MMIO)
@@ -946,29 +1011,7 @@ void rv_delete(riscv_t *rv)
     block_map_destroy(rv);
 #else
 #if RV32_HAS(T2C)
-    /* Signal the thread to quit */
-    pthread_mutex_lock(&rv->wait_queue_lock);
-    rv->quit = true;
-    pthread_cond_signal(&rv->wait_queue_cond);
-    pthread_mutex_unlock(&rv->wait_queue_lock);
-
-    pthread_join(t2c_thread, NULL);
-
-    /* Clean up any remaining entries in wait queue */
-    queue_entry_t *entry, *safe;
-    list_for_each_entry_safe (entry, safe, &rv->wait_queue, list) {
-        list_del(&entry->list);
-        free(entry);
-    }
-
-    pthread_mutex_destroy(&rv->wait_queue_lock);
-    pthread_mutex_destroy(&rv->cache_lock);
-    pthread_cond_destroy(&rv->wait_queue_cond);
-    jit_cache_exit(rv->jit_cache);
-    inline_cache_exit(rv->inline_cache);
-
-    /* Dispose LLVM engines for all remaining blocks before freeing cache */
-    clear_cache_hot(rv->block_cache, t2c_dispose_block_engine);
+    rv_terminate_t2c(rv);
 #endif
     jit_state_exit(rv->jit_state);
     cache_free(rv->block_cache);
@@ -1031,7 +1074,58 @@ static void load_boot_images(vm_attr_t *attr)
         rv_log_info("Rootfs loaded (%ld bytes)", (long) initrd_size);
     }
 }
+#endif /* RV32_HAS(SYSTEM_MMIO) */
 
+#if RV32_HAS(JIT)
+/* Initialize or reinitialize JIT state and block cache.
+ * Cleans up existing state if present (reboot case).
+ * Returns true on success, false on failure.
+ */
+static bool rv_init_jit(riscv_t *rv)
+{
+    /* Clean up existing JIT state if present */
+    if (!rv->jit_state) {
+        INIT_LIST_HEAD(&rv->block_list);
+    } else {
+        jit_state_exit(rv->jit_state);
+    }
+
+    rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
+    if (!rv->jit_state) {
+        rv_log_fatal("Failed to initialize JIT state");
+        return false;
+    }
+
+    /* Clean up existing block cache if present */
+    if (rv->block_cache) {
+        cache_free(rv->block_cache);
+    }
+
+    rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
+    if (!rv->block_cache) {
+        rv_log_fatal("Failed to create block cache");
+        jit_state_exit(rv->jit_state);
+        rv->jit_state = NULL;
+        return false;
+    }
+
+#if RV32_HAS(T2C)
+    /* Spawn new T2C thread */
+    if (!rv_spawn_t2c(rv)) {
+        rv_log_fatal("Spawn T2C failed");
+        cache_free(rv->block_cache);
+        rv->block_cache = NULL;
+        jit_state_exit(rv->jit_state);
+        rv->jit_state = NULL;
+        return false;
+    }
+#endif
+
+    return true;
+}
+#endif /* RV32_HAS(JIT) */
+
+#if RV32_HAS(SYSTEM_MMIO)
 /* Clear memory, load kernel/DTB/initrd and reset the hart.
  *
  * The "warm" aspect is that skipping peripheral
@@ -1060,6 +1154,13 @@ void rv_warm_reboot(riscv_t *rv, riscv_word_t pc)
     /* setup RISC-V hart */
     rv_set_reg(rv, rv_reg_a0, 0);
     rv_set_reg(rv, rv_reg_a1, attr->dtb_addr);
+
+#if RV32_HAS(JIT)
+    if (!rv_init_jit(rv)) {
+        rv_log_fatal("Init JIT state at warm reboot failed");
+        exit(EXIT_FAILURE);
+    }
+#endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
@@ -1349,80 +1450,13 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         block_map_init(&rv->block_map, BLOCK_MAP_CAPACITY_BITS);
     }
 #else
-    rv_log_info("init block map");
-    if (!rv->jit_state) { /* check for reboot */
-        INIT_LIST_HEAD(&rv->block_list);
-    } else {
-        jit_state_exit(rv->jit_state);
+    if (!rv_init_jit(rv)) {
+        goto fail_mpool;
     }
-    rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
-    if (!rv->jit_state) {
-        rv_log_fatal("Failed to initialize JIT state");
-        goto fail_jit_state;
-    }
-
-    if (rv->block_cache) { /* check for reboot */
-        cache_free(rv->block_cache);
-    }
-    rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
-    if (!rv->block_cache) {
-        rv_log_fatal("Failed to create block cache");
-        goto fail_block_cache;
-    }
-#if RV32_HAS(T2C)
-    if (rv->jit_cache) { /* check for reboot */
-        jit_cache_exit(rv->jit_cache);
-    }
-    rv->jit_cache = jit_cache_init();
-    if (!rv->jit_cache) {
-        rv_log_fatal("Failed to initialize JIT cache");
-        goto fail_jit_cache;
-    }
-    if (rv->inline_cache) { /* check for reboot */
-        inline_cache_exit(rv->inline_cache);
-    }
-    rv->inline_cache = inline_cache_init();
-    if (!rv->inline_cache) {
-        rv_log_fatal("Failed to initialize inline cache");
-        goto fail_inline_cache;
-    }
-
-    if (rv->quit) {
-        pthread_mutex_destroy(&rv->wait_queue_lock);
-        pthread_mutex_destroy(&rv->cache_lock);
-    }
-    rv->quit = false;
-    /* prepare wait queue. */
-    pthread_mutex_init(&rv->wait_queue_lock, NULL);
-    pthread_mutex_init(&rv->cache_lock, NULL);
-    pthread_cond_init(&rv->wait_queue_cond, NULL);
-    INIT_LIST_HEAD(&rv->wait_queue);
-    /* Activate the background compilation thread.
-     * Use larger stack (8MB) to handle deep recursion in t2c_trace_ebb
-     * and LLVM's internal stack usage during compilation.
-     */
-    pthread_attr_t t2c_attr;
-    pthread_attr_init(&t2c_attr);
-    pthread_attr_setstacksize(&t2c_attr, 8 * 1024 * 1024); /* 8MB stack */
-    pthread_create(&t2c_thread, &t2c_attr, t2c_runloop, rv);
-    pthread_attr_destroy(&t2c_attr);
-#endif
 #endif
 
     return true;
 
-#if RV32_HAS(JIT)
-#if RV32_HAS(T2C)
-fail_inline_cache:
-    jit_cache_exit(rv->jit_cache);
-fail_jit_cache:
-    cache_free(rv->block_cache);
-#endif
-fail_block_cache:
-    if (rv->jit_state)
-        jit_state_exit(rv->jit_state);
-fail_jit_state:
-#endif
 fail_mpool:
     mpool_destroy(rv->block_ir_mp);
     mpool_destroy(rv->block_mp);

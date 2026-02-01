@@ -534,8 +534,7 @@ static void syscall_sbi_rst(riscv_t *rv)
         } else if (a0 == SBI_RST_TYPE_COLD_REBOOT) { /* default reboot mode,
                                                         reset whole system */
 #if RV32_HAS(T2C)
-            /* terminate t2c_runloop */
-            rv->quit = true;
+            rv_terminate_t2c(rv);
 #endif
             rv_cold_reboot(rv, 0U);
             /* longjmp to return to the main loop to avoid the complex return
@@ -550,8 +549,7 @@ static void syscall_sbi_rst(riscv_t *rv)
         /* reset halt only, echo "warm" > /sys/kernel/reboot/mode to set */
         else if (a0 == SBI_RST_TYPE_WARM_REBOOT) {
 #if RV32_HAS(T2C)
-            /* terminate t2c_runloop */
-            rv->quit = true;
+            rv_terminate_t2c(rv);
 #endif
             rv_warm_reboot(rv, 0U);
             /* longjmp to return to the main loop to avoid the complex return

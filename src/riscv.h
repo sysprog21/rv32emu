@@ -394,6 +394,11 @@ riscv_t *rv_create(riscv_user_t attr);
 /* delete a RISC-V emulator */
 void rv_delete(riscv_t *rv);
 
+#if RV32_HAS(T2C)
+/* cleanup t2c thread */
+void rv_terminate_t2c(riscv_t *rv);
+#endif
+
 /* Cold reboot the system
  *
  * The first power on is considered as a cold reboot

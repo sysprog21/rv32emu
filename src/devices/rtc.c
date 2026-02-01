@@ -24,12 +24,6 @@ static uint64_t now_nsec;
 
 uint64_t rtc_get_now_nsec(rtc_t *rtc)
 {
-    /* TODO:
-     * - detects timezone and use the correct UTC offset
-     * - a new CLI option should be added to main.c to let user to select
-     *   [UTC] or [UTC + offset](localtime) time. E.g., -x rtc:utc or -x
-     *   rtc:localtime
-     */
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     return (uint64_t) (ts.tv_sec * 1e9) + ts.tv_nsec + rtc->clock_offset;

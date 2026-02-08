@@ -380,6 +380,11 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
             LLVMBuildRetVoid(*builder);
         }
     }
+
+    if (tk && tk != *builder)
+        LLVMDisposeBuilder(tk);
+    if (utk && utk != *builder)
+        LLVMDisposeBuilder(utk);
 }
 
 void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)

@@ -111,7 +111,7 @@ Build with a larger `INITRD_SIZE` (e.g., 64 MiB) to run SDL-oriented application
 ```shell
 $ make system ENABLE_SYSTEM=1 ENABLE_SDL=1 INITRD_SIZE=64
 ```
-Once login the guestOS, run `doom-riscv` or `quake` or `smolnes`. To terminate SDL-oriented applications, use the built-in exit utility, ctrl-c or the SDL window close button(X).
+Once log into the guestOS, run `doom-riscv` or `quake` or `smolnes`. To terminate SDL-oriented applications, use the built-in exit utility, ctrl-c or the SDL window close button(X).
 
 #### Virtio Block Device (optional)
 Generate ext4 image file for virtio block device in Unix-like system:

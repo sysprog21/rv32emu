@@ -1063,12 +1063,19 @@ void rv_set_fromhost_addr(riscv_t *rv, uint32_t addr)
 }
 #endif
 
+#if RV32_HAS(JIT)
+static void free_block_branch_tables(void *block)
+{
+    block_t *blk = (block_t *) block;
+    for (rv_insn_t *ir = blk->ir_head; ir; ir = ir->next)
+        free(ir->branch_table);
+}
+#endif
+
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
-#if !RV32_HAS(JIT) || (RV32_HAS(SYSTEM_MMIO))
     vm_attr_t *attr = PRIV(rv);
-#endif
 #if !RV32_HAS(JIT)
     map_delete(attr->fd_map);
     memory_delete(attr->mem);
@@ -1100,10 +1107,13 @@ void rv_delete(riscv_t *rv)
     clear_cache_hot(rv->block_cache, t2c_dispose_block_engine);
 #endif
     jit_state_exit(rv->jit_state);
+    clear_cache_hot(rv->block_cache, free_block_branch_tables);
     cache_free(rv->block_cache);
     mpool_destroy(rv->block_ir_mp);
     mpool_destroy(rv->block_mp);
     mpool_destroy(rv->fuse_mp);
+    map_delete(attr->fd_map);
+    memory_delete(attr->mem);
 #endif
 #if RV32_HAS(SYSTEM_MMIO)
     u8250_delete(attr->uart);

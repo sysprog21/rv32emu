@@ -7,7 +7,7 @@ They enable applications to access services and resources provided by the OS ker
 such as file operations, network communication, and memory management.
 System calls are essential for performing privileged operations that applications can not directly execute,
 ensuring a secure and controlled environment.
-To directly interact with system calls without relying on external libraries, programmers can invoke them from assembler programs.
+To directly interact with system calls without relying on external libraries, programmers can invoke them from assembly programs.
 For a comprehensive list of available system calls and detailed information about their usage, see [`man 2 syscalls`](http://man7.org/linux/man-pages/man2/syscalls.2.html).
 
 ## System Calls in C
@@ -34,8 +34,8 @@ Here is how the parameters are mapped:
 - The pointer to the string (its address) is placed in `a1`.
 - The number of characters to print is placed in `a2`.
 
-For determining the specific system call number for the 'write' operation in the context of `rv32emu`,
-reference can be made to [riscv-pk/pk/syscall.h](https://github.com/riscv/riscv-pk/blob/master/pk/syscall.h).
+To determine the specific system call number for the 'write' operation in the context of `rv32emu`,
+refer to [riscv-pk/pk/syscall.h](https://github.com/riscv/riscv-pk/blob/master/pk/syscall.h).
 In the case of the `write` system call, the associated number is `64`, which is then assigned to the register `a7`.
 
 Following a successful write operation, the count of written characters should be present in the `a0` register.
@@ -78,8 +78,8 @@ $ build/rv32emu hello
 ```
 
 An `ecall` instruction is used to trigger a trap into the kernel,
-and there exist three privilege modes: User mode, Supervisor mode, and Machine mode.
-Corresponding to these modes, there are three versions of the iret instruction:
+and there are three privilege modes: User mode, Supervisor mode, and Machine mode.
+Corresponding to these modes, there are three versions of return instruction:
 `uret` which can be used from any mode if the `N-extension` is enabled to allow user-mode trap handlers,
 `sret` which is used from S-mode (or M-mode), and `mret` which can only be used from M-mode.
 
@@ -125,9 +125,9 @@ This integrates with rv32emu's SDL-based system calls, significantly enhancing u
 
 **synopsis**: `void draw_frame(void *base, int width, int height)`
 
-If a window does not already exist, one will be created with the specified `width` and `height`. The buffer pointed to by `base` will replace the content of the framebuffer, passing a different `width` or `height` compared to the size of the window is undefined behavior. This system call additionally polls events from the SDL library, and, if necessary, update the internal input specific event queue.
+If a window does not already exist, one will be created with the specified `width` and `height`. The buffer pointed to by `base` will replace the content of the framebuffer, passing a different `width` or `height` compared to the size of the window is undefined behavior. This system call additionally polls events from the SDL library, and, if necessary, updates the internal input specific event queue.
 
-The width and height are merely the virtual dimensions of the screen; they are unrelated to the window's real size. The system call would deal with resizing events internally when they occurred.
+The width and height are merely the virtual dimensions of the screen; they are unrelated to the window's real size. The system call would deal with resizing events internally when they occur.
 
 ### `setup_queue` - Setup input system's dedicated event and submission queue
 
@@ -135,15 +135,15 @@ The width and height are merely the virtual dimensions of the screen; they are u
 
 **synopsis**: `void setup_queue(void *base, size_t capacity, size_t *event_count)`
 
-The user must pass a continuous memory chunk that contains two tightly packed queues, the event queue and the submission queue. And the submission queue is immediately following the last element of the event queue, which is the event queue's base address plus the size of each event element multiplied by the given capacity. If the capacity is not a power of two, it will be treated as the rounded value of the next highest power of two. Additionally, because the event counter variable serves as a notifier to the user that an event has been added to the event queue, it is critical to initialize it before passing its address to this system call.
+The user must pass a continuous memory chunk that contains two tightly packed queues, the event queue and the submission queue. The submission queue immediately follows the last element of the event queue, which is the event queue's base address plus the size of each event element multiplied by the given capacity. If the capacity is not a power of two, it will be treated as the rounded value of the next highest power of two. Additionally, because the event counter variable serves as a notifier to the user that an event has been added to the event queue, it is critical to initialize it before passing its address to this system call.
 
 #### Events
 
 An event entry is made up of a 32-bit value representing the event's type and a `union` buffer containing the event's parameters.
 
-* `KEY_EVENT`: Either a key is pressed or released. Its value buffer is made up of a 32-bit universal key code and an 8-bit state flag; if the corresponding character of the pressed key is not printable, the bit right after the most significant bit is set; for example, the "a" key's corresponding character is printable, so its keycode is the ASCII code of the "a" character, which is `0x61`. However, because the left shift key doesn't have a corresponding printable key, its hexadecimal value is `0x400000E1`, with the 31th bit set.
+* `KEY_EVENT`: Either a key is pressed or released. Its value buffer is made up of a 32-bit universal key code and an 8-bit state flag; if the corresponding character of the pressed key is not printable, the bit right after the most significant bit is set; for example, the "a" key's corresponding character is printable, so its keycode is the ASCII code of the "a" character, which is `0x61`. However, because the left shift key doesn't have a corresponding printable key, its hexadecimal value is `0x400000E1`, with the 31st bit set.
 * `MOUSE_MOTION_EVENT`: The cursor is moved between the previous and the current frames. This event contains the current mouse position and how it differs from the last frame. If the relative mouse mode is enabled, the cursor is wrapped within the canvas and repeated whenever the cursor reaches the border.
-* `MOUSE_BUTTON_EVENT`: The state of a mouse button has been changed. Its value buffer contains a 8-bit button value(1 is left, 2 is middle, 3 is right and so on) and an 8-bit boolean flag that indicates whether the mouse button is pressed.
+* `MOUSE_BUTTON_EVENT`: The state of a mouse button has been changed. Its value buffer contains an 8-bit button value(1 is left, 2 is middle, 3 is right and so on) and an 8-bit boolean flag that indicates whether the mouse button is pressed.
 * `QUIT_EVENT`: The program is requested to exit. Typically, the hosted program destroys the created objects and terminates when this event occurs.
 
 ### `submit_queue` - Notify the emulator a submission has been pushed into the submission queue
@@ -158,16 +158,16 @@ To inform the emulator that a batch of submissions should be processed, the appl
 
 The submission entry is structured similarly to an event entry, with a 32-bit type field and an associated dynamic-sized value buffer whose width depends on the type of submission.
 
-* `RELATIVE_MODE_SUBMISSION`: Enable or disable the mouse relative mode. If the mouse relative mode is enabled, the mouse cursor is wrapped within the window border, it's associated with an 8-bit wide boolean value that indicates whether the relative mouse mode should be enbled.
+* `RELATIVE_MODE_SUBMISSION`: Enable or disable the mouse relative mode. If the mouse relative mode is enabled, the mouse cursor is wrapped within the window border, it's associated with an 8-bit wide boolean value that indicates whether the relative mouse mode should be enabled.
 * `WINDOW_TITLE_SUBMISSION`: Change the title of the SDL window. If the title is not specified, it will be `rv32emu` by default.
 
-### `control_audio` - control the behavior of music and sound effect(sfx)
+### `control_audio` - Control the behavior of music and sound effects (SFX)
 
 **system call number**: `0xD00D`
 
 **synopsis**: `void control_audio(int request)`
 
-The application must prepare the sound data and then give the address of the sound data to register `a1`, the volume of the music to register `a2` (if necessary), and looping to register `a3` (if necessary).  in order to ask the emulator to perform some sound operations. The request will be processed as soon as possible. Three different sorts of requests exist:
+The application must prepare the sound data and then pass the address of the sound data in register `a1`, the volume of the music to register `a2` (if necessary), and looping to register `a3` (if necessary) in order to ask the emulator to perform some sound operations. The request will be processed as soon as possible. Three different sorts of requests exist:
 * `PLAY_MUSIC`: Play the music. If any music is currently playing, it will be changed to something new. In order to avoid blocking on the main thread, the music is played by a new thread.
 * `STOP_MUSIC`: Halt the music.
 * `SET_MUSIC_VOLUME`: If necessary, adjust the music level at some point.
@@ -179,16 +179,16 @@ The request is similar to how music is managed earlier in the description and su
 Music data is defined in a structure called `musicinfo_t`. The SDL2_mixer library is used by the emulator to play music using the fields `data` and `size` in the structure.
 
 #### Sound Effect(sfx)
-`sfxinfo_t` is a structure that defines sound effect data and size. The `data` and `size` fields of the structure are used to play sound effect with the SDL2_mixer library. Currently, support sound effect of [Doom's WAV](https://doomwiki.org/wiki/Sound) format and [normal WAV](https://en.wikipedia.org/wiki/WAV) format(includes [RIFF header](https://en.wikipedia.org/wiki/Resource_Interchange_File_Format)).
+`sfxinfo_t` is a structure that defines sound effect data and size. The `data` and `size` fields of the structure are used to play sound effects with the SDL2_mixer library. Currently, sound effects of [Doom's WAV](https://doomwiki.org/wiki/Sound) format and [normal WAV](https://en.wikipedia.org/wiki/WAV) format (includes [RIFF header](https://en.wikipedia.org/wiki/Resource_Interchange_File_Format)) are supported.
 
-### `setup_audio` - setup or shutdown sound system
+### `setup_audio` - Set up or shut down sound system
 
 **system call number**: `0xBABE`
 
 **synopsis**: `void setup_audio(int request)`
 
-The majority of games, such as Doom and Quake, will maintain its own sound system or server, hence there should be a pair of initialization and destruct semantics. I believe that we should give users access to activities like startup and termination in order to maintain the semantic clarity. If not, the emulator will repeatedly check whether audio is enabled before playing music or sound effects.
+The majority of games, such as Doom and Quake, will maintain their own sound systems or servers, hence there should be a pair of initialization and destruct semantics. I believe that we should give users access to activities like startup and termination in order to maintain the semantic clarity. If not, the emulator will repeatedly check whether audio is enabled before playing music or sound effects.
 
 Requesting the sound system to be turned on or off in the emulator. When the audio device is not in the busy status, the request will be handled. Two categories of requests exist:
 * `INIT_AUDIO`: Setup the audio device and the sfx samples buffer. After initialization, open the audio device and get ready to play some music.
-* `SHUTDOWN_AUDIO`: Release all the resources that initialized by `INIT_SOUND` request.
+* `SHUTDOWN_AUDIO`: Release all the resources that were initialized by `INIT_SOUND` request.

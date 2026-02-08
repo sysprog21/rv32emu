@@ -516,9 +516,11 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
 #else
     LLVMCodeModel code_model = LLVMCodeModelLarge;
 #endif
-    LLVMTargetMachineRef tm = LLVMCreateTargetMachine(
-        target, triple, LLVMGetHostCPUName(), LLVMGetHostCPUFeatures(),
-        LLVMCodeGenLevelNone, LLVMRelocPIC, code_model);
+    char *cpu_name = LLVMGetHostCPUName();
+    char *cpu_features = LLVMGetHostCPUFeatures();
+    LLVMTargetMachineRef tm =
+        LLVMCreateTargetMachine(target, triple, cpu_name, cpu_features,
+                                LLVMCodeGenLevelNone, LLVMRelocPIC, code_model);
     LLVMPassBuilderOptionsRef pb_option = LLVMCreatePassBuilderOptions();
     /* Run LLVM optimization passes on the generated IR.
      *
@@ -573,6 +575,8 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     LLVMDisposePassBuilderOptions(pb_option);
     LLVMDisposeTargetMachine(tm);
     LLVMDisposeMessage(triple);
+    LLVMDisposeMessage(cpu_name);
+    LLVMDisposeMessage(cpu_features);
 
     /* Reacquire lock to update shared state.
      * All block field writes must happen under lock to avoid data races.

@@ -191,4 +191,4 @@ The majority of games, such as Doom and Quake, will maintain their own sound sys
 
 Requesting the sound system to be turned on or off in the emulator. When the audio device is not in the busy status, the request will be handled. Two categories of requests exist:
 * `INIT_AUDIO`: Setup the audio device and the sfx samples buffer. After initialization, open the audio device and get ready to play some music.
-* `SHUTDOWN_AUDIO`: Release all the resources that were initialized by `INIT_SOUND` request.
+* `SHUTDOWN_AUDIO`: Release all the resources that were initialized by `INIT_AUDIO` request.

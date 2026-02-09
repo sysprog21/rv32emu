@@ -135,7 +135,7 @@ Identify the subfields of the immediate:
 Re-order the subfields as written on the tables. Typically, the immediate
 encoding is located just below the corresponding instruction's encoding.
 
-| Decoding di `<imm>` |    `-m2-`      |  `imm1`    | `m1` |   `imm2`     | `0` |
+| Decoding of `<imm>` |    `-m2-`      |  `imm1`    | `m1` |   `imm2`     | `0` |
 |:-------------------:|:--------------:|:----------:|:----:|:------------:|:---:|
 | `<imm> (bin)`       | `000000000000` | `00000000` | `0`  | `0000001111` | `0` |
 
@@ -150,16 +150,15 @@ the ABI register aliases.
 
 ### Decoding instruction `j -12`
 
-The instruction `j`.
+The instruction `j -12` corresponds to `jal x0, -12`.
 
 | Instruction Encoding `j` | `<imm> (encoded)` | 00000 | 11011 | 11 |
 |:------------------------:|:-----------------:|:-----:|:-----:|:--:|
 
 The least significant bits are `xxxxxxxxxxxxxxxxxxxx000001101111`.
-The rest represents an immediate, `<imm> = 30`, which needs to be encoded.
-Then sign-extend it to cover all 32 bits of its width, converting
-`<imm> (bin) = 11111111111111111110100` from `<imm> (bin) = -12` to
-`<imm> (bin) = 10100`.
+The rest represents an immediate, `<imm> = -12`, which needs to be encoded.
+Then sign-extend it to cover all 32 bits of its width, converting from 
+`<imm> (dec) = -12` to `<imm> (bin) = 11111111111111111111111111110100`.
 
 Divide this number into its subfields.
 
@@ -193,7 +192,7 @@ of the instruction when:
 However, it turns out that the last two conditions are actually "and" rather
 than "or," and the conditions are more restrictive than the above implies.
 
-There is an opcode map on page 81–83.
+There is an opcode map on pages 81–83.
 
 The designers point out that the Cray-1 also had 16-bit and 32-bit instruction
 lengths, following Stretch, the 360, the CDC 6600, and followed by not only
@@ -215,7 +214,7 @@ using the `CI` format with a 6-bit immediate offset, prescaled by the data
 size (4, 8, or 16 bits). These instructions only index upward from the stack
 pointer, institutionalizing the otherwise conventional downward stack growth.
 The immediate-offset field in the stack-store format is also 6 bits and treated
-in the same way. Additionally, there is a instruction called `c.addi16sp`, which
+in the same way. Additionally, there is an instruction called `c.addi16sp`, which
 adds a signed multiple of 16 to the stack pointer, effectively allocating or
 deallocating stack space.
 

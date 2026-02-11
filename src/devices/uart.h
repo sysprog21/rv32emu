@@ -49,3 +49,6 @@ u8250_state_t *u8250_new();
 
 /* delete a UART instance */
 void u8250_delete(u8250_state_t *uart);
+
+/* reset a UART instance */
+void u8250_reset(u8250_state_t *uart);

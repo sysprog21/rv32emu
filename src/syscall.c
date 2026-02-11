@@ -486,6 +486,39 @@ static void syscall_sbi_base(riscv_t *rv)
     }
 }
 
+static const char *sbi_rst_type_str(const riscv_word_t type)
+{
+    switch (type) {
+    case SBI_RST_TYPE_SHUTDOWN:
+        return "shutdown";
+    case SBI_RST_TYPE_COLD_REBOOT:
+        return "cold reboot";
+    case SBI_RST_TYPE_WARM_REBOOT:
+        return "warm reboot";
+    default:
+        rv_log_error("Unknown reset type: %u", type);
+        break;
+    }
+
+    return "unknown";
+}
+
+static const char *sbi_rst_reason_str(const riscv_word_t reason)
+{
+    switch (reason) {
+    case NO_REASON:
+        return "no reason";
+    case SYSTEM_FAILURE:
+        return "system failure";
+    default:
+        rv_log_error("Unknown reset reason: %u", reason);
+        break;
+    }
+
+    return "unknown";
+}
+
+/* Does not return if it succeeds */
 static void syscall_sbi_rst(riscv_t *rv)
 {
     const riscv_word_t fid = rv_get_reg(rv, rv_reg_a6);
@@ -494,10 +527,40 @@ static void syscall_sbi_rst(riscv_t *rv)
 
     switch (fid) {
     case SBI_RST_SYSTEM_RESET:
-        rv_log_info("System reset: type=%u, reason=%u", a0, a1);
-        rv_halt(rv);
-        rv_set_reg(rv, rv_reg_a0, SBI_SUCCESS);
-        rv_set_reg(rv, rv_reg_a1, 0);
+        rv_log_warn("System reset: type=%s, reason=%s", sbi_rst_type_str(a0),
+                    sbi_rst_reason_str(a1));
+        if (a0 == SBI_RST_TYPE_SHUTDOWN) {
+            rv_halt(rv);
+        } else if (a0 == SBI_RST_TYPE_COLD_REBOOT) { /* default reboot mode,
+                                                        reset whole system */
+#if RV32_HAS(T2C)
+            rv_terminate_t2c(rv);
+#endif
+            rv_cold_reboot(rv, 0U);
+            /* longjmp to return to the main loop to avoid the complex return
+             * path and access stale registers (e.g., sp) after rv_cold_reboot()
+             * has called.
+             *
+             * The setjmp point is in rv_step() in src/emulate.c.
+             */
+            longjmp(rv->reboot_jmp, 1);
+        }
+#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
+        /* reset halt only, echo "warm" > /sys/kernel/reboot/mode to set */
+        else if (a0 == SBI_RST_TYPE_WARM_REBOOT) {
+#if RV32_HAS(T2C)
+            rv_terminate_t2c(rv);
+#endif
+            rv_warm_reboot(rv, 0U);
+            /* longjmp to return to the main loop to avoid the complex return
+             * path and access stale registers (e.g., sp) after rv_warm_reboot()
+             * has called.
+             *
+             * The setjmp point is in rv_step() in src/emulate.c.
+             */
+            longjmp(rv->reboot_jmp, 1);
+        }
+#endif
         break;
     default:
         rv_set_reg(rv, rv_reg_a0, SBI_ERR_NOT_SUPPORTED);

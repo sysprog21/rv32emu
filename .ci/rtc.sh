@@ -6,30 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RET=0
 
-# FIXME: refactor to source common variable from common.sh:
-# 1. TIMEOUT
-# 2. COLOR
-# 3. MESSAGES
-# 4. Base option
-# 5. HOST_UTC_YEAR
-# etc
-
+# RTC Tests
 HOST_UTC_YEAR=$(LC_ALL=C date -u +%Y)
-
-# Allow timeout override for JIT tests (JIT compilation adds significant overhead)
-TIMEOUT=${BOOT_TIMEOUT:-50}
-
-COLOR_G='\e[32;01m' # Green
-COLOR_R='\e[31;01m' # Red
-COLOR_Y='\e[33;01m' # Yellow
-COLOR_N='\e[0m'     # No color
-
-MESSAGES=("${COLOR_G}OK!"
-    "${COLOR_R}Fail to boot"
-    "${COLOR_R}Fail to login"
-    "${COLOR_R}Fail to run commands"
-)
-OPTS_BASE=" -k build/linux-image/Image -i build/linux-image/rootfs.cpio"
 
 # RTC alarm and settime tests
 TEST_OPTIONS=("${OPTS_BASE}")

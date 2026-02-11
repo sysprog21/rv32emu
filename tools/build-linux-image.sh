@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Source common utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../.ci/common.sh"
+
 function ASSERT
 {
     $*
@@ -24,7 +28,14 @@ PARALLEL="-j$(nproc)"
 OUTPUT_DIR=./build/linux-image/
 mkdir -p $OUTPUT_DIR
 
-BR_PKG_RTC_DIR=./tests/system/br_pkgs/rtc
+# RTC
+BR_RTC_PKG_DIR=./tests/system/br_pkgs/rtc
+
+# Doom
+BR_DOOM_PKG_DIR=./tests/system/br_pkgs/doom_riscv
+
+# Quake
+BR_QUAKE_PKG_DIR=./tests/system/br_pkgs/quake
 
 function create_br_pkg_config()
 {
@@ -43,6 +54,9 @@ function create_br_pkg_makefile()
 {
     local pkg_name=$1
     local output_path=$2
+    local output_bin_prefix=${3-}
+    local makefile_prefix=${4-}
+    local artifact=${5-}
 
     cat << EOF > "${output_path}"
 ################################################################################
@@ -56,11 +70,34 @@ ${pkg_name^^}_SITE = package/${pkg_name}/src
 ${pkg_name^^}_SITE_METHOD = local
 
 define ${pkg_name^^}_BUILD_CMDS
-	\$(MAKE) CC="\$(TARGET_CC)" LD="\$(TARGET_LD)" -C \$(@D)
+EOF
+
+    # Only call cmake if package name is quake
+    if [[ "${pkg_name,,}" == *"quake"* ]]; then
+        export PATH="${SRC_DIR}/buildroot/output/host/bin:${PATH}"
+        cat << EOF >> "${output_path}"
+        cd \$(@D)/${makefile_prefix} && cmake -DCMAKE_TOOLCHAIN_FILE=\$(@D)/${makefile_prefix}/port/boards/rv32emu/toolchain.cmake \
+                                              -DCROSS_COMPILE=riscv32-buildroot-linux-gnu- \
+                                              -DCMAKE_BUILD_TYPE=RELEASE \
+                                              -DBOARD_NAME=rv32emu \$(@D)/${makefile_prefix} && cd -
+EOF
+    fi
+
+    cat << EOF >> "${output_path}"
+	\$(MAKE) CROSS="\$(TARGET_CROSS)" CC="\$(TARGET_CC)" LD="\$(TARGET_LD)" -C \$(@D)/${makefile_prefix}
 endef
 
 define ${pkg_name^^}_INSTALL_TARGET_CMDS
-	\$(INSTALL) -D -m 0755 \$(@D)/${pkg_name} \$(TARGET_DIR)/usr/bin
+	\$(INSTALL) -D -m 0755 \$(@D)/${output_bin_prefix}/${pkg_name} \$(TARGET_DIR)/usr/bin
+EOF
+
+    if [ -n "${artifact}" ]; then
+        cat << EOF >> "${output_path}"
+	cp -a \$(@D)/${artifact} \$(TARGET_DIR)/root
+EOF
+    fi
+
+    cat << EOF >> "${output_path}"
 endef
 
 \$(eval \$(generic-package))
@@ -96,12 +133,87 @@ function update_br_pkg_config()
     local source_line="    source \"package/${pkg_name}/Config.in\""
 
     # Only append if this package's isn't already present in the menu
-    if ! grep -q "${pkg_name}" "${br_pkg_config_file}"; then
+    if ! grep -q "/${pkg_name}/" "${br_pkg_config_file}"; then
         sed -i '/^menu "Custom packages"/,/^endmenu$/{
             /^endmenu$/i\
 '"${source_line}"'
         }' "${br_pkg_config_file}"
     fi
+}
+
+function do_patch_doom
+{
+    # Need to sed -i --specs=nano.spec to avoid nanolibc and -Bstatic to avoid static linking
+    sed -i 's/--specs=nano\.specs//g' ${BR_DOOM_PKG_DIR}/src/riscv/Makefile
+    sed -i 's/-Bstatic,//g' ${BR_DOOM_PKG_DIR}/src/riscv/Makefile
+    # rename output binary from doom-riscv.elf to doom
+    sed -i 's/doom-riscv\.elf/doom/g' ${BR_DOOM_PKG_DIR}/src/riscv/Makefile
+
+    local pkg_name="doom"
+
+    mkdir -p ${SRC_DIR}/buildroot/package/${pkg_name}
+
+    # download and unzip Doom artifact(DOOM1.WAD) to buildroot Doom package src
+    if [[ ! -f shareware_doom_iwad.zip ]]; then
+        print_success "Downloading Doom shareware IWAD..."
+        if [ -n "${GH_TOKEN:-}" ]; then
+            download_with_headers \
+                "https://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip" \
+                "Authorization: Bearer ${GH_TOKEN}" \
+                > shareware_doom_iwad.zip
+        else
+            download_with_progress \
+                "https://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip" \
+                "shareware_doom_iwad.zip"
+        fi || {
+            print_error "Failed to download Doom IWAD"
+            return 1
+        }
+    fi
+    unzip -o -d ${SRC_DIR}/buildroot/package/${pkg_name}/src shareware_doom_iwad.zip
+
+    create_br_pkg_config ${pkg_name} ${SRC_DIR}/buildroot/package/${pkg_name}/Config.in
+    create_br_pkg_makefile ${pkg_name} ${SRC_DIR}/buildroot/package/${pkg_name}/${pkg_name}.mk "riscv" "riscv" "DOOM1.WAD"
+    # cp Doom submodule's src to buildroot Doom package src
+    mkdir -p ${SRC_DIR}/buildroot/package/${pkg_name}/src
+    cp -rf ${BR_DOOM_PKG_DIR}/src ${SRC_DIR}/buildroot/package/${pkg_name}/
+
+    update_br_pkg_config ${pkg_name}
+}
+
+function do_patch_quake
+{
+    local pkg_name="quake"
+
+    mkdir -p ${SRC_DIR}/buildroot/package/${pkg_name}
+
+    # download and unzip Quake artifact(id1/pak0.pak) to buildroot Quake package src
+    if [[ ! -f quakesw-1.0.6.zip ]]; then
+        print_success "Downloading Quake shareware data..."
+        if [ -n "${GH_TOKEN:-}" ]; then
+            download_with_headers \
+                "https://www.libsdl.org/projects/quake/data/quakesw-1.0.6.zip" \
+                "Authorization: Bearer ${GH_TOKEN}" \
+                > quakesw-1.0.6.zip
+        else
+            download_with_progress \
+                "https://www.libsdl.org/projects/quake/data/quakesw-1.0.6.zip" \
+                "quakesw-1.0.6.zip"
+        fi || {
+            print_error "Failed to download Quake data"
+            return 1
+        }
+    fi
+    unzip -o -d ${SRC_DIR}/buildroot/package/${pkg_name}/src quakesw-1.0.6.zip
+
+    create_br_pkg_config ${pkg_name} ${SRC_DIR}/buildroot/package/${pkg_name}/Config.in
+    create_br_pkg_makefile ${pkg_name} ${SRC_DIR}/buildroot/package/${pkg_name}/${pkg_name}.mk "port/boards/rv32emu" "" "id1/"
+
+    # cp Quake submodule's src to buildroot Quake package src
+    mkdir -p ${SRC_DIR}/buildroot/package/${pkg_name}/src
+    cp -rf ${BR_QUAKE_PKG_DIR}/* ${SRC_DIR}/buildroot/package/${pkg_name}/src
+
+    update_br_pkg_config ${pkg_name}
 }
 
 # This function patches the packages when building the rootfs.cpio from scratch
@@ -117,7 +229,8 @@ endmenu
 EOF
     fi
 
-    for c in $(find ${BR_PKG_RTC_DIR} -type f); do
+    # RTC self-contained C files
+    for c in $(find ${BR_RTC_PKG_DIR} -type f); do
         local basename="$(basename ${c})"
         local pkg_name="${basename%.*}"
 
@@ -129,6 +242,10 @@ EOF
 
         update_br_pkg_config ${pkg_name}
     done
+
+    do_patch_doom
+
+    do_patch_quake
 }
 
 function do_buildroot

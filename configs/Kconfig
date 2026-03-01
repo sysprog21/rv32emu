@@ -4,23 +4,31 @@
 
 mainmenu "rv32emu Configuration"
 
-# Environment Detection (read-only, set by tools/detect-env.py)
+# Environment Detection (read-only)
+#
+# Boolean checks use the portable $(python,...) preprocessor function
+# with run() for shell-free subprocess execution.
+#
+# See: https://github.com/sysprog21/Kconfiglib/pull/47
 
 menu "Toolchain Detection"
 
 config COMPILER_TYPE
     string
-    default "$(shell,tools/detect-env.py --compiler 2>/dev/null || echo Unknown)"
+    default "Emscripten" if CC_IS_EMCC
+    default "Clang" if CC_IS_CLANG
+    default "GCC" if CC_IS_GCC
+    default "Unknown"
 
 config HAVE_EMCC
     bool
-    default $(shell,tools/detect-env.py --have-emcc 2>/dev/null)
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-emcc'))
 
 config CC_IS_CLANG
-    def_bool $(shell,tools/detect-env.py --is-clang 2>/dev/null)
+    def_bool $(python,assert run(sys.executable, 'tools/detect-env.py', '--is-clang'))
 
 config CC_IS_GCC
-    def_bool $(shell,tools/detect-env.py --is-gcc 2>/dev/null)
+    def_bool $(python,assert run(sys.executable, 'tools/detect-env.py', '--is-gcc'))
 
 comment "Emscripten detected - WebAssembly build available"
     depends on HAVE_EMCC
@@ -76,20 +84,20 @@ endmenu
 config HAVE_SDL2
     bool
     default n if CC_IS_EMCC
-    default $(shell,tools/detect-env.py --have-sdl2 2>/dev/null)
+    default $(python,assert shutil.which('sdl2-config') or run('pkg-config', '--exists', 'sdl2'))
 
 config HAVE_SDL2_MIXER
     bool
     default n if CC_IS_EMCC
-    default $(shell,tools/detect-env.py --have-sdl2-mixer 2>/dev/null)
+    default $(python,assert run('pkg-config', '--exists', 'SDL2_mixer'))
 
 config HAVE_LLVM18
     bool
-    default $(shell,tools/detect-env.py --have-llvm18 2>/dev/null)
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-llvm18'))
 
 config HAVE_RISCV_TOOLCHAIN
     bool
-    default $(shell,tools/detect-env.py --have-riscv-toolchain 2>/dev/null)
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-riscv-toolchain'))
 
 # RISC-V ISA Extensions
 

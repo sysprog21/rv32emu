@@ -363,6 +363,22 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                 }
             }
         }
+
+        /* Ensure the basic block has a terminator. When a block ends with a
+         * non-branching instruction (e.g., addi, lw, sw) whose branch_taken
+         * and branch_untaken are both NULL, or whose target block cannot be
+         * resolved from the cache, no terminator is emitted above. This
+         * produces malformed LLVM IR that crashes LLVMRunPasses.
+         *
+         * Store the next PC (block->pc_end) and return to the interpreter.
+         */
+        LLVMBasicBlockRef bb = LLVMGetInsertBlock(*builder);
+        if (!LLVMGetBasicBlockTerminator(bb)) {
+            T2C_LLVM_GEN_STORE_IMM32(*builder, block->pc_end,
+                                     t2c_gen_PC_addr(start, builder, NULL));
+            T2C_STORE_TIMER(*builder, start, insn_counter);
+            LLVMBuildRetVoid(*builder);
+        }
     }
 }
 

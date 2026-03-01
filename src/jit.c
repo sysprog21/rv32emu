@@ -68,6 +68,13 @@
 #define MAX_BLOCKS 8192
 #define IN_JUMP_THRESHOLD 256
 
+/* Worst-case jump targets per instruction.  SYSTEM_MMIO load paths emit
+ * emit_jump_target_offset x4 (LOC_0, LOC_1, TRAP, NORMAL) plus emit_exit
+ * which itself records a jump target, totaling 5.  Branch epilogues also
+ * reach 5 (2x emit_jmp + 2x emit_exit + 1x emit_jump_target_offset).
+ */
+#define JUMPS_PER_INSN 5
+
 /* Check if branch history table entry should trigger JIT translation */
 static inline bool bht_should_translate(const branch_history_table_t *bt,
                                         int idx
@@ -2952,7 +2959,16 @@ static void translate_chained_block(struct jit_state *state,
     if (state->n_blocks == MAX_BLOCKS)
         return;
 
-    assert(set_add(&state->set, RV_HASH_KEY(block)));
+    /* Check whether the remaining jump slots can accommodate this block.
+     * Each instruction emits up to JUMPS_PER_INSN jump targets (SYSTEM_MMIO
+     * load paths are the worst case) plus up to 2 for a page-terminated
+     * block epilogue (emit_jmp + emit_exit).
+     */
+    if (state->n_jumps + block->n_insn * JUMPS_PER_INSN + 2 >= MAX_JUMPS)
+        return;
+
+    bool added UNUSED = set_add(&state->set, RV_HASH_KEY(block));
+    assert(added);
     offset_map_insert(state, block);
     translate(state, rv, block);
     if (unlikely(should_flush))
@@ -2998,7 +3014,7 @@ static void translate_chained_block(struct jit_state *state,
     }
 }
 
-void jit_translate(riscv_t *rv, block_t *block)
+bool jit_translate(riscv_t *rv, block_t *block)
 {
     struct jit_state *state = rv->jit_state;
     if (set_has(&state->set, RV_HASH_KEY(block))) {
@@ -3011,7 +3027,7 @@ void jit_translate(riscv_t *rv, block_t *block)
             ) {
                 block->offset = state->offset_map[i].offset;
                 block->hot = true;
-                return;
+                return true;
             }
         }
         assert(NULL);
@@ -3036,6 +3052,19 @@ restart:
         code_cache_flush(state, rv);
         goto restart;
     }
+
+    /* If the root block was not translated (e.g. jump budget exhausted on
+     * the very first call to translate_chained_block), bail out without
+     * marking the block hot.  Otherwise resolve_jumps and cache maintenance
+     * would operate on an empty / stale code region.
+     */
+    if (!set_has(&state->set, RV_HASH_KEY(block))) {
+#if defined(__APPLE__) && defined(__aarch64__)
+        jit_exit_write_mode();
+#endif
+        return false;
+    }
+
     resolve_jumps(state);
 #if defined(__aarch64__)
     /* Cache maintenance after patching branch immediates.
@@ -3057,6 +3086,7 @@ restart:
     __asm__ volatile("isb" ::: "memory");
 #endif
     block->hot = true;
+    return true;
 }
 
 struct jit_state *jit_state_init(size_t size)

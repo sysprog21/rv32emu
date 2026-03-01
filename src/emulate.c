@@ -2290,24 +2290,25 @@ void rv_step(void *arg)
             && runtime_profiler(rv, block)
 #endif
         ) {
-            jit_translate(rv, block);
+            if (jit_translate(rv, block)) {
 #if defined(__aarch64__)
-            /* Ensure instruction cache coherency before executing JIT code */
-            __asm__ volatile("isb" ::: "memory");
+                /* Ensure icache coherency before executing JIT */
+                __asm__ volatile("isb" ::: "memory");
 #endif
-            ((exec_block_func_t) state->buf)(
-                rv, (uintptr_t) (state->buf + block->offset));
-            rv->csr_cycle += block->cycle_cost;
+                ((exec_block_func_t) state->buf)(
+                    rv, (uintptr_t) (state->buf + block->offset));
+                rv->csr_cycle += block->cycle_cost;
 #if RV32_HAS(SYSTEM)
-            /* Handle trap if one occurred during JIT block execution */
-            if (rv->is_trapped) {
-                trap_handler(rv);
+                /* Handle trap if one occurred during JIT block execution */
+                if (rv->is_trapped) {
+                    trap_handler(rv);
+                    prev = NULL;
+                    continue;
+                }
+#endif
                 prev = NULL;
                 continue;
             }
-#endif
-            prev = NULL;
-            continue;
         }
         set_reset(&pc_set);
         has_loops = false;

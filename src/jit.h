@@ -67,7 +67,7 @@ struct host_reg {
 
 struct jit_state *jit_state_init(size_t size);
 void jit_state_exit(struct jit_state *state);
-void jit_translate(riscv_t *rv, block_t *block);
+bool jit_translate(riscv_t *rv, block_t *block);
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 
 /* JIT misaligned memory access handler.

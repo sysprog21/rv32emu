@@ -3,21 +3,22 @@
 Environment Detection Script for rv32emu Build System
 
 Detects compilers, libraries, and toolchains for Kconfig integration.
-Called by Kconfig with $(shell,...) to populate configuration options.
+Boolean checks use exit codes (0 = true, 1 = false) for portable
+$(python,...) preprocessor integration.
 
 Usage:
     python3 detect-env.py [OPTIONS]
 
 Options:
     --compiler           Print detected compiler type (GCC/Clang/Emscripten)
-    --is-emcc           Check if compiler is Emscripten (prints y/n)
-    --is-clang          Check if compiler is Clang (prints y/n)
-    --is-gcc            Check if compiler is GCC (prints y/n)
-    --have-emcc         Check if Emscripten (emcc) is available (prints y/n)
-    --have-sdl2         Check if SDL2 is available (prints y/n)
-    --have-sdl2-mixer   Check if SDL2_mixer is available (prints y/n)
-    --have-llvm18       Check if LLVM 18 is available (prints y/n)
-    --have-riscv-toolchain  Check if RISC-V toolchain exists (prints y/n)
+    --is-emcc           Check if compiler is Emscripten (exit 0/1)
+    --is-clang          Check if compiler is Clang (exit 0/1)
+    --is-gcc            Check if compiler is GCC (exit 0/1)
+    --have-emcc         Check if Emscripten (emcc) is available (exit 0/1)
+    --have-sdl2         Check if SDL2 is available (exit 0/1)
+    --have-sdl2-mixer   Check if SDL2_mixer is available (exit 0/1)
+    --have-llvm18       Check if LLVM 18 is available (exit 0/1)
+    --have-riscv-toolchain  Check if RISC-V toolchain exists (exit 0/1)
     --summary           Print full environment summary
 """
 
@@ -55,13 +56,13 @@ def get_compiler_path():
 
 
 def get_compiler_version(compiler):
-    """Get compiler version string."""
-    ret, stdout, _ = run_cmd(
+    """Get compiler version string (stdout + stderr for emcc compat)."""
+    ret, stdout, stderr = run_cmd(
         [compiler, "--version"]
-        if not " " in compiler
+        if " " not in compiler
         else shlex.split(compiler) + ["--version"]
     )
-    return stdout if ret == 0 else ""
+    return (stdout + stderr) if ret == 0 else ""
 
 
 def detect_compiler_type(version_output):
@@ -186,35 +187,50 @@ def print_summary():
     print(f"RISC-V Toolchain: {'yes' if have_riscv_toolchain() else 'no'}")
 
 
+def bool_exit(result):
+    """Signal boolean result via exit code for $(python,...) integration.
+
+    Kconfig's $(python,assert run(sys.executable, 'tools/detect-env.py', ...))
+    checks the exit code: 0 maps to 'y', non-zero maps to 'n'.
+    """
+    sys.exit(0 if result else 1)
+
+
+def _compiler_type():
+    """Detect compiler type (lazy, avoids probing when not needed)."""
+    compiler = get_compiler_path()
+    version = get_compiler_version(compiler)
+    return detect_compiler_type(version)
+
+
 def main():
     if len(sys.argv) < 2:
         print_summary()
         return
 
-    compiler = get_compiler_path()
-    version = get_compiler_version(compiler)
-    comp_type = detect_compiler_type(version)
-
     arg = sys.argv[1]
 
+    # Compiler-type queries (probe CC lazily)
     if arg == "--compiler":
-        print(comp_type)
+        # String output for $(shell,...) -- not convertible to $(python,...)
+        print(_compiler_type())
     elif arg == "--is-emcc":
-        print("y" if comp_type == "Emscripten" else "n")
+        bool_exit(_compiler_type() == "Emscripten")
     elif arg == "--is-clang":
-        print("y" if comp_type == "Clang" else "n")
+        bool_exit(_compiler_type() == "Clang")
     elif arg == "--is-gcc":
-        print("y" if comp_type == "GCC" else "n")
+        bool_exit(_compiler_type() == "GCC")
+    # Library/toolchain availability (no compiler probing needed)
     elif arg == "--have-emcc":
-        print("y" if have_emcc() else "n")
+        bool_exit(have_emcc())
     elif arg == "--have-sdl2":
-        print("y" if have_sdl2() else "n")
+        bool_exit(have_sdl2())
     elif arg == "--have-sdl2-mixer":
-        print("y" if have_sdl2_mixer() else "n")
+        bool_exit(have_sdl2_mixer())
     elif arg == "--have-llvm18":
-        print("y" if have_llvm18() else "n")
+        bool_exit(have_llvm18())
     elif arg == "--have-riscv-toolchain":
-        print("y" if have_riscv_toolchain() else "n")
+        bool_exit(have_riscv_toolchain())
     elif arg == "--summary":
         print_summary()
     else:

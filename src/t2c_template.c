@@ -1209,23 +1209,27 @@ T2C_OP(cbeqz, {
     LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");
     LLVMBuilderRef builder2 = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(builder2, taken);
-    if (ir->branch_taken)
+    if (ir->branch_taken &&
+        t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
         *taken_builder = builder2;
-    else {
+    } else {
         T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + ir->imm, addr_PC);
         T2C_STORE_TIMER(builder2, start, insn_counter);
         LLVMBuildRetVoid(builder2);
+        LLVMDisposeBuilder(builder2);
     }
 
     LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken");
     LLVMBuilderRef builder3 = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(builder3, untaken);
-    if (ir->branch_untaken)
+    if (ir->branch_untaken &&
+        t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
         *untaken_builder = builder3;
-    else {
+    } else {
         T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 2, addr_PC);
         T2C_STORE_TIMER(builder3, start, insn_counter);
         LLVMBuildRetVoid(builder3);
+        LLVMDisposeBuilder(builder3);
     }
     LLVMBuildCondBr(*builder, cmp, taken, untaken);
 })
@@ -1237,23 +1241,27 @@ T2C_OP(cbnez, {
     LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");
     LLVMBuilderRef builder2 = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(builder2, taken);
-    if (ir->branch_taken)
+    if (ir->branch_taken &&
+        t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
         *taken_builder = builder2;
-    else {
+    } else {
         T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + ir->imm, addr_PC);
         T2C_STORE_TIMER(builder2, start, insn_counter);
         LLVMBuildRetVoid(builder2);
+        LLVMDisposeBuilder(builder2);
     }
 
     LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken");
     LLVMBuilderRef builder3 = LLVMCreateBuilder();
     LLVMPositionBuilderAtEnd(builder3, untaken);
-    if (ir->branch_untaken)
+    if (ir->branch_untaken &&
+        t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
         *untaken_builder = builder3;
-    else {
+    } else {
         T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 2, addr_PC);
         T2C_STORE_TIMER(builder3, start, insn_counter);
         LLVMBuildRetVoid(builder3);
+        LLVMDisposeBuilder(builder3);
     }
     LLVMBuildCondBr(*builder, cmp, taken, untaken);
 })
@@ -1683,6 +1691,7 @@ T2C_OP(fuse12, {
         T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + 4 + ir->imm2, addr_PC);
         T2C_STORE_TIMER(builder2, start, insn_counter);
         LLVMBuildRetVoid(builder2);
+        LLVMDisposeBuilder(builder2);
     }
     LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken");
     LLVMBuilderRef builder3 = LLVMCreateBuilder();
@@ -1695,6 +1704,7 @@ T2C_OP(fuse12, {
         T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 8, addr_PC);
         T2C_STORE_TIMER(builder3, start, insn_counter);
         LLVMBuildRetVoid(builder3);
+        LLVMDisposeBuilder(builder3);
     }
     LLVMBuildCondBr(*builder, cmp, taken, untaken);
 })

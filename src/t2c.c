@@ -610,6 +610,7 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
             /* Free IRs that main thread skipped during deferred eviction */
             for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
                 next_ir = ir->next;
+                free(ir->branch_table);
                 if (ir->fuse)
                     mpool_free(rv->fuse_mp, ir->fuse);
                 mpool_free(rv->block_ir_mp, ir);
@@ -631,6 +632,7 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         /* Free IRs that main thread skipped during deferred eviction */
         for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
             next_ir = ir->next;
+            free(ir->branch_table);
             if (ir->fuse)
                 mpool_free(rv->fuse_mp, ir->fuse);
             mpool_free(rv->block_ir_mp, ir);

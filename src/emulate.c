@@ -1983,7 +1983,7 @@ static block_t *block_find_or_translate(riscv_t *rv)
     for (rv_insn_t *ir = replaced_blk->ir_head, *next_ir; ir != NULL;
          ir = next_ir) {
         next_ir = ir->next;
-
+        free(ir->branch_table);
         if (ir->fuse)
             mpool_free(rv->fuse_mp, ir->fuse);
 

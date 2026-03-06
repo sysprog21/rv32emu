@@ -396,6 +396,22 @@ void cache_free(cache_t *cache)
         }
     }
 #endif
+    /* Free all live cache entries */
+    cache_entry_t *entry, *safe;
+#ifdef __HAVE_TYPEOF
+    list_for_each_entry_safe (entry, safe, &cache->list, list)
+#else
+    list_for_each_entry_safe (entry, safe, &cache->list, list, cache_entry_t)
+#endif
+        free(entry);
+    /* Free all ghost (evicted history) cache entries */
+#ifdef __HAVE_TYPEOF
+    list_for_each_entry_safe (entry, safe, &cache->ghost_list, list)
+#else
+    list_for_each_entry_safe (entry, safe, &cache->ghost_list, list,
+                              cache_entry_t)
+#endif
+        free(entry);
     free(cache->map.ht_list_head);
     free(cache);
 }

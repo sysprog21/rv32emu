@@ -46,7 +46,7 @@ However, participation requires adherence to fundamental ground rules:
   This variant should be considered the standard for all documentation efforts.
   For instance, opt for "initialize" over "initialise" and "color" rather than "colour".
 
-Software requirement:
+Software requirements:
 * [clang-format](https://clang.llvm.org/docs/ClangFormat.html) version 20 or later.
 * [shfmt](https://github.com/mvdan/sh).
 * [black](https://github.com/psf/black) version 25.1.0.
@@ -61,7 +61,7 @@ To maintain a uniform style across languages, run:
 
 ## Coding Style for Device Tree Source and Device Tree Source Include
 
-Device Tree Source (and Include) must be clean, consistent, and portable. The following `dtsfmt` rules(check `.dtsfmtrc.toml` file) are enforced project-wide:
+Device Tree Source (and Include) must be clean, consistent, and portable. The following `dtsfmt` rules (check `.dtsfmtrc.toml` file) are enforced project-wide:
 * Use spaces for indentation.
 * Indent with 4 spaces.
 * Use multi-line comments.
@@ -71,7 +71,7 @@ Device Tree Source (and Include) must be clean, consistent, and portable. The fo
 
 ## Coding Style for Shell Script
 
-Shell scripts must be clean, consistent, and portable. The following `shfmt` rules(check `.editorconfig` file) are enforced project-wide:
+Shell scripts must be clean, consistent, and portable. The following `shfmt` rules (check `.editorconfig` file) are enforced project-wide:
 * Use spaces for indentation.
 * Indent with 4 spaces.
 * Use Unix-style line endings (LF).
@@ -191,7 +191,7 @@ unsigned obj_len = sizeof(obj_t);
 Use brackets to avoid ambiguity and with operators such as `sizeof`,
 but otherwise avoid redundant or excessive brackets.
 
-Assignment operators (`=`, `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `~=`, and `!=`) should always have a space before and after them.
+Assignment operators (`=`, `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, and `>>=`) should always have a space before and after them.
 For example:
 ```c
 count += 1;
@@ -208,7 +208,7 @@ For example:
 ```c
 bonus++;
 if (!play)
-    return STATE_QUITE;
+    return STATE_QUIET;
 ```
 
 The ternary operator (`?` and `:`) should have spaces on both sides.
@@ -251,10 +251,10 @@ Additionally, do not use Hungarian notation or any other unnecessary prefixes or
 
 When declaring pointers, follow these spacing conventions:
 ```c
-const char *name;  /* Const pointer; '*' with the name and a space before it */
-conf_t * const cfg;  /* Pointer to const data; spaces around 'const' */
-const uint8_t * const charmap;  /* Const pointer and const data */
-const void * restrict key;  /* Const pointer that does not alias */
+const char *name;  /* Pointer to const data; '*' with name, space before */
+conf_t * const cfg;  /* Const pointer to mutable data; spaces around 'const' */
+const uint8_t * const charmap;  /* Const pointer to const data */
+const void * restrict key;  /* Restrict pointer to const data; does not alias */
 ```
 
 Local variables of the same type should be declared on the same line.
@@ -280,7 +280,7 @@ typedef struct {
 screen_t s = {
     .width = 640,
     .height = 480,   /* comma here */
-}
+};
 ```
 
 ### Type definitions
@@ -314,7 +314,7 @@ When a variable is declared inside a function, it is not automatically initializ
 ```c
 static uint8_t a;  /* Global variable 'a' is set to 0 by the compiler */
 
-void foo()
+void foo(void)
 {
     /* 'b' is uninitialized and set to whatever happens to be in memory */
     uint8_t b;
@@ -343,7 +343,7 @@ static const uint8_t tcp_fsm[TCP_NSTATES][2][TCPFC_COUNT] = {
         },
     },
     ...
-}
+};
 ```
 
 Any pointer variable that does not have an initial address should be explicitly initialized to `NULL`.
@@ -429,7 +429,7 @@ However, be careful not to make the logic more convoluted in an attempt to simpl
 Curly brackets and spacing follow the K&R style:
 ```c
     if (a == b) {
-        ..
+        ...
     } else if (a < b) {
         ...
     } else {
@@ -437,7 +437,7 @@ Curly brackets and spacing follow the K&R style:
     }
 ```
 
-Simple and succinct one-line if-statements may omit curly brackets:
+Simple and succinct one-line `if` statements may omit curly brackets:
 ```c
     if (!valid)
         return -1;
@@ -496,6 +496,7 @@ level, e.g.:
 If the case block does not break, then it is strongly recommended to add a
 comment containing "fallthrough" to indicate it.  Modern compilers can also
 be configured to require such comment (see gcc `-Wimplicit-fallthrough`).
+Alternatively, consider using C23 `[[fallthrough]]` declaration.
 
 ### Function definitions
 
@@ -508,7 +509,7 @@ ssize_t hex_write(FILE *stream, const void *buf, size_t len)
 }
 ```
 
-Do not use old style K&R style C definitions.
+Do not use old K&R style C definitions.
 
 Introduced in C99, `restrict` is a pointer qualifier that informs the compiler no other pointer will access the same object during its lifetime,
 enabling optimizations such as vectorization. Violating this assumption leads to undefined behavior.
@@ -519,11 +520,11 @@ For function parameters, place one space after each comma, except at the end of 
 ### Function-like Macros
 
 When using function-like macros (parameterized macros), adhere to the following guidelines:
-- Enclose the entire macro body in parentheses.
+- For expression macros, enclose the entire macro body in parentheses.
 - Surround each parameter usage with parentheses.
 - Limit the use of each parameter to no more than once within the macro to avoid unintended side effects.
 - Never include control flow statements (e.g., `return`) within a macro.
-- If the macro involves multiple statements, encapsulate them within a `do`-`while (0)` construct.
+- If the macro involves multiple statements, encapsulate them within a `do`-`while (0)` construct instead of parentheses.
 
 For example:
 ```c
@@ -543,8 +544,8 @@ Therefore, use them with caution.
 
 In general, macro names are typically written in all capitals, except in cases where readability is improved by using lowercase.
 For example:
-```
-#define countof(a)   (size)(sizeof(a) / sizeof(*(a)))
+```c
+#define countof(a)   (sizeof(a) / sizeof(*(a)))
 #define lengthof(s)  (countof(s) - 1)
 ```
 
@@ -597,7 +598,7 @@ static bool verify_range(uint16_t x, uint16_t y);
 The `const` keyword is essential for several key purposes:
 - Declaring variables that should not change after initialization.
 - Defining fields within a `struct` that must remain immutable, such as those in memory-mapped I/O peripheral registers.
-- Serving as a strongly typed alternative to `#define` for numerical constants.
+- Serving as a strongly typed alternative to `#define` for read-only variables.
 
 For example, instead of using:
 ```c
@@ -623,7 +624,7 @@ static bool is_valid_cmd(const char *cmd);
 
 ### Object abstraction
 
-Objects are often "simulated" by the C programmers with a `struct` and
+Objects are often "emulated" by the C programmers with a `struct` and
 its "public API".  To enforce the information hiding principle, it is a
 good idea to define the structure in the source file (translation unit)
 and provide only the _declaration_ in the header.  For example, `obj.c`:
@@ -633,7 +634,8 @@ and provide only the _declaration_ in the header.  For example, `obj.c`:
 
 struct obj {
     int value;
-}
+    ...
+};
 
 obj_t *obj_create(void)
 {
@@ -651,7 +653,7 @@ With an example `obj.h`:
 #ifndef _OBJ_H_
 #define _OBJ_H_
 
-typedef struct obj;
+typedef struct obj obj_t;
 
 obj_t *obj_create(void);
 void obj_destroy(obj_t *);
@@ -676,12 +678,13 @@ Consider `crypto_impl.h`:
 
 #include "crypto.h"
 
-typedef struct crypto {
+struct crypto {
     crypto_cipher_t cipher;
     void *key;
     size_t key_len;
     ...
-}
+};
+
 ...
 
 #endif
@@ -742,7 +745,7 @@ as in embedded systems, communication protocols requiring specific data sizes,
 or when interacting with hardware registers that require precise bit-width operations.
 In these scenarios, fixed-width types ensure consistent behavior across different platforms and compilers.
 
-Do not assume `char` is signed; for example, on Arm architectures, it is unsigned by default.
+Do not assume `char` is signed; its signedness is implementation-defined and varies by platform and compiler (e.g., unsigned by default on many Arm toolchains).
 
 Avoid defining bit-fields within signed integer types.
 Additionally, do not use bitwise operators (such as `&`, `|`, `~`, `^`, `<<`, and `>>`) on signed integer data.
@@ -759,7 +762,7 @@ if (unsigned_a + signed_b < 4) {
     /* This block might appear logically correct, as -9 + 6 is -3 */
     ...
 }
-/* but compilers with 16-bit int may legally interpret it as (0xFFFF – 9) + 6. */
+/* but compilers with 16-bit int may legally interpret it as (0x10000 - 9) + 6. */
 ```
 
 It is important to note that certain aspects of manipulating binary data within signed integer containers are implementation-defined behaviors according to ISO C standards.
@@ -782,7 +785,7 @@ printf("val %lld\n", SOME_CONSTANT);
 #### Avoid unaligned access
 
 Avoid assuming that unaligned access is safe.
-It is not secure on architectures like Arm, POWER, and others.
+It is not safe on architectures like Arm, POWER, and others, where it may cause a fault.
 Additionally, even on x86, unaligned access can be slower.
 
 #### Structures and Unions
@@ -824,7 +827,7 @@ always verify the structure size and layout using static assertions.
 
 Unless programming for micro-controllers or exotic CPU architectures,
 focus on the common denominator of the modern CPU architectures, avoiding
-the very maximum portability which can make the code unnecessarily cumbersome.
+the very maximum portability that can make the code unnecessarily cumbersome.
 
 Some examples:
 - It is fair to assume `sizeof(int) == 4` since it is the case on all modern
@@ -832,6 +835,12 @@ mainstream architectures.  PDP-11 era is long gone.
 - Using `1U` instead of `UINT32_C(1)` or `(uint32_t) 1` is also fine.
 - It is fair to assume that `NULL` is matching `(uintptr_t) 0` and it is fair
 to `memset()` structures with zero.  Non-zero `NULL` is for retro computing.
+
+#### Zero-based numbering
+
+Generally, stick with zero-based numbering and 0 ≤ i < N intervals, unless
+there is a very compelling reason not to.  It is universally accepted by the
+C developers.  Also, see EWD 831 (Dijkstra, 1982).
 
 ## Git Commit Style
 

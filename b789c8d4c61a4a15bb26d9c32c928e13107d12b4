@@ -1,0 +1,23 @@
+CONTRIBUTING.md
+  fa38fe7bb695ab7c 49,194,211,254-257,283,317,346,432,440,499,523,527,547,601,627,637-638,656,686-687,748,765,788,830,839-844
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "b789c8d4c61a4a15bb26d9c32c928e13107d12b4",
+  "prompts": {
+    "fa38fe7bb695ab7c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "701d9b29-1b98-4500-851f-f292618bebfc",
+        "model": "<synthetic>"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>",
+      "messages": [],
+      "total_additions": 40,
+      "total_deletions": 31,
+      "accepted_lines": 33,
+      "overriden_lines": 0
+    }
+  }
+}

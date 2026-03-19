@@ -29,6 +29,7 @@ jobs:
             mk/kconfig.mk
             mk/toolchain.mk
             tools/detect-env.py
+            tests/embench-iot/**
             tests/ansibench/**
             tests/rv8-bench/**
             tests/doom/**
@@ -59,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update -q=2
           sudo apt-get upgrade -q=2
-          sudo apt-get install -q=2 gcc-multilib g++-multilib
+          sudo apt-get install -q=2 gcc-multilib g++-multilib scons
           .ci/riscv-toolchain-install.sh
           echo "$PWD/toolchain/bin" >> $GITHUB_PATH
       - name: Build binaries

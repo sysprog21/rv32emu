@@ -243,6 +243,12 @@ $(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
 		rm -f $@.tmp; \
 	fi
 
+# Auto-generate decoder from ISA descriptor
+src/decode.c: src/instructions.in scripts/gen-decoder.py
+	$(VECHO) "  GEN\t$@\n"
+	$(Q)python3 scripts/gen-decoder.py src/instructions.in > $@
+	$(Q)clang-format -i $@
+
 $(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(Q)mkdir -p $(dir $@)
 	$(VECHO) "  CC\t$@\n"

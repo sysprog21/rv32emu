@@ -1,0 +1,239 @@
+# RISC-V Instruction Descriptor for rv32emu
+#
+# format of a line in this file:
+# <instruction name> <args> <opcode>
+#
+# <opcode> is given by specifying one or more range/value pairs:
+# hi..lo=value or bit=value or arg=value (e.g. 6..2=0x45 10=1 rd=0)
+#
+# <args> is one of rd, rs1, rs2, rs3, imm20, imm12, imm12lo, imm12hi,
+# shamtw, shamt, rm
+#
+# source: https://github.com/riscv/riscv-opcodes
+
+# RV32I Base Integer Instruction Set
+
+beq     bimm12hi rs1 rs2 bimm12lo 14..12=0 6..2=0x18 1..0=3
+bne     bimm12hi rs1 rs2 bimm12lo 14..12=1 6..2=0x18 1..0=3
+blt     bimm12hi rs1 rs2 bimm12lo 14..12=4 6..2=0x18 1..0=3
+bge     bimm12hi rs1 rs2 bimm12lo 14..12=5 6..2=0x18 1..0=3
+bltu    bimm12hi rs1 rs2 bimm12lo 14..12=6 6..2=0x18 1..0=3
+bgeu    bimm12hi rs1 rs2 bimm12lo 14..12=7 6..2=0x18 1..0=3
+
+jalr    rd rs1 imm12              14..12=0 6..2=0x19 1..0=3
+
+jal     rd jimm20                          6..2=0x1b 1..0=3
+
+lui     rd imm20 6..2=0x0D 1..0=3
+auipc   rd imm20 6..2=0x05 1..0=3
+
+addi    rd rs1 imm12           14..12=0 6..2=0x04 1..0=3
+slli    rd rs1 31..25=0 shamtw 14..12=1 6..2=0x04 1..0=3
+slti    rd rs1 imm12           14..12=2 6..2=0x04 1..0=3
+sltiu   rd rs1 imm12           14..12=3 6..2=0x04 1..0=3
+xori    rd rs1 imm12           14..12=4 6..2=0x04 1..0=3
+srli    rd rs1 31..25=0 shamtw 14..12=5 6..2=0x04 1..0=3
+srai    rd rs1 31..25=32 shamtw 14..12=5 6..2=0x04 1..0=3
+ori     rd rs1 imm12           14..12=6 6..2=0x04 1..0=3
+andi    rd rs1 imm12           14..12=7 6..2=0x04 1..0=3
+
+add     rd rs1 rs2 31..25=0  14..12=0 6..2=0x0C 1..0=3
+sub     rd rs1 rs2 31..25=32 14..12=0 6..2=0x0C 1..0=3
+sll     rd rs1 rs2 31..25=0  14..12=1 6..2=0x0C 1..0=3
+slt     rd rs1 rs2 31..25=0  14..12=2 6..2=0x0C 1..0=3
+sltu    rd rs1 rs2 31..25=0  14..12=3 6..2=0x0C 1..0=3
+xor     rd rs1 rs2 31..25=0  14..12=4 6..2=0x0C 1..0=3
+srl     rd rs1 rs2 31..25=0  14..12=5 6..2=0x0C 1..0=3
+sra     rd rs1 rs2 31..25=32 14..12=5 6..2=0x0C 1..0=3
+or      rd rs1 rs2 31..25=0  14..12=6 6..2=0x0C 1..0=3
+and     rd rs1 rs2 31..25=0  14..12=7 6..2=0x0C 1..0=3
+
+lb      rd rs1 imm12 14..12=0 6..2=0x00 1..0=3
+lh      rd rs1 imm12 14..12=1 6..2=0x00 1..0=3
+lw      rd rs1 imm12 14..12=2 6..2=0x00 1..0=3
+lbu     rd rs1 imm12 14..12=4 6..2=0x00 1..0=3
+lhu     rd rs1 imm12 14..12=5 6..2=0x00 1..0=3
+
+sb      imm12hi rs1 rs2 imm12lo 14..12=0 6..2=0x08 1..0=3
+sh      imm12hi rs1 rs2 imm12lo 14..12=1 6..2=0x08 1..0=3
+sw      imm12hi rs1 rs2 imm12lo 14..12=2 6..2=0x08 1..0=3
+
+fence   fm pred succ rs1 14..12=0 rd 6..2=0x03 1..0=3
+
+# RISC-V Privileged Instructions
+
+ecall      11..7=0 19..15=0 31..20=0x000 14..12=0 6..2=0x1C 1..0=3
+ebreak     11..7=0 19..15=0 31..20=0x001 14..12=0 6..2=0x1C 1..0=3
+wfi        11..7=0 19..15=0 31..20=0x105 14..12=0 6..2=0x1C 1..0=3
+uret       11..7=0 19..15=0 31..20=0x002 14..12=0 6..2=0x1C 1..0=3
+hret       11..7=0 19..15=0 31..20=0x202 14..12=0 6..2=0x1C 1..0=3
+mret       11..7=0 19..15=0 31..20=0x302 14..12=0 6..2=0x1C 1..0=3
+sfencevma  rs1 rs2 31..25=0b0001001 14..12=0 11..7=0 6..2=0x1C 1..0=3
+
+@extension SYSTEM
+sret       11..7=0 19..15=0 31..20=0x102 14..12=0 6..2=0x1C 1..0=3
+
+# Zifencei Standard Extension
+
+@extension Zifencei
+fencei  imm12 rs1 14..12=1 rd 6..2=0x03 1..0=3
+
+# Zicsr Standard Extension
+
+@extension Zicsr
+csrrw   rd rs1 imm12 14..12=1 6..2=0x1C 1..0=3
+csrrs   rd rs1 imm12 14..12=2 6..2=0x1C 1..0=3
+csrrc   rd rs1 imm12 14..12=3 6..2=0x1C 1..0=3
+csrrwi  rd rs1 imm12 14..12=5 6..2=0x1C 1..0=3
+csrrsi  rd rs1 imm12 14..12=6 6..2=0x1C 1..0=3
+csrrci  rd rs1 imm12 14..12=7 6..2=0x1C 1..0=3
+
+# RV32M Standard Extension (Multiply/Divide)
+
+@extension EXT_M
+mul     rd rs1 rs2 31..25=1 14..12=0 6..2=0x0C 1..0=3
+mulh    rd rs1 rs2 31..25=1 14..12=1 6..2=0x0C 1..0=3
+mulhsu  rd rs1 rs2 31..25=1 14..12=2 6..2=0x0C 1..0=3
+mulhu   rd rs1 rs2 31..25=1 14..12=3 6..2=0x0C 1..0=3
+div     rd rs1 rs2 31..25=1 14..12=4 6..2=0x0C 1..0=3
+divu    rd rs1 rs2 31..25=1 14..12=5 6..2=0x0C 1..0=3
+rem     rd rs1 rs2 31..25=1 14..12=6 6..2=0x0C 1..0=3
+remu    rd rs1 rs2 31..25=1 14..12=7 6..2=0x0C 1..0=3
+
+# RV32A Standard Extension (Atomics)
+
+@extension EXT_A
+lrw       rd rs1      24..20=0 aq rl 31..27=0x02 14..12=2 6..2=0x0B 1..0=3
+scw       rd rs1 rs2           aq rl 31..27=0x03 14..12=2 6..2=0x0B 1..0=3
+amoswapw  rd rs1 rs2           aq rl 31..27=0x01 14..12=2 6..2=0x0B 1..0=3
+amoaddw   rd rs1 rs2           aq rl 31..27=0x00 14..12=2 6..2=0x0B 1..0=3
+amoxorw   rd rs1 rs2           aq rl 31..27=0x04 14..12=2 6..2=0x0B 1..0=3
+amoandw   rd rs1 rs2           aq rl 31..27=0x0C 14..12=2 6..2=0x0B 1..0=3
+amoorw    rd rs1 rs2           aq rl 31..27=0x08 14..12=2 6..2=0x0B 1..0=3
+amominw   rd rs1 rs2           aq rl 31..27=0x10 14..12=2 6..2=0x0B 1..0=3
+amomaxw   rd rs1 rs2           aq rl 31..27=0x14 14..12=2 6..2=0x0B 1..0=3
+amominuw  rd rs1 rs2           aq rl 31..27=0x18 14..12=2 6..2=0x0B 1..0=3
+amomaxuw  rd rs1 rs2           aq rl 31..27=0x1C 14..12=2 6..2=0x0B 1..0=3
+
+# RV32F Standard Extension (Single-Precision Float)
+
+@extension EXT_F
+flw       rd rs1 imm12                          14..12=2 6..2=0x01 1..0=3
+fsw       imm12hi rs1 rs2 imm12lo               14..12=2 6..2=0x09 1..0=3
+fmadds    rd rs1 rs2 rs3 rm                     26..25=0 6..2=0x10 1..0=3
+fmsubs    rd rs1 rs2 rs3 rm                     26..25=0 6..2=0x11 1..0=3
+fnmsubs   rd rs1 rs2 rs3 rm                     26..25=0 6..2=0x12 1..0=3
+fnmadds   rd rs1 rs2 rs3 rm                     26..25=0 6..2=0x13 1..0=3
+fadds     rd rs1 rs2      31..27=0x00 rm 26..25=0 6..2=0x14 1..0=3
+fsubs     rd rs1 rs2      31..27=0x01 rm 26..25=0 6..2=0x14 1..0=3
+fmuls     rd rs1 rs2      31..27=0x02 rm 26..25=0 6..2=0x14 1..0=3
+fdivs     rd rs1 rs2      31..27=0x03 rm 26..25=0 6..2=0x14 1..0=3
+fsqrts    rd rs1 24..20=0 31..27=0x0B rm 26..25=0 6..2=0x14 1..0=3
+fsgnjs    rd rs1 rs2      31..27=0x04 14..12=0 26..25=0 6..2=0x14 1..0=3
+fsgnjns   rd rs1 rs2      31..27=0x04 14..12=1 26..25=0 6..2=0x14 1..0=3
+fsgnjxs   rd rs1 rs2      31..27=0x04 14..12=2 26..25=0 6..2=0x14 1..0=3
+fmins     rd rs1 rs2      31..27=0x05 14..12=0 26..25=0 6..2=0x14 1..0=3
+fmaxs     rd rs1 rs2      31..27=0x05 14..12=1 26..25=0 6..2=0x14 1..0=3
+fcvtws    rd rs1 24..20=0 31..27=0x18 rm 26..25=0 6..2=0x14 1..0=3
+fcvtwus   rd rs1 24..20=1 31..27=0x18 rm 26..25=0 6..2=0x14 1..0=3
+fmvxw     rd rs1 24..20=0 31..27=0x1C 14..12=0 26..25=0 6..2=0x14 1..0=3
+fclasss   rd rs1 24..20=0 31..27=0x1C 14..12=1 26..25=0 6..2=0x14 1..0=3
+feqs      rd rs1 rs2      31..27=0x14 14..12=2 26..25=0 6..2=0x14 1..0=3
+flts      rd rs1 rs2      31..27=0x14 14..12=1 26..25=0 6..2=0x14 1..0=3
+fles      rd rs1 rs2      31..27=0x14 14..12=0 26..25=0 6..2=0x14 1..0=3
+fcvtsw    rd rs1 24..20=0 31..27=0x1A rm 26..25=0 6..2=0x14 1..0=3
+fcvtswu   rd rs1 24..20=1 31..27=0x1A rm 26..25=0 6..2=0x14 1..0=3
+fmvwx     rd rs1 24..20=0 31..27=0x1E 14..12=0 26..25=0 6..2=0x14 1..0=3
+
+# Zba Standard Extension (Address generation)
+
+@extension Zba
+sh1add  rd rs1 rs2 31..25=0b0010000 14..12=2 6..2=0x0C 1..0=3
+sh2add  rd rs1 rs2 31..25=0b0010000 14..12=4 6..2=0x0C 1..0=3
+sh3add  rd rs1 rs2 31..25=0b0010000 14..12=6 6..2=0x0C 1..0=3
+
+# Zbb Standard Extension (Basic bit-manipulation)
+
+@extension Zbb
+andn    rd rs1 rs2 31..25=0b0100000 14..12=7 6..2=0x0C 1..0=3
+orn     rd rs1 rs2 31..25=0b0100000 14..12=6 6..2=0x0C 1..0=3
+xnor    rd rs1 rs2 31..25=0b0100000 14..12=4 6..2=0x0C 1..0=3
+max     rd rs1 rs2 31..25=0b0000101 14..12=6 6..2=0x0C 1..0=3
+maxu    rd rs1 rs2 31..25=0b0000101 14..12=7 6..2=0x0C 1..0=3
+min     rd rs1 rs2 31..25=0b0000101 14..12=4 6..2=0x0C 1..0=3
+minu    rd rs1 rs2 31..25=0b0000101 14..12=5 6..2=0x0C 1..0=3
+rol     rd rs1 rs2 31..25=0b0110000 14..12=1 6..2=0x0C 1..0=3
+ror     rd rs1 rs2 31..25=0b0110000 14..12=5 6..2=0x0C 1..0=3
+zexth   rd rs1     31..25=0b0000100 24..20=0 14..12=4 6..2=0x0C 1..0=3
+clz     rd rs1 31..20=0b011000000000 14..12=1 6..2=0x04 1..0=3
+ctz     rd rs1 31..20=0b011000000001 14..12=1 6..2=0x04 1..0=3
+cpop    rd rs1 31..20=0b011000000010 14..12=1 6..2=0x04 1..0=3
+sextb   rd rs1 31..20=0b011000000100 14..12=1 6..2=0x04 1..0=3
+sexth   rd rs1 31..20=0b011000000101 14..12=1 6..2=0x04 1..0=3
+rori    rd rs1 31..25=0b0110000 shamtw 14..12=5 6..2=0x04 1..0=3
+orcb    rd rs1 31..20=0b001010000111 14..12=5 6..2=0x04 1..0=3
+rev8    rd rs1 31..20=0b011010011000 14..12=5 6..2=0x04 1..0=3
+
+# Zbc Standard Extension (Carry-less multiplication)
+
+@extension Zbc
+clmul   rd rs1 rs2 31..25=0b0000101 14..12=1 6..2=0x0C 1..0=3
+clmulh  rd rs1 rs2 31..25=0b0000101 14..12=3 6..2=0x0C 1..0=3
+clmulr  rd rs1 rs2 31..25=0b0000101 14..12=2 6..2=0x0C 1..0=3
+
+# Zbs Standard Extension (Single-bit operations)
+
+@extension Zbs
+bclr    rd rs1 rs2 31..25=0b0100100 14..12=1 6..2=0x0C 1..0=3
+bext    rd rs1 rs2 31..25=0b0100100 14..12=5 6..2=0x0C 1..0=3
+binv    rd rs1 rs2 31..25=0b0110100 14..12=1 6..2=0x0C 1..0=3
+bset    rd rs1 rs2 31..25=0b0010100 14..12=1 6..2=0x0C 1..0=3
+bclri   rd rs1 31..25=0b0100100 shamtw 14..12=1 6..2=0x04 1..0=3
+bexti   rd rs1 31..25=0b0100100 shamtw 14..12=5 6..2=0x04 1..0=3
+binvi   rd rs1 31..25=0b0110100 shamtw 14..12=1 6..2=0x04 1..0=3
+bseti   rd rs1 31..25=0b0010100 shamtw 14..12=1 6..2=0x04 1..0=3
+
+# RV32C Standard Extension (Compressed Instructions)
+# 16-bit instructions: bits[1:0] = 0, 1, or 2 (not 3)
+
+@extension EXT_C
+
+# Quadrant 0 (1..0=0)
+caddi4spn crdq  cimm4spn               15..13=0 1..0=0
+clw       crdq  crs1q  cimmw           15..13=2 1..0=0
+csw       crs1q crs2q  cimmw           15..13=6 1..0=0
+
+# Quadrant 1 (1..0=1)
+cnop                                   15..13=0 12=0 11..7=0 6..2=0 1..0=1
+caddi     crs1rd cnzimmi               15..13=0 1..0=1
+cjal      cimmj                        15..13=1 1..0=1
+cli       crd    cimmi                 15..13=2 1..0=1
+caddi16sp cnzimm16sp                   15..13=3 11..7=2 1..0=1
+clui      crd    cnzimmi               15..13=3 1..0=1
+csrli     crs1q  cshamt                15..13=4 11..10=0 1..0=1
+csrai     crs1q  cshamt                15..13=4 11..10=1 1..0=1
+candi     crs1q  cimmi                 15..13=4 11..10=2 1..0=1
+csub      crs1q  crs2q                 15..13=4 12=0 11..10=3 6..5=0 1..0=1
+cxor      crs1q  crs2q                 15..13=4 12=0 11..10=3 6..5=1 1..0=1
+cor       crs1q  crs2q                 15..13=4 12=0 11..10=3 6..5=2 1..0=1
+cand      crs1q  crs2q                 15..13=4 12=0 11..10=3 6..5=3 1..0=1
+cj        cimmj                        15..13=5 1..0=1
+cbeqz     crs1q  cimmb                 15..13=6 1..0=1
+cbnez     crs1q  cimmb                 15..13=7 1..0=1
+
+# Quadrant 2 (1..0=2)
+cslli     crs1rd cshamt                15..13=0 1..0=2
+clwsp     crd    cimmlwsp              15..13=2 1..0=2
+cjr       crs1                         15..13=4 12=0 6..2=0 1..0=2
+cmv       crd    crs2                  15..13=4 12=0 1..0=2
+cebreak                                15..13=4 12=1 11..7=0 6..2=0 1..0=2
+cjalr     crs1                         15..13=4 12=1 6..2=0 1..0=2
+cadd      crs1rd crs2                  15..13=4 12=1 1..0=2
+cswsp     crs2   cimmswsp              15..13=6 1..0=2
+
+# RV32FC (Compressed Float, requires EXT_C && EXT_F)
+@extension EXT_F
+cflw      crdq   crs1q  cimmw         15..13=3 1..0=0
+cfsw      crs1q  crs2q  cimmw         15..13=7 1..0=0
+cflwsp    crd    cimmlwsp              15..13=3 1..0=2
+cfswsp    crs2   cimmswsp              15..13=7 1..0=2

@@ -14,7 +14,7 @@ pathvalidate==3.2.3
 pluggy==1.5.0
 pyelftools==0.26
 pytablewriter==1.2.1
-pytest==8.3.4
+pytest==9.0.3
 python-dateutil==2.9.0.post0
 pytz==2025.1
 PyYAML==6.0.2

@@ -42,6 +42,7 @@ BUILD_DTB2C := src/minimal_dtb.h
 $(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB) $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  BIN2C\t$@\n"
 	$(Q)$(BIN_TO_C) $(BUILD_DTB) > $@
+$(OUT)/riscv.o: $(BUILD_DTB2C)
 
 # Device object compilation
 $(DEV_OUT):

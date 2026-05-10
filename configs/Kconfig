@@ -84,16 +84,16 @@ endmenu
 config HAVE_SDL2
     bool
     default n if CC_IS_EMCC
-    default $(python,assert shutil.which('sdl2-config') or run('pkg-config', '--exists', 'sdl2'))
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-sdl2'))
 
 config HAVE_SDL2_MIXER
     bool
     default n if CC_IS_EMCC
-    default $(python,assert run('pkg-config', '--exists', 'SDL2_mixer'))
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-sdl2-mixer'))
 
-config HAVE_LLVM18
+config HAVE_LLVM
     bool
-    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-llvm18'))
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-llvm'))
 
 config HAVE_RISCV_TOOLCHAIN
     bool
@@ -232,12 +232,12 @@ endchoice
 config T2C
     bool "Tier-2 LLVM Compiler"
     default y
-    depends on JIT && HAVE_LLVM18
+    depends on JIT && HAVE_LLVM
     help
-      Enable tier-2 JIT compiler powered by LLVM 18.
+      Enable tier-2 JIT compiler powered by LLVM.
       Provides advanced optimizations for hot code paths.
 
-      Requires LLVM 18 development libraries.
+      Requires LLVM 18 through 21 development libraries.
 
 comment "System Emulation"
 

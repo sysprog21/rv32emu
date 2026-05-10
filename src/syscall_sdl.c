@@ -93,13 +93,15 @@ typedef struct sound {
     int volume;
 } sound_t;
 
+#if RV32_HAS(SDL_MIXER)
 /* SDL-mixer-related and music-related variables */
 static uint8_t *music_midi_data;
-#if RV32_HAS(SDL_MIXER)
 static Mix_Music *mid;
 
 /* SDL-mixer-related and sfx-related variables */
 static Mix_Chunk *sfx_chunk;
+static uint32_t nr_sfx_samples;
+static int chan;
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -108,8 +110,6 @@ static pthread_t music_thread;
 static pthread_t sfx_thread;
 #endif
 static uint8_t *sfx_samples;
-static uint32_t nr_sfx_samples;
-static int chan;
 
 /* Used to properly destroy audio, compatible to process VM emulation */
 static bool audio_init = false;

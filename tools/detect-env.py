@@ -145,6 +145,8 @@ def have_riscv_toolchain():
     """Check if a RISC-V cross-compiler toolchain is available."""
     toolchain_prefixes = [
         "riscv-none-elf-",
+        "riscv32-elf-",
+        "riscv64-elf-",
         "riscv32-unknown-elf-",
         "riscv64-unknown-elf-",
         "riscv-none-embed-",

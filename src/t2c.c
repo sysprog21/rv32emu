@@ -13,22 +13,23 @@
 #include <stdlib.h>
 
 /* LLVM version compatibility check.
- * T2C requires LLVM 18-21 for the following APIs:
+ * T2C requires LLVM 19-23 for the following APIs:
  * - LLVMRunPasses (new pass manager, added in LLVM 13)
  * - LLVMGetInlineAsm with 9 arguments (CanThrow param added in LLVM 13)
- * - LLVMBuildAtomicRMW (stable across 18-21)
- * - LLVMCreateTargetMachine (stable across 18-21)
+ * - LLVMBuildAtomicRMW (stable across 19-23)
+ * - LLVMCreateTargetMachine (stable across 19-23)
+ * - The *InContext constructors; LLVM 22 deprecated the implicit global
+ *   context, so T2C owns one context instead (see t2c_ctx)
  *
- * Note: LLVM 22+ may deprecate MCJIT in favor of ORC JIT.
- * When upgrading beyond LLVM 21, review:
+ * When upgrading beyond LLVM 23, review:
  * - MCJIT deprecation status
  * - Any LLVMGetInlineAsm signature changes
  * - Code model defaults for JIT on aarch64
  */
-#if LLVM_VERSION_MAJOR < 18
-#error "T2C requires LLVM 18 or later. Found LLVM " LLVM_VERSION_STRING
-#elif LLVM_VERSION_MAJOR > 21
-#warning "LLVM version > 21 detected. T2C is tested with LLVM 18-21."
+#if LLVM_VERSION_MAJOR < 19
+#error "T2C requires LLVM 19 or later. Found LLVM " LLVM_VERSION_STRING
+#elif LLVM_VERSION_MAJOR > 23
+#warning "LLVM version > 23 detected. T2C is tested with LLVM 19-23."
 #endif
 
 #include "jit.h"

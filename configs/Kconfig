@@ -84,12 +84,12 @@ endmenu
 config HAVE_SDL2
     bool
     default n if CC_IS_EMCC
-    default $(python,assert shutil.which('sdl2-config') or run('pkg-config', '--exists', 'sdl2'))
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-sdl2'))
 
 config HAVE_SDL2_MIXER
     bool
     default n if CC_IS_EMCC
-    default $(python,assert run('pkg-config', '--exists', 'SDL2_mixer'))
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-sdl2-mixer'))
 
 config HAVE_LLVM18
     bool

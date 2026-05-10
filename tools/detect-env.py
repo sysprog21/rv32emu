@@ -83,7 +83,9 @@ def detect_compiler_type(version_output):
 
 def check_pkg_config(package):
     """Check if a package exists via pkg-config."""
-    ret, _, _ = run_cmd(["pkg-config", "--exists", package])
+    # PKG_CONFIG may carry a wrapper or options, as make allows.
+    pkg_config = shlex.split(os.environ.get("PKG_CONFIG", "pkg-config"))
+    ret, _, _ = run_cmd(pkg_config + ["--exists", package])
     return ret == 0
 
 

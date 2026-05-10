@@ -1,0 +1,8 @@
+name: rv32emu-rv32imafc
+compiler_exe: riscv64-elf-gcc
+objdump_exe: riscv64-elf-objdump
+ref_model_exe: sail_riscv_sim
+udb_config: rv32emu-rv32imafc.yaml
+linker_script: link.ld
+dut_include_dir: .
+include_priv_tests: False

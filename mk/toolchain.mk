@@ -94,6 +94,8 @@ endif
 # RISC-V Cross-Compiler Detection
 
 TOOLCHAIN_LIST := riscv-none-elf- \
+                  riscv32-elf- \
+                  riscv64-elf- \
                   riscv32-unknown-elf- \
                   riscv64-unknown-elf- \
                   riscv-none-embed-

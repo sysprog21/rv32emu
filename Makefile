@@ -47,7 +47,15 @@ $(eval $(require-config))
 
 # Build Configuration
 OUT ?= build
+USER_BIN := $(OUT)/rv32emu-user
+SYSTEM_BIN := $(OUT)/rv32emu-system
+ifeq ("$(CC_IS_EMCC)", "1")
 BIN := $(OUT)/rv32emu
+else ifeq ($(CONFIG_SYSTEM),y)
+BIN := $(SYSTEM_BIN)
+else
+BIN := $(USER_BIN)
+endif
 
 CFLAGS = -std=gnu11 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
 CFLAGS += -Wno-unused-label -include src/common.h -Isrc/ $(CFLAGS_NO_CET)
@@ -262,6 +270,7 @@ all: $(DTB_DEPS) $(BIN)
 # Tools & Testing
 include mk/tools.mk
 include mk/riscv-arch-test.mk
+include mk/act.mk
 include mk/tests.mk
 
 tool: $(TOOLS_BIN)
@@ -269,7 +278,7 @@ tool: $(TOOLS_BIN)
 # Clean Targets
 clean:
 	$(VECHO) "Cleaning... "
-	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP)
+	$(Q)$(RM) $(BIN) $(USER_BIN) $(SYSTEM_BIN) $(OUT)/rv32emu $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
 	$(Q)$(call notice, [OK])
 

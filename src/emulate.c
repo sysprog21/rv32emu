@@ -515,12 +515,6 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_cycle);
     case CSR_INSTRETH: /* Upper 32 bits of instructions retired */
         return &((uint32_t *) &rv->csr_cycle)[1];
-#if RV32_HAS(EXT_F)
-    case CSR_FFLAGS:
-        return (uint32_t *) (&rv->csr_fcsr);
-    case CSR_FCSR:
-        return (uint32_t *) (&rv->csr_fcsr);
-#endif
     case CSR_SSTATUS:
         return (uint32_t *) (&rv->csr_sstatus);
     case CSR_SIE:
@@ -610,6 +604,48 @@ static void csr_written(riscv_t *rv UNUSED,
 #endif
 }
 
+#if RV32_HAS(EXT_F)
+/* fflags and frm are fields of fcsr, so all three bypass csr_get_ptr(). */
+static inline bool csr_is_fcsr(uint32_t csr)
+{
+    return csr == CSR_FFLAGS || csr == CSR_FRM || csr == CSR_FCSR;
+}
+
+static inline uint32_t fcsr_read(riscv_t *rv, uint32_t csr)
+{
+    switch (csr) {
+    case CSR_FFLAGS:
+        return rv->csr_fcsr & FFLAG_MASK;
+    case CSR_FRM:
+        return (rv->csr_fcsr >> FRM_SHIFT) & FRM_MASK;
+    case CSR_FCSR:
+        return rv->csr_fcsr & FCSR_MASK;
+    default:
+        __UNREACHABLE;
+        return 0;
+    }
+}
+
+static inline void fcsr_write(riscv_t *rv, uint32_t csr, uint32_t val)
+{
+    switch (csr) {
+    case CSR_FFLAGS:
+        rv->csr_fcsr = (rv->csr_fcsr & ~FFLAG_MASK) | (val & FFLAG_MASK);
+        break;
+    case CSR_FRM:
+        rv->csr_fcsr = (rv->csr_fcsr & ~(FRM_MASK << FRM_SHIFT)) |
+                       ((val & FRM_MASK) << FRM_SHIFT);
+        break;
+    case CSR_FCSR:
+        rv->csr_fcsr = val & FCSR_MASK;
+        break;
+    default:
+        __UNREACHABLE;
+        break;
+    }
+}
+#endif
+
 /* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
  * zero-extends the value to XLEN bits, and then writes it to register rd.
@@ -636,21 +672,22 @@ static uint32_t csr_csrrw(riscv_t *rv,
         return rvv_out;
     }
 #endif
+#if RV32_HAS(EXT_F)
+    if (csr_is_fcsr(csr)) {
+        const uint32_t out = fcsr_read(rv, csr);
+        fcsr_write(rv, csr, val);
+        return out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
 
     const uint32_t old = *c;
     *c = val;
     csr_written(rv, c, old);
 
-    return out;
+    return old;
 }
 
 /* perform csrrs (atomic read and set) */
@@ -679,21 +716,23 @@ static uint32_t csr_csrrs(riscv_t *rv,
         return rvv_out;
     }
 #endif
+#if RV32_HAS(EXT_F)
+    if (csr_is_fcsr(csr)) {
+        const uint32_t out = fcsr_read(rv, csr);
+        if (val) /* rs1 = x0 reads without writing, as for V above */
+            fcsr_write(rv, csr, out | val);
+        return out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
 
     const uint32_t old = *c;
     *c |= val;
     csr_written(rv, c, old);
 
-    return out;
+    return old;
 }
 
 /* perform csrrc (atomic read and clear)
@@ -720,21 +759,23 @@ static uint32_t csr_csrrc(riscv_t *rv,
         return rvv_out;
     }
 #endif
+#if RV32_HAS(EXT_F)
+    if (csr_is_fcsr(csr)) {
+        const uint32_t out = fcsr_read(rv, csr);
+        if (val) /* rs1 = x0 reads without writing, as for V above */
+            fcsr_write(rv, csr, out & ~val);
+        return out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
 
     const uint32_t old = *c;
     *c &= ~val;
     csr_written(rv, c, old);
 
-    return out;
+    return old;
 }
 
 #if JIT_SYSTEM_HELPERS

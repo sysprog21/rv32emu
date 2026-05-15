@@ -7,10 +7,11 @@ ACT_DIR ?= tests/riscv-act
 ACT_RV32EMU_CONFIG ?= tests/act-rv32emu/rv32emu-rv32imafc/test_config.yaml
 ACT_WORKDIR ?= $(OUT)/act
 ACT_EXTENSIONS ?= I,M,F,Zicsr,Zicntr,Zifencei,Zca,Zcf,Misalign,MisalignZca,Zaamo
+ACT_SAIL_BIN_DIR ?= $(OUT)/act-tools/sail-riscv-Linux-x86_64/bin
 
 act-user-elfs:
 	$(Q)git submodule update --init $(ACT_DIR)
-	$(Q)$(MAKE) -C $(ACT_DIR) \
+	$(Q)PATH="$(abspath $(ACT_SAIL_BIN_DIR)):$$PATH" $(MAKE) -C $(ACT_DIR) \
 		CONFIG_FILES=$(abspath $(ACT_RV32EMU_CONFIG)) \
 		WORKDIR=$(abspath $(ACT_WORKDIR)) \
 		EXTENSIONS=$(ACT_EXTENSIONS)

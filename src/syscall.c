@@ -143,21 +143,31 @@ static void syscall_exit(riscv_t *rv)
     attr->exit_code = rv_get_reg(rv, rv_reg_a0);
 }
 
-/* brk(increment)
- * Note:
- *   - 8 byte alignment for malloc chunks
- *   - 4 KiB aligned for sbrk blocks
+/* brk(addr)
+ *
+ * Sets the program break to 'addr'. Returns the resulting break address.
+ * If 'addr' is 0, returns the current break without changing it.
+ * If 'addr' would exceed available memory, the break is not changed
+ * and the current (unchanged) break is returned, causing sbrk to detect
+ * the failure.
  */
 static void syscall_brk(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
 
-    /* get the increment parameter */
-    riscv_word_t increment = rv_get_reg(rv, rv_reg_a0);
-    if (increment)
-        attr->break_addr = increment;
+    riscv_word_t addr = rv_get_reg(rv, rv_reg_a0);
+    if (addr) {
+        /* Reject if the new break would collide with the stack.
+         * The stack lives at the top of memory, so the heap must stay
+         * below mem_size minus the reserved stack/args region.
+         */
+        riscv_word_t heap_limit =
+            attr->mem_size - attr->stack_size - attr->args_offset_size;
+        if (addr <= heap_limit)
+            attr->break_addr = addr;
+        /* else: leave break_addr unchanged; sbrk detects the mismatch */
+    }
 
-    /* return new break address */
     rv_set_reg(rv, rv_reg_a0, attr->break_addr);
 }
 

@@ -641,11 +641,27 @@ static bool is_branch_taken = false;
 
 /* record the program counter of the previous block */
 static uint32_t last_pc = 0;
+static block_t *prev = NULL;
 
 #if RV32_HAS(JIT)
 static set_t pc_set;
 static bool has_loops = false;
 #endif
+
+void reset_rv_run_state()
+{
+    prev = NULL;
+    is_branch_taken = false;
+    last_pc = 0;
+#if RV32_HAS(JIT)
+    set_reset(&pc_set);
+    has_loops = false;
+#endif
+#if RV32_HAS(SYSTEM)
+    need_retranslate = false;
+    need_handle_signal = false;
+#endif
+}
 
 #if RV32_HAS(SYSTEM_MMIO)
 extern void emu_update_uart_interrupts(riscv_t *rv);
@@ -681,58 +697,132 @@ FORCE_INLINE bool insn_is_branch(uint8_t opcode)
     return false;
 }
 
-#define RVOP(inst, code)                                                       \
-    static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir,      \
-                                        uint64_t cycle, uint32_t PC)           \
-    {                                                                          \
-        RVOP_SYNC_PC(rv, PC);                                                  \
-        cycle++;                                                               \
-        code;                                                                  \
-        IIF(RV32_HAS(SYSTEM))(                                                 \
-            if (need_handle_signal) {                                          \
-                need_handle_signal = false;                                    \
-                return true;                                                   \
-            }, ) nextop : PC += __rv_insn_##inst##_len;                        \
-        IIF(RV32_HAS(SYSTEM))(IIF(RV32_HAS(JIT))(                              \
-                                  , if (unlikely(need_clear_block_map)) {      \
-                                      block_map_clear(rv);                     \
-                                      need_clear_block_map = false;            \
-                                      rv->csr_cycle = cycle;                   \
-                                      rv->PC = PC;                             \
-                                      return false;                            \
-                                  }), );                                       \
-        if (unlikely(RVOP_NO_NEXT(ir)))                                        \
-            goto end_op;                                                       \
-        const rv_insn_t *next = ir->next;                                      \
-        MUST_TAIL return next->impl(rv, next, cycle, PC);                      \
-    end_op:                                                                    \
-        IIF(RV32_HAS(BLOCK_CHAINING))(                                         \
-            {                                                                  \
-                /* Page-terminated block fallthrough: if branch_taken is       \
-                 * set AND this is NOT a branch instruction, tail-call         \
-                 * to next block. Branch instructions use branch_taken         \
-                 * for the taken path, not fallthrough.                        \
-                 */                                                            \
-                if (!insn_is_branch(ir->opcode)) {                             \
-                    struct rv_insn *taken = ir->branch_taken;                  \
-                    if (taken) {                                               \
-                        IIF(RV32_HAS(SYSTEM))(                                 \
-                            if (!rv->is_trapped) {                             \
-                                last_pc = PC;                                  \
-                                MUST_TAIL return taken->impl(rv, taken, cycle, \
-                                                             PC);              \
-                            },                                                 \
-                            {                                                  \
-                                last_pc = PC;                                  \
-                                MUST_TAIL return taken->impl(rv, taken, cycle, \
-                                                             PC);              \
-                            });                                                \
-                    }                                                          \
-                }                                                              \
-            }, );                                                              \
-        rv->csr_cycle = cycle;                                                 \
-        rv->PC = PC;                                                           \
-        return true;                                                           \
+#ifdef __EMSCRIPTEN__
+/* Block-boundary yield strategy to prevent stack overflow in WASM.
+ * Two-tier dispatch:
+ * - INTRA: Fast path for sequential instructions within a block (no check)
+ * - INTER: Checked path for block boundaries (yield point)
+ * This preserves kernel atomic operations within blocks while preventing
+ * unbounded tail-call recursion in WASM.
+ */
+
+/* Instrumentation helpers */
+#ifdef WASM_DEBUG_BLOCKS
+#define WASM_DEBUG_YIELD_HARD(rv, depth)                        \
+    do {                                                        \
+        (rv)->yield_hard_count++;                               \
+        (rv)->total_depth_at_yield +=                           \
+            WASM_BLOCK_LIMIT + WASM_BLOCK_HARD_LIMIT - (depth); \
+        if ((depth) < (rv)->max_block_depth_seen)               \
+            (rv)->max_block_depth_seen = (depth);               \
+    } while (0)
+#define WASM_DEBUG_YIELD_SOFT(rv, depth)                          \
+    do {                                                          \
+        (rv)->yield_soft_count++;                                 \
+        (rv)->total_depth_at_yield += WASM_BLOCK_LIMIT - (depth); \
+    } while (0)
+#else
+#define WASM_DEBUG_YIELD_HARD(rv, depth) ((void) 0)
+#define WASM_DEBUG_YIELD_SOFT(rv, depth) ((void) 0)
+#endif
+
+/* Fast path: Intra-block sequential instructions (ir->next)
+ * Only check hard limit. Let depth go negative to track total stack usage.
+ * This allows kernel atomic operations to complete within blocks. */
+#define RVOP_TAIL_INTRA(rv, target, cycle, PC)                  \
+    do {                                                        \
+        int depth = --(rv)->wasm_block_depth;                   \
+        /* Only yield at hard limit to protect atomicity */     \
+        if (unlikely(depth <= -WASM_BLOCK_HARD_LIMIT)) {        \
+            WASM_DEBUG_YIELD_HARD(rv, depth);                   \
+            (rv)->wasm_block_depth = WASM_BLOCK_LIMIT;          \
+            (rv)->next_insn = (target);                         \
+            (rv)->csr_cycle = (cycle);                          \
+            (rv)->PC = (PC);                                    \
+            return true;                                        \
+        }                                                       \
+        MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+    } while (0)
+
+/* Checked path: Inter-block transitions (block boundaries) */
+#define RVOP_TAIL_INTER(rv, target, cycle, PC)                         \
+    do {                                                               \
+        int depth = --(rv)->wasm_block_depth;                          \
+        /* Yield at soft limit (0) because we're at a safe boundary */ \
+        if (unlikely(depth <= 0)) {                                    \
+            WASM_DEBUG_YIELD_SOFT(rv, depth);                          \
+            (rv)->wasm_block_depth = WASM_BLOCK_LIMIT;                 \
+            (rv)->next_insn = (target);                                \
+            (rv)->csr_cycle = (cycle);                                 \
+            (rv)->PC = (PC);                                           \
+            return true;                                               \
+        }                                                              \
+        MUST_TAIL return (target)->impl(rv, target, cycle, PC);        \
+    } while (0)
+
+/* Backward compatibility: RVOP_TAIL maps to INTER for block boundaries */
+#define RVOP_TAIL(rv, target, cycle, PC) RVOP_TAIL_INTER(rv, target, cycle, PC)
+
+#else
+/* Native builds: no yield checks needed */
+#define RVOP_TAIL_INTRA(rv, target, cycle, PC) \
+    MUST_TAIL return (target)->impl(rv, target, cycle, PC)
+#define RVOP_TAIL_INTER(rv, target, cycle, PC) \
+    MUST_TAIL return (target)->impl(rv, target, cycle, PC)
+#define RVOP_TAIL(rv, target, cycle, PC) \
+    MUST_TAIL return (target)->impl(rv, target, cycle, PC)
+#endif
+
+#define RVOP(inst, code)                                                   \
+    static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir,  \
+                                        uint64_t cycle, uint32_t PC)       \
+    {                                                                      \
+        RVOP_SYNC_PC(rv, PC);                                              \
+        cycle++;                                                           \
+        code;                                                              \
+        IIF(RV32_HAS(SYSTEM))(                                             \
+            if (need_handle_signal) {                                      \
+                need_handle_signal = false;                                \
+                return true;                                               \
+            }, ) nextop : PC += __rv_insn_##inst##_len;                    \
+        IIF(RV32_HAS(SYSTEM))(IIF(RV32_HAS(JIT))(                          \
+                                  , if (unlikely(need_clear_block_map)) {  \
+                                      block_map_clear(rv);                 \
+                                      need_clear_block_map = false;        \
+                                      rv->csr_cycle = cycle;               \
+                                      rv->PC = PC;                         \
+                                      return false;                        \
+                                  }), );                                   \
+        if (unlikely(RVOP_NO_NEXT(ir)))                                    \
+            goto end_op;                                                   \
+        const rv_insn_t *next = ir->next;                                  \
+        RVOP_TAIL_INTRA(rv, next, cycle, PC); /* Fast path: intra-block */ \
+    end_op:                                                                \
+        IIF(RV32_HAS(BLOCK_CHAINING))(                                     \
+            {                                                              \
+                /* Page-terminated block fallthrough: if branch_taken is   \
+                 * set AND this is NOT a branch instruction, tail-call     \
+                 * to next block. Branch instructions use branch_taken     \
+                 * for the taken path, not fallthrough.                    \
+                 */                                                        \
+                if (!insn_is_branch(ir->opcode)) {                         \
+                    struct rv_insn *taken = ir->branch_taken;              \
+                    if (taken) {                                           \
+                        IIF(RV32_HAS(SYSTEM))(                             \
+                            if (!rv->is_trapped) {                         \
+                                last_pc = PC;                              \
+                                RVOP_TAIL(rv, taken, cycle, PC);           \
+                            },                                             \
+                            {                                              \
+                                last_pc = PC;                              \
+                                RVOP_TAIL(rv, taken, cycle, PC);           \
+                            });                                            \
+                    }                                                      \
+                }                                                          \
+            }, );                                                          \
+        rv->csr_cycle = cycle;                                             \
+        rv->PC = PC;                                                       \
+        return true;                                                       \
     }
 
 #include "rv32_template.c"
@@ -771,7 +861,16 @@ static inline bool fuse_next_or_stop(riscv_t *rv,
         return true;
     }
     const rv_insn_t *next = ir->next;
-    MUST_TAIL return next->impl(rv, next, cycle, PC);
+#ifdef WASM_DEBUG_BLOCKS
+    /* Validate: fused sequences shouldn't have branch targets.
+     * fuse6 (ECALL) and fuse12 (ADDI+BNE) bypass this path entirely. */
+    assert(!ir->branch_taken && !ir->branch_untaken &&
+           "Fused ops in fuse_next_or_stop must be intra-block");
+#endif
+    /* Fused operations are atomic sequences detected during block analysis.
+     * Use INTRA path (hard limit 15K) instead of INTER (soft limit 5K)
+     * to avoid unnecessary yields within fused sequences. */
+    RVOP_TAIL_INTRA(rv, next, cycle, PC);
 }
 
 /* multiple LUI */
@@ -1842,7 +1941,6 @@ static void optimize_constant(riscv_t *rv UNUSED, block_t *block)
         ((constopt_func_t) constopt_table[ir->opcode])(ir, &info);
 }
 
-static block_t *prev = NULL;
 static block_t *block_find_or_translate(riscv_t *rv)
 {
 #if !RV32_HAS(JIT)
@@ -2132,6 +2230,20 @@ void rv_step(void *arg)
         rv_check_interrupt(rv);
 #endif
 
+#ifdef __EMSCRIPTEN__
+        // Resume from saved instruction after stack unwind
+        if (rv->next_insn) {
+            const rv_insn_t *ir = rv->next_insn;
+            rv->next_insn = NULL;
+            if (unlikely(!ir->impl(rv, ir, rv->csr_cycle, rv->PC))) {
+                prev = NULL;
+                break;
+            }
+            prev = NULL; /* Reset to avoid mis-chaining across unwind */
+            continue;
+        }
+#endif
+
         if (prev && prev->pc_start != last_pc) {
             /* update previous block */
 #if !RV32_HAS(JIT)
@@ -2341,9 +2453,13 @@ void rv_step(void *arg)
 
 #ifdef __EMSCRIPTEN__
     if (rv_has_halted(rv)) {
+        bool stop_requested = indirect_rv_stop_requested();
         emscripten_cancel_main_loop();
-        rv_delete(rv); /* clean up and reuse memory */
+        reset_rv_run_state();
+        indirect_rv_cleanup();
         rv_log_info("RISC-V emulator is destroyed");
+        if (!stop_requested)
+            report_run_completion();
         enable_run_button();
     }
 #endif

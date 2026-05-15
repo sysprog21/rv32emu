@@ -101,8 +101,11 @@ endef
 
 # External Data Definitions
 
-# Doom WAD file
-DOOM_DATA_URL := https://www.doomworld.com/3ddownloads/ports/shareware_doom_iwad.zip
+# Doom WAD file. Mirrored at rv32emu-prebuilt (doom-artifact branch) because
+# the canonical doomworld.com URL is now Cloudflare-403'd on GitHub Actions
+# runner IPs. The mirror contains the same shareware zip; SHA below is for
+# the extracted DOOM1.WAD payload which matches either source.
+DOOM_DATA_URL := https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip
 DOOM_DATA_DEST := $(OUT)
 DOOM_DATA := $(DOOM_DATA_DEST)/DOOM1.WAD
 DOOM_DATA_SHA := 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d

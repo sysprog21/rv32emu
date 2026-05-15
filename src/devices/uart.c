@@ -57,6 +57,33 @@ void set_input_buf_size(uint8_t size)
 {
     input_buf_size = size;
 }
+
+uint8_t get_input_buf_size()
+{
+    return input_buf_size;
+}
+
+void u8250_reset_input_buffer()
+{
+    input_buf_start = 0;
+    input_buf_size = 0;
+}
+
+void u8250_put_rx_char(uint8_t c)
+{
+    if (input_buf_size >= INPUT_BUF_MAX_CAP) {
+        return; /* Drop if buffer is full */
+    }
+
+    /* Calculate write position: circular buffer wraps around */
+    int write_pos = input_buf_start + input_buf_size;
+    if (write_pos >= INPUT_BUF_MAX_CAP) {
+        write_pos -= INPUT_BUF_MAX_CAP;
+    }
+
+    input_buf[write_pos] = (char) c;
+    input_buf_size++;
+}
 #endif
 
 void u8250_check_ready(u8250_state_t *uart)
@@ -90,9 +117,9 @@ static uint8_t u8250_handle_in(u8250_state_t *uart)
 
 #if defined(__EMSCRIPTEN__)
     value = (uint8_t) input_buf[input_buf_start];
-    input_buf_start++;
-    if (--input_buf_size == 0)
+    if (++input_buf_start >= INPUT_BUF_MAX_CAP)
         input_buf_start = 0;
+    input_buf_size--;
 #else
     if (read(uart->in_fd, &value, 1) < 0)
         rv_log_error("Failed to read UART input: %s", strerror(errno));

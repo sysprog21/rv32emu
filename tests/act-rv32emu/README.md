@@ -25,15 +25,20 @@ PKG_CONFIG=/usr/bin/pkg-config make ci_defconfig
 PKG_CONFIG=/usr/bin/pkg-config make -j$(nproc)
 ```
 
-Generate a small first batch of ACT4 ELFs:
+Generate the default user-mode ACT4 ELF set:
 
 ```sh
-PKG_CONFIG=/usr/bin/pkg-config make act-user-elfs ACT_EXTENSIONS=I
+PKG_CONFIG=/usr/bin/pkg-config make act-user-elfs
 ```
 
 Run generated ELFs through rv32emu:
 
 ```sh
-PKG_CONFIG=/usr/bin/pkg-config make act-user-run ACT_EXTENSIONS=I
+PKG_CONFIG=/usr/bin/pkg-config make act-user-run
 ```
 
+To run a smaller targeted batch, pass a comma-separated extension list:
+
+```sh
+PKG_CONFIG=/usr/bin/pkg-config make act-user-run ACT_EXTENSIONS=F
+```

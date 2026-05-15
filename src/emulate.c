@@ -308,6 +308,8 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
 #if RV32_HAS(EXT_F)
     case CSR_FFLAGS:
         return (uint32_t *) (&rv->csr_fcsr);
+    case CSR_FRM:
+        return (uint32_t *) (&rv->csr_fcsr);
     case CSR_FCSR:
         return (uint32_t *) (&rv->csr_fcsr);
 #endif
@@ -354,6 +356,41 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
     }
 }
 
+#if RV32_HAS(EXT_F)
+static inline uint32_t fcsr_read(riscv_t *rv, uint32_t csr)
+{
+    switch (csr & 0xFFF) {
+    case CSR_FFLAGS:
+        return rv->csr_fcsr & FFLAG_MASK;
+    case CSR_FRM:
+        return (rv->csr_fcsr >> 5) & 0x7;
+    case CSR_FCSR:
+        return rv->csr_fcsr & 0xff;
+    default:
+        __UNREACHABLE;
+        return 0;
+    }
+}
+
+static inline void fcsr_write(riscv_t *rv, uint32_t csr, uint32_t val)
+{
+    switch (csr & 0xFFF) {
+    case CSR_FFLAGS:
+        rv->csr_fcsr = (rv->csr_fcsr & ~FFLAG_MASK) | (val & FFLAG_MASK);
+        break;
+    case CSR_FRM:
+        rv->csr_fcsr = (rv->csr_fcsr & ~(0x7U << 5)) | ((val & 0x7) << 5);
+        break;
+    case CSR_FCSR:
+        rv->csr_fcsr = val & 0xff;
+        break;
+    default:
+        __UNREACHABLE;
+        break;
+    }
+}
+#endif
+
 /* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
  * zero-extends the value to XLEN bits, and then writes it to register rd.
@@ -371,11 +408,16 @@ static uint32_t csr_csrrw(riscv_t *rv,
     if (!c)
         return 0;
 
-    uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
+    if ((csr & 0xFFF) == CSR_FFLAGS || (csr & 0xFFF) == CSR_FRM ||
+        (csr & 0xFFF) == CSR_FCSR) {
+        uint32_t out = fcsr_read(rv, csr);
+        fcsr_write(rv, csr, val);
+        return out;
+    }
 #endif
+
+    uint32_t out = *c;
 
 #if RV32_HAS(SYSTEM)
     uint32_t old_satp = *c;
@@ -415,11 +457,16 @@ static uint32_t csr_csrrs(riscv_t *rv,
     if (!c)
         return 0;
 
-    uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
+    if ((csr & 0xFFF) == CSR_FFLAGS || (csr & 0xFFF) == CSR_FRM ||
+        (csr & 0xFFF) == CSR_FCSR) {
+        uint32_t out = fcsr_read(rv, csr);
+        fcsr_write(rv, csr, out | val);
+        return out;
+    }
 #endif
+
+    uint32_t out = *c;
 
 #if RV32_HAS(SYSTEM)
     uint32_t old_satp = *c;
@@ -449,11 +496,16 @@ static uint32_t csr_csrrc(riscv_t *rv,
     if (!c)
         return 0;
 
-    uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
+    if ((csr & 0xFFF) == CSR_FFLAGS || (csr & 0xFFF) == CSR_FRM ||
+        (csr & 0xFFF) == CSR_FCSR) {
+        uint32_t out = fcsr_read(rv, csr);
+        fcsr_write(rv, csr, out & ~val);
+        return out;
+    }
 #endif
+
+    uint32_t out = *c;
 
 #if RV32_HAS(SYSTEM)
     uint32_t old_satp = *c;
@@ -780,6 +832,7 @@ FORCE_INLINE bool insn_is_branch(uint8_t opcode)
         RVOP_SYNC_PC(rv, PC);                                              \
         cycle++;                                                           \
         code;                                                              \
+        rv->X[rv_reg_zero] = 0;                                            \
         IIF(RV32_HAS(SYSTEM))(                                             \
             if (need_handle_signal) {                                      \
                 need_handle_signal = false;                                \
@@ -863,7 +916,8 @@ static inline bool fuse_next_or_stop(riscv_t *rv,
     const rv_insn_t *next = ir->next;
 #ifdef WASM_DEBUG_BLOCKS
     /* Validate: fused sequences shouldn't have branch targets.
-     * fuse6 (ECALL) and fuse12 (ADDI+BNE) bypass this path entirely. */
+     * fuse6 (ECALL), fuse12 (ADDI+BNE), and branch fusions bypass this path.
+     */
     assert(!ir->branch_taken && !ir->branch_untaken &&
            "Fused ops in fuse_next_or_stop must be intra-block");
 #endif
@@ -1162,11 +1216,11 @@ static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
 #if RV32_HAS(SYSTEM)
             if (!rv->is_trapped) {
                 last_pc = PC;
-                MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+                RVOP_TAIL(rv, taken, cycle, PC);
             }
 #else
             last_pc = PC;
-            MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+            RVOP_TAIL(rv, taken, cycle, PC);
 #endif
         }
     } else {
@@ -1178,11 +1232,11 @@ static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
 #if RV32_HAS(SYSTEM)
             if (!rv->is_trapped) {
                 last_pc = PC;
-                MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
+                RVOP_TAIL(rv, untaken, cycle, PC);
             }
 #else
             last_pc = PC;
-            MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
+            RVOP_TAIL(rv, untaken, cycle, PC);
 #endif
         }
     }
@@ -1937,8 +1991,11 @@ static void optimize_constant(riscv_t *rv UNUSED, block_t *block)
 
     uint32_t i;
     rv_insn_t *ir;
-    for (i = 0, ir = block->ir_head; i < block->n_insn; i++, ir = ir->next)
+    for (i = 0, ir = block->ir_head; i < block->n_insn; i++, ir = ir->next) {
         ((constopt_func_t) constopt_table[ir->opcode])(ir, &info);
+        info.is_constant[rv_reg_zero] = true;
+        info.const_val[rv_reg_zero] = 0;
+    }
 }
 
 static block_t *block_find_or_translate(riscv_t *rv)

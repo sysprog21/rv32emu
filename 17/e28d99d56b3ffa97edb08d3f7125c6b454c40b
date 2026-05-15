@@ -1,0 +1,22 @@
+.github/workflows/main.yml
+  s_f51451ec5261a5::t_7cb59468befc1d 483
+  s_f51451ec5261a5::t_273addc3c5fd4c 116-120
+  s_f51451ec5261a5::t_4fc85d661097a6 383
+  s_f51451ec5261a5::t_a8d1553cf52b30 170-174,180,188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "17e28d99d56b3ffa97edb08d3f7125c6b454c40b",
+  "prompts": {},
+  "sessions": {
+    "s_f51451ec5261a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd56c39b-42e7-4911-9944-65246afb96df",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

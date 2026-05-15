@@ -1,0 +1,29 @@
+tools/rootfs-automount.sh
+  s_f51451ec5261a5::t_e404d21ce26794 12-13,17,26-28,32-41
+tools/cpio-inject.py
+  s_f51451ec5261a5::t_e404d21ce26794 57-59,65-69,72-75,77,112-114,118-120
+tools/dev-server.py
+  s_f51451ec5261a5::t_e404d21ce26794 35-37
+.github/workflows/main.yml
+  s_f51451ec5261a5::t_7cf052d72f5e9f 379
+  s_f51451ec5261a5::t_210ce08af95694 117-122
+  s_f51451ec5261a5::t_9ff29f3f382a28 480
+mk/external.mk
+  s_f51451ec5261a5::t_2bcb47005ef5af 104-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3fca886b4992b3c9a27f80e031cd4007429eee61",
+  "prompts": {},
+  "sessions": {
+    "s_f51451ec5261a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd56c39b-42e7-4911-9944-65246afb96df",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

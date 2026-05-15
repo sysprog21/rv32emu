@@ -1,0 +1,41 @@
+src/em_runtime.c
+  s_f51451ec5261a5::t_9163407d727c50 32-35
+mk/wasm.mk
+  s_f51451ec5261a5::t_06e27404b60c2b 149-153,159-165,169-170,173-177,181-185
+src/riscv_private.h
+  s_f51451ec5261a5::t_66251b04b78f10 241,243,245,247
+tools/dev-server.py
+  s_f51451ec5261a5::t_e404d21ce26794 35-37
+src/devices/minimal.dts
+  s_f51451ec5261a5::t_c18e72b022ace6 12,19,40,46,63,73
+tools/cpio-inject.py
+  s_f51451ec5261a5::t_e404d21ce26794 57-59,65-69,72-75,77,112-114,118-120
+.github/workflows/main.yml
+  s_f51451ec5261a5::t_d7856838c0a023 114-122
+  s_f51451ec5261a5::t_a8d1553cf52b30 170-174,180,188
+  s_f51451ec5261a5::t_7cf052d72f5e9f 379
+  s_f51451ec5261a5::t_712f110cb69c99 383-386
+  s_f51451ec5261a5::t_9ff29f3f382a28 480
+  s_f51451ec5261a5::t_7cb59468befc1d 483
+  s_f51451ec5261a5::t_9748fedeb30b13 484-487
+tools/rootfs-automount.sh
+  s_f51451ec5261a5::t_e404d21ce26794 12-13,17,26-28,32-41
+mk/external.mk
+  s_f51451ec5261a5::t_2bcb47005ef5af 104-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "c51bccf8b5bbb825dc4d25dec0a521428aa72b03",
+  "prompts": {},
+  "sessions": {
+    "s_f51451ec5261a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd56c39b-42e7-4911-9944-65246afb96df",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

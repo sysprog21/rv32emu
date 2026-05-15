@@ -1,0 +1,28 @@
+mk/wasm.mk
+  s_f51451ec5261a5::t_8814f24b6e8abb 288
+  s_f51451ec5261a5::t_a4a6124319360c 162,166
+  s_f51451ec5261a5::t_04a96464785102 267
+  s_f51451ec5261a5::t_9d3ed7382c4e80 226-233
+.github/workflows/deploy-wasm.yml
+  s_f51451ec5261a5::t_03cb84dbf689e8 47-49
+  s_f51451ec5261a5::t_07c7295733a7ea 165-166
+assets/wasm/html/user.html
+  s_f51451ec5261a5::t_2d2b95f29c265a 641-645,659
+  s_f51451ec5261a5::t_abfd8b3330a93b 1319-1322,1331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "68ccf32fb16d2b97e7cb436b40f2fb2226d61fa6",
+  "prompts": {},
+  "sessions": {
+    "s_f51451ec5261a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd56c39b-42e7-4911-9944-65246afb96df",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

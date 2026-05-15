@@ -93,7 +93,7 @@ enum {
     CSR_VCSR = 0x00F,
     CSR_VL = 0xC20,
     CSR_VTYPE = 0xC21,
-    CSR_LENB = 0xC22,
+    CSR_VLENB = 0xC22,
 };
 
 /* Lazy fusion candidate for memory operations in SYSTEM_MMIO mode.

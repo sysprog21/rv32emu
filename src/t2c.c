@@ -238,7 +238,7 @@ static const void *dispatch_table[] = {
 #undef _
 };
 
-FORCE_INLINE bool t2c_insn_is_terminal(uint8_t opcode)
+FORCE_INLINE bool t2c_insn_is_terminal(uint16_t opcode)
 {
     switch (opcode) {
     case rv_insn_ecall:

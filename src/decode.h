@@ -946,19 +946,24 @@ enum {
 };
 /* clang-format on */
 
-/* Fused instruction data - must match first 8 bytes of rv_insn_t layout.
- * This structure is used in fuse arrays and handlers access fields directly.
+/* Fused instruction data - must match first sizeof(opcode_fuse_t) bytes
+ * of rv_insn_t layout. try_fuse_sequence's
+ * memcpy(ir->fuse, ir, sizeof(opcode_fuse_t)) relies on this match.
  * WARNING: Never cast opcode_fuse_t* to rv_insn_t* - use dedicated functions.
+ *
+ * Note: opcode is uint16_t because the V extension's fuse-opcode IDs
+ * (rv_insn_fuse1..fuse12 indices) exceed 255 when EXT_V is enabled.
+ * Layout: imm(4) rd(1) rs1(1) rs2(1) pad(1) opcode(2) pad(2) = 12 bytes.
  */
 typedef struct {
     int32_t imm;
     uint8_t rd, rs1, rs2;
-    uint8_t opcode;
+    uint16_t opcode;
 } opcode_fuse_t;
 
 /* Compile-time layout verification */
-_Static_assert(sizeof(opcode_fuse_t) == 8,
-               "opcode_fuse_t must be exactly 8 bytes");
+_Static_assert(sizeof(opcode_fuse_t) == 12,
+               "opcode_fuse_t must be exactly 12 bytes");
 _Static_assert(offsetof(opcode_fuse_t, imm) == 0,
                "opcode_fuse_t.imm must be at offset 0");
 _Static_assert(offsetof(opcode_fuse_t, rd) == 4,
@@ -967,8 +972,8 @@ _Static_assert(offsetof(opcode_fuse_t, rs1) == 5,
                "opcode_fuse_t.rs1 must be at offset 5");
 _Static_assert(offsetof(opcode_fuse_t, rs2) == 6,
                "opcode_fuse_t.rs2 must be at offset 6");
-_Static_assert(offsetof(opcode_fuse_t, opcode) == 7,
-               "opcode_fuse_t.opcode must be at offset 7");
+_Static_assert(offsetof(opcode_fuse_t, opcode) == 8,
+               "opcode_fuse_t.opcode must be at offset 8");
 
 #define HISTORY_SIZE 16
 /* Direct-mapped BHT requires power-of-2 size for mask calculation */

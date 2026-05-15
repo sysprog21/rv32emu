@@ -685,7 +685,7 @@ static uint32_t peripheral_update_ctr = 64;
     } while (0)
 #endif
 
-FORCE_INLINE bool insn_is_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch, insn_len, translatable, reg_mask) \
@@ -1206,7 +1206,7 @@ static const void *dispatch_table[] = {
 /* clang-format on */
 
 #if RV32_HAS(JIT)
-FORCE_INLINE bool insn_is_translatable(uint8_t opcode)
+FORCE_INLINE bool insn_is_translatable(uint16_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch, insn_len, translatable, reg_mask) \
@@ -1220,7 +1220,7 @@ FORCE_INLINE bool insn_is_translatable(uint8_t opcode)
 #endif
 
 #if RV32_HAS(BLOCK_CHAINING)
-FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_unconditional_branch(uint16_t opcode)
 {
     switch (opcode) {
     case rv_insn_ecall:
@@ -1247,7 +1247,7 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     }
 }
 
-FORCE_INLINE bool insn_is_direct_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_direct_branch(uint16_t opcode)
 {
     switch (opcode) {
     case rv_insn_jal:
@@ -1262,7 +1262,7 @@ FORCE_INLINE bool insn_is_direct_branch(uint8_t opcode)
 }
 #endif
 
-FORCE_INLINE bool insn_is_indirect_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_indirect_branch(uint16_t opcode)
 {
     switch (opcode) {
     case rv_insn_jalr:
@@ -1403,7 +1403,7 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
 }
 
 /* Count consecutive instructions with same opcode */
-static inline int count_consecutive_insn(rv_insn_t *ir, uint8_t opcode)
+static inline int count_consecutive_insn(rv_insn_t *ir, uint16_t opcode)
 {
     int count = 1;
     rv_insn_t *next = ir->next;
@@ -1444,7 +1444,7 @@ static inline bool try_fuse_sequence(riscv_t *rv,
                                      block_t *block,
                                      rv_insn_t *ir,
                                      int count,
-                                     uint8_t fuse_opcode)
+                                     uint16_t fuse_opcode)
 {
     if (count <= 1)
         return false;
@@ -1889,7 +1889,7 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
 
         if (all_ram) {
             /* Attempt fusion - may fail due to allocation */
-            uint8_t fuse_opcode =
+            uint16_t fuse_opcode =
                 (cand->opcode == rv_insn_lw) ? rv_insn_fuse4 : rv_insn_fuse3;
             if (try_fuse_sequence(rv, block, cand->ir, cand->count,
                                   fuse_opcode)) {

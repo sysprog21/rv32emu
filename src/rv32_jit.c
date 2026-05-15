@@ -786,3 +786,9 @@ GEN(binvi, { assert(NULL); })
 GEN(bset, { assert(NULL); })
 GEN(bseti, { assert(NULL); })
 #endif
+
+#if RV32_HAS(EXT_V)
+#define RVOP(inst, body) GEN(inst, { assert(NULL); })
+#include "rv32_v_template.c"
+#undef RVOP
+#endif

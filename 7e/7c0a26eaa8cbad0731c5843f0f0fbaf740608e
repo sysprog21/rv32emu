@@ -1,0 +1,21 @@
+mk/wasm.mk
+  s_f51451ec5261a5::t_06e27404b60c2b 149-153,159-165,169-170,173-177,181-185
+src/riscv_private.h
+  s_f51451ec5261a5::t_66251b04b78f10 241,243,245,247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "7e7c0a26eaa8cbad0731c5843f0f0fbaf740608e",
+  "prompts": {},
+  "sessions": {
+    "s_f51451ec5261a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd56c39b-42e7-4911-9944-65246afb96df",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

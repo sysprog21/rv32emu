@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>rv32emu - RISC-V Emulator</title>
+  <style>
+    *, *::before, *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #0a0a0a;
+      --bg-card: #111111;
+      --bg-card-hover: #161616;
+      --border: #222222;
+      --border-hover: #00ff0040;
+      --text: #d0d0d0;
+      --text-dim: #808080;
+      --text-muted: #505050;
+      --accent: #00ff00;
+      --accent-dim: #00cc00;
+      --glow: rgba(0, 255, 0, 0.06);
+    }
+
+    body {
+      font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', 'Liberation Mono', monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 740px;
+      width: 100%;
+      padding: 60px 32px;
+      text-align: center;
+    }
+
+    /* Header */
+    .logo {
+      font-size: 14px;
+      color: var(--accent);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      opacity: 0.7;
+    }
+
+    h1 {
+      font-size: 44px;
+      font-weight: 600;
+      color: #f0f0f0;
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      font-size: 15px;
+      color: var(--text-dim);
+      font-weight: 400;
+      margin-bottom: 48px;
+      line-height: 1.6;
+    }
+
+    /* Mode cards */
+    .modes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 40px;
+    }
+
+    .mode-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px 24px 28px;
+      text-decoration: none;
+      color: var(--text);
+      transition: all 0.25s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .mode-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--accent);
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    .mode-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--border-hover);
+    }
+
+    .mode-card:hover::before {
+      opacity: 1;
+    }
+
+    .mode-icon {
+      font-size: 28px;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .mode-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: #e8e8e8;
+    }
+
+    .mode-desc {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.7;
+    }
+
+    .mode-arrow {
+      display: inline-block;
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--accent-dim);
+      opacity: 0;
+      transform: translateX(-4px);
+      transition: all 0.25s ease;
+    }
+
+    .mode-card:hover .mode-arrow {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    /* Features */
+    .features {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 28px;
+      margin-bottom: 40px;
+      text-align: left;
+    }
+
+    .features-title {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 16px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+    }
+
+    .feature {
+      font-size: 13px;
+      color: var(--text-dim);
+      padding: 8px 0;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .feature::before {
+      content: '\2022';
+      color: var(--accent);
+      opacity: 0.4;
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+
+    /* Architecture badges */
+    .arch-tags {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 40px;
+      flex-wrap: wrap;
+    }
+
+    .arch-tag {
+      font-size: 11px;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 10px;
+      letter-spacing: 0.5px;
+    }
+
+    /* Footer */
+    .footer {
+      font-size: 13px;
+      color: var(--text-muted);
+      padding-top: 20px;
+      border-top: 1px solid #1a1a1a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .footer a {
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    .footer a:hover {
+      color: var(--accent);
+    }
+
+    .footer-sep {
+      color: #2a2a2a;
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        padding: 40px 20px;
+      }
+
+      h1 {
+        font-size: 32px;
+      }
+
+      .modes {
+        grid-template-columns: 1fr;
+      }
+
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">RISC-V Emulator</div>
+    <h1>rv32emu</h1>
+    <p class="subtitle">A compact RV32I[MAFC] emulator running entirely in your browser via WebAssembly</p>
+
+    <div class="arch-tags">
+      <span class="arch-tag">RV32I</span>
+      <span class="arch-tag">M</span>
+      <span class="arch-tag">A</span>
+      <span class="arch-tag">F</span>
+      <span class="arch-tag">C</span>
+      <span class="arch-tag">Zba/Zbb/Zbc/Zbs</span>
+    </div>
+
+    <div class="modes">
+      <a href="user/" class="mode-card">
+        <span class="mode-icon">&gt;_</span>
+        <div class="mode-title">User Mode</div>
+        <div class="mode-desc">
+          Run RISC-V ELF binaries directly. Doom, Quake, NES emulator, and interactive demos with SDL graphics and audio.
+        </div>
+        <span class="mode-arrow">Launch &rarr;</span>
+      </a>
+
+      <a href="system/" class="mode-card">
+        <span class="mode-icon">&#x2318;</span>
+        <div class="mode-title">System Mode</div>
+        <div class="mode-desc">
+          Boot a full Linux kernel with VirtIO devices. UART console, timer, block device, and network.
+        </div>
+        <span class="mode-arrow">Launch &rarr;</span>
+      </a>
+    </div>
+
+    <div class="features">
+      <div class="features-title">Capabilities</div>
+      <div class="features-grid">
+        <div class="feature">Fast threaded interpreter</div>
+        <div class="feature">Tiered JIT compilation</div>
+        <div class="feature">SDL2 graphics &amp; audio</div>
+        <div class="feature">Linux kernel boot</div>
+        <div class="feature">Macro-op fusion</div>
+        <div class="feature">GDB remote debug</div>
+        <div class="feature">VirtIO block &amp; net</div>
+        <div class="feature">SharedArrayBuffer</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <a href="https://github.com/sysprog21/rv32emu">GitHub</a>
+      <span class="footer-sep">|</span>
+      <span>Open source RISC-V emulator</span>
+    </div>
+  </div>
+</body>
+</html>

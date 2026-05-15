@@ -350,8 +350,7 @@ void memory_gc(void)
 #endif
 }
 
-/*
- * Fast memory access functions - no bounds checking for performance.
+/* Fast memory access functions - no bounds checking for performance.
  * Callers must validate addresses. With MMAP, out-of-bounds access
  * triggers SIGSEGV that chains to the default handler.
  */

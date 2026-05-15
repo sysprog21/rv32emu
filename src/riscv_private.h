@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "common.h"
+
 #if RV32_HAS(GDBSTUB)
 #include "breakpoint.h"
 #include "mini-gdbstub/include/gdbstub.h"
@@ -235,7 +237,35 @@ void block_map_clear(riscv_t *rv);
 struct riscv_internal {
     bool halt; /**< indicate whether the core is halted */
 
-    /* Integer registers - Aarch64 encoder needs 9-bit signed offset access */
+#ifdef __EMSCRIPTEN__
+/* Soft limit: yield at block boundaries */
+#ifndef WASM_BLOCK_LIMIT
+#define WASM_BLOCK_LIMIT 5000
+#endif
+/* Hard limit: force yield (total budget 15000 with the soft limit) */
+#ifndef WASM_BLOCK_HARD_LIMIT
+#define WASM_BLOCK_HARD_LIMIT 10000
+#endif
+    /* WASM stack overflow prevention:
+     * Break recursion chain at block boundaries to unwind stack.
+     * Use block-count budget (not instruction count) to avoid interrupting
+     * kernel atomic operations within basic blocks.
+     */
+    int wasm_block_depth;
+    const rv_insn_t *next_insn;
+#ifdef WASM_DEBUG_BLOCKS
+    int max_block_depth_seen;      /* Track max recursion for validation */
+    int yield_soft_count;          /* INTER yields at block boundaries */
+    int yield_hard_count;          /* INTRA emergency yields */
+    uint64_t total_depth_at_yield; /* For calculating avg depth per yield */
+#endif
+#endif
+
+    /* integer registers */
+    /*
+     * Aarch64 encoder only accepts 9 bits signed offset. Do not put this
+     * structure below the section.
+     */
     riscv_word_t X[N_RV_REGS];
     riscv_word_t PC;
 
@@ -409,17 +439,14 @@ FORCE_INLINE bool is_compressed(uint32_t insn)
  * Performance benefit: Eliminates indirect call overhead (~5-10 cycles per
  * memory access on modern CPUs due to branch predictor penalties).
  *
- * These functions perform NO bounds checking - they trust that 'addr' is
- * valid within mem_base. This invariant is maintained by:
- * 1. ELF loader validation: All program segments must fit within RAM bounds
- *    (see elf_load() in elf.c which rejects out-of-bounds segments)
- * 2. Memory layout: mem_base is allocated with sufficient size for the
- *    configured memory map (see memory_new() in riscv.c)
- * 3. Stack/heap bounds: Initial SP and brk limits are within RAM
+ * On native builds (HAVE_MMAP=1), no bounds checking is performed. The
+ * invariant that 'addr' is valid is maintained by ELF loader validation,
+ * memory layout, and stack/heap bounds. Out-of-bounds access triggers
+ * SIGSEGV which chains to the default handler.
  *
- * DO NOT relax ELF loader validation or memory allocation without adding
- * explicit bounds checks here. Out-of-bounds access leads to undefined
- * behavior (host memory corruption).
+ * On Emscripten/WASM (HAVE_MMAP=0), explicit bounds checking prevents
+ * "out of bounds memory access" WASM traps. The branch is highly
+ * predictable (almost never taken) so the performance cost is negligible.
  *
  * Note: Only used when SYSTEM mode is disabled. SYSTEM mode requires MMU/TLB
  * translation which must go through the io callbacks.
@@ -428,6 +455,10 @@ FORCE_INLINE bool is_compressed(uint32_t insn)
 FORCE_INLINE uint32_t ram_read_w(const riscv_t *rv, uint32_t addr)
 {
     vm_attr_t *attr = PRIV(rv);
+#if !HAVE_MMAP
+    if (unlikely((uint64_t) addr + sizeof(uint32_t) > attr->mem->mem_size))
+        return 0;
+#endif
     uint32_t val;
     memcpy(&val, attr->mem->mem_base + addr, sizeof(val));
     return val;
@@ -436,6 +467,10 @@ FORCE_INLINE uint32_t ram_read_w(const riscv_t *rv, uint32_t addr)
 FORCE_INLINE uint16_t ram_read_s(const riscv_t *rv, uint32_t addr)
 {
     vm_attr_t *attr = PRIV(rv);
+#if !HAVE_MMAP
+    if (unlikely((uint64_t) addr + sizeof(uint16_t) > attr->mem->mem_size))
+        return 0;
+#endif
     uint16_t val;
     memcpy(&val, attr->mem->mem_base + addr, sizeof(val));
     return val;
@@ -444,24 +479,40 @@ FORCE_INLINE uint16_t ram_read_s(const riscv_t *rv, uint32_t addr)
 FORCE_INLINE uint8_t ram_read_b(const riscv_t *rv, uint32_t addr)
 {
     vm_attr_t *attr = PRIV(rv);
+#if !HAVE_MMAP
+    if (unlikely((uint64_t) addr >= attr->mem->mem_size))
+        return 0;
+#endif
     return attr->mem->mem_base[addr];
 }
 
 FORCE_INLINE void ram_write_w(const riscv_t *rv, uint32_t addr, uint32_t val)
 {
     vm_attr_t *attr = PRIV(rv);
+#if !HAVE_MMAP
+    if (unlikely((uint64_t) addr + sizeof(uint32_t) > attr->mem->mem_size))
+        return;
+#endif
     memcpy(attr->mem->mem_base + addr, &val, sizeof(val));
 }
 
 FORCE_INLINE void ram_write_s(const riscv_t *rv, uint32_t addr, uint16_t val)
 {
     vm_attr_t *attr = PRIV(rv);
+#if !HAVE_MMAP
+    if (unlikely((uint64_t) addr + sizeof(uint16_t) > attr->mem->mem_size))
+        return;
+#endif
     memcpy(attr->mem->mem_base + addr, &val, sizeof(val));
 }
 
 FORCE_INLINE void ram_write_b(const riscv_t *rv, uint32_t addr, uint8_t val)
 {
     vm_attr_t *attr = PRIV(rv);
+#if !HAVE_MMAP
+    if (unlikely((uint64_t) addr >= attr->mem->mem_size))
+        return;
+#endif
     attr->mem->mem_base[addr] = val;
 }
 #endif /* !RV32_HAS(SYSTEM) */

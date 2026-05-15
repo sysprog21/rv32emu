@@ -49,3 +49,8 @@ u8250_state_t *u8250_new();
 
 /* delete a UART instance */
 void u8250_delete(u8250_state_t *uart);
+
+#if defined(__EMSCRIPTEN__)
+/* clear pending browser UART input between VM lifecycles */
+void u8250_reset_input_buffer();
+#endif

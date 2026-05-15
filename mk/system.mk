@@ -23,9 +23,9 @@ DTC ?= dtc
 BUILD_DTB := $(OUT)/minimal.dtb
 
 # Device Tree compilation
-$(BUILD_DTB): $(DEV_SRC)/minimal.dts | $(OUT)
+$(BUILD_DTB): $(DEV_SRC)/minimal.dts $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(VECHO) " DTC\t$@\n"
-	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef $(CFLAGS_dt) $^ | $(DTC) - > $@
+	$(Q)$(CC) -nostdinc -E -P -x assembler-with-cpp -undef $(CFLAGS_dt) $< | $(DTC) - > $@
 
 # Native compiler for build tools (emcc generates wasm, need native for tools)
 NATIVE_CC := $(shell which gcc 2>/dev/null || which clang 2>/dev/null)
@@ -39,7 +39,7 @@ else
 endif
 
 BUILD_DTB2C := src/minimal_dtb.h
-$(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB)
+$(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB) $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  BIN2C\t$@\n"
 	$(Q)$(BIN_TO_C) $(BUILD_DTB) > $@
 
@@ -47,7 +47,7 @@ $(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB)
 $(DEV_OUT):
 	$(Q)mkdir -p $@
 
-$(DEV_OUT)/%.o: $(DEV_SRC)/%.c | $(DEV_OUT)
+$(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(EFFECTIVE_CONFIG_STAMP) | $(DEV_OUT)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 

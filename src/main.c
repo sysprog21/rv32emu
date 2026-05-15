@@ -68,6 +68,51 @@ static char *opt_virtio_blk_img[VBLK_DEV_MAX];
 static int opt_virtio_blk_idx = 0;
 #endif
 
+static void reset_getopt_state(void)
+{
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
+    defined(__OpenBSD__) || defined(__DragonFly__)
+    optreset = 1;
+    optind = 1;
+#else
+    optind = 0;
+#endif
+    optarg = NULL;
+    optopt = 0;
+}
+
+static void reset_runtime_options(void)
+{
+#if !RV32_HAS(SYSTEM_MMIO)
+    opt_trace = false;
+#endif
+#if RV32_HAS(GDBSTUB)
+    opt_gdbstub = false;
+#endif
+    opt_dump_regs = false;
+    registers_out_file = NULL;
+    opt_arch_test = false;
+    signature_out_file = NULL;
+    opt_quiet_outputs = false;
+    opt_prog_name = NULL;
+    prog_argc = 0;
+    prog_args = NULL;
+    opt_misaligned = false;
+    opt_prof_data = false;
+    free(prof_out_file);
+    prof_out_file = NULL;
+#if RV32_HAS(SYSTEM_MMIO)
+    opt_kernel_img = NULL;
+    opt_rootfs_img = NULL;
+    opt_bootargs = NULL;
+    memset(opt_virtio_blk_img, 0, sizeof(opt_virtio_blk_img));
+    opt_virtio_blk_idx = 0;
+#endif
+
+    reset_getopt_state();
+    rv_log_set_quiet(false);
+}
+
 static void print_usage(const char *filename)
 {
     rv_log_error(
@@ -264,14 +309,43 @@ static void dump_test_signature(const char UNUSED *prog_name)
  */
 riscv_t *rv;
 #ifdef __EMSCRIPTEN__
+static bool rv_stop_requested;
+
 void indirect_rv_halt()
 {
-    rv_halt(rv);
+    if (rv) {
+        rv_stop_requested = true;
+        rv_halt(rv);
+    }
+}
+
+int indirect_rv_alive()
+{
+    return rv != NULL;
+}
+
+void indirect_rv_cleanup()
+{
+    if (rv) {
+        rv_delete(rv);
+        rv = NULL;
+    }
+#if RV32_HAS(SYSTEM_MMIO)
+    u8250_reset_input_buffer();
+#endif
+    rv_stop_requested = false;
+}
+
+int indirect_rv_stop_requested()
+{
+    return rv_stop_requested;
 }
 #endif
 
 int main(int argc, char **args)
 {
+    reset_runtime_options();
+
     if (argc == 1 || !parse_args(argc, args)) {
         print_usage(args[0]);
         return 1;
@@ -347,6 +421,7 @@ int main(int argc, char **args)
 #endif
 
 #if defined(__EMSCRIPTEN__)
+    rv_stop_requested = false;
     disable_run_button();
 #endif
 
@@ -374,5 +449,6 @@ int main(int argc, char **args)
 
 end:
     free(prof_out_file);
+    prof_out_file = NULL;
     return attr.exit_code;
 }

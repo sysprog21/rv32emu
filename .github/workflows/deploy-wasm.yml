@@ -44,6 +44,9 @@ jobs:
               mk/wasm.mk
               configs/wasm_defconfig
               tools/detect-env.py
+              # rootfs overlay tooling (S99automount auto-mounts /dev/vda)
+              tools/cpio-inject.py
+              tools/rootfs-automount.sh
               # Files below may have a potential performance impact (reference from benchmark.yml)
               src/devices/*.c
               src/system.c
@@ -74,13 +77,22 @@ jobs:
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
         run: |
             make wasm_defconfig
-            make ENABLE_SYSTEM=1 ENABLE_GOLDFISH_RTC=1 INITRD_SIZE=32 -j
+            make ENABLE_SYSTEM=1 ENABLE_GOLDFISH_RTC=1 -j
+            make assets/wasm/vendor/xterm.min.js assets/wasm/vendor/xterm.min.css
+            # Build the rootfs overlay (S99automount) and concatenate it with
+            # the upstream rootfs.cpio so the guest mounts /dev/vda at boot.
+            make build/linux-image/rootfs.web.cpio ENABLE_SYSTEM=1
             mkdir /tmp/rv32emu-system-demo
-            mv assets/wasm/html/system.html /tmp/rv32emu-system-demo/index.html
-            mv assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-system-demo
-            mv build/rv32emu.js /tmp/rv32emu-system-demo
-            mv build/rv32emu.wasm /tmp/rv32emu-system-demo
-            mv build/rv32emu.worker.js /tmp/rv32emu-system-demo
+            cp assets/wasm/html/system.html /tmp/rv32emu-system-demo/index.html
+            cp assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-system-demo/
+            cp assets/wasm/vendor/xterm.min.js /tmp/rv32emu-system-demo/
+            cp assets/wasm/vendor/xterm.min.css /tmp/rv32emu-system-demo/
+            cp build/rv32emu.js /tmp/rv32emu-system-demo/
+            cp build/rv32emu.wasm /tmp/rv32emu-system-demo/
+            cp build/rv32emu.worker.js /tmp/rv32emu-system-demo/ || true
+            cp build/linux-image/Image /tmp/rv32emu-system-demo/
+            # Ship the extended rootfs (with S99automount) as rootfs.cpio
+            cp build/linux-image/rootfs.web.cpio /tmp/rv32emu-system-demo/rootfs.cpio
             ls -al /tmp/rv32emu-system-demo
       - name: Check out the rv32emu-system-demo repo
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
@@ -98,9 +110,13 @@ jobs:
             mkdir -p system
             mv /tmp/rv32emu-system-demo/index.html ./system
             mv /tmp/rv32emu-system-demo/coi-serviceworker.min.js ./system
+            mv /tmp/rv32emu-system-demo/xterm.min.js ./system
+            mv /tmp/rv32emu-system-demo/xterm.min.css ./system
             mv /tmp/rv32emu-system-demo/rv32emu.js ./system
             mv /tmp/rv32emu-system-demo/rv32emu.wasm ./system
-            mv /tmp/rv32emu-system-demo/rv32emu.worker.js ./system
+            mv /tmp/rv32emu-system-demo/rv32emu.worker.js ./system || true
+            mv /tmp/rv32emu-system-demo/Image ./system
+            mv /tmp/rv32emu-system-demo/rootfs.cpio ./system
       - name: Commit files
         id: commit
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
@@ -146,6 +162,8 @@ jobs:
         with:
           files: |
               assets/wasm/html/user.html
+              # Landing page is committed at the repo root by the user job
+              assets/wasm/html/demo-index.html
               assets/wasm/js/user-pre.js
               build/*.elf
               tools/gen-elf-list-js.py
@@ -187,13 +205,28 @@ jobs:
         run: |
             make wasm_defconfig
             make -j
+            make assets/wasm/vendor/xterm.min.js assets/wasm/vendor/xterm.min.css
+            # Bundle the timidity instrument set once as tar and once as
+            # tar.gz. Browsers with DecompressionStream use the smaller gzip
+            # payload; older Safari/Firefox fall back to the plain tar.
+            tar -cf build/timidity.tar -C build/timidity .
+            gzip -9 -c build/timidity.tar > build/timidity.tar.gz
             mkdir /tmp/rv32emu-demo
-            mv assets/wasm/html/user.html /tmp/rv32emu-demo/index.html
-            mv assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-demo
-            mv build/elf_list.js /tmp/rv32emu-demo
-            mv build/rv32emu.js /tmp/rv32emu-demo
-            mv build/rv32emu.wasm /tmp/rv32emu-demo
-            mv build/rv32emu.worker.js /tmp/rv32emu-demo
+            # Landing page goes to the repo root; user-mode assets to /user/
+            cp assets/wasm/html/demo-index.html /tmp/rv32emu-demo/landing.html
+            cp assets/wasm/html/user.html /tmp/rv32emu-demo/index.html
+            cp assets/wasm/js/coi-serviceworker.min.js /tmp/rv32emu-demo/
+            cp assets/wasm/vendor/xterm.min.js /tmp/rv32emu-demo/
+            cp assets/wasm/vendor/xterm.min.css /tmp/rv32emu-demo/
+            cp build/elf_list.js /tmp/rv32emu-demo/
+            cp build/rv32emu.js /tmp/rv32emu-demo/
+            cp build/rv32emu.wasm /tmp/rv32emu-demo/
+            cp build/rv32emu.worker.js /tmp/rv32emu-demo/ || true
+            # Large game-data assets fetched on demand by user.html
+            cp build/DOOM1.WAD /tmp/rv32emu-demo/
+            cp build/id1/pak0.pak /tmp/rv32emu-demo/
+            cp build/timidity.tar /tmp/rv32emu-demo/
+            cp build/timidity.tar.gz /tmp/rv32emu-demo/
             ls -al /tmp/rv32emu-demo
       - name: Check out the rv32emu-demo repo
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
@@ -208,12 +241,27 @@ jobs:
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm') }}
         run: |
-            mv /tmp/rv32emu-demo/index.html .
-            mv /tmp/rv32emu-demo/coi-serviceworker.min.js .
-            mv /tmp/rv32emu-demo/elf_list.js .
-            mv /tmp/rv32emu-demo/rv32emu.js .
-            mv /tmp/rv32emu-demo/rv32emu.wasm .
-            mv /tmp/rv32emu-demo/rv32emu.worker.js .
+            # Migration: previous deploys placed user-mode assets at the repo
+            # root. Remove those stale files so the unified layout (landing
+            # page at /, user mode at /user/, system mode at /system/) is
+            # consistent. Use -f so the step is idempotent on subsequent runs.
+            rm -f navigation.html coi-serviceworker.min.js xterm.min.js \
+                  xterm.min.css elf_list.js rv32emu.js rv32emu.wasm \
+                  rv32emu.worker.js
+            mkdir -p user
+            mv /tmp/rv32emu-demo/landing.html ./index.html
+            mv /tmp/rv32emu-demo/index.html ./user/
+            mv /tmp/rv32emu-demo/coi-serviceworker.min.js ./user/
+            mv /tmp/rv32emu-demo/xterm.min.js ./user/
+            mv /tmp/rv32emu-demo/xterm.min.css ./user/
+            mv /tmp/rv32emu-demo/elf_list.js ./user/
+            mv /tmp/rv32emu-demo/rv32emu.js ./user/
+            mv /tmp/rv32emu-demo/rv32emu.wasm ./user/
+            mv /tmp/rv32emu-demo/rv32emu.worker.js ./user/ || true
+            mv /tmp/rv32emu-demo/DOOM1.WAD ./user/
+            mv /tmp/rv32emu-demo/pak0.pak ./user/
+            mv /tmp/rv32emu-demo/timidity.tar ./user/
+            mv /tmp/rv32emu-demo/timidity.tar.gz ./user/
       - name: Commit files
         id: commit
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||

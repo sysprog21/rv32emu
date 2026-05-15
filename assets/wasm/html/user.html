@@ -1,250 +1,1645 @@
-<!doctype html>
-<html lang="en-us">
-  <head>
-    <meta charset="utf-8">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>Emscripten-Generated Code</title>
-    <style>body {
-  font-family: arial;
-  margin: 0;
-  padding: none;
-}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>rv32emu - RISC-V Emulator</title>
+  <!-- xterm.js CSS (small, load immediately) -->
+  <link rel="stylesheet" href="xterm.min.css">
+  <!-- Preload WASM for streaming compilation (largest asset) -->
+  <link rel="preload" href="rv32emu.wasm" as="fetch" type="application/wasm" crossorigin>
+  <style>
+    /* Critical CSS - inline for fast first paint */
+    :root {
+      --bg-primary: #0a0a0a;
+      --bg-secondary: #141414;
+      --bg-terminal: #000000;
+      --text-primary: #e0e0e0;
+      --text-secondary: #707070;
+      --text-muted: #505050;
+      --accent-green: #00ff00;
+      --accent-cyan: #00ffff;
+      --accent-amber: #ffb000;
+      --border-color: #2a2a2a;
+      --error-red: #ff4444;
+    }
 
-.emscripten { padding-right: 0; margin-left: auto; margin-right: auto; display: block; }
-div.emscripten { text-align: center; }
-div.emscripten_border { border: 1px solid black; }
-/* the canvas *must not* have any border or padding, or mouse coords will be wrong */
-canvas.emscripten { border: 0px none; background-color: black; }
+    @media (prefers-color-scheme: light) {
+      :root:not(.dark-theme) {
+        --bg-primary: #fafafa;
+        --bg-secondary: #f0f0f0;
+        --bg-terminal: #1a1a1a;
+        --text-primary: #1a1a1a;
+        --text-secondary: #666666;
+        --text-muted: #999999;
+        --border-color: #e0e0e0;
+      }
+    }
 
-#emscripten_logo {
-  display: inline-block;
-  margin: 0;
-  padding: 6px;
-  width: 265px;
-}
+    /* Manual light theme toggle (single class for efficient reflow) */
+    :root.light-theme {
+      --bg-primary: #fafafa;
+      --bg-secondary: #f0f0f0;
+      --bg-terminal: #1a1a1a;
+      --text-primary: #1a1a1a;
+      --text-secondary: #666666;
+      --text-muted: #999999;
+      --border-color: #e0e0e0;
+    }
 
-.spinner {
-  height: 30px;
-  width: 30px;
-  margin: 0;
-  margin-top: 20px;
-  margin-left: 20px;
-  display: inline-block;
-  vertical-align: top;
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-  -webkit-animation: rotation .8s linear infinite;
-  -moz-animation: rotation .8s linear infinite;
-  -o-animation: rotation .8s linear infinite;
-  animation: rotation 0.8s linear infinite;
+    body {
+      font-family: 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
 
-  border-left: 5px solid rgb(235, 235, 235);
-  border-right: 5px solid rgb(235, 235, 235);
-  border-bottom: 5px solid rgb(235, 235, 235);
-  border-top: 5px solid rgb(120, 120, 120);
+    /* Progressive loading states */
+    .progressive-load {
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
 
-  border-radius: 100%;
-  background-color: rgb(189, 215, 46);
-}
+    .progressive-load.loaded {
+      opacity: 1;
+      transform: translateY(0);
+    }
 
-@-webkit-keyframes rotation {
-  from {-webkit-transform: rotate(0deg);}
-  to {-webkit-transform: rotate(360deg);}
-}
-@-moz-keyframes rotation {
-  from {-moz-transform: rotate(0deg);}
-  to {-moz-transform: rotate(360deg);}
-}
-@-o-keyframes rotation {
-  from {-o-transform: rotate(0deg);}
-  to {-o-transform: rotate(360deg);}
-}
-@keyframes rotation {
-  from {transform: rotate(0deg);}
-  to {transform: rotate(360deg);}
-}
+    /* Loading overlay */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-primary);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      transition: opacity 0.5s ease, visibility 0.5s ease;
+    }
 
-#status {
-  display: inline-block;
-  vertical-align: top;
-  margin-top: 30px;
-  margin-left: 20px;
-  font-weight: bold;
-  color: rgb(120, 120, 120);
-}
+    .loading-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
 
-#progress {
-  height: 20px;
-  width: 300px;
-}
+    .loading-spinner {
+      width: 48px;
+      height: 48px;
+      border: 3px solid var(--border-color);
+      border-top-color: var(--accent-green);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
 
-#controls {
-  display: inline-block;
-  float: right;
-  vertical-align: top;
-  margin-top: 30px;
-  margin-right: 20px;
-}
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
 
-#output {
-  width: 100%;
-  height: 200px;
-  margin: 0 auto;
-  margin-top: 10px;
-  border-left: 0px;
-  border-right: 0px;
-  padding-left: 0px;
-  padding-right: 0px;
-  display: block;
-  background-color: black;
-  color: white;
-  font-family: 'Lucida Console', Monaco, monospace;
-  outline: none;
-}
-</style>
-  </head>
-  <body>
-    <a href="http://emscripten.org"><img id="emscripten_logo" src="data:image/png;base64,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"></a>
+    .loading-text {
+      margin-top: 16px;
+      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 18px;
+      color: var(--text-secondary);
+    }
 
-    <div class="spinner" id='spinner'></div>
-    <div class="emscripten" id="status">Downloading...</div>
+    .loading-progress {
+      width: 200px;
+      height: 4px;
+      background: var(--border-color);
+      border-radius: 2px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
 
-    <span id='controls'>
-      <span><input type="checkbox" id="resize">Resize canvas</span>
-      <span><input type="checkbox" id="pointerLock" checked>Lock/hide mouse pointer &nbsp;&nbsp;&nbsp;</span>
-      <span><input type="button" value="Fullscreen" onclick="Module.requestFullscreen(document.getElementById('pointerLock').checked,
-                                                                                document.getElementById('resize').checked)">
-      </span>
-    </span>
+    .loading-progress-bar {
+      height: 100%;
+      background: var(--accent-green);
+      border-radius: 2px;
+      width: 100%;
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 0.3s ease;
+      will-change: transform;
+    }
 
-    <select id="elfDropdown">
-      <option value="">Select ELF File</option>
-    </select>
-    <button id="runButton">Run</button>
+    .loading-details {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
 
-    <button id="toSysEmuButton">
-      🚀 Navigate to System Emulation
-    </button>
+    /* Navigation */
+    .nav-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 24px;
+      border-bottom: 1px solid var(--border-color);
+      background: var(--bg-secondary);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
 
-    <div class="emscripten">
-      <progress value="0" max="100" id="progress" hidden=1></progress>
-    </div>
+    .logo {
+      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 28px;
+      color: var(--accent-green);
+      letter-spacing: 2px;
+    }
 
-    <div class="emscripten_border">
-      <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex=-1></canvas>
-    </div>
-    <textarea id="output" rows="8"></textarea>
+    .logo span {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
 
-    <script src="elf_list.js"></script>
-    <script type='text/javascript'>
-      var statusElement = document.getElementById('status');
-      var progressElement = document.getElementById('progress');
-      var spinnerElement = document.getElementById('spinner');
-      var runButton = document.getElementById("runButton");
-      runButton.addEventListener("click", runButtonClickHandler);
-      var toSysEmuButton = document.getElementById("toSysEmuButton");
-      toSysEmuButton.addEventListener("click", toSysEmuButtonClickHandler);
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
 
-      function toSysEmuButtonClickHandler() {
-        console.log("Navigate to system emulation");
-        window.location.href = "./system"
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.2s;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .nav-links a:hover {
+      color: var(--accent-green);
+    }
+
+    /* Main Container */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* Hero Section */
+    .hero {
+      text-align: center;
+      padding: 48px 0 32px;
+    }
+
+    .hero h1 {
+      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 48px;
+      font-weight: normal;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+
+    .hero .subtitle {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .status-badge::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      animation: pulse 2s infinite;
+    }
+
+    .status-badge.loading::before {
+      background: var(--accent-amber);
+    }
+
+    .status-badge.running::before {
+      background: var(--accent-cyan);
+      animation: running-pulse 0.8s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    @keyframes running-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.2); }
+    }
+
+    /* Controls Panel */
+    .controls-panel {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .elf-selector {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 10px 16px;
+      font-family: inherit;
+      font-size: 14px;
+      border-radius: 4px;
+      min-width: 200px;
+      cursor: pointer;
+    }
+
+    .elf-selector:focus {
+      outline: 2px solid var(--accent-green);
+      outline-offset: 2px;
+      border-color: var(--accent-green);
+    }
+
+    .elf-selector:focus:not(:focus-visible) {
+      outline: none;
+    }
+
+    .btn {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 10px 20px;
+      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 18px;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      border-radius: 4px;
+    }
+
+    .btn:hover {
+      background: var(--accent-green);
+      color: var(--bg-primary);
+      border-color: var(--accent-green);
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn:focus-visible {
+      outline: 2px solid var(--accent-cyan);
+      outline-offset: 2px;
+    }
+
+    .btn-primary {
+      background: var(--accent-green);
+      color: var(--bg-primary);
+      border-color: var(--accent-green);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-cyan);
+      border-color: var(--accent-cyan);
+    }
+
+    .btn-secondary {
+      border-color: var(--text-muted);
+      color: var(--text-secondary);
+    }
+
+    /* Canvas Panel */
+    .canvas-panel {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    .canvas-panel.collapsed .canvas-wrapper {
+      max-height: 0;
+      min-height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      opacity: 0;
+      visibility: hidden;
+      overflow: hidden;
+    }
+
+    .canvas-panel.collapsed .canvas-header {
+      cursor: pointer;
+    }
+
+    .canvas-panel.collapsed .canvas-controls {
+      display: none;
+    }
+
+    .canvas-toggle {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 4px 8px;
+      margin-left: 8px;
+    }
+
+    .canvas-toggle:hover {
+      color: var(--accent-green);
+    }
+
+    .canvas-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 16px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .canvas-title {
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .canvas-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .canvas-controls label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .canvas-controls input[type="checkbox"] {
+      accent-color: var(--accent-green);
+    }
+
+    .canvas-wrapper {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 300px;
+      padding: 16px;
+      /* Only animate opacity - avoid layout-triggering properties */
+      transition: opacity 0.3s ease;
+      opacity: 1;
+    }
+
+    #canvas {
+      background: #000;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      max-width: 100%;
+      height: auto;
+      /* GPU compositing - translateZ(0) promotes to compositor layer */
+      transform: translateZ(0);
+    }
+
+    /* Terminal Panel */
+    .terminal-panel {
+      background: var(--bg-terminal);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .terminal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 16px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .terminal-title {
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .terminal-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .terminal-dots span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border-color);
+    }
+
+    .terminal-dots span:nth-child(1) { background: #ff5f56; }
+    .terminal-dots span:nth-child(2) { background: #ffbd2e; }
+    .terminal-dots span:nth-child(3) { background: #27ca40; }
+
+    #terminal {
+      padding: 8px;
+      min-height: 500px;
+    }
+
+    /* xterm.js theme override */
+    .xterm {
+      padding: 8px;
+    }
+
+    .xterm-viewport {
+      background: var(--bg-terminal) !important;
+    }
+
+    /* Features Grid */
+    .features-section {
+      margin-top: 48px;
+      padding-top: 32px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .features-title {
+      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 24px;
+      color: var(--text-secondary);
+      text-align: center;
+      margin-bottom: 24px;
+      text-transform: uppercase;
+      letter-spacing: 4px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+    }
+
+    .feature-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px;
+      transition: border-color 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: var(--accent-green);
+    }
+
+    .feature-card h3 {
+      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
+      font-size: 20px;
+      color: var(--accent-green);
+      margin-bottom: 8px;
+    }
+
+    .feature-card p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* Progress */
+    #progress {
+      width: 100%;
+      height: 4px;
+      appearance: none;
+      border: none;
+      background: var(--border-color);
+      border-radius: 2px;
+      margin-bottom: 16px;
+    }
+
+    #progress::-webkit-progress-bar {
+      background: var(--border-color);
+      border-radius: 2px;
+    }
+
+    #progress::-webkit-progress-value {
+      background: var(--accent-green);
+      border-radius: 2px;
+    }
+
+    /* Spinner - hidden by default, more minimal */
+    .spinner {
+      display: none;
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 32px 0;
+      margin-top: 48px;
+      border-top: 1px solid var(--border-color);
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .footer a {
+      color: var(--text-secondary);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      color: var(--accent-green);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .nav-header {
+        flex-direction: column;
+        gap: 12px;
       }
 
-      var elfDropdown = document.getElementById("elfDropdown");
-      for (var i = 0; i < elfFiles.length; i++) {
-          var option = document.createElement("option");
-          option.value = elfFiles[i];
-          option.textContent = elfFiles[i];
-          elfDropdown.appendChild(option);
+      .hero h1 {
+        font-size: 36px;
       }
 
-      function runButtonClickHandler() {
-        var selectedElf = document.getElementById("elfDropdown").value;
-        if (selectedElf !== "") {
-            elfHandler(selectedElf);
-            console.log("Running ELF: " + selectedElf);
+      .controls-panel {
+        flex-direction: column;
+      }
+
+      .elf-selector {
+        width: 100%;
+      }
+
+      .btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Progressive loading overlay -->
+  <div class="loading-overlay" id="loadingOverlay" role="dialog" aria-modal="true" aria-labelledby="loadingText" aria-describedby="loadingDetails">
+    <div class="loading-spinner" aria-hidden="true"></div>
+    <div class="loading-text" id="loadingText" role="status" aria-live="polite">Initializing...</div>
+    <div class="loading-progress" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Loading progress">
+      <div class="loading-progress-bar" id="loadingProgressBar"></div>
+    </div>
+    <div class="loading-details" id="loadingDetails">Preparing WASM runtime</div>
+  </div>
+
+  <nav class="nav-header progressive-load">
+    <div class="logo">rv32emu <span>RV32I[MAFC]</span></div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="https://github.com/sysprog21/rv32emu">GitHub</a>
+      <button id="themeToggle" class="btn btn-secondary" style="padding: 6px 12px; font-size: 14px;" title="Toggle theme" aria-pressed="true" aria-label="Dark mode enabled, click to toggle">Dark</button>
+      <a href="../system/" class="btn btn-secondary" style="padding: 6px 12px; font-size: 14px;">System Mode</a>
+    </div>
+  </nav>
+
+  <main class="container">
+    <section class="hero progressive-load">
+      <h1>RISC-V RV32 Emulator</h1>
+      <p class="subtitle">Fast interpreter with tiered JIT compilation | Zba/Zbb/Zbc/Zbs bit manipulation</p>
+      <div class="status-badge loading" id="statusBadge" role="status" aria-live="polite">
+        <span id="statusText">Loading...</span>
+      </div>
+    </section>
+
+    <progress value="0" max="100" id="progress" hidden></progress>
+
+    <div class="controls-panel progressive-load">
+      <select class="elf-selector" id="elfDropdown" aria-label="Select ELF program">
+        <option value="">Loading programs...</option>
+      </select>
+      <button class="btn btn-primary" id="runButton" disabled>Run</button>
+      <button class="btn btn-secondary" id="stopButton" disabled title="Stop (Esc)">Stop</button>
+    </div>
+
+    <div class="canvas-panel progressive-load collapsed" id="canvasPanel">
+      <div class="canvas-header">
+        <!-- Bind the panel toggle to just the title cluster so clicks on
+             the resize/pointer-lock checkboxes or the Fullscreen button do
+             not collapse/expand the panel. -->
+        <div class="canvas-header-title" onclick="toggleCanvasPanel()" style="display: flex; align-items: center; cursor: pointer;">
+          <span class="canvas-title">Display Output</span>
+          <button class="canvas-toggle" id="canvasToggle" aria-label="Toggle display panel">[Show]</button>
+        </div>
+        <div class="canvas-controls">
+          <label>
+            <input type="checkbox" id="resize">
+            Resize
+          </label>
+          <label>
+            <input type="checkbox" id="pointerLock" checked>
+            Lock Mouse
+          </label>
+          <button class="btn btn-secondary" style="padding: 4px 12px; font-size: 14px;"
+            onclick="requestCanvasFullscreen()">
+            Fullscreen
+          </button>
+        </div>
+      </div>
+      <div class="canvas-wrapper">
+        <canvas class="emscripten" id="canvas" tabindex="0" aria-label="Emulator display"></canvas>
+      </div>
+    </div>
+
+    <div class="terminal-panel progressive-load">
+      <div class="terminal-header">
+        <span class="terminal-title">Console Output</span>
+        <div class="terminal-dots">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </div>
+      <div id="terminal" aria-label="Console output"></div>
+    </div>
+
+    <section class="features-section progressive-load" id="features">
+      <h2 class="features-title">Features</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <h3>Fast Interpreter</h3>
+          <p>Tail-call-optimization based instruction dispatch with fusion for optimal performance on supported platforms.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Tiered JIT</h3>
+          <p>Two-tier JIT compilation using LLVM 18 for hot code paths with block chaining optimization.</p>
+        </div>
+        <div class="feature-card">
+          <h3>System Emulation</h3>
+          <p>Boot full Linux kernel with device emulation including VirtIO, UART, and RTC support.</p>
+        </div>
+        <div class="feature-card">
+          <h3>SDL Graphics</h3>
+          <p>Graphics and audio support via SDL2 for running graphical RISC-V applications.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>rv32emu - <a href="https://github.com/sysprog21/rv32emu">Open Source</a> RISC-V Emulator</p>
+  </footer>
+
+  <!-- ELF list loaded on-demand when dropdown is clicked -->
+  <script>
+    // Progressive loading controller
+    const ProgressiveLoader = {
+      overlay: null,
+      progressBar: null,
+      loadingText: null,
+      loadingDetails: null,
+      startTime: Date.now(),
+      wasmSize: 0,
+      wasmLoaded: 0,
+
+      init() {
+        this.overlay = document.getElementById('loadingOverlay');
+        this.progressBar = document.getElementById('loadingProgressBar');
+        this.loadingText = document.getElementById('loadingText');
+        this.loadingDetails = document.getElementById('loadingDetails');
+      },
+
+      setProgress(percent, text, details) {
+        if (this.progressBar) {
+          // Use transform for GPU-accelerated animation (no layout thrashing)
+          this.progressBar.style.transform = `scaleX(${percent / 100})`;
+          // Update ARIA for screen readers
+          const progressContainer = this.progressBar.parentElement;
+          if (progressContainer) progressContainer.setAttribute('aria-valuenow', Math.round(percent));
+        }
+        if (text && this.loadingText) this.loadingText.textContent = text;
+        if (details && this.loadingDetails) this.loadingDetails.textContent = details;
+      },
+
+      formatBytes(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      },
+
+      hide() {
+        if (this.overlay) {
+          this.overlay.classList.add('hidden');
+          // Enable progressive reveal of main content
+          document.querySelectorAll('.progressive-load').forEach((el, i) => {
+            setTimeout(() => el.classList.add('loaded'), i * 100);
+          });
+        }
+      }
+    };
+
+    // Initialize loader
+    ProgressiveLoader.init();
+    ProgressiveLoader.setProgress(5, 'Loading...', 'Initializing application');
+
+    const statusBadge = document.getElementById('statusBadge');
+    const statusText = document.getElementById('statusText');
+    const progressElement = document.getElementById('progress');
+    const runButton = document.getElementById('runButton');
+    const elfDropdown = document.getElementById('elfDropdown');
+    const canvasPanel = document.getElementById('canvasPanel');
+    const canvasToggle = document.getElementById('canvasToggle');
+
+    // Canvas panel toggle (collapsed by default, expands when SDL initializes)
+    function toggleCanvasPanel() {
+      if (canvasPanel) {
+        canvasPanel.classList.toggle('collapsed');
+        if (canvasToggle) {
+          canvasToggle.textContent = canvasPanel.classList.contains('collapsed') ? '[Show]' : '[Hide]';
+        }
+      }
+    }
+
+    function expandCanvasPanel() {
+      if (canvasPanel && canvasPanel.classList.contains('collapsed')) {
+        canvasPanel.classList.remove('collapsed');
+        if (canvasToggle) canvasToggle.textContent = '[Hide]';
+        // Auto-focus canvas for keyboard input
+        setTimeout(() => {
+          document.getElementById('canvas')?.focus();
+        }, 100);
+      }
+    }
+
+    // Detect SDL initialization by observing canvas attribute changes
+    const canvas = document.getElementById('canvas');
+
+    // Click on canvas wrapper focuses canvas for keyboard input
+    document.querySelector('.canvas-wrapper')?.addEventListener('click', () => {
+      canvas?.focus();
+    });
+
+    // Show focus indicator on canvas
+    canvas?.addEventListener('focus', () => {
+      canvas.style.outline = '2px solid var(--accent-green)';
+      canvas.style.outlineOffset = '2px';
+    });
+    canvas?.addEventListener('blur', () => {
+      canvas.style.outline = 'none';
+    });
+    // Prevent context menu on canvas (moved from inline handler)
+    canvas?.addEventListener('contextmenu', e => e.preventDefault());
+
+    let sdlDetected = false;
+    let sdlCheckInterval = null;
+    let sdlProgramRan = false;  // Track if an SDL program has been run
+
+    function checkSDLInitialized() {
+      if (sdlDetected) return;
+      // Check if canvas has been given dimensions by SDL (via width/height attributes)
+      // Default canvas is 300x150, so check for sizes larger than that (SDL games typically use 320x200+)
+      if (canvas && (canvas.width > 300 || canvas.height > 150)) {
+        sdlDetected = true;
+        sdlProgramRan = true;  // Remember that an SDL program has been run
+        expandCanvasPanel();
+        // Show keyboard hint in terminal
+        if (term) {
+          term.write('\x1b[36m> Tip: Click on the display to enable keyboard input\x1b[0m\r\n');
         } else {
-            console.warn("Please select an ELF file first.");
+          outputBuffer.push('\x1b[36m> Tip: Click on the display to enable keyboard input\x1b[0m');
+        }
+        if (sdlCheckInterval) {
+          clearInterval(sdlCheckInterval);
+          sdlCheckInterval = null;
         }
       }
+    }
 
-      function elfHandler(target_elf){
-        var element = document.getElementById('output');
-        if (element) {
-          element.value += `Running ${target_elf}...\n`;
-          element.scrollTop = element.scrollHeight;
+    // Use MutationObserver to watch for canvas attribute changes
+    const canvasObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'attributes' &&
+            (mutation.attributeName === 'width' || mutation.attributeName === 'height')) {
+          checkSDLInitialized();
         }
-        Module._indirect_rv_halt();
-        Module['run_user'](target_elf);
+      }
+    });
+    if (canvas) {
+      canvasObserver.observe(canvas, { attributes: true });
+    }
+
+    function resetSDLDetection() {
+      sdlDetected = false;
+      // Collapse the panel - SDL will re-expand it if initialized
+      if (canvasPanel && !canvasPanel.classList.contains('collapsed')) {
+        canvasPanel.classList.add('collapsed');
+        if (canvasToggle) canvasToggle.textContent = '[Show]';
+      }
+      // MutationObserver handles most cases; polling is fallback only
+      // Clear any existing interval
+      if (sdlCheckInterval) clearInterval(sdlCheckInterval);
+      // Reduced polling (500ms instead of 200ms) as MutationObserver is primary
+      sdlCheckInterval = setInterval(checkSDLInitialized, 500);
+      // Stop fallback polling after 5 seconds
+      setTimeout(() => {
+        if (sdlCheckInterval) {
+          clearInterval(sdlCheckInterval);
+          sdlCheckInterval = null;
+        }
+      }, 5000);
+    }
+
+    // Cleanup on page unload to prevent memory leaks
+    window.addEventListener('beforeunload', () => {
+      if (sdlCheckInterval) clearInterval(sdlCheckInterval);
+      if (canvasObserver) canvasObserver.disconnect();
+    });
+
+    // Track emulator ready state
+    let emulatorReady = false;
+
+    // Lazy-load xterm.js terminal for ANSI escape sequence support
+    let term = null;
+    let currentElf = null;
+    let xtermLoading = false;
+    const xtermCallbacks = [];
+    // Buffer output when terminal not ready
+    const outputBuffer = [];
+
+    function loadXterm(callback) {
+      if (typeof Terminal !== 'undefined') {
+        callback();
+        return;
+      }
+      xtermCallbacks.push(callback);
+      if (xtermLoading) return;
+
+      xtermLoading = true;
+      const script = document.createElement('script');
+      script.src = 'xterm.min.js';
+      script.onload = () => {
+        xtermCallbacks.forEach(cb => cb());
+        xtermCallbacks.length = 0;
+      };
+      document.head.appendChild(script);
+    }
+    function initTerminal() {
+      loadXterm(() => {
+        term = new Terminal({
+          fontFamily: "'Menlo', 'Monaco', 'Consolas', monospace",
+          fontSize: 18,
+          theme: {
+            background: '#000000',
+            foreground: '#00ff00',
+            cursor: '#00ff00',
+            cursorAccent: '#000000',
+            selection: 'rgba(0, 255, 0, 0.3)',
+          },
+          cursorBlink: false,
+          disableStdin: true,
+          rows: window.innerWidth < 768 ? 20 : 30,
+          cols: window.innerWidth < 480 ? 40 : (window.innerWidth < 768 ? 60 : 100),
+        });
+        term.open(document.getElementById('terminal'));
+        term.write('\x1b[32mrv32emu\x1b[0m - RISC-V Emulator\r\n');
+        term.write('Select an ELF program and click Run to start.\r\n\r\n');
+        // Flush any buffered output
+        if (outputBuffer.length > 0) {
+          outputBuffer.forEach(text => term.write(text + '\r\n'));
+          outputBuffer.length = 0;
+        }
+      });
+    }
+    // Defer terminal init until browser is idle (off critical rendering path)
+    function deferredInitTerminal() {
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(initTerminal, { timeout: 2000 });
+      } else {
+        // Fallback for Safari
+        setTimeout(initTerminal, 100);
+      }
+    }
+    if (document.readyState === 'complete') {
+      deferredInitTerminal();
+    } else {
+      window.addEventListener('load', deferredInitTerminal);
+    }
+
+    // Update Run button state based on emulator readiness and ELF selection
+    function updateRunButtonState() {
+      if (runButton && elfDropdown) {
+        runButton.disabled = !(emulatorReady && elfDropdown.value);
+      }
+    }
+
+    // On-demand ELF list loading
+    let elfListLoaded = false;
+    let elfListLoading = false;
+
+    function loadElfList() {
+      if (elfListLoaded || elfListLoading) return;
+      elfListLoading = true;
+
+      // Update placeholder to show loading
+      if (elfDropdown) {
+        elfDropdown.options[0].textContent = 'Loading programs...';
       }
 
-      var Module = {
-        print: (function() {
-          var element = document.getElementById('output');
-          if (element) element.value = ''; // clear browser cache
-          return function(text) {
-            if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-            // These replacements are necessary if you render to raw HTML
-            //text = text.replace(/&/g, "&amp;");
-            //text = text.replace(/</g, "&lt;");
-            //text = text.replace(/>/g, "&gt;");
-            //text = text.replace('\n', '<br>', 'g');
-            console.log(text);
-            if (element) {
-              element.value += text + "\n";
-              element.scrollTop = element.scrollHeight; // focus on bottom
+      const script = document.createElement('script');
+      script.src = 'elf_list.js';
+      script.onload = () => {
+        elfListLoaded = true;
+        elfListLoading = false;
+        populateElfDropdown();
+      };
+      script.onerror = () => {
+        elfListLoading = false;
+        if (elfDropdown) {
+          elfDropdown.options[0].textContent = 'Failed to load programs';
+        }
+      };
+      document.head.appendChild(script);
+    }
+
+    function populateElfDropdown() {
+      if (typeof elfFiles !== 'undefined' && elfDropdown) {
+        // Clear placeholder
+        elfDropdown.innerHTML = '';
+
+        // Add default option
+        const defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Select a program...';
+        elfDropdown.appendChild(defaultOption);
+
+        // Add ELF files
+        const fragment = document.createDocumentFragment();
+        elfFiles.forEach(elf => {
+          const option = document.createElement('option');
+          option.value = elf;
+          option.textContent = elf;
+          fragment.appendChild(option);
+        });
+        elfDropdown.appendChild(fragment);
+      }
+    }
+
+    // Load ELF list eagerly (627 bytes, negligible)
+    loadElfList();
+
+    // Enable button when ELF is selected (if emulator is ready)
+    elfDropdown?.addEventListener('change', updateRunButtonState);
+
+    runButton?.addEventListener('click', () => {
+      if (elfDropdown.value) {
+        void elfHandler(elfDropdown.value);
+      }
+    });
+
+    // Known SDL programs that require full state reset when switching
+    const sdlPrograms = ['doom', 'quake', 'smolnes'];
+
+    function isSDLProgram(elfName) {
+      const name = elfName.toLowerCase();
+      return sdlPrograms.some(p => name.includes(p));
+    }
+
+    // Check if we need to auto-run a program after reload
+    const pendingProgram = sessionStorage.getItem('rv32emu_pending_program');
+    if (pendingProgram) {
+      sessionStorage.removeItem('rv32emu_pending_program');
+      // Wait for emulator to be ready, then run the program (with 10s timeout)
+      const checkAndRun = setInterval(() => {
+        if (emulatorReady && typeof Module !== 'undefined' && Module._indirect_rv_halt) {
+          clearInterval(checkAndRun);
+          clearTimeout(checkAndRunTimeout);
+          // Ensure ELF list is loaded first
+          loadElfList();
+          setTimeout(() => {
+            if (elfDropdown) elfDropdown.value = pendingProgram;
+            void elfHandler(pendingProgram);
+          }, 100);
+        }
+      }, 100);
+      // Safety timeout: stop polling after 10s if emulator never becomes ready
+      const checkAndRunTimeout = setTimeout(() => {
+        clearInterval(checkAndRun);
+        console.warn('Auto-run timeout: emulator did not become ready');
+      }, 10000);
+    }
+
+    async function waitForPreviousRunToStop() {
+      if (typeof Module === 'undefined' || typeof Module._indirect_rv_alive !== 'function')
+        return;
+      if (!Module._indirect_rv_alive())
+        return;
+
+      Module._indirect_rv_halt();
+      const deadline = performance.now() + 10000;
+      while (Module._indirect_rv_alive()) {
+        if (performance.now() > deadline)
+          throw new Error('Timed out waiting for previous program to stop');
+        await new Promise((resolve) => setTimeout(resolve, 16));
+      }
+    }
+
+    // Programs that need large data files outside the WASM bundle. Keep this
+    // table in sync with the WEB_FILES additions in mk/wasm.mk.
+    const programAssets = {
+      'riscv32/doom': [
+        { url: 'DOOM1.WAD', dest: '/DOOM1.WAD' },
+        { url: 'timidity.tar.gz', fallbackUrl: 'timidity.tar', dest: '/etc/timidity', untar: true },
+      ],
+      'riscv32/quake': [
+        { url: 'pak0.pak', dest: '/id1/pak0.pak' },
+        { url: 'timidity.tar.gz', fallbackUrl: 'timidity.tar', dest: '/etc/timidity', untar: true },
+      ],
+    };
+
+    const loadedAssets = new Set();
+    const supportsGzipDecompression =
+      typeof DecompressionStream === 'function' &&
+      typeof Response !== 'undefined';
+
+    function memfsMkdirP(path) {
+      if (!path || path === '/' || path === '') return;
+      let cur = '';
+      for (const p of path.split('/').filter(Boolean)) {
+        cur += '/' + p;
+        try { Module.FS.mkdir(cur); } catch (e) {
+          if (e && e.code !== 'EEXIST' && !String(e).includes('exists')) throw e;
+        }
+      }
+    }
+
+    // Minimal ustar parser. Handles regular files and directory entries; tar
+    // produced via `tar -czf x.tar.gz -C dir .` prefixes names with "./" which
+    // is stripped before extraction.
+    function extractTarToMemfs(data, destPrefix) {
+      const decoder = new TextDecoder('ascii');
+      let offset = 0;
+      let count = 0;
+      while (offset + 512 <= data.length) {
+        const header = data.subarray(offset, offset + 512);
+        let allZero = true;
+        for (let i = 0; i < 512; i++) if (header[i] !== 0) { allZero = false; break; }
+        if (allZero) break;
+        let name = decoder.decode(header.subarray(0, 100)).replace(/\0.*$/, '');
+        if (name.startsWith('./')) name = name.substring(2);
+        const sizeOctal = decoder.decode(header.subarray(124, 136)).replace(/\0.*$/, '').trim();
+        const size = sizeOctal ? parseInt(sizeOctal, 8) : 0;
+        const type = String.fromCharCode(header[156] || 0x30);
+        offset += 512;
+        // Skip macOS AppleDouble metadata entries (._foo). They're useless
+        // to the guest and would pollute /etc/timidity with junk.
+        const base = name.split('/').pop();
+        const isAppleDouble = base && base.startsWith('._');
+        if (name && !isAppleDouble) {
+          const isDir = type === '5';
+          const fullPath = destPrefix + '/' + name;
+          const parts = fullPath.split('/').filter(p => p && p !== '.');
+          const dirDepth = isDir ? parts.length : parts.length - 1;
+          let cur = '';
+          for (let i = 0; i < dirDepth; i++) {
+            cur += '/' + parts[i];
+            try { Module.FS.mkdir(cur); } catch (e) {
+              const code = e && (e.code || e.errno);
+              if (code !== 'EEXIST' && code !== 20 && code !== 17 &&
+                  !String(e).includes('exist')) throw e;
             }
-          };
-        })(),
-        canvas: (() => {
-          var canvas = document.getElementById('canvas');
-
-          // As a default initial behavior, pop up an alert when webgl context is lost. To make your
-          // application robust, you may want to override this behavior before shipping!
-          // See http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
-          canvas.addEventListener("webglcontextlost", (e) => { alert('WebGL context lost. You will need to reload the page.'); e.preventDefault(); }, false);
-
-          return canvas;
-        })(),
-        setStatus: (text) => {
-          if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
-          if (text === Module.setStatus.last.text) return;
-          var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
-          var now = Date.now();
-          if (m && now - Module.setStatus.last.time < 30) return; // if this is a progress update, skip it if too soon
-          Module.setStatus.last.time = now;
-          Module.setStatus.last.text = text;
-          if (m) {
-            text = m[1];
-            progressElement.value = parseInt(m[2])*100;
-            progressElement.max = parseInt(m[4])*100;
-            progressElement.hidden = false;
-            spinnerElement.hidden = false;
-          } else {
-            progressElement.value = null;
-            progressElement.max = null;
-            progressElement.hidden = true;
-            if (!text) spinnerElement.style.display = 'none';
-
           }
-          statusElement.innerHTML = text;
-        },
-        totalDependencies: 0,
-        monitorRunDependencies: (left) => {
-          this.totalDependencies = Math.max(this.totalDependencies, left);
-          Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+          if (!isDir && (type === '0' || type === '\0' || type === '')) {
+            try {
+              Module.FS.writeFile(fullPath, data.subarray(offset, offset + size));
+              count++;
+            } catch (e) {
+              throw new Error(`writeFile ${fullPath} failed: ` +
+                  `${e?.message || e?.code || e}`);
+            }
+          }
         }
+        offset += Math.ceil(size / 512) * 512;
+      }
+      return count;
+    }
+
+    function formatError(e) {
+      if (!e) return 'undefined error';
+      if (typeof e === 'string') return e;
+      const parts = [];
+      if (e.name) parts.push(e.name);
+      if (e.code) parts.push(`code=${e.code}`);
+      if (e.errno !== undefined) parts.push(`errno=${e.errno}`);
+      if (e.status) parts.push(`status=${e.status}`);
+      const msg = e.message || e.toString?.() || '';
+      if (msg && msg !== '[object Object]') parts.push(msg);
+      return parts.length ? parts.join(' ') : '[object Object]';
+    }
+
+    function resolveAssetUrl(asset) {
+      if (asset.untar && asset.fallbackUrl && !supportsGzipDecompression)
+        return asset.fallbackUrl;
+      return asset.url;
+    }
+
+    async function ensureProgramAssets(targetElf) {
+      const assets = programAssets[targetElf];
+      if (!assets) return;
+      for (const asset of assets) {
+        const assetUrl = resolveAssetUrl(asset);
+        if (loadedAssets.has(assetUrl)) continue;
+        if (term) term.write(`\x1b[36m> Fetching ${assetUrl}...\x1b[0m\r\n`);
+        const resp = await fetch(assetUrl);
+        if (!resp.ok)
+          throw new Error(`Fetch ${assetUrl} failed: HTTP ${resp.status}`);
+        try {
+          if (asset.untar) {
+            memfsMkdirP(asset.dest);
+            let tarBuf;
+            if (assetUrl.endsWith('.gz')) {
+              const gunzipped = resp.body.pipeThrough(new DecompressionStream('gzip'));
+              tarBuf = await new Response(gunzipped).arrayBuffer();
+            } else {
+              tarBuf = await resp.arrayBuffer();
+            }
+            const n = extractTarToMemfs(new Uint8Array(tarBuf), asset.dest);
+            if (term) term.write(
+              `\x1b[36m> ${assetUrl}: unpacked ${n} files to ${asset.dest}\x1b[0m\r\n`);
+          } else {
+            memfsMkdirP(asset.dest.substring(0, asset.dest.lastIndexOf('/')));
+            const buf = await resp.arrayBuffer();
+            Module.FS.writeFile(asset.dest, new Uint8Array(buf));
+            if (term) term.write(
+              `\x1b[36m> ${assetUrl}: ${buf.byteLength} bytes -> ${asset.dest}\x1b[0m\r\n`);
+          }
+        } catch (e) {
+          throw new Error(`Processing ${assetUrl} failed: ${formatError(e)}`);
+        }
+        loadedAssets.add(assetUrl);
+      }
+    }
+
+    async function elfHandler(targetElf) {
+      // Ensure path starts with / for Emscripten virtual filesystem
+      const elfPath = targetElf.startsWith('/') ? targetElf : '/' + targetElf;
+
+      // Auto-reload when switching between SDL programs to ensure clean state
+      if (sdlProgramRan && isSDLProgram(targetElf) && targetElf !== currentElf) {
+        // Store target program and reload page for clean SDL state
+        sessionStorage.setItem('rv32emu_pending_program', targetElf);
+        if (term) {
+          term.write('\x1b[36m> Reloading for clean SDL state...\x1b[0m\r\n');
+        }
+        setTimeout(() => location.reload(), 100);
+        return;
+      }
+
+      // Force terminal initialization if not ready
+      if (!term) {
+        initTerminal();
+      }
+
+      // Halt the previous program BEFORE clearing the terminal. Otherwise the
+      // previous program's main-loop ticks keep writing stdout into the freshly
+      // cleared viewport, corrupting the new "Running ..." banner.
+      statusText.textContent = `Running: ${targetElf}`;
+      statusBadge.classList.remove('loading');
+      statusBadge.classList.add('running');
+      await waitForPreviousRunToStop();
+
+      // Clear terminal when switching to a different ELF
+      if (term && targetElf !== currentElf) {
+        term.clear();
+      }
+      currentElf = targetElf;
+
+      // Clear leftover SDL canvas pixels when switching away from a graphics program.
+      // Resetting width clears both 2D and WebGL contexts and restores default size.
+      if (sdlProgramRan && !isSDLProgram(targetElf) && canvas) {
+        canvas.width = 300;
+        canvas.height = 150;
+      }
+
+      const runMsg = `\x1b[33m> Running ${targetElf}...\x1b[0m`;
+      if (term) {
+        term.write(runMsg + '\r\n');
+      } else {
+        outputBuffer.push(runMsg);
+      }
+      // Reset SDL detection for new program
+      resetSDLDetection();
+      // Extra arguments for programs that need them
+      const programArgs = {
+        'riscv32/quake': ['-mem', '64'],
       };
-      Module.setStatus('Downloading...');
-      window.onerror = (event) => {
-        // TODO: do not warn on ok events like simulating an infinite loop or exitStatus
-        Module.setStatus('Exception thrown, see JavaScript console');
-        spinnerElement.style.display = 'none';
-        Module.setStatus = (text) => {
-          if (text) console.error('[post-exception status] ' + text);
+      const extraArgs = programArgs[targetElf] || [];
+      try {
+        // Pull any program-specific data assets into MEMFS before launching.
+        // No-op for programs without an entry in programAssets.
+        await ensureProgramAssets(targetElf);
+        const stopBtn = document.getElementById('stopButton');
+        if (stopBtn) stopBtn.disabled = false;
+        const exitCode = Module['run_user'](elfPath, ...extraArgs);
+        // Auto-focus canvas for graphical applications
+        document.getElementById('canvas')?.focus();
+        if (typeof exitCode === 'number') {
+          const exitMsg = exitCode === 0 ? 'Completed' : `Exited (${exitCode})`;
+          statusText.textContent = exitMsg;
+          statusBadge.classList.remove('running');
+          if (term) {
+            term.write(`\x1b[32m> ${exitMsg}\x1b[0m\r\n`);
+          }
+          if (stopBtn) stopBtn.disabled = true;
+        }
+      } catch (e) {
+        console.error('Failed to run ELF:', e);
+        if (term) {
+          term.write(`\x1b[31m> Error: Failed to load '${targetElf}'\x1b[0m\r\n`);
+          term.write(`\x1b[31m> ${formatError(e)}\x1b[0m\r\n`);
+          if (e?.stack) {
+            const firstFrame = e.stack.split('\n')[1] || '';
+            if (firstFrame) term.write(`\x1b[31m> ${firstFrame.trim()}\x1b[0m\r\n`);
+          }
+        }
+        statusText.textContent = 'Error';
+        statusBadge.classList.remove('running');
+      }
+    }
+
+    // Stop button handler
+    const stopButton = document.getElementById('stopButton');
+    stopButton?.addEventListener('click', () => {
+      Module._indirect_rv_halt();
+      if (term) {
+        term.write('\x1b[31m> Stopped\x1b[0m\r\n');
+      }
+      statusText.textContent = 'Stopped';
+      statusBadge.classList.remove('running');
+      stopButton.disabled = true;
+    });
+
+    // Fullscreen handler with fallback
+    function requestCanvasFullscreen() {
+      const canvas = document.getElementById('canvas');
+      const pointerLock = document.getElementById('pointerLock')?.checked;
+      const resize = document.getElementById('resize')?.checked;
+
+      // Try Emscripten's fullscreen API first
+      if (typeof Module !== 'undefined' && Module.requestFullscreen) {
+        try {
+          Module.requestFullscreen(pointerLock, resize);
+          return;
+        } catch (e) {
+          console.warn('Emscripten fullscreen failed:', e);
+        }
+      }
+
+      // Fallback to standard browser Fullscreen API
+      const requestFullscreen = canvas.requestFullscreen ||
+                               canvas.webkitRequestFullscreen ||
+                               canvas.mozRequestFullScreen ||
+                               canvas.msRequestFullscreen;
+
+      if (requestFullscreen) {
+        // Vendor-prefixed APIs (webkit/moz/ms) may return undefined instead
+        // of a Promise. Wrap with Promise.resolve so .then/.catch always
+        // work and a non-Promise return path doesn't throw.
+        Promise.resolve(requestFullscreen.call(canvas)).then(() => {
+          // Lock pointer if checkbox is checked
+          if (pointerLock && canvas.requestPointerLock) {
+            canvas.requestPointerLock();
+          }
+          canvas.focus();
+        }).catch(err => {
+          console.error('Fullscreen request failed:', err);
+          if (term) {
+            term.write(`\x1b[31m> Fullscreen failed: ${err?.message || err}\x1b[0m\r\n`);
+          }
+        });
+      } else {
+        if (term) {
+          term.write('\x1b[31m> Fullscreen not supported in this browser\x1b[0m\r\n');
+        }
+      }
+    }
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      const active = document.activeElement;
+      const canvasEl = document.getElementById('canvas');
+
+      // When canvas has focus, let Emscripten/SDL handle all keys.
+      // Prevent browser defaults (scrolling) for game-relevant keys.
+      if (active === canvasEl) {
+        const gameKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                          ' ', 'Tab', 'Escape'];
+        if (gameKeys.includes(e.key)) {
+          e.preventDefault();
+        }
+        return;  // Don't intercept any keys when game has focus
+      }
+
+      // Escape to stop emulator (only when canvas is NOT focused)
+      if (e.key === 'Escape' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(active?.tagName)) {
+        e.preventDefault();
+        stopButton?.click();
+      }
+    });
+
+    // Theme toggle (single class toggle for efficient rendering)
+    const themeToggle = document.getElementById('themeToggle');
+    let isDark = !window.matchMedia('(prefers-color-scheme: light)').matches;
+
+    // Precomputed xterm themes (avoid getComputedStyle read-after-write)
+    const xtermThemeDark = {
+      background: '#000000',
+      foreground: '#00ff00',
+      cursor: '#00ff00',
+      cursorAccent: '#000000',
+      selection: 'rgba(0, 255, 0, 0.3)'
+    };
+    const xtermThemeLight = {
+      background: '#1a1a1a',
+      foreground: '#00ff00',
+      cursor: '#00ff00',
+      cursorAccent: '#1a1a1a',
+      selection: 'rgba(0, 255, 0, 0.3)'
+    };
+
+    function updateTheme() {
+      // Single class toggle instead of multiple style changes (better performance)
+      document.documentElement.classList.toggle('light-theme', !isDark);
+      document.documentElement.classList.toggle('dark-theme', isDark);
+
+      // Sync xterm.js theme with precomputed theme (no layout thrashing)
+      if (term) {
+        term.options.theme = isDark ? xtermThemeDark : xtermThemeLight;
+      }
+
+      if (themeToggle) {
+        themeToggle.textContent = isDark ? 'Light' : 'Dark';
+        themeToggle.setAttribute('aria-pressed', isDark);
+        themeToggle.setAttribute('aria-label', isDark ? 'Dark mode, click for light' : 'Light mode, click for dark');
+      }
+    }
+    themeToggle?.addEventListener('click', () => {
+      isDark = !isDark;
+      updateTheme();
+    });
+    updateTheme();
+
+    var Module = {
+      // Streaming WASM instantiation with progress tracking
+      instantiateWasm: function(imports, successCallback) {
+        const wasmUrl = 'rv32emu.wasm';
+        ProgressiveLoader.setProgress(10, 'Loading WASM...', 'Starting download');
+
+        // Try streaming instantiation first (most efficient)
+        WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
+          .then(result => {
+            ProgressiveLoader.setProgress(90, 'Initializing...', 'Linking modules');
+            successCallback(result.instance, result.module);
+          })
+          .catch(err => {
+            console.warn('Streaming instantiation failed, using fallback:', err.message);
+            ProgressiveLoader.setProgress(30, 'Loading...', 'Using fallback method');
+
+            // Fallback: fetch with progress tracking, then instantiate
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', wasmUrl, true);
+            xhr.responseType = 'arraybuffer';
+
+            xhr.onprogress = (e) => {
+              if (e.lengthComputable) {
+                const percent = Math.min(80, 30 + (e.loaded / e.total) * 50);
+                ProgressiveLoader.setProgress(percent, 'Loading...',
+                  `Downloaded ${ProgressiveLoader.formatBytes(e.loaded)} / ${ProgressiveLoader.formatBytes(e.total)}`);
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status === 200) {
+                ProgressiveLoader.setProgress(85, 'Compiling...', 'Instantiating module');
+                WebAssembly.instantiate(xhr.response, imports)
+                  .then(result => {
+                    ProgressiveLoader.setProgress(90, 'Initializing...', 'Linking modules');
+                    successCallback(result.instance, result.module);
+                  })
+                  .catch(e => {
+                    console.error('WASM instantiation failed:', e);
+                    ProgressiveLoader.setProgress(0, 'Error', e.message);
+                  });
+              } else {
+                ProgressiveLoader.setProgress(0, 'Error', `HTTP ${xhr.status}`);
+              }
+            };
+
+            xhr.onerror = () => {
+              ProgressiveLoader.setProgress(0, 'Error', 'Network error');
+            };
+
+            xhr.send();
+          });
+
+        return {};
+      },
+
+      print: (function() {
+        let printBuffer = [];
+        let flushPending = false;
+        const MAX_OUTPUT_BUFFER = 2000;
+
+        function flushPrint() {
+          if (term && printBuffer.length > 0) {
+            // Process max 1000 lines per frame to prevent UI freeze
+            const chunk = printBuffer.splice(0, 1000);
+            term.write(chunk.join('\r\n') + '\r\n');
+
+            if (printBuffer.length > 0) {
+              requestAnimationFrame(flushPrint);
+              return;
+            }
+          }
+          flushPending = false;
+        }
+
+        return function(text) {
+          if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+          console.log(text);
+          if (term) {
+            printBuffer.push(text);
+            if (!flushPending) {
+              flushPending = true;
+              requestAnimationFrame(flushPrint);
+            }
+          } else {
+            outputBuffer.push(text);
+            // Cap outputBuffer to prevent memory spikes before terminal is ready
+            if (outputBuffer.length > MAX_OUTPUT_BUFFER) {
+              outputBuffer.splice(0, outputBuffer.length - MAX_OUTPUT_BUFFER);
+            }
+          }
         };
+      })(),
+
+      printErr: (function() {
+        let errBuffer = [];
+        let flushPending = false;
+        const MAX_OUTPUT_BUFFER = 2000;
+
+        function flushErr() {
+          if (term && errBuffer.length > 0) {
+            // Process max 1000 lines per frame to prevent UI freeze
+            const chunk = errBuffer.splice(0, 1000);
+            term.write(chunk.join('\r\n') + '\r\n');
+
+            if (errBuffer.length > 0) {
+              requestAnimationFrame(flushErr);
+              return;
+            }
+          }
+          flushPending = false;
+        }
+
+        return function(text) {
+          if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+          console.error(text);
+          const coloredText = '\x1b[31m' + text + '\x1b[0m';
+          if (term) {
+            errBuffer.push(coloredText);
+            if (!flushPending) {
+              flushPending = true;
+              requestAnimationFrame(flushErr);
+            }
+          } else {
+            outputBuffer.push(coloredText);
+            // Cap outputBuffer to prevent memory spikes before terminal is ready
+            if (outputBuffer.length > MAX_OUTPUT_BUFFER) {
+              outputBuffer.splice(0, outputBuffer.length - MAX_OUTPUT_BUFFER);
+            }
+          }
+        };
+      })(),
+
+      canvas: (() => {
+        const canvas = document.getElementById('canvas');
+        canvas?.addEventListener('webglcontextlost', (e) => {
+          e.preventDefault();
+          statusText.textContent = 'WebGL context lost';
+          statusBadge?.classList.add('loading');
+          // Show reload prompt instead of auto-reloading
+          const overlay = document.getElementById('loadingOverlay');
+          if (overlay) {
+            overlay.classList.remove('hidden');
+            overlay.innerHTML = `
+              <div style="text-align: center;">
+                <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                <div class="loading-text">Graphics context lost</div>
+                <div class="loading-details" style="margin-bottom: 16px;">Click below to reload the renderer</div>
+                <button class="btn btn-primary" onclick="location.reload()">Reload</button>
+              </div>
+            `;
+          }
+        }, false);
+        return canvas;
+      })(),
+
+      setStatus: (text) => {
+        if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
+        if (text === Module.setStatus.last.text) return;
+
+        const m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+        const now = Date.now();
+        if (m && now - Module.setStatus.last.time < 30) return;
+
+        Module.setStatus.last.time = now;
+        Module.setStatus.last.text = text;
+
+        if (m) {
+          statusText.textContent = m[1].trim();
+          progressElement.value = parseInt(m[2]) * 100;
+          progressElement.max = parseInt(m[4]) * 100;
+          progressElement.hidden = false;
+        } else {
+          progressElement.hidden = true;
+          if (text) {
+            statusText.textContent = text;
+          } else {
+            statusText.textContent = 'Ready';
+            statusBadge.classList.remove('loading');
+            // Hide loading overlay when ready
+            ProgressiveLoader.setProgress(100, 'Ready', 'Emulator initialized');
+            setTimeout(() => ProgressiveLoader.hide(), 300);
+          }
+        }
+      },
+
+      totalDependencies: 0,
+      monitorRunDependencies: function(left) {
+        Module.totalDependencies = Math.max(Module.totalDependencies, left);
+        Module.setStatus(left
+          ? `Loading... (${Module.totalDependencies - left}/${Module.totalDependencies})`
+          : 'All downloads complete.');
+      },
+
+      onRuntimeInitialized: function() {
+        ProgressiveLoader.setProgress(100, 'Ready', 'Runtime initialized');
+        emulatorReady = true;
+        updateRunButtonState();
+        setTimeout(() => ProgressiveLoader.hide(), 300);
+      },
+
+      onExit: function(status) {
+        // Program terminated (either normally or via exit())
+        const exitMsg = status === 0 ? 'Completed' : `Exited (${status})`;
+        statusText.textContent = exitMsg;
+        statusBadge.classList.remove('running');
+        if (term) {
+          term.write(`\x1b[32m> ${exitMsg}\x1b[0m\r\n`);
+        }
+        // Disable stop button since program ended
+        const stopBtn = document.getElementById('stopButton');
+        if (stopBtn) stopBtn.disabled = true;
+      }
+    };
+
+    Module.setStatus('Downloading...');
+
+    window.onerror = (event, source, lineno, colno, error) => {
+      Module.setStatus('Error - see console');
+      statusBadge?.classList.add('loading');
+      statusBadge?.style.setProperty('--accent-green', 'var(--error-red)');
+      ProgressiveLoader.setProgress(0, 'Error', 'Check console for details');
+      // Show error in terminal
+      const errorMsg = error?.message || event || 'Unknown error';
+      if (term) {
+        term.write(`\x1b[31m> Runtime Error: ${errorMsg}\x1b[0m\r\n`);
+      } else {
+        outputBuffer.push(`\x1b[31m> Runtime Error: ${errorMsg}\x1b[0m`);
+      }
+      Module.setStatus = (text) => {
+        if (text) console.error('[post-exception status] ' + text);
       };
-    </script>
-    <script async type="text/javascript" src="rv32emu.js"></script>
-    <script src="coi-serviceworker.min.js"></script>
-  </body>
+    };
+  </script>
+  <!-- Load main WASM JS with defer for non-blocking -->
+  <script defer type="text/javascript" src="rv32emu.js"></script>
+  <!-- Service worker for caching (loads last) -->
+  <script defer src="coi-serviceworker.min.js"></script>
+</body>
 </html>

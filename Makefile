@@ -211,6 +211,18 @@ OBJS += emulate.o riscv.o log.o elf.o cache.o mpool.o $(OBJS_EXT) main.o
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps += $(OBJS:%.o=%.o.d)
 
+EFFECTIVE_CONFIG_STAMP := $(OUT)/.effective-config
+EFFECTIVE_CONFIG_VARS := \
+	CONFIG_BUILD_WASM CONFIG_SYSTEM CONFIG_GOLDFISH_RTC CONFIG_ELF_LOADER \
+	CONFIG_EXT_M CONFIG_EXT_A CONFIG_EXT_F CONFIG_EXT_C CONFIG_RV32E \
+	CONFIG_Zicsr CONFIG_Zifencei CONFIG_Zba CONFIG_Zbb CONFIG_Zbc CONFIG_Zbs \
+	CONFIG_MOP_FUSION CONFIG_BLOCK_CHAINING CONFIG_LOG_COLOR CONFIG_ARCH_TEST \
+	CONFIG_SDL CONFIG_SDL_MIXER CONFIG_GDBSTUB CONFIG_JIT CONFIG_T2C \
+	CONFIG_INTERPRETER_ONLY CONFIG_OPTIMIZE_LEVEL CONFIG_OPTIMIZE_SIZE \
+	CONFIG_LTO CONFIG_DEBUG_SYMBOLS CONFIG_UBSAN CONFIG_PREBUILT \
+	MEM_START MEM_SIZE DTB_SIZE INITRD_SIZE USER_MEM_SIZE \
+	INITRD_ACTUAL_BYTES REAL_MEM_SIZE REAL_DTB_SIZE REAL_INITRD_SIZE
+
 ifeq ($(CONFIG_EXT_F),y)
 $(OBJS): $(SOFTFLOAT_LIB)
 endif
@@ -218,7 +230,20 @@ ifeq ($(CONFIG_GDBSTUB),y)
 $(OBJS): $(GDBSTUB_LIB)
 endif
 
-$(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) | $(OUT)
+$(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
+	$(Q){ \
+		printf 'CC=%s\n' '$(CC)'; \
+		printf 'CC_IS_EMCC=%s\n' '$(CC_IS_EMCC)'; \
+		printf 'CROSS_COMPILE=%s\n' '$(CROSS_COMPILE)'; \
+		$(foreach var,$(EFFECTIVE_CONFIG_VARS),printf '$(var)=%s\n' '$($(var))';) \
+	} > $@.tmp
+	$(Q)if ! cmp -s $@.tmp $@ 2>/dev/null; then \
+		mv $@.tmp $@; \
+	else \
+		rm -f $@.tmp; \
+	fi
+
+$(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(Q)mkdir -p $(dir $@)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
@@ -227,9 +252,9 @@ $(OUT):
 	$(Q)mkdir -p $@
 
 # Link the final binary
-$(BIN): $(OBJS) $(DEV_OBJS) | $(OUT)
+$(BIN): $(OBJS) $(DEV_OBJS) $(DTB_DEPS) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(VECHO) "  LD\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $^ $(LDFLAGS)
+	$(Q)$(CC) -o $@ $(CFLAGS_emcc) $(OBJS) $(DEV_OBJS) $(LDFLAGS)
 
 all: $(DTB_DEPS) $(BIN)
 	@$(call notice, Build complete: $(BIN))
@@ -244,7 +269,7 @@ tool: $(TOOLS_BIN)
 # Clean Targets
 clean:
 	$(VECHO) "Cleaning... "
-	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT)
+	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
 	$(Q)$(call notice, [OK])
 
@@ -264,6 +289,6 @@ distclean: cleanconfig
 	$(Q)$(RM) $(OUT)/rv32emu-prebuilt*.tar.gz $(OUT)/rv32emu-prebuilt-sail-*
 	$(Q)$(call notice, [OK])
 
-.PHONY: all tool clean cleanconfig distclean gdbstub-test
+.PHONY: all tool clean cleanconfig distclean gdbstub-test FORCE
 
 -include $(deps)

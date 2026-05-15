@@ -1143,6 +1143,16 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 
     /* set the reset address */
     rv->PC = pc;
+#ifdef __EMSCRIPTEN__
+    rv->wasm_block_depth = WASM_BLOCK_LIMIT;
+    rv->next_insn = NULL;
+#ifdef WASM_DEBUG_BLOCKS
+    rv->max_block_depth_seen = 0;
+    rv->yield_soft_count = 0;
+    rv->yield_hard_count = 0;
+    rv->total_depth_at_yield = 0;
+#endif
+#endif
 
     /* set the default stack pointer */
     rv->X[rv_reg_sp] =

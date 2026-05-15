@@ -111,9 +111,15 @@ jobs:
     - name: Install LLVM
       if: steps.cache-llvm.outputs.cache-hit != 'true'
       run: |
-            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x ./llvm.sh
-            sudo ./llvm.sh ${{ steps.llvm-version.outputs.version }}
+            # Prefer Ubuntu's own LLVM packages over apt.llvm.org. Mixing the
+            # two has been observed to fail with "held broken packages" when
+            # the Ubuntu libllvm-N has a stricter Breaks: clause than the
+            # apt.llvm.org snapshot satisfies. Ubuntu Noble ships llvm-18,
+            # which is enough for T2C's `llvm-config --libs` check.
+            VER='${{ steps.llvm-version.outputs.version }}'
+            sudo apt-get install -y -q=2 \
+                llvm-${VER} llvm-${VER}-dev llvm-${VER}-runtime \
+                clang-${VER} lld-${VER}
 
     - name: Setup LLVM PATH
       run: echo "/usr/lib/llvm-${{ steps.llvm-version.outputs.version }}/bin" >> $GITHUB_PATH
@@ -163,11 +169,17 @@ jobs:
     # emcc builds run on x64 only - WebAssembly output is platform-independent
     # This validates Emscripten compatibility without redundant builds on macOS
     # Note: wasm_defconfig sets CONFIG_BUILD_WASM=y which auto-selects CC=emcc
+    #
+    # Emscripten's first parallel build of the SDL2/SDL2_mixer ports races on
+    # the internal cache lock (one emcc process spawns a child that tries to
+    # take the same lock its parent already holds). Pre-warm the cache with
+    # embuilder so the parallel make doesn't have to build the ports.
     - name: default build using emcc
       if: success()
       run: |
             make distclean
             make wasm_defconfig
+            embuilder build sdl2 sdl2_mixer || true
             make $PARALLEL
 
     - name: default build for system emulation using emcc
@@ -175,6 +187,7 @@ jobs:
       run: |
             make distclean
             make wasm_defconfig
+            embuilder build sdl2 sdl2_mixer || true
             make ENABLE_SYSTEM=1 ENABLE_GOLDFISH_RTC=1 $PARALLEL
             make distclean
 
@@ -367,9 +380,10 @@ jobs:
     - name: Install LLVM
       if: matrix.compiler == 'clang' && steps.cache-llvm.outputs.cache-hit != 'true'
       run: |
-            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x ./llvm.sh
-            sudo ./llvm.sh ${{ steps.llvm-version.outputs.version }}
+            VER='${{ steps.llvm-version.outputs.version }}'
+            sudo apt-get install -y -q=2 \
+                llvm-${VER} llvm-${VER}-dev llvm-${VER}-runtime \
+                clang-${VER} lld-${VER}
 
     - name: Setup LLVM PATH
       if: matrix.compiler == 'clang'
@@ -467,9 +481,10 @@ jobs:
 
     - name: Install LLVM
       run: |
-            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x ./llvm.sh
-            sudo ./llvm.sh $LLVM_VERSION
+            sudo apt-get install -y -q=2 \
+                llvm-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev \
+                llvm-${LLVM_VERSION}-runtime \
+                clang-${LLVM_VERSION} lld-${LLVM_VERSION}
 
     - name: Setup LLVM PATH
       run: echo "/usr/lib/llvm-${LLVM_VERSION}/bin" >> $GITHUB_PATH

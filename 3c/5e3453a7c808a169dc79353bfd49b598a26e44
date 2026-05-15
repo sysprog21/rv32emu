@@ -1,0 +1,114 @@
+src/main.c
+  s_5c672cb2a8de2a::t_2ed78cfb156ef5 333-335
+  s_99e78fe780ceba::t_3994b80bb04ff6 71-115,347-348,452
+  s_5c672cb2a8de2a::t_0c62eb3c7e34b3 312-313,316-319,336-341,424
+src/io.c
+  s_5c672cb2a8de2a::t_71b3d4c28cdbcc 353
+src/emulate.c
+  s_5c672cb2a8de2a::t_fea683ee961932 644
+  s_5c672cb2a8de2a::t_9a55dde5c57f4a 651-665
+  s_5c672cb2a8de2a::t_0c62eb3c7e34b3 2456,2461-2462
+  s_5c672cb2a8de2a::t_979a3d77a67419 2458
+src/em_runtime.h
+  s_5c672cb2a8de2a::t_0c62eb3c7e34b3 20-22,43
+  s_5c672cb2a8de2a::t_77d43a49f6d068 23-25,33-35
+assets/wasm/html/system.html
+  s_f51451ec5261a5::t_7e530d89dc7548 704-705
+  s_f51451ec5261a5::t_ed3948c1e03559 668-679,681,683-687,689-694,696-698,700-703,706-710,712-713
+tools/cpio-inject.py
+  s_f51451ec5261a5::t_df6c9e6d4bf798 1-133
+src/devices/uart.h
+  s_5c672cb2a8de2a::t_5a122e7bac51b4 52-56
+src/devices/uart.c
+  s_5c672cb2a8de2a::t_47b06e40871120 66-71
+.github/workflows/deploy-wasm.yml
+  s_f51451ec5261a5::t_0a9370fd917ecd 220-222,224
+  s_f51451ec5261a5::t_219a2883d20223 239-255
+  s_f51451ec5261a5::t_8b2641bfd1de64 79-81,83-92
+  s_f51451ec5261a5::t_5296e248cdacd7 256-257,259
+  s_f51451ec5261a5::t_ba6b83dc9ec228 210-211
+  s_ac47a78a3a1fe1::t_bca94c58808309 204-208,223,258
+Makefile
+  s_5c672cb2a8de2a::t_cbdf7581d154f4 214-221,225,233-246,255,292
+  s_5c672cb2a8de2a::t_a93daa4b04bf74 222-224
+  s_5c672cb2a8de2a::t_0fae506ce8e2eb 272
+  s_5c672cb2a8de2a::t_6ceecb68da325c 257
+assets/wasm/html/user.html
+  s_f51451ec5261a5::t_8714fca69d6e69 1270-1274
+  s_f51451ec5261a5::t_271d349f2799c1 1093,1105-1109,1112,1118-1120,1124-1130,1135
+  s_f51451ec5261a5::t_980d7ee77b2179 1138-1149,1165,1167-1169,1177-1178,1180-1184,1187
+  s_f51451ec5261a5::t_7c24f423781bc2 1058-1062,1064-1066,1068-1071,1075-1092,1094-1104,1110-1111,1113-1117,1122-1123,1131-1134,1136-1137,1157-1160,1191-1193
+  s_f51451ec5261a5::t_369a78096fa373 617
+  s_ac47a78a3a1fe1::t_0cd7d571ed2deb 1063,1067,1072-1074,1151-1156,1161-1164,1166,1170-1176,1179,1185,1188,1190
+  s_f51451ec5261a5::t_2d2d4325888a8c 1249-1251
+  s_f51451ec5261a5::t_cce1f57bdd0865 1228-1232
+  s_f51451ec5261a5::t_c57c8e014f6fd9 1214-1221,1233-1234
+src/em_runtime.c
+  s_5c672cb2a8de2a::t_8c2756edc232d4 16
+  s_5c672cb2a8de2a::t_0c62eb3c7e34b3 20,25-33,42-43
+tools/dev-server.py
+  s_f51451ec5261a5::t_95d4db9e2be4ec 26-30
+mk/system.mk
+  s_5c672cb2a8de2a::t_cbdf7581d154f4 26,42,50
+  s_5c672cb2a8de2a::t_2e720097d02723 28
+mk/wasm.mk
+  s_5c672cb2a8de2a::t_71b3d4c28cdbcc 31-32,38
+  s_f51451ec5261a5::t_de9fb2acfb8242 115-121,123-132
+  s_f51451ec5261a5::t_47410b12e4b820 243-247
+  s_ac47a78a3a1fe1::t_d94d2bbdc9500e 36,134-136,140-145,147,248-249
+  s_f51451ec5261a5::t_05f53e8189cbed 137-139
+  s_f51451ec5261a5::t_eae83e3c301d43 122
+  s_f51451ec5261a5::t_53ab43ebf46ae4 109-111
+  s_f51451ec5261a5::t_69fdd9b945b1e0 80
+  s_f51451ec5261a5::t_a2064da077106f 112-114,146,148
+  s_f51451ec5261a5::t_4667b4fa0d0751 133
+  s_f51451ec5261a5::t_2f540e5893355c 295
+  s_f51451ec5261a5::t_4b661470fb4653 234-237,264,269,284
+  s_f51451ec5261a5::t_b5b8d6851d3adf 260-261,280-281
+  s_f51451ec5261a5::t_6224a3cfc2121c 69-72
+  s_f51451ec5261a5::t_68f4064a917a1b 240-242
+  s_f51451ec5261a5::t_66b993eb973318 252-255,265-268,270-271
+  s_f51451ec5261a5::t_c4a8a70c6ad85e 26-29,33-35,37
+tools/rootfs-automount.sh
+  s_f51451ec5261a5::t_e047bbedec3023 1-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3c5e3453a7c808a169dc79353bfd49b598a26e44",
+  "prompts": {},
+  "sessions": {
+    "s_5c672cb2a8de2a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e2973-26d4-7ed1-b058-c80d45cdd26f",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    },
+    "s_99e78fe780ceba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e2a58-f1cc-7842-9287-4328674671b4",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    },
+    "s_ac47a78a3a1fe1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e2a81-b492-79a0-97d7-640087b9727c",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    },
+    "s_f51451ec5261a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fd56c39b-42e7-4911-9944-65246afb96df",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

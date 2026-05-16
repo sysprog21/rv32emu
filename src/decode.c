@@ -29,11 +29,14 @@ static inline uint32_t decode_rs2(const uint32_t insn)
     return (insn >> 20) & 0x1f;
 }
 
-/* decode funct3 field: insn[14:12] */
+/* decode funct3 field: insn[14:12] — only used by F-extension (rounding mode)
+ */
+#if RV32_HAS(EXT_F)
 static inline uint32_t decode_funct3(const uint32_t insn)
 {
     return (insn >> 12) & 0x7;
 }
+#endif /* RV32_HAS(EXT_F) */
 
 
 /* I-type immediate: insn[31:20] sign-extended */
@@ -1726,8 +1729,6 @@ static inline bool op_rvc_q2(rv_insn_t *ir, const uint32_t insn)
         ir->imm = ((insn & 0x1000) >> 7) | ((insn & 0x0070) >> 2) |
                   ((insn & 0x000C) << 4);
         ir->rs1 = rv_reg_sp;
-        if (unlikely(ir->rd == rv_reg_zero))
-            return false;
         ir->opcode = rv_insn_cflwsp;
         return true;
 #endif /* RV32_HAS(EXT_F) */

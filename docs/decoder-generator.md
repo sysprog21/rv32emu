@@ -1,19 +1,48 @@
 # Instruction Decoder Generator
 
-The original `src/decode.c` was a hand-written 2000+ line C file containing
-nested switch statements for every supported RISC-V instruction. While
-functional, maintenance and verification were not straightforward — adding a
-new instruction required understanding the full switch structure and manually
-writing bit-extraction logic.
-
-The decoder generator replaces this approach: RISC-V instructions are described
-in a human-readable format in `src/instructions.in`, and `scripts/gen-decoder.py`
-converts this descriptor into the corresponding C implementation. This makes it
-possible to add new instructions or extensions by editing a single line in the
-descriptor file, rather than modifying generated C code by hand.
+RISC-V instructions are described in a human-readable format in
+`src/instructions.in`, and `scripts/gen-decoder.py` converts this descriptor
+into the corresponding C implementation. Adding a new instruction or extension
+requires editing only `src/instructions.in`; `make` regenerates `src/decode.c`
+automatically.
 
 This document describes the format of the ISA descriptor file and how to extend
 it with new instructions.
+
+## Supported Extensions
+
+The RISC-V ISA organizes optional functionality into named extensions.
+rv32emu supports the following extensions, each mapped to a compile-time
+`RV32_HAS()` guard and an `@extension` tag in `src/instructions.in`.
+
+**Base integer ISA**
+
+| Extension | Tag in instructions.in | Description |
+|-----------|------------------------|-------------|
+| I | _(no tag, always included)_ | Base 32-bit integer instruction set |
+
+**Standard unprivileged extensions**
+
+| Extension | Tag in instructions.in | Description |
+|-----------|------------------------|-------------|
+| M | `EXT_M` | Integer multiplication and division |
+| A | `EXT_A` | Atomic memory operations |
+| F | `EXT_F` | Single-precision floating-point |
+| C | `EXT_C` | Compressed (16-bit) instructions |
+
+**Standard unprivileged Z-extensions**
+
+| Extension | Tag in instructions.in | Description |
+|-----------|------------------------|-------------|
+| Zicsr     | `Zicsr`    | Control and status register (CSR) instructions |
+| Zifencei  | `Zifencei` | Instruction-fetch fence |
+| Zba       | `Zba`      | Address generation bit manipulation |
+| Zbb       | `Zbb`      | Basic bit manipulation |
+| Zbc       | `Zbc`      | Carry-less multiplication |
+| Zbs       | `Zbs`      | Single-bit instructions |
+
+Zba, Zbb, Zbc, and Zbs are the ratified subsets of the B (bit-manipulation)
+extension.
 
 ## Overview
 

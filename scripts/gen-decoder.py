@@ -661,8 +661,12 @@ _RVC_INSN_IMPLICIT = {
 _RVC_RD_5BIT_OPERANDS = {"crd", "crs1rd"}
 
 # Instructions where rd=x0 is RESERVED (return false), not a HINT.
-# Per RISC-V spec §16.3: c.lwsp/c.flwsp with rd=0 are reserved.
-_RVC_RD0_RESERVED = {"clwsp", "cflwsp"}
+# Per RISC-V spec §16.3: c.lwsp with rd=x0 is reserved.
+_RVC_RD0_RESERVED = {"clwsp"}
+
+# Instructions whose rd field addresses floating-point registers (f0-f31).
+# rd=0 means f0 which is a valid destination — skip the x0 check entirely.
+_RVC_FLOAT_DEST = {"cflwsp"}
 
 
 def _rvc_operand_lines(insn: Instruction, pad: str) -> list[str]:
@@ -671,9 +675,12 @@ def _rvc_operand_lines(insn: Instruction, pad: str) -> list[str]:
     Looks up each operand in _RVC_OPERAND_DECODERS, then applies
     any per-instruction fixups from _RVC_INSN_IMPLICIT.
 
-    For instructions with a 5-bit rd field:
-      - clwsp / cflwsp: rd==x0 is RESERVED → emit ``return false``
-      - all others:     rd==x0 is a HINT   → emit cnop (not nop)
+    For instructions with a 5-bit integer rd field:
+      - clwsp:  rd==x0 is RESERVED → emit ``return false``
+      - others: rd==x0 is a HINT   → emit cnop (not nop)
+
+    Float-destination instructions (cflwsp) are excluded: rd=0 refers
+    to f0, a valid floating-point register, so no zero-check is emitted.
 
     Using rv_insn_cnop (not rv_insn_nop) matches the original
     decode.c.bak and the RISC-V C extension spec §16.8.
@@ -688,8 +695,9 @@ def _rvc_operand_lines(insn: Instruction, pad: str) -> list[str]:
             lines.append(f"{pad}    {stmt}")
 
     # NOP / reserved check for 5-bit rd instructions
+    # Skip entirely for float-destination instructions (rd=0 → f0, valid).
     has_5bit_rd = any(op in _RVC_RD_5BIT_OPERANDS for op in insn.operands)
-    if has_5bit_rd:
+    if has_5bit_rd and insn.name not in _RVC_FLOAT_DEST:
         if insn.name in _RVC_RD0_RESERVED:
             # rd=x0 is a RESERVED encoding → illegal instruction
             lines.append(f"{pad}    if (unlikely(ir->rd == rv_reg_zero))")
@@ -861,11 +869,13 @@ static inline uint32_t decode_rs2(const uint32_t insn)
     return (insn >> 20) & 0x1f;
 }
 
-/* decode funct3 field: insn[14:12] */
+/* decode funct3 field: insn[14:12] — only used by F-extension (rounding mode) */
+#if RV32_HAS(EXT_F)
 static inline uint32_t decode_funct3(const uint32_t insn)
 {
     return (insn >> 12) & 0x7;
 }
+#endif /* RV32_HAS(EXT_F) */
 
 
 /* I-type immediate: insn[31:20] sign-extended */

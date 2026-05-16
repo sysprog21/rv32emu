@@ -1301,6 +1301,20 @@ void rv_reset(riscv_t *rv, riscv_word_t pc)
 #if RV32_HAS(EXT_M)
     rv->csr_misa |= MISA_M;
 #endif
+#if RV32_HAS(EXT_V)
+    rv->csr_vstart = 0;
+    rv->csr_vxsat = 0;
+    rv->csr_vxrm = 0;
+    rv->csr_vcsr = 0;
+    rv->csr_vl = 0;
+    /* Boot with vtype.vill=1 so any vector op before the first vsetvli
+     * traps; this matches Linux/QEMU convention and avoids quietly running
+     * with the implicit (vlmul=1, sew=8) configuration that csr_vtype=0
+     * would imply.
+     */
+    rv->csr_vtype = 1U << 31;
+    rv->csr_vlenb = VLEN / 8;
+#endif
 
     rv->halt = false;
 }

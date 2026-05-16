@@ -2067,16 +2067,22 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
     const uint32_t index = (insn & INSN_6_2) >> 2;
 
 #if RV32_HAS(EXT_V)
-    /* Handle vector operations */
+    /* Handle vector operations. Both vcfg and vector ops share the same
+     * primary opcode; funct3=0b111 selects the vcfg path, anything else
+     * is a V op. Route the decode through the shared `goto end` exit so
+     * the RV32E register-range check below still rejects illegal x16-x31
+     * operands; an early `return op(ir, insn)` here would skip that.
+     */
     if (index == 0b10101) {
-        /* Since vcfg and vop uses the same opcode */
         if (decode_funct3(insn) == 0b111) {
-            const decode_t op = rv_jump_table[index];
-            return op(ir, insn);
+            op = rv_jump_table[index];
+            ret = op(ir, insn);
+        } else {
+            const uint32_t v_index = (insn >> 26) & 0x3F;
+            op = rvv_jump_table[v_index];
+            ret = op(ir, insn);
         }
-        const uint32_t v_index = (insn >> 26) & 0x3F;
-        const decode_t op = rvv_jump_table[v_index];
-        return op(ir, insn);
+        goto end;
     }
 #endif
 

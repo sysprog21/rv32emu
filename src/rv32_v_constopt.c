@@ -5,16 +5,27 @@
 
 /* RISC-V "V" Vector Extension - constant-optimization stubs.
  *
- * Included from rv32_constopt.c when RV32_HAS(EXT_V) is set. Vector ops
- * write to vector registers (rv->V[]), not GPRs (rv->X[]), so they do
- * not invalidate constant tracking and the CONSTOPT bodies are empty.
- * Future ops that write back to ir->rd (vmv.x.s, vcpop.m, vfirst.m,
- * vfmv.f.s) will need info->is_constant[ir->rd] = false here.
+ * Included from rv32_constopt.c when RV32_HAS(EXT_V) is set. Most vector
+ * ops write to vector registers (rv->V[]) and leave the GPR file alone,
+ * so their CONSTOPT bodies are empty.
+ *
+ * Ops that write a scalar back into GPR ir->rd must explicitly invalidate
+ * the constant tracker for that register:
+ *   vset{i}vl{i}: writes the resulting vl to rd.
+ *   vmv.x.s:      copies vs2[0] to rd.
+ *   vcpop.m:      counts mask bits into rd.
+ *   vfirst.m:     writes first-set-bit index to rd.
+ * Forgetting the invalidation lets a stale constant fold downstream.
  */
 
-CONSTOPT(vsetvli, {})
-CONSTOPT(vsetivli, {})
-CONSTOPT(vsetvl, {})
+/* vset{i}vl{i} writes the resulting vl into GPR rd. The constant-folding
+ * pass must drop rd from its known-constant table; otherwise downstream
+ * uses fold against a stale value left over from a prior write to that
+ * register.
+ */
+CONSTOPT(vsetvli, { info->is_constant[ir->rd] = false; })
+CONSTOPT(vsetivli, { info->is_constant[ir->rd] = false; })
+CONSTOPT(vsetvl, { info->is_constant[ir->rd] = false; })
 CONSTOPT(vle8_v, {})
 CONSTOPT(vle16_v, {})
 CONSTOPT(vle32_v, {})
@@ -515,9 +526,13 @@ CONSTOPT(vwmaccus_vx, {})
 CONSTOPT(vwmaccsu_vv, {})
 CONSTOPT(vwmaccsu_vx, {})
 CONSTOPT(vmv_s_x, {})
-CONSTOPT(vmv_x_s, {})
-CONSTOPT(vcpop_m, {})
-CONSTOPT(vfirst_m, {})
+/* vmv.x.s, vcpop.m, and vfirst.m read a vector register and write the
+ * scalar result into GPR rd. As above, the constant tracker must drop
+ * rd because none of these are constant-foldable from the GPR file.
+ */
+CONSTOPT(vmv_x_s, { info->is_constant[ir->rd] = false; })
+CONSTOPT(vcpop_m, { info->is_constant[ir->rd] = false; })
+CONSTOPT(vfirst_m, { info->is_constant[ir->rd] = false; })
 CONSTOPT(vmsbf_m, {})
 CONSTOPT(vmsof_m, {})
 CONSTOPT(vmsif_m, {})

@@ -865,16 +865,29 @@ static inline bool op_010000(rv_insn_t *ir, const uint32_t insn)
 {
     switch (decode_funct3(insn)) {
     case 0:
+        /* vadc.vvm requires encoded vm=0; vm=1 is reserved (V 1.0 §11.4). */
+        if (decode_vm(insn))
+            return false;
         decode_vvtype(ir, insn);
         ir->vm = 0;
         ir->opcode = rv_insn_vadc_vvm;
         break;
     case 1:
-        /* FIXME: Implement the decoding for VWFUNARY0. */
+        /* OPFVV / VWFUNARY0 (vfmv.f.s and friends). FP unary moves are
+         * not implemented yet; reject explicitly instead of falling
+         * through into the VWXUNARY0 path below, which would silently
+         * misdecode the encoding as vmv.x.s / vcpop.m / vfirst.m.
+         */
+        return false;
     case 2:
-        /* VWXUNARY0 */
+        /* VWXUNARY0 dispatch: vmv.x.s requires vm=1 (vm=0 reserved per
+         * V 1.0 §16.1). vcpop.m / vfirst.m support both vm=0 (masked)
+         * and vm=1 (unmasked) per V 1.0 §15.1, so do NOT force vm there.
+         */
         switch (decode_rs1(insn)) {
         case 0:
+            if (!decode_vm(insn))
+                return false;
             decode_mtype(ir, insn);
             ir->opcode = rv_insn_vmv_x_s;
             break;
@@ -891,19 +904,30 @@ static inline bool op_010000(rv_insn_t *ir, const uint32_t insn)
         }
         break;
     case 3:
+        if (decode_vm(insn))
+            return false;
         decode_vitype(ir, insn);
+        ir->vm = 0;
         ir->opcode = rv_insn_vadc_vim;
         break;
     case 4:
+        if (decode_vm(insn))
+            return false;
         decode_vxtype(ir, insn);
+        ir->vm = 0;
         ir->opcode = rv_insn_vadc_vxm;
         break;
     case 5:
-        /* FIXME: Implement the decoding for VRFUNARY0. */
+        /* OPFVF / VRFUNARY0 (vfmv.s.f). Not implemented yet; reject the
+         * encoding here so it does not fall through to the VRXUNARY0
+         * (vmv.s.x) path below and silently dispatch as the wrong op.
+         */
+        return false;
     case 6:
-        /* VRXUNARY0 */
-        ir->rd = decode_rd(insn);
-        ir->vs2 = decode_rs2(insn);
+        /* VRXUNARY0 - vmv.s.x requires encoded vm=1; vm=0 is reserved. */
+        if (!decode_vm(insn))
+            return false;
+        decode_vxtype(ir, insn);
         ir->vm = 1;
         ir->opcode = rv_insn_vmv_s_x;
         break;
@@ -915,13 +939,17 @@ static inline bool op_010000(rv_insn_t *ir, const uint32_t insn)
 
 static inline bool op_010001(rv_insn_t *ir, const uint32_t insn)
 {
+    /* funct6=010001 dispatch (V 1.0 §11.4): vmadc has only the .vv
+     * (funct3=0), .vi (funct3=3), and .vx (funct3=4) forms. The .vv and
+     * .vx forms exist in both with-carry-in (vm=0) and no-carry-in
+     * (vm=1) variants; the helper consumes ir->vm to pick. Other funct3
+     * values are reserved.
+     */
     switch (decode_funct3(insn)) {
     case 0:
         decode_vvtype(ir, insn);
         ir->opcode = rv_insn_vmadc_vv;
         break;
-    case 1:
-    case 2:
     case 3:
         decode_vitype(ir, insn);
         ir->opcode = rv_insn_vmadc_vi;
@@ -930,8 +958,10 @@ static inline bool op_010001(rv_insn_t *ir, const uint32_t insn)
         decode_vxtype(ir, insn);
         ir->opcode = rv_insn_vmadc_vx;
         break;
-    case 5:
-    case 6:
+    case 1:  /* OPFVV - reserved for vmadc */
+    case 2:  /* OPMVV - reserved for vmadc */
+    case 5:  /* OPFVF - reserved */
+    case 6:  /* OPMVX - reserved */
     default: /* illegal instruction */
         return false;
     }
@@ -942,17 +972,32 @@ static inline bool op_010010(rv_insn_t *ir, const uint32_t insn)
 {
     switch (decode_funct3(insn)) {
     case 0:
+        /* vsbc.vvm requires encoded vm=0; vm=1 is reserved (V 1.0 §11.4). */
+        if (decode_vm(insn))
+            return false;
         decode_vvtype(ir, insn);
+        ir->vm = 0;
         ir->opcode = rv_insn_vsbc_vvm;
         break;
     case 1:
         /* FIXME: Implement the decoding for VFUNARY0. */
-        break;
+        return false;
     case 2:
-        /* FIXME: Implement the decoding for VXUNARY0. */
+        /* OPMVV / VXUNARY0 (vzext.vf{2,4,8} and vsext.vf{2,4,8}). The
+         * RVOPs for these are not implemented yet, so refuse the encoding
+         * rather than silently misdecoding it as vsbc.vxm.
+         */
+        return false;
     case 3:
+        /* OPIVI: vsbc has no immediate form per V 1.0 §11.4 (only vvm/vxm
+         * exist). Reject explicitly instead of falling through. */
+        return false;
     case 4:
+        /* vsbc.vxm: encoded vm=0 required (vm=1 is reserved). */
+        if (decode_vm(insn))
+            return false;
         decode_vxtype(ir, insn);
+        ir->vm = 0;
         ir->opcode = rv_insn_vsbc_vxm;
         break;
     case 5:
@@ -965,21 +1010,26 @@ static inline bool op_010010(rv_insn_t *ir, const uint32_t insn)
 
 static inline bool op_010011(rv_insn_t *ir, const uint32_t insn)
 {
+    /* funct6=010011 dispatch (V 1.0 §11.4): vmsbc has only the .vv
+     * (funct3=0) and .vx (funct3=4) forms; there is no .vi form. Both
+     * exist in with-borrow-in (vm=0) and no-borrow-in (vm=1) variants;
+     * the helper consumes ir->vm to pick. Other funct3 values are
+     * reserved.
+     */
     switch (decode_funct3(insn)) {
     case 0:
         decode_vvtype(ir, insn);
         ir->opcode = rv_insn_vmsbc_vv;
         break;
-    case 1:
-        /* FIXME: Implement the decoding for VFUNARY1. */
-    case 2:
-    case 3:
     case 4:
         decode_vxtype(ir, insn);
         ir->opcode = rv_insn_vmsbc_vx;
         break;
-    case 5:
-    case 6:
+    case 1:  /* OPFVV / VFUNARY1 - not vmsbc; reserved here */
+    case 2:  /* OPMVV - reserved for vmsbc */
+    case 3:  /* OPIVI - vmsbc has no immediate form */
+    case 5:  /* OPFVF - reserved */
+    case 6:  /* OPMVX - reserved */
     default: /* illegal instruction */
         return false;
     }
@@ -1546,7 +1596,11 @@ static inline bool op_100111(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = rv_insn_vmulh_vv;
         break;
     case 3:
-        /* FIXME: Implement the decoding for vmv<nr>r. */
+        /* OPIVI / vmv<nr>r.v (whole-register move). Not implemented;
+         * reject explicitly so the encoding does not fall through to
+         * vsmul.vx below and silently execute the wrong instruction.
+         */
+        return false;
     case 4:
         decode_vxtype(ir, insn);
         ir->opcode = rv_insn_vsmul_vx;

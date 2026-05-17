@@ -1,0 +1,29 @@
+mk/http.mk
+  s_226f1d85d59e2d::t_3b42cb28d25b42 19-23
+  s_226f1d85d59e2d::t_ec34e68ae01a42 45-48
+  s_c5acb38140f2ba::t_2152da2906127c 13-15,38,41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "dbf60bb006adcb921476e8b354525a628b48cccc",
+  "prompts": {},
+  "sessions": {
+    "s_226f1d85d59e2d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5af906e0-0333-4693-a3f0-0566d157c625",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    },
+    "s_c5acb38140f2ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e35c9-9955-78d2-ac25-e86dc907ed4b",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

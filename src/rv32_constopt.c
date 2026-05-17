@@ -1238,5 +1238,9 @@ CONSTOPT(bseti, {
     if (ir->rd)
         info->is_constant[ir->rd] = false;
 })
+#endif
 
+/* Vector Extension */
+#if RV32_HAS(EXT_V)
+#include "rv32_v_constopt.c"
 #endif

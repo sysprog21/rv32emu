@@ -71,6 +71,15 @@ endef
 $(foreach e,$(CHECK_ELF_FILES),$(eval $(call make-check-target,$(e))))
 
 CHECK_TARGETS := check-hello $(addprefix check-,$(CHECK_ELF_FILES))
+ifeq ($(CONFIG_EXT_V),y)
+EXPECTED_rvv_smoke = RVV smoke OK
+CHECK_TARGETS += check-rvv-smoke
+
+check-rvv-smoke: $(BIN)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32imfv_zicsr -mabi=ilp32f -nostdlib -static \
+	    tests/rvv-smoke.S -o $(OUT)/rvv-smoke.elf
+	$(call check-test, , $(OUT)/rvv-smoke.elf, rvv-smoke.elf, tail -n 1,$(EXPECTED_rvv_smoke))
+endif
 check: $(CHECK_TARGETS)
 
 # System tests
@@ -90,4 +99,3 @@ mmu-test: $(BIN)
 .PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
 
 endif # _MK_TESTS_INCLUDED
-

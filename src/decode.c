@@ -306,6 +306,12 @@ static inline uint16_t c_decode_cbtype_imm(const uint16_t insn)
 }
 #endif /* RV32_HAS(EXT_C) */
 
+#if RV32_HAS(EXT_V)
+#include "decode_v.c"
+#else /* !RV32_HAS(EXT_V) */
+#define op_vcfg OP_UNIMP
+#endif /* Vector extension */
+
 /* decode I-type
  *  31       20 19   15 14    12 11   7 6      0
  * | imm[11:0] |  rs1  | funct3 |  rd  | opcode |
@@ -384,6 +390,7 @@ static inline void decode_r4type(rv_insn_t *ir, const uint32_t insn)
     ir->rm = decode_funct3(insn);
 }
 #endif
+
 
 /* LOAD: I-type
  *  31       20 19   15 14    12 11   7 6      0
@@ -1197,6 +1204,11 @@ static inline bool op_amo(rv_insn_t *ir, const uint32_t insn)
  */
 static inline bool op_load_fp(rv_insn_t *ir, const uint32_t insn)
 {
+#if RV32_HAS(EXT_V)
+    if (decode_funct3(insn) != 0b010)
+        return decode_v_load(ir, insn);
+#endif
+
     /* inst imm[11:0] rs1 width rd opcode
      * ----+---------+---+-----+--+-------
      * FLW  imm[11:0] rs1 010   rd 0000111
@@ -1215,6 +1227,11 @@ static inline bool op_load_fp(rv_insn_t *ir, const uint32_t insn)
  */
 static inline bool op_store_fp(rv_insn_t *ir, const uint32_t insn)
 {
+#if RV32_HAS(EXT_V)
+    if (decode_funct3(insn) != 0b010)
+        return decode_v_store(ir, insn);
+#endif
+
     /* inst imm[11:5] rs2 rs1 width imm[4:0] opcode
      * ----+---------+---+---+-----+--------+-------
      * FSW  imm[11:5] rs2 rs1 010   imm[4:0] 0100111
@@ -1964,6 +1981,7 @@ static inline bool op_cfsw(rv_insn_t *ir, const uint32_t insn)
 #define op_cflwsp OP_UNIMP
 #endif /* RV32_HAS(EXT_C) && RV32_HAS(EXT_F) */
 
+
 /* handler for all unimplemented opcodes */
 static inline bool op_unimp(rv_insn_t *ir UNUSED, uint32_t insn UNUSED)
 {
@@ -1989,7 +2007,7 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
     //  000         001           010        011           100         101        110        111
         OP(load),   OP(load_fp),  OP(unimp), OP(misc_mem), OP(op_imm), OP(auipc), OP(unimp), OP(unimp), // 00
         OP(store),  OP(store_fp), OP(unimp), OP(amo),      OP(op),     OP(lui),   OP(unimp), OP(unimp), // 01
-        OP(madd),   OP(msub),     OP(nmsub), OP(nmadd),    OP(op_fp),  OP(unimp), OP(unimp), OP(unimp), // 10
+        OP(madd),   OP(msub),     OP(nmsub), OP(nmadd),    OP(op_fp),  OP(vcfg), OP(unimp), OP(unimp),  // 10
         OP(branch), OP(jalr),     OP(unimp), OP(jal),      OP(system), OP(unimp), OP(unimp), OP(unimp), // 11
     };
 
@@ -2005,6 +2023,24 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
         OP(unimp),      OP(cj),        OP(unimp), OP(unimp),  // 101
         OP(csw),       OP(cbeqz),     OP(cswsp),  OP(unimp),  // 110
         OP(cfsw),      OP(cbnez),     OP(cfswsp), OP(unimp),  // 111
+    };
+#endif
+
+#if RV32_HAS(EXT_V)
+    static const decode_t rvv_jump_table[] = {
+    /* This table maps the function6 entries for RISC-V Vector instructions.
+     * For detailed specifications, see:
+     * https://github.com/riscvarchive/riscv-v-spec/blob/master/inst-table.adoc
+     */
+    //  000        001        010        011        100        101        110        111
+        OP(000000), OP(000001), OP(000010), OP(000011), OP(000100), OP(000101), OP(000110), OP(000111),  // 000
+        OP(001000), OP(001001), OP(001010), OP(001011), OP(001100), OP(unimp), OP(001110), OP(001111),   // 001
+        OP(010000), OP(010001), OP(010010), OP(010011), OP(010100), OP(unimp), OP(unimp), OP(010111),    // 010
+        OP(011000), OP(011001), OP(011010), OP(011011), OP(011100), OP(011101), OP(011110), OP(011111),  // 011
+        OP(100000), OP(100001), OP(100010), OP(100011), OP(100100), OP(100101), OP(100110), OP(100111),  // 100
+        OP(101000), OP(101001), OP(101010), OP(101011), OP(101100), OP(101101), OP(101110), OP(101111),  // 101
+        OP(110000), OP(110001), OP(110010), OP(110011), OP(110100), OP(110101), OP(110110), OP(110111),  // 110
+        OP(111000), OP(unimp), OP(111010), OP(111011), OP(111100), OP(111101), OP(111110), OP(111111)    // 111
     };
 #endif
     /* clang-format on */
@@ -2029,6 +2065,26 @@ bool rv_decode(rv_insn_t *ir, uint32_t insn)
 
     /* standard uncompressed instruction */
     const uint32_t index = (insn & INSN_6_2) >> 2;
+
+#if RV32_HAS(EXT_V)
+    /* Handle vector operations. Both vcfg and vector ops share the same
+     * primary opcode; funct3=0b111 selects the vcfg path, anything else
+     * is a V op. Route the decode through the shared `goto end` exit so
+     * the RV32E register-range check below still rejects illegal x16-x31
+     * operands; an early `return op(ir, insn)` here would skip that.
+     */
+    if (index == 0b10101) {
+        if (decode_funct3(insn) == 0b111) {
+            op = rv_jump_table[index];
+            ret = op(ir, insn);
+        } else {
+            const uint32_t v_index = (insn >> 26) & 0x3F;
+            op = rvv_jump_table[v_index];
+            ret = op(ir, insn);
+        }
+        goto end;
+    }
+#endif
 
     /* decode instruction */
     op = rv_jump_table[index];

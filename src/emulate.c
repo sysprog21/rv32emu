@@ -260,6 +260,95 @@ static inline void update_time(riscv_t *rv)
     rv->csr_time[1] = rv->timer >> 32;
 }
 
+#if RV32_HAS(EXT_V)
+static inline uint32_t rvv_csr_vcsr_value(const riscv_t *rv)
+{
+    return (rv->csr_vxrm & 0x3) | ((rv->csr_vxsat & 0x1) << 2);
+}
+
+static inline void rvv_csr_sync_vcsr(riscv_t *rv)
+{
+    rv->csr_vcsr = rvv_csr_vcsr_value(rv);
+}
+
+static inline bool rvv_csr_read(riscv_t *rv, uint32_t csr, uint32_t *out)
+{
+    switch (csr & 0xFFF) {
+    case CSR_VSTART:
+        *out = rv->csr_vstart;
+        return true;
+    case CSR_VXSAT:
+        *out = rv->csr_vxsat & 0x1;
+        return true;
+    case CSR_VXRM:
+        *out = rv->csr_vxrm & 0x3;
+        return true;
+    case CSR_VCSR:
+        rvv_csr_sync_vcsr(rv);
+        *out = rv->csr_vcsr;
+        return true;
+    case CSR_VL:
+        *out = rv->csr_vl;
+        return true;
+    case CSR_VTYPE:
+        *out = rv->csr_vtype;
+        return true;
+    case CSR_VLENB:
+        *out = rv->csr_vlenb;
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* vstart is architecturally ceil(log2(VLEN)) bits wide; high bits read as
+ * zero. VLEN is a power of two, so masking with (VLEN - 1) is exact.
+ */
+#define RVV_VSTART_MASK ((uint32_t) (VLEN - 1))
+
+static inline bool rvv_csr_is_read_only(uint32_t csr)
+{
+    switch (csr & 0xFFF) {
+    case CSR_VL:
+    case CSR_VTYPE:
+    case CSR_VLENB:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static inline void rvv_csr_write(riscv_t *rv, uint32_t csr, uint32_t val)
+{
+    switch (csr & 0xFFF) {
+    case CSR_VSTART:
+        rv->csr_vstart = val & RVV_VSTART_MASK;
+        break;
+    case CSR_VXSAT:
+        rv->csr_vxsat = val & 0x1;
+        rvv_csr_sync_vcsr(rv);
+        break;
+    case CSR_VXRM:
+        rv->csr_vxrm = val & 0x3;
+        rvv_csr_sync_vcsr(rv);
+        break;
+    case CSR_VCSR:
+        rv->csr_vxrm = val & 0x3;
+        rv->csr_vxsat = (val >> 2) & 0x1;
+        rvv_csr_sync_vcsr(rv);
+        break;
+    default:
+        /* CSR_VL, CSR_VTYPE, CSR_VLENB are read-only; the caller must use
+         * rvv_csr_is_read_only() to gate the write attempt and raise an
+         * illegal-instruction exception per Zicsr. The default case here
+         * is reached only for the zero-mask csrrs/csrrc path that the
+         * dispatcher already short-circuits on val=0.
+         */
+        break;
+    }
+}
+#endif
+
 /* get a pointer to a CSR */
 static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
 {
@@ -367,6 +456,19 @@ static uint32_t csr_csrrw(riscv_t *rv,
                           uint64_t cycle)
 {
     csr_sync_cycle(rv, csr, cycle);
+#if RV32_HAS(EXT_V)
+    uint32_t rvv_out;
+    if (rvv_csr_read(rv, csr, &rvv_out)) {
+        /* csrrw/csrrwi always writes (even with rs1=x0). Trap when the
+         * target is a read-only V CSR. */
+        if (rvv_csr_is_read_only(csr)) {
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
+            return 0;
+        }
+        rvv_csr_write(rv, csr, val);
+        return rvv_out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
@@ -411,6 +513,25 @@ static uint32_t csr_csrrs(riscv_t *rv,
                           uint64_t cycle)
 {
     csr_sync_cycle(rv, csr, cycle);
+#if RV32_HAS(EXT_V)
+    uint32_t rvv_out;
+    if (rvv_csr_read(rv, csr, &rvv_out)) {
+        /* Per Zicsr, csrrs with rs1=x0 (val == 0) must not perform any of
+         * the write side effects. The csrrs/csrrsi RVOPs already pass val=0
+         * in that case; skip the write so VCSR-mirroring side effects
+         * (clobbering vxrm/vxsat) do not fire on a pure read. When val !=
+         * 0, an actual write is requested - trap on read-only V CSRs.
+         */
+        if (val) {
+            if (rvv_csr_is_read_only(csr)) {
+                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
+                return 0;
+            }
+            rvv_csr_write(rv, csr, rvv_out | val);
+        }
+        return rvv_out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
@@ -445,6 +566,20 @@ static uint32_t csr_csrrc(riscv_t *rv,
                           uint64_t cycle)
 {
     csr_sync_cycle(rv, csr, cycle);
+#if RV32_HAS(EXT_V)
+    uint32_t rvv_out;
+    if (rvv_csr_read(rv, csr, &rvv_out)) {
+        /* Same Zicsr no-write-on-x0 rule as csrrs above. */
+        if (val) {
+            if (rvv_csr_is_read_only(csr)) {
+                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
+                return 0;
+            }
+            rvv_csr_write(rv, csr, rvv_out & ~val);
+        }
+        return rvv_out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
@@ -685,7 +820,7 @@ static uint32_t peripheral_update_ctr = 64;
     } while (0)
 #endif
 
-FORCE_INLINE bool insn_is_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch, insn_len, translatable, reg_mask) \
@@ -1206,7 +1341,7 @@ static const void *dispatch_table[] = {
 /* clang-format on */
 
 #if RV32_HAS(JIT)
-FORCE_INLINE bool insn_is_translatable(uint8_t opcode)
+FORCE_INLINE bool insn_is_translatable(uint16_t opcode)
 {
     switch (opcode) {
 #define _(inst, can_branch, insn_len, translatable, reg_mask) \
@@ -1220,7 +1355,7 @@ FORCE_INLINE bool insn_is_translatable(uint8_t opcode)
 #endif
 
 #if RV32_HAS(BLOCK_CHAINING)
-FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_unconditional_branch(uint16_t opcode)
 {
     switch (opcode) {
     case rv_insn_ecall:
@@ -1247,7 +1382,7 @@ FORCE_INLINE bool insn_is_unconditional_branch(uint8_t opcode)
     }
 }
 
-FORCE_INLINE bool insn_is_direct_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_direct_branch(uint16_t opcode)
 {
     switch (opcode) {
     case rv_insn_jal:
@@ -1262,7 +1397,7 @@ FORCE_INLINE bool insn_is_direct_branch(uint8_t opcode)
 }
 #endif
 
-FORCE_INLINE bool insn_is_indirect_branch(uint8_t opcode)
+FORCE_INLINE bool insn_is_indirect_branch(uint16_t opcode)
 {
     switch (opcode) {
     case rv_insn_jalr:
@@ -1403,7 +1538,7 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
 }
 
 /* Count consecutive instructions with same opcode */
-static inline int count_consecutive_insn(rv_insn_t *ir, uint8_t opcode)
+static inline int count_consecutive_insn(rv_insn_t *ir, uint16_t opcode)
 {
     int count = 1;
     rv_insn_t *next = ir->next;
@@ -1444,7 +1579,7 @@ static inline bool try_fuse_sequence(riscv_t *rv,
                                      block_t *block,
                                      rv_insn_t *ir,
                                      int count,
-                                     uint8_t fuse_opcode)
+                                     uint16_t fuse_opcode)
 {
     if (count <= 1)
         return false;
@@ -1889,7 +2024,7 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
 
         if (all_ram) {
             /* Attempt fusion - may fail due to allocation */
-            uint8_t fuse_opcode =
+            uint16_t fuse_opcode =
                 (cand->opcode == rv_insn_lw) ? rv_insn_fuse4 : rv_insn_fuse3;
             if (try_fuse_sequence(rv, block, cand->ir, cand->count,
                                   fuse_opcode)) {

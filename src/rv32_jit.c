@@ -786,3 +786,25 @@ GEN(binvi, { assert(NULL); })
 GEN(bset, { assert(NULL); })
 GEN(bseti, { assert(NULL); })
 #endif
+
+#if RV32_HAS(EXT_V)
+/* JIT stubs for every V opcode. We deliberately reuse rv32_v_constopt.c
+ * for the opcode list instead of including rv32_v_template.c here: the
+ * interpreter template defines static-inline FP helpers (FMASK_SIGN /
+ * is_nan / softfloat shims) that depend on rv32_template.c's earlier F
+ * context, which the JIT compilation unit does not pull in. Including
+ * the template under JIT therefore fails to build whenever EXT_V is
+ * enabled. The constopt sibling, in contrast, is a hand-maintained list
+ * of CONSTOPT(name, {}) lines with no helper dependencies; redefining
+ * the macro converts the list to GEN handlers without touching the rest
+ * of the file.
+ *
+ * Vector instructions are marked translatable=0 in src/decode.h, so the
+ * JIT never reaches these handlers in normal flow. The assert(NULL)
+ * stub catches accidental flips of that flag without quietly emitting
+ * empty (wrong) JIT code for vector ops.
+ */
+#define CONSTOPT(inst, body) GEN(inst, { assert(NULL); })
+#include "rv32_v_constopt.c"
+#undef CONSTOPT
+#endif

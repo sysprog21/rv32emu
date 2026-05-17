@@ -1860,3 +1860,7 @@ RVOP(bseti, {
 })
 
 #endif
+
+#if RV32_HAS(EXT_V)
+#include "rv32_v_template.c"
+#endif

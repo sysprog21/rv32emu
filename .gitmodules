@@ -36,5 +36,5 @@
 	shallow = true
 [submodule "tests/embench-iot"]
 	path = tests/embench-iot
-	url = https://github.com/sysprog21/embench-iot.git
+	url = https://github.com/sysprog21/embench-iot
 	shallow = true

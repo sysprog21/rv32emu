@@ -13,6 +13,7 @@ BIN_DIR := $(abspath $(OUT))
 
 TEST_SUITES += \
 	ansibench \
+	embench-iot \
 	rv8-bench
 
 # "ieee754" needs F extension

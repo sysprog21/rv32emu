@@ -62,14 +62,44 @@ jobs:
         run: |
             git clone https://github.com/emscripten-core/emsdk -b 3.1.51
             cd emsdk
-            ./emsdk install latest
-            ./emsdk activate latest
+            # Pin to the same version as the emsdk tag. `install latest`
+            # would otherwise drift; newer Emscripten releases tightened the
+            # port-cache lock and broke `make -j` builds here.
+            ./emsdk install 3.1.51
+            ./emsdk activate 3.1.51
             source ./emsdk_env.sh
-            echo "$PATH" >> $GITHUB_PATH
+            # Propagate emsdk env to subsequent steps (each `run:` is a fresh
+            # shell). One dir per line per GitHub Actions docs; non-PATH vars
+            # (EM_CONFIG, EMSDK_NODE) ensure emcc finds its .emscripten config
+            # and bundled node without relying on relative-path auto-discovery.
+            {
+              echo "EMSDK=$EMSDK"
+              echo "EM_CONFIG=$EM_CONFIG"
+              echo "EMSDK_NODE=$EMSDK_NODE"
+              echo "EMSDK_PYTHON=$EMSDK_PYTHON"
+            } >> $GITHUB_ENV
+            {
+              echo "$EMSDK"
+              echo "$EMSDK/upstream/emscripten"
+            } >> $GITHUB_PATH
         shell: bash
       - name: fetch artifact
         run: |
               make artifact ENABLE_SYSTEM=1
+      # Populate the SDL2 / SDL2_mixer port cache serially. Without this,
+      # concurrent first-time port generation under `make -j` trips
+      # emscripten's nested-lock assertion on libSDL2.a.
+      - name: warm emscripten port cache
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
+        run: |
+            echo 'int main(void){return 0;}' > /tmp/warmup.c
+            # Link (not just compile) so sysroot libraries that materialize at
+            # link time (e.g. libmimalloc) are populated too.
+            emcc -sSTRICT=0 -sUSE_SDL=2 -sUSE_SDL_MIXER=2 \
+                 -sSDL2_MIXER_FORMATS=wav,mid -sMALLOC=mimalloc -pthread \
+                 -O2 /tmp/warmup.c -o /tmp/warmup.js
       # Note: wasm_defconfig sets CONFIG_BUILD_WASM=y which auto-selects CC=emcc
       - name: build with emcc and move application files to /tmp
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
@@ -186,10 +216,26 @@ jobs:
         run: |
             git clone https://github.com/emscripten-core/emsdk -b 3.1.51
             cd emsdk
-            ./emsdk install latest
-            ./emsdk activate latest
+            # Pin to the same version as the emsdk tag. `install latest`
+            # would otherwise drift; newer Emscripten releases tightened the
+            # port-cache lock and broke `make -j` builds here.
+            ./emsdk install 3.1.51
+            ./emsdk activate 3.1.51
             source ./emsdk_env.sh
-            echo "$PATH" >> $GITHUB_PATH
+            # Propagate emsdk env to subsequent steps (each `run:` is a fresh
+            # shell). One dir per line per GitHub Actions docs; non-PATH vars
+            # (EM_CONFIG, EMSDK_NODE) ensure emcc finds its .emscripten config
+            # and bundled node without relying on relative-path auto-discovery.
+            {
+              echo "EMSDK=$EMSDK"
+              echo "EM_CONFIG=$EM_CONFIG"
+              echo "EMSDK_NODE=$EMSDK_NODE"
+              echo "EMSDK_PYTHON=$EMSDK_PYTHON"
+            } >> $GITHUB_ENV
+            {
+              echo "$EMSDK"
+              echo "$EMSDK/upstream/emscripten"
+            } >> $GITHUB_PATH
         shell: bash
       - name: fetch artifact
         run: |
@@ -197,6 +243,20 @@ jobs:
               # get from rv32emu-prebuilt
               .ci/fetch.sh -o build/shareware_doom_iwad.zip "https://raw.githubusercontent.com/sysprog21/rv32emu-prebuilt/doom-artifact/shareware_doom_iwad.zip"
               unzip -o -d build/ build/shareware_doom_iwad.zip
+      # Populate the SDL2 / SDL2_mixer port cache serially. Without this,
+      # concurrent first-time port generation under `make -j` trips
+      # emscripten's nested-lock assertion on libSDL2.a.
+      - name: warm emscripten port cache
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm') }}
+        run: |
+            echo 'int main(void){return 0;}' > /tmp/warmup.c
+            # Link (not just compile) so sysroot libraries that materialize at
+            # link time (e.g. libmimalloc) are populated too.
+            emcc -sSTRICT=0 -sUSE_SDL=2 -sUSE_SDL_MIXER=2 \
+                 -sSDL2_MIXER_FORMATS=wav,mid -sMALLOC=mimalloc -pthread \
+                 -O2 /tmp/warmup.c -o /tmp/warmup.js
       # Note: wasm_defconfig sets CONFIG_BUILD_WASM=y which auto-selects CC=emcc
       - name: build with emcc and move application files to /tmp
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||

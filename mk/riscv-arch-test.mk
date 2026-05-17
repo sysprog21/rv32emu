@@ -48,11 +48,11 @@ ifeq ($(SKIP_PREREQ),1)
 	$(Q)test -d $(ARCH_TEST_DIR) || \
 		{ echo "Error: SKIP_PREREQ=1 requires submodule. Run 'git submodule update --init tests/riscv-arch-test/' first."; exit 1; }
 else
-	git submodule update --init $(dir $(ARCH_TEST_DIR))
+	git submodule update --init $(ARCH_TEST_DIR)
 	$(Q)cp $(OUT)/rv32emu-prebuilt-sail-$(HOST_PLATFORM) tests/arch-test-target/sail_cSim/riscv_sim_RV32
 	$(Q)chmod +x tests/arch-test-target/sail_cSim/riscv_sim_RV32
 endif
-	$(Q)python3 -B $(RISCV_TARGET)/setup.py --riscv_device=$(RISCV_DEVICE) --hw_data_misaligned_support=$(hw_data_misaligned_support) --work_dir=$(WORK)
+	$(Q)python3 -B $(RISCV_TARGET)/setup.py --riscv_device=$(RISCV_DEVICE) --hw_data_misaligned_support=$(hw_data_misaligned_support) --work_dir=$(WORK) --dut_exe=$(abspath $(BIN))
 	$(Q)grep -q '^\[RISCOF\]' $(WORK)/config.ini || \
 		{ echo "Error: config.ini missing RISCOF section. Contents:"; cat $(WORK)/config.ini; exit 1; }
 	$(Q)riscof run --no-clean --work-dir=$(WORK) \

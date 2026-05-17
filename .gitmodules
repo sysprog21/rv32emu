@@ -34,3 +34,6 @@
 	path = src/dtc
 	url = https://github.com/dgibson/dtc
 	shallow = true
+[submodule "tests/riscv-act"]
+	path = tests/riscv-act
+	url = https://github.com/riscv/riscv-arch-test

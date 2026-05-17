@@ -75,7 +75,7 @@ def setup_testlist(riscv_device, hw_data_misaligned_support, work_dir=None):
 
 
 # setup the riscof config file
-def setup_config(work_dir=None, ispec_path=None):
+def setup_config(work_dir=None, ispec_path=None, dut_exe=None):
     cwd = constants.cwd
     root = constants.root
     refname = constants.refname
@@ -90,6 +90,8 @@ def setup_config(work_dir=None, ispec_path=None):
     # path always points to where rv32emu binary is located (cwd/build)
     # This is used by riscof_rv32emu.py to find the executable
     dut_path = cwd + "/build"
+    if dut_exe is None:
+        dut_exe = os.path.join(dut_path, "rv32emu")
 
     # create config file with device-specific ISA spec path
     # Use explicit fsync to ensure file is written before riscof reads it
@@ -103,6 +105,7 @@ def setup_config(work_dir=None, ispec_path=None):
             cwd,
             ispec_path,
             dut_path,
+            dut_exe,
         )
     else:
         config_content = constants.config_temp.format(
@@ -144,9 +147,14 @@ if __name__ == "__main__":
         help="work directory for device-specific config files (enables parallel execution)",
         default=None,
     )
+    parser.add_argument(
+        "--dut_exe",
+        help="path to the rv32emu executable under test",
+        default=None,
+    )
     args = parser.parse_args()
 
     ispec_path = setup_testlist(
         args.riscv_device, args.hw_data_misaligned_support, args.work_dir
     )
-    setup_config(args.work_dir, ispec_path if args.work_dir else None)
+    setup_config(args.work_dir, ispec_path if args.work_dir else None, args.dut_exe)

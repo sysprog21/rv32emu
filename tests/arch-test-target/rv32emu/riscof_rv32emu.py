@@ -35,8 +35,9 @@ class rv32emu(pluginTemplate):
         # test-bench produced by a simulator (like verilator, vcs, incisive, etc). In case of an iss or
         # emulator, this variable could point to where the iss binary is located. If 'PATH variable
         # is missing in the config.ini we can hardcode the alternate here.
-        self.dut_exe = os.path.join(
-            config["PATH"] if "PATH" in config else "", "rv32emu"
+        self.dut_exe = config.get(
+            "dut_exe",
+            os.path.join(config["PATH"] if "PATH" in config else "", "rv32emu"),
         )
 
         # Number of parallel jobs that can be spawned off by RISCOF

@@ -417,7 +417,7 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             const char *name = fdt_get_name(dtb_buf, subnode, NULL);
             assert(name);
 
-            char *at_pos = strchr(name, '@');
+            const char *at_pos = strchr(name, '@');
             assert(at_pos);
 
             char *endptr;

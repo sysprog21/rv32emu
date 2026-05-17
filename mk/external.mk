@@ -218,12 +218,22 @@ $(LINUX_DATA_DEST)/linux-$(LINUX_VERSION).$(LINUX_PATCHLEVEL).%.tar.gz:
 # Demo Applications (Doom, Quake)
 
 ifeq ($(CONFIG_SDL),y)
+ifeq ($(CONFIG_SYSTEM),y)
+doom:
+	$(Q)echo "doom is a user-mode SDL demo. Run 'make cleanconfig && make jit_defconfig' or 'make defconfig' before 'make doom'." >&2
+	$(Q)exit 1
+
+quake:
+	$(Q)echo "quake is a user-mode SDL demo. Run 'make cleanconfig && make jit_defconfig' or 'make defconfig' before 'make quake'." >&2
+	$(Q)exit 1
+else
 doom: artifact $(DOOM_DATA) $(BIN)
 	(cd $(OUT); LC_ALL=C ../$(BIN) riscv32/doom)
 
 ifeq ($(CONFIG_EXT_F),y)
 quake: artifact $(QUAKE_DATA) $(BIN)
 	(cd $(OUT); LC_ALL=C ../$(BIN) riscv32/quake)
+endif
 endif
 endif
 

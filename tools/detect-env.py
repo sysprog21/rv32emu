@@ -17,7 +17,8 @@ Options:
     --have-emcc         Check if Emscripten (emcc) is available (exit 0/1)
     --have-sdl2         Check if SDL2 is available (exit 0/1)
     --have-sdl2-mixer   Check if SDL2_mixer is available (exit 0/1)
-    --have-llvm18       Check if LLVM 18 is available (exit 0/1)
+    --have-llvm         Check if supported LLVM 18-21 is available (exit 0/1)
+    --have-llvm18       Compatibility alias for --have-llvm
     --have-riscv-toolchain  Check if RISC-V toolchain exists (exit 0/1)
     --summary           Print full environment summary
 """
@@ -80,7 +81,8 @@ def detect_compiler_type(version_output):
 
 def check_pkg_config(package):
     """Check if a package exists via pkg-config."""
-    ret, _, _ = run_cmd(["pkg-config", "--exists", package])
+    pkg_config = os.environ.get("PKG_CONFIG", "pkg-config")
+    ret, _, _ = run_cmd([pkg_config, "--exists", package])
     return ret == 0
 
 
@@ -112,28 +114,51 @@ def have_emcc():
     return False
 
 
-def have_llvm18():
-    """Check if LLVM 18 is available."""
-    # Check for llvm-config-18
-    if shutil.which("llvm-config-18"):
-        return True
+LLVM_MIN_VERSION = 18
+LLVM_MAX_VERSION = 21
+
+
+def llvm_config_supported(llvm_config):
+    """Check whether llvm-config reports a supported major version."""
+    ret, stdout, _ = run_cmd([llvm_config, "--version"])
+    if ret != 0:
+        return False
+    try:
+        major = int(stdout.strip().split(".", 1)[0])
+    except (IndexError, ValueError):
+        return False
+    return LLVM_MIN_VERSION <= major <= LLVM_MAX_VERSION
+
+
+def have_llvm():
+    """Check if a supported LLVM version is available."""
+    for version in range(LLVM_MIN_VERSION, LLVM_MAX_VERSION + 1):
+        llvm_config = shutil.which(f"llvm-config-{version}")
+        if llvm_config and llvm_config_supported(llvm_config):
+            return True
 
     # Check Homebrew path on macOS (dynamic detection)
     if shutil.which("brew"):
-        ret, stdout, _ = run_cmd(["brew", "--prefix", "llvm@18"])
-        if ret == 0:
-            homebrew_path = os.path.join(stdout.strip(), "bin", "llvm-config")
-            if os.access(homebrew_path, os.X_OK):
-                return True
+        for version in range(LLVM_MIN_VERSION, LLVM_MAX_VERSION + 1):
+            ret, stdout, _ = run_cmd(["brew", "--prefix", f"llvm@{version}"])
+            if ret == 0:
+                homebrew_path = os.path.join(stdout.strip(), "bin", "llvm-config")
+                if os.access(homebrew_path, os.X_OK) and llvm_config_supported(
+                    homebrew_path
+                ):
+                    return True
 
     # Check standard llvm-config and verify version
     llvm_config = shutil.which("llvm-config")
-    if llvm_config:
-        ret, stdout, _ = run_cmd([llvm_config, "--version"])
-        if ret == 0 and stdout.strip().startswith("18."):
-            return True
+    if llvm_config and llvm_config_supported(llvm_config):
+        return True
 
     return False
+
+
+def have_llvm18():
+    """Compatibility wrapper for old Kconfig/tests."""
+    return have_llvm()
 
 
 def have_riscv_toolchain():
@@ -183,7 +208,7 @@ def print_summary():
     print(f"Emscripten: {'yes' if have_emcc() else 'no'}")
     print(f"SDL2: {'yes' if have_sdl2() else 'no'}")
     print(f"SDL2_mixer: {'yes' if have_sdl2_mixer() else 'no'}")
-    print(f"LLVM 18: {'yes' if have_llvm18() else 'no'}")
+    print(f"LLVM 18-21: {'yes' if have_llvm() else 'no'}")
     print(f"RISC-V Toolchain: {'yes' if have_riscv_toolchain() else 'no'}")
 
 
@@ -227,6 +252,8 @@ def main():
         bool_exit(have_sdl2())
     elif arg == "--have-sdl2-mixer":
         bool_exit(have_sdl2_mixer())
+    elif arg == "--have-llvm":
+        bool_exit(have_llvm())
     elif arg == "--have-llvm18":
         bool_exit(have_llvm18())
     elif arg == "--have-riscv-toolchain":

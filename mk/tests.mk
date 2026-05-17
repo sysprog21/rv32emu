@@ -49,6 +49,13 @@ else \
 fi
 endef
 
+ifeq ($(CONFIG_SYSTEM),y)
+check:
+	$(Q)echo "check runs user-mode ELF tests. Run 'make cleanconfig && make jit_defconfig' or 'make defconfig' before 'make check'." >&2
+	$(Q)exit 1
+
+CHECK_TARGETS :=
+else
 # Check test definitions
 CHECK_ELF_FILES :=
 ifeq ($(CONFIG_EXT_M),y)
@@ -81,6 +88,7 @@ check-rvv-smoke: $(BIN)
 	$(call check-test, , $(OUT)/rvv-smoke.elf, rvv-smoke.elf, tail -n 1,$(EXPECTED_rvv_smoke))
 endif
 check: $(CHECK_TARGETS)
+endif
 
 # System tests
 EXPECTED_aes_sha1 = 89169ec034bec1c6bb2c556b26728a736d350ca3  -

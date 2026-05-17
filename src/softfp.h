@@ -103,7 +103,7 @@ static inline void set_fflag(riscv_t *rv)
 
 static inline void set_rounding_mode(riscv_t *rv, uint8_t rm)
 {
-    const uint32_t frm = (rv->csr_fcsr >> 5) & (~(1 << 3));
+    const uint32_t frm = (rv->csr_fcsr >> 5) & 0x7;
 
     if (likely(rm == 0b111))
         rm = frm;

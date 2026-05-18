@@ -140,7 +140,17 @@ KCONFIG_LDFLAGS :=
 ifeq ($(CONFIG_OPTIMIZE_SIZE),y)
     KCONFIG_CFLAGS += -Os
 else
-    OPT_LEVEL := $(if $(CONFIG_OPTIMIZE_LEVEL),-O$(CONFIG_OPTIMIZE_LEVEL),-O2)
+    # A user can pass OPT_LEVEL=-Ofast on the make command line, in which case
+    # it overrides whatever CONFIG_OPTIMIZE_LEVEL resolves to. clang 20 marks
+    # -Ofast as deprecated (-Werror,-Wdeprecated-ofast) and refuses to compile,
+    # while gcc and earlier clang still accept it. Expand -Ofast to its
+    # spec-equivalent (-O3 -ffast-math) so the flag keeps the same semantics
+    # across toolchains without tripping the deprecation diagnostic.
+    ifeq ($(OPT_LEVEL),-Ofast)
+        override OPT_LEVEL := -O3 -ffast-math
+    else
+        OPT_LEVEL := $(if $(CONFIG_OPTIMIZE_LEVEL),-O$(CONFIG_OPTIMIZE_LEVEL),-O2)
+    endif
     KCONFIG_CFLAGS += $(OPT_LEVEL)
 endif
 

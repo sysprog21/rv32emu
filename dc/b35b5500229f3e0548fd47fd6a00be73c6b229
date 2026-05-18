@@ -1,0 +1,23 @@
+src/mpool.c
+  s_12dfad11cb4393::t_d1da3905ddc5a7 6
+  s_12dfad11cb4393::t_c59972e967cc4f 17,20-29,48-56
+  s_12dfad11cb4393::t_cecd508039866a 36-37,39-40,42-46,73-75
+  s_12dfad11cb4393::t_48c4cbec838d1d 136-137
+  s_12dfad11cb4393::t_00ab5a15d8e14f 200-202,204-207,214-216,218,221,229,234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "dcb35b5500229f3e0548fd47fd6a00be73c6b229",
+  "prompts": {},
+  "sessions": {
+    "s_12dfad11cb4393": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c0774b98-0975-4d90-9659-16e71ba495f3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

@@ -52,6 +52,11 @@ jobs:
 
       - name: Build for benchmark
         if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'
+        # GH_TOKEN raises the anonymous-API rate limit (60 req/hr) so the
+        # parse-time call to fetch-releases-tag stops flaking when the
+        # cache misses and several PRs build back-to-back.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make defconfig && make ENABLE_SDL=0 all artifact
       - name: Run benchmark
         if: steps.changed-files.outputs.any_changed == 'true' || github.event_name == 'workflow_dispatch'

@@ -26,10 +26,13 @@ WGET_HAS_RETRY_ON_HTTP_ERROR := $(if $(WGET),$(shell $(WGET) --help 2>&1 | grep 
 # (avoids 60 requests/hour rate limit for unauthenticated requests)
 ifdef CURL
     HTTP_TOOL := curl
-    # Fetch URL to stdout (for parsing API responses)
-    # Uses GH_TOKEN if available for authenticated requests
+    # Fetch URL to stdout (for parsing API responses).
+    # GH_TOKEN authenticates the request, which raises the GitHub API rate
+    # limit from 60/hr (anonymous) to 5000/hr; --retry covers the same
+    # transient 5xx / connection-reset class that bit fetch-releases-tag
+    # under pull_request_target events.
     # $(1): URL
-    HTTP_GET = curl -fsSL $(if $(GH_TOKEN),-H "Authorization: Bearer $(GH_TOKEN)") $(1) 2>/dev/null
+    HTTP_GET = curl -fsSL --retry 5 --retry-delay 2 $(if $(CURL_HAS_RETRY_ALL_ERRORS),--retry-all-errors) $(if $(GH_TOKEN),-H "Authorization: Bearer $(GH_TOKEN)") $(1) 2>/dev/null
     # Download file with progress bar and retry
     # --retry-all-errors (curl 7.71+) extends --retry to transient HTTP 5xx
     # (502/503/504); without it a single GitHub Releases CDN hiccup fails
@@ -41,7 +44,9 @@ ifdef CURL
     HTTP_DOWNLOAD_QUIET = curl -fsSL --retry 5 --retry-delay 2 $(if $(CURL_HAS_RETRY_ALL_ERRORS),--retry-all-errors) $(1) -o $(2)
 else ifdef WGET
     HTTP_TOOL := wget
-    HTTP_GET = wget -q $(if $(GH_TOKEN),--header="Authorization: Bearer $(GH_TOKEN)") -O- $(1) 2>/dev/null
+    # --tries / --retry-on-http-error match the curl path so fetch-releases-tag
+    # absorbs the same class of transient GitHub API failures.
+    HTTP_GET = wget -q --tries=5 --waitretry=2 $(if $(WGET_HAS_RETRY_ON_HTTP_ERROR),--retry-on-http-error=500,502,503,504) $(if $(GH_TOKEN),--header="Authorization: Bearer $(GH_TOKEN)") -O- $(1) 2>/dev/null
     # --retry-on-http-error covers transient 5xx that --tries alone ignores;
     # gated on wget 1.20+ so older wget (e.g. RHEL 8) still works.
     HTTP_DOWNLOAD = wget -q $(if $(WGET_HAS_PROGRESS),--show-progress) --tries=5 --waitretry=2 $(if $(WGET_HAS_RETRY_ON_HTTP_ERROR),--retry-on-http-error=500,502,503,504) $(1) -O $(2)

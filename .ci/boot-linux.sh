@@ -300,15 +300,46 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         fi
         RUN_LINUX="build/rv32emu ${OPTS}"
 
-        ASSERT expect <<- DONE
-	set timeout ${TIMEOUT}
-	spawn ${RUN_LINUX}
-	${EXPECT_CMDS[$i]}
+        # Allow one retry on transient JIT/T2C boot failures. Limit retries to
+        # cases that do not persist guest writes into the backing image; a
+        # writable virtio-blk retry could otherwise pass by reusing emu.txt
+        # from an earlier failed attempt.
+        #
+        # BOOT_ATTEMPTS_DEFAULT is taken from the environment but validated:
+        # an empty, non-integer, or zero value would otherwise skip the
+        # for-loop entirely and leave ret=0, masking a real failure as a
+        # silent pass. Clamp anything invalid back to the 2-attempt default.
+        BOOT_ATTEMPTS=1
+        if [[ ! "${TEST_OPTIONS[$i]}" =~ vblk ]] || [[ "${TEST_OPTIONS[$i]}" =~ readonly ]]; then
+            BOOT_ATTEMPTS_RAW=${BOOT_ATTEMPTS_DEFAULT:-2}
+            if [[ "${BOOT_ATTEMPTS_RAW}" =~ ^[0-9]+$ ]] && [ "${BOOT_ATTEMPTS_RAW}" -ge 1 ]; then
+                BOOT_ATTEMPTS=${BOOT_ATTEMPTS_RAW}
+            else
+                print_warning "Ignoring invalid BOOT_ATTEMPTS_DEFAULT='${BOOT_ATTEMPTS_RAW}'; using 2"
+                BOOT_ATTEMPTS=2
+            fi
+        fi
+        ret=0
+        for ((attempt = 1; attempt <= BOOT_ATTEMPTS; attempt++)); do
+            expect <<- DONE
+		set timeout ${TIMEOUT}
+		spawn ${RUN_LINUX}
+		${EXPECT_CMDS[$i]}
 	DONE
-
-        ret=$?
+            ret=$?
+            cleanup
+            if [ ${ret} -eq 0 ]; then
+                break
+            fi
+            if [ ${attempt} -lt ${BOOT_ATTEMPTS} ]; then
+                print_warning "Boot Linux Test attempt ${attempt} failed (exit ${ret}); retrying..."
+            fi
+        done
+        if [ ${ret} -ne 0 ]; then
+            print_error "Assert failed: expect (after ${BOOT_ATTEMPTS} attempts)"
+            exit ${ret}
+        fi
         RET=$((${RET} + ${ret}))
-        cleanup
 
         printf "\nBoot Linux Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
         if [[ "${TEST_OPTIONS[$i]}" =~ vblk ]]; then

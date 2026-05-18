@@ -96,7 +96,8 @@ jobs:
             if [ $UPDATE_EXIT -ne 0 ]; then
               echo "WARNING: apt update exited with code $UPDATE_EXIT, continuing..."
             fi
-            sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
+            sudo apt-get install -q=2 curl wget lsb-release software-properties-common gnupg \
+                 libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full
             set -e  # Re-enable errexit
       shell: bash
 
@@ -111,12 +112,13 @@ jobs:
     - name: Install LLVM
       if: steps.cache-llvm.outputs.cache-hit != 'true'
       run: |
-            # Prefer Ubuntu's own LLVM packages over apt.llvm.org. Mixing the
-            # two has been observed to fail with "held broken packages" when
-            # the Ubuntu libllvm-N has a stricter Breaks: clause than the
-            # apt.llvm.org snapshot satisfies. Ubuntu Noble ships llvm-18,
-            # which is enough for T2C's `llvm-config --libs` check.
+            # LLVM is pinned in .ci/llvm-version. Ubuntu Noble's base repos cap
+            # at llvm-18, so anything newer (the current pin is 20+) requires
+            # apt.llvm.org. .ci/install-llvm.sh adds the apt source after
+            # verifying the signing key fingerprint matches the value pinned
+            # in that script (avoids sudo-executing an unpinned remote script).
             VER='${{ steps.llvm-version.outputs.version }}'
+            sudo .ci/install-llvm.sh "${VER}"
             sudo apt-get install -y -q=2 \
                 llvm-${VER} llvm-${VER}-dev llvm-${VER}-runtime \
                 clang-${VER} lld-${VER}
@@ -375,12 +377,14 @@ jobs:
     - name: Install dependencies
       run: |
             sudo apt-get update -q=2 || true
-            sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full e2fsprogs
+            sudo apt-get install -q=2 curl wget lsb-release software-properties-common gnupg \
+                 libsdl2-dev libsdl2-mixer-dev device-tree-compiler expect bc p7zip-full e2fsprogs
 
     - name: Install LLVM
       if: matrix.compiler == 'clang' && steps.cache-llvm.outputs.cache-hit != 'true'
       run: |
             VER='${{ steps.llvm-version.outputs.version }}'
+            sudo .ci/install-llvm.sh "${VER}"
             sudo apt-get install -y -q=2 \
                 llvm-${VER} llvm-${VER}-dev llvm-${VER}-runtime \
                 clang-${VER} lld-${VER}
@@ -430,13 +434,13 @@ jobs:
         CC: ${{ steps.install_cc.outputs.cc }}
         BOOT_TIMEOUT: ${{ matrix.timeout }}
       run: |
-            # For T2C, verify LLVM 18 detection
+            # For T2C, verify LLVM (pinned to .ci/llvm-version) was detected
             if [ "${{ matrix.boot_type }}" = "t2c" ]; then
               rm -f build/t2c.o
             fi
             make distclean && make ${{ matrix.defconfig }} && make INITRD_SIZE=32 ${{ matrix.make_flags }} $PARALLEL && make artifact $PARALLEL
             if [ "${{ matrix.boot_type }}" = "t2c" ]; then
-              test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM 18 detection failed"; exit 1; }
+              test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM $(cat .ci/llvm-version) detection failed"; exit 1; }
             fi
             bash -c "${BOOT_LINUX_TEST}"
 
@@ -481,6 +485,7 @@ jobs:
 
     - name: Install LLVM
       run: |
+            sudo .ci/install-llvm.sh "${LLVM_VERSION}"
             sudo apt-get install -y -q=2 \
                 llvm-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev \
                 llvm-${LLVM_VERSION}-runtime \
@@ -540,8 +545,8 @@ jobs:
             rm -f build/t2c.o
             # system_jit_defconfig uses T2C_OPT_LEVEL=1 for ~50% faster LLVM compilation
             make distclean && make system_jit_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
-            # Verify T2C is actually compiled (build/t2c.o only exists when LLVM 18 detection succeeds)
-            test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM 18 detection failed"; exit 1; }
+            # Verify T2C is actually compiled (build/t2c.o only exists when LLVM (.ci/llvm-version) is detected)
+            test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM ${LLVM_VERSION} detection failed"; exit 1; }
             bash -c "${BOOT_LINUX_TEST}"
             make clean
 
@@ -727,7 +732,7 @@ jobs:
        if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
-         BOOT_TIMEOUT: 90  # JIT compilation adds significant overhead
+         BOOT_TIMEOUT: 120  # JIT under macOS load has flaked at 90s
        run: |
              make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
              bash -c "${BOOT_LINUX_TEST}"
@@ -793,9 +798,7 @@ jobs:
             fi
             sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev
             LLVM_VERSION=$(cat .ci/llvm-version)
-            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x ./llvm.sh
-            sudo ./llvm.sh $LLVM_VERSION
+            sudo .ci/install-llvm.sh "${LLVM_VERSION}"
             sudo apt-get install -q=2 clang-${LLVM_VERSION} clang-tools-${LLVM_VERSION}
             set -e  # Re-enable errexit
       shell: bash

@@ -966,11 +966,15 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 /* Helper for fused instruction tail: continue to next or stop.
  * Matches RVOP macro signal handling and block map clearing logic.
  * Note: RVOP returns without saving cycle/PC on signal handling, so we do too.
+ *
+ * PRESERVE_NONE matches the callers (do_fuse[1..12]) and the indirect
+ * call target ir->impl, so musttail's calling-convention check passes
+ * under clang-20+.
  */
-static inline bool fuse_next_or_stop(riscv_t *rv,
-                                     const rv_insn_t *ir,
-                                     uint64_t cycle,
-                                     uint32_t PC)
+static PRESERVE_NONE bool fuse_next_or_stop(riscv_t *rv,
+                                            const rv_insn_t *ir,
+                                            uint64_t cycle,
+                                            uint32_t PC)
 {
 #if RV32_HAS(SYSTEM)
     if (need_handle_signal) {

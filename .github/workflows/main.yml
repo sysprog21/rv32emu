@@ -114,12 +114,11 @@ jobs:
       run: |
             # LLVM is pinned in .ci/llvm-version. Ubuntu Noble's base repos cap
             # at llvm-18, so anything newer (the current pin is 20+) requires
-            # apt.llvm.org. Use upstream's llvm.sh to add the right repo first,
-            # then install the matching versioned packages.
+            # apt.llvm.org. .ci/install-llvm.sh adds the apt source after
+            # verifying the signing key fingerprint matches the value pinned
+            # in that script (avoids sudo-executing an unpinned remote script).
             VER='${{ steps.llvm-version.outputs.version }}'
-            .ci/fetch.sh -q -o "${RUNNER_TEMP}/llvm.sh" https://apt.llvm.org/llvm.sh
-            chmod +x "${RUNNER_TEMP}/llvm.sh"
-            sudo "${RUNNER_TEMP}/llvm.sh" ${VER}
+            sudo .ci/install-llvm.sh "${VER}"
             sudo apt-get install -y -q=2 \
                 llvm-${VER} llvm-${VER}-dev llvm-${VER}-runtime \
                 clang-${VER} lld-${VER}
@@ -385,9 +384,7 @@ jobs:
       if: matrix.compiler == 'clang' && steps.cache-llvm.outputs.cache-hit != 'true'
       run: |
             VER='${{ steps.llvm-version.outputs.version }}'
-            .ci/fetch.sh -q -o "${RUNNER_TEMP}/llvm.sh" https://apt.llvm.org/llvm.sh
-            chmod +x "${RUNNER_TEMP}/llvm.sh"
-            sudo "${RUNNER_TEMP}/llvm.sh" ${VER}
+            sudo .ci/install-llvm.sh "${VER}"
             sudo apt-get install -y -q=2 \
                 llvm-${VER} llvm-${VER}-dev llvm-${VER}-runtime \
                 clang-${VER} lld-${VER}
@@ -488,9 +485,7 @@ jobs:
 
     - name: Install LLVM
       run: |
-            .ci/fetch.sh -q -o "${RUNNER_TEMP}/llvm.sh" https://apt.llvm.org/llvm.sh
-            chmod +x "${RUNNER_TEMP}/llvm.sh"
-            sudo "${RUNNER_TEMP}/llvm.sh" ${LLVM_VERSION}
+            sudo .ci/install-llvm.sh "${LLVM_VERSION}"
             sudo apt-get install -y -q=2 \
                 llvm-${LLVM_VERSION} llvm-${LLVM_VERSION}-dev \
                 llvm-${LLVM_VERSION}-runtime \
@@ -803,9 +798,7 @@ jobs:
             fi
             sudo apt-get install -q=2 curl libsdl2-dev libsdl2-mixer-dev
             LLVM_VERSION=$(cat .ci/llvm-version)
-            .ci/fetch.sh -q -o llvm.sh https://apt.llvm.org/llvm.sh
-            chmod +x ./llvm.sh
-            sudo ./llvm.sh $LLVM_VERSION
+            sudo .ci/install-llvm.sh "${LLVM_VERSION}"
             sudo apt-get install -q=2 clang-${LLVM_VERSION} clang-tools-${LLVM_VERSION}
             set -e  # Re-enable errexit
       shell: bash

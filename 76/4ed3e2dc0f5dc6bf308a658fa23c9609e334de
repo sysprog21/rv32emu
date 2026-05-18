@@ -1,0 +1,22 @@
+.github/workflows/deploy-wasm.yml
+  s_10f39d3c13d1fd::t_b8933f2fdec464 253-256
+  s_10f39d3c13d1fd::t_e6333340efc0e7 87-89,94-95
+  s_10f39d3c13d1fd::t_21f1b1538b4a63 250-252,257-258
+  s_10f39d3c13d1fd::t_19d7846f75caad 90-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "764ed3e2dc0f5dc6bf308a658fa23c9609e334de",
+  "prompts": {},
+  "sessions": {
+    "s_10f39d3c13d1fd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cfa28174-c384-47ef-a000-df1ad6886b49",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

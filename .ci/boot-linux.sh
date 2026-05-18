@@ -304,9 +304,20 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         # cases that do not persist guest writes into the backing image; a
         # writable virtio-blk retry could otherwise pass by reusing emu.txt
         # from an earlier failed attempt.
+        #
+        # BOOT_ATTEMPTS_DEFAULT is taken from the environment but validated:
+        # an empty, non-integer, or zero value would otherwise skip the
+        # for-loop entirely and leave ret=0, masking a real failure as a
+        # silent pass. Clamp anything invalid back to the 2-attempt default.
         BOOT_ATTEMPTS=1
         if [[ ! "${TEST_OPTIONS[$i]}" =~ vblk ]] || [[ "${TEST_OPTIONS[$i]}" =~ readonly ]]; then
-            BOOT_ATTEMPTS=${BOOT_ATTEMPTS_DEFAULT:-2}
+            BOOT_ATTEMPTS_RAW=${BOOT_ATTEMPTS_DEFAULT:-2}
+            if [[ "${BOOT_ATTEMPTS_RAW}" =~ ^[0-9]+$ ]] && [ "${BOOT_ATTEMPTS_RAW}" -ge 1 ]; then
+                BOOT_ATTEMPTS=${BOOT_ATTEMPTS_RAW}
+            else
+                print_warning "Ignoring invalid BOOT_ATTEMPTS_DEFAULT='${BOOT_ATTEMPTS_RAW}'; using 2"
+                BOOT_ATTEMPTS=2
+            fi
         fi
         ret=0
         for ((attempt = 1; attempt <= BOOT_ATTEMPTS; attempt++)); do

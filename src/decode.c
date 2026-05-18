@@ -29,8 +29,7 @@ static inline uint32_t decode_rs2(const uint32_t insn)
     return (insn >> 20) & 0x1f;
 }
 
-/* decode funct3 field: insn[14:12] — only used by F-extension (rounding mode)
- */
+/* decode funct3 field: insn[14:12] — only used by F-extension (rounding mode) */
 #if RV32_HAS(EXT_F)
 static inline uint32_t decode_funct3(const uint32_t insn)
 {
@@ -153,6 +152,21 @@ FORCE_INLINE bool csr_is_writable(const uint32_t csr)
     return csr < 0xc00;
 }
 
+#if RV32_HAS(EXT_V)
+/* decode_veew: extract Effective Element Width from the width field insn[14:12].
+ * RVV EEW encoding: 000→8-bit, 101→16-bit, 110→32-bit, 111→64-bit.
+ * Returns 8, 16, 32, or 64 (as uint8_t stored in ir->eew).
+ * Matches the decode_eew() + (8 << eew) calculation in decode_v.c.
+ */
+static inline uint8_t decode_veew(const uint32_t insn)
+{
+    const uint8_t w = (uint8_t)((insn >> 12) & 0x7u);
+    /* w∈{0,1,2,3} → eew_exp=w; w∈{5,6,7} → eew_exp=w-4 (1,2,3) */
+    const uint8_t e = (w < 4u) ? w : (uint8_t)(w - 4u);
+    return (uint8_t)(8u << e);
+}
+#endif /* RV32_HAS(EXT_V) */
+
 static inline bool op_load(rv_insn_t *ir, const uint32_t insn)
 {
     decode_itype(ir, insn);
@@ -179,7 +193,7 @@ static inline bool op_load(rv_insn_t *ir, const uint32_t insn)
     return false;
 }
 
-#if RV32_HAS(EXT_F)
+#if RV32_HAS(EXT_F) || RV32_HAS(EXT_V)
 static inline bool op_load_fp(rv_insn_t *ir, const uint32_t insn)
 {
     decode_itype(ir, insn);
@@ -195,9 +209,9 @@ static inline bool op_load_fp(rv_insn_t *ir, const uint32_t insn)
     }
     return false;
 }
-#else /* !RV32_HAS(EXT_F) */
+#else /* !RV32_HAS(EXT_F) && !RV32_HAS(EXT_V) */
 #define op_load_fp op_unimp
-#endif /* RV32_HAS(EXT_F) */
+#endif /* RV32_HAS(EXT_F) || RV32_HAS(EXT_V) */
 
 static inline bool op_misc_mem(rv_insn_t *ir, const uint32_t insn)
 {
@@ -375,7 +389,7 @@ static inline bool op_store(rv_insn_t *ir, const uint32_t insn)
     return false;
 }
 
-#if RV32_HAS(EXT_F)
+#if RV32_HAS(EXT_F) || RV32_HAS(EXT_V)
 static inline bool op_store_fp(rv_insn_t *ir, const uint32_t insn)
 {
     decode_stype(ir, insn);
@@ -391,9 +405,9 @@ static inline bool op_store_fp(rv_insn_t *ir, const uint32_t insn)
     }
     return false;
 }
-#else /* !RV32_HAS(EXT_F) */
+#else /* !RV32_HAS(EXT_F) && !RV32_HAS(EXT_V) */
 #define op_store_fp op_unimp
-#endif /* RV32_HAS(EXT_F) */
+#endif /* RV32_HAS(EXT_F) || RV32_HAS(EXT_V) */
 
 static inline bool op_amo(rv_insn_t *ir, const uint32_t insn)
 {
@@ -1218,6 +1232,9 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
     return csr_is_writable(ir->imm) || (ir->rs1 == rv_reg_zero);
 }
 
+/* op_op_v: no EXT_V instructions defined yet */
+#define op_op_v op_unimp
+
 #if RV32_HAS(EXT_C)
 
 /* RVC field decoders */
@@ -1748,7 +1765,7 @@ static const decode_t rv_jump_table[] = {
     op_nmsub,  /* 18 */
     op_nmadd,  /* 19 */
     op_op_fp,  /* 20 */
-    op_unimp,  /* 21 */
+    op_op_v,  /* 21 */
     op_unimp,  /* 22 */
     op_unimp,  /* 23 */
     op_branch,  /* 24 */

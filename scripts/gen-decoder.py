@@ -44,6 +44,11 @@ def infer_insn_type(operands: list[str]) -> str:
         return "utype"
     if "rs3" in names:
         return "r4type"
+    # RVV vector instructions: any vector register operand → vtype.
+    # The group function skips the upfront decode_X() call and instead
+    # uses per-leaf operand extraction (rvv=True in generate_c_switch).
+    if names & {"vd", "vs1", "vs2", "vs3"}:
+        return "vtype"
     if "imm12" in names:
         return "itype"
     if "shamtw" in names or "shamt" in names:
@@ -262,7 +267,7 @@ def bits_expr(hi: int, lo: int) -> str:
 
 
 def generate_c_switch(
-    tree: dict, indent: int = 1, rvc: bool = False
+    tree: dict, indent: int = 1, rvc: bool = False, rvv: bool = False
 ) -> list[str]:
     """Generate C switch/case code from a decision tree.
 
@@ -281,6 +286,9 @@ def generate_c_switch(
     When rvc=True, operand decode lines (register extraction,
     immediate reassembly) are emitted before the opcode
     assignment for each leaf instruction.
+
+    When rvv=True, RVV per-leaf operand decode lines are emitted
+    before the opcode assignment for each vector instruction.
     """
     lines = []
     pad = "    " * indent
@@ -307,6 +315,8 @@ def generate_c_switch(
                 lines.append(f"{pad}case {_hex_value(value, hi - lo + 1)}:")
                 if rvc:
                     lines.extend(_rvc_operand_lines(branch, pad))
+                if rvv:
+                    lines.extend(_rvv_operand_lines(branch, pad))
                 lines.append(
                     f"{pad}    ir->opcode = " f"rv_insn_{branch.name};"
                 )
@@ -315,7 +325,9 @@ def generate_c_switch(
                     lines.append(ext_close)
             elif isinstance(branch, dict):
                 lines.append(f"{pad}case {_hex_value(value, hi - lo + 1)}:")
-                lines.extend(generate_c_switch(branch, indent + 1, rvc=rvc))
+                lines.extend(
+                    generate_c_switch(branch, indent + 1, rvc=rvc, rvv=rvv)
+                )
                 lines.append(f"{pad}    break;")
 
         # --- default case ---
@@ -328,6 +340,8 @@ def generate_c_switch(
                 lines.append(ext_open)
             if rvc:
                 lines.extend(_rvc_operand_lines(default_insn, pad))
+            if rvv:
+                lines.extend(_rvv_operand_lines(default_insn, pad))
             lines.append(f"{pad}    ir->opcode = rv_insn_{default_insn.name};")
             lines.append(f"{pad}    return true;")
             if ext_close:
@@ -412,18 +426,41 @@ def generate_c_code(instructions: list[Instruction], tree: dict) -> str:
 
     # --- Per-group decode functions for 32-bit ---
     group_names = _build_group_name_map()
+    populated_gnames: set[str] = set()
     for opcode_val in sorted(groups_32.keys()):
         gname = group_names.get(opcode_val, f"group_{opcode_val}")
         subtree = groups_32[opcode_val]
         insn_type = _infer_group_type(subtree)
+        populated_gnames.add(gname)
         if gname in _EXT_F_GROUPS:
             lines.append("#if RV32_HAS(EXT_F)")
+        elif gname in _EXT_V_ONLY_GROUPS:
+            lines.append("#if RV32_HAS(EXT_V)")
+        elif gname in _EXT_FV_GROUPS:
+            lines.append("#if RV32_HAS(EXT_F) || RV32_HAS(EXT_V)")
         lines.extend(_generate_group_func(gname, subtree, insn_type))
         if gname in _EXT_F_GROUPS:
             lines.append(f"#else /* !RV32_HAS(EXT_F) */")
             lines.append(f"#define op_{gname} op_unimp")
             lines.append(f"#endif /* RV32_HAS(EXT_F) */")
+        elif gname in _EXT_V_ONLY_GROUPS:
+            lines.append(f"#else /* !RV32_HAS(EXT_V) */")
+            lines.append(f"#define op_{gname} op_unimp")
+            lines.append(f"#endif /* RV32_HAS(EXT_V) */")
+        elif gname in _EXT_FV_GROUPS:
+            lines.append(f"#else /* !RV32_HAS(EXT_F) && !RV32_HAS(EXT_V) */")
+            lines.append(f"#define op_{gname} op_unimp")
+            lines.append(f"#endif /* RV32_HAS(EXT_F) || RV32_HAS(EXT_V) */")
         lines.append("")
+
+    # Emit a stub for any EXT_V group referenced by the jump table but not
+    # yet populated (i.e., no EXT_V instructions in instructions.in yet).
+    # This keeps the jump table valid even during incremental development.
+    for gname in sorted(_EXT_V_ONLY_GROUPS):
+        if gname not in populated_gnames:
+            lines.append(f"/* op_{gname}: no EXT_V instructions defined yet */")
+            lines.append(f"#define op_{gname} op_unimp")
+            lines.append("")
 
     # --- RVC decode functions for 16-bit ---
     lines.append("#if RV32_HAS(EXT_C)")
@@ -480,6 +517,7 @@ def _build_group_name_map() -> dict[int, str]:
         0x12: "nmsub",
         0x13: "nmadd",
         0x14: "op_fp",
+        0x15: "op_v",
         0x18: "branch",
         0x19: "jalr",
         0x1B: "jal",
@@ -535,14 +573,28 @@ _RM_GROUPS = {"op_fp", "madd", "msub", "nmsub", "nmadd"}
 # All instructions in the following groups belong to EXT_F
 # When generating, wrap them with #if RV32_HAS(EXT_F)
 _EXT_F_GROUPS = {
-    "load_fp",
-    "store_fp",
     "madd",
     "msub",
     "nmsub",
     "nmadd",
     "op_fp",
 }
+
+# Groups whose instructions are exclusively RVV (EXT_V).
+# When generating, wrap with #if RV32_HAS(EXT_V) / #define op_xxx op_unimp.
+_EXT_V_ONLY_GROUPS = {"op_v"}
+
+# Groups that contain instructions from BOTH EXT_F and EXT_V.
+# When generating, wrap with #if RV32_HAS(EXT_F) || RV32_HAS(EXT_V).
+# Vector loads share the LOAD-FP opcode slot; vector stores share STORE-FP.
+_EXT_FV_GROUPS = {"load_fp", "store_fp"}
+
+# For mixed EXT_F/EXT_V groups, _infer_group_type() may return "vtype"
+# (because V-load/store instructions dominate).  "decode_vtype" does not
+# exist; instead, use the non-vector instruction type so that scalar FP
+# instructions (flw/fsw) still get their fields decoded at group level.
+# Per-leaf _rvv_operand_lines() then overrides the RVV-specific fields.
+_MIXED_GROUP_FALLBACK_TYPE = {"load_fp": "itype", "store_fp": "stype"}
 
 # --- RVC operand decode tables ---
 # Each operand name from instructions.in maps to C statements
@@ -669,6 +721,75 @@ _RVC_RD0_RESERVED = {"clwsp"}
 _RVC_FLOAT_DEST = {"cflwsp"}
 
 
+# --- RVV operand decode tables ---
+# Each operand name from instructions.in maps to C statements
+# that extract the field into the rv_insn_t struct.
+# RVV reuses the standard 5-bit decode_rd/rs1/rs2 helpers because
+# vector register numbers occupy the same bit positions.
+
+_RVV_OPERAND_DECODERS = {
+    # Vector destination register: insn[11:7] (same position as rd)
+    "vd": ["ir->vd = decode_rd(insn);"],
+    # Vector source registers
+    "vs1": ["ir->vs1 = decode_rs1(insn);"],
+    "vs2": ["ir->vs2 = decode_rs2(insn);"],
+    # vs3 is the source in vector stores — encoded in the rd field [11:7]
+    "vs3": ["ir->vs3 = decode_rd(insn);"],
+    # Mask bit: insn[25] (0 = v0.t mask active, 1 = unmasked)
+    "vm": ["ir->vm = (insn >> 25) & 0x1;"],
+    # Number of fields for segment load/store: insn[31:29]
+    "nf": ["ir->nf = (insn >> 29) & 0x7;"],
+    # Integer scalar source register (standard position)
+    "rs1": ["ir->rs1 = decode_rs1(insn);"],
+    "rs2": ["ir->rs2 = decode_rs2(insn);"],
+    # Integer scalar destination register (standard position)
+    "rd": ["ir->rd = decode_rd(insn);"],
+    # simm5: sign-extended 5-bit immediate from insn[19:15].
+    # Used by OPIVI vector-arithmetic instructions (vadd_vi etc.);
+    # stored in ir->imm so executors can use ir->imm directly.
+    # Shift bits [19:15] to [31:27], then arithmetic right-shift 27.
+    "simm5": ["ir->imm = ((int32_t)(insn << 12)) >> 27;"],
+    # zimm5: zero-extended 5-bit immediate from insn[19:15].
+    # Used by vsetivli as the AVL (application vector length).
+    # Per decode_v.c, the AVL is stored in ir->rs1 (not ir->imm) so
+    # that rvv_apply_vsetvl() can read it via ir->rs1.
+    "zimm5": ["ir->rs1 = (insn >> 15) & 0x1f;"],
+    # zimm11: zero-extended 11-bit vtypei from insn[30:20] (vsetvli).
+    # Stored in ir->zimm per rv32_v_template.c rvv_apply_vsetvl usage.
+    "zimm11": ["ir->zimm = (insn >> 20) & 0x7ff;"],
+    # zimm10: zero-extended 10-bit vtypei from insn[29:20] (vsetivli).
+    # Stored in ir->zimm per rv32_v_template.c rvv_apply_vsetvl usage.
+    "zimm10": ["ir->zimm = (insn >> 20) & 0x3ff;"],
+    # veew: Effective Element Width decoded from the width field insn[14:12].
+    # RVV encodes EEW as: 000→8-bit, 101→16-bit, 110→32-bit, 111→64-bit.
+    # decode_veew() maps funct3 → {8,16,32,64} and stores in ir->eew.
+    # Required by V-load/store executors that read ir->eew for element width.
+    "veew": ["ir->eew = decode_veew(insn);"],
+}
+
+
+def _rvv_operand_lines(insn: Instruction, pad: str) -> list[str]:
+    """Generate per-leaf operand decode lines for one RVV instruction.
+
+    Only emits lines when insn.extension == "EXT_V", so this function
+    is safe to call for every leaf in mixed EXT_F/EXT_V groups (e.g.
+    op_load_fp) — non-EXT_V leaves return an empty list.
+
+    Looks up each operand name in _RVV_OPERAND_DECODERS and emits
+    the corresponding C statement(s).  Unknown operands (e.g., pure
+    constraint tokens that don't map to struct fields) are silently
+    skipped — they were already consumed during tree-building.
+    """
+    if insn.extension != "EXT_V":
+        return []
+    lines = []
+    for op in insn.operands:
+        if op in _RVV_OPERAND_DECODERS:
+            for stmt in _RVV_OPERAND_DECODERS[op]:
+                lines.append(f"{pad}    {stmt}")
+    return lines
+
+
 def _rvc_operand_lines(insn: Instruction, pad: str) -> list[str]:
     """Generate operand decode lines for one RVC instruction.
 
@@ -718,8 +839,25 @@ def _generate_group_func(name: str, subtree, insn_type: str) -> list[str]:
         f"static inline bool op_{name}(" f"rv_insn_t *ir, const uint32_t insn)"
     )
     lines.append("{")
-    if insn_type:
-        lines.append(f"    decode_{insn_type}(ir, insn);")
+
+    # RVV groups use per-leaf operand extraction (rvv=True in the switch
+    # generator) instead of a single upfront decode_X() call.  This is
+    # required because the op_v group contains instructions with
+    # incompatible operand layouts (vd/vs1/vs2/vm/imm vs rd/rs1/zimm11
+    # etc.), so there is no single decode function that works for all.
+    is_rvv_group = name in _EXT_V_ONLY_GROUPS
+
+    # Mixed EXT_F/EXT_V groups (load_fp, store_fp): _infer_group_type()
+    # may return "vtype" because V-load/store instructions dominate, but
+    # "decode_vtype" does not exist.  Fall back to the scalar type so
+    # that flw/fsw still have their fields decoded; per-leaf RVV lines
+    # then override the vector-specific fields for V-load/store leaves.
+    effective_type = insn_type
+    if insn_type == "vtype" and name in _MIXED_GROUP_FALLBACK_TYPE:
+        effective_type = _MIXED_GROUP_FALLBACK_TYPE[name]
+
+    if effective_type and not is_rvv_group:
+        lines.append(f"    decode_{effective_type}(ir, insn);")
 
     # F extension: funct3 encodes rounding mode (ir->rm).
     # decode_rtype only sets rd/rs1/rs2, so ir->rm must be set separately.
@@ -739,6 +877,9 @@ def _generate_group_func(name: str, subtree, insn_type: str) -> list[str]:
         lines.append("    }")
 
     if isinstance(subtree, Instruction):
+        # Emit per-leaf RVV operands for the single-instruction case.
+        # _rvv_operand_lines is a no-op for non-EXT_V instructions.
+        lines.extend(_rvv_operand_lines(subtree, ""))
         lines.append(f"    ir->opcode = rv_insn_{subtree.name};")
         # Use post-check if this group has one
         if name in _POST_CHECKS:
@@ -747,7 +888,10 @@ def _generate_group_func(name: str, subtree, insn_type: str) -> list[str]:
             lines.append("    return true;")
     else:
         lines.append("")
-        lines.extend(generate_c_switch(subtree, 1))
+        # Always pass rvv=True so EXT_V leaves emit their per-leaf operand
+        # decoders.  _rvv_operand_lines() is a no-op for non-EXT_V leaves,
+        # so non-vector instructions in the same group are unaffected.
+        lines.extend(generate_c_switch(subtree, 1, rvv=True))
         # Use post-check if this group has one
         if name in _POST_CHECKS:
             lines.append(f"    {_POST_CHECKS[name]}")
@@ -991,6 +1135,21 @@ FORCE_INLINE bool csr_is_writable(const uint32_t csr)
 {
     return csr < 0xc00;
 }
+
+#if RV32_HAS(EXT_V)
+/* decode_veew: extract Effective Element Width from the width field insn[14:12].
+ * RVV EEW encoding: 000→8-bit, 101→16-bit, 110→32-bit, 111→64-bit.
+ * Returns 8, 16, 32, or 64 (as uint8_t stored in ir->eew).
+ * Matches the decode_eew() + (8 << eew) calculation in decode_v.c.
+ */
+static inline uint8_t decode_veew(const uint32_t insn)
+{
+    const uint8_t w = (uint8_t)((insn >> 12) & 0x7u);
+    /* w∈{0,1,2,3} → eew_exp=w; w∈{5,6,7} → eew_exp=w-4 (1,2,3) */
+    const uint8_t e = (w < 4u) ? w : (uint8_t)(w - 4u);
+    return (uint8_t)(8u << e);
+}
+#endif /* RV32_HAS(EXT_V) */
 """
 
 _RVC_HELPERS_TEMPLATE = """\

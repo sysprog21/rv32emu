@@ -1,0 +1,24 @@
+.github/workflows/main.yml
+  s_12dfad11cb4393::t_79a1c02a348b77 488
+  s_12dfad11cb4393::t_5bf1efed71119a 121,387
+  s_12dfad11cb4393::t_85fa72b2a8a9dc 801
+  s_12dfad11cb4393::t_720cd3d2998e7b 117-119
+.ci/install-llvm.sh
+  s_12dfad11cb4393::t_e1d5aca32ac747 1-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "9d5f5eea7678ec876395740052b054205b41e061",
+  "prompts": {},
+  "sessions": {
+    "s_12dfad11cb4393": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c0774b98-0975-4d90-9659-16e71ba495f3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

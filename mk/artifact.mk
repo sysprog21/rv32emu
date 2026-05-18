@@ -317,6 +317,20 @@ ifeq ($(call has, PREBUILT), 1)
 	$(call fetch-checksum-files,$(ACTIVE_CHECKSUMS),$(ACTIVE_TAG))
 endif
 
+# File-level entry points for the Linux image payload produced by `artifact`.
+# Web/system targets depend on these paths directly, so they need explicit
+# rules that can re-materialize the files after `make clean`.
+#
+# Guarded to PREBUILT=1: the PREBUILT=0 && SYSTEM=1 branch of `artifact:`
+# moves these files to /tmp to be repackaged as a tarball, so a `test -f`
+# sentinel would always fail there (issue identified by cubic).
+ifeq ($(call has, PREBUILT), 1)
+$(OUT)/linux-image/Image \
+$(OUT)/linux-image/rootfs.cpio \
+$(OUT)/linux-image/simplefs.ko: artifact
+	$(Q)test -f $@
+endif
+
 scimark2: | $(BIN_DIR)/linux-x86-softfp $(BIN_DIR)/riscv32
 ifeq ($(call has, PREBUILT), 0)
 ifeq ($(call has, SYSTEM), 0)

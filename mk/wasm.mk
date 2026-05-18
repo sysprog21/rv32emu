@@ -266,7 +266,9 @@ start_web_deps := check-demo-dir-exist $(BIN) $(XTERM_DATA)
 ifeq ($(CONFIG_SYSTEM),y)
 # rootfs.web.cpio is the upstream rootfs.cpio with an /etc/init.d/S99automount
 # overlay so the guest auto-mounts /dev/vda at /mnt during boot.
-start_web_deps += $(BUILD_DTB) $(BUILD_DTB2C) $(OUT)/linux-image/rootfs.web.cpio
+start_web_deps += $(BUILD_DTB) $(BUILD_DTB2C) \
+                  $(OUT)/linux-image/Image \
+                  $(OUT)/linux-image/rootfs.web.cpio
 else
 # User mode also stages large game data alongside the WASM bundle so the
 # WEB_FILES copy step succeeds. These targets pull from DOOM_DATA/QUAKE_DATA

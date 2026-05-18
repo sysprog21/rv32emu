@@ -1,0 +1,21 @@
+mk/http.mk
+  s_12dfad11cb4393::t_5b493f2a4d102c 29-33,35,47-49
+.github/workflows/benchmark.yml
+  s_12dfad11cb4393::t_e346fbcea482bc 55-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "31b55c1bb0c420bb3b8ab78e3c791642971f2a0f",
+  "prompts": {},
+  "sessions": {
+    "s_12dfad11cb4393": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c0774b98-0975-4d90-9659-16e71ba495f3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

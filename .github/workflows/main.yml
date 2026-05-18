@@ -732,7 +732,7 @@ jobs:
        if: success()
        env:
          CC: ${{ steps.install_cc.outputs.cc }}
-         BOOT_TIMEOUT: 90  # JIT compilation adds significant overhead
+         BOOT_TIMEOUT: 120  # JIT under macOS load has flaked at 90s
        run: |
              make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
              bash -c "${BOOT_LINUX_TEST}"

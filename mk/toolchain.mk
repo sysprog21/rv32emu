@@ -209,29 +209,30 @@ $(shell which llvm-config 2>/dev/null | xargs -I{} sh -c 'ver=$$({} --version 2>
 endef
 
 # Auto-detect LLVM configuration
-# Priority: versioned binaries (18-21), Homebrew versioned, Homebrew generic, generic with version check
-# Note: Prefers oldest supported version (18) for stability; override with LLVM_CONFIG= for newer
+# Priority: newest supported version first (LLVM 20 is the validated default;
+# 18 and 19 stay in the fallback list for hosts that haven't upgraded yet).
+# Override with LLVM_CONFIG=/path/to/llvm-config to pin a specific install.
 define detect-llvm-config
 $(strip $(or \
-    $(call llvm-config-path,18),\
-    $(call llvm-config-path,19),\
-    $(call llvm-config-path,20),\
     $(call llvm-config-path,21),\
-    $(call llvm-homebrew-config,18),\
-    $(call llvm-homebrew-config,19),\
-    $(call llvm-homebrew-config,20),\
+    $(call llvm-config-path,20),\
+    $(call llvm-config-path,19),\
+    $(call llvm-config-path,18),\
     $(call llvm-homebrew-config,21),\
+    $(call llvm-homebrew-config,20),\
+    $(call llvm-homebrew-config,19),\
+    $(call llvm-homebrew-config,18),\
     $(shell brew --prefix llvm 2>/dev/null | xargs -I{} sh -c 'test -x {}/bin/llvm-config && echo {}/bin/llvm-config' 2>/dev/null),\
     $(call llvm-config-generic,$(LLVM_MIN_VERSION),$(LLVM_MAX_VERSION))))
 endef
 
-# Detect Homebrew LLVM prefix for library path
+# Detect Homebrew LLVM prefix for library path (matches detect-llvm-config order)
 define detect-homebrew-llvm-prefix
 $(strip $(or \
-    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@18 2>/dev/null),\
-    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@19 2>/dev/null),\
-    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@20 2>/dev/null),\
     $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@21 2>/dev/null),\
+    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@20 2>/dev/null),\
+    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@19 2>/dev/null),\
+    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@18 2>/dev/null),\
     $(shell which brew >/dev/null 2>&1 && brew --prefix llvm 2>/dev/null)))
 endef
 

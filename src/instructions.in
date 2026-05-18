@@ -597,3 +597,267 @@ vsoxseg5ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31.
 vsoxseg6ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=5  6..2=0x09 1..0=3
 vsoxseg7ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=6  6..2=0x09 1..0=3
 vsoxseg8ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=7  6..2=0x09 1..0=3
+# --- V-Arithmetic Instructions (opcode=OP-V, bits[6:2]=0x15) ---
+# funct3: 0=OPIVV 2=OPMVV 3=OPIVI 4=OPIVX 6=OPMVX
+# FP (vf*, vmf*) instructions deferred to Phase 5.
+
+# -- funct6=000000 (0x00) --
+  vadd_vv                               vd vs2 vs1 vm  31..26=0  14..12=0  6..2=0x15 1..0=3
+  vredsum_vs                            vd vs2 vs1 vm  31..26=0  14..12=2  6..2=0x15 1..0=3
+  vadd_vi                               vd vs2 simm5 vm  31..26=0  14..12=3  6..2=0x15 1..0=3
+  vadd_vx                               vd vs2 rs1 vm  31..26=0  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000001 (0x01) --
+  vredand_vs                            vd vs2 vs1 vm  31..26=1  14..12=2  6..2=0x15 1..0=3
+# -- funct6=000010 (0x02) --
+  vsub_vv                               vd vs2 vs1 vm  31..26=2  14..12=0  6..2=0x15 1..0=3
+  vredor_vs                             vd vs2 vs1 vm  31..26=2  14..12=2  6..2=0x15 1..0=3
+  vsub_vx                               vd vs2 rs1 vm  31..26=2  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000011 (0x03) --
+  vredxor_vs                            vd vs2 vs1 vm  31..26=3  14..12=2  6..2=0x15 1..0=3
+  vrsub_vi                              vd vs2 simm5 vm  31..26=3  14..12=3  6..2=0x15 1..0=3
+  vrsub_vx                              vd vs2 rs1 vm  31..26=3  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000100 (0x04) --
+  vminu_vv                              vd vs2 vs1 vm  31..26=4  14..12=0  6..2=0x15 1..0=3
+  vredminu_vs                           vd vs2 vs1 vm  31..26=4  14..12=2  6..2=0x15 1..0=3
+  vminu_vx                              vd vs2 rs1 vm  31..26=4  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000101 (0x05) --
+  vmin_vv                               vd vs2 vs1 vm  31..26=5  14..12=0  6..2=0x15 1..0=3
+  vredmin_vs                            vd vs2 vs1 vm  31..26=5  14..12=2  6..2=0x15 1..0=3
+  vmin_vx                               vd vs2 rs1 vm  31..26=5  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000110 (0x06) --
+  vmaxu_vv                              vd vs2 vs1 vm  31..26=6  14..12=0  6..2=0x15 1..0=3
+  vredmaxu_vs                           vd vs2 vs1 vm  31..26=6  14..12=2  6..2=0x15 1..0=3
+  vmaxu_vx                              vd vs2 rs1 vm  31..26=6  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000111 (0x07) --
+  vmax_vv                               vd vs2 vs1 vm  31..26=7  14..12=0  6..2=0x15 1..0=3
+  vredmax_vs                            vd vs2 vs1 vm  31..26=7  14..12=2  6..2=0x15 1..0=3
+  vmax_vx                               vd vs2 rs1 vm  31..26=7  14..12=4  6..2=0x15 1..0=3
+# -- funct6=001000 (0x08) --
+  vaaddu_vv                             vd vs2 vs1 vm  31..26=8  14..12=2  6..2=0x15 1..0=3
+  vaaddu_vx                             vd vs2 rs1 vm  31..26=8  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001001 (0x09) --
+  vand_vv                               vd vs2 vs1 vm  31..26=9  14..12=0  6..2=0x15 1..0=3
+  vaadd_vv                              vd vs2 vs1 vm  31..26=9  14..12=2  6..2=0x15 1..0=3
+  vand_vi                               vd vs2 simm5 vm  31..26=9  14..12=3  6..2=0x15 1..0=3
+  vand_vx                               vd vs2 rs1 vm  31..26=9  14..12=4  6..2=0x15 1..0=3
+  vaadd_vx                              vd vs2 rs1 vm  31..26=9  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001010 (0x0a) --
+  vor_vv                                vd vs2 vs1 vm  31..26=10  14..12=0  6..2=0x15 1..0=3
+  vasubu_vv                             vd vs2 vs1 vm  31..26=10  14..12=2  6..2=0x15 1..0=3
+  vor_vi                                vd vs2 simm5 vm  31..26=10  14..12=3  6..2=0x15 1..0=3
+  vor_vx                                vd vs2 rs1 vm  31..26=10  14..12=4  6..2=0x15 1..0=3
+  vasubu_vx                             vd vs2 rs1 vm  31..26=10  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001011 (0x0b) --
+  vxor_vv                               vd vs2 vs1 vm  31..26=11  14..12=0  6..2=0x15 1..0=3
+  vasub_vv                              vd vs2 vs1 vm  31..26=11  14..12=2  6..2=0x15 1..0=3
+  vxor_vi                               vd vs2 simm5 vm  31..26=11  14..12=3  6..2=0x15 1..0=3
+  vxor_vx                               vd vs2 rs1 vm  31..26=11  14..12=4  6..2=0x15 1..0=3
+  vasub_vx                              vd vs2 rs1 vm  31..26=11  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001100 (0x0c) --
+  vrgather_vv                           vd vs2 vs1 vm  31..26=12  14..12=0  6..2=0x15 1..0=3
+  vrgather_vi                           vd vs2 simm5 vm  31..26=12  14..12=3  6..2=0x15 1..0=3
+  vrgather_vx                           vd vs2 rs1 vm  31..26=12  14..12=4  6..2=0x15 1..0=3
+# -- funct6=001110 (0x0e) --
+  vrgatherei16_vv                       vd vs2 vs1 vm  31..26=14  14..12=0  6..2=0x15 1..0=3
+  vslideup_vi                           vd vs2 simm5 vm  31..26=14  14..12=3  6..2=0x15 1..0=3
+  vslideup_vx                           vd vs2 rs1 vm  31..26=14  14..12=4  6..2=0x15 1..0=3
+  vslide1up_vx                          vd vs2 rs1 vm  31..26=14  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001111 (0x0f) --
+  vslidedown_vi                         vd vs2 simm5 vm  31..26=15  14..12=3  6..2=0x15 1..0=3
+  vslidedown_vx                         vd vs2 rs1 vm  31..26=15  14..12=4  6..2=0x15 1..0=3
+  vslide1down_vx                        vd vs2 rs1 vm  31..26=15  14..12=6  6..2=0x15 1..0=3
+# -- funct6=010000 (0x10) --
+  vadc_vvm                              vd vs2 vs1 vm  31..26=16  14..12=0  6..2=0x15 1..0=3
+  vcpop_m                               rd vs2 vm  19..15=16  31..26=16  14..12=2  6..2=0x15 1..0=3
+  vfirst_m                              rd vs2 vm  19..15=17  31..26=16  14..12=2  6..2=0x15 1..0=3
+  vmv_x_s                               rd vs2 vm  19..15=0   31..26=16  14..12=2  6..2=0x15 1..0=3
+  vadc_vim                              vd vs2 simm5 vm  31..26=16  14..12=3  6..2=0x15 1..0=3
+  vadc_vxm                              vd vs2 rs1 vm  31..26=16  14..12=4  6..2=0x15 1..0=3
+  vmv_s_x                               vd vs2 rs1 vm  31..26=16  14..12=6  6..2=0x15 1..0=3
+# -- funct6=010001 (0x11) --
+  vmadc_vv                              vd vs2 vs1 vm  31..26=17  14..12=0  6..2=0x15 1..0=3
+  vmadc_vi                              vd vs2 simm5 vm  31..26=17  14..12=3  6..2=0x15 1..0=3
+  vmadc_vx                              vd vs2 rs1 vm  31..26=17  14..12=4  6..2=0x15 1..0=3
+# -- funct6=010010 (0x12) --
+  vsbc_vvm                              vd vs2 vs1 vm  31..26=18  14..12=0  6..2=0x15 1..0=3
+  vsbc_vxm                              vd vs2 rs1 vm  31..26=18  14..12=4  6..2=0x15 1..0=3
+# -- funct6=010011 (0x13) --
+  vmsbc_vv                              vd vs2 vs1 vm  31..26=19  14..12=0  6..2=0x15 1..0=3
+  vmsbc_vx                              vd vs2 rs1 vm  31..26=19  14..12=4  6..2=0x15 1..0=3
+# -- funct6=010100 (0x14) --
+  vid_v                                 vd vm  19..15=17  31..26=20  14..12=2  6..2=0x15 1..0=3
+  viota_m                               rd vs2 vm  19..15=16  31..26=20  14..12=2  6..2=0x15 1..0=3
+  vmsbf_m                               rd vs2 vm  19..15=1   31..26=20  14..12=2  6..2=0x15 1..0=3
+  vmsif_m                               rd vs2 vm  19..15=3   31..26=20  14..12=2  6..2=0x15 1..0=3
+  vmsof_m                               rd vs2 vm  19..15=2   31..26=20  14..12=2  6..2=0x15 1..0=3
+# -- funct6=010111 (0x17) --
+  vmerge_vvm                            vd vs2 vs1 vm  25=0  31..26=23  14..12=0  6..2=0x15 1..0=3
+  vmv_v_v                               vd vs2 vs1 vm  25=1  31..26=23  14..12=0  6..2=0x15 1..0=3
+  vcompress_vm                          vd vs2 vs1 vm  31..26=23  14..12=2  6..2=0x15 1..0=3
+  vmerge_vim                            vd vs2 simm5 vm  25=0  31..26=23  14..12=3  6..2=0x15 1..0=3
+  vmv_v_i                               vd vs2 simm5 vm  25=1  31..26=23  14..12=3  6..2=0x15 1..0=3
+  vmerge_vxm                            vd vs2 rs1 vm  25=0  31..26=23  14..12=4  6..2=0x15 1..0=3
+  vmv_v_x                               vd vs2 rs1 vm  25=1  31..26=23  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011000 (0x18) --
+  vmseq_vv                              vd vs2 vs1 vm  31..26=24  14..12=0  6..2=0x15 1..0=3
+  vmandn_mm                             vd vs2 vs1 vm  31..26=24  14..12=2  6..2=0x15 1..0=3
+  vmseq_vi                              vd vs2 simm5 vm  31..26=24  14..12=3  6..2=0x15 1..0=3
+  vmseq_vx                              vd vs2 rs1 vm  31..26=24  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011001 (0x19) --
+  vmsne_vv                              vd vs2 vs1 vm  31..26=25  14..12=0  6..2=0x15 1..0=3
+  vmand_mm                              vd vs2 vs1 vm  31..26=25  14..12=2  6..2=0x15 1..0=3
+  vmsne_vi                              vd vs2 simm5 vm  31..26=25  14..12=3  6..2=0x15 1..0=3
+  vmsne_vx                              vd vs2 rs1 vm  31..26=25  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011010 (0x1a) --
+  vmsltu_vv                             vd vs2 vs1 vm  31..26=26  14..12=0  6..2=0x15 1..0=3
+  vmor_mm                               vd vs2 vs1 vm  31..26=26  14..12=2  6..2=0x15 1..0=3
+  vmsltu_vx                             vd vs2 rs1 vm  31..26=26  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011011 (0x1b) --
+  vmslt_vv                              vd vs2 vs1 vm  31..26=27  14..12=0  6..2=0x15 1..0=3
+  vmxor_mm                              vd vs2 vs1 vm  31..26=27  14..12=2  6..2=0x15 1..0=3
+  vmslt_vx                              vd vs2 rs1 vm  31..26=27  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011100 (0x1c) --
+  vmsleu_vv                             vd vs2 vs1 vm  31..26=28  14..12=0  6..2=0x15 1..0=3
+  vmorn_mm                              vd vs2 vs1 vm  31..26=28  14..12=2  6..2=0x15 1..0=3
+  vmsleu_vi                             vd vs2 simm5 vm  31..26=28  14..12=3  6..2=0x15 1..0=3
+  vmsleu_vx                             vd vs2 rs1 vm  31..26=28  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011101 (0x1d) --
+  vmsle_vv                              vd vs2 vs1 vm  31..26=29  14..12=0  6..2=0x15 1..0=3
+  vmnand_mm                             vd vs2 vs1 vm  31..26=29  14..12=2  6..2=0x15 1..0=3
+  vmsle_vi                              vd vs2 simm5 vm  31..26=29  14..12=3  6..2=0x15 1..0=3
+  vmsle_vx                              vd vs2 rs1 vm  31..26=29  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011110 (0x1e) --
+  vmnor_mm                              vd vs2 vs1 vm  31..26=30  14..12=2  6..2=0x15 1..0=3
+  vmsgtu_vi                             vd vs2 simm5 vm  31..26=30  14..12=3  6..2=0x15 1..0=3
+  vmsgtu_vx                             vd vs2 rs1 vm  31..26=30  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011111 (0x1f) --
+  vmxnor_mm                             vd vs2 vs1 vm  31..26=31  14..12=2  6..2=0x15 1..0=3
+  vmsgt_vi                              vd vs2 simm5 vm  31..26=31  14..12=3  6..2=0x15 1..0=3
+  vmsgt_vx                              vd vs2 rs1 vm  31..26=31  14..12=4  6..2=0x15 1..0=3
+# -- funct6=100000 (0x20) --
+  vsaddu_vv                             vd vs2 vs1 vm  31..26=32  14..12=0  6..2=0x15 1..0=3
+  vdivu_vv                              vd vs2 vs1 vm  31..26=32  14..12=2  6..2=0x15 1..0=3
+  vsaddu_vi                             vd vs2 simm5 vm  31..26=32  14..12=3  6..2=0x15 1..0=3
+  vsaddu_vx                             vd vs2 rs1 vm  31..26=32  14..12=4  6..2=0x15 1..0=3
+  vdivu_vx                              vd vs2 rs1 vm  31..26=32  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100001 (0x21) --
+  vsadd_vv                              vd vs2 vs1 vm  31..26=33  14..12=0  6..2=0x15 1..0=3
+  vdiv_vv                               vd vs2 vs1 vm  31..26=33  14..12=2  6..2=0x15 1..0=3
+  vsadd_vi                              vd vs2 simm5 vm  31..26=33  14..12=3  6..2=0x15 1..0=3
+  vsadd_vx                              vd vs2 rs1 vm  31..26=33  14..12=4  6..2=0x15 1..0=3
+  vdiv_vx                               vd vs2 rs1 vm  31..26=33  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100010 (0x22) --
+  vssubu_vv                             vd vs2 vs1 vm  31..26=34  14..12=0  6..2=0x15 1..0=3
+  vremu_vv                              vd vs2 vs1 vm  31..26=34  14..12=2  6..2=0x15 1..0=3
+  vssubu_vx                             vd vs2 rs1 vm  31..26=34  14..12=4  6..2=0x15 1..0=3
+  vremu_vx                              vd vs2 rs1 vm  31..26=34  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100011 (0x23) --
+  vssub_vv                              vd vs2 vs1 vm  31..26=35  14..12=0  6..2=0x15 1..0=3
+  vrem_vv                               vd vs2 vs1 vm  31..26=35  14..12=2  6..2=0x15 1..0=3
+  vssub_vx                              vd vs2 rs1 vm  31..26=35  14..12=4  6..2=0x15 1..0=3
+  vrem_vx                               vd vs2 rs1 vm  31..26=35  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100100 (0x24) --
+  vmulhu_vv                             vd vs2 vs1 vm  31..26=36  14..12=2  6..2=0x15 1..0=3
+  vmulhu_vx                             vd vs2 rs1 vm  31..26=36  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100101 (0x25) --
+  vsll_vv                               vd vs2 vs1 vm  31..26=37  14..12=0  6..2=0x15 1..0=3
+  vmul_vv                               vd vs2 vs1 vm  31..26=37  14..12=2  6..2=0x15 1..0=3
+  vsll_vi                               vd vs2 simm5 vm  31..26=37  14..12=3  6..2=0x15 1..0=3
+  vsll_vx                               vd vs2 rs1 vm  31..26=37  14..12=4  6..2=0x15 1..0=3
+  vmul_vx                               vd vs2 rs1 vm  31..26=37  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100110 (0x26) --
+  vmulhsu_vv                            vd vs2 vs1 vm  31..26=38  14..12=2  6..2=0x15 1..0=3
+  vmulhsu_vx                            vd vs2 rs1 vm  31..26=38  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100111 (0x27) --
+  vsmul_vv                              vd vs2 vs1 vm  31..26=39  14..12=0  6..2=0x15 1..0=3
+  vmulh_vv                              vd vs2 vs1 vm  31..26=39  14..12=2  6..2=0x15 1..0=3
+  vsmul_vx                              vd vs2 rs1 vm  31..26=39  14..12=4  6..2=0x15 1..0=3
+  vmulh_vx                              vd vs2 rs1 vm  31..26=39  14..12=6  6..2=0x15 1..0=3
+# -- funct6=101000 (0x28) --
+  vsrl_vv                               vd vs2 vs1 vm  31..26=40  14..12=0  6..2=0x15 1..0=3
+  vsrl_vi                               vd vs2 simm5 vm  31..26=40  14..12=3  6..2=0x15 1..0=3
+  vsrl_vx                               vd vs2 rs1 vm  31..26=40  14..12=4  6..2=0x15 1..0=3
+# -- funct6=101001 (0x29) --
+  vsra_vv                               vd vs2 vs1 vm  31..26=41  14..12=0  6..2=0x15 1..0=3
+  vmadd_vv                              vd vs2 vs1 vm  31..26=41  14..12=2  6..2=0x15 1..0=3
+  vsra_vi                               vd vs2 simm5 vm  31..26=41  14..12=3  6..2=0x15 1..0=3
+  vsra_vx                               vd vs2 rs1 vm  31..26=41  14..12=4  6..2=0x15 1..0=3
+  vmadd_vx                              vd vs2 rs1 vm  31..26=41  14..12=6  6..2=0x15 1..0=3
+# -- funct6=101010 (0x2a) --
+  vssrl_vv                              vd vs2 vs1 vm  31..26=42  14..12=0  6..2=0x15 1..0=3
+  vssrl_vi                              vd vs2 simm5 vm  31..26=42  14..12=3  6..2=0x15 1..0=3
+  vssrl_vx                              vd vs2 rs1 vm  31..26=42  14..12=4  6..2=0x15 1..0=3
+# -- funct6=101011 (0x2b) --
+  vssra_vv                              vd vs2 vs1 vm  31..26=43  14..12=0  6..2=0x15 1..0=3
+  vnmsub_vv                             vd vs2 vs1 vm  31..26=43  14..12=2  6..2=0x15 1..0=3
+  vssra_vi                              vd vs2 simm5 vm  31..26=43  14..12=3  6..2=0x15 1..0=3
+  vssra_vx                              vd vs2 rs1 vm  31..26=43  14..12=4  6..2=0x15 1..0=3
+  vnmsub_vx                             vd vs2 rs1 vm  31..26=43  14..12=6  6..2=0x15 1..0=3
+# -- funct6=101100 (0x2c) --
+  vnsrl_wv                              vd vs2 vs1 vm  31..26=44  14..12=0  6..2=0x15 1..0=3
+  vnsrl_wi                              vd vs2 simm5 vm  31..26=44  14..12=3  6..2=0x15 1..0=3
+  vnsrl_wx                              vd vs2 rs1 vm  31..26=44  14..12=4  6..2=0x15 1..0=3
+# -- funct6=101101 (0x2d) --
+  vnsra_wv                              vd vs2 vs1 vm  31..26=45  14..12=0  6..2=0x15 1..0=3
+  vmacc_vv                              vd vs2 vs1 vm  31..26=45  14..12=2  6..2=0x15 1..0=3
+  vnsra_wi                              vd vs2 simm5 vm  31..26=45  14..12=3  6..2=0x15 1..0=3
+  vnsra_wx                              vd vs2 rs1 vm  31..26=45  14..12=4  6..2=0x15 1..0=3
+  vmacc_vx                              vd vs2 rs1 vm  31..26=45  14..12=6  6..2=0x15 1..0=3
+# -- funct6=101110 (0x2e) --
+  vnclipu_wv                            vd vs2 vs1 vm  31..26=46  14..12=0  6..2=0x15 1..0=3
+  vnclipu_wi                            vd vs2 simm5 vm  31..26=46  14..12=3  6..2=0x15 1..0=3
+  vnclipu_wx                            vd vs2 rs1 vm  31..26=46  14..12=4  6..2=0x15 1..0=3
+# -- funct6=101111 (0x2f) --
+  vnclip_wv                             vd vs2 vs1 vm  31..26=47  14..12=0  6..2=0x15 1..0=3
+  vnmsac_vv                             vd vs2 vs1 vm  31..26=47  14..12=2  6..2=0x15 1..0=3
+  vnclip_wi                             vd vs2 simm5 vm  31..26=47  14..12=3  6..2=0x15 1..0=3
+  vnclip_wx                             vd vs2 rs1 vm  31..26=47  14..12=4  6..2=0x15 1..0=3
+  vnmsac_vx                             vd vs2 rs1 vm  31..26=47  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110000 (0x30) --
+  vwredsumu_vs                          vd vs2 vs1 vm  31..26=48  14..12=0  6..2=0x15 1..0=3
+  vwaddu_vv                             vd vs2 vs1 vm  31..26=48  14..12=2  6..2=0x15 1..0=3
+  vwaddu_vx                             vd vs2 rs1 vm  31..26=48  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110001 (0x31) --
+  vwredsum_vs                           vd vs2 vs1 vm  31..26=49  14..12=0  6..2=0x15 1..0=3
+  vwadd_vv                              vd vs2 vs1 vm  31..26=49  14..12=2  6..2=0x15 1..0=3
+  vwadd_vx                              vd vs2 rs1 vm  31..26=49  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110010 (0x32) --
+  vwsubu_vv                             vd vs2 vs1 vm  31..26=50  14..12=2  6..2=0x15 1..0=3
+  vwsubu_vx                             vd vs2 rs1 vm  31..26=50  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110011 (0x33) --
+  vwsub_vv                              vd vs2 vs1 vm  31..26=51  14..12=2  6..2=0x15 1..0=3
+  vwsub_vx                              vd vs2 rs1 vm  31..26=51  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110100 (0x34) --
+  vwaddu_wv                             vd vs2 vs1 vm  31..26=52  14..12=2  6..2=0x15 1..0=3
+  vwaddu_wx                             vd vs2 rs1 vm  31..26=52  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110101 (0x35) --
+  vwadd_wv                              vd vs2 vs1 vm  31..26=53  14..12=2  6..2=0x15 1..0=3
+  vwadd_wx                              vd vs2 rs1 vm  31..26=53  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110110 (0x36) --
+  vwsubu_wv                             vd vs2 vs1 vm  31..26=54  14..12=2  6..2=0x15 1..0=3
+  vwsubu_wx                             vd vs2 rs1 vm  31..26=54  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110111 (0x37) --
+  vwsub_wv                              vd vs2 vs1 vm  31..26=55  14..12=2  6..2=0x15 1..0=3
+  vwsub_wx                              vd vs2 rs1 vm  31..26=55  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111000 (0x38) --
+  vwmulu_vv                             vd vs2 vs1 vm  31..26=56  14..12=2  6..2=0x15 1..0=3
+  vwmulu_vx                             vd vs2 rs1 vm  31..26=56  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111010 (0x3a) --
+  vwmulsu_vv                            vd vs2 vs1 vm  31..26=58  14..12=2  6..2=0x15 1..0=3
+  vwmulsu_vx                            vd vs2 rs1 vm  31..26=58  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111011 (0x3b) --
+  vwmul_vv                              vd vs2 vs1 vm  31..26=59  14..12=2  6..2=0x15 1..0=3
+  vwmul_vx                              vd vs2 rs1 vm  31..26=59  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111100 (0x3c) --
+  vwmaccu_vv                            vd vs2 vs1 vm  31..26=60  14..12=2  6..2=0x15 1..0=3
+  vwmaccu_vx                            vd vs2 rs1 vm  31..26=60  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111101 (0x3d) --
+  vwmacc_vv                             vd vs2 vs1 vm  31..26=61  14..12=2  6..2=0x15 1..0=3
+  vwmacc_vx                             vd vs2 rs1 vm  31..26=61  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111110 (0x3e) --
+  vwmaccus_vx                           vd vs2 rs1 vm  31..26=62  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111111 (0x3f) --
+  vwmaccsu_vv                           vd vs2 vs1 vm  31..26=63  14..12=2  6..2=0x15 1..0=3
+  vwmaccus_vx                           vd vs2 rs1 vm  31..26=63  14..12=6  6..2=0x15 1..0=3
+
+# Total: 198 V-arith int+mask instructions

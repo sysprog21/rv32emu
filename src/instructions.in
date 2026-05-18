@@ -237,3 +237,19 @@ cflw      crdq   crs1q  cimmw         15..13=3 1..0=0
 cfsw      crs1q  crs2q  cimmw         15..13=7 1..0=0
 cflwsp    crd    cimmlwsp              15..13=3 1..0=2
 cfswsp    crs2   cimmswsp              15..13=7 1..0=2
+
+
+# =============================================================
+# RVV (RISC-V Vector Extension v1.0)
+# All instructions require EXT_V.
+# =============================================================
+
+# --- V Configuration-Setting Instructions (funct3=111, opcode=OP-V) ---
+# Encoding summary (opcode[6:2]=0x15, bits[1:0]=3, funct3[14:12]=7):
+#   vsetvli:  [31]=0,           [30:20]=zimm11(vtypei), [19:15]=rs1,   [11:7]=rd
+#   vsetivli: [31:30]=3,        [29:20]=zimm10(vtypei), [19:15]=zimm5(avl), [11:7]=rd
+#   vsetvl:   [31:25]=0b1000000,[24:20]=rs2,            [19:15]=rs1,   [11:7]=rd
+@extension EXT_V
+vsetvli   rd rs1 zimm11   31=0            14..12=7 6..2=0x15 1..0=3
+vsetivli  rd zimm5 zimm10 31..30=3        14..12=7 6..2=0x15 1..0=3
+vsetvl    rd rs1 rs2      31..25=0b1000000 14..12=7 6..2=0x15 1..0=3

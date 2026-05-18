@@ -1009,6 +1009,58 @@ static inline bool op_op_fp(rv_insn_t *ir, const uint32_t insn)
 #define op_op_fp op_unimp
 #endif /* RV32_HAS(EXT_F) */
 
+#if RV32_HAS(EXT_V)
+static inline bool op_op_v(rv_insn_t *ir, const uint32_t insn)
+{
+
+    switch ((insn >> 12) & 0x7) {
+    case 7:
+        switch ((insn >> 25) & 0x7f) {
+#if RV32_HAS(EXT_V)
+        case 0x40:
+            ir->rd = decode_rd(insn);
+            ir->rs1 = decode_rs1(insn);
+            ir->rs2 = decode_rs2(insn);
+            ir->opcode = rv_insn_vsetvl;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+        default:
+            break;
+        }
+        switch ((insn >> 30) & 0x3) {
+#if RV32_HAS(EXT_V)
+        case 3:
+            ir->rd = decode_rd(insn);
+            ir->rs1 = (insn >> 15) & 0x1f;
+            ir->zimm = (insn >> 20) & 0x3ff;
+            ir->opcode = rv_insn_vsetivli;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+        default:
+            break;
+        }
+        switch ((insn >> 31) & 0x1) {
+#if RV32_HAS(EXT_V)
+        case 0:
+            ir->rd = decode_rd(insn);
+            ir->rs1 = decode_rs1(insn);
+            ir->zimm = (insn >> 20) & 0x7ff;
+            ir->opcode = rv_insn_vsetvli;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
+    return false;
+}
+#else /* !RV32_HAS(EXT_V) */
+#define op_op_v op_unimp
+#endif /* RV32_HAS(EXT_V) */
+
 static inline bool op_branch(rv_insn_t *ir, const uint32_t insn)
 {
     decode_btype(ir, insn);
@@ -1231,9 +1283,6 @@ static inline bool op_system(rv_insn_t *ir, const uint32_t insn)
     }
     return csr_is_writable(ir->imm) || (ir->rs1 == rv_reg_zero);
 }
-
-/* op_op_v: no EXT_V instructions defined yet */
-#define op_op_v op_unimp
 
 #if RV32_HAS(EXT_C)
 

@@ -84,6 +84,15 @@ jobs:
             } >> $GITHUB_PATH
         shell: bash
       - name: fetch artifact
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
+        # GH_TOKEN authenticates the parse-time fetch-releases-tag call in
+        # mk/artifact.mk so the GitHub API request escapes the 60 req/hr
+        # anonymous (IP-shared) limit and stops flaking when several
+        # merges land back-to-back.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
               make artifact ENABLE_SYSTEM=1
       # Populate the SDL2 / SDL2_mixer port cache serially. Without this,
@@ -238,6 +247,15 @@ jobs:
             } >> $GITHUB_PATH
         shell: bash
       - name: fetch artifact
+        if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm') }}
+        # GH_TOKEN authenticates the parse-time fetch-releases-tag call in
+        # mk/artifact.mk so the GitHub API request escapes the 60 req/hr
+        # anonymous (IP-shared) limit and stops flaking when several
+        # merges land back-to-back.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
               make artifact
               # get from rv32emu-prebuilt

@@ -861,3 +861,112 @@ vsoxseg8ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31.
   vwmaccus_vx                           vd vs2 rs1 vm  31..26=63  14..12=6  6..2=0x15 1..0=3
 
 # Total: 198 V-arith int+mask instructions
+# --- V-Arithmetic FP Instructions (opcode=OP-V, bits[6:2]=0x15) ---
+# funct3: 1=OPFVV  5=OPFVF
+# All FP operations require EXT_F; decoded here, executed via EXT_V logic.
+# NOTE: vfrdiv_vf at funct3=1 reproduces a decode_v.c fallthrough (reserved).
+
+# -- funct6=000000 (0x00) --
+  vfadd_vv                              vd vs2 vs1 vm  31..26=0  14..12=1  6..2=0x15 1..0=3
+  vfadd_vf                              vd vs2 rs1 vm  31..26=0  14..12=5  6..2=0x15 1..0=3
+# -- funct6=000001 (0x01) --
+  vfredusum_vs                          vd vs2 vs1 vm  31..26=1  14..12=1  6..2=0x15 1..0=3
+# -- funct6=000010 (0x02) --
+  vfsub_vv                              vd vs2 vs1 vm  31..26=2  14..12=1  6..2=0x15 1..0=3
+  vfsub_vf                              vd vs2 rs1 vm  31..26=2  14..12=5  6..2=0x15 1..0=3
+# -- funct6=000011 (0x03) --
+  vfredosum_vs                          vd vs2 vs1 vm  31..26=3  14..12=1  6..2=0x15 1..0=3
+# -- funct6=000100 (0x04) --
+  vfmin_vv                              vd vs2 vs1 vm  31..26=4  14..12=1  6..2=0x15 1..0=3
+  vfmin_vf                              vd vs2 rs1 vm  31..26=4  14..12=5  6..2=0x15 1..0=3
+# -- funct6=000101 (0x05) --
+  vfredmin_vs                           vd vs2 vs1 vm  31..26=5  14..12=1  6..2=0x15 1..0=3
+# -- funct6=000110 (0x06) --
+  vfmax_vv                              vd vs2 vs1 vm  31..26=6  14..12=1  6..2=0x15 1..0=3
+  vfmax_vf                              vd vs2 rs1 vm  31..26=6  14..12=5  6..2=0x15 1..0=3
+# -- funct6=000111 (0x07) --
+  vfredmax_vs                           vd vs2 vs1 vm  31..26=7  14..12=1  6..2=0x15 1..0=3
+# -- funct6=001000 (0x08) --
+  vfsgnj_vv                             vd vs2 vs1 vm  31..26=8  14..12=1  6..2=0x15 1..0=3
+  vfsgnj_vf                             vd vs2 rs1 vm  31..26=8  14..12=5  6..2=0x15 1..0=3
+# -- funct6=001001 (0x09) --
+  vfsgnjn_vv                            vd vs2 vs1 vm  31..26=9  14..12=1  6..2=0x15 1..0=3
+  vfsgnjn_vf                            vd vs2 rs1 vm  31..26=9  14..12=5  6..2=0x15 1..0=3
+# -- funct6=001010 (0x0a) --
+  vfsgnjx_vv                            vd vs2 vs1 vm  31..26=10  14..12=1  6..2=0x15 1..0=3
+  vfsgnjx_vf                            vd vs2 rs1 vm  31..26=10  14..12=5  6..2=0x15 1..0=3
+# -- funct6=001110 (0x0e) --
+  vfslide1up_vf                         vd vs2 rs1 vm  31..26=14  14..12=5  6..2=0x15 1..0=3
+# -- funct6=001111 (0x0f) --
+  vfslide1down_vf                       vd vs2 rs1 vm  31..26=15  14..12=5  6..2=0x15 1..0=3
+# -- funct6=010111 (0x17) --
+  vfmerge_vfm                           vd vs2 rs1 vm  25=0  31..26=23  14..12=5  6..2=0x15 1..0=3
+  vfmv_v_f                              vd vs2 rs1 vm  25=1  31..26=23  14..12=5  6..2=0x15 1..0=3
+# -- funct6=100000 (0x20) --
+  vfdiv_vv                              vd vs2 vs1 vm  31..26=32  14..12=1  6..2=0x15 1..0=3
+  vfdiv_vf                              vd vs2 rs1 vm  31..26=32  14..12=5  6..2=0x15 1..0=3
+# -- funct6=100001 (0x21) --
+  vfrdiv_vf                             vd vs2 vs1 vm  31..26=33  14..12=1  6..2=0x15 1..0=3
+  vfrdiv_vf                             vd vs2 rs1 vm  31..26=33  14..12=5  6..2=0x15 1..0=3
+# -- funct6=100100 (0x24) --
+  vfmul_vv                              vd vs2 vs1 vm  31..26=36  14..12=1  6..2=0x15 1..0=3
+  vfmul_vf                              vd vs2 rs1 vm  31..26=36  14..12=5  6..2=0x15 1..0=3
+# -- funct6=100111 (0x27) --
+  vfrsub_vf                             vd vs2 rs1 vm  31..26=39  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101000 (0x28) --
+  vfmadd_vv                             vd vs2 vs1 vm  31..26=40  14..12=1  6..2=0x15 1..0=3
+  vfmadd_vf                             vd vs2 rs1 vm  31..26=40  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101001 (0x29) --
+  vfnmadd_vv                            vd vs2 vs1 vm  31..26=41  14..12=1  6..2=0x15 1..0=3
+  vfnmadd_vf                            vd vs2 rs1 vm  31..26=41  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101010 (0x2a) --
+  vfmsub_vv                             vd vs2 vs1 vm  31..26=42  14..12=1  6..2=0x15 1..0=3
+  vfmsub_vf                             vd vs2 rs1 vm  31..26=42  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101011 (0x2b) --
+  vfnmsub_vv                            vd vs2 vs1 vm  31..26=43  14..12=1  6..2=0x15 1..0=3
+  vfnmsub_vf                            vd vs2 rs1 vm  31..26=43  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101100 (0x2c) --
+  vfmacc_vv                             vd vs2 vs1 vm  31..26=44  14..12=1  6..2=0x15 1..0=3
+  vfmacc_vf                             vd vs2 rs1 vm  31..26=44  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101101 (0x2d) --
+  vfnmacc_vv                            vd vs2 vs1 vm  31..26=45  14..12=1  6..2=0x15 1..0=3
+  vfnmacc_vf                            vd vs2 rs1 vm  31..26=45  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101110 (0x2e) --
+  vfmsac_vv                             vd vs2 vs1 vm  31..26=46  14..12=1  6..2=0x15 1..0=3
+  vfmsac_vf                             vd vs2 rs1 vm  31..26=46  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101111 (0x2f) --
+  vfnmsac_vv                            vd vs2 vs1 vm  31..26=47  14..12=1  6..2=0x15 1..0=3
+  vfnmsac_vf                            vd vs2 rs1 vm  31..26=47  14..12=5  6..2=0x15 1..0=3
+# -- funct6=110000 (0x30) --
+  vfwadd_vv                             vd vs2 vs1 vm  31..26=48  14..12=1  6..2=0x15 1..0=3
+  vfwadd_vf                             vd vs2 rs1 vm  31..26=48  14..12=5  6..2=0x15 1..0=3
+# -- funct6=110001 (0x31) --
+  vfwredusum_vs                         vd vs2 vs1 vm  31..26=49  14..12=1  6..2=0x15 1..0=3
+# -- funct6=110010 (0x32) --
+  vfwsub_vv                             vd vs2 vs1 vm  31..26=50  14..12=1  6..2=0x15 1..0=3
+  vfwsub_vf                             vd vs2 rs1 vm  31..26=50  14..12=5  6..2=0x15 1..0=3
+# -- funct6=110011 (0x33) --
+  vfwredosum_vs                         vd vs2 vs1 vm  31..26=51  14..12=1  6..2=0x15 1..0=3
+# -- funct6=110100 (0x34) --
+  vfwadd_wv                             vd vs2 vs1 vm  31..26=52  14..12=1  6..2=0x15 1..0=3
+  vfwadd_wf                             vd vs2 rs1 vm  31..26=52  14..12=5  6..2=0x15 1..0=3
+# -- funct6=110110 (0x36) --
+  vfwsub_wv                             vd vs2 vs1 vm  31..26=54  14..12=1  6..2=0x15 1..0=3
+  vfwsub_wf                             vd vs2 rs1 vm  31..26=54  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111000 (0x38) --
+  vfwmul_vv                             vd vs2 vs1 vm  31..26=56  14..12=1  6..2=0x15 1..0=3
+  vfwmul_vf                             vd vs2 rs1 vm  31..26=56  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111100 (0x3c) --
+  vfwmacc_vv                            vd vs2 vs1 vm  31..26=60  14..12=1  6..2=0x15 1..0=3
+  vfwmacc_vf                            vd vs2 rs1 vm  31..26=60  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111101 (0x3d) --
+  vfwnmacc_vv                           vd vs2 vs1 vm  31..26=61  14..12=1  6..2=0x15 1..0=3
+  vfwnmacc_vf                           vd vs2 rs1 vm  31..26=61  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111110 (0x3e) --
+  vfwmsac_vv                            vd vs2 vs1 vm  31..26=62  14..12=1  6..2=0x15 1..0=3
+  vfwmsac_vf                            vd vs2 rs1 vm  31..26=62  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111111 (0x3f) --
+  vfwnmsac_vv                           vd vs2 vs1 vm  31..26=63  14..12=1  6..2=0x15 1..0=3
+  vfwnmsac_vf                           vd vs2 rs1 vm  31..26=63  14..12=5  6..2=0x15 1..0=3
+
+# Total: 65 V-arith FP instructions

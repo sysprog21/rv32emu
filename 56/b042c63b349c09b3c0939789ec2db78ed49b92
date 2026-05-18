@@ -1,0 +1,44 @@
+.github/workflows/main.yml
+  s_81c69cf02c74e0::t_ab271545b9f2aa 381-382
+  s_12dfad11cb4393::t_268e7969d85ba0 553-554
+  s_81c69cf02c74e0::t_b8eb99bbdb22c7 99-100
+  s_12dfad11cb4393::t_a5009ea1e80735 115-118
+  s_12dfad11cb4393::t_cb1ea5e7739381 120-122,388-390
+  s_12dfad11cb4393::t_fe11c1387c67d2 491-493
+  s_12dfad11cb4393::t_538e051253e5aa 740
+  s_12dfad11cb4393::t_e3c2e4c821b3b0 440,446
+Makefile
+  s_81c69cf02c74e0::t_bcbe990768f25d 72-77,79
+  s_12dfad11cb4393::t_2a7fe14eb08ce5 78,80-107
+README.md
+  s_12dfad11cb4393::t_eefbfb8a012051 58-62,64,66-69
+  s_12dfad11cb4393::t_9bd4746695349e 65
+.ci/llvm-version
+  s_12dfad11cb4393::t_982eb025550e89 1
+mk/toolchain.mk
+  s_12dfad11cb4393::t_72a24cfb7e71bd 212-214,218-220,222-224,229,233-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "56b042c63b349c09b3c0939789ec2db78ed49b92",
+  "prompts": {},
+  "sessions": {
+    "s_12dfad11cb4393": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c0774b98-0975-4d90-9659-16e71ba495f3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    },
+    "s_81c69cf02c74e0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e369a-69d7-79a0-bfc3-f856016687e6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

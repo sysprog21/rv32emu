@@ -156,7 +156,7 @@ FORCE_INLINE bool csr_is_writable(const uint32_t csr)
 /* decode_veew: extract Effective Element Width from the width field insn[14:12].
  * RVV EEW encoding: 000→8-bit, 101→16-bit, 110→32-bit, 111→64-bit.
  * Returns 8, 16, 32, or 64 (as uint8_t stored in ir->eew).
- * Matches the decode_eew() + (8 << eew) calculation in decode_v.c.
+ * RVV EEW table: width field (funct3) → bytes per element.
  */
 static inline uint8_t decode_veew(const uint32_t insn)
 {

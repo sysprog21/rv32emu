@@ -29,6 +29,7 @@ rv32emu supports the following extensions, each mapped to a compile-time
 | A | `EXT_A` | Atomic memory operations |
 | F | `EXT_F` | Single-precision floating-point |
 | C | `EXT_C` | Compressed (16-bit) instructions |
+| V | `EXT_V` | Vector extension (RVV v1.0) |
 
 **Standard unprivileged Z-extensions**
 
@@ -190,11 +191,90 @@ layout not covered by the existing operand names), you also need to:
 3. If the instruction has implicit registers (e.g. `rs1` is always `sp`),
    add an entry to `_RVC_INSN_IMPLICIT`.
 
+## Adding a New RVV Instruction
+
+Vector (RVV v1.0) instructions use a different set of operand names and
+bit-field conventions from scalar instructions.
+
+### RVV Operand Names
+
+| Operand | Bits | Decoded field | Notes |
+|---------|------|---------------|-------|
+| `vd` | `[11:7]` | `ir->vd` | Vector destination register |
+| `vs1` | `[19:15]` | `ir->vs1` | Vector source 1 |
+| `vs2` | `[24:20]` | `ir->vs2` | Vector source 2 |
+| `vs3` | `[11:7]` | `ir->vs3` | Vector source 3 (stores, same position as `rd`) |
+| `vm` | `[25]` | `ir->vm` | Vector mask bit |
+| `rd` | `[11:7]` | `ir->rd` | Scalar destination (mask reductions: vmv.x.s, vcpop.m …) |
+| `rs1` | `[19:15]` | `ir->rs1` | Scalar integer or float source |
+| `simm5` | `[19:15]` | `ir->imm` | 5-bit sign-extended immediate (OPIVI) |
+| `zimm5` | `[19:15]` | `ir->imm` | 5-bit unsigned immediate (vsetivli avl) |
+| `zimm10` | `[29:20]` | `ir->imm` | 10-bit unsigned immediate (vsetivli vtypei) |
+| `zimm11` | `[30:20]` | `ir->imm` | 11-bit unsigned immediate (vsetvli vtypei) |
+| `veew` | `[14:12]` | `ir->eew` | Effective element width (V-load/store only) |
+
+### RVV Encoding Conventions
+
+**OP-V instructions** (`opcode[6:2]=0x15`) use a 6-bit `funct6` field
+(`bits[31:26]`) instead of the 7-bit `funct7` used by scalar OP/OP-32.
+The funct3 field (`bits[14:12]`) selects the operation class:
+
+| funct3 | Class | Typical operands |
+|--------|-------|-----------------|
+| 0 (OPIVV) | Integer vector×vector | `vd vs2 vs1 vm` |
+| 1 (OPFVV) | FP vector×vector | `vd vs2 vs1 vm` |
+| 2 (OPMVV) | Mask/integer vector×vector | `vd vs2 vs1 vm` |
+| 3 (OPIVI) | Integer vector×immediate | `vd vs2 simm5 vm` |
+| 4 (OPIVX) | Integer vector×scalar | `vd vs2 rs1 vm` |
+| 5 (OPFVF) | FP vector×scalar | `vd vs2 rs1 vm` |
+| 6 (OPMVX) | Mask/integer vector×scalar | `vd vs2 rs1 vm` |
+
+**Constraint ordering rule**: The last constraint in the line becomes
+the outermost switch key.  Always place the opcode constraint
+(`6..2=0x15 1..0=3`) last so the root switch dispatches on `opcode`.
+
+**V-load/store instructions** (`opcode=LOAD-FP` / `STORE-FP`) add the
+`mop` (`bits[27:26]`), `mew` (`bit[28]`), and `nf` (`bits[31:29]`)
+fields; the EEW is encoded in `bits[14:12]`.
+
+### Special Dispatch Patterns
+
+Some OP-V groups dispatch on a sub-field in addition to funct6/funct3:
+
+- **VWXUNARY0** (`funct6=0x10, funct3=2`): dispatched by `bits[19:15]`
+  (the `vs1` slot).  Use the `19..15=N` constraint *before* the funct6
+  and funct3 constraints so it becomes an inner switch.
+
+  ```
+  vmv_x_s   rd vs2 vm   19..15=0   31..26=16  14..12=2  6..2=0x15 1..0=3
+  vcpop_m   rd vs2 vm   19..15=16  31..26=16  14..12=2  6..2=0x15 1..0=3
+  ```
+
+- **VMUNARY0** (`funct6=0x14, funct3=2`): same pattern as VWXUNARY0.
+
+- **vmv_v_v / vmerge_vvm** (`funct6=0x17, funct3=0`): differentiated by
+  the `vm` bit (`bit[25]`).  Add a `25=1` / `25=0` constraint.
+
+  ```
+  vmv_v_v    vd vs2 vs1 vm  25=1  31..26=23  14..12=0  6..2=0x15 1..0=3
+  vmerge_vvm vd vs2 vs1 vm  25=0  31..26=23  14..12=0  6..2=0x15 1..0=3
+  ```
+
+### Example: Adding a Hypothetical RVV Instruction
+
+```
+@extension EXT_V
+# vadd.vv — vector-vector add, funct6=0x00, funct3=0 (OPIVV)
+vadd_vv   vd vs2 vs1 vm  31..26=0  14..12=0  6..2=0x15 1..0=3
+```
+
+Run `make` to regenerate `src/decode.c`.
+
 ## Verification
 
 ```bash
 # Check that every instruction in instructions.in is reachable
-# in the decision tree (should print 161/161 PASSED):
+# in the decision tree:
 python3 scripts/verify-tree.py src/instructions.in
 
 # Rebuild and run basic tests:

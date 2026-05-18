@@ -3,6 +3,7 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,7 +14,45 @@
 #define getpagesize() 4096
 #endif
 
+#include "feature.h"
 #include "mpool.h"
+
+/* T2C runs a worker thread that calls mpool_free on the same pools the
+ * main thread allocates from (block_mp / block_ir_mp / fuse_mp). The
+ * freelist is unsynchronized internally, so without a guard the worker's
+ * free can hand the same chunk out twice on the next main-thread alloc,
+ * which later surfaces as `free(): corrupted unsorted chunks` on the libc
+ * heap once a double-freed ir->branch_table is released. Gate the mutex on
+ * T2C so non-threaded builds keep the original lock-free fast path.
+ */
+#if RV32_HAS(T2C)
+#include <pthread.h>
+/* Init/destroy are called from single-threaded setup/teardown paths
+ * (riscv_create / riscv_delete in src/riscv.c); failure here means broken
+ * contract (already-init/EBUSY at destroy = stray thread, ENOMEM at init
+ * = no mutex at all) and must abort loudly rather than silently leaking
+ * a half-initialized pool or unmapping memory under a live owner.
+ */
+#define MPOOL_LOCK_INIT(mp)                                         \
+    do {                                                            \
+        int _mpool_lock_rc = pthread_mutex_init(&(mp)->lock, NULL); \
+        assert(_mpool_lock_rc == 0);                                \
+        (void) _mpool_lock_rc;                                      \
+    } while (0)
+#define MPOOL_LOCK_DESTROY(mp)                                   \
+    do {                                                         \
+        int _mpool_lock_rc = pthread_mutex_destroy(&(mp)->lock); \
+        assert(_mpool_lock_rc == 0);                             \
+        (void) _mpool_lock_rc;                                   \
+    } while (0)
+#define MPOOL_LOCK(mp) pthread_mutex_lock(&(mp)->lock)
+#define MPOOL_UNLOCK(mp) pthread_mutex_unlock(&(mp)->lock)
+#else
+#define MPOOL_LOCK_INIT(mp) ((void) 0)
+#define MPOOL_LOCK_DESTROY(mp) ((void) 0)
+#define MPOOL_LOCK(mp) ((void) 0)
+#define MPOOL_UNLOCK(mp) ((void) 0)
+#endif
 
 /* Chunk layout: [memchunk_t next-pointer][user data] */
 typedef struct memchunk {
@@ -31,6 +70,9 @@ typedef struct mpool {
     size_t chunk_size;
     struct memchunk *free_chunk_head;
     area_t area;
+#if RV32_HAS(T2C)
+    pthread_mutex_t lock;
+#endif
 } mpool_t;
 
 /* Allocate page-aligned memory via mmap (demand-paged) or malloc fallback */
@@ -91,6 +133,8 @@ mpool_t *mpool_create(size_t pool_size, size_t chunk_size)
         cur = cur->next;
     }
     cur->next = NULL;
+
+    MPOOL_LOCK_INIT(new_mp);
     return new_mp;
 
 fail_mpool:
@@ -153,19 +197,28 @@ void *mpool_alloc(mpool_t *mp)
 {
     if (!mp)
         return NULL;
-    if (!mp->chunk_count && !mpool_extend(mp))
+    MPOOL_LOCK(mp);
+    if (!mp->chunk_count && !mpool_extend(mp)) {
+        MPOOL_UNLOCK(mp);
         return NULL;
-    return mpool_alloc_helper(mp);
+    }
+    void *ptr = mpool_alloc_helper(mp);
+    MPOOL_UNLOCK(mp);
+    return ptr;
 }
 
 void *mpool_calloc(mpool_t *mp)
 {
     if (!mp)
         return NULL;
-    if (!mp->chunk_count && !mpool_extend(mp))
+    MPOOL_LOCK(mp);
+    if (!mp->chunk_count && !mpool_extend(mp)) {
+        MPOOL_UNLOCK(mp);
         return NULL;
+    }
     char *ptr = mpool_alloc_helper(mp);
     memset(ptr, 0, mp->chunk_size);
+    MPOOL_UNLOCK(mp);
     return ptr;
 }
 
@@ -173,16 +226,19 @@ void mpool_free(mpool_t *mp, void *target)
 {
     if (!mp || !target)
         return;
+    MPOOL_LOCK(mp);
     memchunk_t *ptr = (memchunk_t *) ((char *) target - sizeof(memchunk_t));
     ptr->next = mp->free_chunk_head;
     mp->free_chunk_head = ptr;
     mp->chunk_count++;
+    MPOOL_UNLOCK(mp);
 }
 
 void mpool_destroy(mpool_t *mp)
 {
     if (!mp)
         return;
+    MPOOL_LOCK_DESTROY(mp);
 #if HAVE_MMAP
     size_t mem_size = mp->page_count * getpagesize();
     for (area_t *cur = &mp->area, *tmp; cur; cur = tmp) {

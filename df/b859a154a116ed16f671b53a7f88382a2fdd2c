@@ -1,0 +1,22 @@
+mk/artifact.mk
+  s_1fad1c78814f2a::t_e09781bca43a45 320-322,326-327
+  s_1fad1c78814f2a::t_27895f7ba2600e 323-325
+mk/wasm.mk
+  s_1fad1c78814f2a::t_a400280f5d0e9f 269-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "dfb859a154a116ed16f671b53a7f88382a2fdd2c",
+  "prompts": {},
+  "sessions": {
+    "s_1fad1c78814f2a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e3a9b-0477-7711-aca5-31afb39889d3",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

@@ -156,7 +156,7 @@ FORCE_INLINE bool csr_is_writable(const uint32_t csr)
 /* decode_veew: extract Effective Element Width from the width field insn[14:12].
  * RVV EEW encoding: 000→8-bit, 101→16-bit, 110→32-bit, 111→64-bit.
  * Returns 8, 16, 32, or 64 (as uint8_t stored in ir->eew).
- * RVV EEW table: width field (funct3) → bytes per element.
+ * Matches the decode_eew() + (8 << eew) calculation in decode_v.c.
  */
 static inline uint8_t decode_veew(const uint32_t insn)
 {
@@ -5601,6 +5601,42 @@ static inline bool op_op_v(rv_insn_t *ir, const uint32_t insn)
             return true;
 #endif /* RV32_HAS(EXT_V) */
 #if RV32_HAS(EXT_V)
+        case 0x18:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->vs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmfeq_vv;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+        case 0x19:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->vs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmfle_vv;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+        case 0x1b:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->vs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmflt_vv;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+        case 0x1c:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->vs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmfne_vv;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
         case 0x20:
             ir->vd = decode_rd(insn);
             ir->vs2 = decode_rs2(insn);
@@ -7067,6 +7103,60 @@ static inline bool op_op_v(rv_insn_t *ir, const uint32_t insn)
                 break;
             }
             break;
+#if RV32_HAS(EXT_V)
+        case 0x18:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->rs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmfeq_vf;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+        case 0x19:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->rs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmfle_vf;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+        case 0x1b:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->rs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmflt_vf;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+        case 0x1c:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->rs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmfne_vf;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+        case 0x1d:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->rs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmfgt_vf;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+        case 0x1f:
+            ir->vd = decode_rd(insn);
+            ir->vs2 = decode_rs2(insn);
+            ir->rs1 = decode_rs1(insn);
+            ir->vm = (insn >> 25) & 0x1;
+            ir->opcode = rv_insn_vmfge_vf;
+            return true;
+#endif /* RV32_HAS(EXT_V) */
 #if RV32_HAS(EXT_V)
         case 0x20:
             ir->vd = decode_rd(insn);

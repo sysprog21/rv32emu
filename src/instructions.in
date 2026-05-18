@@ -970,3 +970,19 @@ vsoxseg8ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31.
   vfwnmsac_vf                           vd vs2 rs1 vm  31..26=63  14..12=5  6..2=0x15 1..0=3
 
 # Total: 65 V-arith FP instructions
+
+# -- FP comparison mask instructions (vmf*) -- funct6=0x18..0x1f --
+# OPFVV (funct3=1): vd vs2 vs1 vm
+# OPFVF (funct3=5): vd vs2 rs1 vm  (rs1 = float scalar)
+# NOTE: funct6=0x1a (011010) is spec-reserved; decode_v.c has vmflt there too
+#       (fallthrough bug). We use only the canonical positions per spec.
+  vmfeq_vv                              vd vs2 vs1 vm  31..26=24  14..12=1  6..2=0x15 1..0=3
+  vmfeq_vf                              vd vs2 rs1 vm  31..26=24  14..12=5  6..2=0x15 1..0=3
+  vmfle_vv                              vd vs2 vs1 vm  31..26=25  14..12=1  6..2=0x15 1..0=3
+  vmfle_vf                              vd vs2 rs1 vm  31..26=25  14..12=5  6..2=0x15 1..0=3
+  vmflt_vv                              vd vs2 vs1 vm  31..26=27  14..12=1  6..2=0x15 1..0=3
+  vmflt_vf                              vd vs2 rs1 vm  31..26=27  14..12=5  6..2=0x15 1..0=3
+  vmfne_vv                              vd vs2 vs1 vm  31..26=28  14..12=1  6..2=0x15 1..0=3
+  vmfne_vf                              vd vs2 rs1 vm  31..26=28  14..12=5  6..2=0x15 1..0=3
+  vmfgt_vf                              vd vs2 rs1 vm  31..26=29  14..12=5  6..2=0x15 1..0=3
+  vmfge_vf                              vd vs2 rs1 vm  31..26=31  14..12=5  6..2=0x15 1..0=3

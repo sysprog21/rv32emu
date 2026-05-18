@@ -68,16 +68,43 @@ AR := ar
 ifeq ("$(CC_IS_CLANG)", "1")
     ifeq ($(UNAME_S),Darwin)
         # macOS: system ar is sufficient
-    else ifeq ($(CONFIG_LTO),y)
-        LLVM_AR := $(shell which llvm-ar 2>/dev/null)
-        ifeq ($(LLVM_AR),)
-            $(error llvm-ar required for LTO with Clang. Install LLVM or disable LTO.)
-        endif
-        AR = llvm-ar
     else
-        LLVM_AR := $(shell which llvm-ar 2>/dev/null)
-        ifneq ($(LLVM_AR),)
-            AR = llvm-ar
+        # Match llvm-ar to the same install as the LLVM we'd compile against.
+        # Honor an explicit LLVM_CONFIG=/path/to/llvm-config override first,
+        # then fall back to auto-detection from mk/toolchain.mk. Without this,
+        # hosts with multiple LLVM majors can leave the unversioned `llvm-ar`
+        # pointing at an older install, and a newer clang's LTO bitcode .o
+        # files fail to archive (e.g. clang-20 bitcode + llvm-ar-18 ->
+        # "Invalid attribute group entry" on `ar crs`).
+        LLVM_CONFIG_FOR_AR := $(if $(LLVM_CONFIG),$(LLVM_CONFIG),$(call detect-llvm-config))
+        ifneq ($(LLVM_CONFIG_FOR_AR),)
+            LLVM_BINDIR_FOR_AR := $(shell $(LLVM_CONFIG_FOR_AR) --bindir 2>/dev/null)
+        endif
+        ifeq ($(CONFIG_LTO),y)
+            ifneq ($(LLVM_BINDIR_FOR_AR),)
+                ifneq ($(wildcard $(LLVM_BINDIR_FOR_AR)/llvm-ar),)
+                    AR := $(LLVM_BINDIR_FOR_AR)/llvm-ar
+                else
+                    $(error llvm-ar not found at $(LLVM_BINDIR_FOR_AR)/llvm-ar. Install matching LLVM dev package or disable LTO.)
+                endif
+            else
+                LLVM_AR := $(shell which llvm-ar 2>/dev/null)
+                ifeq ($(LLVM_AR),)
+                    $(error llvm-ar required for LTO with Clang. Install LLVM or disable LTO.)
+                endif
+                AR = llvm-ar
+            endif
+        else
+            ifneq ($(LLVM_BINDIR_FOR_AR),)
+                ifneq ($(wildcard $(LLVM_BINDIR_FOR_AR)/llvm-ar),)
+                    AR := $(LLVM_BINDIR_FOR_AR)/llvm-ar
+                endif
+            else
+                LLVM_AR := $(shell which llvm-ar 2>/dev/null)
+                ifneq ($(LLVM_AR),)
+                    AR = llvm-ar
+                endif
+            endif
         endif
     endif
 endif

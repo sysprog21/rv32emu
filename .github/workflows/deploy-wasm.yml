@@ -72,12 +72,16 @@ jobs:
             # shell). One dir per line per GitHub Actions docs; non-PATH vars
             # (EM_CONFIG, EMSDK_NODE) ensure emcc finds its .emscripten config
             # and bundled node without relying on relative-path auto-discovery.
-            {
-              echo "EMSDK=$EMSDK"
-              echo "EM_CONFIG=$EM_CONFIG"
-              echo "EMSDK_NODE=$EMSDK_NODE"
-              echo "EMSDK_PYTHON=$EMSDK_PYTHON"
-            } >> $GITHUB_ENV
+            #
+            # Only propagate values that are set and non-empty: emsdk
+            # 3.1.51's emsdk_env.sh does not export EM_CONFIG / EMSDK_PYTHON.
+            # Writing them empty to $GITHUB_ENV would override emcc's
+            # $HOME/.emscripten fallback with "", which emcc resolves to '.'
+            # and reports as "config file not found".
+            for var in EMSDK EM_CONFIG EMSDK_NODE EMSDK_PYTHON; do
+              val="${!var}"
+              [ -n "$val" ] && printf '%s=%s\n' "$var" "$val" >> "$GITHUB_ENV"
+            done
             {
               echo "$EMSDK"
               echo "$EMSDK/upstream/emscripten"
@@ -235,12 +239,16 @@ jobs:
             # shell). One dir per line per GitHub Actions docs; non-PATH vars
             # (EM_CONFIG, EMSDK_NODE) ensure emcc finds its .emscripten config
             # and bundled node without relying on relative-path auto-discovery.
-            {
-              echo "EMSDK=$EMSDK"
-              echo "EM_CONFIG=$EM_CONFIG"
-              echo "EMSDK_NODE=$EMSDK_NODE"
-              echo "EMSDK_PYTHON=$EMSDK_PYTHON"
-            } >> $GITHUB_ENV
+            #
+            # Only propagate values that are set and non-empty: emsdk
+            # 3.1.51's emsdk_env.sh does not export EM_CONFIG / EMSDK_PYTHON.
+            # Writing them empty to $GITHUB_ENV would override emcc's
+            # $HOME/.emscripten fallback with "", which emcc resolves to '.'
+            # and reports as "config file not found".
+            for var in EMSDK EM_CONFIG EMSDK_NODE EMSDK_PYTHON; do
+              val="${!var}"
+              [ -n "$val" ] && printf '%s=%s\n' "$var" "$val" >> "$GITHUB_ENV"
+            done
             {
               echo "$EMSDK"
               echo "$EMSDK/upstream/emscripten"

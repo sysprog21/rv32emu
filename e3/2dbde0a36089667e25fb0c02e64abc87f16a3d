@@ -1,0 +1,29 @@
+.ci/boot-linux.sh
+  s_81c69cf02c74e0::t_0f7a1a8646173c 303-310
+  s_81c69cf02c74e0::t_8698a9149bab5e 312
+  s_12dfad11cb4393::t_4ffaae6c3fbfdb 311,313-316,318-330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "e32dbde0a36089667e25fb0c02e64abc87f16a3d",
+  "prompts": {},
+  "sessions": {
+    "s_12dfad11cb4393": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c0774b98-0975-4d90-9659-16e71ba495f3",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    },
+    "s_81c69cf02c74e0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e369a-69d7-79a0-bfc3-f856016687e6",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

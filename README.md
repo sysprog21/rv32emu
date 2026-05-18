@@ -55,11 +55,18 @@ $ make
 
 ### Tiered JIT Compilation
 The tier-2 JIT compiler in `rv32emu` leverages LLVM for powerful optimization.
-Therefore, the target system must have [`LLVM`](https://llvm.org/) installed, with versions 18 through 21 supported.
-If `LLVM` is not installed, only the tier-1 JIT compiler will be used for performance enhancement.
+The target system must have [`LLVM`](https://llvm.org/) installed; versions 18
+through 21 are accepted, and **LLVM 20+** is the validated default exercised by
+CI on both macOS (arm64, Homebrew) and Linux (x86-64, Ubuntu 24.04). If `LLVM`
+is not installed, only the tier-1 JIT compiler will be used for performance
+enhancement.
 
-* macOS: `brew install llvm@18` (or llvm@19, llvm@20, llvm@21)
-* Ubuntu Linux / Debian: `sudo apt-get install llvm-18` (or llvm-19, llvm-20, llvm-21)
+* macOS: `brew install llvm@20` (LLVM 18, 19, and 21 are also accepted)
+* Ubuntu Linux / Debian: `sudo apt-get install llvm-20-dev clang-20 lld-20` — the `-dev` package is required because T2C builds against `<llvm-c/*.h>` and links via `llvm-config`. On releases that don't ship LLVM 20 in the base repos (Ubuntu 24.04 caps at llvm-18), add [apt.llvm.org](https://apt.llvm.org/) first. LLVM 18, 19, and 21 are also accepted.
+
+The Makefile auto-detects `llvm-config` in `$PATH` (preferring the newest
+supported version) and the matching Homebrew prefix; override with
+`make LLVM_CONFIG=/path/to/llvm-config` to pin a specific install.
 
 Build the emulator with JIT compiler using the predefined configuration:
 ```shell

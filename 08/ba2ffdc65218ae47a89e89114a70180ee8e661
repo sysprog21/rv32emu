@@ -1,0 +1,19 @@
+README.md
+  s_908b9dd6a274d5::t_abf6cfc6015080 506-508,510
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "08ba2ffdc65218ae47a89e89114a70180ee8e661",
+  "prompts": {},
+  "sessions": {
+    "s_908b9dd6a274d5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "60069c40-3245-46f7-bd16-43647614104d",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

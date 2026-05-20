@@ -2277,7 +2277,7 @@ static inline bool op_111111(rv_insn_t *ir, const uint32_t insn)
         break;
     case 6:
         decode_vxtype(ir, insn);
-        ir->opcode = rv_insn_vwmaccus_vx;
+        ir->opcode = rv_insn_vwmaccsu_vx;
         break;
     default: /* illegal instruction */
         return false;

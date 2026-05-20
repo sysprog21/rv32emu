@@ -365,6 +365,8 @@ void memory_read(const memory_t *mem,
 
 uint32_t memory_ifetch(uint32_t addr)
 {
+    if ((uint64_t) addr + sizeof(uint32_t) > data_memory_size)
+        return 0;
     uint32_t val;
     memcpy(&val, data_memory_base + addr, sizeof(val));
     return val;

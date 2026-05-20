@@ -22,8 +22,10 @@ Blocks that continue to execute frequently may be further compiled by the Tier-2
 | File | Purpose |
 |------|---------|
 | `src/rv32_template.c` | Interpreter instruction implementations using RVOP macro |
+| `src/rv32_v_template.c` | Vector (V) extension interpreter handlers (experimental, decode + partial execution) |
 | `src/rv32_jit.c` | Tier-1 JIT code generators using GEN macro (included by jit.c) |
 | `src/rv32_constopt.c` | IR-level constant folding and optimization |
+| `src/rv32_v_constopt.c` | Constant-folding hooks for the V extension |
 | `src/jit.c` | Tier-1 JIT infrastructure, emit_* API, and fused instruction handlers |
 | `src/t2c.c` | Tier-2 JIT driver (includes t2c_template.c) |
 | `src/t2c_template.c` | Tier-2 JIT instruction handlers using T2C_OP macro |
@@ -92,7 +94,14 @@ Each handler translates the RISC-V instruction semantics into LLVM IR using the 
 LLVM then applies its optimization passes and register allocation,
 producing native code that typically outperforms Tier-1 for hot paths.
 
-Tier-2 compilation requires LLVM 18 and is enabled with `ENABLE_JIT=1` at build time.
+Tier-2 compilation requires LLVM 18-21 (LLVM 20+ is the validated default
+exercised by CI on macOS arm64 and Ubuntu 24.04 x86-64). The Makefile
+auto-detects `llvm-config` in `$PATH` (preferring the newest supported
+version) and the matching Homebrew prefix; override with
+`make LLVM_CONFIG=/path/to/llvm-config` to pin a specific install. Enable
+T2C via `make jit_defconfig` (which selects both `CONFIG_JIT` and
+`CONFIG_T2C`), through `make config`, or with the legacy `ENABLE_JIT=1`
+shim. See [build.md](build.md) for the full configuration matrix.
 
 ## IR Optimization
 Before execution or JIT compilation,

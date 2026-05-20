@@ -25,6 +25,7 @@ C11 atomics for memory management, with a focus on efficiency and readability.
 Features:
 * Fast interpreter that faithfully executes the complete RV32 instruction set
 * Full coverage of RV32I / RV32E plus the M (integer multiply–divide), A (atomics), F (single-precision floating-point), C (compressed), and Zba/Zbb/Zbc/Zbs bit-manipulation extensions
+* Partial support for the V (vector) extension — decode plus partial execution at `VLEN=128`; opt-in via `make config` (select "V — Vector Extension")
 * Built-in ELF loader for user-mode emulation
 * Newlib-compatible system-call layer for standalone programs
 * Minimal system emulation capable of booting an RV32 Linux kernel and running user-space binaries
@@ -33,481 +34,59 @@ Features:
 * Remote debugging through the GDB Remote Serial Protocol
 * Tiered JIT compilation for performance boost while maintaining a small footprint
 
-## Build and Verify
-`rv32emu` relies on certain third-party packages for full functionality and access to all its features.
-To ensure proper operation, the target system should have the [SDL2 library](https://www.libsdl.org/)
-and [SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) installed.
+## Quick start
+
+`rv32emu` relies on the [SDL2 library](https://www.libsdl.org/) and
+[SDL2_Mixer library](https://wiki.libsdl.org/SDL2_mixer) for full
+functionality:
 * macOS: `brew install sdl2 sdl2_mixer`
 * Ubuntu Linux / Debian: `sudo apt install libsdl2-dev libsdl2-mixer-dev`
 
-### Quick Start
+Build and verify:
 ```shell
 $ make defconfig      # Apply default configuration
 $ make                # Build rv32emu
 $ make check          # Run tests
 ```
 
-For interactive configuration with a menu-driven interface:
+Run the included demos:
 ```shell
-$ make config         # Configure build options interactively
-$ make
+$ make doom           # Doom (1993)
+$ make quake          # Quake (requires RV32F, on by default)
 ```
 
-### Tiered JIT Compilation
-The tier-2 JIT compiler in `rv32emu` leverages LLVM for powerful optimization.
-The target system must have [`LLVM`](https://llvm.org/) installed; versions 18
-through 21 are accepted, and **LLVM 20+** is the validated default exercised by
-CI on both macOS (arm64, Homebrew) and Linux (x86-64, Ubuntu 24.04). If `LLVM`
-is not installed, only the tier-1 JIT compiler will be used for performance
-enhancement.
-
-* macOS: `brew install llvm@20` (LLVM 18, 19, and 21 are also accepted)
-* Ubuntu Linux / Debian: `sudo apt-get install llvm-20-dev clang-20 lld-20` — the `-dev` package is required because T2C builds against `<llvm-c/*.h>` and links via `llvm-config`. On releases that don't ship LLVM 20 in the base repos (Ubuntu 24.04 caps at llvm-18), add [apt.llvm.org](https://apt.llvm.org/) first. LLVM 18, 19, and 21 are also accepted.
-
-The Makefile auto-detects `llvm-config` in `$PATH` (preferring the newest
-supported version) and the matching Homebrew prefix; override with
-`make LLVM_CONFIG=/path/to/llvm-config` to pin a specific install.
-
-Build the emulator with JIT compiler using the predefined configuration:
-```shell
-$ make jit_defconfig
-$ make
-```
-
-Alternatively, use the legacy command-line option (for backward compatibility):
-```shell
-$ make ENABLE_JIT=1
-```
-
-If you don't want the JIT compilation feature, simply build with the following:
-```shell
-$ make defconfig
-$ make
-```
-
-### Experimental system emulation
-Device Tree compiler (dtc) is required. To install it on Debian/Ubuntu Linux, enter the following command:
-```shell
-$ sudo apt install device-tree-compiler
-```
-For macOS, use the following command:
-```shell
-$ brew install dtc
-```
-
-#### Build and run system emulation
-Build and run using default images (the default images will be fetched from [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt) before running).
-If `ENABLE_ARCH_TEST=1` was previously set, run `make distclean` before proceeding.
-```shell
-$ make ENABLE_SYSTEM=1 system
-```
-
-For improved performance, JIT compilation can be enabled in system emulation mode:
-```shell
-$ make system_jit_defconfig
-$ make system
-```
-
-Build and run using specified images (`readonly` option makes the virtual block device read-only):
-```shell
-$ make ENABLE_SYSTEM=1
-$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> [-x vblk:<virtio_blk_img_path>[,readonly]]
-```
-
-Build with a larger `INITRD_SIZE` (e.g., 64 MiB) to run SDL-oriented application because the default 8 MiB is insufficient for SDL-oriented application artifacts:
-```shell
-$ make system ENABLE_SYSTEM=1 ENABLE_SDL=1 INITRD_SIZE=64
-```
-Once log into the guestOS, run `doom-riscv` or `quake` or `smolnes`. To terminate SDL-oriented applications, use the built-in exit utility, ctrl-c or the SDL window close button(X).
-
-#### Virtio Block Device (optional)
-Generate ext4 image file for virtio block device in Unix-like system:
-```shell
-$ dd if=/dev/zero of=disk.img bs=4M count=32
-$ mkfs.ext4 disk.img
-```
-Instead of creating a new block device image, you can share the hostOS's existing block devices. For example, on macOS host, specify the block device path as `-x vblk:/dev/disk3`, or on Linux host as `-x vblk:/dev/loop3`, assuming these paths point to valid block devices.
-
-Mount the virtual block device and create a test file after booting, note that root privilege is required to mount and unmount a disk:
-```shell
-# mkdir mnt
-# mount /dev/vda mnt
-# echo "rv32emu" > mnt/emu.txt
-# umount mnt
-```
-Reboot and re-mount the virtual block device, the written file should remain existing.
-
-To specify multiple virtual block devices, pass multiple `-x vblk` options when launching the emulator. Each option can point to either a disk image or a hostOS block device, with optional read-only mode. For example:
-```shell
-$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -x vblk:disk.img -x vblk:/dev/loop22,readonly
-```
-Note that the /dev/vdx device order in guestOS is assigned in reverse: the first `-x vblk` argument corresponds to the device with the highest letter, while subsequent arguments receive lower-lettered device names.
-
-In addition to the built-in ext4 filesystem support, other out-of-tree filesystems such as [simplefs](https://github.com/sysprog21/simplefs) are also supported. To use simplefs, first follow the instructions [here](https://github.com/sysprog21/simplefs?tab=readme-ov-file#build-and-run) to generate the simplefs disk image, and then attach it to the guestOS via the virtio block device. An additional ext4 image containing `simplefs.ko` must also be attached to the guestOS, since `simplefs.ko` is out-of-tree kernel module. The pre-built `simplefs.ko` can be found at `build/linux-image/` (run `make artifact ENABLE_SYSTEM=1` to get the artifacts).
-```shell
-$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -x vblk:<ext4_disk_img_path> -x vblk:<simplefs_disk_img_path>
-```
-Once the guestOS is booted, insert the `simplefs.ko` kernel module. After loading the kernel module, the simplefs disk will be recognized by the Linux kernel and can be mounted and used as a regular filesystem.
-```shell
-# mkdir -p mnt && mount /dev/vdb mnt # mount the ext4 disk that contains simplefs.ko
-
-# insmod mnt/simplefs.ko # insert simplefs.ko
-
-# mkdir -p simplefs && mount -t simplefs /dev/vda simplefs # mount the simplefs disk
-```
-
-#### Customize bootargs
-Build and run with customized bootargs to boot the guestOS. Otherwise, the default bootargs defined in `src/devices/minimal.dts` will be used.
-```shell
-$ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> [-b <bootargs>]
-```
-
-#### Build Linux image
-An automated build script is provided to compile the RISC-V cross-compiler, Busybox, and Linux kernel from source. Please note that it only supports the Linux host environment. It can be found at tools/build-linux-image.sh.
-```shell
-$ make build-linux-image
-```
-
-### Verify with prebuilt RISC-V ELF files
-
-Run sample RV32I[M] programs:
-```shell
-$ make check
-```
-
-Run [Doom](https://en.wikipedia.org/wiki/Doom_(1993_video_game)), the classical video game, via `rv32emu`:
-```shell
-$ make doom
-```
-
-The build script will then download data file for Doom automatically.
-When Doom is loaded and run, an SDL2-based window ought to appear.
-
-If RV32F support is enabled (turned on by default), [Quake](https://en.wikipedia.org/wiki/Quake_(series))
-demo program can be launched via:
-```shell
-$ make quake
-```
-
-The usage and limitations of Doom and Quake demo are listed in [docs/demo.md](docs/demo.md).
-
-### Docker image
-The image containing all the necessary tools for development and testing can be executed by `docker run -it sysprog21/rv32emu:latest`. It works for both x86-64 and aarch64 (e.g., Apple's M1 chip) machines.
-
-To keep the Docker image minimal, executables and prebuilt images are not embedded. Follow the steps below to fetch the required artifacts.
-
-##### User-Mode
-Fetch and extract the latest prebuilt user-mode ELF artifacts:
-```shell
-$ wget $(wget -qO- 'https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases?per_page=100' \
-  | grep browser_download_url | grep ELF | head -n 1 | cut -d '"' -f4)
-
-$ tar -xzvf rv32emu-prebuilt.tar.gz
-```
-To run `rv32emu-user`, consider the following examples:
-```shell
-# Run a local ELF program
-build/rv32emu-user build/hello.elf
-
-# Run a prebuilt user-mode program (e.g., pi)
-build/rv32emu-user rv32emu-prebuilt/riscv32/pi
-```
-
-##### System-Mode
-Fetch and extract the latest prebuilt system-mode Linux image artifacts:
-```shell
-$ wget $(wget -qO- 'https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases?per_page=100' \
-  | grep browser_download_url | grep Linux-Image | head -n 1 | cut -d '"' -f4)
-
-$ tar -xzvf rv32emu-linux-image-prebuilt.tar.gz
-```
-To run `rv32emu-system`, use the following:
-```shell
-$ build/rv32emu-system \
-  -k rv32emu-linux-image-prebuilt/linux-image/Image \
-  -i rv32emu-linux-image-prebuilt/linux-image/rootfs.cpio
-```
-
-### Customization
-`rv32emu` uses a [Kconfig](https://github.com/sysprog21/Kconfiglib)-based build system for configuration.
-There are three ways to customize the build:
-
-#### 1. Predefined Configurations
-Use predefined configurations for common use cases:
-```shell
-$ make defconfig            # Default: SDL enabled, all extensions
-$ make mini_defconfig       # Minimal: no SDL, basic extensions only
-$ make jit_defconfig        # JIT: enables tiered JIT compilation
-$ make system_defconfig     # System: enables Linux system emulation
-$ make system_jit_defconfig # System+JIT: enables Linux system emulation with JIT
-$ make wasm_defconfig       # WebAssembly: build for browser deployment
-```
-
-#### 2. Interactive Configuration
-Use the menu-driven interface to customize options:
-```shell
-$ make config
-```
-
-#### 3. Command-line Override (Legacy)
-Override individual options on the command line (for backward compatibility):
-```shell
-$ make ENABLE_EXT_F=0     # Build without floating-point support
-$ make ENABLE_SDL=0       # Build without SDL support
-```
-
-Available configuration options:
-* `ENABLE_RV32E`: RV32E Base Integer Instruction Set
-* `ENABLE_EXT_M`: Standard Extension for Integer Multiplication and Division
-* `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
-* `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
-* `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
-* `ENABLE_Zba`: Standard Extension for Address Generation Instructions
-* `ENABLE_Zbb`: Standard Extension for Basic Bit-Manipulation Instructions
-* `ENABLE_Zbc`: Standard Extension for Carry-Less Multiplication Instructions
-* `ENABLE_Zbs`: Standard Extension for Single-Bit Instructions
-* `ENABLE_Zicsr`: Control and Status Register (CSR)
-* `ENABLE_Zifencei`: Instruction-Fetch Fence
-* `ENABLE_GDBSTUB`: GDB remote debugging support
-* `ENABLE_SDL`: Display and Event System Calls for running video games
-* `ENABLE_JIT`: Tiered JIT compiler for performance optimization
-* `ENABLE_SYSTEM`: System emulation for booting Linux kernel
-* `ENABLE_GOLDFISH_RTC`: Enable Goldfish RTC peripheral when running the Linux kernel
-* `ENABLE_MOP_FUSION`: Macro-operation fusion
-* `ENABLE_BLOCK_CHAINING`: Block chaining of translated blocks
-* `T2C_OPT_LEVEL`: LLVM optimization level for tier-2 JIT (0-3, default varies by config)
-
-### RISCOF
-[RISCOF](https://github.com/riscv-software-src/riscof) (RISC-V Compatibility Framework) is
-a Python based framework that facilitates testing of a RISC-V target against a golden reference model.
-
-The RISC-V Architectural Tests, also known as [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test),
-provide a fundamental set of tests that can be used to verify that the behavior of the
-RISC-V model aligns with RISC-V standards while executing specific applications.
-These tests are not meant to replace thorough design verification.
-
-Reference signatures are generated by the formal RISC-V model [RISC-V SAIL](https://github.com/riscv/sail-riscv)
-in Executable and Linkable Format (ELF) files.
-ELF files contain multiple testing instructions, data, and signatures, such as `cadd-01.elf`.
-The specific data locations that the testing model (this emulator) must write to during
-the test are referred to as test signatures.
-These test signatures are written upon completion of the test and are then compared to the reference signature.
-Successful tests are indicated by matching signatures.
-
-To install [RISCOF](https://riscof.readthedocs.io/en/stable/installation.html#install-riscof):
-```shell
-$ python3 -m pip install git+https://github.com/riscv/riscof
-```
-
-[RISC-V GNU Compiler Toolchain](https://github.com/riscv-collab/riscv-gnu-toolchain) should be prepared in advance.
-You can obtain prebuilt GNU toolchain for `riscv32-elf` from the [Automated Nightly Release](https://github.com/riscv-collab/riscv-gnu-toolchain/releases).
-If `ENABLE_SYSTEM=1` was previously set, run `make distclean` before proceeding.
-Then, run the following command to run all tests:
-```shell
-$ .ci/riscv-tests.sh
-```
-
-Or run it with the configuration you want:
-```shell
-$ make arch-test ENABLE_ARCH_TEST=1 <your-config>
-```
-
-For macOS users, installing `sdiff` might be required:
-```shell
-$ brew install diffutils
-```
-
-To run the tests for specific extension, set the environmental variable `RISCV_DEVICE` to one of `I`, `M`, `A`, `F`, `C`, `Zifencei`, `privilege`, `SYSTEM`.
-```shell
-$ make ENABLE_ARCH_TEST=1 arch-test RISCV_DEVICE=I
-```
-
-Current progress of this emulator in riscv-arch-test (RV32):
-* Passed Tests
-    - `I`: Base Integer Instruction Set
-    - `E`: RV32E Base Integer Instruction Set
-    - `M`: Standard Extension for Integer Multiplication and Division
-    - `A`: Standard Extension for Atomic Instructions
-    - `F`: Standard Extension for Single-Precision Floating-Point
-    - `C`: Standard Extension for Compressed Instruction
-    - `Zba`: Standard Extension for Address Generation Instructions
-    - `Zbb`: Standard Extension for Basic Bit-Manipulation
-    - `Zbc`: Standard Extension for Carry-Less Multiplication
-    - `Zbs`: Standard Extension for Single-Bit Instructions
-    - `Zifencei`: Instruction-Fetch Fence
-    - `privilege`: RISCV Privileged Specification
-
-Detail in riscv-arch-test:
-* [RISCOF document](https://riscof.readthedocs.io/en/stable/)
-* [riscv-arch-test repository](https://github.com/riscv-non-isa/riscv-arch-test)
-* [RISC-V Architectural Testing Framework](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/doc/README.adoc)
-* [RISC-V Architecture Test Format Specification](https://github.com/riscv-non-isa/riscv-arch-test/blob/master/spec/TestFormatSpec.adoc)
-
-## Benchmarks
-The benchmarks are classified based on their characteristics and cover various aspects of system performance. Most are derived from the industry-standard BYTEmark (nbench) suite, supplemented by cryptographic and system benchmarks:
-
-| Benchmark     | Description |
-| ------------- | ----------- |
-| numeric sort  | Focuses on sorting integer arrays using various algorithms |
-| string sort   | Evaluates string sorting capabilities |
-| bitfield      | Tests bitwise operations and integer arithmetic on data words |
-| emfloat       | Focuses on emulating floating-point calculations using integer arithmetic |
-| assignment    | Tests solving resource allocation problems (e.g., assignment algorithm) |
-| idea          | Assesses encryption and decryption using the International Data Encryption Algorithm (IDEA) |
-| huffman       | Measures performance in data compression using Huffman coding |
-| dhrystone     | Assesses general integer performance with a mix of string processing and control operations |
-| primes        | Measures efficiency in computing prime numbers using algorithms like the Sieve of Eratosthenes |
-| sha512        | Tests cryptographic hash computations |
-
-These benchmarks were performed by rv32emu (with tiered JIT enabled) and QEMU v9.0.0 on an Intel Core i7-11700 CPU running at 2.5 GHz with Ubuntu Linux 22.04.1 LTS. The toolchain used was GCC v14.2.0 with RV32IM extensions.
-
-The figure below illustrates the speedup (normalized reciprocal of average elapsed time over 200 iterations) of rv32emu with tiered JIT compilation compared to QEMU. Higher values indicate better performance.
-
-![](docs/jit-bench.png)
-
-**Performance Summary:**
-- rv32emu with tiered JIT compilation outperforms QEMU v9.0.0 across all benchmarks
-- Significant performance gains in compute-intensive workloads (primes, sha512, emfloat)
-- Strong performance in optimization and cryptography benchmarks (assignment, idea, huffman)
-- Consistent advantages in sorting operations (numeric sort, string sort)
-- The tiered JIT approach effectively balances compilation overhead with code optimization quality
-
-### Continuous Benchmarking
-Continuous benchmarking is integrated into GitHub Actions,
-allowing the committer and reviewer to examine the comment on benchmark comparisons between
-the pull request commit(s) and the latest commit on the master branch within the conversation.
-This comment is generated by the benchmark CI and provides an opportunity for discussion before merging.
-
-The results of the benchmark will be rendered on a [GitHub page](https://sysprog21.github.io/rv32emu-bench/).
-Check [benchmark-action/github-action-benchmark](https://github.com/benchmark-action/github-action-benchmark) for the reference of benchmark CI workflow.
-
-There are several files that have the potential to significantly impact the performance of `rv32emu`, including:
-* `src/decode.c`
-* `src/rv32_template.c`
-* `src/emulate.c`
-
-As a result, any modifications made to these files will trigger the benchmark CI.
-
-## GDB Remote Debugging
-`rv32emu` supports a subset of the [GDB Remote Serial Protocol](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Protocol.html) (GDBRSP).
-To enable this feature, use the configuration system (e.g., `make config` and enable `ENABLE_GDBSTUB`) or use the predefined configuration with GDB support.
-After that, you might execute it using the command below.
-```shell
-$ build/rv32emu -g <binary>
-```
-
-The `<binary>` should be the ELF file in RISC-V 32 bit format. Additionally, it is advised
-that you compile programs with the `-g` option in order to produce debug information in
-your ELF files.
-
-You can run `riscv-gdb` if the emulator starts up correctly without an error. It takes two
-GDB commands to connect to the emulator after giving GDB the supported architecture of the
-emulator and any debugging symbols it may have.
-
-```shell
-$ riscv32-unknown-elf-gdb
-(gdb) file <binary>
-(gdb) target remote :1234
-```
-
-Congratulate yourself if `riscv-gdb` does not produce an error message. Now that the GDB
-command line is available, you can communicate with `rv32emu`.
-
-### Dump registers as JSON
-
-If the `-d [filename]` option is provided, the emulator will output registers in JSON format.
-This feature can be utilized for tests involving the emulator, such as compiler tests.
-
-You can also combine this option with `-q` to directly use the output.
-For example, if you want to read the register x10 (a0), then run the following command:
-```shell
-$ build/rv32emu -d - -q out.elf | jq .x10
-```
-
-## Usage Statistics
-
-### RISC-V Instructions/Registers
-This is a static analysis tool for assessing the usage of RV32 instructions/registers
-in a given target program.
-Build this tool by running the following command:
-```shell
-$ make tool
-```
-
-After building, you can launch the tool using the following command:
-```shell
-$ build/rv_histogram [-ar] [target_program_path]
-```
-
-The tool includes two optional options:
-* `-a`: output the analysis in ascending order(default is descending order)
-* `-r`: output usage of registers(default is usage of instructions)
-
-_Example Instructions Histogram_
-![Instructions Histogram Example](docs/histogram-insn.png)
-
-_Example Registers Histogram_
-![Registers Histogram Example](docs/histogram-reg.png)
-
-### Basic Block
-
-To install [lolviz](https://github.com/parrt/lolviz), use the following command:
-```shell
-$ pip install lolviz
-```
-
-For macOS users, it might be necessary to install additional dependencies:
-```shell
-$ brew install graphviz
-```
-
-Build the profiling data by executing `rv32emu`.
-This can be done as follows:
-```shell
-$ build/rv32emu -p build/[test_program].elf
-```
-
-To analyze the profiling data, use the `rv_profiler` tool with the desired options:
-```shell
-$ tools/rv_profiler [--start-address|--stop-address|--graph-ir] [test_program]
-```
-
-## WebAssembly Translation
-`rv32emu` relies on [Emscripten](https://emscripten.org/docs/getting_started/downloads.html) to be compiled to WebAssembly.
-Thus, the target system should have the Emscripten version 3.1.51 installed.
-
-Moreover, `rv32emu` leverages the tail call optimization (TCO) and we have tested the WebAssembly
-execution in Chrome with at least MAJOR 112, Firefox with at least MAJOR 121 and Safari with at least version 18.2
-since they support tail call feature. Please check your browser version and update if necessary, or install a compatible
-browser before proceeding.
-
-Source your Emscripten SDK environment before make. For macOS and Linux users:
-```shell
-$ source ~/emsdk/emsdk_env.sh
-```
-Change the Emscripten SDK environment path if necessary.
-
-At this point, you can build and start a web server service to serve WebAssembly by running:
-- user-mode emulation:
-```shell
-$ make CC=emcc start-web -j8
-```
-- system emulation:
-```shell
-$ make CC=emcc start-web ENABLE_SYSTEM=1 INITRD_SIZE=32 -j8
-```
-You would see the server's IP:PORT in your terminal. Copy and paste it to the browsers and
-you just access the index page of `rv32emu`.
-
-You would see a dropdown menu which you can use to select the ELF executable for user-mode emulation, select one and
-click the 'Run' button to run it. For system emulation, click the 'Run Linux' button to boot Linux.
-
-Alternatively, you may want to view a hosted `rv32emu` since building takes some time.
-- [demo landing page](https://sysprog21.github.io/rv32emu-demo/)
-- [user-mode emulation demo page](https://sysprog21.github.io/rv32emu-demo/user/)
-- [system emulation demo page](https://sysprog21.github.io/rv32emu-demo/system/)
-
-The landing page links to both modes, and each mode page has a navigation button that switches directly to the other.
+For interactive build configuration, use `make config`. For predefined
+configurations, Kconfig options, and tiered JIT compilation setup
+(LLVM toolchain), see [docs/build.md](docs/build.md).
+
+## Online demo
+
+A hosted WebAssembly build of `rv32emu` runs entirely in the browser, so
+you can try it without building locally:
+* [User-mode emulation demo page](https://sysprog21.github.io/rv32emu-demo/user/)
+* [System emulation demo page](https://sysprog21.github.io/rv32emu-demo/system/)
+
+The landing page links to both modes, and each mode page has a navigation
+button that switches directly to the other.
+
+## Documentation
+
+| Topic | Document |
+| ----- | -------- |
+| Build options, Kconfig, and tiered JIT setup | [docs/build.md](docs/build.md) |
+| System emulation: boot Linux, virtio block devices, bootargs | [docs/system.md](docs/system.md) |
+| WebAssembly build for the browser | [docs/wasm.md](docs/wasm.md) |
+| GDB remote debugging and register JSON dump | [docs/gdbstub.md](docs/gdbstub.md) |
+| RISCOF / RISC-V architecture tests | [docs/riscof.md](docs/riscof.md) |
+| Benchmarks and continuous benchmarking | [docs/benchmark.md](docs/benchmark.md) |
+| Static analysis tools (rv_histogram, rv_profiler) | [docs/tools.md](docs/tools.md) |
+| Docker image | [docs/docker.md](docs/docker.md) |
+| Demo applications (Doom, Quake) | [docs/demo.md](docs/demo.md) |
+| Code generation and JIT internals | [docs/codegen.md](docs/codegen.md) |
+| RISC-V instruction reference | [docs/instruction.md](docs/instruction.md) |
+| Newlib system calls | [docs/syscall.md](docs/syscall.md) |
+| Prebuilt binaries | [docs/prebuilt.md](docs/prebuilt.md) |
+| Base image preparation | [docs/base-image.md](docs/base-image.md) |
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.

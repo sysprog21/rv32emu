@@ -112,6 +112,23 @@ This mechanism allows code executed on a RISC-V target to interact with and util
 
 Any other system calls will fail with an "unknown syscall" error.
 
+## SBI calls (system emulation)
+
+When built with `ENABLE_SYSTEM=1`, `rv32emu` also services a minimal subset
+of the [Supervisor Binary Interface](https://github.com/riscv-non-isa/riscv-sbi-doc)
+issued by the booted RISC-V Linux kernel. The dispatcher matches the
+extension ID placed in `a7` and the function ID in `a6`, returning
+SBI_SUCCESS / SBI_ERR_NOT_SUPPORTED in `a0` and the result in `a1`. SBI
+reports the implementation as version 0.3 with implementation ID `0x999`.
+
+|     EID (a7) | Extension       | Functions (a6) | Notes |
+|-------------:|-----------------|----------------|-------|
+| `0x10`       | Base            | `GET_SBI_IMPL_ID`, `GET_SBI_IMPL_VERSION`, `GET_MVENDORID`, `GET_MARCHID`, `GET_MIMPID`, `GET_SBI_SPEC_VERSION`, `PROBE_EXTENSION` | Only Base, Timer, and System Reset probe as available. |
+| `0x54494D45` | Timer (`"TIME"`)| `SET_TIMER` | Latches `(a1 << 32) \| a0` into the next mtimer compare. |
+| `0x53525354` | System Reset (`"SRST"`) | `SYSTEM_RESET` | Logs the reset type/reason and halts the emulator. |
+
+All other SBI extensions return `SBI_ERR_NOT_SUPPORTED`.
+
 ## Display, Event, and Sound System Calls
 
 These system calls are solely for the convenience of accessing the [SDL library](https://www.libsdl.org/) and [SDL2_Mixer](https://wiki.libsdl.org/SDL2_mixer) and are only intended for the presentation of RISC-V graphics applications. They are not present in the ABI interface of POSIX or Linux.

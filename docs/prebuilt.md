@@ -28,6 +28,7 @@ The prebuilt binaries in `rv32emu-prebuilt` are built from the following reposit
     - coremark
     - stream
     - nbench
+- [embench-iot](https://github.com/embench/embench-iot)
 - [rv8-bench](https://github.com/sysprog21/rv8-bench)
     - aes
     - dhrystone

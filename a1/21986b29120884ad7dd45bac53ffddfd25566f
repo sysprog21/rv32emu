@@ -1,0 +1,57 @@
+docs/system.md
+  s_b141f3b090f70a::t_366e295dd09927 1-34,39-120
+  s_b141f3b090f70a::t_63242e143503b7 35-38
+docs/codegen.md
+  s_b141f3b090f70a::t_fe1aad9c914048 25,28
+  s_b141f3b090f70a::t_5c4530ebf0d4a5 97-104
+docs/base-image.md
+  s_b141f3b090f70a::t_f2977d6e85c663 3-7,9-12,14,16,18,20-22,24-63
+docs/gdbstub.md
+  s_b141f3b090f70a::t_9d04e58c96c903 1-4,9-42
+  s_b141f3b090f70a::t_73c3f5adeefa10 5-8
+docs/syscall.md
+  s_b141f3b090f70a::t_2bdc2d2e7f6710 115-131
+docs/wasm.md
+  s_b141f3b090f70a::t_a25b31e3aa14d4 44-45,49-50
+  s_b141f3b090f70a::t_f5641733c480db 1-43,46-48
+docs/prebuilt.md
+  s_b141f3b090f70a::t_58e90735db4ba8 31
+docs/tools.md
+  s_b141f3b090f70a::t_9d7de36181af9b 44-45,49-51
+  s_b141f3b090f70a::t_6d49e239e3d539 47
+  s_b141f3b090f70a::t_334969b6587d1a 1-43,46,48
+docs/docker.md
+  s_b141f3b090f70a::t_3ef23937aeb79c 1-42
+docs/riscof.md
+  s_b141f3b090f70a::t_b4de7109311495 54-58,60-64
+  s_b141f3b090f70a::t_9d625f06b5dd92 1-53,59,65-88
+README.md
+  s_b141f3b090f70a::t_c63d53ce108148 37-41,45,52,54-55,58-60,72,74-89
+  s_b141f3b090f70a::t_6289c83bddc268 62,64-67,69-70
+  s_b141f3b090f70a::t_1fc0d4c323e9e3 28
+docs/build.md
+  s_b141f3b090f70a::t_8e9f03aedc6907 78
+  s_b141f3b090f70a::t_3bf58b2b82b91b 87,89-98,100
+  s_b141f3b090f70a::t_daba59d3d5fa78 99
+  s_b141f3b090f70a::t_2a384a0b16af41 88
+  s_b141f3b090f70a::t_45f21e7dbf14b2 1-77,79-86
+docs/benchmark.md
+  s_b141f3b090f70a::t_c890dbe582f411 52-54,57-64
+  s_b141f3b090f70a::t_2bd34f2144775b 1-51,55-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "a121986b29120884ad7dd45bac53ffddfd25566f",
+  "prompts": {},
+  "sessions": {
+    "s_b141f3b090f70a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "634876ae-5430-4225-a5d5-6aac7729d6fd",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

@@ -1416,10 +1416,8 @@ static inline bool op_100001(rv_insn_t *ir, const uint32_t insn)
         decode_vvtype(ir, insn);
         ir->opcode = rv_insn_vsadd_vv;
         break;
-    case 1:
-        decode_vvtype(ir, insn);
-        ir->opcode = rv_insn_vfrdiv_vf;
-        break;
+    case 1: /* reserved per V 1.0 spec */
+        return false;
     case 2:
         decode_vvtype(ir, insn);
         ir->opcode = rv_insn_vdiv_vv;

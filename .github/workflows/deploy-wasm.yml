@@ -101,12 +101,20 @@ jobs:
               make artifact ENABLE_SYSTEM=1
       # Populate the SDL2 / SDL2_mixer port cache serially. Without this,
       # concurrent first-time port generation under `make -j` trips
-      # emscripten's nested-lock assertion on libSDL2.a.
+      # emscripten's nested-lock assertion on libSDL2.a. The link-time
+      # warmup alone is not enough on emsdk 3.1.51: building sdl2_mixer
+      # spawns one emcc -c subprocess per .c file with -sUSE_SDL=2, each
+      # of which tries to build the sdl2 port while the parent emcc still
+      # holds the cache lock and has exported EM_CACHE_IS_LOCKED=1 into
+      # the subprocess environment, tripping cache.py's assertion. Run
+      # embuilder up front to put sdl2 (and the -pthread/-mt variants) in
+      # the cache so those subprocess port lookups are hits.
       - name: warm emscripten port cache
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_system_wasm') }}
         run: |
+            embuilder build sdl2 sdl2-mt libmimalloc libmimalloc-mt
             echo 'int main(void){return 0;}' > /tmp/warmup.c
             # Link (not just compile) so sysroot libraries that materialize at
             # link time (e.g. libmimalloc) are populated too.
@@ -271,12 +279,17 @@ jobs:
               unzip -o -d build/ build/shareware_doom_iwad.zip
       # Populate the SDL2 / SDL2_mixer port cache serially. Without this,
       # concurrent first-time port generation under `make -j` trips
-      # emscripten's nested-lock assertion on libSDL2.a.
+      # emscripten's nested-lock assertion on libSDL2.a. See the matching
+      # comment on the system-deploy warmup step for the root-cause
+      # explanation; embuilder seeds the sdl2 / sdl2-mt / mimalloc cache
+      # entries so per-file sdl2_mixer compile subprocesses don't try to
+      # re-acquire the cache lock the parent emcc already holds.
       - name: warm emscripten port cache
         if: ${{ steps.changed-files.outputs.any_modified == 'true' ||
             github.event_name == 'workflow_dispatch' ||
             (github.event_name == 'repository_dispatch' && github.event.action == 'deploy_user_wasm') }}
         run: |
+            embuilder build sdl2 sdl2-mt libmimalloc libmimalloc-mt
             echo 'int main(void){return 0;}' > /tmp/warmup.c
             # Link (not just compile) so sysroot libraries that materialize at
             # link time (e.g. libmimalloc) are populated too.

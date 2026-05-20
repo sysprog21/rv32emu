@@ -503,10 +503,11 @@ You would see a dropdown menu which you can use to select the ELF executable for
 click the 'Run' button to run it. For system emulation, click the 'Run Linux' button to boot Linux.
 
 Alternatively, you may want to view a hosted `rv32emu` since building takes some time.
-- [user-mode emulation demo page](https://sysprog21.github.io/rv32emu-demo/)
-- [system emulation demo page](https://sysprog21.github.io/rv32emu-demo/system)
+- [demo landing page](https://sysprog21.github.io/rv32emu-demo/)
+- [user-mode emulation demo page](https://sysprog21.github.io/rv32emu-demo/user/)
+- [system emulation demo page](https://sysprog21.github.io/rv32emu-demo/system/)
 
-Both pages can be easily switched using the navigation button.
+The landing page links to both modes, and each mode page has a navigation button that switches directly to the other.
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.

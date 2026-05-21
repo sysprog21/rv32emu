@@ -1,0 +1,19 @@
+src/jit.c
+  s_836b991c4170b2::t_3b94bff988da9e 3853
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "6780cf1ccb7e75227116c68cdc88028f5c3fec52",
+  "prompts": {},
+  "sessions": {
+    "s_836b991c4170b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff1891d2-5fd7-40dc-9867-1354f9723029",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

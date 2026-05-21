@@ -50,6 +50,53 @@
 #include "system.h"
 #endif
 
+#if RV32_HAS(SYSTEM_MMIO)
+/* JIT MMU fast-path ABI invariants.
+ *
+ * The inline dTLB probe emitted by the per-arch fast path hard-codes field
+ * offsets and sizes of tlb_entry_t and memory_t. Any layout change must keep
+ * these asserts true, or the emitted asm/IR will silently access the wrong
+ * bytes. These mirror the structures in riscv_private.h and io.h.
+ *
+ * The fast path also assumes:
+ *   - TLB_SIZE is a power of two so VPN -> index is a simple AND.
+ *   - T1 handles both TLB_PAGE_LEVEL_4K and TLB_PAGE_LEVEL_SUPER inline:
+ *     the offset mask is chosen by CSEL (aarch64) / CMOVcc (x86-64) based on
+ *     the level byte (12 bits for 4 KiB, 22 bits for 4 MiB).  T2C still
+ *     bails to C on superpage entries — an LLVM-IR select variant showed
+ *     intermittent crashes after T2C compilation, root cause not isolated.
+ *   - dirty == 1 on writes; clean PTE writes fall back to C so PTE_D update
+ *     stays in dtlb_lookup() / mmu_translate().
+ *   - paddr range is checked against memory_t mem_size to keep MMIO mappings
+ *     on the slow path.
+ */
+_Static_assert(sizeof(tlb_entry_t) == 16, "tlb_entry_t must be 16 bytes");
+_Static_assert(offsetof(tlb_entry_t, vpn) == 0, "tlb_entry_t.vpn offset");
+_Static_assert(offsetof(tlb_entry_t, ppn) == 4, "tlb_entry_t.ppn offset");
+_Static_assert(offsetof(tlb_entry_t, pte_addr) == 8,
+               "tlb_entry_t.pte_addr offset");
+_Static_assert(offsetof(tlb_entry_t, perm) == 12, "tlb_entry_t.perm offset");
+_Static_assert(offsetof(tlb_entry_t, valid) == 13, "tlb_entry_t.valid offset");
+_Static_assert(offsetof(tlb_entry_t, dirty) == 14, "tlb_entry_t.dirty offset");
+_Static_assert(offsetof(tlb_entry_t, level) == 15, "tlb_entry_t.level offset");
+_Static_assert((TLB_SIZE & (TLB_SIZE - 1)) == 0,
+               "TLB_SIZE must be a power of two");
+/* The x86-64 fast path masks the VPN with `and esi, TLB_SIZE - 1` using opcode
+ * 0x83 /4, whose 8-bit immediate is sign-extended to 32 bits.  TLB_SIZE - 1
+ * must therefore fit in a signed 8-bit value (<= 127); otherwise the mask
+ * becomes negative and the dTLB index calculation is wrong.  If you ever need
+ * a larger TLB, switch that single instruction to the imm32 form (0x81 /4).
+ */
+_Static_assert(TLB_SIZE <= 128,
+               "TLB_SIZE > 128 needs imm32 AND encoding in the x86-64 "
+               "fast path");
+_Static_assert(RV_PG_SHIFT == 12, "fast path assumes 4 KiB pages");
+_Static_assert(offsetof(memory_t, mem_base) == 0, "memory_t.mem_base offset");
+_Static_assert(offsetof(memory_t, mem_size) == 8, "memory_t.mem_size offset");
+_Static_assert(PTE_R == 0x02, "PTE_R must be bit 1");
+_Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
+#endif /* RV32_HAS(SYSTEM_MMIO) */
+
 #define JIT_CLS_MASK 0x07
 #define JIT_ALU_OP_MASK 0xf0
 #define JIT_CLS_ALU 0x04
@@ -64,16 +111,28 @@
 #define JIT_OP_MOD_REG (JIT_CLS_ALU | JIT_SRC_REG | 0x90)
 
 #define STACK_SIZE 512
-#define MAX_JUMPS 1024
+/* The SYSTEM_MMIO fast path adds ~8 jump-table entries per load/store
+ * (7 slow-path gating branches + 1 unconditional B), pushing
+ * JUMPS_PER_INSN to 16.  state->jumps accumulates across chained blocks,
+ * so the cap also gates how many instructions can be translated together.
+ * 65536 keeps the table at 1 MiB (struct jump is 16 bytes under SYSTEM)
+ * and lets a chained sequence translate up to ~4000 insns before bailing.
+ */
+#define MAX_JUMPS 65536
 #define MAX_BLOCKS 8192
 #define IN_JUMP_THRESHOLD 256
 
-/* Worst-case jump targets per instruction.  SYSTEM_MMIO load paths emit
- * emit_jump_target_offset x4 (LOC_0, LOC_1, TRAP, NORMAL) plus emit_exit
- * which itself records a jump target, totaling 5.  Branch epilogues also
- * reach 5 (2x emit_jmp + 2x emit_exit + 1x emit_jump_target_offset).
+/* Worst-case jump targets per instruction.  Under SYSTEM_MMIO with the
+ * inline dTLB fast path enabled, a single load/store can record:
+ *   - 7 fast-path gating branches (align, vpn, valid, perm, dirty for stores,
+ *     level, range) patched to the slow-path label
+ *   - 1 unconditional B at the end of the fast path patched to the merge label
+ *   - 4 slow-path branches (LOC_0, LOC_1, TRAP, NORMAL)
+ *   - 1 implicit jump inside emit_exit
+ * Total: 13.  Branch epilogues are still 5 (2x emit_jmp + 2x emit_exit +
+ * 1x emit_jump_target_offset).  We round up to 16 for headroom.
  */
-#define JUMPS_PER_INSN 5
+#define JUMPS_PER_INSN 16
 
 /* Check if branch history table entry should trigger JIT translation */
 static inline bool bht_should_translate(const branch_history_table_t *bt,
@@ -256,21 +315,21 @@ enum operand_size {
 /* There are two common x86-64 calling conventions, discussed at:
  * https://en.wikipedia.org/wiki/X64_calling_conventions#x86-64_calling_conventions
  *
- * Please note: R12 is an exception and is *not* being used. Consequently, it
- * is omitted from the list of non-volatile registers for both platforms,
- * despite being non-volatile.
+ * Inline fast paths may use callee-saved registers as scratch temporaries, so
+ * they must stay in the saved non-volatile set even if the generic allocator
+ * does not hand them out.
  */
 #if defined(_WIN32)
-static const int nonvolatile_reg[] = {RBP, RBX, RDI, RSI, R13, R14, R15};
+static const int nonvolatile_reg[] = {RBP, RBX, RDI, RSI, R12, R13, R14, R15};
 static const int parameter_reg[] = {RCX, RDX, R8, R9};
 static struct host_reg register_map[] = {
     {RAX, -1, 0, 0}, {R10, -1, 0, 0}, {RDX, -1, 0, 0}, {R8, -1, 0, 0},
     {R9, -1, 0, 0},  {R14, -1, 0, 0}, {R15, -1, 0, 0}, {RDI, -1, 0, 0},
     {RSI, -1, 0, 0}, {RBX, -1, 0, 0}, {RBP, -1, 0, 0},
 };
-static int temp_reg = RCX;
+static int temp_reg = R11;
 #else
-static const int nonvolatile_reg[] = {RBP, RBX, R13, R14, R15};
+static const int nonvolatile_reg[] = {RBP, RBX, R12, R13, R14, R15};
 static const int parameter_reg[] = {RDI, RSI, RDX, RCX, R8, R9};
 static struct host_reg register_map[] = {
     {RAX, -1, 0, 0}, {RBX, -1, 0, 0}, {RDX, -1, 0, 0}, {R8, -1, 0, 0},
@@ -322,6 +381,16 @@ static inline void set_dirty(int reg_idx, bool is_dirty)
         register_map[i].dirty = is_dirty;
         return;
     }
+}
+
+static inline bool host_reg_maps_x0(int reg_idx)
+{
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].reg_idx != reg_idx)
+            continue;
+        return register_map[i].vm_reg_idx == rv_reg_zero;
+    }
+    return false;
 }
 
 static inline void offset_map_insert(struct jit_state *state, block_t *block)
@@ -966,12 +1035,7 @@ static inline void emit_load(struct jit_state *state,
                              int dst,
                              int32_t offset)
 {
-    for (int i = 0; i < n_host_regs; i++) {
-        if (register_map[i].reg_idx != dst)
-            continue;
-        if (register_map[i].vm_reg_idx != 0)
-            continue;
-
+    if (host_reg_maps_x0(dst)) {
         /* if dst is x0, load 0x0 into host register */
         emit_load_imm(state, dst, 0x0);
         set_dirty(dst, true);
@@ -1023,12 +1087,7 @@ static inline void emit_load_sext(struct jit_state *state,
                                   int dst,
                                   int32_t offset)
 {
-    for (int i = 0; i < n_host_regs; i++) {
-        if (register_map[i].reg_idx != dst)
-            continue;
-        if (register_map[i].vm_reg_idx != 0)
-            continue;
-
+    if (host_reg_maps_x0(dst)) {
         /* if dst is x0, load 0x0 into host register */
         emit_load_imm(state, dst, 0x0);
         set_dirty(dst, true);
@@ -1593,7 +1652,19 @@ uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
     __UNREACHABLE;
 }
 
-void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
+/* Slow-path entry from the JIT.
+ *
+ * vaddr / type / pc / vreg_idx arrive as call arguments rather than via the
+ * rv->jit_mmu staging area.  Skipping the three pre-call memory stores per
+ * memop saves slow-path host bytes and one round-trip through L1.  Results
+ * (is_mmio, paddr) still land in rv->jit_mmu for the JIT to read back; once
+ * we have a register-return story those reads can go too.
+ */
+void jit_mmu_handler(riscv_t *rv,
+                     uint32_t vreg_idx,
+                     uint32_t vaddr,
+                     uint32_t type,
+                     uint32_t pc)
 {
     assert(vreg_idx < 32);
 
@@ -1601,7 +1672,7 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
     uint32_t access_size;
 
     /* Determine access size based on instruction type */
-    switch (rv->jit_mmu.type) {
+    switch (type) {
     case rv_insn_lb:
     case rv_insn_lbu:
     case rv_insn_sb:
@@ -1628,14 +1699,13 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
      * handler uses rv->PC to set sepc/mepc (the return address). Without this,
      * the kernel would resume at the wrong instruction after sret.
      */
-    rv->PC = rv->jit_mmu.pc;
+    rv->PC = pc;
 
-    if (rv->jit_mmu.type == rv_insn_lb || rv->jit_mmu.type == rv_insn_lh ||
-        rv->jit_mmu.type == rv_insn_lbu || rv->jit_mmu.type == rv_insn_lhu ||
-        rv->jit_mmu.type == rv_insn_lw)
-        addr = rv->io.mem_translate(rv, rv->jit_mmu.vaddr, R);
+    if (type == rv_insn_lb || type == rv_insn_lh || type == rv_insn_lbu ||
+        type == rv_insn_lhu || type == rv_insn_lw)
+        addr = rv->io.mem_translate(rv, vaddr, R);
     else
-        addr = rv->io.mem_translate(rv, rv->jit_mmu.vaddr, W);
+        addr = rv->io.mem_translate(rv, vaddr, W);
 
     /* Check for trap during address translation.
      * mem_translate may trigger a page fault which sets is_trapped=true.
@@ -1660,7 +1730,7 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
     uint32_t val;
     rv->jit_mmu.is_mmio = 1;
 
-    switch (rv->jit_mmu.type) {
+    switch (type) {
     case rv_insn_sb:
         val = rv->X[vreg_idx] & 0xff;
         MMIO_WRITE();
@@ -1694,44 +1764,741 @@ void jit_mmu_handler(riscv_t *rv, uint32_t vreg_idx)
     }
 }
 
-void emit_jit_mmu_handler(struct jit_state *state, uint8_t vreg_idx)
+#if RV32_HAS(SYSTEM_MMIO)
+#if defined(__aarch64__)
+/* CBZ Wt, #0 — 32-bit form, displacement patched later.  Returns the
+ * instruction offset so the caller can record it for resolve_jumps().
+ */
+static uint32_t emit_a64_cbz(struct jit_state *state, int rt)
+{
+    uint32_t loc = state->offset;
+    emit_a64(state, UINT32_C(0x34000000) | (uint32_t) rt);
+    return loc;
+}
+
+/* CBNZ Wt, #0 — 32-bit form, displacement patched later. */
+static uint32_t emit_a64_cbnz(struct jit_state *state, int rt)
+{
+    uint32_t loc = state->offset;
+    emit_a64(state, UINT32_C(0x35000000) | (uint32_t) rt);
+    return loc;
+}
+
+/* B.cond #0 — displacement patched later.  Returns the instruction offset. */
+static uint32_t emit_a64_bcond(struct jit_state *state, int cond)
+{
+    uint32_t loc = state->offset;
+    emit_a64(state, UINT32_C(0x54000000) | (uint32_t) cond);
+    return loc;
+}
+
+/* CSEL Wd, Wn, Wm, cond — conditional select (32-bit form).
+ * Wd = (cond_holds) ? Wn : Wm.  Used by the superpage path to pick the
+ * offset mask without branching.  Encoding:
+ *   31 30 29 28..21       20..16 15..12 11..10 9..5 4..0
+ *   sf  0  0  1101_0100   Rm     cond   00      Rn   Rd    (sf=0 for 32-bit)
+ */
+static void emit_a64_csel(struct jit_state *state,
+                          int cond,
+                          int rd,
+                          int rn,
+                          int rm)
+{
+    emit_a64(state, UINT32_C(0x1A800000) | ((uint32_t) rm << 16) |
+                        ((uint32_t) cond << 12) | ((uint32_t) rn << 5) |
+                        (uint32_t) rd);
+}
+#endif
+
+#if defined(__x86_64__) && !defined(_WIN32)
+/* cmp byte ptr [r12+disp8], imm8 — 6 bytes: 41 80 7c 24 disp imm. */
+static void emit_x64_cmp_byte_r12_disp_imm8(struct jit_state *state,
+                                            uint8_t disp,
+                                            uint8_t imm)
+{
+    emit1(state, 0x41);
+    emit1(state, 0x80);
+    emit1(state, 0x7c);
+    emit1(state, 0x24);
+    emit1(state, disp);
+    emit1(state, imm);
+}
+
+/* test byte ptr [r12+disp8], imm8 — 5 bytes: 41 f6 44 24 disp imm. */
+static void emit_x64_test_byte_r12_disp_imm8(struct jit_state *state,
+                                             uint8_t disp,
+                                             uint8_t imm)
+{
+    emit1(state, 0x41);
+    emit1(state, 0xf6);
+    emit1(state, 0x44);
+    emit1(state, 0x24);
+    emit1(state, disp);
+    emit1(state, imm);
+}
+
+/* jcc rel32: emits 0F <opc> <rel32=0>; returns the offset of the rel32 field
+ * so the caller can record it for resolve_jumps() to patch.
+ */
+static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
+{
+    emit1(state, 0x0f);
+    emit1(state, opc);
+    uint32_t loc = state->offset;
+    emit4(state, 0);
+    return loc;
+}
+
+/* CMOVcc r32, r/m32 — conditional move based on flags.
+ *   dst = (cond_holds) ? src : dst
+ * Encoded as 0F 4x /r where 4x = 0x40 + cc.  REX.R/REX.B as needed.
+ */
+static void emit_x64_cmov(struct jit_state *state, uint8_t cc, int dst, int src)
+{
+    if ((dst & 8) || (src & 8))
+        emit_basic_rex(state, 0, dst, src);
+    emit1(state, 0x0f);
+    emit1(state, 0x40 | cc);
+    emit_modrm_reg2reg(state, dst, src);
+}
+#endif
+
+/* Inline dTLB fast path for a load or store.
+ *
+ * Caller contract (set up by the GEN_LOAD / GEN_STORE macros in rv32_jit.c):
+ *   - parameter_reg[0] holds rv
+ *   - temp_reg holds the guest virtual address (vaddr = rs1 + imm)
+ *   - The host register allocator has been reset (caller did store_back +
+ *     reset_reg) and load_dest_reg is the host register the caller will
+ *     subsequently bind to ir->rd via map_vm_reg.  For stores, load_dest_reg
+ *     is unused; the data source is read straight from rv->X[ir->rs2] via a
+ *     scratch.
+ *
+ * The fast path bails out (falls through to where the caller emits the slow
+ * path) whenever any of the following are not met, so each one keeps the
+ * slow path's behavior intact:
+ *   - vaddr aligned to access_size
+ *   - dTLB[idx] is valid and its VPN matches
+ *   - entry.perm has PTE_R (load) or PTE_W (store)
+ *   - For stores: entry.dirty == 1 (so PTE_D update stays in C)
+ *   - paddr + access_size <= mem_size (MMIO and bound-violators take slow path)
+ *
+ * Both TLB_PAGE_LEVEL_4K and TLB_PAGE_LEVEL_SUPER (4 MiB) are handled
+ * inline: the offset mask is selected via CSEL/CMOVcc based on the level
+ * byte, so superpage entries no longer bail to the slow path.
+ *
+ * Aligned + same page implies no page crossing, so we do not check that.
+ *
+ * Returns the buf offset of the unconditional branch that the caller must
+ * patch (via emit_jump_target_offset) to the "fast path end" label, i.e. the
+ * common merge point after the slow path. Returns 0 when no fast path was
+ * emitted (caller proceeds straight to slow path).
+ */
+static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
+                                      const rv_insn_t *ir,
+                                      uint32_t insn_type,
+                                      int load_dest_reg UNUSED,
+                                      const memory_t *mem)
+{
+    uint8_t access_size = 0;
+    bool is_store = false;
+    bool is_signed UNUSED = false;
+    switch (insn_type) {
+    case rv_insn_lb:
+        access_size = 1;
+        is_signed = true;
+        break;
+    case rv_insn_lbu:
+        access_size = 1;
+        break;
+    case rv_insn_lh:
+        access_size = 2;
+        is_signed = true;
+        break;
+    case rv_insn_lhu:
+        access_size = 2;
+        break;
+    case rv_insn_lw:
+        access_size = 4;
+        break;
+    case rv_insn_sb:
+        access_size = 1;
+        is_store = true;
+        break;
+    case rv_insn_sh:
+        access_size = 2;
+        is_store = true;
+        break;
+    case rv_insn_sw:
+        access_size = 4;
+        is_store = true;
+        break;
+    default:
+        return 0;
+    }
+
+    /* Small RAM images cannot satisfy multi-byte accesses in the inline fast
+     * path. Keep them on the checked slow path and avoid unsigned underflow in
+     * the max_paddr calculation below.
+     */
+    if (mem->mem_size < access_size)
+        return 0;
+#if defined(__aarch64__)
+    /* Guest RAM is capped at 4 GiB.  The exact 4 GiB case is supported:
+     * mem_size itself no longer fits in uint32_t, but mem_size - access_size
+     * still does for every load/store width we JIT here.
+     */
+    assert(mem->mem_size <= 0x100000000ULL);
+
+    /* Track the offsets of every conditional branch that funnels to the slow
+     * path so we can patch them once we know the slow-path label.
+     *
+     * Maximum count:
+     *   1 align + 1 vpn + 1 valid + 1 perm + 1 dirty (store) + 1 level + 1
+     * range
+     */
+    uint32_t slow_branches[8];
+    int n_slow = 0;
+
+    /* Alignment check (skip for byte access)
+     * AND w10, w8, #(size - 1); CBNZ w10, slow
+     */
+    if (access_size > 1) {
+        emit_load_imm(state, R10, access_size - 1);
+        emit_logical_register(state, false, LOG_AND, R10, R8, R10);
+        slow_branches[n_slow++] = emit_a64_cbnz(state, R10);
+    }
+
+    /* vpn = vaddr >> 12
+     * LSR Wd, Wn, #12 = UBFM Wd, Wn, #12, #31
+     * sf=0, opc=10, N=0: 0x53000000 | (immr<<16) | (imms<<10) | (Rn<<5) | Rd
+     */
+    emit_a64(state, UINT32_C(0x53000000) | (UINT32_C(12) << 16) |
+                        (UINT32_C(31) << 10) | ((uint32_t) R8 << 5) |
+                        (uint32_t) R10);
+
+    /* idx = vpn & (TLB_SIZE - 1) into w24 */
+    emit_load_imm(state, R24, TLB_SIZE - 1);
+    emit_logical_register(state, false, LOG_AND, R24, R10, R24);
+
+    /* x24 = idx << 4 (each tlb_entry_t is 16 bytes)
+     * LSL Xd, Xn, #4 = UBFM Xd, Xn, #(64-4)=60, #(63-4)=59
+     * sf=1, N=1: 0xd3400000 | (60<<16) | (59<<10) | (Rn<<5) | Rd
+     */
+    emit_a64(state, UINT32_C(0xd3400000) | (UINT32_C(60) << 16) |
+                        (UINT32_C(59) << 10) | ((uint32_t) R24 << 5) |
+                        (uint32_t) R24);
+
+    /* x25 = rv + offsetof(dtlb) + idx*16 */
+    emit_load_imm_sext(state, R25,
+                       (int64_t) (uintptr_t) offsetof(riscv_t, dtlb));
+    emit_addsub_register(state, true, AS_ADD, R25, R0, R25);
+    emit_addsub_register(state, true, AS_ADD, R25, R25, R24);
+    /* w10 still holds vpn (LSR result above; not clobbered by the AND into
+     * R24 nor by the LSL on R24).
+     */
+
+    /* VPN match: LDR w24,[x25,#0]; CMP w24,w10; B.NE slow */
+    emit_loadstore_imm(state, LS_LDRW, R24, R25, 0);
+    emit_addsub_register(state, false, AS_SUBS, RZ, R24, R10);
+    slow_branches[n_slow++] = emit_a64_bcond(state, COND_NE);
+
+    /* valid != 0: LDRB w24,[x25,#13]; CBZ w24, slow */
+    emit_loadstore_imm(state, LS_LDRB, R24, R25, 13);
+    slow_branches[n_slow++] = emit_a64_cbz(state, R24);
+
+    /* perm has needed bit: LDRB w24,[x25,#12]; AND with PTE_R/W */
+    emit_loadstore_imm(state, LS_LDRB, R24, R25, 12);
+    emit_load_imm(state, R10, is_store ? PTE_W : PTE_R);
+    emit_logical_register(state, false, LOG_AND, R24, R24, R10);
+    slow_branches[n_slow++] = emit_a64_cbz(state, R24);
+
+    /* For stores, dirty must be 1 (so PTE_D update stays in C) */
+    if (is_store) {
+        emit_loadstore_imm(state, LS_LDRB, R24, R25, 14);
+        slow_branches[n_slow++] = emit_a64_cbz(state, R24);
+    }
+
+    /* Level-aware paddr compute.  level is 1 (4MB superpage) or 2 (4KB).
+     *
+     * Compute both candidate offsets (4K = vaddr & 0xFFF, super = vaddr &
+     * 0x3FFFFF) into separate registers, then CSEL based on level == 4K.
+     * Branchless to keep the hot 4K path free of an extra conditional, and
+     * dropping the previous `level != 4K → slow` bail lets superpages stay
+     * inline too.
+     *
+     * w10 = 4K offset = vaddr & 0xFFF
+     * w11 = super offset = vaddr & 0x3FFFFF
+     * w24 = ppn from TLB entry
+     * Then SUBS xzr, level, #4K and CSEL between w10/w11 based on EQ.
+     */
+    emit_loadstore_imm(state, LS_LDRB, R12, R25, 15); /* w12 = level */
+    emit_loadstore_imm(state, LS_LDRW, R24, R25, 4);  /* w24 = ppn */
+    emit_load_imm(state, R10, 0xFFF);
+    emit_logical_register(state, false, LOG_AND, R10, R8, R10); /* 4K offset */
+    emit_load_imm(state, R11, 0x3FFFFF);
+    emit_logical_register(state, false, LOG_AND, R11, R8, R11); /* super off */
+    emit_load_imm(state, R25, TLB_PAGE_LEVEL_4K);
+    emit_addsub_register(state, false, AS_SUBS, RZ, R12, R25); /* CMP level,2 */
+    emit_a64_csel(state, COND_EQ, R25, R10, R11);              /* offset */
+    emit_logical_register(state, false, LOG_ORR, R24, R24, R25); /* paddr */
+
+    /* Range check: paddr <= mem_size - access_size
+     * Branch to slow path if paddr > max_paddr (unsigned).
+     */
+    uint32_t max_paddr = (uint32_t) (mem->mem_size - access_size);
+    emit_load_imm(state, R25, max_paddr);
+    /* CMP w25, w24 — sets C if no borrow (w25 >= w24).  COND_LO branches when
+     * C clear, i.e. w25 < w24 (paddr exceeds the max).
+     */
+    emit_addsub_register(state, false, AS_SUBS, RZ, R25, R24);
+    slow_branches[n_slow++] = emit_a64_bcond(state, COND_LO);
+
+    /* host address: x25 = mem_base + paddr
+     * The OR above was a 32-bit op, which zero-extends, so the high 32 bits of
+     * x24 are already zero and the 64-bit ADD is correct.
+     */
+    emit_load_imm_sext(state, R25, (int64_t) (uintptr_t) mem->mem_base);
+    emit_addsub_register(state, true, AS_ADD, R25, R25, R24);
+
+    /* Perform the access */
+    if (is_store) {
+        emit_load(state, S32, R0, R10,
+                  offsetof(riscv_t, X) + 4 * (uint32_t) ir->rs2);
+        a64opcode_t store_op;
+        switch (access_size) {
+        case 1:
+            store_op = LS_STRB;
+            break;
+        case 2:
+            store_op = LS_STRH;
+            break;
+        case 4:
+            store_op = LS_STRW;
+            break;
+        default:
+            __UNREACHABLE;
+        }
+        emit_loadstore_imm(state, store_op, R10, R25, 0);
+    } else {
+        if (host_reg_maps_x0(load_dest_reg)) {
+            emit_load_imm(state, load_dest_reg, 0);
+            set_dirty(load_dest_reg, true);
+        } else {
+            a64opcode_t load_op;
+            switch (access_size) {
+            case 1:
+                load_op = is_signed ? LS_LDRSBW : LS_LDRB;
+                break;
+            case 2:
+                load_op = is_signed ? LS_LDRSHW : LS_LDRH;
+                break;
+            case 4:
+                load_op = LS_LDRW;
+                break;
+            default:
+                __UNREACHABLE;
+            }
+            /* Load directly into the host register the caller has bound to rd.
+             * Mark it dirty so the next store_back() spills the new value to
+             * rv->X[rd]; otherwise the architectural write is lost on block
+             * exit.
+             */
+            emit_loadstore_imm(state, load_op, load_dest_reg, R25, 0);
+            set_dirty(load_dest_reg, true);
+        }
+    }
+
+    /* Final unconditional B; caller patches the offset to fastpath_end */
+    uint32_t fastpath_end_loc = state->offset;
+    emit_a64(state, UINT32_C(0x14000000)); /* B #0 (patched later) */
+
+    /* Slow path begins right after our emission; patch every gating branch. */
+    uint32_t slow_label = state->offset;
+    for (int i = 0; i < n_slow; i++)
+        emit_jump_target_offset(state, slow_branches[i], slow_label);
+
+    return fastpath_end_loc;
+#elif defined(__x86_64__) && !defined(_WIN32)
+    /* Guest RAM is capped at 4 GiB.  The exact 4 GiB case is supported:
+     * mem_size itself no longer fits in uint32_t, but mem_size - access_size
+     * still does for every load/store width we JIT here.
+     */
+    assert(mem->mem_size <= 0x100000000ULL);
+    /* Slow path's reset_reg + map_vm_reg(rd) deterministically returns
+     * register_map[0].reg_idx which is RAX on this ABI.  The caller passes
+     * that same value through load_dest_reg so the fast path lands the
+     * loaded value in the same host register the slow path will use.
+     */
+    if (!is_store)
+        assert(load_dest_reg == RAX);
+
+    /* Up to 7 conditional branches funnel to the slow-path label.  Each
+     * entry stores the offset of the rel32 displacement field, matching
+     * what resolve_jumps() patches.
+     */
+    uint32_t slow_branches[8];
+    int n_slow = 0;
+
+    /* Alignment check */
+    if (access_size > 1) {
+        /* test cl, (size - 1) */
+        emit1(state, 0xf6);
+        emit_modrm(state, 0xc0, 0, RCX);
+        emit1(state, (uint8_t) (access_size - 1));
+        /* jnz rel32 (0f 85 rel32) — rel32 starts 2 bytes after opcode */
+        emit1(state, 0x0f);
+        emit1(state, 0x85);
+        slow_branches[n_slow++] = state->offset;
+        emit4(state, 0);
+    }
+
+    /* vpn = vaddr >> 12 into EAX (kept around for the CMP) */
+    /* mov eax, ecx */
+    emit1(state, 0x89);
+    emit_modrm_reg2reg(state, RCX, RAX);
+    /* shr eax, 12 */
+    emit1(state, 0xc1);
+    emit_modrm(state, 0xc0, 5, RAX);
+    emit1(state, 12);
+
+    /* idx (in ESI) = vpn & (TLB_SIZE - 1); then ESI <<= 4 */
+    /* mov esi, eax */
+    emit1(state, 0x89);
+    emit_modrm_reg2reg(state, RAX, RSI);
+    /* and esi, TLB_SIZE - 1   (imm8 fits since TLB_SIZE - 1 = 63) */
+    emit1(state, 0x83);
+    emit_modrm(state, 0xc0, 4, RSI);
+    emit1(state, (uint8_t) (TLB_SIZE - 1));
+    /* shl rsi, 4 — REX.W + C1 /4 imm8 */
+    emit1(state, 0x48);
+    emit1(state, 0xc1);
+    emit_modrm(state, 0xc0, 4, RSI);
+    emit1(state, 4);
+
+    /* r12 = rdi + offsetof(dtlb) + rsi (idx*16 already in rsi)
+     * LEA r12, [rdi + rsi*1 + dtlb_offset]
+     * REX.WRB = 0x4c, opcode 8d, ModRM = 84 (mod=10 disp32, reg=R12 low3=4,
+     *   r/m=100 SIB), SIB = 37 (scale=00, index=110=RSI, base=111=RDI).
+     */
+    emit1(state, 0x4c);
+    emit1(state, 0x8d);
+    emit1(state, 0xa4);
+    emit1(state, 0x37);
+    emit4(state, (uint32_t) offsetof(riscv_t, dtlb));
+
+    /* VPN match: cmp eax, [r12]; jne slow
+     * REX.B for r12 base, opcode 3b, mod=00 r/m=100 SIB, SIB.base=R12.
+     */
+    emit1(state, 0x41);
+    emit1(state, 0x3b);
+    emit1(state, 0x04);
+    emit1(state, 0x24);
+    slow_branches[n_slow++] = emit_x64_jcc32(state, 0x85); /* jne */
+
+    /* valid (byte at +13) != 0: je slow */
+    emit_x64_cmp_byte_r12_disp_imm8(state, 13, 0);
+    slow_branches[n_slow++] = emit_x64_jcc32(state, 0x84); /* je */
+
+    /* perm (byte at +12) has needed bit: jz slow */
+    emit_x64_test_byte_r12_disp_imm8(state, 12, is_store ? PTE_W : PTE_R);
+    slow_branches[n_slow++] = emit_x64_jcc32(state, 0x84); /* jz */
+
+    /* (stores) dirty (byte at +14) != 0: je slow */
+    if (is_store) {
+        emit_x64_cmp_byte_r12_disp_imm8(state, 14, 0);
+        slow_branches[n_slow++] = emit_x64_jcc32(state, 0x84); /* je */
+    }
+
+    /* Level-aware paddr compute.  level (byte at +15) is 1 (4MB superpage)
+     * or 2 (4KB).  Drop the previous `level != 4K → slow` bail so superpage
+     * entries also stay inline.  Pick the offset mask via CMOVcc, mirroring
+     * the aarch64 CSEL-based design.
+     *
+     *   ESI = vaddr & 0xFFF           (4K offset, in RCX = vaddr originally)
+     *   EBX = vaddr & 0x3FFFFF        (super offset)
+     *   cmp byte [r12+15], 2
+     *   cmovne esi, ebx               ; if not 4K, use super offset
+     *   mov eax, [r12+4]              ; ppn
+     *   or eax, esi                   ; paddr
+     */
+    /* mov esi, ecx  -- ESI = vaddr */
+    emit1(state, 0x89);
+    emit_modrm_reg2reg(state, RCX, RSI);
+    /* and esi, 0xFFF -- 4K offset */
+    emit1(state, 0x81);
+    emit_modrm(state, 0xc0, 4, RSI);
+    emit4(state, 0xFFF);
+    /* mov ebx, ecx  -- EBX = vaddr */
+    emit1(state, 0x89);
+    emit_modrm_reg2reg(state, RCX, RBX);
+    /* and ebx, 0x3FFFFF -- super offset */
+    emit1(state, 0x81);
+    emit_modrm(state, 0xc0, 4, RBX);
+    emit4(state, 0x3FFFFF);
+    /* cmp byte ptr [r12+15], 2 */
+    emit_x64_cmp_byte_r12_disp_imm8(state, 15, TLB_PAGE_LEVEL_4K);
+    /* cmovne esi, ebx -- if level != 4K (i.e., superpage), use super offset */
+    emit_x64_cmov(state, 0x5 /* NE */, RSI, RBX);
+    /* mov eax, [r12+4]  (4-byte ppn) */
+    emit1(state, 0x41);
+    emit1(state, 0x8b);
+    emit1(state, 0x44);
+    emit1(state, 0x24);
+    emit1(state, 4);
+    /* or eax, esi — 09 /r */
+    emit1(state, 0x09);
+    emit_modrm_reg2reg(state, RSI, RAX);
+
+    /* range: cmp eax, max_paddr; ja slow */
+    uint32_t max_paddr = (uint32_t) (mem->mem_size - access_size);
+    emit1(state, 0x3d); /* cmp eax, imm32 (short form) */
+    emit4(state, max_paddr);
+    slow_branches[n_slow++] = emit_x64_jcc32(state, 0x87); /* ja */
+
+    /* host addr: r12 = mem_base + rax */
+    /* mov r12, imm64 — REX.WB + B8+(r&7) + imm64 */
+    emit1(state, 0x49);
+    emit1(state, 0xbc);
+    emit8(state, (uint64_t) (uintptr_t) mem->mem_base);
+    /* add r12, rax — REX.WB + 01 /r — opcode 01 has direction r/m += reg */
+    emit1(state, 0x49);
+    emit1(state, 0x01);
+    emit_modrm_reg2reg(state, RAX, R12);
+
+    /* Access */
+    if (is_store) {
+        /* Load rs2 from rv->X[rs2] into ESI. */
+        int32_t off = (int32_t) (offsetof(riscv_t, X) + 4 * (uint32_t) ir->rs2);
+        emit1(state, 0x8b);
+        emit_modrm_and_displacement(state, RSI, RDI, off);
+        switch (access_size) {
+        case 1:
+            /* mov [r12], sil — needs REX (sil is high reg requiring REX). */
+            emit1(state, 0x41); /* REX.B for r12 */
+            emit1(state, 0x88); /* mov r/m8, r8 */
+            emit1(state, 0x34);
+            emit1(state, 0x24);
+            break;
+        case 2:
+            emit1(state, 0x66); /* operand-size override (16-bit) */
+            emit1(state, 0x41);
+            emit1(state, 0x89);
+            emit1(state, 0x34);
+            emit1(state, 0x24);
+            break;
+        case 4:
+            emit1(state, 0x41);
+            emit1(state, 0x89);
+            emit1(state, 0x34);
+            emit1(state, 0x24);
+            break;
+        default:
+            __UNREACHABLE;
+        }
+    } else {
+        if (host_reg_maps_x0(load_dest_reg)) {
+            emit_load_imm(state, load_dest_reg, 0);
+            set_dirty(load_dest_reg, true);
+        } else {
+            /* Loads write to RAX (load_dest_reg). */
+            switch (access_size) {
+            case 1:
+                emit1(state, 0x41); /* REX.B for r12 */
+                emit1(state, 0x0f);
+                emit1(state, is_signed ? 0xbe : 0xb6);
+                emit1(state, 0x04);
+                emit1(state, 0x24);
+                break;
+            case 2:
+                emit1(state, 0x41);
+                emit1(state, 0x0f);
+                emit1(state, is_signed ? 0xbf : 0xb7);
+                emit1(state, 0x04);
+                emit1(state, 0x24);
+                break;
+            case 4:
+                emit1(state, 0x41);
+                emit1(state, 0x8b);
+                emit1(state, 0x04);
+                emit1(state, 0x24);
+                break;
+            default:
+                __UNREACHABLE;
+            }
+            /* Mark RAX dirty so store_back() later spills the loaded value to
+             * rv->X[rd]; otherwise the architectural write is lost on block
+             * exit.
+             */
+            set_dirty(load_dest_reg, true);
+        }
+    }
+
+    /* jmp rel32 to fastpath_end */
+    emit1(state, 0xe9);
+    uint32_t fastpath_end_loc = state->offset;
+    emit4(state, 0);
+
+    /* Slow path begins right after this; patch all gating branches. */
+    uint32_t slow_label = state->offset;
+    for (int i = 0; i < n_slow; i++)
+        emit_jump_target_offset(state, slow_branches[i], slow_label);
+
+    return fastpath_end_loc;
+#else
+    /* Windows x86-64 or other ABIs — fast path disabled. */
+    (void) state;
+    (void) ir;
+    (void) access_size;
+    (void) is_store;
+    (void) is_signed;
+    (void) load_dest_reg;
+    (void) mem;
+    return 0U;
+#endif
+}
+#endif /* RV32_HAS(SYSTEM_MMIO) */
+
+/* Emit the slow-path C call: jit_mmu_handler(rv, vreg_idx, vaddr, type, pc).
+ *
+ * Contract:
+ *   - parameter_reg[0] holds rv on entry (the standard JIT calling convention)
+ *   - vaddr_reg holds the guest virtual address.  Callers in the inline TLB
+ *     fast path place vaddr in temp_reg as a side effect of the address
+ *     compute; the fast-path probe preserves that register through the
+ *     slow-path fall-through, so the typical caller passes vaddr_reg ==
+ *     temp_reg.  do_fuse* callers load a constant vaddr into temp_reg
+ *     immediately before this call for the same reason.
+ *
+ * This replaces three pre-call emit_stores into rv->jit_mmu.{vaddr,type,pc}.
+ * The C handler now reads vaddr/type/pc directly from its arguments.  Results
+ * (is_mmio, paddr) still land in rv->jit_mmu for the JIT to read back.
+ */
+void emit_jit_mmu_handler(struct jit_state *state,
+                          uint8_t vreg_idx,
+                          int vaddr_reg,
+                          uint32_t insn_type,
+                          uint32_t insn_pc)
 {
     assert(vreg_idx < 32);
 
-#if defined(__x86_64__)
-    /* push $rdi */
-    emit1(state, 0xff);
-    emit_modrm(state, 0x3 << 6, 0x6, parameter_reg[0]);
+#if defined(__x86_64__) && defined(_WIN32)
+    /* Preserve rv across the call, then reserve the required 32-byte shadow
+     * space plus one 8-byte stack slot for the 5th argument.
+     * prepare_translate() leaves %rsp 16-byte aligned inside the JIT body, so
+     * push+sub 40 preserves Windows x64 call-site alignment.
+     */
+    emit_push(state, parameter_reg[0]);
+    emit_alu64_imm32(state, 0x81, 5, RSP, 0x28);
 
-    /* mov $vreg_idx, %rsi */
+    /* mov r8, vaddr_reg — arg2 */
+    if (vaddr_reg != R8) {
+        emit_basic_rex(state, 1, vaddr_reg, R8);
+        emit1(state, 0x89);
+        emit_modrm_reg2reg(state, vaddr_reg, R8);
+    }
+
+    /* mov edx, vreg_idx — arg1 */
+    emit1(state, 0xba);
+    emit4(state, vreg_idx);
+
+    /* mov r9d, insn_type — arg3 */
+    emit1(state, 0x41);
+    emit1(state, 0xb8 | (R9 & 7));
+    emit4(state, insn_type);
+
+    /* mov dword ptr [rsp + 32], insn_pc — arg4 */
+    emit1(state, 0xc7);
+    emit_modrm(state, 0x1 << 6, 0x0, RSP & 7);
+    emit1(state, 0x24); /* SIB: no index, base rsp */
+    emit1(state, 0x20);
+    emit4(state, insn_pc);
+
+    /* mov r11, &handler — caller-saved scratch */
+    emit1(state, 0x49); /* REX.W + REX.B */
+    emit1(state, 0xb8 | (R11 & 7));
+    emit8(state, (uint64_t) (uintptr_t) &jit_mmu_handler);
+
+    /* call r11 */
+    emit1(state, 0x41); /* REX.B */
+    emit1(state, 0xff);
+    emit_modrm(state, 0x3 << 6, 0x2, R11 & 7);
+
+    emit_alu64_imm32(state, 0x81, 0, RSP, 0x28);
+    emit_pop(state, parameter_reg[0]);
+#elif defined(__x86_64__)
+    /* Preserve rv across the call. prepare_translate() leaves %rsp 16-byte
+     * aligned inside the JIT body, so a matching 8-byte alignment slot keeps
+     * the SysV call-site stack invariant after the push.
+     */
+    emit_push(state, parameter_reg[0]);
+    emit_alu64_imm32(state, 0x81, 5, RSP, 0x8);
+
+    /* mov rdx, vaddr_reg — arg2. Must precede the type load that overwrites
+     * RCX (== temp_reg == parameter_reg[3]).
+     */
+    if (vaddr_reg != RDX) {
+        emit_basic_rex(state, 1, vaddr_reg, RDX);
+        emit1(state, 0x89);
+        emit_modrm_reg2reg(state, vaddr_reg, RDX);
+    }
+
+    /* mov ecx, insn_type — arg3 (overwrites RCX/temp_reg) */
+    emit1(state, 0xb8 | (RCX & 7));
+    emit4(state, insn_type);
+
+    /* mov r8d, insn_pc — arg4 */
+    emit1(state, 0x41);
+    emit1(state, 0xb8 | (R8 & 7));
+    emit4(state, insn_pc);
+
+    /* mov esi, vreg_idx — arg1 */
     emit1(state, 0xbe);
     emit4(state, vreg_idx);
 
-    /* call jit_mmu_handler */
-    emit_load_imm_sext(state, temp_reg, (uintptr_t) &jit_mmu_handler);
-    emit1(state, 0xff);
-    emit_modrm(state, 0x3 << 6, 0x2, temp_reg);
+    /* mov r11, &handler — caller-saved scratch */
+    emit1(state, 0x49); /* REX.W + REX.B */
+    emit1(state, 0xb8 | (R11 & 7));
+    emit8(state, (uint64_t) (uintptr_t) &jit_mmu_handler);
 
-    /* pop rv to $rdi */
-    emit1(state, 0x8f);
-    emit_modrm(state, 0x3 << 6, 0x0, parameter_reg[0]);
+    /* call r11 */
+    emit1(state, 0x41); /* REX.B */
+    emit1(state, 0xff);
+    emit_modrm(state, 0x3 << 6, 0x2, R11 & 7);
+
+    emit_alu64_imm32(state, 0x81, 0, RSP, 0x8);
+    emit_pop(state, parameter_reg[0]);
 #elif defined(__aarch64__)
     uint32_t insn;
 
-    /* push rv into stack */
+    /* push rv (X0) onto stack: str x0, [sp, #-16]! */
     insn = (0xf81f0fe << 4) | R0;
     emit_a64(state, insn);
 
-    /* move vreg_idx into R1 */
+    /* mov X2, vaddr_reg — arg2.  Sequence first because subsequent MOVZs may
+     * use temp_reg, and on most call paths vaddr_reg == temp_reg.
+     */
+    if (vaddr_reg != R2) {
+        /* MOV (register) is encoded as ORR Wd, WZR, Wm */
+        emit_logical_register(state, false, LOG_ORR, R2, RZ, vaddr_reg);
+    }
+
+    /* movz X3, insn_type (+ movk if needed) — arg3 */
+    emit_movewide_imm(state, true, R3, insn_type);
+
+    /* movz X4, insn_pc (+ movk if needed) — arg4 */
+    emit_movewide_imm(state, true, R4, insn_pc);
+
+    /* movz X1, vreg_idx — arg1 (fits in 16 bits, single MOVZ) */
     emit_movewide_imm(state, false, R1, vreg_idx);
 
-    /* load &jit_mmu_handler */
+    /* load &jit_mmu_handler into temp_reg */
     emit_movewide_imm(state, true, temp_reg, (uintptr_t) &jit_mmu_handler);
-    /* blr jit_mmu_handler */
+    /* blr temp_reg */
     insn = (0xd63f << 16) | (temp_reg << 5);
     emit_a64(state, insn);
 
-    /* pop from stack */
+    /* pop rv: ldr x0, [sp], #16 */
     insn = (0xf84107e << 4) | R0;
     emit_a64(state, insn);
 #endif
@@ -2556,20 +3323,13 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     vm_reg[0] = map_vm_reg(state, ir->rd);
     emit_load_imm(state, vm_reg[0], ir->imm);
 
-    /* Store virtual address and type for MMU translation */
+    /* Load constant vaddr into temp_reg.  It will be passed as the vaddr
+     * argument to jit_mmu_handler, replacing the prior three stores into
+     * rv->jit_mmu.{vaddr,type,pc}.
+     */
     emit_load_imm(state, temp_reg, addr);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.vaddr));
-    emit_load_imm(state, temp_reg, rv_insn_lw);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.type));
-    /* Store instruction PC for trap return address */
-    emit_load_imm(state, temp_reg, ir->pc);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.pc));
-
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rs2);
+    emit_jit_mmu_handler(state, ir->rs2, temp_reg, rv_insn_lw, ir->pc);
     reset_reg();
 
     /* Check if trap occurred during MMU translation.
@@ -2640,19 +3400,10 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     vm_reg[0] = map_vm_reg(state, ir->rd);
     emit_load_imm(state, vm_reg[0], ir->imm);
 
-    /* Store virtual address and type for MMU translation */
+    /* Constant vaddr -> temp_reg, passed as call arg (see do_fuse9). */
     emit_load_imm(state, temp_reg, addr);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.vaddr));
-    emit_load_imm(state, temp_reg, rv_insn_sw);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.type));
-    /* Store instruction PC for trap return address */
-    emit_load_imm(state, temp_reg, ir->pc);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.pc));
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rs1);
+    emit_jit_mmu_handler(state, ir->rs1, temp_reg, rv_insn_sw, ir->pc);
     reset_reg();
 
     /* Check if trap occurred - skip store if trapped */
@@ -2710,22 +3461,15 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 {
     memory_t *m = PRIV(rv)->mem;
 #if RV32_HAS(SYSTEM_MMIO)
-    /* Compute virtual address: rs1 + imm */
+    /* Compute virtual address: rs1 + imm.  After the ADD, vaddr lives in
+     * temp_reg and is handed to jit_mmu_handler as the vaddr argument.
+     */
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_load_imm_sext(state, temp_reg, ir->imm);
     emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.vaddr));
-    emit_load_imm(state, temp_reg, rv_insn_lw);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.type));
-    /* Store instruction PC for trap return address */
-    emit_load_imm(state, temp_reg, ir->pc);
-    emit_store(state, S32, temp_reg, parameter_reg[0],
-               offsetof(riscv_t, jit_mmu.pc));
 
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rd);
+    emit_jit_mmu_handler(state, ir->rd, temp_reg, rv_insn_lw, ir->pc);
     reset_reg();
 
     /* Check if trap occurred during MMU translation.
@@ -3034,7 +3778,16 @@ bool jit_translate(riscv_t *rv, block_t *block)
         __UNREACHABLE;
     }
 restart:
-    memset(state->jumps, 0, MAX_JUMPS * sizeof(struct jump));
+    /* Only clear the portion that was used in the previous translation.
+     * MAX_JUMPS is sized for the worst-case SYSTEM_MMIO fast path (1 MiB
+     * with the bumped cap), so a blanket memset here turned out to be the
+     * dominant per-translation cost on small-block workloads like
+     * Dhrystone / CoreMark.  state->n_jumps still tracks the live range
+     * and resolve_jumps() only reads [0, n_jumps), so anything past the
+     * previous high-water mark stays untouched.
+     */
+    if (state->n_jumps)
+        memset(state->jumps, 0, state->n_jumps * sizeof(struct jump));
     state->n_jumps = 0;
     block->offset = state->offset;
 #if defined(__APPLE__) && defined(__aarch64__)
@@ -3097,6 +3850,7 @@ struct jit_state *jit_state_init(size_t size)
     assert(state);
 
     state->offset = 0;
+    state->n_jumps = 0;
     state->size = size;
     state->buf = mmap(0, size, PROT_READ | PROT_WRITE | PROT_EXEC,
                       MAP_PRIVATE | MAP_ANONYMOUS

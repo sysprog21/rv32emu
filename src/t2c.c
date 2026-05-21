@@ -35,6 +35,30 @@
 #include "mpool.h"
 #include "riscv_private.h"
 
+#if RV32_HAS(SYSTEM_MMIO)
+/* Layout invariants for the T2C inline dTLB fast path.  Mirrors the asserts
+ * in jit.c so the LLVM IR emission can hard-code offsets safely.
+ */
+_Static_assert(sizeof(tlb_entry_t) == 16, "tlb_entry_t must be 16 bytes");
+_Static_assert(offsetof(tlb_entry_t, vpn) == 0, "tlb_entry_t.vpn offset");
+_Static_assert(offsetof(tlb_entry_t, ppn) == 4, "tlb_entry_t.ppn offset");
+_Static_assert(offsetof(tlb_entry_t, perm) == 12, "tlb_entry_t.perm offset");
+_Static_assert(offsetof(tlb_entry_t, valid) == 13, "tlb_entry_t.valid offset");
+_Static_assert(offsetof(tlb_entry_t, dirty) == 14, "tlb_entry_t.dirty offset");
+_Static_assert(offsetof(tlb_entry_t, level) == 15, "tlb_entry_t.level offset");
+_Static_assert((TLB_SIZE & (TLB_SIZE - 1)) == 0,
+               "TLB_SIZE must be a power of two");
+/* Mirrors the assert in jit.c: the T1 x86-64 fast path uses opcode 0x83 /4
+ * (imm8 sign-extended) for `and esi, TLB_SIZE - 1`.  Keep both asserts in
+ * lockstep so a TLB_SIZE bump here cannot silently diverge from the T1
+ * emitter's encoding.
+ */
+_Static_assert(TLB_SIZE <= 128,
+               "TLB_SIZE > 128 needs imm32 AND encoding in the x86-64 "
+               "fast path (see jit.c emit path)");
+_Static_assert(RV_PG_SHIFT == 12, "fast path assumes 4 KiB pages");
+#endif
+
 #define MAX_BLOCKS 8152
 
 struct LLVM_block_map_entry {
@@ -119,7 +143,30 @@ T2C_LLVM_GEN_ADDR(ra, X, rv_reg_ra);
 T2C_LLVM_GEN_ADDR(sp, X, rv_reg_sp);
 #endif
 T2C_LLVM_GEN_ADDR(PC, PC, 0);
-T2C_LLVM_GEN_ADDR(csr_cycle, csr_cycle, 0);
+
+FORCE_INLINE LLVMValueRef t2c_gen_rv_field_ptr(LLVMValueRef start,
+                                               LLVMBuilderRef *builder,
+                                               size_t byte_offset,
+                                               LLVMTypeRef field_type)
+{
+    LLVMValueRef rv_bytes =
+        LLVMBuildBitCast(*builder, LLVMGetParam(start, 0),
+                         LLVMPointerType(LLVMInt8Type(), 0), "");
+    LLVMValueRef offset =
+        LLVMConstInt(LLVMInt64Type(), (uint64_t) byte_offset, false);
+    LLVMValueRef field_bytes =
+        LLVMBuildGEP2(*builder, LLVMInt8Type(), rv_bytes, &offset, 1, "");
+    return LLVMBuildBitCast(*builder, field_bytes,
+                            LLVMPointerType(field_type, 0), "");
+}
+
+FORCE_INLINE LLVMValueRef t2c_gen_csr_cycle_addr(LLVMValueRef start,
+                                                 LLVMBuilderRef *builder,
+                                                 UNUSED rv_insn_t *ir)
+{
+    return t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, csr_cycle),
+                                LLVMInt64Type());
+}
 
 #define T2C_LLVM_GEN_STORE_IMM32(builder, val, addr) \
     LLVMBuildStore(builder, LLVMConstInt(LLVMInt32Type(), val, true), addr)
@@ -192,24 +239,17 @@ UNUSED FORCE_INLINE LLVMValueRef t2c_gen_mem_loc(LLVMValueRef start,
  * This approach is correct regardless of RV32_HAS(SYSTEM) configuration,
  * which adds extra MMU function pointers to riscv_io_t.
  *
- * Uses manual pointer arithmetic (PtrToInt -> Add -> IntToPtr) to compute
- * the correct address, avoiding issues with GEP and struct layout
- * mismatches that can cause crashes on Apple Silicon.
+ * Uses byte-based pointer arithmetic from the real riscv_t base rather than
+ * the synthetic prefix type used for the T2C function parameter.
  */
 FORCE_INLINE void t2c_gen_call_io_func(LLVMValueRef start,
                                        LLVMBuilderRef *builder,
                                        LLVMTypeRef *param_types,
                                        size_t byte_offset)
 {
-    /* Convert rv pointer to integer, add offset, convert back to pointer */
     LLVMValueRef rv_ptr = LLVMGetParam(start, 0);
-    LLVMValueRef rv_int =
-        LLVMBuildPtrToInt(*builder, rv_ptr, LLVMInt64Type(), "");
-    LLVMValueRef offset_val = LLVMConstInt(LLVMInt64Type(), byte_offset, false);
-    LLVMValueRef func_ptr_addr = LLVMBuildAdd(*builder, rv_int, offset_val, "");
-    LLVMValueRef func_ptr_ptr = LLVMBuildIntToPtr(
-        *builder, func_ptr_addr,
-        LLVMPointerType(LLVMPointerType(LLVMVoidType(), 0), 0), "");
+    LLVMValueRef func_ptr_ptr = t2c_gen_rv_field_ptr(
+        start, builder, byte_offset, LLVMPointerType(LLVMVoidType(), 0));
 
     /* Load function pointer and call */
     LLVMValueRef io_func = LLVMBuildLoad2(
@@ -398,7 +438,8 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     LLVMModuleRef module = LLVMModuleCreateWithName("my_module");
     /* Build LLVM struct type that matches riscv_internal layout.
      *
-     * Actual riscv_internal struct layout (see riscv_private.h):
+     * Synthetic riscv_internal prefix layout used by typed GEPs (see
+     * riscv_private.h):
      *   1. bool halt (1 byte + padding)
      *   2. uint32_t X[32] (128 bytes)
      *   3. uint32_t PC (4 bytes)
@@ -406,9 +447,9 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
      *   5. riscv_user_t data (pointer, 8 bytes)
      *   6. riscv_io_t io (function pointers)
      *
-     * Note: Additional fields may exist with SYSTEM/EXT_F/etc enabled.
-     * The io struct offset is computed using offsetof() in
-     * t2c_gen_call_io_func.
+     * Fields beyond this prefix (for example csr_cycle, csr_satp, jit_cache,
+     * inline_cache, and dtlb) are accessed via byte offsets from the real rv
+     * base pointer, not via typed inbounds GEPs on this truncated struct.
      */
     LLVMTypeRef io_members[] = {
         LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0),

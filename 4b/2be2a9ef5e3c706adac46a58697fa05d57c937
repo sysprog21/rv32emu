@@ -1,0 +1,20 @@
+src/jit.c
+  s_836b991c4170b2::t_75a1243cbb92bb 3781-3790
+  s_836b991c4170b2::t_ecb7da19dcad5e 1957-1958,1977-1978,1989-1990,2043,2104-2105,2330-2331,2387-2389
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.11",
+  "base_commit_sha": "4b2be2a9ef5e3c706adac46a58697fa05d57c937",
+  "prompts": {},
+  "sessions": {
+    "s_836b991c4170b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ff1891d2-5fd7-40dc-9867-1354f9723029",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jim Huang <jserv@ccns.ncku.edu.tw>"
+    }
+  }
+}

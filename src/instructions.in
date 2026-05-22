@@ -1,0 +1,988 @@
+# RISC-V Instruction Descriptor for rv32emu
+#
+# format of a line in this file:
+# <instruction name> <args> <opcode>
+#
+# <opcode> is given by specifying one or more range/value pairs:
+# hi..lo=value or bit=value or arg=value (e.g. 6..2=0x45 10=1 rd=0)
+#
+# <args> is one of rd, rs1, rs2, rs3, imm20, imm12, imm12lo, imm12hi,
+# shamtw, shamt, rm
+#
+# source: https://github.com/riscv/riscv-opcodes
+
+# RV32I Base Integer Instruction Set
+
+beq     bimm12hi rs1 rs2 bimm12lo 14..12=0 6..2=0x18 1..0=3
+bne     bimm12hi rs1 rs2 bimm12lo 14..12=1 6..2=0x18 1..0=3
+blt     bimm12hi rs1 rs2 bimm12lo 14..12=4 6..2=0x18 1..0=3
+bge     bimm12hi rs1 rs2 bimm12lo 14..12=5 6..2=0x18 1..0=3
+bltu    bimm12hi rs1 rs2 bimm12lo 14..12=6 6..2=0x18 1..0=3
+bgeu    bimm12hi rs1 rs2 bimm12lo 14..12=7 6..2=0x18 1..0=3
+
+jalr    rd rs1 imm12              14..12=0 6..2=0x19 1..0=3
+
+jal     rd jimm20                          6..2=0x1b 1..0=3
+
+lui     rd imm20 6..2=0x0D 1..0=3
+auipc   rd imm20 6..2=0x05 1..0=3
+
+addi    rd rs1 imm12           14..12=0 6..2=0x04 1..0=3
+slli    rd rs1 31..25=0 shamtw 14..12=1 6..2=0x04 1..0=3
+slti    rd rs1 imm12           14..12=2 6..2=0x04 1..0=3
+sltiu   rd rs1 imm12           14..12=3 6..2=0x04 1..0=3
+xori    rd rs1 imm12           14..12=4 6..2=0x04 1..0=3
+srli    rd rs1 31..25=0 shamtw 14..12=5 6..2=0x04 1..0=3
+srai    rd rs1 31..25=32 shamtw 14..12=5 6..2=0x04 1..0=3
+ori     rd rs1 imm12           14..12=6 6..2=0x04 1..0=3
+andi    rd rs1 imm12           14..12=7 6..2=0x04 1..0=3
+
+add     rd rs1 rs2 31..25=0  14..12=0 6..2=0x0C 1..0=3
+sub     rd rs1 rs2 31..25=32 14..12=0 6..2=0x0C 1..0=3
+sll     rd rs1 rs2 31..25=0  14..12=1 6..2=0x0C 1..0=3
+slt     rd rs1 rs2 31..25=0  14..12=2 6..2=0x0C 1..0=3
+sltu    rd rs1 rs2 31..25=0  14..12=3 6..2=0x0C 1..0=3
+xor     rd rs1 rs2 31..25=0  14..12=4 6..2=0x0C 1..0=3
+srl     rd rs1 rs2 31..25=0  14..12=5 6..2=0x0C 1..0=3
+sra     rd rs1 rs2 31..25=32 14..12=5 6..2=0x0C 1..0=3
+or      rd rs1 rs2 31..25=0  14..12=6 6..2=0x0C 1..0=3
+and     rd rs1 rs2 31..25=0  14..12=7 6..2=0x0C 1..0=3
+
+lb      rd rs1 imm12 14..12=0 6..2=0x00 1..0=3
+lh      rd rs1 imm12 14..12=1 6..2=0x00 1..0=3
+lw      rd rs1 imm12 14..12=2 6..2=0x00 1..0=3
+lbu     rd rs1 imm12 14..12=4 6..2=0x00 1..0=3
+lhu     rd rs1 imm12 14..12=5 6..2=0x00 1..0=3
+
+sb      imm12hi rs1 rs2 imm12lo 14..12=0 6..2=0x08 1..0=3
+sh      imm12hi rs1 rs2 imm12lo 14..12=1 6..2=0x08 1..0=3
+sw      imm12hi rs1 rs2 imm12lo 14..12=2 6..2=0x08 1..0=3
+
+fence   fm pred succ rs1 14..12=0 rd 6..2=0x03 1..0=3
+
+# RISC-V Privileged Instructions
+
+ecall      11..7=0 19..15=0 31..20=0x000 14..12=0 6..2=0x1C 1..0=3
+ebreak     11..7=0 19..15=0 31..20=0x001 14..12=0 6..2=0x1C 1..0=3
+wfi        11..7=0 19..15=0 31..20=0x105 14..12=0 6..2=0x1C 1..0=3
+uret       11..7=0 19..15=0 31..20=0x002 14..12=0 6..2=0x1C 1..0=3
+hret       11..7=0 19..15=0 31..20=0x202 14..12=0 6..2=0x1C 1..0=3
+mret       11..7=0 19..15=0 31..20=0x302 14..12=0 6..2=0x1C 1..0=3
+sfencevma  rs1 rs2 31..25=0b0001001 14..12=0 11..7=0 6..2=0x1C 1..0=3
+
+@extension SYSTEM
+sret       11..7=0 19..15=0 31..20=0x102 14..12=0 6..2=0x1C 1..0=3
+
+# Zifencei Standard Extension
+
+@extension Zifencei
+fencei  imm12 rs1 14..12=1 rd 6..2=0x03 1..0=3
+
+# Zicsr Standard Extension
+
+@extension Zicsr
+csrrw   rd rs1 imm12 14..12=1 6..2=0x1C 1..0=3
+csrrs   rd rs1 imm12 14..12=2 6..2=0x1C 1..0=3
+csrrc   rd rs1 imm12 14..12=3 6..2=0x1C 1..0=3
+csrrwi  rd rs1 imm12 14..12=5 6..2=0x1C 1..0=3
+csrrsi  rd rs1 imm12 14..12=6 6..2=0x1C 1..0=3
+csrrci  rd rs1 imm12 14..12=7 6..2=0x1C 1..0=3
+
+# RV32M Standard Extension (Multiply/Divide)
+
+@extension EXT_M
+mul     rd rs1 rs2 31..25=1 14..12=0 6..2=0x0C 1..0=3
+mulh    rd rs1 rs2 31..25=1 14..12=1 6..2=0x0C 1..0=3
+mulhsu  rd rs1 rs2 31..25=1 14..12=2 6..2=0x0C 1..0=3
+mulhu   rd rs1 rs2 31..25=1 14..12=3 6..2=0x0C 1..0=3
+div     rd rs1 rs2 31..25=1 14..12=4 6..2=0x0C 1..0=3
+divu    rd rs1 rs2 31..25=1 14..12=5 6..2=0x0C 1..0=3
+rem     rd rs1 rs2 31..25=1 14..12=6 6..2=0x0C 1..0=3
+remu    rd rs1 rs2 31..25=1 14..12=7 6..2=0x0C 1..0=3
+
+# RV32A Standard Extension (Atomics)
+
+@extension EXT_A
+lrw       rd rs1      24..20=0 aq rl 31..27=0x02 14..12=2 6..2=0x0B 1..0=3
+scw       rd rs1 rs2           aq rl 31..27=0x03 14..12=2 6..2=0x0B 1..0=3
+amoswapw  rd rs1 rs2           aq rl 31..27=0x01 14..12=2 6..2=0x0B 1..0=3
+amoaddw   rd rs1 rs2           aq rl 31..27=0x00 14..12=2 6..2=0x0B 1..0=3
+amoxorw   rd rs1 rs2           aq rl 31..27=0x04 14..12=2 6..2=0x0B 1..0=3
+amoandw   rd rs1 rs2           aq rl 31..27=0x0C 14..12=2 6..2=0x0B 1..0=3
+amoorw    rd rs1 rs2           aq rl 31..27=0x08 14..12=2 6..2=0x0B 1..0=3
+amominw   rd rs1 rs2           aq rl 31..27=0x10 14..12=2 6..2=0x0B 1..0=3
+amomaxw   rd rs1 rs2           aq rl 31..27=0x14 14..12=2 6..2=0x0B 1..0=3
+amominuw  rd rs1 rs2           aq rl 31..27=0x18 14..12=2 6..2=0x0B 1..0=3
+amomaxuw  rd rs1 rs2           aq rl 31..27=0x1C 14..12=2 6..2=0x0B 1..0=3
+
+# RV32F Standard Extension (Single-Precision Float)
+
+@extension EXT_F
+flw       rd rs1 imm12                          14..12=2 6..2=0x01 1..0=3
+fsw       imm12hi rs1 rs2 imm12lo               14..12=2 6..2=0x09 1..0=3
+fmadds    rd rs1 rs2 rs3 rm                     26..25=0 6..2=0x10 1..0=3
+fmsubs    rd rs1 rs2 rs3 rm                     26..25=0 6..2=0x11 1..0=3
+fnmsubs   rd rs1 rs2 rs3 rm                     26..25=0 6..2=0x12 1..0=3
+fnmadds   rd rs1 rs2 rs3 rm                     26..25=0 6..2=0x13 1..0=3
+fadds     rd rs1 rs2      31..27=0x00 rm 26..25=0 6..2=0x14 1..0=3
+fsubs     rd rs1 rs2      31..27=0x01 rm 26..25=0 6..2=0x14 1..0=3
+fmuls     rd rs1 rs2      31..27=0x02 rm 26..25=0 6..2=0x14 1..0=3
+fdivs     rd rs1 rs2      31..27=0x03 rm 26..25=0 6..2=0x14 1..0=3
+fsqrts    rd rs1 24..20=0 31..27=0x0B rm 26..25=0 6..2=0x14 1..0=3
+fsgnjs    rd rs1 rs2      31..27=0x04 14..12=0 26..25=0 6..2=0x14 1..0=3
+fsgnjns   rd rs1 rs2      31..27=0x04 14..12=1 26..25=0 6..2=0x14 1..0=3
+fsgnjxs   rd rs1 rs2      31..27=0x04 14..12=2 26..25=0 6..2=0x14 1..0=3
+fmins     rd rs1 rs2      31..27=0x05 14..12=0 26..25=0 6..2=0x14 1..0=3
+fmaxs     rd rs1 rs2      31..27=0x05 14..12=1 26..25=0 6..2=0x14 1..0=3
+fcvtws    rd rs1 24..20=0 31..27=0x18 rm 26..25=0 6..2=0x14 1..0=3
+fcvtwus   rd rs1 24..20=1 31..27=0x18 rm 26..25=0 6..2=0x14 1..0=3
+fmvxw     rd rs1 24..20=0 31..27=0x1C 14..12=0 26..25=0 6..2=0x14 1..0=3
+fclasss   rd rs1 24..20=0 31..27=0x1C 14..12=1 26..25=0 6..2=0x14 1..0=3
+feqs      rd rs1 rs2      31..27=0x14 14..12=2 26..25=0 6..2=0x14 1..0=3
+flts      rd rs1 rs2      31..27=0x14 14..12=1 26..25=0 6..2=0x14 1..0=3
+fles      rd rs1 rs2      31..27=0x14 14..12=0 26..25=0 6..2=0x14 1..0=3
+fcvtsw    rd rs1 24..20=0 31..27=0x1A rm 26..25=0 6..2=0x14 1..0=3
+fcvtswu   rd rs1 24..20=1 31..27=0x1A rm 26..25=0 6..2=0x14 1..0=3
+fmvwx     rd rs1 24..20=0 31..27=0x1E 14..12=0 26..25=0 6..2=0x14 1..0=3
+
+# Zba Standard Extension (Address generation)
+
+@extension Zba
+sh1add  rd rs1 rs2 31..25=0b0010000 14..12=2 6..2=0x0C 1..0=3
+sh2add  rd rs1 rs2 31..25=0b0010000 14..12=4 6..2=0x0C 1..0=3
+sh3add  rd rs1 rs2 31..25=0b0010000 14..12=6 6..2=0x0C 1..0=3
+
+# Zbb Standard Extension (Basic bit-manipulation)
+
+@extension Zbb
+andn    rd rs1 rs2 31..25=0b0100000 14..12=7 6..2=0x0C 1..0=3
+orn     rd rs1 rs2 31..25=0b0100000 14..12=6 6..2=0x0C 1..0=3
+xnor    rd rs1 rs2 31..25=0b0100000 14..12=4 6..2=0x0C 1..0=3
+max     rd rs1 rs2 31..25=0b0000101 14..12=6 6..2=0x0C 1..0=3
+maxu    rd rs1 rs2 31..25=0b0000101 14..12=7 6..2=0x0C 1..0=3
+min     rd rs1 rs2 31..25=0b0000101 14..12=4 6..2=0x0C 1..0=3
+minu    rd rs1 rs2 31..25=0b0000101 14..12=5 6..2=0x0C 1..0=3
+rol     rd rs1 rs2 31..25=0b0110000 14..12=1 6..2=0x0C 1..0=3
+ror     rd rs1 rs2 31..25=0b0110000 14..12=5 6..2=0x0C 1..0=3
+zexth   rd rs1     31..25=0b0000100 24..20=0 14..12=4 6..2=0x0C 1..0=3
+clz     rd rs1 31..20=0b011000000000 14..12=1 6..2=0x04 1..0=3
+ctz     rd rs1 31..20=0b011000000001 14..12=1 6..2=0x04 1..0=3
+cpop    rd rs1 31..20=0b011000000010 14..12=1 6..2=0x04 1..0=3
+sextb   rd rs1 31..20=0b011000000100 14..12=1 6..2=0x04 1..0=3
+sexth   rd rs1 31..20=0b011000000101 14..12=1 6..2=0x04 1..0=3
+rori    rd rs1 31..25=0b0110000 shamtw 14..12=5 6..2=0x04 1..0=3
+orcb    rd rs1 31..20=0b001010000111 14..12=5 6..2=0x04 1..0=3
+rev8    rd rs1 31..20=0b011010011000 14..12=5 6..2=0x04 1..0=3
+
+# Zbc Standard Extension (Carry-less multiplication)
+
+@extension Zbc
+clmul   rd rs1 rs2 31..25=0b0000101 14..12=1 6..2=0x0C 1..0=3
+clmulh  rd rs1 rs2 31..25=0b0000101 14..12=3 6..2=0x0C 1..0=3
+clmulr  rd rs1 rs2 31..25=0b0000101 14..12=2 6..2=0x0C 1..0=3
+
+# Zbs Standard Extension (Single-bit operations)
+
+@extension Zbs
+bclr    rd rs1 rs2 31..25=0b0100100 14..12=1 6..2=0x0C 1..0=3
+bext    rd rs1 rs2 31..25=0b0100100 14..12=5 6..2=0x0C 1..0=3
+binv    rd rs1 rs2 31..25=0b0110100 14..12=1 6..2=0x0C 1..0=3
+bset    rd rs1 rs2 31..25=0b0010100 14..12=1 6..2=0x0C 1..0=3
+bclri   rd rs1 31..25=0b0100100 shamtw 14..12=1 6..2=0x04 1..0=3
+bexti   rd rs1 31..25=0b0100100 shamtw 14..12=5 6..2=0x04 1..0=3
+binvi   rd rs1 31..25=0b0110100 shamtw 14..12=1 6..2=0x04 1..0=3
+bseti   rd rs1 31..25=0b0010100 shamtw 14..12=1 6..2=0x04 1..0=3
+
+# RV32C Standard Extension (Compressed Instructions)
+# 16-bit instructions: bits[1:0] = 0, 1, or 2 (not 3)
+
+@extension EXT_C
+
+# Quadrant 0 (1..0=0)
+caddi4spn crdq  cimm4spn               15..13=0 1..0=0
+clw       crdq  crs1q  cimmw           15..13=2 1..0=0
+csw       crs1q crs2q  cimmw           15..13=6 1..0=0
+
+# Quadrant 1 (1..0=1)
+cnop                                   15..13=0 12=0 11..7=0 6..2=0 1..0=1
+caddi     crs1rd cnzimmi               15..13=0 1..0=1
+cjal      cimmj                        15..13=1 1..0=1
+cli       crd    cimmi                 15..13=2 1..0=1
+caddi16sp cnzimm16sp                   15..13=3 11..7=2 1..0=1
+clui      crd    cnzimmi               15..13=3 1..0=1
+csrli     crs1q  cshamt                15..13=4 11..10=0 1..0=1
+csrai     crs1q  cshamt                15..13=4 11..10=1 1..0=1
+candi     crs1q  cimmi                 15..13=4 11..10=2 1..0=1
+csub      crs1q  crs2q                 15..13=4 12=0 11..10=3 6..5=0 1..0=1
+cxor      crs1q  crs2q                 15..13=4 12=0 11..10=3 6..5=1 1..0=1
+cor       crs1q  crs2q                 15..13=4 12=0 11..10=3 6..5=2 1..0=1
+cand      crs1q  crs2q                 15..13=4 12=0 11..10=3 6..5=3 1..0=1
+cj        cimmj                        15..13=5 1..0=1
+cbeqz     crs1q  cimmb                 15..13=6 1..0=1
+cbnez     crs1q  cimmb                 15..13=7 1..0=1
+
+# Quadrant 2 (1..0=2)
+cslli     crs1rd cshamt                15..13=0 1..0=2
+clwsp     crd    cimmlwsp              15..13=2 1..0=2
+cjr       crs1                         15..13=4 12=0 6..2=0 1..0=2
+cmv       crd    crs2                  15..13=4 12=0 1..0=2
+cebreak                                15..13=4 12=1 11..7=0 6..2=0 1..0=2
+cjalr     crs1                         15..13=4 12=1 6..2=0 1..0=2
+cadd      crs1rd crs2                  15..13=4 12=1 1..0=2
+cswsp     crs2   cimmswsp              15..13=6 1..0=2
+
+# RV32FC (Compressed Float, requires EXT_C && EXT_F)
+@extension EXT_F
+cflw      crdq   crs1q  cimmw         15..13=3 1..0=0
+cfsw      crs1q  crs2q  cimmw         15..13=7 1..0=0
+cflwsp    crd    cimmlwsp              15..13=3 1..0=2
+cfswsp    crs2   cimmswsp              15..13=7 1..0=2
+
+# =============================================================
+# RVV (RISC-V Vector Extension v1.0)
+# All instructions require EXT_V.
+# =============================================================
+
+# --- V Configuration-Setting Instructions (funct3=111, opcode=OP-V) ---
+# Encoding summary (opcode[6:2]=0x15, bits[1:0]=3, funct3[14:12]=7):
+#   vsetvli:  [31]=0,           [30:20]=zimm11(vtypei), [19:15]=rs1,   [11:7]=rd
+#   vsetivli: [31:30]=3,        [29:20]=zimm10(vtypei), [19:15]=zimm5(avl), [11:7]=rd
+#   vsetvl:   [31:25]=0b1000000,[24:20]=rs2,            [19:15]=rs1,   [11:7]=rd
+@extension EXT_V
+vsetvli   rd rs1 zimm11   31=0            14..12=7 6..2=0x15 1..0=3
+vsetivli  rd zimm5 zimm10 31..30=3        14..12=7 6..2=0x15 1..0=3
+vsetvl    rd rs1 rs2      31..25=0b1000000 14..12=7 6..2=0x15 1..0=3
+# --- V-Load Instructions (opcode=LOAD-FP) ---
+# Bit layout: [31:29]=nf [28]=mew [27:26]=mop [25]=vm
+#             [24:20]=lumop/rs2/vs2 [19:15]=rs1
+#             [14:12]=width(EEW)   [11:7]=vd
+
+# -- Unit-stride loads: mop=00, lumop=00000 (normal) --
+vle8_v                        vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=0  6..2=0x01 1..0=3
+vlseg2e8_v                    vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=1  6..2=0x01 1..0=3
+vlseg3e8_v                    vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=2  6..2=0x01 1..0=3
+vlseg4e8_v                    vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=3  6..2=0x01 1..0=3
+vlseg5e8_v                    vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=4  6..2=0x01 1..0=3
+vlseg6e8_v                    vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=5  6..2=0x01 1..0=3
+vlseg7e8_v                    vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=6  6..2=0x01 1..0=3
+vlseg8e8_v                    vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=7  6..2=0x01 1..0=3
+vle16_v                       vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=0  6..2=0x01 1..0=3
+vlseg2e16_v                   vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=1  6..2=0x01 1..0=3
+vlseg3e16_v                   vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=2  6..2=0x01 1..0=3
+vlseg4e16_v                   vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=3  6..2=0x01 1..0=3
+vlseg5e16_v                   vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=4  6..2=0x01 1..0=3
+vlseg6e16_v                   vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=5  6..2=0x01 1..0=3
+vlseg7e16_v                   vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=6  6..2=0x01 1..0=3
+vlseg8e16_v                   vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=7  6..2=0x01 1..0=3
+vle32_v                       vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=0  6..2=0x01 1..0=3
+vlseg2e32_v                   vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=1  6..2=0x01 1..0=3
+vlseg3e32_v                   vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=2  6..2=0x01 1..0=3
+vlseg4e32_v                   vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=3  6..2=0x01 1..0=3
+vlseg5e32_v                   vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=4  6..2=0x01 1..0=3
+vlseg6e32_v                   vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=5  6..2=0x01 1..0=3
+vlseg7e32_v                   vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=6  6..2=0x01 1..0=3
+vlseg8e32_v                   vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=7  6..2=0x01 1..0=3
+vle64_v                       vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=0  6..2=0x01 1..0=3
+vlseg2e64_v                   vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=1  6..2=0x01 1..0=3
+vlseg3e64_v                   vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=2  6..2=0x01 1..0=3
+vlseg4e64_v                   vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=3  6..2=0x01 1..0=3
+vlseg5e64_v                   vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=4  6..2=0x01 1..0=3
+vlseg6e64_v                   vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=5  6..2=0x01 1..0=3
+vlseg7e64_v                   vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=6  6..2=0x01 1..0=3
+vlseg8e64_v                   vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=7  6..2=0x01 1..0=3
+
+# -- Whole-register loads: mop=00, lumop=01000 --
+vl1re8_v                      vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=8  31..29=0  6..2=0x01 1..0=3
+vl2re8_v                      vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=8  31..29=1  6..2=0x01 1..0=3
+vl4re8_v                      vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=8  31..29=3  6..2=0x01 1..0=3
+vl8re8_v                      vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=8  31..29=7  6..2=0x01 1..0=3
+vl1re16_v                     vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=8  31..29=0  6..2=0x01 1..0=3
+vl2re16_v                     vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=8  31..29=1  6..2=0x01 1..0=3
+vl4re16_v                     vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=8  31..29=3  6..2=0x01 1..0=3
+vl8re16_v                     vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=8  31..29=7  6..2=0x01 1..0=3
+vl1re32_v                     vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=8  31..29=0  6..2=0x01 1..0=3
+vl2re32_v                     vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=8  31..29=1  6..2=0x01 1..0=3
+vl4re32_v                     vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=8  31..29=3  6..2=0x01 1..0=3
+vl8re32_v                     vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=8  31..29=7  6..2=0x01 1..0=3
+vl1re64_v                     vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=8  31..29=0  6..2=0x01 1..0=3
+vl2re64_v                     vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=8  31..29=1  6..2=0x01 1..0=3
+vl4re64_v                     vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=8  31..29=3  6..2=0x01 1..0=3
+vl8re64_v                     vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=8  31..29=7  6..2=0x01 1..0=3
+
+# -- Mask load: mop=00, lumop=01011, eew=8, nf=0 --
+vlm_v                         vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=11  31..29=0  6..2=0x01 1..0=3
+
+# -- Fault-only-first loads: mop=00, lumop=10000 --
+vle8ff_v                      vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=16  31..29=0  6..2=0x01 1..0=3
+vlseg2e8ff_v                  vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=16  31..29=1  6..2=0x01 1..0=3
+vlseg3e8ff_v                  vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=16  31..29=2  6..2=0x01 1..0=3
+vlseg4e8ff_v                  vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=16  31..29=3  6..2=0x01 1..0=3
+vlseg5e8ff_v                  vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=16  31..29=4  6..2=0x01 1..0=3
+vlseg6e8ff_v                  vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=16  31..29=5  6..2=0x01 1..0=3
+vlseg7e8ff_v                  vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=16  31..29=6  6..2=0x01 1..0=3
+vlseg8e8ff_v                  vd rs1 vm veew  14..12=0  27..26=0  28=0  24..20=16  31..29=7  6..2=0x01 1..0=3
+vle16ff_v                     vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=16  31..29=0  6..2=0x01 1..0=3
+vlseg2e16ff_v                 vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=16  31..29=1  6..2=0x01 1..0=3
+vlseg3e16ff_v                 vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=16  31..29=2  6..2=0x01 1..0=3
+vlseg4e16ff_v                 vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=16  31..29=3  6..2=0x01 1..0=3
+vlseg5e16ff_v                 vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=16  31..29=4  6..2=0x01 1..0=3
+vlseg6e16ff_v                 vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=16  31..29=5  6..2=0x01 1..0=3
+vlseg7e16ff_v                 vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=16  31..29=6  6..2=0x01 1..0=3
+vlseg8e16ff_v                 vd rs1 vm veew  14..12=5  27..26=0  28=0  24..20=16  31..29=7  6..2=0x01 1..0=3
+vle32ff_v                     vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=16  31..29=0  6..2=0x01 1..0=3
+vlseg2e32ff_v                 vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=16  31..29=1  6..2=0x01 1..0=3
+vlseg3e32ff_v                 vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=16  31..29=2  6..2=0x01 1..0=3
+vlseg4e32ff_v                 vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=16  31..29=3  6..2=0x01 1..0=3
+vlseg5e32ff_v                 vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=16  31..29=4  6..2=0x01 1..0=3
+vlseg6e32ff_v                 vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=16  31..29=5  6..2=0x01 1..0=3
+vlseg7e32ff_v                 vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=16  31..29=6  6..2=0x01 1..0=3
+vlseg8e32ff_v                 vd rs1 vm veew  14..12=6  27..26=0  28=0  24..20=16  31..29=7  6..2=0x01 1..0=3
+vle64ff_v                     vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=16  31..29=0  6..2=0x01 1..0=3
+vlseg2e64ff_v                 vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=16  31..29=1  6..2=0x01 1..0=3
+vlseg3e64ff_v                 vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=16  31..29=2  6..2=0x01 1..0=3
+vlseg4e64ff_v                 vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=16  31..29=3  6..2=0x01 1..0=3
+vlseg5e64ff_v                 vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=16  31..29=4  6..2=0x01 1..0=3
+vlseg6e64ff_v                 vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=16  31..29=5  6..2=0x01 1..0=3
+vlseg7e64ff_v                 vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=16  31..29=6  6..2=0x01 1..0=3
+vlseg8e64ff_v                 vd rs1 vm veew  14..12=7  27..26=0  28=0  24..20=16  31..29=7  6..2=0x01 1..0=3
+
+# -- Strided loads: mop=10, bits[24:20]=rs2 --
+vlse8_v                       vd rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=0  6..2=0x01 1..0=3
+vlsseg2e8_v                   vd rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=1  6..2=0x01 1..0=3
+vlsseg3e8_v                   vd rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=2  6..2=0x01 1..0=3
+vlsseg4e8_v                   vd rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=3  6..2=0x01 1..0=3
+vlsseg5e8_v                   vd rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=4  6..2=0x01 1..0=3
+vlsseg6e8_v                   vd rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=5  6..2=0x01 1..0=3
+vlsseg7e8_v                   vd rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=6  6..2=0x01 1..0=3
+vlsseg8e8_v                   vd rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=7  6..2=0x01 1..0=3
+vlse16_v                      vd rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=0  6..2=0x01 1..0=3
+vlsseg2e16_v                  vd rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=1  6..2=0x01 1..0=3
+vlsseg3e16_v                  vd rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=2  6..2=0x01 1..0=3
+vlsseg4e16_v                  vd rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=3  6..2=0x01 1..0=3
+vlsseg5e16_v                  vd rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=4  6..2=0x01 1..0=3
+vlsseg6e16_v                  vd rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=5  6..2=0x01 1..0=3
+vlsseg7e16_v                  vd rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=6  6..2=0x01 1..0=3
+vlsseg8e16_v                  vd rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=7  6..2=0x01 1..0=3
+vlse32_v                      vd rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=0  6..2=0x01 1..0=3
+vlsseg2e32_v                  vd rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=1  6..2=0x01 1..0=3
+vlsseg3e32_v                  vd rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=2  6..2=0x01 1..0=3
+vlsseg4e32_v                  vd rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=3  6..2=0x01 1..0=3
+vlsseg5e32_v                  vd rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=4  6..2=0x01 1..0=3
+vlsseg6e32_v                  vd rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=5  6..2=0x01 1..0=3
+vlsseg7e32_v                  vd rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=6  6..2=0x01 1..0=3
+vlsseg8e32_v                  vd rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=7  6..2=0x01 1..0=3
+vlse64_v                      vd rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=0  6..2=0x01 1..0=3
+vlsseg2e64_v                  vd rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=1  6..2=0x01 1..0=3
+vlsseg3e64_v                  vd rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=2  6..2=0x01 1..0=3
+vlsseg4e64_v                  vd rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=3  6..2=0x01 1..0=3
+vlsseg5e64_v                  vd rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=4  6..2=0x01 1..0=3
+vlsseg6e64_v                  vd rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=5  6..2=0x01 1..0=3
+vlsseg7e64_v                  vd rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=6  6..2=0x01 1..0=3
+vlsseg8e64_v                  vd rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=7  6..2=0x01 1..0=3
+
+# -- Indexed-unordered loads: mop=01, bits[24:20]=vs2 --
+vluxei8_v                     vd rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=0  6..2=0x01 1..0=3
+vluxseg2ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=1  6..2=0x01 1..0=3
+vluxseg3ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=2  6..2=0x01 1..0=3
+vluxseg4ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=3  6..2=0x01 1..0=3
+vluxseg5ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=4  6..2=0x01 1..0=3
+vluxseg6ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=5  6..2=0x01 1..0=3
+vluxseg7ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=6  6..2=0x01 1..0=3
+vluxseg8ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=7  6..2=0x01 1..0=3
+vluxei16_v                    vd rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=0  6..2=0x01 1..0=3
+vluxseg2ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=1  6..2=0x01 1..0=3
+vluxseg3ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=2  6..2=0x01 1..0=3
+vluxseg4ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=3  6..2=0x01 1..0=3
+vluxseg5ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=4  6..2=0x01 1..0=3
+vluxseg6ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=5  6..2=0x01 1..0=3
+vluxseg7ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=6  6..2=0x01 1..0=3
+vluxseg8ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=7  6..2=0x01 1..0=3
+vluxei32_v                    vd rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=0  6..2=0x01 1..0=3
+vluxseg2ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=1  6..2=0x01 1..0=3
+vluxseg3ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=2  6..2=0x01 1..0=3
+vluxseg4ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=3  6..2=0x01 1..0=3
+vluxseg5ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=4  6..2=0x01 1..0=3
+vluxseg6ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=5  6..2=0x01 1..0=3
+vluxseg7ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=6  6..2=0x01 1..0=3
+vluxseg8ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=7  6..2=0x01 1..0=3
+vluxei64_v                    vd rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=0  6..2=0x01 1..0=3
+vluxseg2ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=1  6..2=0x01 1..0=3
+vluxseg3ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=2  6..2=0x01 1..0=3
+vluxseg4ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=3  6..2=0x01 1..0=3
+vluxseg5ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=4  6..2=0x01 1..0=3
+vluxseg6ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=5  6..2=0x01 1..0=3
+vluxseg7ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=6  6..2=0x01 1..0=3
+vluxseg8ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=7  6..2=0x01 1..0=3
+
+# -- Indexed-ordered loads: mop=11, bits[24:20]=vs2 --
+vloxei8_v                     vd rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=0  6..2=0x01 1..0=3
+vloxseg2ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=1  6..2=0x01 1..0=3
+vloxseg3ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=2  6..2=0x01 1..0=3
+vloxseg4ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=3  6..2=0x01 1..0=3
+vloxseg5ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=4  6..2=0x01 1..0=3
+vloxseg6ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=5  6..2=0x01 1..0=3
+vloxseg7ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=6  6..2=0x01 1..0=3
+vloxseg8ei8_v                 vd rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=7  6..2=0x01 1..0=3
+vloxei16_v                    vd rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=0  6..2=0x01 1..0=3
+vloxseg2ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=1  6..2=0x01 1..0=3
+vloxseg3ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=2  6..2=0x01 1..0=3
+vloxseg4ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=3  6..2=0x01 1..0=3
+vloxseg5ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=4  6..2=0x01 1..0=3
+vloxseg6ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=5  6..2=0x01 1..0=3
+vloxseg7ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=6  6..2=0x01 1..0=3
+vloxseg8ei16_v                vd rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=7  6..2=0x01 1..0=3
+vloxei32_v                    vd rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=0  6..2=0x01 1..0=3
+vloxseg2ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=1  6..2=0x01 1..0=3
+vloxseg3ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=2  6..2=0x01 1..0=3
+vloxseg4ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=3  6..2=0x01 1..0=3
+vloxseg5ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=4  6..2=0x01 1..0=3
+vloxseg6ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=5  6..2=0x01 1..0=3
+vloxseg7ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=6  6..2=0x01 1..0=3
+vloxseg8ei32_v                vd rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=7  6..2=0x01 1..0=3
+vloxei64_v                    vd rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=0  6..2=0x01 1..0=3
+vloxseg2ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=1  6..2=0x01 1..0=3
+vloxseg3ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=2  6..2=0x01 1..0=3
+vloxseg4ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=3  6..2=0x01 1..0=3
+vloxseg5ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=4  6..2=0x01 1..0=3
+vloxseg6ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=5  6..2=0x01 1..0=3
+vloxseg7ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=6  6..2=0x01 1..0=3
+vloxseg8ei64_v                vd rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=7  6..2=0x01 1..0=3
+
+
+# --- V-Store Instructions (opcode=STORE-FP) ---
+# Bit layout: same as V-loads except bits[11:7]=vs3 (source vector reg)
+
+# -- Unit-stride stores: mop=00, sumop=00000 (normal) --
+vse8_v                        vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=0  6..2=0x09 1..0=3
+vsseg2e8_v                    vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=1  6..2=0x09 1..0=3
+vsseg3e8_v                    vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=2  6..2=0x09 1..0=3
+vsseg4e8_v                    vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=3  6..2=0x09 1..0=3
+vsseg5e8_v                    vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=4  6..2=0x09 1..0=3
+vsseg6e8_v                    vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=5  6..2=0x09 1..0=3
+vsseg7e8_v                    vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=6  6..2=0x09 1..0=3
+vsseg8e8_v                    vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=0  31..29=7  6..2=0x09 1..0=3
+vse16_v                       vs3 rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=0  6..2=0x09 1..0=3
+vsseg2e16_v                   vs3 rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=1  6..2=0x09 1..0=3
+vsseg3e16_v                   vs3 rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=2  6..2=0x09 1..0=3
+vsseg4e16_v                   vs3 rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=3  6..2=0x09 1..0=3
+vsseg5e16_v                   vs3 rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=4  6..2=0x09 1..0=3
+vsseg6e16_v                   vs3 rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=5  6..2=0x09 1..0=3
+vsseg7e16_v                   vs3 rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=6  6..2=0x09 1..0=3
+vsseg8e16_v                   vs3 rs1 vm veew  14..12=5  27..26=0  28=0  24..20=0  31..29=7  6..2=0x09 1..0=3
+vse32_v                       vs3 rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=0  6..2=0x09 1..0=3
+vsseg2e32_v                   vs3 rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=1  6..2=0x09 1..0=3
+vsseg3e32_v                   vs3 rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=2  6..2=0x09 1..0=3
+vsseg4e32_v                   vs3 rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=3  6..2=0x09 1..0=3
+vsseg5e32_v                   vs3 rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=4  6..2=0x09 1..0=3
+vsseg6e32_v                   vs3 rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=5  6..2=0x09 1..0=3
+vsseg7e32_v                   vs3 rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=6  6..2=0x09 1..0=3
+vsseg8e32_v                   vs3 rs1 vm veew  14..12=6  27..26=0  28=0  24..20=0  31..29=7  6..2=0x09 1..0=3
+vse64_v                       vs3 rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=0  6..2=0x09 1..0=3
+vsseg2e64_v                   vs3 rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=1  6..2=0x09 1..0=3
+vsseg3e64_v                   vs3 rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=2  6..2=0x09 1..0=3
+vsseg4e64_v                   vs3 rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=3  6..2=0x09 1..0=3
+vsseg5e64_v                   vs3 rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=4  6..2=0x09 1..0=3
+vsseg6e64_v                   vs3 rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=5  6..2=0x09 1..0=3
+vsseg7e64_v                   vs3 rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=6  6..2=0x09 1..0=3
+vsseg8e64_v                   vs3 rs1 vm veew  14..12=7  27..26=0  28=0  24..20=0  31..29=7  6..2=0x09 1..0=3
+
+# -- Whole-register stores: mop=00, sumop=01000
+# (EEW/funct3 is not architecturally significant for opcode selection) --
+vs1r_v                        vs3 rs1 vm veew  27..26=0  28=0  24..20=8  31..29=0  6..2=0x09 1..0=3
+vs2r_v                        vs3 rs1 vm veew  27..26=0  28=0  24..20=8  31..29=1  6..2=0x09 1..0=3
+vs4r_v                        vs3 rs1 vm veew  27..26=0  28=0  24..20=8  31..29=3  6..2=0x09 1..0=3
+vs8r_v                        vs3 rs1 vm veew  27..26=0  28=0  24..20=8  31..29=7  6..2=0x09 1..0=3
+
+# -- Mask store: mop=00, sumop=01011, eew=8, nf=0 --
+vsm_v                         vs3 rs1 vm veew  14..12=0  27..26=0  28=0  24..20=11  31..29=0  6..2=0x09 1..0=3
+
+# -- Strided stores: mop=10, bits[24:20]=rs2 --
+vsse8_v                       vs3 rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=0  6..2=0x09 1..0=3
+vssseg2e8_v                   vs3 rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=1  6..2=0x09 1..0=3
+vssseg3e8_v                   vs3 rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=2  6..2=0x09 1..0=3
+vssseg4e8_v                   vs3 rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=3  6..2=0x09 1..0=3
+vssseg5e8_v                   vs3 rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=4  6..2=0x09 1..0=3
+vssseg6e8_v                   vs3 rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=5  6..2=0x09 1..0=3
+vssseg7e8_v                   vs3 rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=6  6..2=0x09 1..0=3
+vssseg8e8_v                   vs3 rs1 rs2 vm veew  14..12=0  27..26=2  28=0  31..29=7  6..2=0x09 1..0=3
+vsse16_v                      vs3 rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=0  6..2=0x09 1..0=3
+vssseg2e16_v                  vs3 rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=1  6..2=0x09 1..0=3
+vssseg3e16_v                  vs3 rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=2  6..2=0x09 1..0=3
+vssseg4e16_v                  vs3 rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=3  6..2=0x09 1..0=3
+vssseg5e16_v                  vs3 rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=4  6..2=0x09 1..0=3
+vssseg6e16_v                  vs3 rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=5  6..2=0x09 1..0=3
+vssseg7e16_v                  vs3 rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=6  6..2=0x09 1..0=3
+vssseg8e16_v                  vs3 rs1 rs2 vm veew  14..12=5  27..26=2  28=0  31..29=7  6..2=0x09 1..0=3
+vsse32_v                      vs3 rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=0  6..2=0x09 1..0=3
+vssseg2e32_v                  vs3 rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=1  6..2=0x09 1..0=3
+vssseg3e32_v                  vs3 rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=2  6..2=0x09 1..0=3
+vssseg4e32_v                  vs3 rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=3  6..2=0x09 1..0=3
+vssseg5e32_v                  vs3 rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=4  6..2=0x09 1..0=3
+vssseg6e32_v                  vs3 rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=5  6..2=0x09 1..0=3
+vssseg7e32_v                  vs3 rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=6  6..2=0x09 1..0=3
+vssseg8e32_v                  vs3 rs1 rs2 vm veew  14..12=6  27..26=2  28=0  31..29=7  6..2=0x09 1..0=3
+vsse64_v                      vs3 rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=0  6..2=0x09 1..0=3
+vssseg2e64_v                  vs3 rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=1  6..2=0x09 1..0=3
+vssseg3e64_v                  vs3 rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=2  6..2=0x09 1..0=3
+vssseg4e64_v                  vs3 rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=3  6..2=0x09 1..0=3
+vssseg5e64_v                  vs3 rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=4  6..2=0x09 1..0=3
+vssseg6e64_v                  vs3 rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=5  6..2=0x09 1..0=3
+vssseg7e64_v                  vs3 rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=6  6..2=0x09 1..0=3
+vssseg8e64_v                  vs3 rs1 rs2 vm veew  14..12=7  27..26=2  28=0  31..29=7  6..2=0x09 1..0=3
+
+# -- Indexed-unordered stores: mop=01, bits[24:20]=vs2 --
+vsuxei8_v                     vs3 rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=0  6..2=0x09 1..0=3
+vsuxseg2ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=1  6..2=0x09 1..0=3
+vsuxseg3ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=2  6..2=0x09 1..0=3
+vsuxseg4ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=3  6..2=0x09 1..0=3
+vsuxseg5ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=4  6..2=0x09 1..0=3
+vsuxseg6ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=5  6..2=0x09 1..0=3
+vsuxseg7ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=6  6..2=0x09 1..0=3
+vsuxseg8ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=1  28=0  31..29=7  6..2=0x09 1..0=3
+vsuxei16_v                    vs3 rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=0  6..2=0x09 1..0=3
+vsuxseg2ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=1  6..2=0x09 1..0=3
+vsuxseg3ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=2  6..2=0x09 1..0=3
+vsuxseg4ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=3  6..2=0x09 1..0=3
+vsuxseg5ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=4  6..2=0x09 1..0=3
+vsuxseg6ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=5  6..2=0x09 1..0=3
+vsuxseg7ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=6  6..2=0x09 1..0=3
+vsuxseg8ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=1  28=0  31..29=7  6..2=0x09 1..0=3
+vsuxei32_v                    vs3 rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=0  6..2=0x09 1..0=3
+vsuxseg2ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=1  6..2=0x09 1..0=3
+vsuxseg3ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=2  6..2=0x09 1..0=3
+vsuxseg4ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=3  6..2=0x09 1..0=3
+vsuxseg5ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=4  6..2=0x09 1..0=3
+vsuxseg6ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=5  6..2=0x09 1..0=3
+vsuxseg7ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=6  6..2=0x09 1..0=3
+vsuxseg8ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=1  28=0  31..29=7  6..2=0x09 1..0=3
+vsuxei64_v                    vs3 rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=0  6..2=0x09 1..0=3
+vsuxseg2ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=1  6..2=0x09 1..0=3
+vsuxseg3ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=2  6..2=0x09 1..0=3
+vsuxseg4ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=3  6..2=0x09 1..0=3
+vsuxseg5ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=4  6..2=0x09 1..0=3
+vsuxseg6ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=5  6..2=0x09 1..0=3
+vsuxseg7ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=6  6..2=0x09 1..0=3
+vsuxseg8ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=1  28=0  31..29=7  6..2=0x09 1..0=3
+
+# -- Indexed-ordered stores: mop=11, bits[24:20]=vs2 --
+vsoxei8_v                     vs3 rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=0  6..2=0x09 1..0=3
+vsoxseg2ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=1  6..2=0x09 1..0=3
+vsoxseg3ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=2  6..2=0x09 1..0=3
+vsoxseg4ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=3  6..2=0x09 1..0=3
+vsoxseg5ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=4  6..2=0x09 1..0=3
+vsoxseg6ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=5  6..2=0x09 1..0=3
+vsoxseg7ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=6  6..2=0x09 1..0=3
+vsoxseg8ei8_v                 vs3 rs1 vs2 vm veew  14..12=0  27..26=3  28=0  31..29=7  6..2=0x09 1..0=3
+vsoxei16_v                    vs3 rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=0  6..2=0x09 1..0=3
+vsoxseg2ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=1  6..2=0x09 1..0=3
+vsoxseg3ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=2  6..2=0x09 1..0=3
+vsoxseg4ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=3  6..2=0x09 1..0=3
+vsoxseg5ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=4  6..2=0x09 1..0=3
+vsoxseg6ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=5  6..2=0x09 1..0=3
+vsoxseg7ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=6  6..2=0x09 1..0=3
+vsoxseg8ei16_v                vs3 rs1 vs2 vm veew  14..12=5  27..26=3  28=0  31..29=7  6..2=0x09 1..0=3
+vsoxei32_v                    vs3 rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=0  6..2=0x09 1..0=3
+vsoxseg2ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=1  6..2=0x09 1..0=3
+vsoxseg3ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=2  6..2=0x09 1..0=3
+vsoxseg4ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=3  6..2=0x09 1..0=3
+vsoxseg5ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=4  6..2=0x09 1..0=3
+vsoxseg6ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=5  6..2=0x09 1..0=3
+vsoxseg7ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=6  6..2=0x09 1..0=3
+vsoxseg8ei32_v                vs3 rs1 vs2 vm veew  14..12=6  27..26=3  28=0  31..29=7  6..2=0x09 1..0=3
+vsoxei64_v                    vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=0  6..2=0x09 1..0=3
+vsoxseg2ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=1  6..2=0x09 1..0=3
+vsoxseg3ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=2  6..2=0x09 1..0=3
+vsoxseg4ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=3  6..2=0x09 1..0=3
+vsoxseg5ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=4  6..2=0x09 1..0=3
+vsoxseg6ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=5  6..2=0x09 1..0=3
+vsoxseg7ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=6  6..2=0x09 1..0=3
+vsoxseg8ei64_v                vs3 rs1 vs2 vm veew  14..12=7  27..26=3  28=0  31..29=7  6..2=0x09 1..0=3
+# --- V-Arithmetic Instructions (opcode=OP-V, bits[6:2]=0x15) ---
+# funct3: 0=OPIVV 2=OPMVV 3=OPIVI 4=OPIVX 6=OPMVX
+# FP (vf*, vmf*) instructions deferred to Phase 5.
+
+# -- funct6=000000 (0x00) --
+  vadd_vv                               vd vs2 vs1 vm  31..26=0  14..12=0  6..2=0x15 1..0=3
+  vredsum_vs                            vd vs2 vs1 vm  31..26=0  14..12=2  6..2=0x15 1..0=3
+  vadd_vi                               vd vs2 simm5 vm  31..26=0  14..12=3  6..2=0x15 1..0=3
+  vadd_vx                               vd vs2 rs1 vm  31..26=0  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000001 (0x01) --
+  vredand_vs                            vd vs2 vs1 vm  31..26=1  14..12=2  6..2=0x15 1..0=3
+# -- funct6=000010 (0x02) --
+  vsub_vv                               vd vs2 vs1 vm  31..26=2  14..12=0  6..2=0x15 1..0=3
+  vredor_vs                             vd vs2 vs1 vm  31..26=2  14..12=2  6..2=0x15 1..0=3
+  vsub_vx                               vd vs2 rs1 vm  31..26=2  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000011 (0x03) --
+  vredxor_vs                            vd vs2 vs1 vm  31..26=3  14..12=2  6..2=0x15 1..0=3
+  vrsub_vi                              vd vs2 simm5 vm  31..26=3  14..12=3  6..2=0x15 1..0=3
+  vrsub_vx                              vd vs2 rs1 vm  31..26=3  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000100 (0x04) --
+  vminu_vv                              vd vs2 vs1 vm  31..26=4  14..12=0  6..2=0x15 1..0=3
+  vredminu_vs                           vd vs2 vs1 vm  31..26=4  14..12=2  6..2=0x15 1..0=3
+  vminu_vx                              vd vs2 rs1 vm  31..26=4  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000101 (0x05) --
+  vmin_vv                               vd vs2 vs1 vm  31..26=5  14..12=0  6..2=0x15 1..0=3
+  vredmin_vs                            vd vs2 vs1 vm  31..26=5  14..12=2  6..2=0x15 1..0=3
+  vmin_vx                               vd vs2 rs1 vm  31..26=5  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000110 (0x06) --
+  vmaxu_vv                              vd vs2 vs1 vm  31..26=6  14..12=0  6..2=0x15 1..0=3
+  vredmaxu_vs                           vd vs2 vs1 vm  31..26=6  14..12=2  6..2=0x15 1..0=3
+  vmaxu_vx                              vd vs2 rs1 vm  31..26=6  14..12=4  6..2=0x15 1..0=3
+# -- funct6=000111 (0x07) --
+  vmax_vv                               vd vs2 vs1 vm  31..26=7  14..12=0  6..2=0x15 1..0=3
+  vredmax_vs                            vd vs2 vs1 vm  31..26=7  14..12=2  6..2=0x15 1..0=3
+  vmax_vx                               vd vs2 rs1 vm  31..26=7  14..12=4  6..2=0x15 1..0=3
+# -- funct6=001000 (0x08) --
+  vaaddu_vv                             vd vs2 vs1 vm  31..26=8  14..12=2  6..2=0x15 1..0=3
+  vaaddu_vx                             vd vs2 rs1 vm  31..26=8  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001001 (0x09) --
+  vand_vv                               vd vs2 vs1 vm  31..26=9  14..12=0  6..2=0x15 1..0=3
+  vaadd_vv                              vd vs2 vs1 vm  31..26=9  14..12=2  6..2=0x15 1..0=3
+  vand_vi                               vd vs2 simm5 vm  31..26=9  14..12=3  6..2=0x15 1..0=3
+  vand_vx                               vd vs2 rs1 vm  31..26=9  14..12=4  6..2=0x15 1..0=3
+  vaadd_vx                              vd vs2 rs1 vm  31..26=9  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001010 (0x0a) --
+  vor_vv                                vd vs2 vs1 vm  31..26=10  14..12=0  6..2=0x15 1..0=3
+  vasubu_vv                             vd vs2 vs1 vm  31..26=10  14..12=2  6..2=0x15 1..0=3
+  vor_vi                                vd vs2 simm5 vm  31..26=10  14..12=3  6..2=0x15 1..0=3
+  vor_vx                                vd vs2 rs1 vm  31..26=10  14..12=4  6..2=0x15 1..0=3
+  vasubu_vx                             vd vs2 rs1 vm  31..26=10  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001011 (0x0b) --
+  vxor_vv                               vd vs2 vs1 vm  31..26=11  14..12=0  6..2=0x15 1..0=3
+  vasub_vv                              vd vs2 vs1 vm  31..26=11  14..12=2  6..2=0x15 1..0=3
+  vxor_vi                               vd vs2 simm5 vm  31..26=11  14..12=3  6..2=0x15 1..0=3
+  vxor_vx                               vd vs2 rs1 vm  31..26=11  14..12=4  6..2=0x15 1..0=3
+  vasub_vx                              vd vs2 rs1 vm  31..26=11  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001100 (0x0c) --
+  vrgather_vv                           vd vs2 vs1 vm  31..26=12  14..12=0  6..2=0x15 1..0=3
+  vrgather_vi                           vd vs2 simm5 vm  31..26=12  14..12=3  6..2=0x15 1..0=3
+  vrgather_vx                           vd vs2 rs1 vm  31..26=12  14..12=4  6..2=0x15 1..0=3
+# -- funct6=001110 (0x0e) --
+  vrgatherei16_vv                       vd vs2 vs1 vm  31..26=14  14..12=0  6..2=0x15 1..0=3
+  vslideup_vi                           vd vs2 simm5 vm  31..26=14  14..12=3  6..2=0x15 1..0=3
+  vslideup_vx                           vd vs2 rs1 vm  31..26=14  14..12=4  6..2=0x15 1..0=3
+  vslide1up_vx                          vd vs2 rs1 vm  31..26=14  14..12=6  6..2=0x15 1..0=3
+# -- funct6=001111 (0x0f) --
+  vslidedown_vi                         vd vs2 simm5 vm  31..26=15  14..12=3  6..2=0x15 1..0=3
+  vslidedown_vx                         vd vs2 rs1 vm  31..26=15  14..12=4  6..2=0x15 1..0=3
+  vslide1down_vx                        vd vs2 rs1 vm  31..26=15  14..12=6  6..2=0x15 1..0=3
+# -- funct6=010000 (0x10) --
+  vadc_vvm                              vd vs2 vs1 vm  31..26=16  14..12=0  6..2=0x15 1..0=3
+  vcpop_m                               rd vs2 vm  19..15=16  31..26=16  14..12=2  6..2=0x15 1..0=3
+  vfirst_m                              rd vs2 vm  19..15=17  31..26=16  14..12=2  6..2=0x15 1..0=3
+  vmv_x_s                               rd vs2 vm  19..15=0   31..26=16  14..12=2  6..2=0x15 1..0=3
+  vadc_vim                              vd vs2 simm5 vm  31..26=16  14..12=3  6..2=0x15 1..0=3
+  vadc_vxm                              vd vs2 rs1 vm  31..26=16  14..12=4  6..2=0x15 1..0=3
+  vmv_s_x                               vd vs2 rs1 vm  31..26=16  14..12=6  6..2=0x15 1..0=3
+# -- funct6=010001 (0x11) --
+  vmadc_vv                              vd vs2 vs1 vm  31..26=17  14..12=0  6..2=0x15 1..0=3
+  vmadc_vi                              vd vs2 simm5 vm  31..26=17  14..12=3  6..2=0x15 1..0=3
+  vmadc_vx                              vd vs2 rs1 vm  31..26=17  14..12=4  6..2=0x15 1..0=3
+# -- funct6=010010 (0x12) --
+  vsbc_vvm                              vd vs2 vs1 vm  31..26=18  14..12=0  6..2=0x15 1..0=3
+  vsbc_vxm                              vd vs2 rs1 vm  31..26=18  14..12=4  6..2=0x15 1..0=3
+# -- funct6=010011 (0x13) --
+  vmsbc_vv                              vd vs2 vs1 vm  31..26=19  14..12=0  6..2=0x15 1..0=3
+  vmsbc_vx                              vd vs2 rs1 vm  31..26=19  14..12=4  6..2=0x15 1..0=3
+# -- funct6=010100 (0x14) --
+  vid_v                                 vd vm  19..15=17  31..26=20  14..12=2  6..2=0x15 1..0=3
+  viota_m                               rd vs2 vm  19..15=16  31..26=20  14..12=2  6..2=0x15 1..0=3
+  vmsbf_m                               rd vs2 vm  19..15=1   31..26=20  14..12=2  6..2=0x15 1..0=3
+  vmsif_m                               rd vs2 vm  19..15=3   31..26=20  14..12=2  6..2=0x15 1..0=3
+  vmsof_m                               rd vs2 vm  19..15=2   31..26=20  14..12=2  6..2=0x15 1..0=3
+# -- funct6=010111 (0x17) --
+  vmerge_vvm                            vd vs2 vs1 vm  25=0  31..26=23  14..12=0  6..2=0x15 1..0=3
+  vmv_v_v                               vd vs2 vs1 vm  25=1  31..26=23  14..12=0  6..2=0x15 1..0=3
+  vcompress_vm                          vd vs2 vs1 vm  31..26=23  14..12=2  6..2=0x15 1..0=3
+  vmerge_vim                            vd vs2 simm5 vm  25=0  31..26=23  14..12=3  6..2=0x15 1..0=3
+  vmv_v_i                               vd vs2 simm5 vm  25=1  31..26=23  14..12=3  6..2=0x15 1..0=3
+  vmerge_vxm                            vd vs2 rs1 vm  25=0  31..26=23  14..12=4  6..2=0x15 1..0=3
+  vmv_v_x                               vd vs2 rs1 vm  25=1  31..26=23  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011000 (0x18) --
+  vmseq_vv                              vd vs2 vs1 vm  31..26=24  14..12=0  6..2=0x15 1..0=3
+  vmandn_mm                             vd vs2 vs1 vm  31..26=24  14..12=2  6..2=0x15 1..0=3
+  vmseq_vi                              vd vs2 simm5 vm  31..26=24  14..12=3  6..2=0x15 1..0=3
+  vmseq_vx                              vd vs2 rs1 vm  31..26=24  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011001 (0x19) --
+  vmsne_vv                              vd vs2 vs1 vm  31..26=25  14..12=0  6..2=0x15 1..0=3
+  vmand_mm                              vd vs2 vs1 vm  31..26=25  14..12=2  6..2=0x15 1..0=3
+  vmsne_vi                              vd vs2 simm5 vm  31..26=25  14..12=3  6..2=0x15 1..0=3
+  vmsne_vx                              vd vs2 rs1 vm  31..26=25  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011010 (0x1a) --
+  vmsltu_vv                             vd vs2 vs1 vm  31..26=26  14..12=0  6..2=0x15 1..0=3
+  vmor_mm                               vd vs2 vs1 vm  31..26=26  14..12=2  6..2=0x15 1..0=3
+  vmsltu_vx                             vd vs2 rs1 vm  31..26=26  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011011 (0x1b) --
+  vmslt_vv                              vd vs2 vs1 vm  31..26=27  14..12=0  6..2=0x15 1..0=3
+  vmxor_mm                              vd vs2 vs1 vm  31..26=27  14..12=2  6..2=0x15 1..0=3
+  vmslt_vx                              vd vs2 rs1 vm  31..26=27  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011100 (0x1c) --
+  vmsleu_vv                             vd vs2 vs1 vm  31..26=28  14..12=0  6..2=0x15 1..0=3
+  vmorn_mm                              vd vs2 vs1 vm  31..26=28  14..12=2  6..2=0x15 1..0=3
+  vmsleu_vi                             vd vs2 simm5 vm  31..26=28  14..12=3  6..2=0x15 1..0=3
+  vmsleu_vx                             vd vs2 rs1 vm  31..26=28  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011101 (0x1d) --
+  vmsle_vv                              vd vs2 vs1 vm  31..26=29  14..12=0  6..2=0x15 1..0=3
+  vmnand_mm                             vd vs2 vs1 vm  31..26=29  14..12=2  6..2=0x15 1..0=3
+  vmsle_vi                              vd vs2 simm5 vm  31..26=29  14..12=3  6..2=0x15 1..0=3
+  vmsle_vx                              vd vs2 rs1 vm  31..26=29  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011110 (0x1e) --
+  vmnor_mm                              vd vs2 vs1 vm  31..26=30  14..12=2  6..2=0x15 1..0=3
+  vmsgtu_vi                             vd vs2 simm5 vm  31..26=30  14..12=3  6..2=0x15 1..0=3
+  vmsgtu_vx                             vd vs2 rs1 vm  31..26=30  14..12=4  6..2=0x15 1..0=3
+# -- funct6=011111 (0x1f) --
+  vmxnor_mm                             vd vs2 vs1 vm  31..26=31  14..12=2  6..2=0x15 1..0=3
+  vmsgt_vi                              vd vs2 simm5 vm  31..26=31  14..12=3  6..2=0x15 1..0=3
+  vmsgt_vx                              vd vs2 rs1 vm  31..26=31  14..12=4  6..2=0x15 1..0=3
+# -- funct6=100000 (0x20) --
+  vsaddu_vv                             vd vs2 vs1 vm  31..26=32  14..12=0  6..2=0x15 1..0=3
+  vdivu_vv                              vd vs2 vs1 vm  31..26=32  14..12=2  6..2=0x15 1..0=3
+  vsaddu_vi                             vd vs2 simm5 vm  31..26=32  14..12=3  6..2=0x15 1..0=3
+  vsaddu_vx                             vd vs2 rs1 vm  31..26=32  14..12=4  6..2=0x15 1..0=3
+  vdivu_vx                              vd vs2 rs1 vm  31..26=32  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100001 (0x21) --
+  vsadd_vv                              vd vs2 vs1 vm  31..26=33  14..12=0  6..2=0x15 1..0=3
+  vdiv_vv                               vd vs2 vs1 vm  31..26=33  14..12=2  6..2=0x15 1..0=3
+  vsadd_vi                              vd vs2 simm5 vm  31..26=33  14..12=3  6..2=0x15 1..0=3
+  vsadd_vx                              vd vs2 rs1 vm  31..26=33  14..12=4  6..2=0x15 1..0=3
+  vdiv_vx                               vd vs2 rs1 vm  31..26=33  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100010 (0x22) --
+  vssubu_vv                             vd vs2 vs1 vm  31..26=34  14..12=0  6..2=0x15 1..0=3
+  vremu_vv                              vd vs2 vs1 vm  31..26=34  14..12=2  6..2=0x15 1..0=3
+  vssubu_vx                             vd vs2 rs1 vm  31..26=34  14..12=4  6..2=0x15 1..0=3
+  vremu_vx                              vd vs2 rs1 vm  31..26=34  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100011 (0x23) --
+  vssub_vv                              vd vs2 vs1 vm  31..26=35  14..12=0  6..2=0x15 1..0=3
+  vrem_vv                               vd vs2 vs1 vm  31..26=35  14..12=2  6..2=0x15 1..0=3
+  vssub_vx                              vd vs2 rs1 vm  31..26=35  14..12=4  6..2=0x15 1..0=3
+  vrem_vx                               vd vs2 rs1 vm  31..26=35  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100100 (0x24) --
+  vmulhu_vv                             vd vs2 vs1 vm  31..26=36  14..12=2  6..2=0x15 1..0=3
+  vmulhu_vx                             vd vs2 rs1 vm  31..26=36  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100101 (0x25) --
+  vsll_vv                               vd vs2 vs1 vm  31..26=37  14..12=0  6..2=0x15 1..0=3
+  vmul_vv                               vd vs2 vs1 vm  31..26=37  14..12=2  6..2=0x15 1..0=3
+  vsll_vi                               vd vs2 simm5 vm  31..26=37  14..12=3  6..2=0x15 1..0=3
+  vsll_vx                               vd vs2 rs1 vm  31..26=37  14..12=4  6..2=0x15 1..0=3
+  vmul_vx                               vd vs2 rs1 vm  31..26=37  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100110 (0x26) --
+  vmulhsu_vv                            vd vs2 vs1 vm  31..26=38  14..12=2  6..2=0x15 1..0=3
+  vmulhsu_vx                            vd vs2 rs1 vm  31..26=38  14..12=6  6..2=0x15 1..0=3
+# -- funct6=100111 (0x27) --
+  vsmul_vv                              vd vs2 vs1 vm  31..26=39  14..12=0  6..2=0x15 1..0=3
+  vmulh_vv                              vd vs2 vs1 vm  31..26=39  14..12=2  6..2=0x15 1..0=3
+  vsmul_vx                              vd vs2 rs1 vm  31..26=39  14..12=4  6..2=0x15 1..0=3
+  vmulh_vx                              vd vs2 rs1 vm  31..26=39  14..12=6  6..2=0x15 1..0=3
+# -- funct6=101000 (0x28) --
+  vsrl_vv                               vd vs2 vs1 vm  31..26=40  14..12=0  6..2=0x15 1..0=3
+  vsrl_vi                               vd vs2 simm5 vm  31..26=40  14..12=3  6..2=0x15 1..0=3
+  vsrl_vx                               vd vs2 rs1 vm  31..26=40  14..12=4  6..2=0x15 1..0=3
+# -- funct6=101001 (0x29) --
+  vsra_vv                               vd vs2 vs1 vm  31..26=41  14..12=0  6..2=0x15 1..0=3
+  vmadd_vv                              vd vs2 vs1 vm  31..26=41  14..12=2  6..2=0x15 1..0=3
+  vsra_vi                               vd vs2 simm5 vm  31..26=41  14..12=3  6..2=0x15 1..0=3
+  vsra_vx                               vd vs2 rs1 vm  31..26=41  14..12=4  6..2=0x15 1..0=3
+  vmadd_vx                              vd vs2 rs1 vm  31..26=41  14..12=6  6..2=0x15 1..0=3
+# -- funct6=101010 (0x2a) --
+  vssrl_vv                              vd vs2 vs1 vm  31..26=42  14..12=0  6..2=0x15 1..0=3
+  vssrl_vi                              vd vs2 simm5 vm  31..26=42  14..12=3  6..2=0x15 1..0=3
+  vssrl_vx                              vd vs2 rs1 vm  31..26=42  14..12=4  6..2=0x15 1..0=3
+# -- funct6=101011 (0x2b) --
+  vssra_vv                              vd vs2 vs1 vm  31..26=43  14..12=0  6..2=0x15 1..0=3
+  vnmsub_vv                             vd vs2 vs1 vm  31..26=43  14..12=2  6..2=0x15 1..0=3
+  vssra_vi                              vd vs2 simm5 vm  31..26=43  14..12=3  6..2=0x15 1..0=3
+  vssra_vx                              vd vs2 rs1 vm  31..26=43  14..12=4  6..2=0x15 1..0=3
+  vnmsub_vx                             vd vs2 rs1 vm  31..26=43  14..12=6  6..2=0x15 1..0=3
+# -- funct6=101100 (0x2c) --
+  vnsrl_wv                              vd vs2 vs1 vm  31..26=44  14..12=0  6..2=0x15 1..0=3
+  vnsrl_wi                              vd vs2 simm5 vm  31..26=44  14..12=3  6..2=0x15 1..0=3
+  vnsrl_wx                              vd vs2 rs1 vm  31..26=44  14..12=4  6..2=0x15 1..0=3
+# -- funct6=101101 (0x2d) --
+  vnsra_wv                              vd vs2 vs1 vm  31..26=45  14..12=0  6..2=0x15 1..0=3
+  vmacc_vv                              vd vs2 vs1 vm  31..26=45  14..12=2  6..2=0x15 1..0=3
+  vnsra_wi                              vd vs2 simm5 vm  31..26=45  14..12=3  6..2=0x15 1..0=3
+  vnsra_wx                              vd vs2 rs1 vm  31..26=45  14..12=4  6..2=0x15 1..0=3
+  vmacc_vx                              vd vs2 rs1 vm  31..26=45  14..12=6  6..2=0x15 1..0=3
+# -- funct6=101110 (0x2e) --
+  vnclipu_wv                            vd vs2 vs1 vm  31..26=46  14..12=0  6..2=0x15 1..0=3
+  vnclipu_wi                            vd vs2 simm5 vm  31..26=46  14..12=3  6..2=0x15 1..0=3
+  vnclipu_wx                            vd vs2 rs1 vm  31..26=46  14..12=4  6..2=0x15 1..0=3
+# -- funct6=101111 (0x2f) --
+  vnclip_wv                             vd vs2 vs1 vm  31..26=47  14..12=0  6..2=0x15 1..0=3
+  vnmsac_vv                             vd vs2 vs1 vm  31..26=47  14..12=2  6..2=0x15 1..0=3
+  vnclip_wi                             vd vs2 simm5 vm  31..26=47  14..12=3  6..2=0x15 1..0=3
+  vnclip_wx                             vd vs2 rs1 vm  31..26=47  14..12=4  6..2=0x15 1..0=3
+  vnmsac_vx                             vd vs2 rs1 vm  31..26=47  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110000 (0x30) --
+  vwredsumu_vs                          vd vs2 vs1 vm  31..26=48  14..12=0  6..2=0x15 1..0=3
+  vwaddu_vv                             vd vs2 vs1 vm  31..26=48  14..12=2  6..2=0x15 1..0=3
+  vwaddu_vx                             vd vs2 rs1 vm  31..26=48  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110001 (0x31) --
+  vwredsum_vs                           vd vs2 vs1 vm  31..26=49  14..12=0  6..2=0x15 1..0=3
+  vwadd_vv                              vd vs2 vs1 vm  31..26=49  14..12=2  6..2=0x15 1..0=3
+  vwadd_vx                              vd vs2 rs1 vm  31..26=49  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110010 (0x32) --
+  vwsubu_vv                             vd vs2 vs1 vm  31..26=50  14..12=2  6..2=0x15 1..0=3
+  vwsubu_vx                             vd vs2 rs1 vm  31..26=50  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110011 (0x33) --
+  vwsub_vv                              vd vs2 vs1 vm  31..26=51  14..12=2  6..2=0x15 1..0=3
+  vwsub_vx                              vd vs2 rs1 vm  31..26=51  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110100 (0x34) --
+  vwaddu_wv                             vd vs2 vs1 vm  31..26=52  14..12=2  6..2=0x15 1..0=3
+  vwaddu_wx                             vd vs2 rs1 vm  31..26=52  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110101 (0x35) --
+  vwadd_wv                              vd vs2 vs1 vm  31..26=53  14..12=2  6..2=0x15 1..0=3
+  vwadd_wx                              vd vs2 rs1 vm  31..26=53  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110110 (0x36) --
+  vwsubu_wv                             vd vs2 vs1 vm  31..26=54  14..12=2  6..2=0x15 1..0=3
+  vwsubu_wx                             vd vs2 rs1 vm  31..26=54  14..12=6  6..2=0x15 1..0=3
+# -- funct6=110111 (0x37) --
+  vwsub_wv                              vd vs2 vs1 vm  31..26=55  14..12=2  6..2=0x15 1..0=3
+  vwsub_wx                              vd vs2 rs1 vm  31..26=55  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111000 (0x38) --
+  vwmulu_vv                             vd vs2 vs1 vm  31..26=56  14..12=2  6..2=0x15 1..0=3
+  vwmulu_vx                             vd vs2 rs1 vm  31..26=56  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111010 (0x3a) --
+  vwmulsu_vv                            vd vs2 vs1 vm  31..26=58  14..12=2  6..2=0x15 1..0=3
+  vwmulsu_vx                            vd vs2 rs1 vm  31..26=58  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111011 (0x3b) --
+  vwmul_vv                              vd vs2 vs1 vm  31..26=59  14..12=2  6..2=0x15 1..0=3
+  vwmul_vx                              vd vs2 rs1 vm  31..26=59  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111100 (0x3c) --
+  vwmaccu_vv                            vd vs2 vs1 vm  31..26=60  14..12=2  6..2=0x15 1..0=3
+  vwmaccu_vx                            vd vs2 rs1 vm  31..26=60  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111101 (0x3d) --
+  vwmacc_vv                             vd vs2 vs1 vm  31..26=61  14..12=2  6..2=0x15 1..0=3
+  vwmacc_vx                             vd vs2 rs1 vm  31..26=61  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111110 (0x3e) --
+  vwmaccus_vx                           vd vs2 rs1 vm  31..26=62  14..12=6  6..2=0x15 1..0=3
+# -- funct6=111111 (0x3f) --
+  vwmaccsu_vv                           vd vs2 vs1 vm  31..26=63  14..12=2  6..2=0x15 1..0=3
+  vwmaccus_vx                           vd vs2 rs1 vm  31..26=63  14..12=6  6..2=0x15 1..0=3
+
+# Total: 198 V-arith int+mask instructions
+# --- V-Arithmetic FP Instructions (opcode=OP-V, bits[6:2]=0x15) ---
+# funct3: 1=OPFVV  5=OPFVF
+# All FP operations require EXT_F; decoded here, executed via EXT_V logic.
+# NOTE: vfrdiv_vf at funct3=1 reproduces a decode_v.c fallthrough (reserved).
+
+# -- funct6=000000 (0x00) --
+  vfadd_vv                              vd vs2 vs1 vm  31..26=0  14..12=1  6..2=0x15 1..0=3
+  vfadd_vf                              vd vs2 rs1 vm  31..26=0  14..12=5  6..2=0x15 1..0=3
+# -- funct6=000001 (0x01) --
+  vfredusum_vs                          vd vs2 vs1 vm  31..26=1  14..12=1  6..2=0x15 1..0=3
+# -- funct6=000010 (0x02) --
+  vfsub_vv                              vd vs2 vs1 vm  31..26=2  14..12=1  6..2=0x15 1..0=3
+  vfsub_vf                              vd vs2 rs1 vm  31..26=2  14..12=5  6..2=0x15 1..0=3
+# -- funct6=000011 (0x03) --
+  vfredosum_vs                          vd vs2 vs1 vm  31..26=3  14..12=1  6..2=0x15 1..0=3
+# -- funct6=000100 (0x04) --
+  vfmin_vv                              vd vs2 vs1 vm  31..26=4  14..12=1  6..2=0x15 1..0=3
+  vfmin_vf                              vd vs2 rs1 vm  31..26=4  14..12=5  6..2=0x15 1..0=3
+# -- funct6=000101 (0x05) --
+  vfredmin_vs                           vd vs2 vs1 vm  31..26=5  14..12=1  6..2=0x15 1..0=3
+# -- funct6=000110 (0x06) --
+  vfmax_vv                              vd vs2 vs1 vm  31..26=6  14..12=1  6..2=0x15 1..0=3
+  vfmax_vf                              vd vs2 rs1 vm  31..26=6  14..12=5  6..2=0x15 1..0=3
+# -- funct6=000111 (0x07) --
+  vfredmax_vs                           vd vs2 vs1 vm  31..26=7  14..12=1  6..2=0x15 1..0=3
+# -- funct6=001000 (0x08) --
+  vfsgnj_vv                             vd vs2 vs1 vm  31..26=8  14..12=1  6..2=0x15 1..0=3
+  vfsgnj_vf                             vd vs2 rs1 vm  31..26=8  14..12=5  6..2=0x15 1..0=3
+# -- funct6=001001 (0x09) --
+  vfsgnjn_vv                            vd vs2 vs1 vm  31..26=9  14..12=1  6..2=0x15 1..0=3
+  vfsgnjn_vf                            vd vs2 rs1 vm  31..26=9  14..12=5  6..2=0x15 1..0=3
+# -- funct6=001010 (0x0a) --
+  vfsgnjx_vv                            vd vs2 vs1 vm  31..26=10  14..12=1  6..2=0x15 1..0=3
+  vfsgnjx_vf                            vd vs2 rs1 vm  31..26=10  14..12=5  6..2=0x15 1..0=3
+# -- funct6=001110 (0x0e) --
+  vfslide1up_vf                         vd vs2 rs1 vm  31..26=14  14..12=5  6..2=0x15 1..0=3
+# -- funct6=001111 (0x0f) --
+  vfslide1down_vf                       vd vs2 rs1 vm  31..26=15  14..12=5  6..2=0x15 1..0=3
+# -- funct6=010111 (0x17) --
+  vfmerge_vfm                           vd vs2 rs1 vm  25=0  31..26=23  14..12=5  6..2=0x15 1..0=3
+  vfmv_v_f                              vd vs2 rs1 vm  25=1  31..26=23  14..12=5  6..2=0x15 1..0=3
+# -- funct6=100000 (0x20) --
+  vfdiv_vv                              vd vs2 vs1 vm  31..26=32  14..12=1  6..2=0x15 1..0=3
+  vfdiv_vf                              vd vs2 rs1 vm  31..26=32  14..12=5  6..2=0x15 1..0=3
+# -- funct6=100001 (0x21) --
+  vfrdiv_vf                             vd vs2 vs1 vm  31..26=33  14..12=1  6..2=0x15 1..0=3
+  vfrdiv_vf                             vd vs2 rs1 vm  31..26=33  14..12=5  6..2=0x15 1..0=3
+# -- funct6=100100 (0x24) --
+  vfmul_vv                              vd vs2 vs1 vm  31..26=36  14..12=1  6..2=0x15 1..0=3
+  vfmul_vf                              vd vs2 rs1 vm  31..26=36  14..12=5  6..2=0x15 1..0=3
+# -- funct6=100111 (0x27) --
+  vfrsub_vf                             vd vs2 rs1 vm  31..26=39  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101000 (0x28) --
+  vfmadd_vv                             vd vs2 vs1 vm  31..26=40  14..12=1  6..2=0x15 1..0=3
+  vfmadd_vf                             vd vs2 rs1 vm  31..26=40  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101001 (0x29) --
+  vfnmadd_vv                            vd vs2 vs1 vm  31..26=41  14..12=1  6..2=0x15 1..0=3
+  vfnmadd_vf                            vd vs2 rs1 vm  31..26=41  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101010 (0x2a) --
+  vfmsub_vv                             vd vs2 vs1 vm  31..26=42  14..12=1  6..2=0x15 1..0=3
+  vfmsub_vf                             vd vs2 rs1 vm  31..26=42  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101011 (0x2b) --
+  vfnmsub_vv                            vd vs2 vs1 vm  31..26=43  14..12=1  6..2=0x15 1..0=3
+  vfnmsub_vf                            vd vs2 rs1 vm  31..26=43  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101100 (0x2c) --
+  vfmacc_vv                             vd vs2 vs1 vm  31..26=44  14..12=1  6..2=0x15 1..0=3
+  vfmacc_vf                             vd vs2 rs1 vm  31..26=44  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101101 (0x2d) --
+  vfnmacc_vv                            vd vs2 vs1 vm  31..26=45  14..12=1  6..2=0x15 1..0=3
+  vfnmacc_vf                            vd vs2 rs1 vm  31..26=45  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101110 (0x2e) --
+  vfmsac_vv                             vd vs2 vs1 vm  31..26=46  14..12=1  6..2=0x15 1..0=3
+  vfmsac_vf                             vd vs2 rs1 vm  31..26=46  14..12=5  6..2=0x15 1..0=3
+# -- funct6=101111 (0x2f) --
+  vfnmsac_vv                            vd vs2 vs1 vm  31..26=47  14..12=1  6..2=0x15 1..0=3
+  vfnmsac_vf                            vd vs2 rs1 vm  31..26=47  14..12=5  6..2=0x15 1..0=3
+# -- funct6=110000 (0x30) --
+  vfwadd_vv                             vd vs2 vs1 vm  31..26=48  14..12=1  6..2=0x15 1..0=3
+  vfwadd_vf                             vd vs2 rs1 vm  31..26=48  14..12=5  6..2=0x15 1..0=3
+# -- funct6=110001 (0x31) --
+  vfwredusum_vs                         vd vs2 vs1 vm  31..26=49  14..12=1  6..2=0x15 1..0=3
+# -- funct6=110010 (0x32) --
+  vfwsub_vv                             vd vs2 vs1 vm  31..26=50  14..12=1  6..2=0x15 1..0=3
+  vfwsub_vf                             vd vs2 rs1 vm  31..26=50  14..12=5  6..2=0x15 1..0=3
+# -- funct6=110011 (0x33) --
+  vfwredosum_vs                         vd vs2 vs1 vm  31..26=51  14..12=1  6..2=0x15 1..0=3
+# -- funct6=110100 (0x34) --
+  vfwadd_wv                             vd vs2 vs1 vm  31..26=52  14..12=1  6..2=0x15 1..0=3
+  vfwadd_wf                             vd vs2 rs1 vm  31..26=52  14..12=5  6..2=0x15 1..0=3
+# -- funct6=110110 (0x36) --
+  vfwsub_wv                             vd vs2 vs1 vm  31..26=54  14..12=1  6..2=0x15 1..0=3
+  vfwsub_wf                             vd vs2 rs1 vm  31..26=54  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111000 (0x38) --
+  vfwmul_vv                             vd vs2 vs1 vm  31..26=56  14..12=1  6..2=0x15 1..0=3
+  vfwmul_vf                             vd vs2 rs1 vm  31..26=56  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111100 (0x3c) --
+  vfwmacc_vv                            vd vs2 vs1 vm  31..26=60  14..12=1  6..2=0x15 1..0=3
+  vfwmacc_vf                            vd vs2 rs1 vm  31..26=60  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111101 (0x3d) --
+  vfwnmacc_vv                           vd vs2 vs1 vm  31..26=61  14..12=1  6..2=0x15 1..0=3
+  vfwnmacc_vf                           vd vs2 rs1 vm  31..26=61  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111110 (0x3e) --
+  vfwmsac_vv                            vd vs2 vs1 vm  31..26=62  14..12=1  6..2=0x15 1..0=3
+  vfwmsac_vf                            vd vs2 rs1 vm  31..26=62  14..12=5  6..2=0x15 1..0=3
+# -- funct6=111111 (0x3f) --
+  vfwnmsac_vv                           vd vs2 vs1 vm  31..26=63  14..12=1  6..2=0x15 1..0=3
+  vfwnmsac_vf                           vd vs2 rs1 vm  31..26=63  14..12=5  6..2=0x15 1..0=3
+
+# Total: 65 V-arith FP instructions
+
+# -- FP comparison mask instructions (vmf*) -- funct6=0x18..0x1f --
+# OPFVV (funct3=1): vd vs2 vs1 vm
+# OPFVF (funct3=5): vd vs2 rs1 vm  (rs1 = float scalar)
+# NOTE: funct6=0x1a (011010) is spec-reserved; decode_v.c has vmflt there too
+#       (fallthrough bug). We use only the canonical positions per spec.
+  vmfeq_vv                              vd vs2 vs1 vm  31..26=24  14..12=1  6..2=0x15 1..0=3
+  vmfeq_vf                              vd vs2 rs1 vm  31..26=24  14..12=5  6..2=0x15 1..0=3
+  vmfle_vv                              vd vs2 vs1 vm  31..26=25  14..12=1  6..2=0x15 1..0=3
+  vmfle_vf                              vd vs2 rs1 vm  31..26=25  14..12=5  6..2=0x15 1..0=3
+  vmflt_vv                              vd vs2 vs1 vm  31..26=27  14..12=1  6..2=0x15 1..0=3
+  vmflt_vf                              vd vs2 rs1 vm  31..26=27  14..12=5  6..2=0x15 1..0=3
+  vmfne_vv                              vd vs2 vs1 vm  31..26=28  14..12=1  6..2=0x15 1..0=3
+  vmfne_vf                              vd vs2 rs1 vm  31..26=28  14..12=5  6..2=0x15 1..0=3
+  vmfgt_vf                              vd vs2 rs1 vm  31..26=29  14..12=5  6..2=0x15 1..0=3
+  vmfge_vf                              vd vs2 rs1 vm  31..26=31  14..12=5  6..2=0x15 1..0=3

@@ -66,6 +66,9 @@ static char *opt_bootargs;
 #define VBLK_DEV_MAX 100
 static char *opt_virtio_blk_img[VBLK_DEV_MAX];
 static int opt_virtio_blk_idx = 0;
+
+/* enable virtio-rng device */
+static bool opt_virtio_rng = false;
 #endif
 
 static void reset_getopt_state(void)
@@ -107,6 +110,7 @@ static void reset_runtime_options(void)
     opt_bootargs = NULL;
     memset(opt_virtio_blk_img, 0, sizeof(opt_virtio_blk_img));
     opt_virtio_blk_idx = 0;
+    opt_virtio_rng = false;
 #endif
 
     reset_getopt_state();
@@ -132,6 +136,7 @@ static void print_usage(const char *filename)
         "<image> as virtio-blk disk image "
         "(default read and write). This option may be specified "
         "multiple times for multiple block devices\n"
+        "  -x vrng : enable virtio-rng device\n"
         "  -b <bootargs> : use customized <bootargs> for the kernel\n"
 #endif
         "  -d [filename]: dump registers as JSON to the "
@@ -178,16 +183,20 @@ static bool parse_args(int argc, char **args)
             emu_argc++;
             break;
         case 'x':
-            if (opt_virtio_blk_idx >= VBLK_DEV_MAX) {
-                rv_log_error("Too many virtio-blk devices. Maximum is %d.\n",
-                             VBLK_DEV_MAX);
-                return false;
-            }
-            if (!strncmp("vblk:", optarg, 5))
+            if (!strncmp("vblk:", optarg, 5)) {
+                if (opt_virtio_blk_idx >= VBLK_DEV_MAX) {
+                    rv_log_error(
+                        "Too many virtio-blk devices. Maximum is %d.\n",
+                        VBLK_DEV_MAX);
+                    return false;
+                }
                 opt_virtio_blk_img[opt_virtio_blk_idx++] =
                     optarg + 5; /* strlen("vblk:") */
-            else
+            } else if (!strcmp("vrng", optarg)) {
+                opt_virtio_rng = true;
+            } else {
                 return false;
+            }
             emu_argc++;
             break;
 #endif
@@ -379,6 +388,7 @@ int main(int argc, char **args)
     attr.data.system.kernel = opt_kernel_img;
     attr.data.system.initrd = opt_rootfs_img;
     attr.data.system.bootargs = opt_bootargs;
+    attr.data.system.vrng_enabled = opt_virtio_rng;
     if (opt_virtio_blk_idx) {
         attr.data.system.vblk_device = opt_virtio_blk_img;
         attr.data.system.vblk_device_cnt = opt_virtio_blk_idx;

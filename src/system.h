@@ -29,6 +29,7 @@ enum SUPPORTED_MMIO {
     MMIO_PLIC,
     MMIO_UART,
     MMIO_VIRTIOBLK,
+    MMIO_VIRTIORNG,
 #if RV32_HAS(GOLDFISH_RTC)
     MMIO_RTC,
 #endif /* RV32_HAS(GOLDFISH_RTC) */
@@ -70,6 +71,17 @@ enum SUPPORTED_MMIO {
                 return;                                                               \
             )                                                                         \
             break;                                                                    \
+        case MMIO_VIRTIORNG:                                                          \
+            IIF(rw)(  /* read */                                                      \
+                mmio_read_val = virtio_rng_read(PRIV(rv)->vrng, addr & 0xFFFFF);      \
+                emu_update_vrng_interrupts(rv);                                       \
+                return mmio_read_val;                                                 \
+                ,     /* write */                                                     \
+                virtio_rng_write(PRIV(rv)->vrng, addr & 0xFFFFF, val);                \
+                emu_update_vrng_interrupts(rv);                                       \
+                return;                                                               \
+            )                                                                         \
+            break;                                                                    \
         IIF(RV32_FEATURE_GOLDFISH_RTC)(                                               \
         case MMIO_RTC:                                                                \
             IIF(rw)( /* read */                                                       \
@@ -99,6 +111,8 @@ enum SUPPORTED_MMIO {
                 PRIV(rv)->vblk_curr =                                         \
                     PRIV(rv)->vblk[hi - PRIV(rv)->vblk_mmio_base_hi];         \
                 MMIO_OP(MMIO_VIRTIOBLK, MMIO_R);                              \
+            } else if (PRIV(rv)->vrng && hi == PRIV(rv)->vrng_mmio_base_hi) { \
+                MMIO_OP(MMIO_VIRTIORNG, MMIO_R);                              \
             } else {                                                          \
                 switch (hi) {                                                 \
                 case 0x0:                                                     \
@@ -131,6 +145,8 @@ enum SUPPORTED_MMIO {
                 PRIV(rv)->vblk_curr =                                         \
                     PRIV(rv)->vblk[hi - PRIV(rv)->vblk_mmio_base_hi];         \
                 MMIO_OP(MMIO_VIRTIOBLK, MMIO_W);                              \
+            } else if (PRIV(rv)->vrng && hi == PRIV(rv)->vrng_mmio_base_hi) { \
+                MMIO_OP(MMIO_VIRTIORNG, MMIO_W);                              \
             } else {                                                          \
                 switch (hi) {                                                 \
                 case 0x0:                                                     \
@@ -156,6 +172,7 @@ enum SUPPORTED_MMIO {
 
 void emu_update_uart_interrupts(riscv_t *rv);
 void emu_update_vblk_interrupts(riscv_t *rv);
+void emu_update_vrng_interrupts(riscv_t *rv);
 #if RV32_HAS(GOLDFISH_RTC)
 void emu_update_rtc_interrupts(riscv_t *rv);
 #endif /* RV32_HAS(GOLDFISH_RTC) */

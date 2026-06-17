@@ -69,6 +69,7 @@ static int opt_virtio_blk_idx = 0;
 
 /* enable virtio-rng device */
 static bool opt_virtio_rng = false;
+static char *opt_virtio_net_backend;
 #endif
 
 static void reset_getopt_state(void)
@@ -111,6 +112,7 @@ static void reset_runtime_options(void)
     memset(opt_virtio_blk_img, 0, sizeof(opt_virtio_blk_img));
     opt_virtio_blk_idx = 0;
     opt_virtio_rng = false;
+    opt_virtio_net_backend = NULL;
 #endif
 
     reset_getopt_state();
@@ -137,6 +139,7 @@ static void print_usage(const char *filename)
         "(default read and write). This option may be specified "
         "multiple times for multiple block devices\n"
         "  -x vrng : enable virtio-rng device\n"
+        "  -x vnet:<backend>: use <backend> as virtio-net backend interface \n"
         "  -b <bootargs> : use customized <bootargs> for the kernel\n"
 #endif
         "  -d [filename]: dump registers as JSON to the "
@@ -192,6 +195,12 @@ static bool parse_args(int argc, char **args)
                 }
                 opt_virtio_blk_img[opt_virtio_blk_idx++] =
                     optarg + 5; /* strlen("vblk:") */
+            } else if (!strncmp("vnet:", optarg, 5)) {
+                if (!optarg[5]) {
+                    rv_log_error("Missing virtio-net backend interface.\n");
+                    return false;
+                }
+                opt_virtio_net_backend = optarg + 5; /* strlen("vnet:") */
             } else if (!strcmp("vrng", optarg)) {
                 opt_virtio_rng = true;
             } else {
@@ -389,6 +398,7 @@ int main(int argc, char **args)
     attr.data.system.initrd = opt_rootfs_img;
     attr.data.system.bootargs = opt_bootargs;
     attr.data.system.vrng_enabled = opt_virtio_rng;
+    attr.data.system.vnet_backend = opt_virtio_net_backend;
     if (opt_virtio_blk_idx) {
         attr.data.system.vblk_device = opt_virtio_blk_img;
         attr.data.system.vblk_device_cnt = opt_virtio_blk_idx;

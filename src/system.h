@@ -30,6 +30,7 @@ enum SUPPORTED_MMIO {
     MMIO_UART,
     MMIO_VIRTIOBLK,
     MMIO_VIRTIORNG,
+    MMIO_VIRTIONET,
 #if RV32_HAS(GOLDFISH_RTC)
     MMIO_RTC,
 #endif /* RV32_HAS(GOLDFISH_RTC) */
@@ -82,6 +83,17 @@ enum SUPPORTED_MMIO {
                 return;                                                               \
             )                                                                         \
             break;                                                                    \
+        case MMIO_VIRTIONET:                                                          \
+            IIF(rw)( /* read */                                                       \
+                mmio_read_val = virtio_net_read(PRIV(rv)->vnet, addr & 0xFFFFF);      \
+                emu_update_vnet_interrupts(rv);                                       \
+                return mmio_read_val;                                                 \
+                ,    /* write */                                                      \
+                virtio_net_write(PRIV(rv)->vnet, addr & 0xFFFFF, val);                \
+                emu_update_vnet_interrupts(rv);                                       \
+                return;                                                               \
+            )                                                                         \
+            break;                                                                    \
         IIF(RV32_FEATURE_GOLDFISH_RTC)(                                               \
         case MMIO_RTC:                                                                \
             IIF(rw)( /* read */                                                       \
@@ -113,6 +125,8 @@ enum SUPPORTED_MMIO {
                 MMIO_OP(MMIO_VIRTIOBLK, MMIO_R);                              \
             } else if (PRIV(rv)->vrng && hi == PRIV(rv)->vrng_mmio_base_hi) { \
                 MMIO_OP(MMIO_VIRTIORNG, MMIO_R);                              \
+            } else if (PRIV(rv)->vnet && hi == PRIV(rv)->vnet_mmio_base_hi) { \
+                MMIO_OP(MMIO_VIRTIONET, MMIO_R);                              \
             } else {                                                          \
                 switch (hi) {                                                 \
                 case 0x0:                                                     \
@@ -147,6 +161,8 @@ enum SUPPORTED_MMIO {
                 MMIO_OP(MMIO_VIRTIOBLK, MMIO_W);                              \
             } else if (PRIV(rv)->vrng && hi == PRIV(rv)->vrng_mmio_base_hi) { \
                 MMIO_OP(MMIO_VIRTIORNG, MMIO_W);                              \
+            } else if (PRIV(rv)->vnet && hi == PRIV(rv)->vnet_mmio_base_hi) { \
+                MMIO_OP(MMIO_VIRTIONET, MMIO_W);                              \
             } else {                                                          \
                 switch (hi) {                                                 \
                 case 0x0:                                                     \
@@ -173,6 +189,7 @@ enum SUPPORTED_MMIO {
 void emu_update_uart_interrupts(riscv_t *rv);
 void emu_update_vblk_interrupts(riscv_t *rv);
 void emu_update_vrng_interrupts(riscv_t *rv);
+void emu_update_vnet_interrupts(riscv_t *rv);
 #if RV32_HAS(GOLDFISH_RTC)
 void emu_update_rtc_interrupts(riscv_t *rv);
 #endif /* RV32_HAS(GOLDFISH_RTC) */

@@ -33,6 +33,21 @@ void emu_update_vblk_interrupts(riscv_t *rv)
     }
 }
 
+void emu_update_vrng_interrupts(riscv_t *rv)
+{
+    vm_attr_t *attr = PRIV(rv);
+
+    if (!attr->vrng)
+        return;
+
+    if (attr->vrng->interrupt_status)
+        attr->plic->active |= IRQ_VRNG_BIT(attr->vrng_irq);
+    else
+        attr->plic->active &= ~IRQ_VRNG_BIT(attr->vrng_irq);
+
+    plic_update_interrupts(attr->plic);
+}
+
 #if RV32_HAS(GOLDFISH_RTC)
 void emu_update_rtc_interrupts(riscv_t *rv)
 {

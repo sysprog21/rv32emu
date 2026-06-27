@@ -348,6 +348,7 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
 #include "minimal_dtb.h"
     char *bootargs = attr->data.system.bootargs;
     char **vblk = attr->data.system.vblk_device;
+    bool vrng_enabled = attr->data.system.vrng_enabled;
     char *blob = *ram_loc;
     char *buf;
     size_t len;
@@ -399,7 +400,7 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         rv_log_warn("Failed to remove rtc node from DTB");
 #endif
 
-    if (vblk) {
+    if (vblk || vrng_enabled) {
         int node = fdt_path_offset(dtb_buf, "/soc@F0000000");
         assert(node >= 0);
 
@@ -446,7 +447,7 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
 
         /* set the VBLK MMIO valid range */
         attr->vblk_mmio_base_hi = next_addr >> 20;
-        attr->vblk_mmio_max_hi = attr->vblk_mmio_base_hi + attr->vblk_cnt;
+        attr->vblk_mmio_max_hi = attr->vblk_mmio_base_hi + attr->vblk_cnt - 1;
 
         /* adding new virtio block nodes */
         for (int i = 0; i < attr->vblk_cnt; i++) {
@@ -471,6 +472,32 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             assert(fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)) == 0);
 
             /* interrupts = <new_irq> */
+            uint32_t irq = cpu_to_fdt32(new_irq);
+            assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
+                               sizeof(irq)) == 0);
+        }
+
+        if (vrng_enabled) {
+            uint32_t new_addr = next_addr + attr->vblk_cnt * addr_offset;
+            uint32_t new_irq = next_irq + attr->vblk_cnt;
+
+            attr->vrng_mmio_base_hi = new_addr >> 20;
+            attr->vrng_irq = new_irq;
+
+            char node_name[32];
+            snprintf(node_name, sizeof(node_name), "virtio@%x", new_addr);
+
+            int subnode = fdt_add_subnode(dtb_buf, node, node_name);
+            if (subnode == -FDT_ERR_NOSPACE)
+                rv_log_warn("add virtio-rng subnode no space!\n");
+            assert(subnode >= 0);
+
+            assert(fdt_setprop_string(dtb_buf, subnode, "compatible",
+                                      "virtio,mmio") == 0);
+
+            uint32_t reg[2] = {cpu_to_fdt32(new_addr), cpu_to_fdt32(size)};
+            assert(fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)) == 0);
+
             uint32_t irq = cpu_to_fdt32(new_irq);
             assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
                                sizeof(irq)) == 0);
@@ -585,6 +612,11 @@ static void rv_fsync_device()
 
         free(attr->vblk);
         free(attr->disk);
+    }
+
+    if (attr->vrng) {
+        vrng_delete(attr->vrng);
+        attr->vrng = NULL;
     }
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
@@ -715,6 +747,9 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 
     /* load_dtb needs the count to add the virtio block subnode dynamically */
     attr->vblk_cnt = attr->data.system.vblk_device_cnt;
+    attr->vrng = NULL;
+    attr->vrng_mmio_base_hi = 0;
+    attr->vrng_irq = 0;
 
     char *ram_loc = (char *) attr->mem->mem_base;
     map_file(&ram_loc, attr->data.system.kernel, 0);
@@ -858,6 +893,16 @@ riscv_t *rv_create(riscv_user_t rv_attr)
                 free(vblk_device);
         }
     }
+    if (attr->data.system.vrng_enabled) {
+        attr->vrng = vrng_new();
+        assert(attr->vrng);
+        attr->vrng->ram = (uint32_t *) attr->mem->mem_base;
+
+        if (!virtio_rng_init(attr->vrng)) {
+            rv_log_error("Failed to initialize virtio-rng");
+            exit(EXIT_FAILURE);
+        }
+    }
 
     capture_keyboard_input();
 #endif /* !RV32_HAS(SYSTEM_MMIO) */
@@ -961,6 +1006,9 @@ fail_mpool:
         free(attr->vblk);
     }
     free(attr->disk);
+
+    if (attr->vrng)
+        vrng_delete(attr->vrng);
 #endif
     map_delete(attr->fd_map);
     memory_delete(attr->mem);

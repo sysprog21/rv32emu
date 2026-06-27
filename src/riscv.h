@@ -501,6 +501,7 @@ typedef struct {
     char *bootargs;
     char **vblk_device;
     int vblk_device_cnt;
+    bool vrng_enabled;
 } vm_system_t;
 #endif /* RV32_HAS(SYSTEM) */
 
@@ -534,6 +535,11 @@ typedef struct {
     uint32_t vblk_mmio_max_hi;
     int vblk_irq_base;
     int vblk_cnt;
+
+    /* virtio-rng device */
+    virtio_rng_state_t *vrng;
+    uint32_t vrng_mmio_base_hi;
+    int vrng_irq;
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
     /* vm memory object */

@@ -349,6 +349,7 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
     char *bootargs = attr->data.system.bootargs;
     char **vblk = attr->data.system.vblk_device;
     bool vrng_enabled = attr->data.system.vrng_enabled;
+    char *vnet = attr->data.system.vnet_backend;
     char *blob = *ram_loc;
     char *buf;
     size_t len;
@@ -400,7 +401,8 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         rv_log_warn("Failed to remove rtc node from DTB");
 #endif
 
-    if (vblk || vrng_enabled) {
+    int32_t dev_idx = 0;
+    if (vblk || vrng_enabled || vnet) {
         int node = fdt_path_offset(dtb_buf, "/soc@F0000000");
         assert(node >= 0);
 
@@ -475,11 +477,12 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             uint32_t irq = cpu_to_fdt32(new_irq);
             assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
                                sizeof(irq)) == 0);
+            dev_idx = attr->vblk_cnt;
         }
 
         if (vrng_enabled) {
-            uint32_t new_addr = next_addr + attr->vblk_cnt * addr_offset;
-            uint32_t new_irq = next_irq + attr->vblk_cnt;
+            uint32_t new_addr = next_addr + dev_idx * addr_offset;
+            uint32_t new_irq = next_irq + dev_idx;
 
             attr->vrng_mmio_base_hi = new_addr >> 20;
             attr->vrng_irq = new_irq;
@@ -501,6 +504,34 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             uint32_t irq = cpu_to_fdt32(new_irq);
             assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
                                sizeof(irq)) == 0);
+            dev_idx++;
+        }
+
+        if (vnet) {
+            uint32_t new_addr = next_addr + dev_idx * addr_offset;
+            uint32_t new_irq = next_irq + dev_idx;
+
+            attr->vnet_mmio_base_hi = new_addr >> 20;
+            attr->vnet_irq = new_irq;
+
+            char node_name[32];
+            snprintf(node_name, sizeof(node_name), "virtio@%x", new_addr);
+
+            int subnode = fdt_add_subnode(dtb_buf, node, node_name);
+            if (subnode == -FDT_ERR_NOSPACE)
+                rv_log_warn("add virtio-net subnode no space!\n");
+            assert(subnode >= 0);
+
+            assert(fdt_setprop_string(dtb_buf, subnode, "compatible",
+                                      "virtio,mmio") == 0);
+
+            uint32_t reg[2] = {cpu_to_fdt32(new_addr), cpu_to_fdt32(size)};
+            assert(fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)) == 0);
+
+            uint32_t irq = cpu_to_fdt32(new_irq);
+            assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
+                               sizeof(irq)) == 0);
+            dev_idx++;
         }
     }
 
@@ -617,6 +648,11 @@ static void rv_fsync_device()
     if (attr->vrng) {
         vrng_delete(attr->vrng);
         attr->vrng = NULL;
+    }
+
+    if (attr->vnet) {
+        vnet_delete(attr->vnet);
+        attr->vnet = NULL;
     }
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
@@ -904,6 +940,18 @@ riscv_t *rv_create(riscv_user_t rv_attr)
         }
     }
 
+    if (attr->data.system.vnet_backend) {
+        attr->vnet = vnet_new();
+        assert(attr->vnet);
+
+        attr->vnet->ram = (uint32_t *) attr->mem->mem_base;
+
+        if (!virtio_net_init(attr->vnet, attr->data.system.vnet_backend)) {
+            rv_log_error("Failed to initialize virtio-net");
+            exit(EXIT_FAILURE);
+        }
+    }
+
     capture_keyboard_input();
 #endif /* !RV32_HAS(SYSTEM_MMIO) */
 
@@ -1009,6 +1057,9 @@ fail_mpool:
 
     if (attr->vrng)
         vrng_delete(attr->vrng);
+
+    if (attr->vnet)
+        vnet_delete(attr->vnet);
 #endif
     map_delete(attr->fd_map);
     memory_delete(attr->mem);
@@ -1070,8 +1121,14 @@ void rv_run(riscv_t *rv)
         emscripten_set_main_loop_arg(rv_step, (void *) rv, 0, 1);
 #else
         /* default main loop */
-        for (; !rv_has_halted(rv);) /* run until the flag is done */
-            rv_step(rv);            /* step instructions */
+        for (; !rv_has_halted(rv);) { /* run until the flag is done */
+            rv_step(rv);              /* step instructions */
+
+#if RV32_HAS(SYSTEM_MMIO)
+            if (attr->vnet)
+                virtio_net_refresh_queue(attr->vnet);
+#endif
+        }
 #endif
     }
 #if !RV32_HAS(SYSTEM_MMIO)

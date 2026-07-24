@@ -15,6 +15,7 @@
 #if RV32_HAS(SYSTEM_MMIO)
 #include <termios.h>
 #include "dtc/libfdt/libfdt.h"
+#include "system.h"
 
 /* TODO: support WASM target by leveraging -sUSE_ZLIB=1 */
 #if RV32_HAS(LINK_ZLIB)
@@ -903,8 +904,10 @@ void rv_run(riscv_t *rv)
             rv_step(rv);              /* step instructions */
 
 #if RV32_HAS(SYSTEM_MMIO)
-            if (attr->vnet)
+            if (attr->vnet) {
                 virtio_net_refresh_queue(attr->vnet);
+                emu_update_vnet_interrupts(rv);
+            }
 #endif
         }
 #endif

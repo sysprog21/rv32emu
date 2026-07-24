@@ -13,6 +13,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
+#include "system.h"
 #include "utils.h"
 #include "virtio.h"
 
@@ -343,6 +344,7 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
         return;
 
     uint16_t new_used = ram[queue->queue_used] >> 16;
+    uint16_t old_used = new_used;
 
     while (queue->last_avail != new_avail) {
         uint16_t queue_idx = queue->last_avail % queue->queue_num;
@@ -382,6 +384,8 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
         new_used++;
     }
 
+    if (new_used == old_used)
+        return;
     ram[queue->queue_used] &= MASK(16);
     ram[queue->queue_used] |= ((uint32_t) new_used) << 16;
 
@@ -417,7 +421,11 @@ static void virtio_net_try_tx(virtio_net_state_t *vnet)
         return virtio_net_set_fail(vnet);
     }
 
+    if (queue->last_avail == new_avail)
+        return;
+
     uint16_t new_used = ram[queue->queue_used] >> 16;
+    uint16_t old_used = new_used;
 
     while (queue->last_avail != new_avail) {
         uint16_t queue_idx = queue->last_avail % queue->queue_num;
@@ -453,6 +461,8 @@ static void virtio_net_try_tx(virtio_net_state_t *vnet)
         new_used++;
     }
 
+    if (new_used == old_used)
+        return;
     ram[queue->queue_used] &= MASK(16);
     ram[queue->queue_used] |= ((uint32_t) new_used) << 16;
 

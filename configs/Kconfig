@@ -99,6 +99,13 @@ config HAVE_RISCV_TOOLCHAIN
     bool
     default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-riscv-toolchain'))
 
+# Host platform detection used by platform-specific system devices.
+config HOST_LINUX
+    def_bool $(python,assert sys.platform.startswith('linux'))
+
+config HOST_MACOS
+    def_bool $(python,assert sys.platform == 'darwin')
+
 # RISC-V ISA Extensions
 
 menu "RISC-V ISA Configuration"
@@ -281,6 +288,37 @@ config ELF_LOADER
 
       Enable this for running 'make check' tests in system mode.
       Disable this for booting Linux kernel images.
+
+config VIRTIO_NET
+    bool "Enable VirtIO network device"
+    default y
+    depends on SYSTEM && !ELF_LOADER && !CC_IS_EMCC
+    depends on HOST_LINUX || HOST_MACOS
+    help
+      Enable VirtIO network device emulation.
+
+      Disable this option to exclude virtio-net, its host backends,
+      and their dependencies from the rv32emu executable.
+
+config VIRTIO_NET_TAP
+    bool "Enable Linux TAP backend"
+    default y
+    depends on VIRTIO_NET && HOST_LINUX
+    help
+      Enable the Linux TAP backend for VirtIO networking.
+
+      This backend uses /dev/net/tun and normally requires root
+      privileges or CAP_NET_ADMIN.
+
+config VIRTIO_NET_USER
+    bool "Enable user-mode SLIRP backend"
+    default y
+    depends on VIRTIO_NET && (HOST_LINUX || HOST_MACOS)
+    help
+      Enable user-mode networking through minislirp.
+
+      This backend does not require a TAP interface or root privileges,
+      but it adds minislirp to the final executable.
 
 endmenu
 

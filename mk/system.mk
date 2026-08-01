@@ -52,6 +52,21 @@ $(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(EFFECTIVE_CONFIG_STAMP) | $(DEV_OUT)
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
 DEV_OBJS := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c))
+# VirtIO networking is optional. Exclude all network-related objects unless
+# kernel system emulation is active and at least one host backend is enabled.
+# The SLIRP object is only needed by the user-mode backend.
+ifneq ($(VIRTIO_NET_BUILD_ENABLED),y)
+DEV_OBJS := $(filter-out \
+    $(DEV_OUT)/virtio-net.o \
+    $(DEV_OUT)/netdev.o \
+    $(DEV_OUT)/slirp.o, \
+    $(DEV_OBJS))
+else
+ifneq ($(VIRTIO_NET_USER_BUILD_ENABLED),y)
+DEV_OBJS := $(filter-out $(DEV_OUT)/slirp.o, $(DEV_OBJS))
+endif
+endif
+
 # Enable Goldfish RTC peripheral
 ifneq ($(CONFIG_GOLDFISH_RTC),y)
 DEV_OBJS := $(filter-out $(DEV_OUT)/rtc.o, $(DEV_OBJS))

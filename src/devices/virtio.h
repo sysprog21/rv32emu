@@ -8,7 +8,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "feature.h"
+
+#if RV32_HAS(VIRTIO_NET)
 #include "netdev.h"
+#endif
 
 #define VIRTIO_VENDOR_ID 0x12345678
 #define VIRTIO_MAGIC_NUMBER 0x74726976
@@ -16,6 +20,7 @@
 #define VIRTIO_CONFIG_GENERATE 0
 
 #define VIRTIO_STATUS_DRIVER_OK 4
+#define VIRTIO_STATUS_FEATURES_OK 8
 #define VIRTIO_STATUS_DEVICE_NEEDS_RESET 64
 
 #define VIRTIO_INT_USED_RING 1
@@ -43,14 +48,9 @@
 
 #define VIRTIO_RNG_DEV_ID 4
 
+#if RV32_HAS(VIRTIO_NET)
 #define VIRTIO_NET_DEV_ID 1
-
-#define VIRTIO_NET_F_MTU (1U << 3)
-#define VIRTIO_NET_F_MAC (1U << 5)
-#define VIRTIO_NET_F_STATUS (1U << 16)
-
 #define IRQ_VNET_BIT(base) (1U << (base))
-#define VIRTIO_STATUS_FEATURES_OK 8
 #endif
 
 /* VirtIO MMIO registers */
@@ -178,6 +178,7 @@ virtio_rng_state_t *vrng_new(void);
 
 void vrng_delete(virtio_rng_state_t *vrng);
 
+#if RV32_HAS(VIRTIO_NET)
 typedef struct {
     uint32_t queue_num;
     uint32_t queue_desc;
@@ -225,3 +226,4 @@ virtio_net_state_t *vnet_new(void);
 void vnet_delete(virtio_net_state_t *vnet);
 
 void virtio_net_refresh_queue(virtio_net_state_t *vnet);
+#endif /* RV32_HAS(VIRTIO_NET) */

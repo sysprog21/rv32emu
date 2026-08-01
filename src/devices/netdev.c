@@ -19,21 +19,52 @@
 #include <sys/ioctl.h>
 #endif
 
+#if RV32EMU_NET_HAS_TAP || RV32EMU_NET_HAS_SLIRP
+typedef int (*netdev_init_fn_t)(netdev_t *netdev);
+#endif
+
 static void netdev_reset(netdev_t *netdev)
 {
     if (!netdev)
         return;
 
     netdev->name = NULL;
-    netdev->type = NETDEV_IMPL_none;
+    netdev->type = NETDEV_IMPL_NONE;
     netdev->op = NULL;
 }
+
+#if RV32EMU_NET_HAS_TAP || RV32EMU_NET_HAS_SLIRP
+static bool netdev_setup(netdev_t *netdev,
+                         const char *name,
+                         netdev_impl_t type,
+                         size_t options_size,
+                         netdev_init_fn_t init_fn)
+{
+    netdev->name = name;
+    netdev->type = type;
+    netdev->op = calloc(1, options_size);
+
+    if (!netdev->op) {
+        netdev_reset(netdev);
+        return false;
+    }
+
+    if (init_fn(netdev) < 0) {
+        free(netdev->op);
+        netdev_reset(netdev);
+        return false;
+    }
+
+    return true;
+}
+#endif
 
 #if RV32EMU_NET_HAS_TAP
 static int net_init_tap(netdev_t *netdev)
 {
     net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
 
+    tap->tap_fd = -1;
     tap->tap_fd = open("/dev/net/tun", O_RDWR);
     if (tap->tap_fd < 0) {
         rv_log_error("failed to open TAP device: %s", strerror(errno));
@@ -84,19 +115,16 @@ static int net_init_user(netdev_t *netdev)
 }
 #endif
 
+static const char *netdev_default_backend(void)
+{
 #if RV32EMU_NET_HAS_TAP
-static const char *netdev_linux_default(void)
-{
     return "tap";
-}
-#endif
-
-#if defined(__APPLE__) && RV32EMU_NET_HAS_SLIRP
-static const char *netdev_macos_default(void)
-{
+#elif RV32EMU_NET_HAS_SLIRP
     return "user";
-}
+#else
+    return NULL;
 #endif
+}
 
 bool netdev_init(netdev_t *netdev, const char *net_type)
 {
@@ -105,73 +133,28 @@ bool netdev_init(netdev_t *netdev, const char *net_type)
 
     netdev_reset(netdev);
 
-#if defined(__APPLE__) && RV32EMU_NET_HAS_SLIRP
-    const char *requested = net_type ? net_type : netdev_macos_default();
-
-    if (!strcmp(requested, "user")) {
-        netdev->name = "user";
-        netdev->type = NETDEV_IMPL_user;
-        netdev->op = calloc(1, sizeof(net_user_options_t));
-        if (!netdev->op)
-            return false;
-
-        if (net_init_user(netdev) < 0) {
-            free(netdev->op);
-            netdev->op = NULL;
-            return false;
-        }
-
-        return true;
+    const char *requested = net_type ? net_type : netdev_default_backend();
+    if (!requested) {
+        rv_log_error("no virtio-net backend was compiled");
+        return false;
     }
 
-    rv_log_error("unsupported virtio-net backend on macOS: %s", requested);
-    return false;
-
-#elif RV32EMU_NET_HAS_TAP
-    const char *requested = net_type ? net_type : netdev_linux_default();
-
+#if RV32EMU_NET_HAS_TAP
     if (!strcmp(requested, "tap")) {
-        netdev->name = "tap";
-        netdev->type = NETDEV_IMPL_tap;
-        netdev->op = calloc(1, sizeof(net_tap_options_t));
-        if (!netdev->op)
-            return false;
-
-        if (net_init_tap(netdev) < 0) {
-            free(netdev->op);
-            netdev->op = NULL;
-            return false;
-        }
-
-        return true;
+        return netdev_setup(netdev, "tap", NETDEV_IMPL_TAP,
+                            sizeof(net_tap_options_t), net_init_tap);
     }
+#endif
 
 #if RV32EMU_NET_HAS_SLIRP
     if (!strcmp(requested, "user")) {
-        netdev->name = "user";
-        netdev->type = NETDEV_IMPL_user;
-        netdev->op = calloc(1, sizeof(net_user_options_t));
-        if (!netdev->op)
-            return false;
-
-        if (net_init_user(netdev) < 0) {
-            free(netdev->op);
-            netdev->op = NULL;
-            return false;
-        }
-
-        return true;
+        return netdev_setup(netdev, "user", NETDEV_IMPL_USER,
+                            sizeof(net_user_options_t), net_init_user);
     }
 #endif
 
-    rv_log_error("unsupported virtio-net backend on Linux: %s", requested);
+    rv_log_error("unsupported virtio-net backend: %s", requested);
     return false;
-
-#else
-    (void) net_type;
-    rv_log_error("virtio-net networking is disabled on this host");
-    return false;
-#endif
 }
 
 void netdev_delete(netdev_t *netdev)
@@ -181,7 +164,7 @@ void netdev_delete(netdev_t *netdev)
 
     switch (netdev->type) {
 #if RV32EMU_NET_HAS_TAP
-    case NETDEV_IMPL_tap: {
+    case NETDEV_IMPL_TAP: {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         if (tap->tap_fd >= 0)
             close(tap->tap_fd);
@@ -190,11 +173,12 @@ void netdev_delete(netdev_t *netdev)
 #endif
 
 #if RV32EMU_NET_HAS_SLIRP
-    case NETDEV_IMPL_user:
+    case NETDEV_IMPL_USER:
         net_slirp_cleanup((net_user_options_t *) netdev->op);
         break;
 #endif
 
+    case NETDEV_IMPL_NONE:
     default:
         break;
     }

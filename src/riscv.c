@@ -543,7 +543,12 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
     char *bootargs = attr->data.system.bootargs;
     char **vblk = attr->data.system.vblk_device;
     bool vrng_enabled = attr->data.system.vrng_enabled;
+#if RV32_HAS(VIRTIO_NET)
     char *vnet = attr->data.system.vnet_backend;
+    bool have_optional_virtio = vblk || vrng_enabled || vnet;
+#else
+    bool have_optional_virtio = vblk || vrng_enabled;
+#endif
     char *blob = *ram_loc;
     char *buf;
     size_t len;
@@ -596,7 +601,7 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
 #endif
 
     int32_t dev_idx = 0;
-    if (vblk || vrng_enabled || vnet) {
+    if (have_optional_virtio) {
         int node = fdt_path_offset(dtb_buf, "/soc@F0000000");
         assert(node >= 0);
 
@@ -709,6 +714,7 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
             dev_idx++;
         }
 
+#if RV32_HAS(VIRTIO_NET)
         if (vnet) {
             uint32_t new_addr = next_addr + dev_idx * addr_offset;
             uint32_t new_irq = next_irq + dev_idx;
@@ -738,6 +744,7 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
                 fdt_setprop(dtb_buf, subnode, "interrupts", &irq, sizeof(irq)),
                 "virtio-net interrupts");
         }
+#endif
     }
 
 dtb_end:
@@ -857,10 +864,12 @@ static void rv_fsync_device()
         attr->vrng = NULL;
     }
 
+#if RV32_HAS(VIRTIO_NET)
     if (attr->vnet) {
         vnet_delete(attr->vnet);
         attr->vnet = NULL;
     }
+#endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
@@ -949,7 +958,7 @@ void rv_run(riscv_t *rv)
         for (; !rv_has_halted(rv);) { /* run until the flag is done */
             rv_step(rv);              /* step instructions */
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
             if (attr->vnet) {
                 virtio_net_refresh_queue(attr->vnet);
                 emu_update_vnet_interrupts(rv);
@@ -1754,6 +1763,7 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         }
     }
 
+#if RV32_HAS(VIRTIO_NET)
     if (attr->data.system.vnet_backend) {
         attr->vnet = vnet_new();
         assert(attr->vnet);
@@ -1765,6 +1775,7 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
             exit(EXIT_FAILURE);
         }
     }
+#endif
 
     capture_keyboard_input();
 #endif /* !RV32_HAS(SYSTEM_MMIO) */
@@ -1830,8 +1841,10 @@ fail_mpool:
     if (attr->vrng)
         vrng_delete(attr->vrng);
 
+#if RV32_HAS(VIRTIO_NET)
     if (attr->vnet)
         vnet_delete(attr->vnet);
+#endif
 #endif
     map_delete(attr->fd_map);
     memory_delete(attr->mem);

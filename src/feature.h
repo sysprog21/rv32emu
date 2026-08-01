@@ -163,6 +163,42 @@
 #define RV32_FEATURE_SYSTEM_MMIO 0
 #endif
 
+/* VirtIO network device */
+#ifndef RV32_FEATURE_VIRTIO_NET
+#define RV32_FEATURE_VIRTIO_NET 0
+#endif
+
+/* Linux TAP backend for VirtIO networking */
+#ifndef RV32_FEATURE_VIRTIO_NET_TAP
+#define RV32_FEATURE_VIRTIO_NET_TAP 0
+#endif
+
+/* User-mode SLIRP backend for VirtIO networking */
+#ifndef RV32_FEATURE_VIRTIO_NET_USER
+#define RV32_FEATURE_VIRTIO_NET_USER 0
+#endif
+
+/* VirtIO networking is only valid for kernel system emulation. */
+#if !RV32_FEATURE_SYSTEM_MMIO
+#undef RV32_FEATURE_VIRTIO_NET
+#define RV32_FEATURE_VIRTIO_NET 0
+#endif
+
+/* A VirtIO network device requires at least one compiled backend. */
+#if RV32_FEATURE_VIRTIO_NET && \
+    !(RV32_FEATURE_VIRTIO_NET_TAP || RV32_FEATURE_VIRTIO_NET_USER)
+#undef RV32_FEATURE_VIRTIO_NET
+#define RV32_FEATURE_VIRTIO_NET 0
+#endif
+
+/* Backends cannot be enabled without the VirtIO network device. */
+#if !RV32_FEATURE_VIRTIO_NET
+#undef RV32_FEATURE_VIRTIO_NET_TAP
+#define RV32_FEATURE_VIRTIO_NET_TAP 0
+#undef RV32_FEATURE_VIRTIO_NET_USER
+#define RV32_FEATURE_VIRTIO_NET_USER 0
+#endif
+
 /* Standard Extension for Vector Instructions */
 #ifndef RV32_FEATURE_EXT_V
 #define RV32_FEATURE_EXT_V 0

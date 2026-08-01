@@ -235,7 +235,7 @@ static ssize_t vnet_handle_read(netdev_t *netdev,
 {
     switch (netdev->type) {
 #if RV32EMU_NET_HAS_TAP
-    case NETDEV_IMPL_tap: {
+    case NETDEV_IMPL_TAP: {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         ssize_t plen = readv(tap->tap_fd, iovs, niovs);
 
@@ -255,7 +255,7 @@ static ssize_t vnet_handle_read(netdev_t *netdev,
 #endif
 
 #if RV32EMU_NET_HAS_SLIRP
-    case NETDEV_IMPL_user: {
+    case NETDEV_IMPL_USER: {
         net_user_options_t *usr = (net_user_options_t *) netdev->op;
         ssize_t plen =
             readv(usr->host_to_guest_channel[SLIRP_READ_SIDE], iovs, niovs);
@@ -287,7 +287,7 @@ static ssize_t vnet_handle_write(netdev_t *netdev,
 {
     switch (netdev->type) {
 #if RV32EMU_NET_HAS_TAP
-    case NETDEV_IMPL_tap: {
+    case NETDEV_IMPL_TAP: {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         ssize_t plen = writev(tap->tap_fd, iovs, niovs);
 
@@ -307,7 +307,7 @@ static ssize_t vnet_handle_write(netdev_t *netdev,
 #endif
 
 #if RV32EMU_NET_HAS_SLIRP
-    case NETDEV_IMPL_user: {
+    case NETDEV_IMPL_USER: {
         net_user_options_t *usr = (net_user_options_t *) netdev->op;
         ssize_t plen =
             writev(usr->guest_to_host_channel[SLIRP_WRITE_SIDE], iovs, niovs);
@@ -534,7 +534,7 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
 
     switch (vnet->peer.type) {
 #if RV32EMU_NET_HAS_TAP
-    case NETDEV_IMPL_tap: {
+    case NETDEV_IMPL_TAP: {
         net_tap_options_t *tap = (net_tap_options_t *) vnet->peer.op;
         struct pollfd pfd = {
             .fd = tap->tap_fd,
@@ -558,7 +558,7 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
 #endif
 
 #if RV32EMU_NET_HAS_SLIRP
-    case NETDEV_IMPL_user: {
+    case NETDEV_IMPL_USER: {
         net_user_options_t *usr = (net_user_options_t *) vnet->peer.op;
 
         /* First let SLIRP consume any packets written by guest TX. */

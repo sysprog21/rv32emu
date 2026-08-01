@@ -11,6 +11,8 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 
+#include "feature.h"
+
 /*
  * Networking backends:
  *
@@ -22,18 +24,15 @@
  *   - user : user-mode SLIRP
  *
  * Emscripten:
- * * Networking backends:
- *
- *
  *   - virtio-net networking backends are disabled
  */
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if RV32_HAS(VIRTIO_NET_TAP) && defined(__linux__) && !defined(__EMSCRIPTEN__)
 #define RV32EMU_NET_HAS_TAP 1
 #else
 #define RV32EMU_NET_HAS_TAP 0
 #endif
 
-#if !defined(__EMSCRIPTEN__)
+#if RV32_HAS(VIRTIO_NET_USER) && !defined(__EMSCRIPTEN__)
 #define RV32EMU_NET_HAS_SLIRP 1
 #else
 #define RV32EMU_NET_HAS_SLIRP 0
@@ -44,12 +43,12 @@
 typedef struct netdev netdev_t;
 
 typedef enum {
-    NETDEV_IMPL_none = 0,
+    NETDEV_IMPL_NONE = 0,
 #if RV32EMU_NET_HAS_TAP
-    NETDEV_IMPL_tap,
+    NETDEV_IMPL_TAP,
 #endif
 #if RV32EMU_NET_HAS_SLIRP
-    NETDEV_IMPL_user,
+    NETDEV_IMPL_USER,
 #endif
 } netdev_impl_t;
 

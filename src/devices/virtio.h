@@ -8,7 +8,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "feature.h"
+
+#if RV32_HAS(VIRTIO_NET)
 #include "netdev.h"
+#endif
 
 #define VIRTIO_VENDOR_ID 0x12345678
 #define VIRTIO_MAGIC_NUMBER 0x74726976
@@ -43,8 +47,10 @@
 
 #define VIRTIO_RNG_DEV_ID 4
 
+#if RV32_HAS(VIRTIO_NET)
 #define VIRTIO_NET_DEV_ID 1
-#define IRQ_VNET_BIT(base) (1 << (base))
+#define IRQ_VNET_BIT(base) (1U << (base))
+#endif
 
 /* VirtIO MMIO registers */
 #define VIRTIO_REG_LIST                  \
@@ -171,6 +177,7 @@ virtio_rng_state_t *vrng_new(void);
 
 void vrng_delete(virtio_rng_state_t *vrng);
 
+#if RV32_HAS(VIRTIO_NET)
 typedef struct {
     uint32_t queue_num;
     uint32_t queue_desc;
@@ -217,3 +224,4 @@ virtio_net_state_t *vnet_new(void);
 void vnet_delete(virtio_net_state_t *vnet);
 
 void virtio_net_refresh_queue(virtio_net_state_t *vnet);
+#endif /* RV32_HAS(VIRTIO_NET) */

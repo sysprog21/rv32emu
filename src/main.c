@@ -21,6 +21,10 @@
 #include "riscv.h"
 #include "utils.h"
 
+#if RV32_HAS(VIRTIO_NET)
+#include "devices/netdev.h"
+#endif
+
 /* enable program trace mode */
 #if !RV32_HAS(SYSTEM_MMIO)
 static bool opt_trace = false;
@@ -69,7 +73,9 @@ static int opt_virtio_blk_idx = 0;
 
 /* enable virtio-rng device */
 static bool opt_virtio_rng = false;
+#if RV32_HAS(VIRTIO_NET)
 static char *opt_virtio_net_backend;
+#endif
 #endif
 
 static void reset_getopt_state(void)
@@ -112,7 +118,9 @@ static void reset_runtime_options(void)
     memset(opt_virtio_blk_img, 0, sizeof(opt_virtio_blk_img));
     opt_virtio_blk_idx = 0;
     opt_virtio_rng = false;
+#if RV32_HAS(VIRTIO_NET)
     opt_virtio_net_backend = NULL;
+#endif
 #endif
 
     reset_getopt_state();
@@ -139,7 +147,17 @@ static void print_usage(const char *filename)
         "(default read and write). This option may be specified "
         "multiple times for multiple block devices\n"
         "  -x vrng : enable virtio-rng device\n"
-        "  -x vnet:<backend>: use <backend> as virtio-net backend interface\n"
+#if RV32_HAS(VIRTIO_NET)
+        "  -x vnet:<backend>: use <backend> as virtio-net backend "
+        "interface (supported backend:"
+#if RV32EMU_NET_HAS_TAP
+        " tap"
+#endif
+#if RV32EMU_NET_HAS_SLIRP
+        " user"
+#endif
+        ")\n"
+#endif
         "  -b <bootargs> : use customized <bootargs> for the kernel\n"
 #endif
         "  -d [filename]: dump registers as JSON to the "
@@ -153,22 +171,20 @@ static void print_usage(const char *filename)
         filename);
 }
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 static bool virtio_net_backend_supported(const char *backend)
 {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
-    if (!strcmp(backend, "tap") || !strcmp(backend, "user"))
+#if RV32EMU_NET_HAS_TAP
+    if (!strcmp(backend, "tap"))
         return true;
-#elif defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+#endif
+#if RV32EMU_NET_HAS_SLIRP
     if (!strcmp(backend, "user"))
         return true;
-#else
-    (void) backend;
 #endif
 
     return false;
 }
-
 #endif
 
 static bool parse_args(int argc, char **args)
@@ -213,6 +229,7 @@ static bool parse_args(int argc, char **args)
                 }
                 opt_virtio_blk_img[opt_virtio_blk_idx++] =
                     optarg + 5; /* strlen("vblk:") */
+#if RV32_HAS(VIRTIO_NET)
             } else if (!strncmp("vnet:", optarg, 5)) {
                 if (!optarg[5]) {
                     rv_log_error("Missing virtio-net backend interface.\n");
@@ -228,6 +245,7 @@ static bool parse_args(int argc, char **args)
                                  opt_virtio_net_backend);
                     return false;
                 }
+#endif
             } else if (!strcmp("vrng", optarg)) {
                 opt_virtio_rng = true;
             } else {
@@ -425,7 +443,9 @@ int main(int argc, char **args)
     attr.data.system.initrd = opt_rootfs_img;
     attr.data.system.bootargs = opt_bootargs;
     attr.data.system.vrng_enabled = opt_virtio_rng;
+#if RV32_HAS(VIRTIO_NET)
     attr.data.system.vnet_backend = opt_virtio_net_backend;
+#endif
     if (opt_virtio_blk_idx) {
         attr.data.system.vblk_device = opt_virtio_blk_img;
         attr.data.system.vblk_device_cnt = opt_virtio_blk_idx;

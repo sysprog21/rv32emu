@@ -91,6 +91,11 @@ config HAVE_SDL2_MIXER
     default n if CC_IS_EMCC
     default $(python,assert run('pkg-config', '--exists', 'SDL2_mixer'))
 
+config HAVE_PORTAUDIO
+    bool
+    default n if CC_IS_EMCC
+    default $(python,assert run('pkg-config', '--exists', 'portaudio-2.0'))
+
 config HAVE_LLVM18
     bool
     default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-llvm18'))
@@ -281,6 +286,21 @@ config ELF_LOADER
 
       Enable this for running 'make check' tests in system mode.
       Disable this for booting Linux kernel images.
+
+config VIRTIO_SND
+    bool "Enable VirtIO sound device"
+    default y
+    depends on SYSTEM && !ELF_LOADER && !CC_IS_EMCC
+    depends on HAVE_PORTAUDIO
+    help
+      Enable VirtIO sound device emulation for Linux system mode.
+
+      The device provides PCM playback through PortAudio and is enabled at
+      runtime with '-x vsnd'. Disable this option to exclude virtio-snd and
+      its PortAudio dependency from the rv32emu executable.
+
+comment "PortAudio not found - VirtIO sound support is unavailable"
+    depends on SYSTEM && !ELF_LOADER && !CC_IS_EMCC && !HAVE_PORTAUDIO
 
 endmenu
 

@@ -52,12 +52,39 @@ BIN := $(OUT)/rv32emu
 CFLAGS = -std=gnu11 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
 CFLAGS += -Wno-unused-label -include src/common.h -Isrc/ $(CFLAGS_NO_CET)
 LDFLAGS += $(KCONFIG_LDFLAGS)
+
+# VirtIO sound is available only for native kernel system emulation.
+# Keep an explicit effective state so mk/system.mk can exclude virtio-snd.o
+# when the feature is disabled.
+VIRTIO_SND_BUILD_ENABLED := n
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifeq ($(CONFIG_VIRTIO_SND),y)
+ifneq ($(CC_IS_EMCC),1)
+VIRTIO_SND_BUILD_ENABLED := y
+endif
+endif
+endif
+endif
+
+ifeq ($(VIRTIO_SND_BUILD_ENABLED),y)
+PORTAUDIO_CFLAGS := $(shell pkg-config --cflags portaudio-2.0 2>/dev/null)
+PORTAUDIO_LIBS := $(shell pkg-config --libs portaudio-2.0 2>/dev/null)
+ifeq ($(PORTAUDIO_LIBS),)
+PORTAUDIO_LIBS := -lportaudio
+endif
+CFLAGS += $(PORTAUDIO_CFLAGS)
+LDFLAGS += $(PORTAUDIO_LIBS) -lpthread -lm
+endif
+
 OBJS_EXT :=
 deps :=
 
 # Feature Flags (Kconfig -> RV32_FEATURE_*)
 $(call set-features, ELF_LOADER MOP_FUSION BLOCK_CHAINING LOG_COLOR)
 $(call set-features, SYSTEM GOLDFISH_RTC ARCH_TEST)
+VIRTIO_SND_FEATURE := $(if $(filter y,$(VIRTIO_SND_BUILD_ENABLED)),1,0)
+CFLAGS += -DRV32_FEATURE_VIRTIO_SND=$(VIRTIO_SND_FEATURE)
 $(call set-features, EXT_M EXT_A EXT_F EXT_C EXT_V RV32E)
 $(call set-features, Zicsr Zifencei Zba Zbb Zbc Zbs)
 $(call set-features, SDL SDL_MIXER GDBSTUB JIT)
@@ -247,6 +274,7 @@ deps += $(OBJS:%.o=%.o.d)
 EFFECTIVE_CONFIG_STAMP := $(OUT)/.effective-config
 EFFECTIVE_CONFIG_VARS := \
 	CONFIG_BUILD_WASM CONFIG_SYSTEM CONFIG_GOLDFISH_RTC CONFIG_ELF_LOADER \
+	CONFIG_VIRTIO_SND \
 	CONFIG_EXT_M CONFIG_EXT_A CONFIG_EXT_F CONFIG_EXT_C CONFIG_EXT_V CONFIG_RV32E \
 	CONFIG_Zicsr CONFIG_Zifencei CONFIG_Zba CONFIG_Zbb CONFIG_Zbc CONFIG_Zbs \
 	CONFIG_MOP_FUSION CONFIG_BLOCK_CHAINING CONFIG_LOG_COLOR CONFIG_ARCH_TEST \

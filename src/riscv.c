@@ -15,6 +15,7 @@
 #if RV32_HAS(SYSTEM_MMIO)
 #include <termios.h>
 #include "dtc/libfdt/libfdt.h"
+#include "system.h"
 #endif
 
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -349,6 +350,12 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
     char *bootargs = attr->data.system.bootargs;
     char **vblk = attr->data.system.vblk_device;
     bool vrng_enabled = attr->data.system.vrng_enabled;
+#if RV32_HAS(VIRTIO_SND)
+    bool vsnd = attr->data.system.vsnd_enabled;
+    bool have_optional_virtio = vblk || vrng_enabled || vsnd;
+#else
+    bool have_optional_virtio = vblk || vrng_enabled;
+#endif
     char *blob = *ram_loc;
     char *buf;
     size_t len;
@@ -400,7 +407,8 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         rv_log_warn("Failed to remove rtc node from DTB");
 #endif
 
-    if (vblk || vrng_enabled) {
+    int32_t dev_idx = 0;
+    if (have_optional_virtio) {
         int node = fdt_path_offset(dtb_buf, "/soc@F0000000");
         assert(node >= 0);
 
@@ -475,11 +483,12 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             uint32_t irq = cpu_to_fdt32(new_irq);
             assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
                                sizeof(irq)) == 0);
+            dev_idx = attr->vblk_cnt;
         }
 
         if (vrng_enabled) {
-            uint32_t new_addr = next_addr + attr->vblk_cnt * addr_offset;
-            uint32_t new_irq = next_irq + attr->vblk_cnt;
+            uint32_t new_addr = next_addr + dev_idx * addr_offset;
+            uint32_t new_irq = next_irq + dev_idx;
 
             attr->vrng_mmio_base_hi = new_addr >> 20;
             attr->vrng_irq = new_irq;
@@ -501,7 +510,35 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             uint32_t irq = cpu_to_fdt32(new_irq);
             assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
                                sizeof(irq)) == 0);
+            dev_idx++;
         }
+#if RV32_HAS(VIRTIO_SND)
+        if (vsnd) {
+            uint32_t new_addr = next_addr + dev_idx * addr_offset;
+            uint32_t new_irq = next_irq + dev_idx;
+
+            attr->vsnd_mmio_base_hi = new_addr >> 20;
+            attr->vsnd_irq = new_irq;
+
+            char node_name[32];
+            snprintf(node_name, sizeof(node_name), "virtio@%x", new_addr);
+
+            int subnode = fdt_add_subnode(dtb_buf, node, node_name);
+            if (subnode == -FDT_ERR_NOSPACE)
+                rv_log_warn("add virtio-snd subnode no space!\n");
+            assert(subnode >= 0);
+
+            assert(fdt_setprop_string(dtb_buf, subnode, "compatible",
+                                      "virtio,mmio") == 0);
+
+            uint32_t reg[2] = {cpu_to_fdt32(new_addr), cpu_to_fdt32(size)};
+            assert(fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)) == 0);
+
+            uint32_t irq = cpu_to_fdt32(new_irq);
+            assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
+                               sizeof(irq)) == 0);
+        }
+#endif
     }
 
 dtb_end:
@@ -618,6 +655,13 @@ static void rv_fsync_device()
         vrng_delete(attr->vrng);
         attr->vrng = NULL;
     }
+
+#if RV32_HAS(VIRTIO_SND)
+    if (attr->vsnd) {
+        vsnd_delete(attr->vsnd);
+        attr->vsnd = NULL;
+    }
+#endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
@@ -750,6 +794,11 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     attr->vrng = NULL;
     attr->vrng_mmio_base_hi = 0;
     attr->vrng_irq = 0;
+#if RV32_HAS(VIRTIO_SND)
+    attr->vsnd = NULL;
+    attr->vsnd_mmio_base_hi = 0;
+    attr->vsnd_irq = 0;
+#endif
 
     char *ram_loc = (char *) attr->mem->mem_base;
     map_file(&ram_loc, attr->data.system.kernel, 0);
@@ -904,6 +953,20 @@ riscv_t *rv_create(riscv_user_t rv_attr)
         }
     }
 
+#if RV32_HAS(VIRTIO_SND)
+    if (attr->data.system.vsnd_enabled) {
+        attr->vsnd = vsnd_new();
+        assert(attr->vsnd);
+
+        attr->vsnd->ram = (uint32_t *) attr->mem->mem_base;
+
+        if (!virtio_snd_init(attr->vsnd)) {
+            rv_log_error("Failed to initialize virtio-snd");
+            exit(EXIT_FAILURE);
+        }
+    }
+#endif
+
     capture_keyboard_input();
 #endif /* !RV32_HAS(SYSTEM_MMIO) */
 
@@ -915,8 +978,8 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     /* Fuse pool: fixed-size slots for macro-op fusion arrays.
      * Each slot holds up to FUSE_MAX_ENTRIES opcode_fuse_t structures.
      */
-    rv->fuse_mp = mpool_create(FUSE_SLOT_SIZE << BLOCK_IR_MAP_CAPACITY_BITS,
-                               FUSE_SLOT_SIZE);
+    rv->fuse_mp =
+        mpool_create(FUSE_SLOT_SIZE << BLOCK_MAP_CAPACITY_BITS, FUSE_SLOT_SIZE);
     if (!rv->block_mp || !rv->block_ir_mp || !rv->fuse_mp) {
         rv_log_fatal("Failed to create memory pool");
         goto fail_mpool;
@@ -1009,6 +1072,11 @@ fail_mpool:
 
     if (attr->vrng)
         vrng_delete(attr->vrng);
+
+#if RV32_HAS(VIRTIO_SND)
+    if (attr->vsnd)
+        vsnd_delete(attr->vsnd);
+#endif
 #endif
     map_delete(attr->fd_map);
     memory_delete(attr->mem);
@@ -1070,8 +1138,14 @@ void rv_run(riscv_t *rv)
         emscripten_set_main_loop_arg(rv_step, (void *) rv, 0, 1);
 #else
         /* default main loop */
-        for (; !rv_has_halted(rv);) /* run until the flag is done */
-            rv_step(rv);            /* step instructions */
+        for (; !rv_has_halted(rv);) { /* run until the flag is done */
+            rv_step(rv);              /* step instructions */
+
+#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(VIRTIO_SND)
+            if (attr->vsnd)
+                emu_update_vsnd_interrupts(rv);
+#endif
+        }
 #endif
     }
 #if !RV32_HAS(SYSTEM_MMIO)
@@ -1125,6 +1199,16 @@ void rv_delete(riscv_t *rv)
 {
     assert(rv);
     vm_attr_t *attr = PRIV(rv);
+#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(VIRTIO_SND)
+    /*
+     * Stop sound workers before releasing guest memory because TX
+     * completion may still access descriptors and status in guest RAM.
+     */
+    if (attr->vsnd) {
+        vsnd_delete(attr->vsnd);
+        attr->vsnd = NULL;
+    }
+#endif
 #if !RV32_HAS(JIT)
     map_delete(attr->fd_map);
     memory_delete(attr->mem);

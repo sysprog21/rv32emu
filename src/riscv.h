@@ -502,6 +502,9 @@ typedef struct {
     char **vblk_device;
     int vblk_device_cnt;
     bool vrng_enabled;
+#if RV32_HAS(VIRTIO_SND)
+    bool vsnd_enabled;
+#endif
 } vm_system_t;
 #endif /* RV32_HAS(SYSTEM) */
 
@@ -540,6 +543,13 @@ typedef struct {
     virtio_rng_state_t *vrng;
     uint32_t vrng_mmio_base_hi;
     int vrng_irq;
+
+#if RV32_HAS(VIRTIO_SND)
+    /* virtio-snd device */
+    virtio_snd_state_t *vsnd;
+    uint32_t vsnd_mmio_base_hi;
+    int vsnd_irq;
+#endif
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
     /* vm memory object */

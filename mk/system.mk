@@ -52,6 +52,13 @@ $(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(EFFECTIVE_CONFIG_STAMP) | $(DEV_OUT)
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
 DEV_OBJS := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c))
+
+# VirtIO sound is optional. Exclude the implementation object when Kconfig
+# disables the feature so PortAudio is not a build/link dependency.
+ifneq ($(VIRTIO_SND_BUILD_ENABLED),y)
+DEV_OBJS := $(filter-out $(DEV_OUT)/virtio-snd.o, $(DEV_OBJS))
+endif
+
 # Enable Goldfish RTC peripheral
 ifneq ($(CONFIG_GOLDFISH_RTC),y)
 DEV_OBJS := $(filter-out $(DEV_OUT)/rtc.o, $(DEV_OBJS))

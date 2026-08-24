@@ -48,6 +48,26 @@ void emu_update_vrng_interrupts(riscv_t *rv)
     plic_update_interrupts(attr->plic);
 }
 
+#if RV32_HAS(VIRTIO_SND)
+void emu_update_vsnd_interrupts(riscv_t *rv)
+{
+    vm_attr_t *attr = PRIV(rv);
+
+    if (!attr->vsnd)
+        return;
+
+    uint32_t interrupt_status =
+        __atomic_load_n(&attr->vsnd->interrupt_status, __ATOMIC_ACQUIRE);
+
+    if (interrupt_status)
+        attr->plic->active |= IRQ_VSND_BIT(attr->vsnd_irq);
+    else
+        attr->plic->active &= ~IRQ_VSND_BIT(attr->vsnd_irq);
+
+    plic_update_interrupts(attr->plic);
+}
+#endif
+
 #if RV32_HAS(GOLDFISH_RTC)
 void emu_update_rtc_interrupts(riscv_t *rv)
 {

@@ -5,6 +5,11 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "feature.h"
+
 #define VIRTIO_VENDOR_ID 0x12345678
 #define VIRTIO_MAGIC_NUMBER 0x74726976
 #define VIRTIO_VERSION 2
@@ -37,6 +42,11 @@
 #define VIRTIO_BLK_F_RO (1 << 5)
 
 #define VIRTIO_RNG_DEV_ID 4
+
+#if RV32_HAS(VIRTIO_SND)
+#define VIRTIO_SND_DEV_ID 25
+#define IRQ_VSND_BIT(irq) (1U << (irq))
+#endif
 
 /* VirtIO MMIO registers */
 #define VIRTIO_REG_LIST                  \
@@ -157,3 +167,40 @@ bool virtio_rng_init(virtio_rng_state_t *vrng);
 virtio_rng_state_t *vrng_new(void);
 
 void vrng_delete(virtio_rng_state_t *vrng);
+
+#if RV32_HAS(VIRTIO_SND)
+typedef struct {
+    uint32_t queue_num;
+    uint32_t queue_desc;
+    uint32_t queue_avail;
+    uint32_t queue_used;
+    uint16_t last_avail;
+    bool ready;
+} virtio_snd_queue_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t device_features;
+    uint32_t driver_features;
+    uint32_t device_features_sel;
+    uint32_t driver_features_sel;
+    uint32_t queue_sel;
+    uint32_t interrupt_status;
+    uint32_t status;
+
+    uint32_t *ram;
+    void *priv;
+
+    virtio_snd_queue_t queues[4];
+} virtio_snd_state_t;
+
+virtio_snd_state_t *vsnd_new(void);
+
+void vsnd_delete(virtio_snd_state_t *vsnd);
+
+bool virtio_snd_init(virtio_snd_state_t *vsnd);
+
+uint32_t virtio_snd_read(virtio_snd_state_t *vsnd, uint32_t addr);
+
+void virtio_snd_write(virtio_snd_state_t *vsnd, uint32_t addr, uint32_t value);
+#endif /* RV32_HAS(VIRTIO_SND) */

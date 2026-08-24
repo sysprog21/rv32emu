@@ -18,6 +18,7 @@
  *   - SDL requires SDL2 library or Emscripten
  *   - SDL_MIXER requires SDL
  *   - ELF_LOADER requires SYSTEM mode
+ *   - VIRTIO_SND requires SYSTEM_MMIO
  *
  * Derived Features (computed from other features):
  *   - SYSTEM_MMIO = SYSTEM && !ELF_LOADER (for kernel boot with MMIO devices)
@@ -26,6 +27,7 @@
  *   - RV32_HAS(T2C) implies RV32_HAS(JIT) - no need to check both
  *   - RV32_HAS(ELF_LOADER) implies RV32_HAS(SYSTEM)
  *   - RV32_HAS(SDL_MIXER) implies RV32_HAS(SDL)
+ *   - RV32_HAS(VIRTIO_SND) implies RV32_HAS(SYSTEM_MMIO)
  *   - Use RV32_HAS(SYSTEM_MMIO) instead of RV32_HAS(SYSTEM) &&
  *     !RV32_HAS(ELF_LOADER)
  */
@@ -157,6 +159,16 @@
 #define RV32_FEATURE_SYSTEM_MMIO 1
 #else
 #define RV32_FEATURE_SYSTEM_MMIO 0
+#endif
+
+/* VirtIO sound device */
+#ifndef RV32_FEATURE_VIRTIO_SND
+#define RV32_FEATURE_VIRTIO_SND 0
+#endif
+
+/* VirtIO sound requires kernel system emulation with MMIO support. */
+#if RV32_FEATURE_VIRTIO_SND && !RV32_FEATURE_SYSTEM_MMIO
+#error "VirtIO sound requires SYSTEM mode without ELF_LOADER"
 #endif
 
 /* Standard Extension for Vector Instructions */

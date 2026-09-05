@@ -116,7 +116,7 @@ include mk/softfloat.mk
 OBJS_NEED_SOFTFLOAT := $(OUT)/decode.o $(OUT)/riscv.o
 ifeq ($(CONFIG_SYSTEM),y)
 DEV_OUT := $(OUT)/devices
-OBJS_NEED_SOFTFLOAT += $(DEV_OUT)/uart.o $(DEV_OUT)/plic.o
+OBJS_NEED_SOFTFLOAT += $(DEV_OUT)/uart.o $(DEV_OUT)/plic.o $(DEV_OUT)/virtio-net.o
 endif
 $(OBJS_NEED_SOFTFLOAT): $(SOFTFLOAT_LIB)
 LDFLAGS += $(SOFTFLOAT_LIB) -lm

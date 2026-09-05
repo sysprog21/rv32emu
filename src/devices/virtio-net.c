@@ -96,6 +96,21 @@ static inline uint32_t vnet_preprocess(virtio_net_state_t *vnet, uint32_t addr)
     return addr >> 2;
 }
 
+void virtio_net_reset(virtio_net_state_t *vnet)
+{
+    netdev_t peer = vnet->peer;
+    uint32_t *ram = vnet->ram;
+    void *priv = vnet->priv;
+
+    memset(vnet, 0, sizeof(*vnet));
+
+    vnet->peer = peer;
+    vnet->ram = ram;
+    vnet->priv = priv;
+    vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+    vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+}
+
 static void virtio_net_update_status(virtio_net_state_t *vnet, uint32_t status)
 {
     vnet->status |= status;
@@ -108,18 +123,7 @@ static void virtio_net_update_status(virtio_net_state_t *vnet, uint32_t status)
         return;
     }
 
-    /* Reset while preserving environment-owned fields. */
-    netdev_t peer = vnet->peer;
-    uint32_t *ram = vnet->ram;
-    void *priv = vnet->priv;
-
-    memset(vnet, 0, sizeof(*vnet));
-
-    vnet->peer = peer;
-    vnet->ram = ram;
-    vnet->priv = priv;
-    vnet->queues[VNET_QUEUE_RX].fd_ready = true;
-    vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+    virtio_net_reset(vnet);
 }
 
 static bool vnet_iovec_write(struct iovec **vecs,

@@ -85,7 +85,7 @@ static int net_init_tap(netdev_t *netdev)
         return -1;
     }
 
-    rv_log_info("allocated TAP interface: %s", ifreq.ifr_name);
+    rv_log_warn("allocated TAP interface: %s", ifreq.ifr_name);
 
     int flags = fcntl(tap->tap_fd, F_GETFL, 0);
     if (flags < 0 || fcntl(tap->tap_fd, F_SETFL, flags | O_NONBLOCK) < 0) {

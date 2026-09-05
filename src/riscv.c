@@ -1699,15 +1699,19 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
 
 #if RV32_HAS(VIRTIO_NET)
     if (attr->data.system.vnet_backend) {
-        attr->vnet = vnet_new();
-        assert(attr->vnet);
+        if (attr->vnet) { /* check for reboot */
+            virtio_net_reset(attr->vnet);
+        } else {
+            attr->vnet = vnet_new();
+            assert(attr->vnet);
+
+            if (!virtio_net_init(attr->vnet, attr->data.system.vnet_backend)) {
+                rv_log_error("Failed to initialize virtio-net");
+                exit(EXIT_FAILURE);
+            }
+        }
 
         attr->vnet->ram = (uint32_t *) attr->mem->mem_base;
-
-        if (!virtio_net_init(attr->vnet, attr->data.system.vnet_backend)) {
-            rv_log_error("Failed to initialize virtio-net");
-            exit(EXIT_FAILURE);
-        }
     }
 #endif
 

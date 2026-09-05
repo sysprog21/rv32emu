@@ -224,4 +224,6 @@ virtio_net_state_t *vnet_new(void);
 void vnet_delete(virtio_net_state_t *vnet);
 
 void virtio_net_refresh_queue(virtio_net_state_t *vnet);
+
+void virtio_net_reset(virtio_net_state_t *vnet);
 #endif /* RV32_HAS(VIRTIO_NET) */

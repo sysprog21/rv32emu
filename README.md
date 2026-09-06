@@ -87,6 +87,7 @@ button that switches directly to the other.
 | Newlib system calls | [docs/syscall.md](docs/syscall.md) |
 | Prebuilt binaries | [docs/prebuilt.md](docs/prebuilt.md) |
 | Base image preparation | [docs/base-image.md](docs/base-image.md) |
+| Networking guidance | [docs/networking.md](docs/networking.md) |
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.

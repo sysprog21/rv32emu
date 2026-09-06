@@ -45,3 +45,7 @@
 	path = tests/system/br_pkgs/quake
 	url = https://github.com/sysprog21/quake-embedded
 	shallow = true
+[submodule "src/minislirp"]
+	path = src/minislirp
+	url = https://github.com/sysprog21/minislirp
+	shallow = true

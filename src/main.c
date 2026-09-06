@@ -153,6 +153,24 @@ static void print_usage(const char *filename)
         filename);
 }
 
+#if RV32_HAS(SYSTEM_MMIO)
+static bool virtio_net_backend_supported(const char *backend)
+{
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+    if (!strcmp(backend, "tap") || !strcmp(backend, "user"))
+        return true;
+#elif defined(__APPLE__) && !defined(__EMSCRIPTEN__)
+    if (!strcmp(backend, "user"))
+        return true;
+#else
+    (void) backend;
+#endif
+
+    return false;
+}
+
+#endif
+
 static bool parse_args(int argc, char **args)
 {
     int opt;
@@ -200,8 +218,12 @@ static bool parse_args(int argc, char **args)
                     rv_log_error("Missing virtio-net backend interface.\n");
                     return false;
                 }
+                if (opt_virtio_net_backend) {
+                    rv_log_error("only one virtio-net device is supported");
+                    return false;
+                }
                 opt_virtio_net_backend = optarg + 5; /* strlen("vnet:") */
-                if (strcmp(opt_virtio_net_backend, "tap")) {
+                if (!virtio_net_backend_supported(opt_virtio_net_backend)) {
                     rv_log_error("unsupported virtio-net backend: %s",
                                  opt_virtio_net_backend);
                     return false;

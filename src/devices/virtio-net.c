@@ -29,6 +29,12 @@ enum {
     VNET_QUEUE_TX = 1,
 };
 
+typedef enum {
+    VNET_TX_OK = 0,
+    VNET_TX_RETRY,
+    VNET_TX_DROP,
+} vnet_tx_result_t;
+
 #define VNET_LINK_UP 1
 #define VNET_HDR_SIZE 12
 
@@ -284,10 +290,10 @@ static ssize_t vnet_handle_read(netdev_t *netdev,
     }
 }
 
-static ssize_t vnet_handle_write(netdev_t *netdev,
-                                 virtio_net_queue_t *queue,
-                                 struct iovec *iovs,
-                                 size_t niovs)
+static vnet_tx_result_t vnet_handle_write(netdev_t *netdev,
+                                          virtio_net_queue_t *queue,
+                                          struct iovec *iovs,
+                                          size_t niovs)
 {
     switch (netdev->type) {
 #if RV32EMU_NET_HAS_TAP
@@ -295,18 +301,19 @@ static ssize_t vnet_handle_write(netdev_t *netdev,
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         ssize_t plen = writev(tap->tap_fd, iovs, niovs);
 
-        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+        if (plen >= 0)
+            return VNET_TX_OK;
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
             queue->fd_ready = false;
-            return -1;
+            return VNET_TX_RETRY;
         }
 
-        if (plen < 0) {
-            rv_log_error("virtio-net: could not write packet: %s",
-                         strerror(errno));
-            return -1;
-        }
+        if (errno == EINTR)
+            return VNET_TX_RETRY;
 
-        return plen;
+        rv_log_error("virtio-net: could not write packet: %s", strerror(errno));
+        return VNET_TX_DROP;
     }
 #endif
 
@@ -316,23 +323,25 @@ static ssize_t vnet_handle_write(netdev_t *netdev,
         ssize_t plen =
             writev(usr->guest_to_host_channel[SLIRP_WRITE_SIDE], iovs, niovs);
 
-        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+        if (plen >= 0)
+            return VNET_TX_OK;
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
             queue->fd_ready = false;
-            return -1;
+            return VNET_TX_RETRY;
         }
 
-        if (plen < 0) {
-            rv_log_error("virtio-net: could not write packet to SLIRP: %s",
-                         strerror(errno));
-            return -1;
-        }
+        if (errno == EINTR)
+            return VNET_TX_RETRY;
 
-        return plen;
+        rv_log_error("virtio-net: could not write packet to SLIRP: %s",
+                     strerror(errno));
+        return VNET_TX_DROP;
     }
 #endif
 
     default:
-        return -1;
+        return VNET_TX_DROP;
     }
 }
 
@@ -511,8 +520,10 @@ static void virtio_net_try_tx(virtio_net_state_t *vnet)
             return virtio_net_set_fail(vnet);
         }
 
-        ssize_t plen = vnet_handle_write(&vnet->peer, queue, cursor, ncursor);
-        if (plen < 0)
+        vnet_tx_result_t result =
+            vnet_handle_write(&vnet->peer, queue, cursor, ncursor);
+
+        if (result == VNET_TX_RETRY)
             break;
 
         if (!vnet_put_used_elem(vnet, queue, new_used, buffer_idx, 0))

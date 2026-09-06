@@ -54,6 +54,10 @@
 
 #define BLOCK_IR_MAP_CAPACITY_BITS 10
 
+#if RV32_HAS(VIRTIO_NET)
+#define VNET_REFRESH_INTERVAL 5000ULL
+#endif
+
 #if !RV32_HAS(JIT)
 /* initialize the block map */
 static void block_map_init(block_map_t *map, const uint8_t bits)
@@ -896,6 +900,9 @@ void rv_run(riscv_t *rv)
     assert(rv);
 
     vm_attr_t *attr = PRIV(rv);
+#if RV32_HAS(VIRTIO_NET)
+    uint64_t last_vnet_refresh = rv->csr_cycle;
+#endif
     assert(attr &&
 #if RV32_HAS(SYSTEM_MMIO)
            attr->data.system.kernel && attr->data.system.initrd
@@ -914,7 +921,12 @@ void rv_run(riscv_t *rv)
 
 #if RV32_HAS(VIRTIO_NET)
             if (attr->vnet) {
-                virtio_net_refresh_queue(attr->vnet);
+                if (rv->csr_cycle - last_vnet_refresh >=
+                    VNET_REFRESH_INTERVAL) {
+                    virtio_net_refresh_queue(attr->vnet);
+                    last_vnet_refresh = rv->csr_cycle;
+                }
+
                 emu_update_vnet_interrupts(rv);
             }
 #endif

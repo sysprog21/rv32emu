@@ -54,6 +54,10 @@
 
 #define BLOCK_IR_MAP_CAPACITY_BITS 10
 
+#if RV32_HAS(VIRTIO_NET)
+#define VNET_REFRESH_INTERVAL 5000ULL
+#endif
+
 #if !RV32_HAS(JIT)
 /* initialize the block map */
 static void block_map_init(block_map_t *map, const uint8_t bits)
@@ -733,7 +737,7 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             assert(subnode >= 0);
 
             DTB_SET_OR_FAIL(fdt_setprop_string(dtb_buf, subnode, "compatible",
-                                            "virtio,mmio"),
+                                               "virtio,mmio"),
                             "virtio-net compatible");
 
             uint32_t reg[2] = {cpu_to_fdt32(new_addr), cpu_to_fdt32(size)};
@@ -944,6 +948,9 @@ void rv_run(riscv_t *rv)
     assert(rv);
 
     vm_attr_t *attr = PRIV(rv);
+#if RV32_HAS(VIRTIO_NET)
+    uint64_t last_vnet_refresh = rv->csr_cycle;
+#endif
     assert(attr &&
 #if RV32_HAS(SYSTEM_MMIO)
            attr->data.system.kernel && attr->data.system.initrd
@@ -962,8 +969,12 @@ void rv_run(riscv_t *rv)
 
 #if RV32_HAS(VIRTIO_NET)
             if (attr->vnet) {
-                virtio_net_refresh_queue(attr->vnet);
-                emu_update_vnet_interrupts(rv);
+                if (rv->csr_cycle - last_vnet_refresh >=
+                    VNET_REFRESH_INTERVAL) {
+                    virtio_net_refresh_queue(attr->vnet);
+                    emu_update_vnet_interrupts(rv);
+                    last_vnet_refresh = rv->csr_cycle;
+                }
             }
 #endif
         }

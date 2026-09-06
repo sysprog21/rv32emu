@@ -68,7 +68,9 @@ static void virtio_queue_notify_handler(virtio_rng_state_t *vrng, int index)
 
     /* Check for new buffers */
     uint16_t new_avail = ram[queue->queue_avail] >> 16;
-    if (new_avail - queue->last_avail > (uint16_t) queue->queue_num) {
+    uint16_t pending = new_avail - queue->last_avail;
+
+    if (pending > (uint16_t) queue->queue_num) {
         rv_log_error("Size check fail");
         return virtio_rng_set_fail(vrng);
     }

@@ -392,7 +392,9 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
         return;
 
     uint16_t new_avail = ram[queue->queue_avail] >> 16;
-    if (new_avail - queue->last_avail > (uint16_t) queue->queue_num) {
+    uint16_t pending = new_avail - queue->last_avail;
+
+    if (pending > (uint16_t) queue->queue_num) {
         rv_log_error("virtio-net: RX available ring size check failed");
         return virtio_net_set_fail(vnet);
     }
@@ -473,7 +475,9 @@ static void virtio_net_try_tx(virtio_net_state_t *vnet)
         return;
 
     uint16_t new_avail = ram[queue->queue_avail] >> 16;
-    if (new_avail - queue->last_avail > (uint16_t) queue->queue_num) {
+    uint16_t pending = new_avail - queue->last_avail;
+
+    if (pending > (uint16_t) queue->queue_num) {
         rv_log_error("virtio-net: TX available ring size check failed");
         return virtio_net_set_fail(vnet);
     }

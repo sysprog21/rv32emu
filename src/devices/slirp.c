@@ -21,11 +21,12 @@
 #include "minislirp/src/libslirp.h"
 #include "utils.h"
 
-typedef struct {
+typedef struct rv_slirp_timer {
     Slirp *slirp;
     SlirpTimerId id;
     void *cb_opaque;
     int64_t expire_time_ms;
+    struct rv_slirp_timer *next;
 } rv_slirp_timer_t;
 
 static int64_t monotonic_clock_ns(void)
@@ -87,18 +88,28 @@ static void *net_slirp_timer_new_opaque(SlirpTimerId id,
     timer->cb_opaque = cb_opaque;
     timer->expire_time_ms = -1;
 
-    usr->timer = timer;
+    timer->next = usr->timers;
+    usr->timers = timer;
+
     return timer;
 }
 
 static void net_slirp_timer_free(void *timer, void *opaque)
 {
     net_user_options_t *usr = (net_user_options_t *) opaque;
+    rv_slirp_timer_t *target = (rv_slirp_timer_t *) timer;
 
-    if (usr && usr->timer == timer)
-        usr->timer = NULL;
+    if (usr) {
+        rv_slirp_timer_t **current = &usr->timers;
 
-    free(timer);
+        while (*current && *current != target)
+            current = &(*current)->next;
+
+        if (*current == target)
+            *current = target->next;
+    }
+
+    free(target);
 }
 
 static void net_slirp_timer_mod(void *timer, int64_t expire_time, void *opaque)
@@ -316,11 +327,16 @@ void net_slirp_cleanup(net_user_options_t *usr)
         usr->slirp = NULL;
     }
 
+    while (usr->timers) {
+        rv_slirp_timer_t *timer = usr->timers;
+        usr->timers = timer->next;
+        free(timer);
+    }
+
     free(usr->pfd);
     usr->pfd = NULL;
     usr->pfd_len = 0;
     usr->pfd_size = 0;
-    usr->timer = NULL;
 }
 
 int net_slirp_read(net_user_options_t *usr)
@@ -347,14 +363,26 @@ int net_slirp_read(net_user_options_t *usr)
 
 static void net_slirp_handle_timer(net_user_options_t *usr)
 {
-    rv_slirp_timer_t *timer = (rv_slirp_timer_t *) usr->timer;
+    while (true) {
+        rv_slirp_timer_t *timer = usr->timers;
+        int64_t now = monotonic_clock_ms();
 
-    if (!timer || timer->expire_time_ms < 0)
-        return;
+        while (timer) {
+            if (timer->expire_time_ms >= 0 && timer->expire_time_ms <= now)
+                break;
 
-    if (timer->expire_time_ms <= monotonic_clock_ms()) {
+            timer = timer->next;
+        }
+
+        if (!timer)
+            return;
+
+        SlirpTimerId id = timer->id;
+        void *cb_opaque = timer->cb_opaque;
+
         timer->expire_time_ms = -1;
-        slirp_handle_timer((Slirp *) usr->slirp, timer->id, timer->cb_opaque);
+
+        slirp_handle_timer((Slirp *) usr->slirp, id, cb_opaque);
     }
 }
 

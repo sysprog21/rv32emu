@@ -63,6 +63,8 @@ typedef struct {
 #define SLIRP_READ_SIDE 0
 #define SLIRP_WRITE_SIDE 1
 
+struct rv_slirp_timer;
+
 typedef struct {
     void *slirp;
     int guest_to_host_channel[2];
@@ -70,7 +72,7 @@ typedef struct {
     struct pollfd *pfd;
     int pfd_len;
     int pfd_size;
-    void *timer;
+    struct rv_slirp_timer *timers;
 } net_user_options_t;
 
 int net_slirp_init(net_user_options_t *usr);

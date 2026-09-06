@@ -17,7 +17,8 @@
 #include "utils.h"
 #include "virtio.h"
 
-#define VNET_FEATURES_0 0
+#define VNET_FEATURES_0 \
+    (VIRTIO_NET_F_MTU | VIRTIO_NET_F_MAC | VIRTIO_NET_F_STATUS)
 #define VNET_FEATURES_1 1 /* VIRTIO_F_VERSION_1 */
 
 #define VNET_QUEUE_NUM_MAX 1024
@@ -624,7 +625,7 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
 static uint32_t virtio_net_config_read(virtio_net_state_t *vnet, uint32_t addr)
 {
     virtio_net_config_t *cfg = (virtio_net_config_t *) vnet->priv;
-    uint32_t offset = (addr - VIRTIO_Config) * sizeof(uint32_t);
+    uint32_t offset = addr - (VIRTIO_Config << 2);
     uint32_t value = 0;
 
     if (offset >= sizeof(*cfg))
@@ -652,9 +653,12 @@ static void virtio_net_config_write(virtio_net_state_t *vnet,
 
 uint32_t virtio_net_read(virtio_net_state_t *vnet, uint32_t addr)
 {
-    addr = addr >> 2;
-
 #define _(reg) VIRTIO_##reg
+    if (addr >= (_(Config) << 2))
+        return virtio_net_config_read(vnet, addr);
+
+    addr >>= 2;
+
     switch (addr) {
     case _(MagicValue):
         return VIRTIO_MAGIC_NUMBER;
@@ -679,8 +683,6 @@ uint32_t virtio_net_read(virtio_net_state_t *vnet, uint32_t addr)
     case _(ConfigGeneration):
         return VIRTIO_CONFIG_GENERATE;
     default:
-        if (addr >= _(Config))
-            return virtio_net_config_read(vnet, addr);
         return 0;
     }
 #undef _

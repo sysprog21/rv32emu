@@ -49,6 +49,11 @@
 
 #if RV32_HAS(VIRTIO_NET)
 #define VIRTIO_NET_DEV_ID 1
+
+#define VIRTIO_NET_F_MTU (1U << 3)
+#define VIRTIO_NET_F_MAC (1U << 5)
+#define VIRTIO_NET_F_STATUS (1U << 16)
+
 #define IRQ_VNET_BIT(base) (1U << (base))
 #endif
 

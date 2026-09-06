@@ -203,6 +203,11 @@ static bool vnet_build_iovs(virtio_net_state_t *vnet,
             return false;
         }
 
+        if (*niovs >= VNET_QUEUE_NUM_MAX) {
+            virtio_net_set_fail(vnet);
+            return false;
+        }
+
         if (!vnet_guest_range_ok(desc->addr, desc->len)) {
             virtio_net_set_fail(vnet);
             return false;
@@ -229,6 +234,7 @@ static ssize_t vnet_handle_read(netdev_t *netdev,
                                 size_t niovs)
 {
     switch (netdev->type) {
+#if RV32EMU_NET_HAS_TAP
     case NETDEV_IMPL_tap: {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         ssize_t plen = readv(tap->tap_fd, iovs, niovs);
@@ -246,6 +252,29 @@ static ssize_t vnet_handle_read(netdev_t *netdev,
 
         return plen;
     }
+#endif
+
+#if RV32EMU_NET_HAS_SLIRP
+    case NETDEV_IMPL_user: {
+        net_user_options_t *usr = (net_user_options_t *) netdev->op;
+        ssize_t plen =
+            readv(usr->host_to_guest_channel[SLIRP_READ_SIDE], iovs, niovs);
+
+        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+            queue->fd_ready = false;
+            return -1;
+        }
+
+        if (plen < 0) {
+            rv_log_error("virtio-net: could not read packet from SLIRP: %s",
+                         strerror(errno));
+            return -1;
+        }
+
+        return plen;
+    }
+#endif
+
     default:
         return -1;
     }
@@ -257,6 +286,7 @@ static ssize_t vnet_handle_write(netdev_t *netdev,
                                  size_t niovs)
 {
     switch (netdev->type) {
+#if RV32EMU_NET_HAS_TAP
     case NETDEV_IMPL_tap: {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         ssize_t plen = writev(tap->tap_fd, iovs, niovs);
@@ -274,6 +304,29 @@ static ssize_t vnet_handle_write(netdev_t *netdev,
 
         return plen;
     }
+#endif
+
+#if RV32EMU_NET_HAS_SLIRP
+    case NETDEV_IMPL_user: {
+        net_user_options_t *usr = (net_user_options_t *) netdev->op;
+        ssize_t plen =
+            writev(usr->guest_to_host_channel[SLIRP_WRITE_SIDE], iovs, niovs);
+
+        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+            queue->fd_ready = false;
+            return -1;
+        }
+
+        if (plen < 0) {
+            rv_log_error("virtio-net: could not write packet to SLIRP: %s",
+                         strerror(errno));
+            return -1;
+        }
+
+        return plen;
+    }
+#endif
+
     default:
         return -1;
     }
@@ -480,6 +533,7 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
         return;
 
     switch (vnet->peer.type) {
+#if RV32EMU_NET_HAS_TAP
     case NETDEV_IMPL_tap: {
         net_tap_options_t *tap = (net_tap_options_t *) vnet->peer.op;
         struct pollfd pfd = {
@@ -501,6 +555,48 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
 
         break;
     }
+#endif
+
+#if RV32EMU_NET_HAS_SLIRP
+    case NETDEV_IMPL_user: {
+        net_user_options_t *usr = (net_user_options_t *) vnet->peer.op;
+
+        /* First let SLIRP consume any packets written by guest TX. */
+        net_slirp_poll(usr);
+
+        struct pollfd pfd = {
+            .fd = usr->host_to_guest_channel[SLIRP_READ_SIDE],
+            .events = POLLIN,
+        };
+
+        poll(&pfd, 1, 0);
+        if (pfd.revents & POLLIN) {
+            vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+            virtio_net_try_rx(vnet);
+        }
+
+        /*
+         * User-mode backend is memory/socketpair backed.  It is safe to try TX
+         * on every refresh because virtio_net_try_tx() only raises an interrupt
+         * when it actually completes at least one descriptor.
+         */
+        vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+        virtio_net_try_tx(vnet);
+
+        /* A TX packet may synchronously produce a reply through SLIRP. */
+        net_slirp_poll(usr);
+
+        pfd.revents = 0;
+        poll(&pfd, 1, 0);
+        if (pfd.revents & POLLIN) {
+            vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+            virtio_net_try_rx(vnet);
+        }
+
+        break;
+    }
+#endif
+
     default:
         break;
     }
@@ -660,7 +756,7 @@ bool virtio_net_init(virtio_net_state_t *vnet, const char *net_type)
 {
     if (!netdev_init(&vnet->peer, net_type)) {
         rv_log_error("virtio-net: failed to initialize net backend: %s",
-                     net_type ? net_type : "(null)");
+                     net_type ? net_type : "(default)");
         return false;
     }
 

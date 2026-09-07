@@ -47,6 +47,9 @@ cmp_src:
 cmp_init:
     .byte 0x0a, 0x00, 0x00, 0x00
 
+widen_overlap_src:
+    .short 3, 4, 5, 6
+
 mask_prefix_src:
     .byte 0x14, 0x00, 0x00, 0x00
 
@@ -100,6 +103,13 @@ mulfix_lhs:
 
 mulfix_rhs:
     .byte 0x40, 0x80, 0x40, 0x20
+
+vfmv_src:
+    .word 0x40490fdb, 0x3f800000, 0xc0000000, 0x00000000
+
+ext_src:
+    .byte 0x7f, 0x80, 0x01, 0xff
+    .balign 2
 
 narrow16_a:
     .short 0x8000, 0x0002
@@ -305,6 +315,12 @@ fixed_out:
     .space 16
 wide_out:
     .space 32
+vfmv_out:
+    .space 32
+ext_out:
+    .space 32
+vmvnr_out:
+    .space 64
 red_out:
     .space 16
 wide_red_out:
@@ -1842,6 +1858,225 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    # Floating-point scalar moves (V 1.0 16.3). Both ignore LMUL and only
+    # touch element 0.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    # Stage the source through the scratch buffer so every address in this
+    # block comes from the same base register.
+    la a2, vfmv_out
+    li t2, 0x40490fdb
+    sw t2, 0(a2)
+    li t2, 0x3f800000
+    sw t2, 4(a2)
+    vle32.v v20, (a2)
+
+    # vfmv.f.s: element 0 (0x40490fdb) lands in an f register. Spill it back
+    # to the scratch buffer to compare the bits.
+    vfmv.f.s ft0, v20
+    fmv.x.w t1, ft0
+    li t6, 0x40490fdb
+    bne t1, t6, fail_vfmv_f_s
+
+    # vfmv.s.f writes element 0 only; element 1 must keep its old value
+    # under the tail-undisturbed policy selected above.
+    la a1, vfmv_out
+    li t2, 0x11111111
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v22, (a1)
+    li t2, 0x3f800000
+    fmv.w.x ft1, t2
+    vfmv.s.f v22, ft1
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x3f800000
+    bne t1, t6, fail_vfmv_s_f
+    lw t1, 4(a1)
+    li t6, 0x11111111
+    bne t1, t6, fail_vfmv_s_f
+
+    # Per spec, vfmv.s.f performs no update when vstart >= vl; with vl = 0
+    # that holds for every vstart, so element 0 keeps its previous value.
+    la a1, vfmv_out
+    li t2, 0x22222222
+    sw t2, 0(a1)
+    vle32.v v22, (a1)
+    li a0, 0
+    vsetvli t0, a0, e32, m1, tu, mu
+    csrr t1, vl
+    assert_reg_imm t1, 0, fail_vfmv_vl0
+    vfmv.s.f v22, ft1
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, vfmv_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x22222222
+    bne t1, t6, fail_vfmv_vl0
+
+    /*
+     * Cross-EEW overlap, widening direction (V 1.0 5.2): a destination
+     * group whose EEW exceeds the source EEW may overlap the source when
+     * the source EMUL is at least 1 and the overlap sits in the HIGHEST-
+     * numbered part of the destination group. At SEW=16/LMUL=1 the dest
+     * group of vwadd.vv v0 is {v0,v1}, so a source of v1 is legal and must
+     * execute rather than trap. (The reserved cases - e.g. a source of v0,
+     * sharing the base register - raise an illegal instruction, which this
+     * harness cannot observe in user mode; see issue #735.)
+     */
+    li a0, 4
+    vsetvli t0, a0, e16, m1, tu, mu
+    la a1, widen_overlap_src
+    vle16.v v1, (a1)
+    vwadd.vv v0, v1, v1
+    li a0, 4
+    vsetvli t0, a0, e32, m2, tu, mu
+    la a1, fp32_out
+    vse32.v v0, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 6, fail_widen_overlap
+    lw t1, 12(a1)
+    assert_reg_imm t1, 12, fail_widen_overlap
+    # Integer extension (V 1.0 11.3): vzext/vsext widen a narrow source
+    # element into a full SEW-wide destination.
+    li a0, 4
+    vsetvli t0, a0, e16, m1, tu, mu
+    la a1, ext_src
+    vle8.v v20, (a1)
+
+    # vzext.vf2: 0x7f,0x80,0x01,0xff -> zero-extended to 16-bit
+    vzext.vf2 v22, v20
+    la a1, ext_out
+    vse16.v v22, (a1)
+    lhu t1, 0(a1)
+    assert_reg_imm t1, 0x007f, fail_vzext_vf2
+    lhu t1, 2(a1)
+    assert_reg_imm t1, 0x0080, fail_vzext_vf2
+    lhu t1, 6(a1)
+    assert_reg_imm t1, 0x00ff, fail_vzext_vf2
+
+    # vsext.vf2: 0x80 and 0xff are negative when sign-extended
+    vsext.vf2 v22, v20
+    la a1, ext_out
+    vse16.v v22, (a1)
+    lhu t1, 0(a1)
+    assert_reg_imm t1, 0x007f, fail_vsext_vf2
+    lhu t1, 2(a1)
+    assert_reg_imm t1, 0xff80, fail_vsext_vf2
+    lhu t1, 6(a1)
+    assert_reg_imm t1, 0xffff, fail_vsext_vf2
+
+    # vf4: 8-bit source widened to 32-bit destination
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, ext_src
+    vle8.v v20, (a1)
+
+    vzext.vf4 v22, v20
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x0000007f, fail_vzext_vf4
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0x00000080, fail_vzext_vf4
+
+    vsext.vf4 v22, v20
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 4(a1)
+    assert_reg_imm t1, -128, fail_vsext_vf4
+    lw t1, 12(a1)
+    assert_reg_imm t1, -1, fail_vsext_vf4
+
+    # Masked form leaves inactive elements undisturbed (vma=0). v0 bit
+    # pattern 0x5 activates elements 0 and 2 only.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, ext_out
+    # Whole vector register move (V 1.0 16.6). Copies all VLEN bits of NREG
+    # registers, ignoring vl. Every address below comes from a1 so the test
+    # does not mix gp-relative and pc-relative forms.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, vmvnr_out
+    li t2, 0xaaaa0001
+    sw t2, 0(a1)
+    li t2, 0xaaaa0002
+    sw t2, 4(a1)
+    li t2, 0xaaaa0003
+    sw t2, 8(a1)
+    li t2, 0xaaaa0004
+    sw t2, 12(a1)
+    vle32.v v8, (a1)
+
+    # Clear v16 so a failed copy is visible.
+    li t2, 0
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v22, (a1)
+    la a1, mask_bits
+    vle8.v v0, (a1)
+    la a1, ext_src
+    vle8.v v20, (a1)
+    vzext.vf4 v22, v20, v0.t
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x0000007f, fail_vzext_mask
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0, fail_vzext_mask
+    lw t1, 8(a1)
+    assert_reg_imm t1, 0x00000001, fail_vzext_mask
+    vle32.v v16, (a1)
+
+    vmv1r.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0xaaaa0001
+    bne t1, t6, fail_vmv1r
+    lw t1, 12(a1)
+    li t6, 0xaaaa0004
+    bne t1, t6, fail_vmv1r
+
+    # vmv2r.v copies the pair {v8,v9} to {v16,v17}; check the second
+    # register of the group actually moved.
+    li t2, 0xbbbb0001
+    sw t2, 0(a1)
+    li t2, 0xbbbb0002
+    sw t2, 4(a1)
+    li t2, 0xbbbb0003
+    sw t2, 8(a1)
+    li t2, 0xbbbb0004
+    sw t2, 12(a1)
+    vle32.v v9, (a1)
+    li t2, 0
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v17, (a1)
+
+    vmv2r.v v16, v8
+    vse32.v v17, (a1)
+    lw t1, 0(a1)
+    li t6, 0xbbbb0001
+    bne t1, t6, fail_vmv2r
+    lw t1, 12(a1)
+    li t6, 0xbbbb0004
+    bne t1, t6, fail_vmv2r
+
+    # vd == vs2 is an architectural NOP: the register must be unchanged.
+    vmv1r.v v8, v8
+    vse32.v v8, (a1)
+    lw t1, 0(a1)
+    li t6, 0xaaaa0001
+    bne t1, t6, fail_vmv_nop
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -1939,6 +2174,38 @@ fail_vsmul4:
     j write_and_exit_fail
 fail_vwadd:
     li a3, 0xd5
+    j write_and_exit_fail
+fail_vfmv_f_s:
+    li a3, 0x97
+    j write_and_exit_fail
+fail_vfmv_s_f:
+    li a3, 0x98
+    j write_and_exit_fail
+fail_vfmv_vl0:
+    li a3, 0x99
+    j write_and_exit_fail
+fail_vzext_vf2:
+    li a3, 0xf1
+    j write_and_exit_fail
+fail_vsext_vf2:
+    li a3, 0xf2
+    j write_and_exit_fail
+fail_vzext_vf4:
+    li a3, 0xf3
+    j write_and_exit_fail
+fail_vsext_vf4:
+    li a3, 0xf4
+    j write_and_exit_fail
+fail_vzext_mask:
+    li a3, 0xf5
+fail_vmv1r:
+    li a3, 0x9a
+    j write_and_exit_fail
+fail_vmv2r:
+    li a3, 0x9b
+    j write_and_exit_fail
+fail_vmv_nop:
+    li a3, 0x9c
     j write_and_exit_fail
 fail_vwmulu:
     li a3, 0xd6
@@ -2074,6 +2341,9 @@ fail_fractional:
     j write_and_exit_fail
 fail_vmsbc32:
     li a3, 0xf1
+    j write_and_exit_fail
+fail_widen_overlap:
+    li a3, 0xf2
     j write_and_exit_fail
 
 write_and_exit_fail:

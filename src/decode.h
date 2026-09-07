@@ -745,6 +745,10 @@ enum op_field {
         _(vwmaccsu_vx, 0, 4, 0, ENC(rs1, rs2, vd))        \
         _(vmv_s_x, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vmv_x_s, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vmv1r_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vmv2r_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vmv4r_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vmv8r_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vcpop_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vfirst_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vmsbf_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
@@ -752,6 +756,12 @@ enum op_field {
         _(vmsif_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(viota_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vid_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf2, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf2, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf4, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf4, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf8, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf8, 0, 4, 0, ENC(rs1, rs2, vd))            \
         /* OPF */                                         \
         _(vfadd_vv, 0, 4, 0, ENC(rs1, rs2, vd))           \
         _(vfadd_vf, 0, 4, 0, ENC(rs1, rs2, vd))           \
@@ -827,6 +837,8 @@ enum op_field {
         _(vfwmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))         \
         _(vfwnmsac_vv, 0, 4, 0, ENC(rs1, rs2, vd))        \
         _(vfwnmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))        \
+        _(vfmv_f_s, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfmv_s_f, 0, 4, 0, ENC(rs1, rs2, vd))            \
     )
 
 /* clang-format on */

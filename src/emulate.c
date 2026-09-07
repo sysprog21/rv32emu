@@ -783,7 +783,11 @@ static set_t pc_set;
 static bool has_loops = false;
 #endif
 
-void reset_rv_run_state()
+/* Declared in em_runtime.h behind the same guard, and only reached from the
+ * Emscripten main-loop teardown below.
+ */
+#if defined(__EMSCRIPTEN__)
+void reset_rv_run_state(void)
 {
     prev = NULL;
     is_branch_taken = false;
@@ -797,6 +801,7 @@ void reset_rv_run_state()
     need_handle_signal = false;
 #endif
 }
+#endif /* __EMSCRIPTEN__ */
 
 #if RV32_HAS(SYSTEM_MMIO)
 extern void emu_update_uart_interrupts(riscv_t *rv);

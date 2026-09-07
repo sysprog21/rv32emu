@@ -53,6 +53,6 @@ uint32_t rtc_read(rtc_t *rtc, uint32_t addr);
 
 void rtc_write(rtc_t *rtc, uint32_t addr, uint32_t value);
 
-rtc_t *rtc_new();
+rtc_t *rtc_new(void);
 
 void rtc_delete(rtc_t *rtc);

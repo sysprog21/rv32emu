@@ -187,7 +187,7 @@ static_assert(offsetof(struct jit_cache, key) % 8 == 0,
 static_assert(offsetof(struct jit_cache, entry) % sizeof(void *) == 0,
               "jit_cache.entry must be pointer-aligned for atomic loads");
 
-struct jit_cache *jit_cache_init();
+struct jit_cache *jit_cache_init(void);
 void jit_cache_exit(struct jit_cache *cache);
 void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
 void jit_cache_clear(struct jit_cache *cache);

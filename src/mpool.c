@@ -17,21 +17,22 @@
 #include "feature.h"
 #include "mpool.h"
 
-/* T2C runs a worker thread that calls mpool_free on the same pools the
- * main thread allocates from (block_mp / block_ir_mp / fuse_mp). The
- * freelist is unsynchronized internally, so without a guard the worker's
- * free can hand the same chunk out twice on the next main-thread alloc,
- * which later surfaces as `free(): corrupted unsorted chunks` on the libc
- * heap once a double-freed ir->branch_table is released. Gate the mutex on
- * T2C so non-threaded builds keep the original lock-free fast path.
+/* T2C runs a worker thread that calls mpool_free on the same pools the main
+ * thread allocates from (block_mp / block_ir_mp / fuse_mp). The freelist is
+ * unsynchronized internally, so without a guard the worker's free can hand the
+ * same chunk out twice on the next main-thread alloc, which later surfaces as
+ * "free(): corrupted unsorted chunks" on the libc heap once a double-freed
+ * ir->branch_table is released. Gate the mutex on T2C so non-threaded builds
+ * keep the original lock-free fast path.
  */
 #if RV32_HAS(T2C)
 #include <pthread.h>
+
 /* Init/destroy are called from single-threaded setup/teardown paths
  * (riscv_create / riscv_delete in src/riscv.c); failure here means broken
- * contract (already-init/EBUSY at destroy = stray thread, ENOMEM at init
- * = no mutex at all) and must abort loudly rather than silently leaking
- * a half-initialized pool or unmapping memory under a live owner.
+ * contract (already-init/EBUSY at destroy = stray thread, ENOMEM at init = no
+ * mutex at all) and must abort loudly rather than silently leaking a
+ * half-initialized pool or unmapping memory under a live owner.
  */
 #define MPOOL_LOCK_INIT(mp)                                         \
     do {                                                            \
@@ -68,6 +69,7 @@ typedef struct mpool {
     size_t chunk_count;
     size_t page_count;
     size_t chunk_size;
+    size_t slot_size;
     struct memchunk *free_chunk_head;
     area_t area;
 #if RV32_HAS(T2C)
@@ -95,6 +97,23 @@ static void *mem_arena(size_t sz)
     return p;
 }
 
+/* Thread an arena into a NULL-terminated free list and return its head. Pool
+ * creation and extension build the list identically; keeping it in one place is
+ * what stops the two copies from drifting apart. Requires chunk_count >= 1,
+ * otherwise the loop bound underflows.
+ */
+static memchunk_t *build_freelist(char *p, size_t chunk_count, size_t slot_size)
+{
+    assert(chunk_count);
+    memchunk_t *head = (memchunk_t *) p, *cur = head;
+    for (size_t i = 0; i < chunk_count - 1; i++) {
+        cur->next = (memchunk_t *) ((char *) cur + slot_size);
+        cur = cur->next;
+    }
+    cur->next = NULL;
+    return head;
+}
+
 mpool_t *mpool_create(size_t pool_size, size_t chunk_size)
 {
     mpool_t *new_mp = malloc(sizeof(mpool_t));
@@ -104,35 +123,42 @@ mpool_t *mpool_create(size_t pool_size, size_t chunk_size)
     new_mp->area.next = NULL;
     size_t pgsz = getpagesize();
 
-    /* Overflow checks */
-    if (chunk_size > SIZE_MAX - sizeof(memchunk_t))
+    /* Overflow checks. The bound covers the header plus the round-up slack
+     * added below, so neither addition can wrap.
+     */
+    if (chunk_size > SIZE_MAX - 2 * sizeof(memchunk_t) + 1)
         goto fail_mpool;
-    if (pool_size < chunk_size + sizeof(memchunk_t))
-        pool_size += sizeof(memchunk_t);
+    /* Payloads sit one memchunk_t into each slot, so slot_size decides their
+     * alignment: round it up rather than handing back pointers that drift out
+     * of alignment as the arena is walked. Callers pass sizeof() of aligned
+     * structs today, which this leaves untouched.
+     */
+    size_t slot_size = chunk_size + sizeof(memchunk_t);
+    slot_size =
+        (slot_size + sizeof(memchunk_t) - 1) & ~(sizeof(memchunk_t) - 1);
+
+    /* A pool must hold at least one chunk. Below that chunk_count computes to 0
+     * and the free-list build walks off the arena.
+     */
+    if (pool_size < slot_size)
+        pool_size = slot_size;
     if (pool_size > SIZE_MAX - pgsz + 1)
         goto fail_mpool;
     size_t page_count = (pool_size + pgsz - 1) / pgsz;
     if (page_count > SIZE_MAX / pgsz)
         goto fail_mpool;
 
-    char *p = mem_arena(page_count * pgsz);
+    size_t arena_size = page_count * pgsz;
+    char *p = mem_arena(arena_size);
     if (!p)
         goto fail_mpool;
 
     new_mp->area.mapped = p;
     new_mp->page_count = page_count;
-    new_mp->chunk_count = pool_size / (sizeof(memchunk_t) + chunk_size);
+    new_mp->chunk_count = arena_size / slot_size;
     new_mp->chunk_size = chunk_size;
-
-    /* Build free list */
-    new_mp->free_chunk_head = (memchunk_t *) p;
-    memchunk_t *cur = new_mp->free_chunk_head;
-    for (size_t i = 0; i < new_mp->chunk_count - 1; i++) {
-        cur->next =
-            (memchunk_t *) ((char *) cur + (sizeof(memchunk_t) + chunk_size));
-        cur = cur->next;
-    }
-    cur->next = NULL;
+    new_mp->slot_size = slot_size;
+    new_mp->free_chunk_head = build_freelist(p, new_mp->chunk_count, slot_size);
 
     MPOOL_LOCK_INIT(new_mp);
     return new_mp;
@@ -156,16 +182,11 @@ static void *mpool_extend(mpool_t *mp)
 
     new_area->mapped = p;
     new_area->next = NULL;
-    size_t chunk_count = pool_size / (sizeof(memchunk_t) + mp->chunk_size);
+    size_t chunk_count = pool_size / mp->slot_size;
 
-    /* Build free list for new area */
-    mp->free_chunk_head = (memchunk_t *) p;
-    memchunk_t *cur = mp->free_chunk_head;
-    for (size_t i = 0; i < chunk_count - 1; i++) {
-        cur->next = (memchunk_t *) ((char *) cur +
-                                    (sizeof(memchunk_t) + mp->chunk_size));
-        cur = cur->next;
-    }
+    /* Only reached with the pool drained, so no live free list is lost here. */
+    assert(!mp->free_chunk_head);
+    mp->free_chunk_head = build_freelist(p, chunk_count, mp->slot_size);
     mp->chunk_count += chunk_count;
 
     /* Append to area list */

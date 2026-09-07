@@ -21,7 +21,7 @@ void indirect_rv_cleanup();
 int indirect_rv_stop_requested();
 
 /* Reset static interpreter state between VM lifecycles. */
-void reset_rv_run_state();
+void reset_rv_run_state(void);
 
 #if RV32_HAS(SYSTEM_MMIO)
 /* To bridge xterm.js terminal with UART */

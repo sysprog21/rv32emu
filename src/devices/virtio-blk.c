@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <libgen.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,13 @@
 #define VBLK_QUEUE (vblk->queues[vblk->queue_sel])
 
 #define VBLK_PRIV(x) ((struct virtio_blk_config *) x->priv)
+
+/* Words of guest-addressable device configuration space. A guest may name any
+ * word in the 1 MiB device window, so the config index has to be range checked
+ * in both directions: below VIRTIO_Config the subtraction wraps, and above the
+ * struct it runs off a heap allocation.
+ */
+#define VBLK_CONFIG_WORDS (sizeof(struct virtio_blk_config) / sizeof(uint32_t))
 
 PACKED(struct virtio_blk_config {
     uint64_t capacity;
@@ -78,6 +86,18 @@ PACKED(struct vblk_req_header {
     uint8_t status;
 });
 
+/* Descriptor payload addresses and lengths come straight from the guest, so
+ * every [addr, addr + len) range derived from them has to be proven to lie
+ * inside guest RAM before it reaches a memcpy. Both operands are widened to
+ * 64-bit and the length is compared against the remaining space rather than
+ * added to the address, so neither side can wrap. virtio-rng.c does the same
+ * check inline; this one is shared because virtio-blk has four call sites.
+ */
+static inline bool vblk_ram_range_ok(uint64_t addr, uint64_t len)
+{
+    return addr < MEM_SIZE && len <= MEM_SIZE - addr;
+}
+
 static void virtio_blk_set_fail(virtio_blk_state_t *vblk)
 {
     vblk->status |= VIRTIO_STATUS_DEVICE_NEEDS_RESET;
@@ -116,7 +136,7 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
     uint64_t disk_size = vblk->disk_size;
     int disk_fd = vblk->disk_fd;
     void *priv = vblk->priv;
-    uint32_t capacity = VBLK_PRIV(vblk)->capacity;
+    uint64_t capacity = vblk->capacity;
     memset(vblk, 0, sizeof(*vblk));
     vblk->device_features = device_features;
     vblk->ram = ram;
@@ -124,6 +144,7 @@ static void virtio_blk_update_status(virtio_blk_state_t *vblk, uint32_t status)
     vblk->disk_size = disk_size;
     vblk->disk_fd = disk_fd;
     vblk->priv = priv;
+    vblk->capacity = capacity;
     VBLK_PRIV(vblk)->capacity = capacity;
 }
 
@@ -167,15 +188,27 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
 
     /* Collect the descriptors */
     for (int i = 0; i < 3; i++) {
-        /* The size of the `struct virtq_desc` is 4 words */
-        const struct virtq_desc *desc =
-            (struct virtq_desc *) &vblk->ram[queue->queue_desc + desc_idx * 4];
-
-        /* Retrieve the fields of current descriptor */
-        vq_desc[i].addr = desc->addr;
-        vq_desc[i].len = desc->len;
-        vq_desc[i].flags = desc->flags;
-        desc_idx = desc->next;
+        /* The size of "struct virtq_desc" is 4 words. queue_desc was
+         * clamped by vblk_preprocess() when the driver programmed it, but
+         * desc_idx comes from the available ring and can point anywhere.
+         */
+        if (desc_idx >= queue->queue_num) {
+            virtio_blk_set_fail(vblk);
+            return -1;
+        }
+        uint64_t desc_addr =
+            ((uint64_t) queue->queue_desc + (uint64_t) desc_idx * 4) * 4;
+        if (!vblk_ram_range_ok(desc_addr, sizeof(struct virtq_desc))) {
+            virtio_blk_set_fail(vblk);
+            return -1;
+        }
+        /* Copied rather than cast: the guest picks the descriptor table
+         * base, so the entry is only guaranteed 4-byte aligned while the
+         * struct wants 8. This also reads all four fields at once.
+         */
+        memcpy(&vq_desc[i], (const void *) ((uintptr_t) vblk->ram + desc_addr),
+               sizeof(vq_desc[i]));
+        desc_idx = vq_desc[i].next;
     }
 
     /* The next flag for the first and second descriptors should be set,
@@ -190,6 +223,20 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
         return -1;
     }
 
+    /* The header and the status byte must be in bounds before either is
+     * touched: reporting an error through *status is only safe once the
+     * status descriptor itself has been validated. Only the fields up to
+     * "status" are read out of the header descriptor.
+     */
+    if (vq_desc[0].len < offsetof(struct vblk_req_header, status) ||
+        !vblk_ram_range_ok(vq_desc[0].addr,
+                           offsetof(struct vblk_req_header, status)) ||
+        vq_desc[2].len < sizeof(uint8_t) ||
+        !vblk_ram_range_ok(vq_desc[2].addr, sizeof(uint8_t))) {
+        virtio_blk_set_fail(vblk);
+        return -1;
+    }
+
     /* Process the header */
     const struct vblk_req_header *header =
         (struct vblk_req_header *) ((uintptr_t) vblk->ram + vq_desc[0].addr);
@@ -197,8 +244,24 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     uint64_t sector = header->sector;
     uint8_t *status = (uint8_t *) ((uintptr_t) vblk->ram + vq_desc[2].addr);
 
-    /* Check sector index is valid */
-    if (sector > (VBLK_PRIV(vblk)->capacity - 1)) {
+    /* Check sector index is valid. Written as ">=" rather than
+     * "> capacity - 1" because capacity is deliberately left at 0 when no
+     * disk image is attached, and the subtraction would wrap to UINT64_MAX
+     * and wave every sector through onto a NULL vblk->disk.
+     */
+    const uint64_t capacity = vblk->capacity;
+    if (!capacity || sector >= capacity) {
+        *status = VIRTIO_BLK_S_IOERR;
+        return -1;
+    }
+
+    /* The payload descriptor is guest-controlled on both ends: it has to fit
+     * in guest RAM, and it has to fit in the disk from "sector" onward.
+     */
+    const uint64_t disk_size = vblk->disk_size;
+    const uint64_t offset = sector * DISK_BLK_SIZE;
+    if (!vblk_ram_range_ok(vq_desc[1].addr, vq_desc[1].len) ||
+        offset >= disk_size || vq_desc[1].len > disk_size - offset) {
         *status = VIRTIO_BLK_S_IOERR;
         return -1;
     }
@@ -321,6 +384,10 @@ uint32_t virtio_blk_read(virtio_blk_state_t *vblk, uint32_t addr)
         return VIRTIO_CONFIG_GENERATE;
     default:
         /* Read configuration from the corresponding register */
+        if (addr < _(Config) || addr - _(Config) >= VBLK_CONFIG_WORDS) {
+            virtio_blk_set_fail(vblk);
+            return 0;
+        }
         return ((uint32_t *) VBLK_PRIV(vblk))[addr - _(Config)];
     }
 #undef _
@@ -392,6 +459,10 @@ void virtio_blk_write(virtio_blk_state_t *vblk, uint32_t addr, uint32_t value)
         break;
     default:
         /* Write configuration to the corresponding register */
+        if (addr < _(Config) || addr - _(Config) >= VBLK_CONFIG_WORDS) {
+            virtio_blk_set_fail(vblk);
+            break;
+        }
         ((uint32_t *) VBLK_PRIV(vblk))[addr - _(Config)] = value;
         break;
     }
@@ -421,6 +492,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
     if (!disk_file) {
         /* By setting the block capacity to zero, the kernel will
          * then not to touch the device after booting */
+        vblk->capacity = 0;
         VBLK_PRIV(vblk)->capacity = 0;
         return NULL;
     }
@@ -445,7 +517,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
         goto disk_size_fail;
     }
     /* Get the disk size */
-    uint64_t disk_size;
+    uint64_t disk_size = 0;
     if (!strcmp(disk_file_dirname, "/dev")) { /* from /dev/, leverage ioctl */
         if ((st.st_mode & S_IFMT) != S_IFBLK) {
             rv_log_error("%s is not block device", disk_file);
@@ -474,12 +546,22 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
     } else { /* other path, get the size of block device via stat buffer */
         disk_size = st.st_size;
     }
+
+    /* An empty image would wrap the capacity computation below to a huge
+     * value and hand the guest a device backed by a zero-byte mapping. On
+     * Emscripten this also catches a /dev path, which has no ioctl to ask.
+     */
+    if (!disk_size) {
+        rv_log_error("Disk %s has zero length", disk_file);
+        goto disk_size_fail;
+    }
+    vblk->disk_size = disk_size;
     VBLK_PRIV(vblk)->disk_size = disk_size;
 
     /* Set up the disk memory */
     uint32_t *disk_mem;
 #if HAVE_MMAP
-    disk_mem = mmap(NULL, VBLK_PRIV(vblk)->disk_size,
+    disk_mem = mmap(NULL, vblk->disk_size,
                     readonly ? PROT_READ : (PROT_READ | PROT_WRITE), MAP_SHARED,
                     disk_fd, 0);
     if (disk_mem == MAP_FAILED) {
@@ -502,7 +584,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
 #endif
 
 mmap_fallback:
-    disk_mem = malloc(VBLK_PRIV(vblk)->disk_size);
+    disk_mem = malloc(vblk->disk_size);
     if (!disk_mem)
         goto disk_mem_err;
     vblk->disk_fd = disk_fd;
@@ -516,8 +598,9 @@ disk_mem_ok:
     assert(!(((uintptr_t) disk_mem) & 0b11));
 
     vblk->disk = disk_mem;
-    VBLK_PRIV(vblk)->capacity =
-        (VBLK_PRIV(vblk)->disk_size - 1) / DISK_BLK_SIZE + 1;
+    /* Round up to whole blocks; disk_size is non-zero, checked above. */
+    vblk->capacity = (vblk->disk_size - 1) / DISK_BLK_SIZE + 1;
+    VBLK_PRIV(vblk)->capacity = vblk->capacity;
 
     if (readonly)
         vblk->device_features = VIRTIO_BLK_F_RO;
@@ -534,7 +617,7 @@ fail:
     exit(EXIT_FAILURE);
 }
 
-virtio_blk_state_t *vblk_new()
+virtio_blk_state_t *vblk_new(void)
 {
     virtio_blk_state_t *vblk = calloc(1, sizeof(virtio_blk_state_t));
     assert(vblk);
@@ -548,7 +631,7 @@ void vblk_delete(virtio_blk_state_t *vblk)
         free(vblk->disk);
 #if HAVE_MMAP
     else
-        munmap(vblk->disk, VBLK_PRIV(vblk)->disk_size);
+        munmap(vblk->disk, vblk->disk_size);
 #endif
     free(vblk->priv);
     free(vblk);

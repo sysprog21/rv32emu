@@ -212,7 +212,7 @@ void u8250_write(u8250_state_t *uart, uint32_t addr, uint32_t value)
     }
 }
 
-u8250_state_t *u8250_new()
+u8250_state_t *u8250_new(void)
 {
     u8250_state_t *uart = calloc(1, sizeof(u8250_state_t));
     assert(uart);

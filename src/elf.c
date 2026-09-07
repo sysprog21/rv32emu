@@ -107,8 +107,48 @@ static void release(elf_t *e)
 }
 
 /* check if the ELF file header is valid */
+/* Does [offset, offset + size) fall inside the mapped file? Written so that
+ * neither operand can wrap: the sum is never formed.
+ */
+static inline bool in_file(const elf_t *e, uint32_t offset, uint32_t size)
+{
+    return offset <= e->raw_size && size <= e->raw_size - offset;
+}
+
+/* Section contents, bounds-checked. */
+static inline bool section_in_file(const elf_t *e,
+                                   const struct Elf32_Shdr *shdr)
+{
+    /* These section types have no file payload. */
+    return shdr->sh_type == SHT_NULL || shdr->sh_type == SHT_NOBITS ||
+           in_file(e, shdr->sh_offset, shdr->sh_size);
+}
+
+/* Fetch a NUL-terminated string out of a string-table section. is_valid()
+ * has already proven the section lies in the file and ends in a NUL, so any
+ * index inside it yields a string that terminates without running off the
+ * end.
+ */
+static const char *str_in_section(const elf_t *e,
+                                  const struct Elf32_Shdr *strtab,
+                                  uint32_t index)
+{
+    if (!strtab || strtab->sh_type != SHT_STRTAB || index >= strtab->sh_size)
+        return NULL;
+    return (const char *) (e->raw_data + strtab->sh_offset + index);
+}
+
+/* Validate the whole header structure up front, so that every traversal
+ * downstream can index the tables without re-checking. An ELF is attacker
+ * controlled input: nothing below this function may trust a field that was
+ * not proven in bounds here.
+ */
 static bool is_valid(elf_t *e)
 {
+    /* the header itself must be present before any field is read */
+    if (e->raw_size < sizeof(struct Elf32_Ehdr))
+        return false;
+
     /* check for ELF magic */
     if (memcmp(e->hdr->e_ident, "\177ELF", 4))
         return false;
@@ -121,66 +161,144 @@ static bool is_valid(elf_t *e)
     if (e->hdr->e_machine != EM_RISCV)
         return false;
 
+    /* section header table, and the entries it claims to hold. The offset and
+     * stride must both be 4-aligned: the entries are cast to structs holding
+     * uint32_t, so a misaligned table is undefined behavior, not merely slow.
+     * Every real toolchain emits aligned tables.
+     */
+    if (e->hdr->e_shnum) {
+        if (e->hdr->e_shentsize < sizeof(struct Elf32_Shdr) ||
+            (e->hdr->e_shoff & 3) || (e->hdr->e_shentsize & 3) ||
+            e->hdr->e_shnum > e->raw_size / e->hdr->e_shentsize ||
+            !in_file(e, e->hdr->e_shoff,
+                     (uint32_t) e->hdr->e_shnum * e->hdr->e_shentsize))
+            return false;
+
+        /* the section name string table is indexed by e_shstrndx */
+        if (e->hdr->e_shstrndx >= e->hdr->e_shnum)
+            return false;
+
+        for (int i = 0; i < e->hdr->e_shnum; ++i) {
+            const struct Elf32_Shdr *shdr =
+                (const struct Elf32_Shdr *) (e->raw_data + e->hdr->e_shoff +
+                                             (uint32_t) i *
+                                                 e->hdr->e_shentsize);
+            if (!section_in_file(e, shdr))
+                return false;
+
+            /* symbol table contents are cast to structs as well */
+            if (shdr->sh_type == SHT_SYMTAB && (shdr->sh_offset & 3))
+                return false;
+
+            /* A string table is indexed by name offsets taken from other
+             * headers. Requiring a trailing NUL is what makes every such
+             * lookup terminate inside the section.
+             */
+            if (shdr->sh_type == SHT_STRTAB &&
+                (!shdr->sh_size ||
+                 e->raw_data[shdr->sh_offset + shdr->sh_size - 1]))
+                return false;
+        }
+    }
+
+    /* program header table, same alignment reasoning as above */
+    if (e->hdr->e_phnum) {
+        if (e->hdr->e_phentsize < sizeof(struct Elf32_Phdr) ||
+            (e->hdr->e_phoff & 3) || (e->hdr->e_phentsize & 3) ||
+            e->hdr->e_phnum > e->raw_size / e->hdr->e_phentsize ||
+            !in_file(e, e->hdr->e_phoff,
+                     (uint32_t) e->hdr->e_phnum * e->hdr->e_phentsize))
+            return false;
+
+        for (int i = 0; i < e->hdr->e_phnum; ++i) {
+            const struct Elf32_Phdr *phdr =
+                (const struct Elf32_Phdr *) (e->raw_data + e->hdr->e_phoff +
+                                             (uint32_t) i *
+                                                 e->hdr->e_phentsize);
+            /* p_filesz must not exceed p_memsz. elf_load() derives its
+             * zero-fill length from max(p_memsz, p_filesz), so an inverted
+             * pair makes it clear bytes past the end of the segment.
+             */
+            if (phdr->p_type == PT_LOAD &&
+                (phdr->p_filesz > phdr->p_memsz ||
+                 !in_file(e, phdr->p_offset, phdr->p_filesz)))
+                return false;
+        }
+    }
+
     return true;
 }
 
-/* get section header string table */
-static const char *get_sh_string(elf_t *e, int index)
+/* get the nth section header; the table was validated by is_valid() */
+static const struct Elf32_Shdr *get_shdr(const elf_t *e, int n)
 {
-    uint32_t offset =
-        e->hdr->e_shoff + e->hdr->e_shstrndx * e->hdr->e_shentsize;
-    const struct Elf32_Shdr *shdr =
-        (const struct Elf32_Shdr *) (e->raw_data + offset);
-    return (const char *) (e->raw_data + shdr->sh_offset + index);
+    return (const struct Elf32_Shdr *) (e->raw_data + e->hdr->e_shoff +
+                                        (uint32_t) n * e->hdr->e_shentsize);
+}
+
+/* get section header string table */
+static const char *get_sh_string(elf_t *e, uint32_t index)
+{
+    return str_in_section(e, get_shdr(e, e->hdr->e_shstrndx), index);
 }
 
 /* get a section header */
 static const struct Elf32_Shdr *get_section_header(elf_t *e, const char *name)
 {
     for (int s = 0; s < e->hdr->e_shnum; ++s) {
-        uint32_t offset = e->hdr->e_shoff + s * e->hdr->e_shentsize;
-        const struct Elf32_Shdr *shdr =
-            (const struct Elf32_Shdr *) (e->raw_data + offset);
+        const struct Elf32_Shdr *shdr = get_shdr(e, s);
+        if (shdr->sh_type == SHT_NULL)
+            continue;
         const char *sname = get_sh_string(e, shdr->sh_name);
-        if (!strcmp(name, sname))
+        if (sname && !strcmp(name, sname))
             return shdr;
     }
     return NULL;
 }
 
-/* get the ELF string table */
-static const char *get_strtab(elf_t *e)
+/* get the ELF string table section, or NULL when absent */
+static const struct Elf32_Shdr *get_strtab(elf_t *e)
 {
     const struct Elf32_Shdr *shdr = get_section_header(e, ".strtab");
-    if (!shdr)
-        return NULL;
+    return shdr && shdr->sh_type == SHT_STRTAB ? shdr : NULL;
+}
 
-    return (const char *) (e->raw_data + shdr->sh_offset);
+static const struct Elf32_Shdr *get_symtab(elf_t *e)
+{
+    const struct Elf32_Shdr *shdr = get_section_header(e, ".symtab");
+    return shdr && shdr->sh_type == SHT_SYMTAB ? shdr : NULL;
+}
+
+/* Number of whole symbol entries in a symbol table section. sh_size is
+ * attacker controlled and need not be a multiple of the entry size, so the
+ * partial tail entry is dropped rather than read across the section end.
+ */
+static inline uint32_t symbol_count(const struct Elf32_Shdr *shdr)
+{
+    return shdr->sh_size / sizeof(struct Elf32_Sym);
 }
 
 /* find a symbol entry */
 const struct Elf32_Sym *elf_get_symbol(elf_t *e, const char *name)
 {
-    const char *strtab = get_strtab(e); /* get the string table */
+    const struct Elf32_Shdr *strtab = get_strtab(e); /* the string table */
     if (!strtab)
         return NULL;
 
     /* get the symbol table */
-    const struct Elf32_Shdr *shdr = get_section_header(e, ".symtab");
+    const struct Elf32_Shdr *shdr = get_symtab(e);
     if (!shdr)
         return NULL;
 
     /* find symbol table range */
-    const struct Elf32_Sym *sym =
+    const struct Elf32_Sym *syms =
         (const struct Elf32_Sym *) (e->raw_data + shdr->sh_offset);
-    const struct Elf32_Sym *end =
-        (const struct Elf32_Sym *) (e->raw_data + shdr->sh_offset +
-                                    shdr->sh_size);
+    const uint32_t n = symbol_count(shdr);
 
-    for (; sym < end; ++sym) { /* try to find the symbol */
-        const char *sym_name = strtab + sym->st_name;
-        if (!strcmp(name, sym_name))
-            return sym;
+    for (uint32_t i = 0; i < n; ++i) { /* try to find the symbol */
+        const char *sym_name = str_in_section(e, strtab, syms[i].st_name);
+        if (sym_name && !strcmp(name, sym_name))
+            return &syms[i];
     }
 
     /* no symbol found */
@@ -194,29 +312,29 @@ static void fill_symbols(elf_t *e)
     map_insert(e->symbols, &(int) {0}, &(char *) {NULL});
 
     /* get the string table */
-    const char *strtab = get_strtab(e);
+    const struct Elf32_Shdr *strtab = get_strtab(e);
     if (!strtab)
         return;
 
     /* get the symbol table */
-    const struct Elf32_Shdr *shdr = get_section_header(e, ".symtab");
+    const struct Elf32_Shdr *shdr = get_symtab(e);
     if (!shdr)
         return;
 
     /* find symbol table range */
-    const struct Elf32_Sym *sym =
+    const struct Elf32_Sym *syms =
         (const struct Elf32_Sym *) (e->raw_data + shdr->sh_offset);
-    const struct Elf32_Sym *end =
-        (const struct Elf32_Sym *) (e->raw_data + shdr->sh_offset +
-                                    shdr->sh_size);
+    const uint32_t n = symbol_count(shdr);
 
-    for (; sym < end; ++sym) { /* try to find the symbol */
-        const char *sym_name = strtab + sym->st_name;
-        switch (ELF_ST_TYPE(sym->st_info)) { /* add to the symbol table */
+    for (uint32_t i = 0; i < n; ++i) { /* try to find the symbol */
+        const char *sym_name = str_in_section(e, strtab, syms[i].st_name);
+        if (!sym_name)
+            continue;
+        switch (ELF_ST_TYPE(syms[i].st_info)) { /* add to the symbol table */
         case STT_NOTYPE:
         case STT_OBJECT:
         case STT_FUNC:
-            map_insert(e->symbols, (void *) &(sym->st_value), &sym_name);
+            map_insert(e->symbols, (void *) &(syms[i].st_value), &sym_name);
         }
     }
 }
@@ -264,9 +382,9 @@ bool elf_load(elf_t *e, memory_t *mem)
     /* loop over all of the program headers */
     for (int p = 0; p < e->hdr->e_phnum; ++p) {
         /* find next program header */
-        uint32_t offset = e->hdr->e_phoff + (p * e->hdr->e_phentsize);
         const struct Elf32_Phdr *phdr =
-            (const struct Elf32_Phdr *) (e->raw_data + offset);
+            (const struct Elf32_Phdr *) (e->raw_data + e->hdr->e_phoff +
+                                         (uint32_t) p * e->hdr->e_phentsize);
 
         /* check this section should be loaded */
         if (phdr->p_type != PT_LOAD)

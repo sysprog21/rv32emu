@@ -17,7 +17,7 @@ static inline int cmp(const void *arg0, const void *arg1)
                        : MAP_CMP_EQUAL;
 }
 
-breakpoint_map_t breakpoint_map_new()
+breakpoint_map_t breakpoint_map_new(void)
 {
     return map_init(riscv_word_t, breakpoint_t, cmp);
 }

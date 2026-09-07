@@ -717,7 +717,7 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     free(set);
 }
 
-struct jit_cache *jit_cache_init()
+struct jit_cache *jit_cache_init(void)
 {
     return calloc(N_JIT_CACHE_ENTRIES, sizeof(struct jit_cache));
 }

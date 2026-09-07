@@ -2592,7 +2592,7 @@ static int liveness[N_RV_REGS];
 static uint8_t candidate_queue[N_RV_REGS];
 static int vm_reg[3]; /* enum x64_reg/a64_reg */
 
-static void reset_reg()
+static void reset_reg(void)
 {
     for (int i = 0; i < n_host_regs; i++) {
         register_map[i].vm_reg_idx = -1;
@@ -2632,12 +2632,12 @@ static void store_back(struct jit_state *state)
     }
 }
 
-static inline void liveness_reset()
+static inline void liveness_reset(void)
 {
     memset(liveness, 0xff, sizeof(liveness));
 }
 
-static inline void candidate_queue_init()
+static inline void candidate_queue_init(void)
 {
     for (int i = 0; i < N_RV_REGS; i++) {
         candidate_queue[i] = i;
@@ -3128,9 +3128,9 @@ static void ra_load2_sext(struct jit_state *state,
 }
 #endif
 
-void parse_branch_history_table(struct jit_state *state,
-                                riscv_t *rv UNUSED,
-                                rv_insn_t *ir)
+static void parse_branch_history_table(struct jit_state *state,
+                                       riscv_t *rv UNUSED,
+                                       rv_insn_t *ir)
 {
     branch_history_table_t *bt = ir->branch_table;
     int max_idx = bht_find_max_idx(bt);
@@ -3586,7 +3586,7 @@ static const void *dispatch_table[] = {
 };
 /* clang-format on */
 
-void clear_hot(block_t *block)
+static void clear_hot(block_t *block)
 {
     block->hot = false;
 }

@@ -35,7 +35,7 @@ uint32_t plic_read(plic_t *plic, const uint32_t addr);
 void plic_write(plic_t *plic, const uint32_t addr, uint32_t value);
 
 /* create a PLIC instance */
-plic_t *plic_new();
+plic_t *plic_new(void);
 
 /* delete a PLIC instance */
 void plic_delete(plic_t *plic);

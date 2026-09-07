@@ -77,7 +77,7 @@ void plic_write(plic_t *plic, const uint32_t addr, uint32_t value)
     return;
 }
 
-plic_t *plic_new()
+plic_t *plic_new(void)
 {
     plic_t *plic = calloc(1, sizeof(plic_t));
     assert(plic);

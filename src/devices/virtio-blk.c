@@ -617,7 +617,7 @@ fail:
     exit(EXIT_FAILURE);
 }
 
-virtio_blk_state_t *vblk_new()
+virtio_blk_state_t *vblk_new(void)
 {
     virtio_blk_state_t *vblk = calloc(1, sizeof(virtio_blk_state_t));
     assert(vblk);

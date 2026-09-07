@@ -124,7 +124,7 @@ uint32_t *virtio_blk_init(virtio_blk_state_t *vblk,
                           char *disk_file,
                           bool readonly);
 
-virtio_blk_state_t *vblk_new();
+virtio_blk_state_t *vblk_new(void);
 
 void vblk_delete(virtio_blk_state_t *vblk);
 

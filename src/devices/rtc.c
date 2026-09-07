@@ -104,7 +104,7 @@ void rtc_write(rtc_t *rtc, uint32_t addr, uint32_t value)
     return;
 }
 
-rtc_t *rtc_new()
+rtc_t *rtc_new(void)
 {
     rtc_t *rtc = calloc(1, sizeof(rtc_t));
     assert(rtc);

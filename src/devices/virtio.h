@@ -105,7 +105,12 @@ typedef struct {
     /* supplied by environment */
     uint32_t *ram;
     uint32_t *disk;
+    /* Host-owned geometry. The same values are mirrored into the guest
+     * visible config space, which the driver may write, so requests are
+     * validated against these and never against the mirror.
+     */
     uint64_t disk_size;
+    uint64_t capacity;
     int disk_fd;
     /* implementation-specific */
     void *priv;

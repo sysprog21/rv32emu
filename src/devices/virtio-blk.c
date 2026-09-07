@@ -39,6 +39,13 @@
 
 #define VBLK_PRIV(x) ((struct virtio_blk_config *) x->priv)
 
+/* Words of guest-addressable device configuration space. A guest may name any
+ * word in the 1 MiB device window, so the config index has to be range checked
+ * in both directions: below VIRTIO_Config the subtraction wraps, and above the
+ * struct it runs off a heap allocation.
+ */
+#define VBLK_CONFIG_WORDS (sizeof(struct virtio_blk_config) / sizeof(uint32_t))
+
 PACKED(struct virtio_blk_config {
     uint64_t capacity;
     uint32_t size_max;
@@ -321,6 +328,10 @@ uint32_t virtio_blk_read(virtio_blk_state_t *vblk, uint32_t addr)
         return VIRTIO_CONFIG_GENERATE;
     default:
         /* Read configuration from the corresponding register */
+        if (addr < _(Config) || addr - _(Config) >= VBLK_CONFIG_WORDS) {
+            virtio_blk_set_fail(vblk);
+            return 0;
+        }
         return ((uint32_t *) VBLK_PRIV(vblk))[addr - _(Config)];
     }
 #undef _
@@ -392,6 +403,10 @@ void virtio_blk_write(virtio_blk_state_t *vblk, uint32_t addr, uint32_t value)
         break;
     default:
         /* Write configuration to the corresponding register */
+        if (addr < _(Config) || addr - _(Config) >= VBLK_CONFIG_WORDS) {
+            virtio_blk_set_fail(vblk);
+            break;
+        }
         ((uint32_t *) VBLK_PRIV(vblk))[addr - _(Config)] = value;
         break;
     }

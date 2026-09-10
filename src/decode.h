@@ -827,6 +827,8 @@ enum op_field {
         _(vfwmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))         \
         _(vfwnmsac_vv, 0, 4, 0, ENC(rs1, rs2, vd))        \
         _(vfwnmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))        \
+        _(vfmv_f_s, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfmv_s_f, 0, 4, 0, ENC(rs1, rs2, vd))            \
     )
 
 /* clang-format on */

@@ -98,6 +98,10 @@ mulfix_lhs:
 mulfix_rhs:
     .byte 0x40, 0x80, 0x40, 0x20
 
+ext_src:
+    .byte 0x7f, 0x80, 0x01, 0xff
+    .balign 2
+
 narrow16_a:
     .short 0x8000, 0x0002
 
@@ -295,6 +299,8 @@ shift_out:
 fixed_out:
     .space 16
 wide_out:
+    .space 32
+ext_out:
     .space 32
 red_out:
     .space 16
@@ -1813,6 +1819,82 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    # Integer extension (V 1.0 11.3): vzext/vsext widen a narrow source
+    # element into a full SEW-wide destination.
+    li a0, 4
+    vsetvli t0, a0, e16, m1, tu, mu
+    la a1, ext_src
+    vle8.v v20, (a1)
+
+    # vzext.vf2: 0x7f,0x80,0x01,0xff -> zero-extended to 16-bit
+    vzext.vf2 v22, v20
+    la a1, ext_out
+    vse16.v v22, (a1)
+    lhu t1, 0(a1)
+    assert_reg_imm t1, 0x007f, fail_vzext_vf2
+    lhu t1, 2(a1)
+    assert_reg_imm t1, 0x0080, fail_vzext_vf2
+    lhu t1, 6(a1)
+    assert_reg_imm t1, 0x00ff, fail_vzext_vf2
+
+    # vsext.vf2: 0x80 and 0xff are negative when sign-extended
+    vsext.vf2 v22, v20
+    la a1, ext_out
+    vse16.v v22, (a1)
+    lhu t1, 0(a1)
+    assert_reg_imm t1, 0x007f, fail_vsext_vf2
+    lhu t1, 2(a1)
+    assert_reg_imm t1, 0xff80, fail_vsext_vf2
+    lhu t1, 6(a1)
+    assert_reg_imm t1, 0xffff, fail_vsext_vf2
+
+    # vf4: 8-bit source widened to 32-bit destination
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, ext_src
+    vle8.v v20, (a1)
+
+    vzext.vf4 v22, v20
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x0000007f, fail_vzext_vf4
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0x00000080, fail_vzext_vf4
+
+    vsext.vf4 v22, v20
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 4(a1)
+    assert_reg_imm t1, -128, fail_vsext_vf4
+    lw t1, 12(a1)
+    assert_reg_imm t1, -1, fail_vsext_vf4
+
+    # Masked form leaves inactive elements undisturbed (vma=0). v0 bit
+    # pattern 0x5 activates elements 0 and 2 only.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, ext_out
+    li t2, 0
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v22, (a1)
+    la a1, mask_bits
+    vle8.v v0, (a1)
+    la a1, ext_src
+    vle8.v v20, (a1)
+    vzext.vf4 v22, v20, v0.t
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x0000007f, fail_vzext_mask
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0, fail_vzext_mask
+    lw t1, 8(a1)
+    assert_reg_imm t1, 0x00000001, fail_vzext_mask
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -1910,6 +1992,21 @@ fail_vsmul4:
     j write_and_exit_fail
 fail_vwadd:
     li a3, 0xd5
+    j write_and_exit_fail
+fail_vzext_vf2:
+    li a3, 0xf1
+    j write_and_exit_fail
+fail_vsext_vf2:
+    li a3, 0xf2
+    j write_and_exit_fail
+fail_vzext_vf4:
+    li a3, 0xf3
+    j write_and_exit_fail
+fail_vsext_vf4:
+    li a3, 0xf4
+    j write_and_exit_fail
+fail_vzext_mask:
+    li a3, 0xf5
     j write_and_exit_fail
 fail_vwmulu:
     li a3, 0xd6

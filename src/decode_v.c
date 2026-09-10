@@ -983,11 +983,39 @@ static inline bool op_010010(rv_insn_t *ir, const uint32_t insn)
         /* FIXME: Implement the decoding for VFUNARY0. */
         return false;
     case 2:
-        /* OPMVV / VXUNARY0 (vzext.vf{2,4,8} and vsext.vf{2,4,8}). The
-         * RVOPs for these are not implemented yet, so refuse the encoding
-         * rather than silently misdecoding it as vsbc.vxm.
+        /* OPMVV / VXUNARY0 dispatch (V 1.0 §11.3): vs1 carries the
+         * sub-opcode selecting the extension factor and signedness.
+         * Both masked (vm=0) and unmasked (vm=1) forms are permitted.
          */
-        return false;
+        switch (decode_rs1(insn)) {
+        case 0b00010:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vzext_vf8;
+            break;
+        case 0b00011:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vsext_vf8;
+            break;
+        case 0b00100:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vzext_vf4;
+            break;
+        case 0b00101:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vsext_vf4;
+            break;
+        case 0b00110:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vzext_vf2;
+            break;
+        case 0b00111:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vsext_vf2;
+            break;
+        default:
+            return false;
+        }
+        break;
     case 3:
         /* OPIVI: vsbc has no immediate form per V 1.0 §11.4 (only vvm/vxm
          * exist). Reject explicitly instead of falling through. */

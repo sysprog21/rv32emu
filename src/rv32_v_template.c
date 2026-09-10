@@ -6499,6 +6499,93 @@ RVOP(vid_v, {
     rvv_exec_vid(rv, ir, ir->vd);
 })
 
+/* Integer extension (V 1.0 §11.3): widen each SEW/factor-wide source
+ * element into a full SEW-wide destination element, either zero- or
+ * sign-extended. The source EEW is SEW/factor with EMUL = LMUL/factor,
+ * so the source group span is derived from that narrower width while the
+ * destination keeps the SEW-based span.
+ */
+static inline bool rvv_exec_int_extend(riscv_t *rv,
+                                       const rv_insn_t *ir,
+                                       uint32_t factor,
+                                       bool is_signed)
+{
+    uint32_t sew_bits = rvv_sew_bits(rv->csr_vtype);
+    uint32_t src_bits = sew_bits / factor;
+    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+    uint64_t fill = rvv_elem_mask64(sew_bits);
+    uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
+    uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
+    uint32_t src_span, dest_span = rvv_group_regs(rv->csr_vtype);
+    uint32_t lmul_num, lmul_den;
+    bool src_emul_below_one;
+
+    /* EMUL of the source is (EEW/SEW)*LMUL (V 1.0 §11.3); compare it to 1
+     * without losing the fractional case, which rvv_eew_reg_span() clamps
+     * to a span of one register.
+     */
+    rvv_lmul_ratio(rv->csr_vtype, &lmul_num, &lmul_den);
+    src_emul_below_one =
+        ((uint64_t) lmul_num * src_bits) < ((uint64_t) lmul_den * sew_bits);
+
+    /* A source narrower than 8 bits has no architectural encoding; this
+     * rejects e.g. vzext.vf8 at SEW=32 (V 1.0 §11.3).
+     */
+    if (src_bits < 8)
+        return rvv_trap_illegal_state(rv, 0);
+    if (!rvv_eew_reg_span(rv, src_bits, &src_span) ||
+        !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
+        !rvv_validate_eew_reg(rv, src_bits, ir->vs2))
+        return rvv_trap_illegal_state(rv, 0);
+    /* Per V 1.0 §5.2, a destination whose EEW exceeds the source EEW may
+     * overlap the source only when the source EMUL is at least 1 and the
+     * overlap sits in the HIGHEST-numbered part of the destination group
+     * (at LMUL=8, `vzext.vf4 v0, v6` is legal but `v0, v0` is not). This
+     * differs from the widening-arithmetic rule in
+     * rvv_cross_eew_overlap_illegal(), which pins both groups to a shared
+     * base register, so the check is spelled out here.
+     */
+    if (rvv_reg_spans_overlap(ir->vd, dest_span, ir->vs2, src_span) &&
+        (src_emul_below_one || ((ir->vs2 + src_span) != (ir->vd + dest_span))))
+        return rvv_trap_illegal_state(rv, 0);
+
+    for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
+        uint64_t value;
+        if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
+            if (vma)
+                rvv_set_elem_ext(rv, ir->vd, elem, sew_bits, fill);
+            continue;
+        }
+        value = rvv_get_elem_ext(rv, ir->vs2, elem, src_bits);
+        if (is_signed)
+            value = (uint64_t) rvv_sign_extend64(value, src_bits);
+        rvv_set_elem_ext(rv, ir->vd, elem, sew_bits,
+                         value & rvv_elem_mask64(sew_bits));
+    }
+    if (vta) {
+        for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+            rvv_set_elem_ext(rv, ir->vd, elem, sew_bits, fill);
+    }
+
+    rv->csr_vstart = 0;
+    return true;
+}
+
+#define RVV_INT_EXTEND_OP(name, factor, is_signed)           \
+    RVOP(name, {                                             \
+        if (rvv_require_operable(rv))                        \
+            return false;                                    \
+        if (!rvv_exec_int_extend(rv, ir, factor, is_signed)) \
+            return false;                                    \
+    })
+
+RVV_INT_EXTEND_OP(vzext_vf2, 2, false)
+RVV_INT_EXTEND_OP(vsext_vf2, 2, true)
+RVV_INT_EXTEND_OP(vzext_vf4, 4, false)
+RVV_INT_EXTEND_OP(vsext_vf4, 4, true)
+RVV_INT_EXTEND_OP(vzext_vf8, 8, false)
+RVV_INT_EXTEND_OP(vsext_vf8, 8, true)
+
 #if RV32_HAS(EXT_F)
 typedef uint32_t (*rvv_fp32_binop_fn)(uint32_t lhs, uint32_t rhs);
 typedef uint32_t (*rvv_fp32_triop_fn)(uint32_t dest,

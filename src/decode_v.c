@@ -1025,7 +1025,31 @@ static inline bool op_010011(rv_insn_t *ir, const uint32_t insn)
         decode_vxtype(ir, insn);
         ir->opcode = rv_insn_vmsbc_vx;
         break;
-    case 1:  /* OPFVV / VFUNARY1 - not vmsbc; reserved here */
+    case 1:
+        /* OPFVV / VFUNARY1 (V 1.0 §13.8-13.14): vs1 carries the
+         * sub-opcode. Both masked and unmasked forms are permitted.
+         */
+        switch (decode_rs1(insn)) {
+        case 0b00000:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfsqrt_v;
+            break;
+        case 0b00100:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfrsqrt7_v;
+            break;
+        case 0b00101:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfrec7_v;
+            break;
+        case 0b10000:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfclass_v;
+            break;
+        default:
+            return false;
+        }
+        break;
     case 2:  /* OPMVV - reserved for vmsbc */
     case 3:  /* OPIVI - vmsbc has no immediate form */
     case 5:  /* OPFVF - reserved */

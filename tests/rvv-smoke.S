@@ -296,6 +296,8 @@ fixed_out:
     .space 16
 wide_out:
     .space 32
+vmvnr_out:
+    .space 64
 red_out:
     .space 16
 wide_red_out:
@@ -1813,6 +1815,73 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    # Whole vector register move (V 1.0 16.6). Copies all VLEN bits of NREG
+    # registers, ignoring vl. Every address below comes from a1 so the test
+    # does not mix gp-relative and pc-relative forms.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, vmvnr_out
+    li t2, 0xaaaa0001
+    sw t2, 0(a1)
+    li t2, 0xaaaa0002
+    sw t2, 4(a1)
+    li t2, 0xaaaa0003
+    sw t2, 8(a1)
+    li t2, 0xaaaa0004
+    sw t2, 12(a1)
+    vle32.v v8, (a1)
+
+    # Clear v16 so a failed copy is visible.
+    li t2, 0
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v16, (a1)
+
+    vmv1r.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0xaaaa0001
+    bne t1, t6, fail_vmv1r
+    lw t1, 12(a1)
+    li t6, 0xaaaa0004
+    bne t1, t6, fail_vmv1r
+
+    # vmv2r.v copies the pair {v8,v9} to {v16,v17}; check the second
+    # register of the group actually moved.
+    li t2, 0xbbbb0001
+    sw t2, 0(a1)
+    li t2, 0xbbbb0002
+    sw t2, 4(a1)
+    li t2, 0xbbbb0003
+    sw t2, 8(a1)
+    li t2, 0xbbbb0004
+    sw t2, 12(a1)
+    vle32.v v9, (a1)
+    li t2, 0
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v17, (a1)
+
+    vmv2r.v v16, v8
+    vse32.v v17, (a1)
+    lw t1, 0(a1)
+    li t6, 0xbbbb0001
+    bne t1, t6, fail_vmv2r
+    lw t1, 12(a1)
+    li t6, 0xbbbb0004
+    bne t1, t6, fail_vmv2r
+
+    # vd == vs2 is an architectural NOP: the register must be unchanged.
+    vmv1r.v v8, v8
+    vse32.v v8, (a1)
+    lw t1, 0(a1)
+    li t6, 0xaaaa0001
+    bne t1, t6, fail_vmv_nop
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -1910,6 +1979,15 @@ fail_vsmul4:
     j write_and_exit_fail
 fail_vwadd:
     li a3, 0xd5
+    j write_and_exit_fail
+fail_vmv1r:
+    li a3, 0x9a
+    j write_and_exit_fail
+fail_vmv2r:
+    li a3, 0x9b
+    j write_and_exit_fail
+fail_vmv_nop:
+    li a3, 0x9c
     j write_and_exit_fail
 fail_vwmulu:
     li a3, 0xd6

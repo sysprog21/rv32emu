@@ -6695,6 +6695,44 @@ static inline uint32_t rvv_fp_fnmsub32(uint32_t dest,
         .v;
 }
 
+/* Widening conversions for the vfwcvt family (V 1.0 §13.17): a 32-bit
+ * source element produces a 64-bit destination element. The
+ * float-to-integer forms take the rounding mode already installed by
+ * rvv_fp_begin_round(), except the .rtz variants which pin
+ * round-towards-zero. The trailing "exact" argument is false because
+ * these conversions report inexact results through fflags.
+ */
+static inline uint64_t rvv_fp_wcvt_xu_f32(uint32_t bits)
+{
+    return f32_to_ui64(rvv_fp32_from_raw(bits), softfloat_roundingMode, false);
+}
+
+static inline uint64_t rvv_fp_wcvt_x_f32(uint32_t bits)
+{
+    return (uint64_t) f32_to_i64(rvv_fp32_from_raw(bits),
+                                 softfloat_roundingMode, false);
+}
+
+static inline uint64_t rvv_fp_wcvt_rtz_xu_f32(uint32_t bits)
+{
+    return f32_to_ui64_r_minMag(rvv_fp32_from_raw(bits), false);
+}
+
+static inline uint64_t rvv_fp_wcvt_rtz_x_f32(uint32_t bits)
+{
+    return (uint64_t) f32_to_i64_r_minMag(rvv_fp32_from_raw(bits), false);
+}
+
+static inline uint64_t rvv_fp_wcvt_f_xu32(uint32_t bits)
+{
+    return ui32_to_f64(bits).v;
+}
+
+static inline uint64_t rvv_fp_wcvt_f_x32(uint32_t bits)
+{
+    return i32_to_f64((int32_t) bits).v;
+}
+
 static inline uint64_t rvv_fp_widen32(uint32_t bits)
 {
     return f32_to_f64(rvv_fp32_from_raw(bits)).v;
@@ -6826,6 +6864,60 @@ static inline void rvv_exec_fp32_vf(riscv_t *rv,
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
     rv->csr_vstart = 0;
+}
+
+/* Widening unary element loop for the vfwcvt family (V 1.0 §13.17): a
+ * single 32-bit source element produces one 64-bit destination element.
+ */
+typedef uint64_t (*rvv_fp_wcvt_fn)(uint32_t src);
+
+static inline void rvv_exec_fp_wcvt(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint32_t dest,
+                                    rvv_fp_wcvt_fn op)
+{
+    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+    uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
+    uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
+
+    for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
+        if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
+            if (vma)
+                rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
+            continue;
+        }
+        rvv_set_elem_ext(rv, dest, elem, 64,
+                         op(rvv_get_elem(rv, ir->vs2, elem, 32)));
+    }
+    if (vta) {
+        for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+            rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
+    }
+    rv->csr_vstart = 0;
+}
+
+/* Overlap check for a widening destination (EEW = 2*SEW) reading a
+ * single-width source. Per V 1.0 §5.2 a destination whose EEW exceeds the
+ * source EEW may overlap the source only when the source EMUL is at least
+ * 1 and the overlap lies in the HIGHEST-numbered part of the destination
+ * group. Note this is NOT the rule implemented by
+ * rvv_cross_eew_overlap_illegal(), which pins both groups to a shared base
+ * register; that predicate matches the narrowing direction instead.
+ */
+static inline bool rvv_widen_overlap_illegal(riscv_t *rv,
+                                             uint32_t vd,
+                                             uint32_t wide_span,
+                                             uint32_t vs2,
+                                             uint32_t narrow_span)
+{
+    uint32_t lmul_num, lmul_den;
+
+    if (!rvv_reg_spans_overlap(vd, wide_span, vs2, narrow_span))
+        return false;
+    rvv_lmul_ratio(rv->csr_vtype, &lmul_num, &lmul_den);
+    if (lmul_num < lmul_den) /* source EMUL below 1 */
+        return true;
+    return (vs2 + narrow_span) != (vd + wide_span);
 }
 
 static inline void rvv_exec_fp32_mask_vv(riscv_t *rv,
@@ -7448,6 +7540,35 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
         set_fflag(rv);                                                \
     })
 
+#define RVV_FP_WCVT_OP(name, opfn, dynamic_round)                     \
+    RVOP(name, {                                                      \
+        uint32_t wide_span;                                           \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);         \
+        if (rvv_require_operable(rv))                                 \
+            return false;                                             \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                    \
+            !rvv_wide_group_span(rv, &wide_span) ||                   \
+            !rvv_validate_wide_reg(rv, ir->vd) ||                     \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||         \
+            rvv_widen_overlap_illegal(rv, ir->vd, wide_span, ir->vs2, \
+                                      narrow_span))                   \
+            return rvv_trap_illegal_state(rv, 0);                     \
+        if (dynamic_round)                                            \
+            rvv_fp_begin_round(rv);                                   \
+        else                                                          \
+            rvv_fp_begin_flags();                                     \
+        rvv_exec_fp_wcvt(rv, ir, ir->vd, opfn);                       \
+        set_fflag(rv);                                                \
+    })
+
+RVV_FP_WCVT_OP(vfwcvt_xu_f_v, rvv_fp_wcvt_xu_f32, true);
+RVV_FP_WCVT_OP(vfwcvt_x_f_v, rvv_fp_wcvt_x_f32, true);
+RVV_FP_WCVT_OP(vfwcvt_f_xu_v, rvv_fp_wcvt_f_xu32, true);
+RVV_FP_WCVT_OP(vfwcvt_f_x_v, rvv_fp_wcvt_f_x32, true);
+RVV_FP_WCVT_OP(vfwcvt_f_f_v, rvv_fp_widen32, true);
+RVV_FP_WCVT_OP(vfwcvt_rtz_xu_f_v, rvv_fp_wcvt_rtz_xu_f32, false);
+RVV_FP_WCVT_OP(vfwcvt_rtz_x_f_v, rvv_fp_wcvt_rtz_x_f32, false);
+
 RVV_FP32_VV_OP(vfadd_vv, rvv_fp_add32, true);
 RVV_FP32_VF_OP(vfadd_vf, rvv_fp_add32, true);
 RVV_FP32_RED_OP(vfredusum_vs, rvv_fp_add32, true);
@@ -7619,6 +7740,13 @@ RVV_FP64_MAC_VF_OP(vfwmsac_vf, rvv_fp_wmsac64);
 RVV_FP64_MAC_VV_OP(vfwnmsac_vv, rvv_fp_wnmsac64);
 RVV_FP64_MAC_VF_OP(vfwnmsac_vf, rvv_fp_wnmsac64);
 #else
+RVOP(vfwcvt_xu_f_v, { V_NOP; })
+RVOP(vfwcvt_x_f_v, { V_NOP; })
+RVOP(vfwcvt_f_xu_v, { V_NOP; })
+RVOP(vfwcvt_f_x_v, { V_NOP; })
+RVOP(vfwcvt_f_f_v, { V_NOP; })
+RVOP(vfwcvt_rtz_xu_f_v, { V_NOP; })
+RVOP(vfwcvt_rtz_x_f_v, { V_NOP; })
 RVOP(vfadd_vv, { V_NOP; })
 RVOP(vfadd_vf, { V_NOP; })
 RVOP(vfredusum_vs, { V_NOP; })

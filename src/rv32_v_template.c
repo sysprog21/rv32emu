@@ -6778,6 +6778,194 @@ static inline void rvv_fp_begin_flags(void)
     softfloat_exceptionFlags = 0;
 }
 
+/* Lookup tables for the 7-bit estimate instructions (V 1.0 §13.9,
+ * §13.10), transcribed from the tables in the specification.
+ */
+/* clang-format off */
+static const uint8_t rvv_frsqrt7_table[128] = {
+     52,  51,  50,  48,  47,  46,  44,  43,
+     42,  41,  40,  39,  38,  36,  35,  34,
+     33,  32,  31,  30,  30,  29,  28,  27,
+     26,  25,  24,  23,  23,  22,  21,  20,
+     19,  19,  18,  17,  16,  16,  15,  14,
+     14,  13,  12,  12,  11,  10,  10,   9,
+      9,   8,   7,   7,   6,   6,   5,   4,
+      4,   3,   3,   2,   2,   1,   1,   0,
+    127, 125, 123, 121, 119, 118, 116, 114,
+    113, 111, 109, 108, 106, 105, 103, 102,
+    100,  99,  97,  96,  95,  93,  92,  91,
+     90,  88,  87,  86,  85,  84,  83,  82,
+     80,  79,  78,  77,  76,  75,  74,  73,
+     72,  71,  70,  70,  69,  68,  67,  66,
+     65,  64,  63,  63,  62,  61,  60,  59,
+     59,  58,  57,  56,  56,  55,  54,  53
+};
+/* clang-format on */
+
+/* clang-format off */
+static const uint8_t rvv_frec7_table[128] = {
+    127, 125, 123, 121, 119, 117, 116, 114,
+    112, 110, 109, 107, 105, 104, 102, 100,
+     99,  97,  96,  94,  93,  91,  90,  88,
+     87,  85,  84,  83,  81,  80,  79,  77,
+     76,  75,  74,  72,  71,  70,  69,  68,
+     66,  65,  64,  63,  62,  61,  60,  59,
+     58,  57,  56,  55,  54,  53,  52,  51,
+     50,  49,  48,  47,  46,  45,  44,  43,
+     42,  41,  40,  40,  39,  38,  37,  36,
+     35,  35,  34,  33,  32,  31,  31,  30,
+     29,  28,  28,  27,  26,  25,  25,  24,
+     23,  23,  22,  21,  21,  20,  19,  19,
+     18,  17,  17,  16,  15,  15,  14,  14,
+     13,  12,  12,  11,  11,  10,   9,   9,
+      8,   8,   7,   7,   6,   5,   5,   4,
+      4,   3,   3,   2,   2,   1,   1,   0
+};
+/* clang-format on */
+
+/* Normalize a binary32 input: returns the normalized exponent and
+ * significand per V 1.0 §13.9. For a normal input these are the encoded
+ * fields; for a subnormal the exponent is minus the number of leading
+ * zeros in the significand and the significand is shifted left
+ * accordingly, discarding the leading one.
+ */
+static inline void rvv_fp_normalize32(uint32_t sig,
+                                      uint32_t exp,
+                                      int32_t *norm_exp,
+                                      uint32_t *norm_sig)
+{
+    if (exp) {
+        *norm_exp = (int32_t) exp;
+        *norm_sig = sig;
+        return;
+    }
+    {
+        uint32_t lz = 0, t = sig;
+
+        while (!(t & (UINT32_C(1) << 22))) {
+            t = (t << 1) & 0x7FFFFFU;
+            lz++;
+        }
+        *norm_exp = -(int32_t) lz;
+        *norm_sig = (sig << (1 - *norm_exp)) & 0x7FFFFFU;
+    }
+}
+
+/* vfrsqrt7.v (V 1.0 §13.9): 7-bit estimate of 1/sqrt(x). The result is
+ * independent of the dynamic rounding mode.
+ */
+static inline uint32_t rvv_fp_rsqrt7_32(uint32_t bits)
+{
+    uint32_t sign = bits & 0x80000000U;
+    uint32_t exp = (bits >> 23) & 0xFFU;
+    uint32_t sig = bits & 0x7FFFFFU;
+    int32_t norm_exp;
+    uint32_t norm_sig, idx, out_sig;
+    int32_t out_exp;
+
+    if (exp == 0xFFU) {
+        if (sig) { /* NaN in, canonical NaN out; sNaN also signals NV */
+            if (!(sig & 0x400000U))
+                softfloat_exceptionFlags |= softfloat_flag_invalid;
+            return 0x7FC00000U;
+        }
+        /* -inf is out of domain, +inf yields +0 */
+        if (sign) {
+            softfloat_exceptionFlags |= softfloat_flag_invalid;
+            return 0x7FC00000U;
+        }
+        return 0x00000000U;
+    }
+    if (!exp && !sig) { /* +-0 -> +-inf, divide-by-zero */
+        softfloat_exceptionFlags |= softfloat_flag_infinite;
+        return sign | 0x7F800000U;
+    }
+    if (sign) { /* any other negative input is out of domain */
+        softfloat_exceptionFlags |= softfloat_flag_invalid;
+        return 0x7FC00000U;
+    }
+
+    rvv_fp_normalize32(sig, exp, &norm_exp, &norm_sig);
+    idx = (uint32_t) ((norm_exp & 1) << 6) | ((norm_sig >> 17) & 0x3FU);
+    out_sig = rvv_frsqrt7_table[idx];
+    out_exp = (3 * 127 - 1 - norm_exp) / 2;
+    return sign | (((uint32_t) out_exp & 0xFFU) << 23) |
+           ((out_sig & 0x7FU) << 16);
+}
+
+/* vfrec7.v (V 1.0 §13.10): 7-bit estimate of 1/x. Only the overflow
+ * cases depend on the rounding mode.
+ */
+static inline uint32_t rvv_fp_rec7_32(uint32_t bits)
+{
+    uint32_t sign = bits & 0x80000000U;
+    uint32_t exp = (bits >> 23) & 0xFFU;
+    uint32_t sig = bits & 0x7FFFFFU;
+    int32_t norm_exp, out_exp;
+    uint32_t norm_sig, sig_field;
+
+    if (exp == 0xFFU) {
+        if (sig) {
+            if (!(sig & 0x400000U))
+                softfloat_exceptionFlags |= softfloat_flag_invalid;
+            return 0x7FC00000U;
+        }
+        return sign; /* +-inf -> +-0 */
+    }
+    if (!exp && !sig) { /* +-0 -> +-inf, divide-by-zero */
+        softfloat_exceptionFlags |= softfloat_flag_infinite;
+        return sign | 0x7F800000U;
+    }
+
+    rvv_fp_normalize32(sig, exp, &norm_exp, &norm_sig);
+    out_exp = 2 * 127 - 1 - norm_exp;
+    if (out_exp > 2 * 127 || out_exp < -1) {
+        /* Overflow: the delivered value depends on the rounding mode, and
+         * both NX and OF are raised (V 1.0 §13.10).
+         */
+        softfloat_exceptionFlags |=
+            softfloat_flag_overflow | softfloat_flag_inexact;
+        if ((softfloat_roundingMode == softfloat_round_minMag) ||
+            (sign ? (softfloat_roundingMode == softfloat_round_max)
+                  : (softfloat_roundingMode == softfloat_round_min)))
+            return sign | 0x7F7FFFFFU; /* greatest finite magnitude */
+        return sign | 0x7F800000U;
+    }
+
+    sig_field = ((uint32_t) rvv_frec7_table[(norm_sig >> 16) & 0x7FU] & 0x7FU)
+                << 16;
+    if (out_exp == 0 || out_exp == -1) {
+        /* Subnormal result: prepend the implicit one, then denormalize. */
+        sig_field = ((UINT32_C(1) << 23) | sig_field) >> (1 - out_exp);
+        out_exp = 0;
+    }
+    return sign | (((uint32_t) out_exp & 0xFFU) << 23) |
+           (sig_field & 0x7FFFFFU);
+}
+
+/* vfsqrt.v (V 1.0 §13.8) and vfclass.v (§13.14). */
+static inline uint32_t rvv_fp_sqrt32(uint32_t bits)
+{
+    return f32_sqrt(rvv_fp32_from_raw(bits)).v;
+}
+
+static inline uint32_t rvv_fp_class32(uint32_t bits)
+{
+    uint32_t sign = (bits >> 31) & 1U;
+    uint32_t exp = (bits >> 23) & 0xFFU;
+    uint32_t sig = bits & 0x7FFFFFU;
+
+    if (exp == 0xFFU) {
+        if (sig)
+            return (sig & 0x400000U) ? (1U << 9) : (1U << 8);
+        return sign ? (1U << 0) : (1U << 7);
+    }
+    if (!exp)
+        return sig ? (sign ? (1U << 2) : (1U << 5))
+                   : (sign ? (1U << 3) : (1U << 4));
+    return sign ? (1U << 1) : (1U << 6);
+}
+
 static inline uint32_t rvv_fp_add32(uint32_t lhs, uint32_t rhs)
 {
     return f32_add(rvv_fp32_from_raw(lhs), rvv_fp32_from_raw(rhs)).v;
@@ -6925,6 +7113,125 @@ static inline uint32_t rvv_fp_fnmsub32(uint32_t dest,
     return f32_mulAdd(rvv_fp32_from_raw(rvv_fp32_neg(rhs)),
                       rvv_fp32_from_raw(dest), rvv_fp32_from_raw(lhs))
         .v;
+}
+
+/* Single-width conversions for the vfcvt family (V 1.0 §13.17). The
+ * float-to-integer forms take an explicit rounding mode so the .rtz
+ * variants can pin round-towards-zero while the plain forms follow the
+ * dynamic mode already installed by rvv_fp_begin_round(). The trailing
+ * "exact" argument is false because these conversions signal inexact
+ * results through fflags rather than trapping.
+ */
+static inline uint32_t rvv_fp_cvt_xu_f32(uint32_t bits)
+{
+    return f32_to_ui32(rvv_fp32_from_raw(bits), softfloat_roundingMode, false);
+}
+
+static inline uint32_t rvv_fp_cvt_x_f32(uint32_t bits)
+{
+    return (uint32_t) f32_to_i32(rvv_fp32_from_raw(bits),
+                                 softfloat_roundingMode, false);
+}
+
+static inline uint32_t rvv_fp_cvt_rtz_xu_f32(uint32_t bits)
+{
+    return f32_to_ui32_r_minMag(rvv_fp32_from_raw(bits), false);
+}
+
+static inline uint32_t rvv_fp_cvt_rtz_x_f32(uint32_t bits)
+{
+    return (uint32_t) f32_to_i32_r_minMag(rvv_fp32_from_raw(bits), false);
+}
+
+static inline uint32_t rvv_fp_cvt_f_xu32(uint32_t bits)
+{
+    return ui32_to_f32(bits).v;
+}
+
+static inline uint32_t rvv_fp_cvt_f_x32(uint32_t bits)
+{
+    return i32_to_f32((int32_t) bits).v;
+}
+
+/* Widening conversions for the vfwcvt family (V 1.0 §13.17): a 32-bit
+ * source element produces a 64-bit destination element. The
+ * float-to-integer forms take the rounding mode already installed by
+ * rvv_fp_begin_round(), except the .rtz variants which pin
+ * round-towards-zero. The trailing "exact" argument is false because
+ * these conversions report inexact results through fflags.
+ */
+static inline uint64_t rvv_fp_wcvt_xu_f32(uint32_t bits)
+{
+    return f32_to_ui64(rvv_fp32_from_raw(bits), softfloat_roundingMode, false);
+}
+
+static inline uint64_t rvv_fp_wcvt_x_f32(uint32_t bits)
+{
+    return (uint64_t) f32_to_i64(rvv_fp32_from_raw(bits),
+                                 softfloat_roundingMode, false);
+}
+
+static inline uint64_t rvv_fp_wcvt_rtz_xu_f32(uint32_t bits)
+{
+    return f32_to_ui64_r_minMag(rvv_fp32_from_raw(bits), false);
+}
+
+static inline uint64_t rvv_fp_wcvt_rtz_x_f32(uint32_t bits)
+{
+    return (uint64_t) f32_to_i64_r_minMag(rvv_fp32_from_raw(bits), false);
+}
+
+static inline uint64_t rvv_fp_wcvt_f_xu32(uint32_t bits)
+{
+    return ui32_to_f64(bits).v;
+}
+
+static inline uint64_t rvv_fp_wcvt_f_x32(uint32_t bits)
+{
+    return i32_to_f64((int32_t) bits).v;
+}
+
+/* Narrowing conversions for the vfncvt family (V 1.0 §13.19): a 64-bit
+ * source element produces a 32-bit destination element. The rounding
+ * mode in force is whatever the RVOP installed - the dynamic frm for the
+ * plain forms, round-towards-zero for .rtz, or round-towards-odd for
+ * vfncvt.rod.f.f.w. The trailing "exact" argument is false because these
+ * conversions report inexact results through fflags.
+ */
+static inline uint32_t rvv_fp_ncvt_xu_f64(uint64_t bits)
+{
+    return f64_to_ui32(rvv_fp64_from_raw(bits), softfloat_roundingMode, false);
+}
+
+static inline uint32_t rvv_fp_ncvt_x_f64(uint64_t bits)
+{
+    return (uint32_t) f64_to_i32(rvv_fp64_from_raw(bits),
+                                 softfloat_roundingMode, false);
+}
+
+static inline uint32_t rvv_fp_ncvt_rtz_xu_f64(uint64_t bits)
+{
+    return f64_to_ui32_r_minMag(rvv_fp64_from_raw(bits), false);
+}
+
+static inline uint32_t rvv_fp_ncvt_rtz_x_f64(uint64_t bits)
+{
+    return (uint32_t) f64_to_i32_r_minMag(rvv_fp64_from_raw(bits), false);
+}
+
+static inline uint32_t rvv_fp_ncvt_f_xu64(uint64_t bits)
+{
+    return ui64_to_f32(bits).v;
+}
+
+static inline uint32_t rvv_fp_ncvt_f_x64(uint64_t bits)
+{
+    return i64_to_f32((int64_t) bits).v;
+}
+
+static inline uint32_t rvv_fp_ncvt_f_f64(uint64_t bits)
+{
+    return f64_to_f32(rvv_fp64_from_raw(bits)).v;
 }
 
 static inline uint64_t rvv_fp_widen32(uint32_t bits)
@@ -7085,6 +7392,96 @@ static inline void rvv_exec_vfmv_s_f(riscv_t *rv, const rv_insn_t *ir)
             for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
                 rvv_set_elem(rv, ir->vd, elem, 32, 0xFFFFFFFFU);
         }
+    }
+    rv->csr_vstart = 0;
+}
+
+/* Single-width unary element loop for the vfcvt family (V 1.0 §13.17):
+ * one source element in, one same-width destination element out.
+ */
+typedef uint32_t (*rvv_fp32_unop_fn)(uint32_t src);
+
+static inline void rvv_exec_fp32_unary(riscv_t *rv,
+                                       const rv_insn_t *ir,
+                                       uint32_t dest,
+                                       rvv_fp32_unop_fn op)
+{
+    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+    uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
+    uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
+
+    for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
+        if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
+            if (vma)
+                rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
+            continue;
+        }
+        rvv_set_elem(rv, dest, elem, 32,
+                     op(rvv_get_elem(rv, ir->vs2, elem, 32)));
+    }
+    if (vta) {
+        for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+            rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
+    }
+    rv->csr_vstart = 0;
+}
+
+/* Widening unary element loop for the vfwcvt family (V 1.0 §13.17): a
+ * single 32-bit source element produces one 64-bit destination element.
+ */
+typedef uint64_t (*rvv_fp_wcvt_fn)(uint32_t src);
+
+static inline void rvv_exec_fp_wcvt(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint32_t dest,
+                                    rvv_fp_wcvt_fn op)
+{
+    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+    uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
+    uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
+
+    for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
+        if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
+            if (vma)
+                rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
+            continue;
+        }
+        rvv_set_elem_ext(rv, dest, elem, 64,
+                         op(rvv_get_elem(rv, ir->vs2, elem, 32)));
+    }
+    if (vta) {
+        for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+            rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
+    }
+    rv->csr_vstart = 0;
+}
+
+/* Narrowing unary element loop for the vfncvt family (V 1.0 §13.19): a
+ * single 64-bit source element produces one 32-bit destination element.
+ */
+typedef uint32_t (*rvv_fp_ncvt_fn)(uint64_t src);
+
+static inline void rvv_exec_fp_ncvt(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint32_t dest,
+                                    rvv_fp_ncvt_fn op)
+{
+    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+    uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
+    uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
+
+    for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
+        if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
+            if (vma)
+                rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
+            continue;
+        }
+        rvv_set_elem(rv, dest, elem, 32,
+                     op(rvv_get_elem_ext(rv, ir->vs2, elem, 64)));
+    }
+    if (vta) {
+        for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+            rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
     rv->csr_vstart = 0;
 }
@@ -7725,6 +8122,120 @@ RVOP(vfmv_s_f, {
     rvv_exec_vfmv_s_f(rv, ir);
 })
 
+#define RVV_FP32_CVT_OP(name, opfn, dynamic_round)           \
+    RVOP(name, {                                             \
+        if (rvv_require_operable(rv))                        \
+            return false;                                    \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||           \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vd) || \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))  \
+            return rvv_trap_illegal_state(rv, 0);            \
+        if (dynamic_round)                                   \
+            rvv_fp_begin_round(rv);                          \
+        else                                                 \
+            rvv_fp_begin_flags();                            \
+        rvv_exec_fp32_unary(rv, ir, ir->vd, opfn);           \
+        set_fflag(rv);                                       \
+    })
+
+RVV_FP32_CVT_OP(vfcvt_xu_f_v, rvv_fp_cvt_xu_f32, true);
+RVV_FP32_CVT_OP(vfcvt_x_f_v, rvv_fp_cvt_x_f32, true);
+RVV_FP32_CVT_OP(vfcvt_f_xu_v, rvv_fp_cvt_f_xu32, true);
+RVV_FP32_CVT_OP(vfcvt_f_x_v, rvv_fp_cvt_f_x32, true);
+RVV_FP32_CVT_OP(vfcvt_rtz_xu_f_v, rvv_fp_cvt_rtz_xu_f32, false);
+RVV_FP32_CVT_OP(vfcvt_rtz_x_f_v, rvv_fp_cvt_rtz_x_f32, false);
+
+#define RVV_FP_WCVT_OP(name, opfn, dynamic_round)                              \
+    RVOP(name, {                                                               \
+        uint32_t wide_span;                                                    \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
+        if (rvv_require_operable(rv))                                          \
+            return false;                                                      \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
+            !rvv_wide_group_span(rv, &wide_span) ||                            \
+            !rvv_validate_wide_reg(rv, ir->vd) ||                              \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||                  \
+            rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span, \
+                                      rvv_sew_emul_at_least_1(rv)))            \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        if (dynamic_round)                                                     \
+            rvv_fp_begin_round(rv);                                            \
+        else                                                                   \
+            rvv_fp_begin_flags();                                              \
+        rvv_exec_fp_wcvt(rv, ir, ir->vd, opfn);                                \
+        set_fflag(rv);                                                         \
+    })
+
+#define RVV_FP32_UNARY_OP(name, opfn, dynamic_round)         \
+    RVOP(name, {                                             \
+        if (rvv_require_operable(rv))                        \
+            return false;                                    \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||           \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vd) || \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))  \
+            return rvv_trap_illegal_state(rv, 0);            \
+        if (dynamic_round)                                   \
+            rvv_fp_begin_round(rv);                          \
+        else                                                 \
+            rvv_fp_begin_flags();                            \
+        rvv_exec_fp32_unary(rv, ir, ir->vd, opfn);           \
+        set_fflag(rv);                                       \
+    })
+
+RVV_FP32_UNARY_OP(vfsqrt_v, rvv_fp_sqrt32, true);
+RVV_FP32_UNARY_OP(vfrsqrt7_v, rvv_fp_rsqrt7_32, false);
+RVV_FP32_UNARY_OP(vfrec7_v, rvv_fp_rec7_32, true);
+RVV_FP32_UNARY_OP(vfclass_v, rvv_fp_class32, false);
+
+/* round_mode: RVV_NCVT_RM_DYN follows frm, RVV_NCVT_RM_ROD pins
+ * round-towards-odd for vfncvt.rod.f.f.w, and RVV_NCVT_RM_NONE leaves the
+ * mode alone for the .rtz forms, whose softfloat helpers carry their own.
+ */
+#define RVV_NCVT_RM_NONE 0
+#define RVV_NCVT_RM_DYN 1
+#define RVV_NCVT_RM_ROD 2
+
+#define RVV_FP_NCVT_OP(name, opfn, round_mode)                       \
+    RVOP(name, {                                                     \
+        uint32_t wide_span;                                          \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);        \
+        if (rvv_require_operable(rv))                                \
+            return false;                                            \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                   \
+            !rvv_wide_group_span(rv, &wide_span) ||                  \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||         \
+            !rvv_validate_wide_reg(rv, ir->vs2) ||                   \
+            rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, \
+                                       wide_span))                   \
+            return rvv_trap_illegal_state(rv, 0);                    \
+        if (round_mode == RVV_NCVT_RM_DYN) {                         \
+            rvv_fp_begin_round(rv);                                  \
+        } else {                                                     \
+            rvv_fp_begin_flags();                                    \
+            if (round_mode == RVV_NCVT_RM_ROD)                       \
+                softfloat_roundingMode = softfloat_round_odd;        \
+        }                                                            \
+        rvv_exec_fp_ncvt(rv, ir, ir->vd, opfn);                      \
+        set_fflag(rv);                                               \
+    })
+
+RVV_FP_NCVT_OP(vfncvt_xu_f_w, rvv_fp_ncvt_xu_f64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_x_f_w, rvv_fp_ncvt_x_f64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_f_xu_w, rvv_fp_ncvt_f_xu64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_f_x_w, rvv_fp_ncvt_f_x64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_f_f_w, rvv_fp_ncvt_f_f64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_rod_f_f_w, rvv_fp_ncvt_f_f64, RVV_NCVT_RM_ROD);
+RVV_FP_NCVT_OP(vfncvt_rtz_xu_f_w, rvv_fp_ncvt_rtz_xu_f64, RVV_NCVT_RM_NONE);
+RVV_FP_NCVT_OP(vfncvt_rtz_x_f_w, rvv_fp_ncvt_rtz_x_f64, RVV_NCVT_RM_NONE);
+
+RVV_FP_WCVT_OP(vfwcvt_xu_f_v, rvv_fp_wcvt_xu_f32, true);
+RVV_FP_WCVT_OP(vfwcvt_x_f_v, rvv_fp_wcvt_x_f32, true);
+RVV_FP_WCVT_OP(vfwcvt_f_xu_v, rvv_fp_wcvt_f_xu32, true);
+RVV_FP_WCVT_OP(vfwcvt_f_x_v, rvv_fp_wcvt_f_x32, true);
+RVV_FP_WCVT_OP(vfwcvt_f_f_v, rvv_fp_widen32, true);
+RVV_FP_WCVT_OP(vfwcvt_rtz_xu_f_v, rvv_fp_wcvt_rtz_xu_f32, false);
+RVV_FP_WCVT_OP(vfwcvt_rtz_x_f_v, rvv_fp_wcvt_rtz_x_f32, false);
+
 RVV_FP32_VV_OP(vfadd_vv, rvv_fp_add32, true);
 RVV_FP32_VF_OP(vfadd_vf, rvv_fp_add32, true);
 RVV_FP32_RED_OP(vfredusum_vs, rvv_fp_add32, true);
@@ -7896,8 +8407,33 @@ RVV_FP64_MAC_VF_OP(vfwmsac_vf, rvv_fp_wmsac64);
 RVV_FP64_MAC_VV_OP(vfwnmsac_vv, rvv_fp_wnmsac64);
 RVV_FP64_MAC_VF_OP(vfwnmsac_vf, rvv_fp_wnmsac64);
 #else
+RVOP(vfsqrt_v, { V_NOP; })
+RVOP(vfrsqrt7_v, { V_NOP; })
+RVOP(vfrec7_v, { V_NOP; })
+RVOP(vfclass_v, { V_NOP; })
+RVOP(vfncvt_xu_f_w, { V_NOP; })
+RVOP(vfncvt_x_f_w, { V_NOP; })
+RVOP(vfncvt_f_xu_w, { V_NOP; })
+RVOP(vfncvt_f_x_w, { V_NOP; })
+RVOP(vfncvt_f_f_w, { V_NOP; })
+RVOP(vfncvt_rod_f_f_w, { V_NOP; })
+RVOP(vfncvt_rtz_xu_f_w, { V_NOP; })
+RVOP(vfncvt_rtz_x_f_w, { V_NOP; })
+RVOP(vfwcvt_xu_f_v, { V_NOP; })
+RVOP(vfwcvt_x_f_v, { V_NOP; })
+RVOP(vfwcvt_f_xu_v, { V_NOP; })
+RVOP(vfwcvt_f_x_v, { V_NOP; })
+RVOP(vfwcvt_f_f_v, { V_NOP; })
+RVOP(vfwcvt_rtz_xu_f_v, { V_NOP; })
+RVOP(vfwcvt_rtz_x_f_v, { V_NOP; })
 RVOP(vfmv_f_s, { V_NOP; })
 RVOP(vfmv_s_f, { V_NOP; })
+RVOP(vfcvt_xu_f_v, { V_NOP; })
+RVOP(vfcvt_x_f_v, { V_NOP; })
+RVOP(vfcvt_f_xu_v, { V_NOP; })
+RVOP(vfcvt_f_x_v, { V_NOP; })
+RVOP(vfcvt_rtz_xu_f_v, { V_NOP; })
+RVOP(vfcvt_rtz_x_f_v, { V_NOP; })
 RVOP(vfadd_vv, { V_NOP; })
 RVOP(vfadd_vf, { V_NOP; })
 RVOP(vfredusum_vs, { V_NOP; })

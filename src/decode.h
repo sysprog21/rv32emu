@@ -837,8 +837,33 @@ enum op_field {
         _(vfwmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))         \
         _(vfwnmsac_vv, 0, 4, 0, ENC(rs1, rs2, vd))        \
         _(vfwnmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))        \
+        _(vfsqrt_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfrsqrt7_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfrec7_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfclass_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_xu_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_x_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_xu_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_x_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rod_f_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rtz_xu_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rtz_x_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_xu_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_x_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_f_xu_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_f_x_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_f_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_rtz_xu_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_rtz_x_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vfmv_f_s, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vfmv_s_f, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_xu_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_x_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_f_xu_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_f_x_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_rtz_xu_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_rtz_x_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
     )
 
 /* clang-format on */

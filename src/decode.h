@@ -827,6 +827,14 @@ enum op_field {
         _(vfwmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))         \
         _(vfwnmsac_vv, 0, 4, 0, ENC(rs1, rs2, vd))        \
         _(vfwnmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))        \
+        _(vfncvt_xu_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_x_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_xu_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_x_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rod_f_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rtz_xu_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rtz_x_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
     )
 
 /* clang-format on */

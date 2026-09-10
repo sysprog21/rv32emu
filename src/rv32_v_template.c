@@ -6695,6 +6695,49 @@ static inline uint32_t rvv_fp_fnmsub32(uint32_t dest,
         .v;
 }
 
+/* Narrowing conversions for the vfncvt family (V 1.0 §13.19): a 64-bit
+ * source element produces a 32-bit destination element. The rounding
+ * mode in force is whatever the RVOP installed - the dynamic frm for the
+ * plain forms, round-towards-zero for .rtz, or round-towards-odd for
+ * vfncvt.rod.f.f.w. The trailing "exact" argument is false because these
+ * conversions report inexact results through fflags.
+ */
+static inline uint32_t rvv_fp_ncvt_xu_f64(uint64_t bits)
+{
+    return f64_to_ui32(rvv_fp64_from_raw(bits), softfloat_roundingMode, false);
+}
+
+static inline uint32_t rvv_fp_ncvt_x_f64(uint64_t bits)
+{
+    return (uint32_t) f64_to_i32(rvv_fp64_from_raw(bits),
+                                 softfloat_roundingMode, false);
+}
+
+static inline uint32_t rvv_fp_ncvt_rtz_xu_f64(uint64_t bits)
+{
+    return f64_to_ui32_r_minMag(rvv_fp64_from_raw(bits), false);
+}
+
+static inline uint32_t rvv_fp_ncvt_rtz_x_f64(uint64_t bits)
+{
+    return (uint32_t) f64_to_i32_r_minMag(rvv_fp64_from_raw(bits), false);
+}
+
+static inline uint32_t rvv_fp_ncvt_f_xu64(uint64_t bits)
+{
+    return ui64_to_f32(bits).v;
+}
+
+static inline uint32_t rvv_fp_ncvt_f_x64(uint64_t bits)
+{
+    return i64_to_f32((int64_t) bits).v;
+}
+
+static inline uint32_t rvv_fp_ncvt_f_f64(uint64_t bits)
+{
+    return f64_to_f32(rvv_fp64_from_raw(bits)).v;
+}
+
 static inline uint64_t rvv_fp_widen32(uint32_t bits)
 {
     return f32_to_f64(rvv_fp32_from_raw(bits)).v;
@@ -6820,6 +6863,36 @@ static inline void rvv_exec_fp32_vf(riscv_t *rv,
         }
         rvv_set_elem(rv, dest, elem, 32,
                      op(rvv_get_elem(rv, ir->vs2, elem, 32), scalar));
+    }
+    if (vta) {
+        for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+            rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
+    }
+    rv->csr_vstart = 0;
+}
+
+/* Narrowing unary element loop for the vfncvt family (V 1.0 §13.19): a
+ * single 64-bit source element produces one 32-bit destination element.
+ */
+typedef uint32_t (*rvv_fp_ncvt_fn)(uint64_t src);
+
+static inline void rvv_exec_fp_ncvt(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint32_t dest,
+                                    rvv_fp_ncvt_fn op)
+{
+    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+    uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
+    uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
+
+    for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
+        if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
+            if (vma)
+                rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
+            continue;
+        }
+        rvv_set_elem(rv, dest, elem, 32,
+                     op(rvv_get_elem_ext(rv, ir->vs2, elem, 64)));
     }
     if (vta) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
@@ -7448,6 +7521,47 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
         set_fflag(rv);                                                \
     })
 
+/* round_mode: RVV_NCVT_RM_DYN follows frm, RVV_NCVT_RM_ROD pins
+ * round-towards-odd for vfncvt.rod.f.f.w, and RVV_NCVT_RM_NONE leaves the
+ * mode alone for the .rtz forms, whose softfloat helpers carry their own.
+ */
+#define RVV_NCVT_RM_NONE 0
+#define RVV_NCVT_RM_DYN 1
+#define RVV_NCVT_RM_ROD 2
+
+#define RVV_FP_NCVT_OP(name, opfn, round_mode)                          \
+    RVOP(name, {                                                        \
+        uint32_t wide_span;                                             \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);           \
+        if (rvv_require_operable(rv))                                   \
+            return false;                                               \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                      \
+            !rvv_wide_group_span(rv, &wide_span) ||                     \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||            \
+            !rvv_validate_wide_reg(rv, ir->vs2) ||                      \
+            rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, \
+                                          wide_span))                   \
+            return rvv_trap_illegal_state(rv, 0);                       \
+        if (round_mode == RVV_NCVT_RM_DYN) {                            \
+            rvv_fp_begin_round(rv);                                     \
+        } else {                                                        \
+            rvv_fp_begin_flags();                                       \
+            if (round_mode == RVV_NCVT_RM_ROD)                          \
+                softfloat_roundingMode = softfloat_round_odd;           \
+        }                                                               \
+        rvv_exec_fp_ncvt(rv, ir, ir->vd, opfn);                         \
+        set_fflag(rv);                                                  \
+    })
+
+RVV_FP_NCVT_OP(vfncvt_xu_f_w, rvv_fp_ncvt_xu_f64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_x_f_w, rvv_fp_ncvt_x_f64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_f_xu_w, rvv_fp_ncvt_f_xu64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_f_x_w, rvv_fp_ncvt_f_x64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_f_f_w, rvv_fp_ncvt_f_f64, RVV_NCVT_RM_DYN);
+RVV_FP_NCVT_OP(vfncvt_rod_f_f_w, rvv_fp_ncvt_f_f64, RVV_NCVT_RM_ROD);
+RVV_FP_NCVT_OP(vfncvt_rtz_xu_f_w, rvv_fp_ncvt_rtz_xu_f64, RVV_NCVT_RM_NONE);
+RVV_FP_NCVT_OP(vfncvt_rtz_x_f_w, rvv_fp_ncvt_rtz_x_f64, RVV_NCVT_RM_NONE);
+
 RVV_FP32_VV_OP(vfadd_vv, rvv_fp_add32, true);
 RVV_FP32_VF_OP(vfadd_vf, rvv_fp_add32, true);
 RVV_FP32_RED_OP(vfredusum_vs, rvv_fp_add32, true);
@@ -7619,6 +7733,14 @@ RVV_FP64_MAC_VF_OP(vfwmsac_vf, rvv_fp_wmsac64);
 RVV_FP64_MAC_VV_OP(vfwnmsac_vv, rvv_fp_wnmsac64);
 RVV_FP64_MAC_VF_OP(vfwnmsac_vf, rvv_fp_wnmsac64);
 #else
+RVOP(vfncvt_xu_f_w, { V_NOP; })
+RVOP(vfncvt_x_f_w, { V_NOP; })
+RVOP(vfncvt_f_xu_w, { V_NOP; })
+RVOP(vfncvt_f_x_w, { V_NOP; })
+RVOP(vfncvt_f_f_w, { V_NOP; })
+RVOP(vfncvt_rod_f_f_w, { V_NOP; })
+RVOP(vfncvt_rtz_xu_f_w, { V_NOP; })
+RVOP(vfncvt_rtz_x_f_w, { V_NOP; })
 RVOP(vfadd_vv, { V_NOP; })
 RVOP(vfadd_vf, { V_NOP; })
 RVOP(vfredusum_vs, { V_NOP; })

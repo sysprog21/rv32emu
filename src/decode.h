@@ -1078,5 +1078,32 @@ typedef struct rv_insn {
     branch_history_table_t *branch_table;
 } rv_insn_t;
 
+/* Compile-time layout verification of the rv_insn_t/opcode_fuse_t contract.
+ *
+ * try_fuse_sequence() populates the fuse array with
+ * memcpy(ir->fuse + j, next_ir, sizeof(opcode_fuse_t)), reinterpreting the
+ * leading bytes of rv_insn_t as an opcode_fuse_t. That is only valid while
+ * both structures agree on the offset of every field the fused handlers
+ * read back, so pin the shared prefix here rather than relying on the two
+ * declarations being edited in lockstep.
+ *
+ * WARNING: reordering these members, or inserting a member ahead of opcode
+ * in rv_insn_t (including inside the EXT_C, EXT_V and EXT_F blocks, should
+ * one ever move above it), silently corrupts every fused sequence. Keep the
+ * prefixes identical or update try_fuse_sequence() accordingly.
+ */
+_Static_assert(offsetof(rv_insn_t, imm) == offsetof(opcode_fuse_t, imm),
+               "rv_insn_t.imm must match opcode_fuse_t.imm");
+_Static_assert(offsetof(rv_insn_t, rd) == offsetof(opcode_fuse_t, rd),
+               "rv_insn_t.rd must match opcode_fuse_t.rd");
+_Static_assert(offsetof(rv_insn_t, rs1) == offsetof(opcode_fuse_t, rs1),
+               "rv_insn_t.rs1 must match opcode_fuse_t.rs1");
+_Static_assert(offsetof(rv_insn_t, rs2) == offsetof(opcode_fuse_t, rs2),
+               "rv_insn_t.rs2 must match opcode_fuse_t.rs2");
+_Static_assert(offsetof(rv_insn_t, opcode) == offsetof(opcode_fuse_t, opcode),
+               "rv_insn_t.opcode must match opcode_fuse_t.opcode");
+_Static_assert(sizeof(rv_insn_t) >= sizeof(opcode_fuse_t),
+               "rv_insn_t must be large enough to copy an opcode_fuse_t from");
+
 /* decode the RISC-V instruction */
 bool rv_decode(rv_insn_t *ir, const uint32_t insn);

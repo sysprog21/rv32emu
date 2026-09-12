@@ -27,4 +27,28 @@ RET=$((${RET} + $?))
 (. "${SCRIPT_DIR}/virtio-blk.sh")
 RET=$((${RET} + $?))
 
+# Virtio-net user-mode backend test
+(
+    export VNET_BACKEND=user
+    . "${SCRIPT_DIR}/netdev.sh"
+)
+RET=$((${RET} + $?))
+
+# Virtio-net TAP backend test
+(
+    export VNET_BACKEND=tap
+    . "${SCRIPT_DIR}/netdev.sh"
+)
+RET=$((${RET} + $?))
+
+# Virtio-net vmnet backend test
+if [[ "${OS_TYPE}" = "Darwin" ]] \
+    && grep -q '^CONFIG_VIRTIO_NET_VMNET=y$' .config; then
+    (
+        export VNET_BACKEND=vmnet
+        . "${SCRIPT_DIR}/netdev.sh"
+    )
+    RET=$((${RET} + $?))
+fi
+
 exit ${RET}

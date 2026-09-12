@@ -19,7 +19,7 @@
 #include <sys/ioctl.h>
 #endif
 
-#if RV32EMU_NET_HAS_TAP || RV32EMU_NET_HAS_SLIRP
+#if RV32EMU_NET_HAS_TAP || RV32EMU_NET_HAS_SLIRP || RV32EMU_NET_HAS_VMNET
 typedef int (*netdev_init_fn_t)(netdev_t *netdev);
 #endif
 
@@ -33,7 +33,7 @@ static void netdev_reset(netdev_t *netdev)
     netdev->op = NULL;
 }
 
-#if RV32EMU_NET_HAS_TAP || RV32EMU_NET_HAS_SLIRP
+#if RV32EMU_NET_HAS_TAP || RV32EMU_NET_HAS_SLIRP || RV32EMU_NET_HAS_VMNET
 static bool netdev_setup(netdev_t *netdev,
                          const char *name,
                          netdev_impl_t type,
@@ -115,12 +115,30 @@ static int net_init_user(netdev_t *netdev)
 }
 #endif
 
+#if RV32EMU_NET_HAS_VMNET
+static int net_init_vmnet(netdev_t *netdev)
+{
+    /*
+     * Match semu's current user-facing behavior:
+     *
+     * "vmnet" selects VMNET_SHARED_MODE.
+     *
+     * Host and bridged initializers remain implemented in
+     * netdev-vmnet.c, but are not exposed through rv32emu's command
+     * line yet.
+     */
+    return net_vmnet_init(netdev, RV32EMU_VMNET_SHARED, NULL);
+}
+#endif
+
 static const char *netdev_default_backend(void)
 {
 #if RV32EMU_NET_HAS_TAP
     return "tap";
 #elif RV32EMU_NET_HAS_SLIRP
     return "user";
+#elif RV32EMU_NET_HAS_VMNET
+    return "vmnet";
 #else
     return NULL;
 #endif
@@ -153,6 +171,13 @@ bool netdev_init(netdev_t *netdev, const char *net_type)
     }
 #endif
 
+#if RV32EMU_NET_HAS_VMNET
+    if (!strcmp(requested, "vmnet")) {
+        return netdev_setup(netdev, "vmnet", NETDEV_IMPL_VMNET,
+                            sizeof(net_vmnet_options_t), net_init_vmnet);
+    }
+#endif
+
     rv_log_error("unsupported virtio-net backend: %s", requested);
     return false;
 }
@@ -175,6 +200,12 @@ void netdev_delete(netdev_t *netdev)
 #if RV32EMU_NET_HAS_SLIRP
     case NETDEV_IMPL_USER:
         net_slirp_cleanup((net_user_options_t *) netdev->op);
+        break;
+#endif
+
+#if RV32EMU_NET_HAS_VMNET
+    case NETDEV_IMPL_VMNET:
+        net_vmnet_cleanup((net_vmnet_state_t *) netdev->op);
         break;
 #endif
 

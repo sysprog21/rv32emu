@@ -41,4 +41,14 @@ RET=$((${RET} + $?))
 )
 RET=$((${RET} + $?))
 
+# Virtio-net vmnet backend test
+if [[ "${OS_TYPE}" = "Darwin" ]] \
+    && grep -q '^CONFIG_VIRTIO_NET_VMNET=y$' .config; then
+    (
+        export VNET_BACKEND=vmnet
+        . "${SCRIPT_DIR}/netdev.sh"
+    )
+    RET=$((${RET} + $?))
+fi
+
 exit ${RET}

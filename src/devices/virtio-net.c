@@ -286,6 +286,43 @@ static ssize_t vnet_handle_read(netdev_t *netdev,
     }
 #endif
 
+#if RV32EMU_NET_HAS_VMNET
+    case NETDEV_IMPL_VMNET: {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) netdev->op;
+
+        uint8_t buf[VMNET_PKT_MAX];
+
+        ssize_t plen = net_vmnet_read(vmnet, buf, sizeof(buf));
+
+        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+            queue->fd_ready = false;
+            return -1;
+        }
+
+        if (plen < 0) {
+            rv_log_error(
+                "virtio-net: could not read packet "
+                "from vmnet: %s",
+                strerror(errno));
+
+            return -1;
+        }
+
+        struct iovec *vecs = iovs;
+        size_t nvecs = niovs;
+
+        if (vnet_iovec_write(&vecs, &nvecs, buf, (size_t) plen)) {
+            rv_log_error(
+                "virtio-net: vmnet packet exceeds "
+                "guest RX buffer");
+
+            return -1;
+        }
+
+        return plen;
+    }
+#endif
+
     default:
         return -1;
     }
@@ -337,6 +374,33 @@ static vnet_tx_result_t vnet_handle_write(netdev_t *netdev,
 
         rv_log_error("virtio-net: could not write packet to SLIRP: %s",
                      strerror(errno));
+
+        return VNET_TX_DROP;
+    }
+#endif
+
+#if RV32EMU_NET_HAS_VMNET
+    case NETDEV_IMPL_VMNET: {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) netdev->op;
+
+        ssize_t plen = net_vmnet_writev(vmnet, iovs, niovs);
+
+        if (plen >= 0)
+            return VNET_TX_OK;
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            queue->fd_ready = false;
+            return VNET_TX_RETRY;
+        }
+
+        if (errno == EINTR)
+            return VNET_TX_RETRY;
+
+        rv_log_error(
+            "virtio-net: could not write packet "
+            "to vmnet: %s",
+            strerror(errno));
+
         return VNET_TX_DROP;
     }
 #endif
@@ -617,6 +681,39 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
     }
 #endif
 
+#if RV32EMU_NET_HAS_VMNET
+    case NETDEV_IMPL_VMNET: {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) vnet->peer.op;
+
+        int fd = net_vmnet_get_fd(vmnet);
+
+        struct pollfd pfd = {
+            .fd = fd,
+            .events = POLLIN,
+        };
+
+        poll(&pfd, 1, 0);
+
+        if (pfd.revents & POLLIN) {
+            vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+
+            virtio_net_try_rx(vnet);
+        }
+
+        /*
+         * vmnet_write() does not expose a writable file descriptor.
+         * Treat TX as writable and let net_vmnet_writev() report
+         * VMNET_BUFFER_EXHAUSTED as EAGAIN when the framework cannot
+         * currently accept another packet.
+         */
+        vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+
+        virtio_net_try_tx(vnet);
+
+        break;
+    }
+#endif
+
     default:
         break;
     }
@@ -780,6 +877,23 @@ bool virtio_net_init(virtio_net_state_t *vnet, const char *net_type)
                      net_type ? net_type : "(default)");
         return false;
     }
+
+#if RV32EMU_NET_HAS_VMNET
+    /*
+     * vmnet.framework assigns a MAC address to the created interface.
+     *
+     * rv32emu advertises VIRTIO_NET_F_MAC, so expose that same address
+     * through the VirtIO configuration instead of keeping the static
+     * default MAC.
+     */
+    if (vnet->peer.type == NETDEV_IMPL_VMNET) {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) vnet->peer.op;
+
+        virtio_net_config_t *cfg = (virtio_net_config_t *) vnet->priv;
+
+        memcpy(cfg->mac, vmnet->mac, sizeof(cfg->mac));
+    }
+#endif
 
     return true;
 }

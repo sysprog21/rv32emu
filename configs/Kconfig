@@ -320,6 +320,20 @@ config VIRTIO_NET_USER
       This backend does not require a TAP interface or root privileges,
       but it adds minislirp to the final executable.
 
+config VIRTIO_NET_VMNET
+    bool "Enable macOS vmnet.framework backend"
+    default y
+    depends on VIRTIO_NET && HOST_MACOS && CC_IS_CLANG
+    help
+      Enable the macOS vmnet.framework backend for VirtIO networking.
+
+      The backend implements shared, host-only, and bridged vmnet
+      operation modes. The current rv32emu frontend selects shared mode
+      when using the "vmnet" backend.
+
+      vmnet.framework requires macOS and Apple Blocks support, so this
+      backend is enabled only when building with Clang.
+      
 endmenu
 
 # Performance Optimizations

@@ -156,6 +156,9 @@ static void print_usage(const char *filename)
 #if RV32EMU_NET_HAS_SLIRP
         " user"
 #endif
+#if RV32EMU_NET_HAS_VMNET
+        " vmnet"
+#endif
         ")\n"
 #endif
         "  -b <bootargs> : use customized <bootargs> for the kernel\n"
@@ -180,6 +183,10 @@ static bool virtio_net_backend_supported(const char *backend)
 #endif
 #if RV32EMU_NET_HAS_SLIRP
     if (!strcmp(backend, "user"))
+        return true;
+#endif
+#if RV32EMU_NET_HAS_VMNET
+    if (!strcmp(backend, "vmnet"))
         return true;
 #endif
 

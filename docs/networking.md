@@ -5,10 +5,9 @@ This document explains how to configure and use virtio-net networking in rv32emu
 rv32emu provides a virtio-net device with platform-specific host networking backends. The currently supported backends are:
 
 - Linux : TAP and user-mode SLIRP
-- macOS : user-mode SLIRP
+- macOS : user-mode SLIRP and vmnet.framework
 - Emscripten : networking backends are disabled
 
-vmnet.framework support is not included yet.
 
 ## Backend overview
 
@@ -17,6 +16,22 @@ vmnet.framework support is not included yet.
 The TAP backend uses the Linux TUN/TAP interface. It provides kernel-level networking, but requires either `sudo` or `CAP_NET_ADMIN`.
 
 Use this backend when you want direct host-side TAP networking.
+
+### macOS vmnet.framework
+
+The vmnet backend uses Apple's vmnet.framework and is available on
+macOS builds using Clang.
+
+Shared mode creates a private virtual network managed by macOS and uses
+NAT to provide external network access.
+
+The vmnet network parameters are assigned by macOS at runtime, so the
+guest address and gateway are not fixed like the user-mode SLIRP
+backend.
+
+The current rv32emu frontend exposes only shared mode. Host-only and
+bridged initialization paths are implemented in the backend but are not
+yet selectable from the command line.
 
 ### User-mode SLIRP
 
@@ -101,6 +116,26 @@ ping -c 3 10.0.2.2
 
 The `10.0.2.2` address is the SLIRP gateway.
 
+### macOS vmnet
+The backend implements shared, host-only, and bridged vmnet operation
+modes internally. The current command-line interface exposes shared
+mode through:
+
+```shell
+sudo -E build/rv32emu \
+  -k build/linux-image/Image \
+  -i build/linux-image/rootfs.cpio \
+  -x vnet:vmnet
+```
+Inside the guest:
+```
+ip link set eth0 up
+ip addr flush dev eth0
+ip addr add 192.168.2.10/24 dev eth0
+ip addr show eth0
+ping -c 3 -W 5 192.168.2.1
+```
+
 ### macOS user-mode SLIRP
 
 On macOS, use the user-mode SLIRP backend:
@@ -133,17 +168,23 @@ VNET_BACKEND=user .ci/boot-linux.sh
 VNET_BACKEND=tap sudo -E .ci/boot-linux.sh
 ```
 
-macOS runs the user-mode SLIRP boot test:
+macOS runs the user-mode SLIRP test. Clang builds also exercise the
+vmnet shared backend:
 
-Shell
-
-```
-VNET_BACKEND=user .ci/boot-linux.sh
+```shell
+VNET_BACKEND=user .ci/netdev.sh
+VNET_BACKEND=vmnet .ci/netdev.sh
 ```
 
 TAP is only tested on Linux because it depends on the Linux TUN/TAP interface.
 
-The virtio-net tests are not run for every JIT, T2C, or MOP-fusion matrix entry. Those modes already have normal Linux boot coverage. The virtio-net tests mainly validate backend I/O, virtio-net driver binding, guest interface setup, RX/TX virtqueues, and interrupt delivery.
+The vmnet test starts rv32emu with elevated privileges, detects the
+private network created by vmnet.framework, configures the guest
+interface, and verifies packet delivery by pinging the vmnet gateway.
+The vmnet backend is not built for macOS GCC because vmnet.framework's
+callback API uses Apple Blocks syntax.
+
+The virtio-net tests mainly validate backend I/O, virtio-net driver binding, guest interface setup, RX/TX virtqueues, and interrupt delivery.
 
 ## Implementation notes
 
@@ -155,20 +196,15 @@ The virtio-net implementation is split into:
 | `src/devices/netdev.h` | Network backend abstraction |
 | `src/devices/netdev.c` | Backend selection and initialization |
 | `src/devices/slirp.c` | minislirp integration for user-mode networking |
+| `src/devices/netdev-vmnet.c` | macOS vmnet.framework backend |
 
 The user-mode SLIRP backend uses non-blocking socketpairs to connect the virtio-net RX/TX paths with minislirp.
 
 At the moment, SLIRP progress is driven from rv32emu's existing virtio-net refresh path. A future improvement could replace frequent non-blocking polling with an event-driven wakeup mechanism, such as `eventfd`, a pipe, or a condition-variable based notification path.
 
+The vmnet backend uses vmnet.framework callbacks for host packet delivery and a non-blocking pipe to integrate those asynchronous callbacks with rv32emu's existing polling-based virtio-net refresh path.
+
 ## Future work
-
-### vmnet.framework
-
-macOS vmnet.framework support is not implemented in rv32emu yet.
-
-semu has a vmnet backend, but that implementation uses Apple's vmnet.framework and Blocks syntax for callbacks. This is suitable for Clang with Blocks support, but it is not suitable for the current macOS gcc-15 CI job. vmnet also has macOS-specific privilege and entitlement requirements.
-
-A future implementation could add vmnet through a Clang-only macOS path or a more portable wrapper.
 
 ### Event-driven wakeup
 

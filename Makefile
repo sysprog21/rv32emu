@@ -58,7 +58,7 @@ deps :=
 # Feature Flags (Kconfig -> RV32_FEATURE_*)
 $(call set-features, ELF_LOADER MOP_FUSION BLOCK_CHAINING LOG_COLOR)
 $(call set-features, SYSTEM GOLDFISH_RTC ARCH_TEST)
-$(call set-features, VIRTIO_NET VIRTIO_NET_TAP VIRTIO_NET_USER)
+$(call set-features, VIRTIO_NET VIRTIO_NET_TAP VIRTIO_NET_USER VIRTIO_NET_VMNET)
 $(call set-features, EXT_M EXT_A EXT_F EXT_C EXT_V RV32E)
 $(call set-features, Zicsr Zifencei Zba Zbb Zbc Zbs)
 $(call set-features, SDL SDL_MIXER GDBSTUB JIT LINK_ZLIB)
@@ -231,7 +231,10 @@ VIRTIO_NET_BUILD_ENABLED := n
 ifeq ($(CONFIG_SYSTEM),y)
 ifneq ($(CONFIG_ELF_LOADER),y)
 ifeq ($(CONFIG_VIRTIO_NET),y)
-ifneq ($(filter y,$(CONFIG_VIRTIO_NET_TAP) $(CONFIG_VIRTIO_NET_USER)),)
+ifneq ($(filter y, \
+    $(CONFIG_VIRTIO_NET_TAP) \
+    $(CONFIG_VIRTIO_NET_USER) \
+    $(CONFIG_VIRTIO_NET_VMNET)),)
 VIRTIO_NET_BUILD_ENABLED := y
 endif
 endif
@@ -245,11 +248,25 @@ VIRTIO_NET_USER_BUILD_ENABLED := y
 endif
 endif
 
+VIRTIO_NET_VMNET_BUILD_ENABLED := n
+ifeq ($(VIRTIO_NET_BUILD_ENABLED),y)
+ifeq ($(CONFIG_VIRTIO_NET_VMNET),y)
+VIRTIO_NET_VMNET_BUILD_ENABLED := y
+endif
+endif
+
 # External Dependencies & System Emulation
 include mk/external.mk
 include mk/artifact.mk
 include mk/system.mk
 include mk/wasm.mk
+
+ifeq ($(VIRTIO_NET_VMNET_BUILD_ENABLED),y)
+ifeq ($(UNAME_S),Darwin)
+$(OUT)/devices/netdev-vmnet.o: CFLAGS += -fblocks
+LDFLAGS += -framework vmnet
+endif
+endif
 
 ifeq ($(VIRTIO_NET_USER_BUILD_ENABLED),y)
 ifneq ($(CC_IS_EMCC),1)
@@ -296,6 +313,7 @@ EFFECTIVE_CONFIG_STAMP := $(OUT)/.effective-config
 EFFECTIVE_CONFIG_VARS := \
 	CONFIG_BUILD_WASM CONFIG_SYSTEM CONFIG_GOLDFISH_RTC CONFIG_ELF_LOADER \
 	CONFIG_VIRTIO_NET CONFIG_VIRTIO_NET_TAP CONFIG_VIRTIO_NET_USER \
+	CONFIG_VIRTIO_NET_VMNET \
 	CONFIG_EXT_M CONFIG_EXT_A CONFIG_EXT_F CONFIG_EXT_C CONFIG_EXT_V CONFIG_RV32E \
 	CONFIG_Zicsr CONFIG_Zifencei CONFIG_Zba CONFIG_Zbb CONFIG_Zbc CONFIG_Zbs \
 	CONFIG_MOP_FUSION CONFIG_BLOCK_CHAINING CONFIG_LOG_COLOR CONFIG_ARCH_TEST \
@@ -380,7 +398,8 @@ check-vnet-config:
 	    [ "$(CONFIG_ELF_LOADER)" != "y" ] && \
 	    [ "$(CONFIG_VIRTIO_NET)" = "y" ] && \
 	    [ "$(CONFIG_VIRTIO_NET_TAP)" != "y" ] && \
-	    [ "$(CONFIG_VIRTIO_NET_USER)" != "y" ]; then \
+	    [ "$(CONFIG_VIRTIO_NET_USER)" != "y" ] && \
+	    [ "$(CONFIG_VIRTIO_NET_VMNET)" != "y" ]; then \
 		echo "Error: VirtIO network device requires at least one backend." >&2; \
 		exit 1; \
 	fi

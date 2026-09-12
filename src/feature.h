@@ -178,6 +178,20 @@
 #define RV32_FEATURE_VIRTIO_NET_USER 0
 #endif
 
+/* macOS vmnet.framework backend for VirtIO networking */
+#ifndef RV32_FEATURE_VIRTIO_NET_VMNET
+#define RV32_FEATURE_VIRTIO_NET_VMNET 0
+#endif
+
+/*
+ * vmnet.framework is supported only on macOS with Clang because its
+ * asynchronous callback API uses Apple Blocks.
+ */
+#if !defined(__APPLE__) || !defined(__clang__)
+#undef RV32_FEATURE_VIRTIO_NET_VMNET
+#define RV32_FEATURE_VIRTIO_NET_VMNET 0
+#endif
+
 /* VirtIO networking is only valid for kernel system emulation. */
 #if !RV32_FEATURE_SYSTEM_MMIO
 #undef RV32_FEATURE_VIRTIO_NET
@@ -185,8 +199,9 @@
 #endif
 
 /* A VirtIO network device requires at least one compiled backend. */
-#if RV32_FEATURE_VIRTIO_NET && \
-    !(RV32_FEATURE_VIRTIO_NET_TAP || RV32_FEATURE_VIRTIO_NET_USER)
+#if RV32_FEATURE_VIRTIO_NET &&                                       \
+    !(RV32_FEATURE_VIRTIO_NET_TAP || RV32_FEATURE_VIRTIO_NET_USER || \
+      RV32_FEATURE_VIRTIO_NET_VMNET)
 #undef RV32_FEATURE_VIRTIO_NET
 #define RV32_FEATURE_VIRTIO_NET 0
 #endif
@@ -197,6 +212,10 @@
 #define RV32_FEATURE_VIRTIO_NET_TAP 0
 #undef RV32_FEATURE_VIRTIO_NET_USER
 #define RV32_FEATURE_VIRTIO_NET_USER 0
+
+#undef RV32_FEATURE_VIRTIO_NET_VMNET
+#define RV32_FEATURE_VIRTIO_NET_VMNET 0
+
 #endif
 
 /* Standard Extension for Vector Instructions */

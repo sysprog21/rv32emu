@@ -972,7 +972,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
  * Matches RVOP macro signal handling and block map clearing logic.
  * Note: RVOP returns without saving cycle/PC on signal handling, so we do too.
  *
- * PRESERVE_NONE matches the callers (do_fuse[1..12]) and the indirect
+ * PRESERVE_NONE matches the callers (do_fuse[1..13]) and the indirect
  * call target ir->impl, so musttail's calling-convention check passes
  * under clang-20+.
  */
@@ -1340,6 +1340,34 @@ static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
+}
+
+/* fused SW + ADDI (post-increment store)
+ *
+ * The store must observe both source registers before the base register is
+ * incremented. This is especially important for "sw rs1, off(rs1)". This fusion
+ * is enabled only for the direct-RAM execution path: SYSTEM mode retains its
+ * per-instruction MMU and MMIO fault boundaries.
+ */
+static PRESERVE_NONE bool do_fuse13(riscv_t *rv,
+                                    const rv_insn_t *ir,
+                                    uint64_t cycle,
+                                    uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+    cycle++;
+    const uint32_t addr = rv->X[ir->rs1] + ir->imm;
+    const uint32_t value = rv->X[ir->rs2];
+    RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
+    MEM_WRITE_W(rv, addr, value);
+#if RV32_HAS(ARCH_TEST)
+    check_tohost_write(rv, addr, value);
+#endif
+    /* The ADDI retires only after a successfully completed store. */
+    cycle++;
+    rv->X[ir->rs1] += ir->imm2;
+    PC += 8;
+    return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
 /* clang-format off */
@@ -1823,6 +1851,21 @@ static void match_pattern(riscv_t *rv, block_t *block)
              * runtime.
              */
         case rv_insn_sw:
+            /* SW + ADDI post-increment fusion (fuse13). Keep SYSTEM mode
+             * unfused because either operation may cross an MMIO or fault
+             * boundary that must remain independently observable.
+             */
+            next_ir = ir->next;
+#if !RV32_HAS(SYSTEM)
+            if (next_ir && IF_insn(next_ir, addi) && ir->rs1 == next_ir->rs1 &&
+                next_ir->rs1 == next_ir->rd) {
+                ir->imm2 = next_ir->imm;
+                ir->opcode = rv_insn_fuse13;
+                ir->impl = dispatch_table[ir->opcode];
+                remove_next_nth_ir(rv, ir, block, 1);
+                break;
+            }
+#endif
             /* Multiple SW fusion (fuse3) */
             count = count_consecutive_insn(ir, rv_insn_sw);
 #if RV32_HAS(SYSTEM_MMIO)

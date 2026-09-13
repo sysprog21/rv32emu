@@ -2858,6 +2858,11 @@ static inline void liveness_calc(block_t *block)
             /* ADDI + BNE: rs1 is source */
             liveness[ir->rs1] = idx;
             break;
+        case rv_insn_fuse13:
+            /* SW + ADDI: store value and base are both live. */
+            liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
+            break;
         default:
             __UNREACHABLE;
         }
@@ -3535,6 +3540,32 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
     set_dirty(vm_reg[0], true); /* Mark rs1 dirty so it's saved to memory */
+#endif
+}
+
+/* fused SW + ADDI (post-increment store). match_pattern() creates this
+ * operation only in non-SYSTEM builds, where direct RAM stores cannot trap.
+ */
+static void do_fuse13(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
+{
+#if !RV32_HAS(SYSTEM)
+    memory_t *m = PRIV(rv)->mem;
+    vm_reg[0] = ra_load(state, ir->rs1);
+    /* Integer arithmetic: a negative offset must not form a pointer before
+     * the allocation. */
+    emit_load_imm_sext(state, temp_reg, (intptr_t) m->mem_base + ir->imm);
+    emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);
+    vm_reg[1] = ra_load(state, ir->rs2);
+    emit_store(state, S32, vm_reg[1], temp_reg, 0);
+    /* Loading rs2 may have evicted rs1, so reload it before the increment. */
+    vm_reg[0] = ra_load(state, ir->rs1);
+    emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
+    set_dirty(vm_reg[0], true);
+#else
+    (void) state;
+    (void) rv;
+    (void) ir;
+    __UNREACHABLE;
 #endif
 }
 

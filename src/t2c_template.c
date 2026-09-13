@@ -1914,6 +1914,36 @@ T2C_OP(fuse11, {
         });
 })
 
+/* fused SW + ADDI (post-increment store). This operation is deliberately formed
+ * only without SYSTEM support, so the direct-RAM sequence preserves the
+ * original instruction ordering without eliding an MMIO/fault boundary.
+ */
+T2C_OP(fuse13, {
+    /* T2C_OP accounts for the fused IR node once. Account for the ADDI
+     * represented by this node as well, so RDCYCLE agrees with interpreter and
+     * tier-1 JIT execution.
+     */
+    LLVMValueRef cnt =
+        LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");
+    cnt = LLVMBuildAdd(*builder, cnt, LLVMConstInt(LLVMInt64Type(), 1, false),
+                       "");
+    LLVMBuildStore(*builder, cnt, insn_counter);
+    IIF(RV32_HAS(SYSTEM))(
+        { __UNREACHABLE; },
+        {
+            LLVMValueRef addr_rs1 = t2c_gen_rs1_addr(start, builder, ir);
+            T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, addr_rs1);
+            T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,
+                                    t2c_gen_rs2_addr(start, builder, ir));
+            LLVMValueRef mem_loc =
+                t2c_gen_mem_loc(start, builder, ir, mem_base);
+            LLVMBuildStore(*builder, val_rs2, mem_loc);
+            LLVMValueRef inc_val =
+                T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm2);
+            LLVMBuildStore(*builder, inc_val, addr_rs1);
+        });
+})
+
 /* fused ADDI + BNE (loop counter decrement-branch)
  * rd = rs1 + imm
  * if rd != 0, branch to PC + 4 + imm2

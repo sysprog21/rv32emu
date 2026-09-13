@@ -95,6 +95,13 @@ static void syscall_write(riscv_t *rv)
     riscv_word_t buffer = rv_get_reg(rv, rv_reg_a1);
     riscv_word_t count = rv_get_reg(rv, rv_reg_a2);
 
+    /* Validate the whole guest buffer before emitting anything. Checking each
+     * chunk instead would let a bad pointer produce a partial write, and buffer
+     * + count wraps in 32 bits, so the macro widens it.
+     */
+    if (count && !GUEST_RAM_CONTAINS(attr->mem, buffer, count))
+        goto error_handler;
+
     /* lookup the file descriptor */
     map_iter_t it;
     map_find(attr->fd_map, &it, &fd);

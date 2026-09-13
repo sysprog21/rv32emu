@@ -49,8 +49,15 @@ uint16_t memory_read_s(uint32_t addr);
 /* read a byte from memory */
 uint8_t memory_read_b(uint32_t addr);
 
-/* read a length of data from memory */
-void memory_read(const memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size);
+/* Read a length of data from memory.
+ *
+ * Returns false when [addr, addr + size) is not entirely inside the guest
+ * address space. The destination is zero filled in that case, so a caller that
+ * ignores the result still never observes host memory it did not ask for. This
+ * mirrors the bounds checking in memory_write() and memory_fill(); the read
+ * path must not be the one place a guest supplied address escapes the arena.
+ */
+bool memory_read(const memory_t *m, uint8_t *dst, uint32_t addr, uint32_t size);
 
 /* write a length of data to memory */
 static inline bool memory_write(memory_t *m,

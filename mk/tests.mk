@@ -73,6 +73,7 @@ EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 EXPECTED_fused-misalign = fused misalign passed
 EXPECTED_syscall-zero-write = zero-length write passed
+EXPECTED_trace_match = trace matcher corpus passed
 
 check-hello: $(BIN)
 	$(call check-test, , $(OUT)/hello.elf, hello.elf, uniq,$(EXPECTED_hello))
@@ -114,7 +115,13 @@ check-$(1): $(BIN) tests/$(1).c
 endef
 $(foreach t,$(GUEST_CHECKS),$(eval $(call guest-check-target,$(t))))
 
+check-trace-match: $(BIN) tests/trace-match.c src/trace_match.c src/trace_match.h | $(OUT)
+	$(Q)$(CC) $(CFLAGS) -o $(OUT)/trace-match tests/trace-match.c \
+	    src/trace_match.c $(LDFLAGS)
+	$(Q)output="$$($(OUT)/trace-match)"; test "$$output" = "$(EXPECTED_trace_match)"
+
 CHECK_TARGETS := check-hello $(GUEST_CHECK_TARGETS) \
+	check-trace-match \
 	$(addprefix check-,$(CHECK_ELF_FILES))
 ifeq ($(CONFIG_EXT_V),y)
 EXPECTED_rvv_smoke = RVV smoke OK

@@ -510,6 +510,22 @@ static char *realloc_property(char *fdt,
     return fdt;
 }
 
+/* Set a device tree property, or stop booting.
+ *
+ * These calls were previously the argument of assert(), which drops the write
+ * itself under NDEBUG. Capturing the result into a variable instead would leave
+ * that variable unused in the same builds, so the check has to be real. A
+ * failure here means the DTB buffer cannot hold the configured device set, and
+ * a partial tree would hide devices whose MMIO ranges the host still serves.
+ */
+#define DTB_SET_OR_FAIL(expr, what)                     \
+    do {                                                \
+        if ((expr) != 0) {                              \
+            rv_log_fatal("DTB: cannot set %s", (what)); \
+            exit(EXIT_FAILURE);                         \
+        }                                               \
+    } while (0)
+
 void load_dtb(char **ram_loc, vm_attr_t *attr)
 {
 #include "minimal_dtb.h"
@@ -631,17 +647,21 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
             assert(subnode >= 0);
 
             /* compatible = "virtio,mmio" */
-            assert(fdt_setprop_string(dtb_buf, subnode, "compatible",
-                                      "virtio,mmio") == 0);
+            DTB_SET_OR_FAIL(fdt_setprop_string(dtb_buf, subnode, "compatible",
+                                               "virtio,mmio"),
+                            "virtio-blk compatible");
 
             /* reg = <new_addr size> */
             uint32_t reg[2] = {cpu_to_fdt32(new_addr), cpu_to_fdt32(size)};
-            assert(fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)) == 0);
+            DTB_SET_OR_FAIL(
+                fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)),
+                "virtio-blk reg");
 
             /* interrupts = <new_irq> */
             uint32_t irq = cpu_to_fdt32(new_irq);
-            assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
-                               sizeof(irq)) == 0);
+            DTB_SET_OR_FAIL(
+                fdt_setprop(dtb_buf, subnode, "interrupts", &irq, sizeof(irq)),
+                "virtio-blk interrupts");
         }
 
         if (vrng_enabled) {
@@ -659,15 +679,19 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
                 rv_log_warn("add virtio-rng subnode no space!\n");
             assert(subnode >= 0);
 
-            assert(fdt_setprop_string(dtb_buf, subnode, "compatible",
-                                      "virtio,mmio") == 0);
+            DTB_SET_OR_FAIL(fdt_setprop_string(dtb_buf, subnode, "compatible",
+                                               "virtio,mmio"),
+                            "virtio-rng compatible");
 
             uint32_t reg[2] = {cpu_to_fdt32(new_addr), cpu_to_fdt32(size)};
-            assert(fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)) == 0);
+            DTB_SET_OR_FAIL(
+                fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)),
+                "virtio-rng reg");
 
             uint32_t irq = cpu_to_fdt32(new_irq);
-            assert(fdt_setprop(dtb_buf, subnode, "interrupts", &irq,
-                               sizeof(irq)) == 0);
+            DTB_SET_OR_FAIL(
+                fdt_setprop(dtb_buf, subnode, "interrupts", &irq, sizeof(irq)),
+                "virtio-rng interrupts");
         }
     }
 
@@ -679,6 +703,8 @@ dtb_end:
     *ram_loc += totalsize;
     return;
 }
+
+#undef DTB_SET_OR_FAIL
 
 /*
  * The control mode flag for keyboard.
@@ -822,9 +848,15 @@ static void rv_run_and_trace(riscv_t *rv)
     assert(attr && attr->data.user.elf_program);
     attr->cycle_per_step = 1;
 
-    const char UNUSED *prog_name = attr->data.user.elf_program;
+    const char *prog_name = attr->data.user.elf_program;
     elf_t *elf = elf_new();
-    assert(elf && elf_open(elf, prog_name));
+    assert(elf);
+    if (!elf_open(elf, prog_name)) {
+        rv_log_fatal("elf_open() failed: %s", prog_name);
+        elf_delete(elf);
+        attr->exit_code = EXIT_FAILURE;
+        return;
+    }
 
     for (; !rv_has_halted(rv);) { /* run until the flag is done */
         /* trace execution */
@@ -1428,18 +1460,29 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     /* set not exiting */
     attr->on_exit = false;
 
-    const struct Elf32_Sym *exit;
-    if ((exit = elf_get_symbol(elf, "exit")))
-        attr->exit_addr = exit->st_value;
+    const struct Elf32_Sym *exit_sym;
+    if ((exit_sym = elf_get_symbol(elf, "exit")))
+        attr->exit_addr = exit_sym->st_value;
 #endif
 
-    assert(elf_load(elf, attr->mem));
-
-    /* set the entry pc */
-    const struct Elf32_Ehdr UNUSED *hdr = get_elf_header(elf);
-    assert(rv_set_pc(rv, hdr->e_entry));
+    /* Load the program and set the entry pc. Neither is an assert: this is
+     * untrusted file content, and an assert would also drop the load itself
+     * under NDEBUG.
+     */
+    const struct Elf32_Ehdr *hdr = get_elf_header(elf);
+    bool loaded = elf_load(elf, attr->mem);
+    if (!loaded)
+        rv_log_fatal("elf_load() failed");
+    else if (!(loaded = rv_set_pc(rv, hdr->e_entry)))
+        rv_log_fatal("Invalid entry point 0x%08x", hdr->e_entry);
 
     elf_delete(elf);
+    if (!loaded) {
+        map_delete(attr->fd_map);
+        memory_delete(attr->mem);
+        free(rv);
+        exit(EXIT_FAILURE);
+    }
 
 /* combine with USE_ELF for system test suite */
 #if RV32_HAS(SYSTEM)

@@ -73,6 +73,15 @@ void block_map_clear(riscv_t *rv)
             continue;
 
         uint32_t idx;
+#if RV32_HAS_PACKED_TAIL
+        for (idx = 0; idx < block->n_insn; idx++) {
+            rv_insn_t *ir = &block->ir_head[idx];
+            if (ir->fuse)
+                mpool_free(rv->fuse_mp, ir->fuse);
+            free(ir->branch_table);
+        }
+        free(block->ir_head);
+#else
         rv_insn_t *ir, *next;
         for (idx = 0, ir = block->ir_head; idx < block->n_insn;
              idx++, ir = next) {
@@ -82,6 +91,7 @@ void block_map_clear(riscv_t *rv)
             next = ir->next;
             mpool_free(rv->block_ir_mp, ir);
         }
+#endif
         mpool_free(rv->block_mp, block);
         map->map[i] = NULL;
     }
@@ -1842,6 +1852,14 @@ void rv_profile(riscv_t *rv, char *out_file_path)
             fprintf(f, "%#-8x|", taken->pc);
         else
             fprintf(f, "%-8s|", "NULL");
+#if RV32_HAS_PACKED_TAIL
+        for (uint32_t idx = 0; idx < block->n_insn; idx++) {
+            rv_insn_t *ir = &block->ir_head[idx];
+            fprintf(f, "%s", insn_name_table[ir->opcode]);
+            if (idx + 1 != block->n_insn)
+                fprintf(f, " - ");
+        }
+#else
         rv_insn_t *ir = block->ir_head;
         while (1) {
             assert(ir);
@@ -1851,6 +1869,7 @@ void rv_profile(riscv_t *rv, char *out_file_path)
             ir = ir->next;
             fprintf(f, " - ");
         }
+#endif
         fprintf(f, "\n");
     }
 #endif

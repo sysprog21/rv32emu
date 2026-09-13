@@ -1057,13 +1057,22 @@ typedef struct rv_insn {
      * function stack frame.
      *
      * The @next member indicates the next IR or is NULL if it is the final
-     * instruction in a basic block. The @impl member facilitates the direct
+     * instruction in a basic block.  Native interpreter-only builds compact
+     * finalized blocks and reuse this slot for the successor implementation;
+     * those records are contiguous, so their successor IR is @ir + 1.  The
+     * @impl member facilitates the direct
      * invocation of the next instruction emulation without the need to compute
      * the jump address. By utilizing these two members, all instruction
      * emulations can be rewritten into a self-recursive version, enabling the
      * compiler to leverage TCO.
      */
-    struct rv_insn *next;
+    union {
+        struct rv_insn *next;
+        PRESERVE_NONE bool (*next_impl)(riscv_t *,
+                                        const struct rv_insn *,
+                                        uint64_t,
+                                        uint32_t);
+    };
     PRESERVE_NONE bool (*impl)(riscv_t *,
                                const struct rv_insn *,
                                uint64_t,

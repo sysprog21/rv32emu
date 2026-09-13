@@ -324,8 +324,7 @@ struct riscv_internal {
     uint32_t csr_fcsr;
 #endif
 
-#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
-    !defined(__EMSCRIPTEN__)
+#if RV32_HAS_PACKED_TAIL
     /* Exclusive rv_step() cycle limit while native branch chaining is live. */
     uint64_t branch_chain_cycle_target;
 #endif

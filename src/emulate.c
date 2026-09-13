@@ -764,11 +764,19 @@ enum {
 #undef _
 };
 
+#if RV32_HAS_PACKED_TAIL
+#define RVOP_NO_NEXT(ir) (!(ir)->next_impl)
+#define RVOP_NEXT_IR(ir) ((ir) + 1)
+#define RVOP_NEXT_IMPL(ir) ((ir)->next_impl)
+#else
+#define RVOP_NEXT_IR(ir) ((ir)->next)
+#define RVOP_NEXT_IMPL(ir) ((ir)->next->impl)
 #if RV32_HAS(GDBSTUB)
 #define RVOP_NO_NEXT(ir) \
     (!ir->next | rv->debug_mode IIF(RV32_HAS(SYSTEM))(| rv->is_trapped, ))
 #else
 #define RVOP_NO_NEXT(ir) (!ir->next IIF(RV32_HAS(SYSTEM))(| rv->is_trapped, ))
+#endif
 #endif
 
 /* record whether the branch is taken or not during emulation */
@@ -866,7 +874,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #define WASM_DEBUG_YIELD_SOFT(rv, depth) ((void) 0)
 #endif
 
-/* Fast path: Intra-block sequential instructions (ir->next)
+/* Fast path: Intra-block sequential instructions.
  * Only check hard limit. Let depth go negative to track total stack usage.
  * This allows kernel atomic operations to complete within blocks. */
 #define RVOP_TAIL_INTRA(rv, target, cycle, PC)                  \
@@ -913,6 +921,14 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
 #endif
 
+#if RV32_HAS_PACKED_TAIL
+#define RVOP_TAIL_INTRA_IMPL(rv, impl, target, cycle, PC) \
+    MUST_TAIL return (impl) (rv, target, cycle, PC)
+#else
+#define RVOP_TAIL_INTRA_IMPL(rv, impl, target, cycle, PC) \
+    RVOP_TAIL_INTRA(rv, target, cycle, PC)
+#endif
+
 /* A conditional branch normally returns to rv_step() so that the JIT can
  * account for block hotness and SYSTEM builds can process trap state. The
  * native interpreter-only path has neither requirement, so once an edge has
@@ -922,8 +938,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
  * return to rv_step(), which is where halt and interrupt state are observed.
  * WASM keeps its yield-aware dispatch path instead.
  */
-#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
-    !defined(__EMSCRIPTEN__)
+#if RV32_HAS_PACKED_TAIL
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
     do {                                                            \
         if (likely((cycle) < (rv)->branch_chain_cycle_target)) {    \
@@ -937,56 +952,57 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     } while (0)
 #endif
 
-#define RVOP(inst, code)                                                   \
-    static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir,  \
-                                        uint64_t cycle, uint32_t PC)       \
-    {                                                                      \
-        RVOP_SYNC_PC(rv, PC);                                              \
-        cycle++;                                                           \
-        code;                                                              \
-        IIF(RV32_HAS(SYSTEM))(                                             \
-            if (need_handle_signal) {                                      \
-                need_handle_signal = false;                                \
-                return true;                                               \
-            }, ) nextop : PC += __rv_insn_##inst##_len;                    \
-        IIF(RV32_HAS(SYSTEM))(IIF(RV32_HAS(JIT))(                          \
-                                  , if (unlikely(need_clear_block_map)) {  \
-                                      block_map_clear(rv);                 \
-                                      need_clear_block_map = false;        \
-                                      rv->csr_cycle = cycle;               \
-                                      rv->PC = PC;                         \
-                                      return false;                        \
-                                  }), );                                   \
-        if (unlikely(RVOP_NO_NEXT(ir)))                                    \
-            goto end_op;                                                   \
-        const rv_insn_t *next = ir->next;                                  \
-        RVOP_TAIL_INTRA(rv, next, cycle, PC); /* Fast path: intra-block */ \
-    end_op:                                                                \
-        IIF(RV32_HAS(BLOCK_CHAINING))(                                     \
-            {                                                              \
-                /* Page-terminated block fallthrough: if branch_taken is   \
-                 * set AND this is NOT a branch instruction, tail-call     \
-                 * to next block. Branch instructions use branch_taken     \
-                 * for the taken path, not fallthrough.                    \
-                 */                                                        \
-                if (!insn_is_branch(ir->opcode)) {                         \
-                    struct rv_insn *taken = ir->branch_taken;              \
-                    if (taken) {                                           \
-                        IIF(RV32_HAS(SYSTEM))(                             \
-                            if (!rv->is_trapped) {                         \
-                                last_pc = PC;                              \
-                                RVOP_TAIL(rv, taken, cycle, PC);           \
-                            },                                             \
-                            {                                              \
-                                last_pc = PC;                              \
-                                RVOP_TAIL(rv, taken, cycle, PC);           \
-                            });                                            \
-                    }                                                      \
-                }                                                          \
-            }, );                                                          \
-        rv->csr_cycle = cycle;                                             \
-        rv->PC = PC;                                                       \
-        return true;                                                       \
+#define RVOP(inst, code)                                                  \
+    static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir, \
+                                        uint64_t cycle, uint32_t PC)      \
+    {                                                                     \
+        RVOP_SYNC_PC(rv, PC);                                             \
+        cycle++;                                                          \
+        code;                                                             \
+        IIF(RV32_HAS(SYSTEM))(                                            \
+            if (need_handle_signal) {                                     \
+                need_handle_signal = false;                               \
+                return true;                                              \
+            }, ) nextop : PC += __rv_insn_##inst##_len;                   \
+        IIF(RV32_HAS(SYSTEM))(IIF(RV32_HAS(JIT))(                         \
+                                  , if (unlikely(need_clear_block_map)) { \
+                                      block_map_clear(rv);                \
+                                      need_clear_block_map = false;       \
+                                      rv->csr_cycle = cycle;              \
+                                      rv->PC = PC;                        \
+                                      return false;                       \
+                                  }), );                                  \
+        if (unlikely(RVOP_NO_NEXT(ir)))                                   \
+            goto end_op;                                                  \
+        const rv_insn_t *next = RVOP_NEXT_IR(ir);                         \
+        RVOP_TAIL_INTRA_IMPL(rv, RVOP_NEXT_IMPL(ir), next, cycle, PC);    \
+        /* Fast path: intra-block */                                      \
+    end_op:                                                               \
+        IIF(RV32_HAS(BLOCK_CHAINING))(                                    \
+            {                                                             \
+                /* Page-terminated block fallthrough: if branch_taken is  \
+                 * set AND this is NOT a branch instruction, tail-call    \
+                 * to next block. Branch instructions use branch_taken    \
+                 * for the taken path, not fallthrough.                   \
+                 */                                                       \
+                if (!insn_is_branch(ir->opcode)) {                        \
+                    struct rv_insn *taken = ir->branch_taken;             \
+                    if (taken) {                                          \
+                        IIF(RV32_HAS(SYSTEM))(                            \
+                            if (!rv->is_trapped) {                        \
+                                last_pc = PC;                             \
+                                RVOP_TAIL(rv, taken, cycle, PC);          \
+                            },                                            \
+                            {                                             \
+                                last_pc = PC;                             \
+                                RVOP_TAIL(rv, taken, cycle, PC);          \
+                            });                                           \
+                    }                                                     \
+                }                                                         \
+            }, );                                                         \
+        rv->csr_cycle = cycle;                                            \
+        rv->PC = PC;                                                      \
+        return true;                                                      \
     }
 
 #include "rv32_template.c"
@@ -1030,7 +1046,7 @@ static PRESERVE_NONE bool fuse_next_or_stop(riscv_t *rv,
         rv->PC = PC;
         return true;
     }
-    const rv_insn_t *next = ir->next;
+    const rv_insn_t *next = RVOP_NEXT_IR(ir);
 #ifdef WASM_DEBUG_BLOCKS
     /* Validate: fused sequences shouldn't have branch targets.
      * fuse6 (ECALL) and fuse12 (ADDI+BNE) bypass this path entirely. */
@@ -1040,7 +1056,7 @@ static PRESERVE_NONE bool fuse_next_or_stop(riscv_t *rv,
     /* Fused operations are atomic sequences detected during block analysis.
      * Use INTRA path (hard limit 15K) instead of INTER (soft limit 5K)
      * to avoid unnecessary yields within fused sequences. */
-    RVOP_TAIL_INTRA(rv, next, cycle, PC);
+    RVOP_TAIL_INTRA_IMPL(rv, RVOP_NEXT_IMPL(ir), next, cycle, PC);
 }
 
 /* multiple LUI */
@@ -2160,6 +2176,50 @@ static void optimize_constant(riscv_t *rv UNUSED, block_t *block)
         ((constopt_func_t) constopt_table[ir->opcode])(ir, &info);
 }
 
+#if RV32_HAS_PACKED_TAIL
+/* Translation and fusion use the linked pool representation.  Once both have
+ * completed, lay the records out consecutively and replace each link with the
+ * already-resolved successor handler. */
+static bool pack_block_ir(riscv_t *rv, block_t *block)
+{
+    assert(block->n_insn);
+    rv_insn_t *packed = malloc(block->n_insn * sizeof(*packed));
+    if (!packed)
+        return false;
+
+    rv_insn_t *ir = block->ir_head;
+    for (uint32_t i = 0; i < block->n_insn; i++) {
+        assert(ir);
+        rv_insn_t *next = ir->next;
+        packed[i] = *ir;
+        mpool_free(rv->block_ir_mp, ir);
+        ir = next;
+    }
+    assert(!ir);
+
+    for (uint32_t i = 0; i + 1 < block->n_insn; i++)
+        packed[i].next_impl = packed[i + 1].impl;
+    packed[block->n_insn - 1].next_impl = NULL;
+    block->ir_head = packed;
+    block->ir_tail = &packed[block->n_insn - 1];
+    return true;
+}
+
+static void free_linked_block(riscv_t *rv, block_t *block)
+{
+    rv_insn_t *ir = block->ir_head;
+    while (ir) {
+        rv_insn_t *next = ir->next;
+        if (ir->fuse)
+            mpool_free(rv->fuse_mp, ir->fuse);
+        free(ir->branch_table);
+        mpool_free(rv->block_ir_mp, ir);
+        ir = next;
+    }
+    mpool_free(rv->block_mp, block);
+}
+#endif
+
 static block_t *block_find_or_translate(riscv_t *rv)
 {
 #if !RV32_HAS(JIT)
@@ -2214,6 +2274,13 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #if RV32_HAS(MOP_FUSION)
     /* macro operation fusion */
     match_pattern(rv, next_blk);
+#endif
+
+#if RV32_HAS_PACKED_TAIL
+    if (unlikely(!pack_block_ir(rv, next_blk))) {
+        free_linked_block(rv, next_blk);
+        return NULL;
+    }
 #endif
 
 #if !RV32_HAS(JIT)
@@ -2440,8 +2507,7 @@ void rv_step(void *arg)
 
     /* find or translate a block for starting PC */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
-#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
-    !defined(__EMSCRIPTEN__)
+#if RV32_HAS_PACKED_TAIL
     rv->branch_chain_cycle_target = cycles_target;
 #endif
 
@@ -2510,8 +2576,7 @@ void rv_step(void *arg)
             rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
                          rv->PC);
             rv->halt = true;
-#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
-    !defined(__EMSCRIPTEN__)
+#if RV32_HAS_PACKED_TAIL
             rv->branch_chain_cycle_target = 0;
 #endif
             return;
@@ -2687,8 +2752,7 @@ void rv_step(void *arg)
         prev = block;
     }
 
-#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
-    !defined(__EMSCRIPTEN__)
+#if RV32_HAS_PACKED_TAIL
     rv->branch_chain_cycle_target = 0;
 
     /* Incremental memory maintenance: reclaim unused pages periodically.

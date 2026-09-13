@@ -311,8 +311,7 @@ static bool dump_test_signature(const char UNUSED *prog_name)
 
 /* CYCLE_PER_STEP shall be defined on different runtime */
 #ifndef CYCLE_PER_STEP
-#if !RV32_HAS(SYSTEM) && !RV32_HAS(JIT) && !RV32_HAS(GDBSTUB) && \
-    !defined(__EMSCRIPTEN__)
+#if RV32_HAS_PACKED_TAIL
 /* Native user-mode has no interrupt, JIT-hotness, or browser-yield boundary.
  * A larger slice amortizes rv_step() and lets learned branch edges remain in
  * the tail-call chain longer without changing retired guest cycles. */

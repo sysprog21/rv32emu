@@ -457,14 +457,6 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
     /* decode I-type */
     decode_itype(ir, insn);
 
-    /* nop can be implemented as "addi x0, x0, 0".
-     * Any integer computational instruction writing into "x0" is NOP.
-     */
-    if (unlikely(ir->rd == rv_reg_zero)) {
-        ir->opcode = rv_insn_nop;
-        return true;
-    }
-
     /* dispatch from funct3 field */
     switch (decode_funct3(insn)) {
     case 0: /* ADDI: Add Immediate */
@@ -474,42 +466,44 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
 #if RV32_HAS(Zbb)
         if (ir->imm == 0b011000000000) { /* clz */
             ir->opcode = rv_insn_clz;
-            return true;
+            break;
         }
         if (ir->imm == 0b011000000001) { /* ctz */
             ir->opcode = rv_insn_ctz;
-            return true;
+            break;
         }
         if (ir->imm == 0b011000000010) { /* cpop */
             ir->opcode = rv_insn_cpop;
-            return true;
+            break;
         }
         if (ir->imm == 0b011000000100) { /* sext.b */
             ir->opcode = rv_insn_sextb;
-            return true;
+            break;
         }
         if (ir->imm == 0b011000000101) { /* sext.h */
             ir->opcode = rv_insn_sexth;
-            return true;
+            break;
         }
 #endif
 #if RV32_HAS(Zbs)
         if (ir->imm >> 5 == 0b0100100) { /* bclri */
             ir->opcode = rv_insn_bclri;
-            return true;
+            break;
         }
         if (ir->imm >> 5 == 0b0110100) { /* binvi */
             ir->opcode = rv_insn_binvi;
-            return true;
+            break;
         }
         if (ir->imm >> 5 == 0b0010100) { /* bseti */
             ir->opcode = rv_insn_bseti;
-            return true;
+            break;
         }
 #endif
-        ir->opcode = rv_insn_slli;
-        if (unlikely(ir->imm & (1 << 5)))
+        /* The base RV32 encoding reserves every upper immediate except 0.
+         * Extension encodings above have already been recognized. */
+        if (unlikely(ir->imm & ~0x1f))
             return false;
+        ir->opcode = rv_insn_slli;
         break;
     case 2: /* SLTI: Set on Less Than Immediate */
         ir->opcode = rv_insn_slti;
@@ -524,31 +518,30 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
 #if RV32_HAS(Zbb)
         if (ir->imm >> 5 == 0b0110000) { /* rori */
             ir->opcode = rv_insn_rori;
-            return true;
+            break;
         }
         if (ir->imm == 0b001010000111) { /* orc.b */
             ir->opcode = rv_insn_orcb;
-            return true;
+            break;
         }
         if (ir->imm == 0b011010011000) { /* rev8 */
             ir->opcode = rv_insn_rev8;
-            return true;
+            break;
         }
 #endif
 #if RV32_HAS(Zbs)
         if (ir->imm >> 5 == 0b0100100) { /* bexti */
             ir->opcode = rv_insn_bexti;
-            return true;
+            break;
         }
 #endif
         /* SLL, SRL, and SRA perform logical left, logical right, and
          * arithmetic right shifts on the value in register rs1.
          */
-        ir->opcode = (ir->imm & ~0x1f)
-                         ? rv_insn_srai  /* SRAI: Shift Right Arithmetic */
-                         : rv_insn_srli; /* SRLI: Shift Right Logical */
-        if (unlikely(ir->imm & (1 << 5)))
+        /* Only funct7 0x00 (SRLI) and 0x20 (SRAI) are defined. */
+        if (unlikely(ir->imm & ~0x41f))
             return false;
+        ir->opcode = (ir->imm & 0x400) ? rv_insn_srai : rv_insn_srli;
         break;
     case 6: /* ORI: OR Immediate */
         ir->opcode = rv_insn_ori;
@@ -559,6 +552,10 @@ static inline bool op_op_imm(rv_insn_t *ir, const uint32_t insn)
     default: /* illegal instruction */
         return false;
     }
+    /* Valid integer computational writes to x0 have no observable effect.
+     * Do this only after validating the original encoding. */
+    if (unlikely(ir->rd == rv_reg_zero))
+        ir->opcode = rv_insn_nop;
     return true;
 }
 

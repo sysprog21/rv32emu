@@ -20,6 +20,9 @@ $(eval $(call test-framework,path,test-path.o,$(OUT)/utils.o,))
 # IO test: guest memory accessors reject out-of-range addresses
 $(eval $(call test-framework,io,test-io.o,$(OUT)/io.o $(OUT)/log.o,))
 
+# Decode test: OP-IMM reserved shift encodings are rejected before x0 NOPs
+$(eval $(call test-framework,decode,test-decode.o,$(OUT)/decode.o,))
+
 # ELF test: rejects malformed ELF input without reading outside the file
 $(eval $(call test-framework,elf,test-elf.o,$(OUT)/elf.o $(OUT)/io.o $(OUT)/map.o $(OUT)/utils.o $(OUT)/log.o,))
 
@@ -33,10 +36,11 @@ $(eval $(call run-test-simple,map))
 $(eval $(call run-test-simple,path))
 $(eval $(call run-test-simple,elf))
 $(eval $(call run-test-simple,io))
+$(eval $(call run-test-simple,decode))
 
 # Main Test Target
 
-tests: run-test-cache run-test-map run-test-path run-test-elf run-test-io
+tests: run-test-cache run-test-map run-test-path run-test-elf run-test-io run-test-decode
 
 # Integration Tests (run emulator with test programs)
 
@@ -136,7 +140,8 @@ EXPECTED_mmu = Store page fault test passed!
 mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
-.PHONY: tests run-test-cache run-test-map run-test-path run-test-elf run-test-io
+.PHONY: tests run-test-cache run-test-map run-test-path run-test-elf run-test-io \
+	run-test-decode
 .PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
 
 endif # _MK_TESTS_INCLUDED

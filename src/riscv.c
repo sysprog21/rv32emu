@@ -1117,21 +1117,18 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 
     /* argc */
     uintptr_t *args_p = (uintptr_t *) args_top;
-    assert(memory_write(mem, (uintptr_t) args_p, (void *) &argc, sizeof(int)));
+    if (!memory_write(mem, (uintptr_t) args_p, (void *) &argc, sizeof(int)))
+        goto args_too_large;
     args_p++;
 
-    /* args */
-    /* used for calculating the offset of args when pushing to stack */
-    size_t args_space[256];
-    size_t args_space_idx = 0;
-    size_t args_len;
+    /* args used for calculating the offset of args when pushing to stack */
     size_t args_len_total = 0;
     for (int i = 0; i < argc; i++) {
         const char *arg = args[i];
-        args_len = strlen(arg);
-        assert(memory_write(mem, (uintptr_t) args_p, (void *) arg,
-                            (args_len + 1) * sizeof(uint8_t)));
-        args_space[args_space_idx++] = args_len + 1;
+        const size_t args_len = strlen(arg);
+        if (!memory_write(mem, (uintptr_t) args_p, (void *) arg,
+                          (args_len + 1) * sizeof(uint8_t)))
+            goto args_too_large;
         args_p = (uintptr_t *) ((uintptr_t) args_p + args_len + 1);
         args_len_total += args_len + 1;
     }
@@ -1146,9 +1143,10 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 
     /* argc */
     uintptr_t *sp = (uintptr_t *) stack_top;
-    assert(memory_write(mem, (uintptr_t) sp,
-                        (void *) (mem->mem_base + (uintptr_t) args_p),
-                        sizeof(int)));
+    if (!memory_write(mem, (uintptr_t) sp,
+                      (void *) (mem->mem_base + (uintptr_t) args_p),
+                      sizeof(int)))
+        goto args_too_large;
     args_p++;
     /* keep argc and args[0] within one word due to RV32 ABI */
     sp = (uintptr_t *) ((uint32_t *) sp + 1);
@@ -1156,15 +1154,26 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     /* args */
     for (int i = 0; i < argc; i++) {
         uintptr_t offset = (uintptr_t) args_p;
-        assert(memory_write(mem, (uintptr_t) sp, (void *) &offset,
-                            sizeof(uintptr_t)));
-        args_p = (uintptr_t *) ((uintptr_t) args_p + args_space[i]);
+        if (!memory_write(mem, (uintptr_t) sp, (void *) &offset,
+                          sizeof(uintptr_t)))
+            goto args_too_large;
+        args_p = (uintptr_t *) ((uintptr_t) args_p + strlen(args[i]) + 1);
         sp = (uintptr_t *) ((uint32_t *) sp + 1);
     }
-    assert(memory_fill(mem, (uintptr_t) sp, sizeof(uint32_t), 0));
+    if (!memory_fill(mem, (uintptr_t) sp, sizeof(uint32_t), 0))
+        goto args_too_large;
 
     /* reset sp pointing to argc */
     rv->X[rv_reg_sp] = stack_top;
+    return;
+
+args_too_large:
+    /* argc and argv come from the command line, so this is reachable: refuse to
+     * start rather than run a guest whose stack was only partly built.
+     */
+    rv_log_fatal("Program arguments do not fit in the reserved region");
+    attr->exit_code = EXIT_FAILURE;
+    rv->halt = true;
 #endif /* !RV32_HAS(SYSTEM_MMIO) */
 #endif
 }

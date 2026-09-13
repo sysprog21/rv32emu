@@ -311,7 +311,15 @@ static bool dump_test_signature(const char UNUSED *prog_name)
 
 /* CYCLE_PER_STEP shall be defined on different runtime */
 #ifndef CYCLE_PER_STEP
+#if !RV32_HAS(SYSTEM) && !RV32_HAS(JIT) && !RV32_HAS(GDBSTUB) && \
+    !defined(__EMSCRIPTEN__)
+/* Native user-mode has no interrupt, JIT-hotness, or browser-yield boundary.
+ * A larger slice amortizes rv_step() and lets learned branch edges remain in
+ * the tail-call chain longer without changing retired guest cycles. */
+#define CYCLE_PER_STEP 1000
+#else
 #define CYCLE_PER_STEP 100
+#endif
 #endif
 /* MEM_SIZE is defined by Makefile:
  * - SYSTEM mode (kernel): configurable, default 512 MiB

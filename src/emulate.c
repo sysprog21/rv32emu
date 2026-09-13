@@ -913,6 +913,30 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
 #endif
 
+/* A conditional branch normally returns to rv_step() so that the JIT can
+ * account for block hotness and SYSTEM builds can process trap state. The
+ * native interpreter-only path has neither requirement, so once an edge has
+ * been learned, keep executing it in the existing tail-call chain.
+ *
+ * The cycle budget still bounds the chain: without it a hot loop would never
+ * return to rv_step(), which is where halt and interrupt state are observed.
+ * WASM keeps its yield-aware dispatch path instead.
+ */
+#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
+    !defined(__EMSCRIPTEN__)
+#define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
+    do {                                                            \
+        if (likely((cycle) < (rv)->branch_chain_cycle_target)) {    \
+            last_pc = (PC);                                         \
+            MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+        }                                                           \
+    } while (0)
+#else
+#define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
+    do {                                               \
+    } while (0)
+#endif
+
 #define RVOP(inst, code)                                                   \
     static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir,  \
                                         uint64_t cycle, uint32_t PC)       \
@@ -967,6 +991,8 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 
 #include "rv32_template.c"
 #undef RVOP
+
+#undef RVOP_NATIVE_BRANCH_TAIL
 
 /* Helper for fused instruction tail: continue to next or stop.
  * Matches RVOP macro signal handling and block map clearing logic.
@@ -2414,6 +2440,10 @@ void rv_step(void *arg)
 
     /* find or translate a block for starting PC */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
+#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
+    !defined(__EMSCRIPTEN__)
+    rv->branch_chain_cycle_target = cycles_target;
+#endif
 
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
     /* Set up the jump point for handling reboots */
@@ -2480,6 +2510,10 @@ void rv_step(void *arg)
             rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
                          rv->PC);
             rv->halt = true;
+#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
+    !defined(__EMSCRIPTEN__)
+            rv->branch_chain_cycle_target = 0;
+#endif
             return;
         }
         assert(block);
@@ -2653,12 +2687,27 @@ void rv_step(void *arg)
         prev = block;
     }
 
+#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
+    !defined(__EMSCRIPTEN__)
+    rv->branch_chain_cycle_target = 0;
+
+    /* Incremental memory maintenance: reclaim unused pages periodically.
+     * Native user mode takes longer step slices, so count retired cycles and
+     * keep the cadence of 65536 calls with the default 100-cycle slice.
+     */
+    static uint64_t gc_cycle = 0;
+    if (unlikely(rv->csr_cycle - gc_cycle >= UINT64_C(65536) * 100)) {
+        gc_cycle = rv->csr_cycle;
+        memory_gc();
+    }
+#else
     /* Incremental memory maintenance: reclaim unused pages periodically.
      * Using a 16-bit counter, this runs every 65536 rv_step() calls.
      */
     static uint16_t gc_counter = 0;
     if (unlikely(++gc_counter == 0))
         memory_gc();
+#endif
 
 #ifdef __EMSCRIPTEN__
     if (rv_has_halted(rv)) {

@@ -245,6 +245,7 @@ RVOP(jalr, {
                     MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);    \
                 }                                                              \
             }, );                                                              \
+        RVOP_NATIVE_BRANCH_TAIL(rv, untaken, cycle, PC);                       \
         goto end_op;                                                           \
     }                                                                          \
     IIF(RV32_HAS(SYSTEM))(                                                     \
@@ -277,6 +278,7 @@ RVOP(jalr, {
                     MUST_TAIL return taken->impl(rv, taken, cycle, PC);        \
                 }                                                              \
             }, );                                                              \
+        RVOP_NATIVE_BRANCH_TAIL(rv, taken, cycle, PC);                         \
     }                                                                          \
     goto end_op;
 

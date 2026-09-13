@@ -67,6 +67,7 @@ EXPECTED_hello = Hello World!
 EXPECTED_puzzle = success in 2005 trials
 EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
+EXPECTED_fused-misalign = fused misalign passed
 EXPECTED_syscall-zero-write = zero-length write passed
 
 check-hello: $(BIN)
@@ -83,7 +84,7 @@ $(foreach e,$(CHECK_ELF_FILES),$(eval $(call make-check-target,$(e))))
 # cross compiler.  Target the base integer ISA: the same programs must run on
 # emulators built with any optional extension disabled.
 GUEST_CFLAGS := -march=rv32i -mabi=ilp32
-GUEST_CHECKS := syscall-zero-write
+GUEST_CHECKS := fused-misalign syscall-zero-write
 GUEST_CHECK_TARGETS :=
 ifneq ($(CROSS_COMPILE),)
 ifneq ($(CONFIG_RV32E),y)

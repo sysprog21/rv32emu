@@ -1053,9 +1053,9 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
                                    uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
-    cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
+        cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         uint32_t value = rv->X[fuse[i].rs2];
@@ -1063,8 +1063,8 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
+        PC += 4;
     }
-    PC += ir->imm2 * 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
@@ -1075,14 +1075,14 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
                                    uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
-    cycle += ir->imm2;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
+        cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
         rv->X[fuse[i].rd] = MEM_READ_W(rv, addr);
+        PC += 4;
     }
-    PC += ir->imm2 * 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
@@ -1209,16 +1209,18 @@ static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
                                    uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
-    cycle += 2;
+    cycle++;
     /* Write LUI result to rd - required when rd != LW destination.
      * LUI completes before LW, so this write happens even if LW faults.
      */
     rv->X[ir->rd] = ir->imm;
+    PC += 4;
+    cycle++;
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
     rv->X[ir->rs2] = MEM_READ_W(rv, addr);
-    PC += 8;
+    PC += 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
@@ -1235,12 +1237,14 @@ static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
                                     uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
-    cycle += 2;
+    cycle++;
     /* Write LUI result to rd - SW doesn't write registers, so rd may be
      * used later. LUI completes before SW, so this write happens even if
      * SW faults.
      */
     rv->X[ir->rd] = ir->imm;
+    PC += 4;
+    cycle++;
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
     RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
@@ -1249,7 +1253,7 @@ static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
 #if RV32_HAS(ARCH_TEST)
     check_tohost_write(rv, addr, value);
 #endif
-    PC += 8;
+    PC += 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
@@ -1266,10 +1270,12 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
                                     uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
-    cycle += 2;
+    cycle++;
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
     rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    PC += 4;
+    cycle++;
     /* Only increment rs1 if load succeeded (no trap in SYSTEM mode).
      * In non-SYSTEM mode, RAM access never faults so this always executes.
      */
@@ -1277,7 +1283,7 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
     if (!rv->is_trapped)
 #endif
         rv->X[ir->rs1] = rv->X[ir->rs1] + ir->imm2;
-    PC += 8;
+    PC += 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 

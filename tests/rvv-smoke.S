@@ -296,6 +296,8 @@ fixed_out:
     .space 16
 wide_out:
     .space 32
+vfun_out:
+    .space 64
 red_out:
     .space 16
 wide_red_out:
@@ -1813,6 +1815,88 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    # Floating-point unary instructions (V 1.0 13.8-13.14). All addresses
+    # come from a1 so the block does not mix gp-relative and pc-relative
+    # forms.
+    li t2, 0
+    csrw frm, t2
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, vfun_out
+    li t2, 0x40800000          /*  4.0 */
+    sw t2, 0(a1)
+    li t2, 0x41200000          /* 10.0 */
+    sw t2, 4(a1)
+    li t2, 0xc0800000          /* -4.0 */
+    sw t2, 8(a1)
+    li t2, 0x7f800000          /* +inf */
+    sw t2, 12(a1)
+    vle32.v v8, (a1)
+
+    # vfsqrt.v: sqrt(4.0) = 2.0
+    vfsqrt.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0x40000000
+    bne t1, t6, fail_vfsqrt
+    lw t1, 12(a1)
+    li t6, 0x7f800000          /* sqrt(+inf) = +inf */
+    bne t1, t6, fail_vfsqrt
+
+    # vfclass.v: 4.0 -> positive normal (bit 6), -4.0 -> negative normal
+    # (bit 1), +inf -> bit 7.
+    vfclass.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x40, fail_vfclass
+    lw t1, 8(a1)
+    assert_reg_imm t1, 0x02, fail_vfclass
+    lw t1, 12(a1)
+    assert_reg_imm t1, 0x80, fail_vfclass
+
+    # vfrsqrt7.v against the two worked examples in the specification.
+    la a1, vfun_out
+    li t2, 0x00718abc
+    sw t2, 0(a1)
+    li t2, 0x7f765432
+    sw t2, 4(a1)
+    li t2, 0x40800000          /* 4.0 -> 1/2 estimate */
+    sw t2, 8(a1)
+    li t2, 0x00000000          /* +0.0 -> +inf */
+    sw t2, 12(a1)
+    vle32.v v8, (a1)
+
+    vfrsqrt7.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0x5f080000
+    bne t1, t6, fail_vfrsqrt7
+    lw t1, 4(a1)
+    li t6, 0x1f820000
+    bne t1, t6, fail_vfrsqrt7
+    # 4.0 has an even normalized exponent, unlike either worked example, so
+    # it pins the floor() in the output-exponent formula.
+    lw t1, 8(a1)
+    li t6, 0x3eff0000
+    bne t1, t6, fail_vfrsqrt7
+    lw t1, 12(a1)
+    li t6, 0x7f800000
+    bne t1, t6, fail_vfrsqrt7
+
+    # vfrec7.v against the specification's worked examples; the second one
+    # exercises the subnormal-output path.
+    vfrec7.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0x7e900000
+    bne t1, t6, fail_vfrec7
+    lw t1, 4(a1)
+    li t6, 0x00214000
+    bne t1, t6, fail_vfrec7
+    lw t1, 12(a1)
+    li t6, 0x7f800000          /* 1/+0.0 = +inf */
+    bne t1, t6, fail_vfrec7
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -1910,6 +1994,18 @@ fail_vsmul4:
     j write_and_exit_fail
 fail_vwadd:
     li a3, 0xd5
+    j write_and_exit_fail
+fail_vfsqrt:
+    li a3, 0x9d
+    j write_and_exit_fail
+fail_vfclass:
+    li a3, 0x9e
+    j write_and_exit_fail
+fail_vfrsqrt7:
+    li a3, 0x9f
+    j write_and_exit_fail
+fail_vfrec7:
+    li a3, 0xa0
     j write_and_exit_fail
 fail_vwmulu:
     li a3, 0xd6

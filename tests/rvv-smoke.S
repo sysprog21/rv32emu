@@ -98,6 +98,12 @@ mulfix_lhs:
 mulfix_rhs:
     .byte 0x40, 0x80, 0x40, 0x20
 
+cvt_f_src:
+    .word 0x3fc00000, 0x40200000, 0xbfc00000, 0x40e00000
+
+cvt_i_src:
+    .word 3, -3, 5, 0
+
 narrow16_a:
     .short 0x8000, 0x0002
 
@@ -295,6 +301,8 @@ shift_out:
 fixed_out:
     .space 16
 wide_out:
+    .space 32
+cvt_out:
     .space 32
 red_out:
     .space 16
@@ -1813,6 +1821,73 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    # Single-width FP conversions (V 1.0 13.17). frm is set to RNE so the
+    # dynamic-rounding forms can be told apart from the .rtz forms: 1.5
+    # rounds to 2 under RNE but truncates to 1 under RTZ.
+    li t2, 0
+    csrw frm, t2
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, cvt_f_src
+    vle32.v v20, (a1)
+
+    # vfcvt.x.f.v: 1.5->2, 2.5->2, -1.5->-2, 7.0->7
+    vfcvt.x.f.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 2, fail_vfcvt_x_f
+    lw t1, 4(a1)
+    assert_reg_imm t1, 2, fail_vfcvt_x_f
+    lw t1, 8(a1)
+    assert_reg_imm t1, -2, fail_vfcvt_x_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfcvt_x_f
+
+    # vfcvt.rtz.x.f.v truncates instead: 1.5->1, -1.5->-1
+    vfcvt.rtz.x.f.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 1, fail_vfcvt_rtz_x_f
+    lw t1, 8(a1)
+    assert_reg_imm t1, -1, fail_vfcvt_rtz_x_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfcvt_rtz_x_f
+
+    # vfcvt.xu.f.v: negative input saturates to 0 in the unsigned form
+    vfcvt.xu.f.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 2, fail_vfcvt_xu_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfcvt_xu_f
+
+    # Integer-to-float: -3 differs between the signed and unsigned forms
+    la a1, cvt_i_src
+    vle32.v v20, (a1)
+
+    vfcvt.f.x.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x40400000
+    bne t1, t6, fail_vfcvt_f_x
+    lw t1, 4(a1)
+    li t6, 0xc0400000
+    bne t1, t6, fail_vfcvt_f_x
+
+    vfcvt.f.xu.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x40400000
+    bne t1, t6, fail_vfcvt_f_xu
+    lw t1, 4(a1)
+    li t6, 0x4f800000
+    bne t1, t6, fail_vfcvt_f_xu
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -1910,6 +1985,21 @@ fail_vsmul4:
     j write_and_exit_fail
 fail_vwadd:
     li a3, 0xd5
+    j write_and_exit_fail
+fail_vfcvt_x_f:
+    li a3, 0xf6
+    j write_and_exit_fail
+fail_vfcvt_rtz_x_f:
+    li a3, 0xf7
+    j write_and_exit_fail
+fail_vfcvt_xu_f:
+    li a3, 0xf8
+    j write_and_exit_fail
+fail_vfcvt_f_x:
+    li a3, 0xf9
+    j write_and_exit_fail
+fail_vfcvt_f_xu:
+    li a3, 0xfa
     j write_and_exit_fail
 fail_vwmulu:
     li a3, 0xd6

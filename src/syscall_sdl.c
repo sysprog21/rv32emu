@@ -874,8 +874,11 @@ static void play_sfx(riscv_t *rv)
 
     GET_SFX_DATA_FROM_RANDOM_PAGE(sfx_data_vaddr, sfx_data_ptr);
 #else
-    memory_read(attr->mem, sfx->data, sfx_data_offset,
-                sizeof(uint8_t) * sfx_data_size);
+    if (!memory_read(attr->mem, sfx->data, sfx_data_offset,
+                     sizeof(uint8_t) * sfx_data_size)) {
+        free(sfx);
+        return;
+    }
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -960,7 +963,11 @@ static void play_music(riscv_t *rv)
 
     GET_MUSIC_DATA_FROM_RANDOM_PAGE(music_data_vaddr, music_data_ptr);
 #else
-    memory_read(attr->mem, music->data, music_data_offset, music_data_size);
+    if (!memory_read(attr->mem, music->data, music_data_offset,
+                     music_data_size)) {
+        free(music);
+        return;
+    }
 #endif
 
 #ifdef __EMSCRIPTEN__

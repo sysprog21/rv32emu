@@ -236,7 +236,7 @@ DTB_DEPS := $(BUILD_DTB) $(BUILD_DTB2C)
 endif
 endif
 
-OBJS := map.o utils.o decode.o io.o syscall.o
+OBJS := map.o utils.o decode.o io.o syscall.o trace_match.o
 ifeq ($(CC_IS_EMCC), 1)
 OBJS += em_runtime.o
 endif

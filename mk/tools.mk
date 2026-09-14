@@ -19,6 +19,7 @@ HIST_OBJS := \
 	mpool.o \
 	utils.o \
 	emulate.o \
+	trace_match.o \
 	syscall.o \
 	syscall_sdl.o \
 	io.o \

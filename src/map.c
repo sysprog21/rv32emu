@@ -141,10 +141,17 @@ static void rb_remove(map_t rb, map_node_t *node)
     rb_path_entry_t path[RB_MAX_DEPTH];
     rb_path_entry_t *pathp = NULL, *nodep = NULL;
 
+    /* Both traversals below store through pathp[1], so they must stop one entry
+     * short of the end. rb_insert_unique() already bounds itself this way; a
+     * red-black tree cannot reach RB_MAX_DEPTH, but the array must not depend
+     * on that to stay in range.
+     */
+    const rb_path_entry_t *path_end = &path[RB_MAX_DEPTH - 1];
+
     /* Traverse through red-black tree node and find the search target node. */
     path->node = rb->root;
     pathp = path;
-    while (pathp->node) {
+    while (pathp->node && pathp < path_end) {
         map_cmp_t cmp = pathp->cmp =
             (rb->comparator)(node->key, pathp->node->key);
         if (cmp == MAP_CMP_LESS) {
@@ -155,7 +162,7 @@ static void rb_remove(map_t rb, map_node_t *node)
                 /* find node's successor, in preparation for swap */
                 pathp->cmp = MAP_CMP_GREATER;
                 nodep = pathp;
-                for (pathp++; pathp->node; pathp++) {
+                for (pathp++; pathp->node && pathp < path_end; pathp++) {
                     pathp->cmp = MAP_CMP_LESS;
                     pathp[1].node = rb_node_get_left(pathp->node);
                 }

@@ -235,7 +235,11 @@ static bool parse_args(int argc, char **args)
 
     if (opt_prof_data) {
         char cwd_path[PATH_MAX] = {0};
-        assert(getcwd(cwd_path, PATH_MAX));
+        /* Not an assert: NDEBUG would drop the call and leave the path empty */
+        if (!getcwd(cwd_path, PATH_MAX)) {
+            rv_log_fatal("Cannot determine the current working directory");
+            return false;
+        }
 
         char rel_path[PATH_MAX] = {0};
         size_t args0_len = strlen(args[0]);
@@ -264,10 +268,15 @@ static bool parse_args(int argc, char **args)
     return true;
 }
 
-static void dump_test_signature(const char UNUSED *prog_name)
+static bool dump_test_signature(const char UNUSED *prog_name)
 {
     elf_t *elf = elf_new();
-    assert(elf && elf_open(elf, prog_name));
+    assert(elf);
+    if (!elf_open(elf, prog_name)) {
+        rv_log_fatal("elf_open() failed: %s", prog_name);
+        elf_delete(elf);
+        return false;
+    }
 
     uint32_t start = 0, end = 0;
     const struct Elf32_Sym *sym;
@@ -275,7 +284,8 @@ static void dump_test_signature(const char UNUSED *prog_name)
     if (!f) {
         rv_log_fatal("Cannot open signature output file: %s",
                      signature_out_file);
-        return;
+        elf_delete(elf);
+        return false;
     }
 
     /* use the entire .data section as a fallback */
@@ -291,13 +301,24 @@ static void dump_test_signature(const char UNUSED *prog_name)
     for (uint32_t addr = start; addr < end; addr += 4)
         fprintf(f, "%08x\n", memory_read_w(addr));
 
-    fclose(f);
+    /* A failed write or close leaves the signature incomplete. */
+    bool written = !ferror(f);
+    if (fclose(f) != 0)
+        written = false;
     elf_delete(elf);
+    return written;
 }
 
 /* CYCLE_PER_STEP shall be defined on different runtime */
 #ifndef CYCLE_PER_STEP
+#if RV32_HAS_PACKED_TAIL
+/* Native user-mode has no interrupt, JIT-hotness, or browser-yield boundary.
+ * A larger slice amortizes rv_step() and lets learned branch edges remain in
+ * the tail-call chain longer without changing retired guest cycles. */
+#define CYCLE_PER_STEP 1000
+#else
 #define CYCLE_PER_STEP 100
+#endif
 #endif
 /* MEM_SIZE is defined by Makefile:
  * - SYSTEM mode (kernel): configurable, default 512 MiB
@@ -442,8 +463,8 @@ int main(int argc, char **args)
         dump_registers(rv, registers_out_file);
 
     /* dump test result in test mode */
-    if (opt_arch_test)
-        dump_test_signature(opt_prog_name);
+    if (opt_arch_test && !dump_test_signature(opt_prog_name))
+        attr.exit_code = EXIT_FAILURE;
 
     /* finalize the RISC-V runtime */
     rv_delete(rv);

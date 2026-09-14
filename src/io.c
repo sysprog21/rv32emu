@@ -350,17 +350,23 @@ void memory_gc(void)
 #endif
 }
 
-/* Fast memory access functions - no bounds checking for performance.
- * Callers must validate addresses. With MMAP, out-of-bounds access
- * triggers SIGSEGV that chains to the default handler.
+/* memory_read() refuses a range outside guest RAM and zero fills dst, since
+ * a guest chooses the address.  The fast accessors below skip bounds checking
+ * for performance, so their callers must validate addresses; with MMAP an
+ * out-of-bounds access triggers SIGSEGV that chains to the default handler.
  */
 
-void memory_read(const memory_t *mem,
+bool memory_read(const memory_t *mem,
                  uint8_t *dst,
                  uint32_t addr,
                  uint32_t size)
 {
+    if (!GUEST_RAM_CONTAINS(mem, addr, size)) {
+        memset(dst, 0, size);
+        return false;
+    }
     memcpy(dst, mem->mem_base + addr, size);
+    return true;
 }
 
 uint32_t memory_ifetch(uint32_t addr)

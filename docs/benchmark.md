@@ -36,6 +36,37 @@ Performance summary:
 - Consistent advantages in sorting operations (numeric sort, string sort)
 - The tiered JIT approach effectively balances compilation overhead with code optimization quality
 
+## Interpreter comparison
+
+`tests/interpreter_bench.py` measures the workloads listed above using
+externally timed process lifetimes. It compares interpreter-only rv32emu with
+libriscv while explicitly disabling libriscv translation:
+
+```sh
+python3 tests/interpreter_bench.py \
+    --libriscv <path-to-compatible-libriscv-rv32-runner> \
+    --libriscv-build-flags '-DRISCV_BRK_MEMORY_SIZE=33554432' \
+    --runs 3 --warmup 1 --json build/interpreter-bench.json
+```
+
+Use `--libriscv-args` when a compatible runner needs runtime options. For
+example, the ARM64 32 MiB runner is invoked with `--libriscv-args '-m 32'`.
+
+By default the runner skips `bitfield` and `idea`, whose single interpreter runs
+take many minutes. Pass `--workloads all` to include them, or a comma-separated
+list of workload names to select a subset.
+
+The runner verifies an interpreter-only effective configuration, interleaves
+the two engines, retains raw samples and build provenance in the JSON report,
+and returns failure unless rv32emu wins every workload by the configured
+statistical margin (2% by default).
+
+The libriscv runner must support these static newlib guests and accept `-n` to
+disable translation. The runner preflight compares normalized guest output and
+refuses to time a workload if either emulator fails or produces a different
+result. `primes` needs more than libriscv's stock 16 MiB `brk` cap, so build
+the RV32 newlib runner with `-DRISCV_BRK_MEMORY_SIZE=33554432`.
+
 ## Continuous benchmarking
 
 Continuous benchmarking is integrated into GitHub Actions, allowing the

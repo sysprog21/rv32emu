@@ -324,6 +324,11 @@ struct riscv_internal {
     uint32_t csr_fcsr;
 #endif
 
+#if RV32_HAS_PACKED_TAIL
+    /* Exclusive rv_step() cycle limit while native branch chaining is live. */
+    uint64_t branch_chain_cycle_target;
+#endif
+
     /* csr registers */
     uint64_t csr_cycle;     /* Machine cycle counter */
     uint32_t csr_time[2];   /* Performance counter */

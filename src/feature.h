@@ -170,3 +170,15 @@
 
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x
+
+/* Native interpreter-only builds: no JIT, system emulation, GDB stub or
+ * browser event loop.  Only these lay decoded blocks out as packed IR, chain
+ * learned branch edges and take longer step slices.  Packed IR keeps the full
+ * rv_insn_t payload and the existing must-tail handler ABI.
+ */
+#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
+    !defined(__EMSCRIPTEN__)
+#define RV32_HAS_PACKED_TAIL 1
+#else
+#define RV32_HAS_PACKED_TAIL 0
+#endif

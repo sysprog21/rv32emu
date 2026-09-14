@@ -3530,8 +3530,9 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     /* Load value into rd */
     vm_reg[1] = map_vm_reg(state, ir->rd);
     emit_load(state, S32, temp_reg, vm_reg[1], 0);
-    /* Increment rs1 by imm2 */
-    vm_reg[0] = map_vm_reg(state, ir->rs1);
+    /* Increment rs1 by imm2.  Mapping rd may have evicted rs1, whose value
+     * was saved to memory, so reload it rather than assume it is mapped. */
+    vm_reg[0] = ra_load(state, ir->rs1);
     emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
     set_dirty(vm_reg[0], true); /* Mark rs1 dirty so it's saved to memory */
 #endif

@@ -98,6 +98,9 @@ mulfix_lhs:
 mulfix_rhs:
     .byte 0x40, 0x80, 0x40, 0x20
 
+vfmv_src:
+    .word 0x40490fdb, 0x3f800000, 0xc0000000, 0x00000000
+
 narrow16_a:
     .short 0x8000, 0x0002
 
@@ -295,6 +298,8 @@ shift_out:
 fixed_out:
     .space 16
 wide_out:
+    .space 32
+vfmv_out:
     .space 32
 red_out:
     .space 16
@@ -1813,6 +1818,65 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    # Floating-point scalar moves (V 1.0 16.3). Both ignore LMUL and only
+    # touch element 0.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    # Stage the source through the scratch buffer so every address in this
+    # block comes from the same base register.
+    la a2, vfmv_out
+    li t2, 0x40490fdb
+    sw t2, 0(a2)
+    li t2, 0x3f800000
+    sw t2, 4(a2)
+    vle32.v v20, (a2)
+
+    # vfmv.f.s: element 0 (0x40490fdb) lands in an f register. Spill it back
+    # to the scratch buffer to compare the bits.
+    vfmv.f.s ft0, v20
+    fmv.x.w t1, ft0
+    li t6, 0x40490fdb
+    bne t1, t6, fail_vfmv_f_s
+
+    # vfmv.s.f writes element 0 only; element 1 must keep its old value
+    # under the tail-undisturbed policy selected above.
+    la a1, vfmv_out
+    li t2, 0x11111111
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v22, (a1)
+    li t2, 0x3f800000
+    fmv.w.x ft1, t2
+    vfmv.s.f v22, ft1
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x3f800000
+    bne t1, t6, fail_vfmv_s_f
+    lw t1, 4(a1)
+    li t6, 0x11111111
+    bne t1, t6, fail_vfmv_s_f
+
+    # Per spec, vfmv.s.f performs no update when vstart >= vl; with vl = 0
+    # that holds for every vstart, so element 0 keeps its previous value.
+    la a1, vfmv_out
+    li t2, 0x22222222
+    sw t2, 0(a1)
+    vle32.v v22, (a1)
+    li a0, 0
+    vsetvli t0, a0, e32, m1, tu, mu
+    csrr t1, vl
+    assert_reg_imm t1, 0, fail_vfmv_vl0
+    vfmv.s.f v22, ft1
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, vfmv_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x22222222
+    bne t1, t6, fail_vfmv_vl0
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -1910,6 +1974,15 @@ fail_vsmul4:
     j write_and_exit_fail
 fail_vwadd:
     li a3, 0xd5
+    j write_and_exit_fail
+fail_vfmv_f_s:
+    li a3, 0x97
+    j write_and_exit_fail
+fail_vfmv_s_f:
+    li a3, 0x98
+    j write_and_exit_fail
+fail_vfmv_vl0:
+    li a3, 0x99
     j write_and_exit_fail
 fail_vwmulu:
     li a3, 0xd6

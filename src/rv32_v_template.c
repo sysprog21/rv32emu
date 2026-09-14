@@ -6828,6 +6828,35 @@ static inline void rvv_exec_fp32_vf(riscv_t *rv,
     rv->csr_vstart = 0;
 }
 
+/* Floating-point scalar moves (V 1.0 §16.3). Both ignore LMUL and touch
+ * only element 0.
+ */
+static inline void rvv_exec_vfmv_f_s(riscv_t *rv, const rv_insn_t *ir)
+{
+    /* vfmv.f.s performs its operation even if vstart >= vl or vl == 0. */
+    rv->F[ir->rd].v = rvv_get_elem(rv, ir->vs2, 0, 32);
+    rv->csr_vstart = 0;
+}
+
+static inline void rvv_exec_vfmv_s_f(riscv_t *rv, const rv_insn_t *ir)
+{
+    /* If vstart >= vl nothing is written; with vl == 0 that covers every
+     * vstart, so the destination is left alone. Remaining elements are
+     * tail elements governed by the usual vta policy.
+     */
+    if (rv->csr_vstart < rv->csr_vl) {
+        uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+        uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
+
+        rvv_set_elem(rv, ir->vd, 0, 32, rv->F[ir->rs1].v);
+        if (vta) {
+            for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+                rvv_set_elem(rv, ir->vd, elem, 32, 0xFFFFFFFFU);
+        }
+    }
+    rv->csr_vstart = 0;
+}
+
 static inline void rvv_exec_fp32_mask_vv(riscv_t *rv,
                                          const rv_insn_t *ir,
                                          uint32_t dest,
@@ -7448,6 +7477,22 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
         set_fflag(rv);                                                \
     })
 
+RVOP(vfmv_f_s, {
+    if (rvv_require_operable(rv))
+        return false;
+    if (rvv_sew_bits(rv->csr_vtype) != 32)
+        return rvv_trap_illegal_state(rv, 0);
+    rvv_exec_vfmv_f_s(rv, ir);
+})
+
+RVOP(vfmv_s_f, {
+    if (rvv_require_operable(rv))
+        return false;
+    if (rvv_sew_bits(rv->csr_vtype) != 32)
+        return rvv_trap_illegal_state(rv, 0);
+    rvv_exec_vfmv_s_f(rv, ir);
+})
+
 RVV_FP32_VV_OP(vfadd_vv, rvv_fp_add32, true);
 RVV_FP32_VF_OP(vfadd_vf, rvv_fp_add32, true);
 RVV_FP32_RED_OP(vfredusum_vs, rvv_fp_add32, true);
@@ -7619,6 +7664,8 @@ RVV_FP64_MAC_VF_OP(vfwmsac_vf, rvv_fp_wmsac64);
 RVV_FP64_MAC_VV_OP(vfwnmsac_vv, rvv_fp_wnmsac64);
 RVV_FP64_MAC_VF_OP(vfwnmsac_vf, rvv_fp_wnmsac64);
 #else
+RVOP(vfmv_f_s, { V_NOP; })
+RVOP(vfmv_s_f, { V_NOP; })
 RVOP(vfadd_vv, { V_NOP; })
 RVOP(vfadd_vf, { V_NOP; })
 RVOP(vfredusum_vs, { V_NOP; })

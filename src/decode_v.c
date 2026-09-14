@@ -873,12 +873,15 @@ static inline bool op_010000(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = rv_insn_vadc_vvm;
         break;
     case 1:
-        /* OPFVV / VWFUNARY0 (vfmv.f.s and friends). FP unary moves are
-         * not implemented yet; reject explicitly instead of falling
-         * through into the VWXUNARY0 path below, which would silently
-         * misdecode the encoding as vmv.x.s / vcpop.m / vfirst.m.
+        /* OPFVV / VWFUNARY0: vfmv.f.s reads element 0 into f[rd]. The
+         * masked encoding (vm=0) is reserved (V 1.0 §16.3), and vs1 must
+         * be zero - any other value is not a defined sub-opcode.
          */
-        return false;
+        if (!decode_vm(insn) || decode_rs1(insn))
+            return false;
+        decode_mtype(ir, insn);
+        ir->opcode = rv_insn_vfmv_f_s;
+        break;
     case 2:
         /* VWXUNARY0 dispatch: vmv.x.s requires vm=1 (vm=0 reserved per
          * V 1.0 §16.1). vcpop.m / vfirst.m support both vm=0 (masked)
@@ -918,11 +921,15 @@ static inline bool op_010000(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = rv_insn_vadc_vxm;
         break;
     case 5:
-        /* OPFVF / VRFUNARY0 (vfmv.s.f). Not implemented yet; reject the
-         * encoding here so it does not fall through to the VRXUNARY0
-         * (vmv.s.x) path below and silently dispatch as the wrong op.
+        /* OPFVF / VRFUNARY0: vfmv.s.f writes f[rs1] into element 0. The
+         * masked encoding (vm=0) is reserved (V 1.0 §16.3), and vs2 must
+         * be zero - any other value is not a defined sub-opcode.
          */
-        return false;
+        if (!decode_vm(insn) || decode_rs2(insn))
+            return false;
+        decode_vxtype(ir, insn);
+        ir->opcode = rv_insn_vfmv_s_f;
+        break;
     case 6:
         /* VRXUNARY0 - vmv.s.x requires encoded vm=1; vm=0 is reserved. */
         if (!decode_vm(insn))

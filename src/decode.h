@@ -752,6 +752,12 @@ enum op_field {
         _(vmsif_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(viota_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vid_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf2, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf2, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf4, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf4, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf8, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf8, 0, 4, 0, ENC(rs1, rs2, vd))            \
         /* OPF */                                         \
         _(vfadd_vv, 0, 4, 0, ENC(rs1, rs2, vd))           \
         _(vfadd_vf, 0, 4, 0, ENC(rs1, rs2, vd))           \

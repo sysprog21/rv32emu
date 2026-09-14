@@ -98,6 +98,12 @@ mulfix_lhs:
 mulfix_rhs:
     .byte 0x40, 0x80, 0x40, 0x20
 
+wcvt_f_src:
+    .word 0x3fc00000, 0x40200000, 0xbfc00000, 0x40e00000
+
+wcvt_i_src:
+    .word 3, -3, 5, 0
+
 narrow16_a:
     .short 0x8000, 0x0002
 
@@ -296,6 +302,8 @@ fixed_out:
     .space 16
 wide_out:
     .space 32
+wcvt_out:
+    .space 64
 red_out:
     .space 16
 wide_red_out:
@@ -1813,6 +1821,74 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    # Widening FP conversions (V 1.0 13.17): 32-bit source elements produce
+    # 64-bit destination elements, so the destination group is 2*LMUL and
+    # results are checked as low/high 32-bit halves.
+    li t2, 0
+    csrw frm, t2
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, wcvt_f_src
+    vle32.v v20, (a1)
+
+    # vfwcvt.f.f.v: 1.5 -> 0x3ff8000000000000, -1.5 -> 0xbff8000000000000
+    vfwcvt.f.f.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0, fail_vfwcvt_f_f
+    lw t1, 4(a1)
+    li t6, 0x3ff80000
+    bne t1, t6, fail_vfwcvt_f_f
+    lw t1, 20(a1)
+    li t6, 0xbff80000
+    bne t1, t6, fail_vfwcvt_f_f
+
+    # vfwcvt.x.f.v: RNE gives 1.5->2, -1.5->-2 (sign-extended to 64 bits)
+    vfwcvt.x.f.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 2, fail_vfwcvt_x_f
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0, fail_vfwcvt_x_f
+    lw t1, 16(a1)
+    assert_reg_imm t1, -2, fail_vfwcvt_x_f
+    lw t1, 20(a1)
+    assert_reg_imm t1, -1, fail_vfwcvt_x_f
+
+    # vfwcvt.rtz.x.f.v truncates instead: 1.5->1, -1.5->-1
+    vfwcvt.rtz.x.f.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 1, fail_vfwcvt_rtz_x_f
+    lw t1, 16(a1)
+    assert_reg_imm t1, -1, fail_vfwcvt_rtz_x_f
+    lw t1, 20(a1)
+    assert_reg_imm t1, -1, fail_vfwcvt_rtz_x_f
+
+    # Integer-to-double: -3 differs between the signed and unsigned forms
+    la a1, wcvt_i_src
+    vle32.v v20, (a1)
+
+    vfwcvt.f.x.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 12(a1)
+    li t6, 0xc0080000
+    bne t1, t6, fail_vfwcvt_f_x
+
+    vfwcvt.f.xu.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 12(a1)
+    li t6, 0x41efffff
+    bne t1, t6, fail_vfwcvt_f_xu
+    lw t1, 8(a1)
+    li t6, 0xffa00000
+    bne t1, t6, fail_vfwcvt_f_xu
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -1910,6 +1986,21 @@ fail_vsmul4:
     j write_and_exit_fail
 fail_vwadd:
     li a3, 0xd5
+    j write_and_exit_fail
+fail_vfwcvt_f_f:
+    li a3, 0xfb
+    j write_and_exit_fail
+fail_vfwcvt_x_f:
+    li a3, 0xfc
+    j write_and_exit_fail
+fail_vfwcvt_rtz_x_f:
+    li a3, 0xfd
+    j write_and_exit_fail
+fail_vfwcvt_f_x:
+    li a3, 0xfe
+    j write_and_exit_fail
+fail_vfwcvt_f_xu:
+    li a3, 0xff
     j write_and_exit_fail
 fail_vwmulu:
     li a3, 0xd6

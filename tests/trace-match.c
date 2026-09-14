@@ -108,6 +108,14 @@ int main(void)
     empty.terminal_branch = false;
     assert(!trace_match(empty_records, &empty, NULL));
 
+#if !RV32_HAS(RV32E)
+    rv_insn_t records[TRACE_MATCH_MAX_LENGTH];
+    trace_match_spec_t invalid = trace_match_specs[trace_record_copy];
+    make_trace(records, &invalid);
+    invalid.terminal_branch = true;
+    assert(!trace_match(records, &invalid, NULL));
+#endif
+
     puts("trace matcher corpus passed");
     return 0;
 }

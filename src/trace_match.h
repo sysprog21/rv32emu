@@ -49,6 +49,20 @@ typedef struct {
 
 enum trace_match_id {
     trace_byte_copy,
+    trace_backward_byte_copy,
+    trace_emfloat_halfword_shift,
+    trace_strlen_word,
+#if !RV32_HAS(RV32E)
+    trace_numsift_index,
+    trace_bitfield_set_bit,
+    trace_bitfield_invert_bit,
+    trace_record_copy,
+    trace_primes_probe,
+#endif
+#if !RV32_HAS(RV32E) && RV32_HAS(EXT_M)
+    trace_idea_round_prefix,
+    trace_idea_alu_suffix,
+#endif
     trace_match_count,
 };
 

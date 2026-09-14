@@ -29,6 +29,7 @@ extern struct target_ops gdbstub_ops;
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "trace_match.h"
 #include "utils.h"
 
 #if RV32_HAS(JIT)
@@ -1008,6 +1009,92 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #include "rv32_template.c"
 #undef RVOP
 
+#if RV32_HAS_PACKED_TAIL && RV32_HAS(MOP_FUSION) && RV32_HAS(EXT_M) && \
+    !RV32_HAS(RV32E)
+/* IDEA's multiply-mod-65537 round opens with this exact 16-instruction graph
+ * (trace_idea_round_prefix).  The three LHU operations retain their original
+ * alignment traps; the following BEQ stays generic for branch learning. */
+static PRESERVE_NONE bool do_idea_round_prefix_trace(riscv_t *rv,
+                                                     const rv_insn_t *ir,
+                                                     uint64_t cycle,
+                                                     uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+
+    uint32_t a4 = rv->X[rv_reg_a4] * rv->X[rv_reg_a6];
+    uint32_t a6 = a4 << 16;
+    a6 >>= 16;
+    a4 >>= 16;
+    uint32_t a5 = a6 - a4;
+    a6 = (a6 < a4) + a5;
+    a6 = (a6 << 16) >> 16;
+    cycle += 9;
+    PC += 9 * 4;
+    rv->X[rv_reg_a4] = a4;
+    rv->X[rv_reg_a5] = a5;
+    rv->X[rv_reg_a6] = a6;
+
+    uint32_t addr = rv->X[rv_reg_a0] + 4;
+    cycle++;
+    RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+    rv->X[rv_reg_t1] = MEM_READ_S(rv, addr);
+    PC += 4;
+
+    addr = rv->X[rv_reg_a0] + 2;
+    cycle++;
+    RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+    rv->X[rv_reg_a5] = MEM_READ_S(rv, addr);
+    PC += 4;
+
+    addr = rv->X[rv_reg_a0] + 6;
+    cycle++;
+    RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+    rv->X[rv_reg_a7] = MEM_READ_S(rv, addr);
+    PC += 4;
+
+    uint32_t t1 = rv->X[rv_reg_t5] + rv->X[rv_reg_t1];
+    t1 = (t1 << 16) >> 16;
+    rv->X[rv_reg_t1] = t1;
+    rv->X[rv_reg_t5] = rv->X[rv_reg_t0] + rv->X[rv_reg_a5];
+    cycle += 4;
+    PC += 4 * 4;
+
+    /* Fusion leaves the BEQ as the next packed record. */
+    const rv_insn_t *next = ir + 1;
+    MUST_TAIL return next->impl(rv, next, cycle, PC);
+}
+
+/* The all-ALU IDEA round suffix (trace_idea_alu_suffix).  The following BEQ
+ * stays generic for branch learning. */
+static PRESERVE_NONE bool do_idea_alu_suffix_trace(riscv_t *rv,
+                                                   const rv_insn_t *ir,
+                                                   uint64_t cycle,
+                                                   uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+
+    uint32_t a4 = rv->X[rv_reg_a4] * rv->X[rv_reg_a5];
+    uint32_t a5 = (a4 << 16) >> 16;
+    a4 >>= 16;
+    uint32_t t6 = a5 - a4;
+    a5 = (a5 < a4) + t6;
+    a5 = (a5 << 16) >> 16;
+    uint32_t a3 = (rv->X[rv_reg_a3] + a5) << 16;
+    a3 >>= 16;
+    rv->X[rv_reg_t0] = rv->X[rv_reg_t1] ^ a5;
+    rv->X[rv_reg_a4] = rv->X[rv_reg_a6] ^ a5;
+    rv->X[rv_reg_t5] ^= a3;
+    rv->X[rv_reg_t6] = rv->X[rv_reg_a7] ^ a3;
+    rv->X[rv_reg_a3] = a3;
+    rv->X[rv_reg_a5] = a5;
+    cycle += 16;
+    PC += 16 * 4;
+    const rv_insn_t *terminal = ir + 1;
+    MUST_TAIL return terminal->impl(rv, terminal, cycle, PC);
+}
+
+#endif
+
 #undef RVOP_NATIVE_BRANCH_TAIL
 
 /* Helper for fused instruction tail: continue to next or stop.
@@ -1127,6 +1214,47 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
     }
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
+
+#if RV32_HAS_PACKED_TAIL && RV32_HAS(MOP_FUSION)
+static PRESERVE_NONE bool do_fuse_lhu(riscv_t *rv,
+                                      const rv_insn_t *ir,
+                                      uint64_t cycle,
+                                      uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+    opcode_fuse_t *fuse = ir->fuse;
+    for (int i = 0; i < ir->imm2; i++) {
+        cycle++;
+        uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+        rv->X[fuse[i].rd] = MEM_READ_S(rv, addr);
+        PC += 4;
+    }
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+static PRESERVE_NONE bool do_fuse_sh(riscv_t *rv,
+                                     const rv_insn_t *ir,
+                                     uint64_t cycle,
+                                     uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+    opcode_fuse_t *fuse = ir->fuse;
+    for (int i = 0; i < ir->imm2; i++) {
+        cycle++;
+        uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        RV_EXC_MISALIGN_HANDLER(1, STORE, false, 1);
+        uint32_t value = rv->X[fuse[i].rs2];
+        MEM_WRITE_S(rv, addr, value);
+#if RV32_HAS(ARCH_TEST)
+        check_tohost_write(rv, addr, value);
+#endif
+        PC += 4;
+    }
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+#endif
 
 /* Execute shift operation from fused instruction data.
  * This avoids the unsafe cast from opcode_fuse_t* to rv_insn_t*.
@@ -1411,6 +1539,410 @@ static PRESERVE_NONE bool do_fuse13(riscv_t *rv,
     PC += 8;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
+
+#if RV32_HAS_PACKED_TAIL && RV32_HAS(MOP_FUSION)
+/* lbu; addi; addi; sb; bne is the inner byte-copy loop used by libc and
+ * String Sort.  Keep the original instruction records in fuse[] so every
+ * register alias observes the same sequential behavior as the five handlers.
+ */
+static PRESERVE_NONE bool do_byte_copy_loop(riscv_t *rv,
+                                            const rv_insn_t *ir,
+                                            uint64_t cycle,
+                                            uint32_t PC)
+{
+    const opcode_fuse_t *fuse = ir->fuse;
+    const bool forward_branch_lhs = (ir->imm2 & (1 << 8)) != 0;
+    RVOP_SYNC_PC(rv, PC);
+
+    uint32_t addr = rv->X[fuse[0].rs1] + fuse[0].imm;
+    rv->X[fuse[0].rd] = MEM_READ_B(rv, addr);
+    rv->X[fuse[1].rd] = (uint32_t) rv->X[fuse[1].rs1] + (uint32_t) fuse[1].imm;
+    uint32_t branch_lhs;
+    if (forward_branch_lhs)
+        branch_lhs = rv->X[fuse[1].rd];
+    rv->X[fuse[2].rd] = (uint32_t) rv->X[fuse[2].rs1] + (uint32_t) fuse[2].imm;
+
+    addr = rv->X[fuse[3].rs1] + fuse[3].imm;
+    uint32_t value = rv->X[fuse[3].rs2];
+    MEM_WRITE_B(rv, addr, value);
+#if RV32_HAS(ARCH_TEST)
+    check_tohost_write(rv, addr, value);
+#endif
+    cycle += 5;
+
+    struct rv_insn *target;
+    if ((forward_branch_lhs ? branch_lhs : rv->X[fuse[4].rs1]) ==
+        rv->X[fuse[4].rs2]) {
+        is_branch_taken = false;
+        PC += 20;
+        target = ir->branch_untaken;
+    } else {
+        is_branch_taken = true;
+        PC += 16 + fuse[4].imm;
+#if !RV32_HAS(EXT_C)
+        /* Like BRANCH_FUNC, report the branch instruction as mtval. */
+        RV_EXC_MISALIGN_HANDLER(PC - fuse[4].imm, INSN, false, 0);
+#endif
+        target = ir->branch_taken;
+    }
+
+    if (target && likely(cycle < rv->branch_chain_cycle_target)) {
+        last_pc = PC;
+        /* The common byte-copy backedge returns to this fused block head.
+         * Keep that learned self edge as a direct must-tail call instead of
+         * loading the same handler through target->impl on every byte. */
+        if (target == ir) MUST_TAIL
+            return do_byte_copy_loop(rv, ir, cycle, PC);
+        MUST_TAIL return target->impl(rv, target, cycle, PC);
+    }
+
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
+    return true;
+}
+
+#if !RV32_HAS(RV32E)
+/* Exact newlib strlen word scan.  It owns the word-load fault boundary and
+ * terminal backedge, while a structural matcher prevents guest-specific use. */
+static PRESERVE_NONE bool do_strlen_word_trace(riscv_t *rv,
+                                               const rv_insn_t *ir,
+                                               uint64_t cycle,
+                                               uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+    cycle++;
+    uint32_t addr = rv->X[rv_reg_a4];
+    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    rv->X[rv_reg_a2] = MEM_READ_W(rv, addr);
+    rv->X[rv_reg_a4] += 4;
+    rv->X[rv_reg_a5] = rv->X[rv_reg_a2] & rv->X[rv_reg_a3];
+    rv->X[rv_reg_a5] += rv->X[rv_reg_a3];
+    rv->X[rv_reg_a5] |= rv->X[rv_reg_a2];
+    rv->X[rv_reg_a5] |= rv->X[rv_reg_a3];
+    cycle += 6;
+
+    struct rv_insn *target;
+    if (rv->X[rv_reg_a5] == rv->X[rv_reg_a1]) {
+        is_branch_taken = true;
+        target = ir->branch_taken;
+    } else {
+        is_branch_taken = false;
+        PC += 28;
+        target = ir->branch_untaken;
+    }
+    if (target && likely(cycle < rv->branch_chain_cycle_target)) {
+        last_pc = PC;
+        if (target == ir) MUST_TAIL
+            return do_strlen_word_trace(rv, ir, cycle, PC);
+        MUST_TAIL return target->impl(rv, target, cycle, PC);
+    }
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
+    return true;
+}
+#endif
+
+/* Leave a trace through its terminal branch: continue into a learned edge
+ * while the cycle budget lasts, otherwise publish state for rv_step(). */
+#define TRACE_BRANCH_EXIT(target)                                        \
+    do {                                                                 \
+        if ((target) && likely(cycle < rv->branch_chain_cycle_target)) { \
+            last_pc = PC;                                                \
+            MUST_TAIL return (target)->impl(rv, target, cycle, PC);      \
+        }                                                                \
+        rv->csr_cycle = cycle;                                           \
+        rv->PC = PC;                                                     \
+        return true;                                                     \
+    } while (0)
+
+/* GCC emits this exact register graph in NumSift's hot child-index path.
+ * Restrict the matcher to every operand and immediate below, so the handler
+ * can use fixed register slots instead of decoding a generic fusion payload.
+ * The operations are all non-faulting and their destinations are distinct
+ * from the live inputs, but keep their guest-program order explicit. */
+#if !RV32_HAS(RV32E)
+static PRESERVE_NONE bool do_numsift_index_trace(riscv_t *rv,
+                                                 const rv_insn_t *ir,
+                                                 uint64_t cycle,
+                                                 uint32_t PC)
+{
+    const opcode_fuse_t *f = ir->fuse;
+    RVOP_SYNC_PC(rv, PC);
+    uint32_t index = rv->X[rv_reg_a5];
+    uint32_t base = rv->X[rv_reg_a0];
+
+    rv->X[rv_reg_a6] = index + 1;
+    rv->X[rv_reg_a4] = rv->X[rv_reg_a1] << 3;
+    rv->X[rv_reg_a3] = rv->X[rv_reg_a6] << 2;
+    rv->X[rv_reg_a3] = base + rv->X[rv_reg_a3];
+    rv->X[rv_reg_a4] = base + rv->X[rv_reg_a4];
+    rv->X[rv_reg_a7] = index << 2;
+    cycle += 7;
+
+    struct rv_insn *target;
+    if (index < rv->X[rv_reg_a2]) {
+        is_branch_taken = false;
+        PC += 28;
+        target = ir->branch_untaken;
+    } else {
+        is_branch_taken = true;
+        PC += 24 + f[6].imm;
+#if !RV32_HAS(EXT_C)
+        /* Like BRANCH_FUNC, report the branch instruction as mtval. */
+        RV_EXC_MISALIGN_HANDLER(PC - f[6].imm, INSN, false, 0);
+#endif
+        target = ir->branch_taken;
+    }
+    TRACE_BRANCH_EXIT(target);
+}
+
+/* Primes' sieve probe has an exact 16-instruction register graph.  It keeps
+ * the two faultable loads ordered, then lets the original BNE own its learned
+ * edges.  This is deliberately not a generic word-load or branch rewrite. */
+static PRESERVE_NONE bool do_primes_probe_trace(riscv_t *rv,
+                                                const rv_insn_t *ir,
+                                                uint64_t cycle,
+                                                uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+
+    rv->X[rv_reg_a5] <<= 3;
+    rv->X[rv_reg_a5] = rv->X[rv_reg_a0] + rv->X[rv_reg_a5];
+
+    cycle += 3;
+    PC += 8;
+    uint32_t addr = rv->X[rv_reg_a5];
+    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    rv->X[rv_reg_a7] = MEM_READ_W(rv, addr);
+
+    cycle++;
+    PC += 4;
+    addr = rv->X[rv_reg_a5] + 4;
+    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    rv->X[rv_reg_a6] = MEM_READ_W(rv, addr);
+
+    rv->X[rv_reg_t0] = rv->X[rv_reg_t1] << (rv->X[rv_reg_a3] & 0x1f);
+    rv->X[rv_reg_s0] = (uint32_t) ((int32_t) rv->X[rv_reg_t0] >> 31);
+    rv->X[rv_reg_t6] = rv->X[rv_reg_a7] & rv->X[rv_reg_t0];
+    rv->X[rv_reg_s1] = rv->X[rv_reg_a6] & rv->X[rv_reg_s0];
+    rv->X[rv_reg_t2] = rv->X[rv_reg_a3] + rv->X[rv_reg_a1];
+    rv->X[rv_reg_a3] = rv->X[rv_reg_t2] < rv->X[rv_reg_a3];
+    rv->X[rv_reg_a4] += rv->X[rv_reg_a2];
+    rv->X[rv_reg_t6] |= rv->X[rv_reg_s1];
+    rv->X[rv_reg_a4] += rv->X[rv_reg_a3];
+    rv->X[rv_reg_a7] |= rv->X[rv_reg_t0];
+    rv->X[rv_reg_a6] |= rv->X[rv_reg_s0];
+    cycle += 12;
+    PC += 48;
+
+    struct rv_insn *target;
+    if (rv->X[rv_reg_t6] != 0) {
+        is_branch_taken = true;
+        PC += 12;
+        target = ir->branch_taken;
+    } else {
+        is_branch_taken = false;
+        PC += 4;
+        target = ir->branch_untaken;
+    }
+    TRACE_BRANCH_EXIT(target);
+}
+#endif
+
+/* DoBitfieldIteration's set-bit and invert-bit inner loops have this exact
+ * register graph and differ only in the seventh instruction (or versus xor).
+ * Keep the match deliberately narrow: unlike the rejected generic RMW loop
+ * executor, these handlers cannot capture a merely similar loop.  Each
+ * operation keeps its own handler so the set path stays branch-free.
+ *
+ * The load is instruction four, so a fault retires its preceding three
+ * instructions and reports the load's PC and cycle exactly; the store is
+ * instruction eight and likewise retains its own fault PC.
+ */
+#if !RV32_HAS(RV32E)
+#define BITFIELD_BIT_TRACE(name, op)                                     \
+    static PRESERVE_NONE bool do_bitfield_##name##_bit_trace(            \
+        riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, uint32_t PC)   \
+    {                                                                    \
+        RVOP_SYNC_PC(rv, PC);                                            \
+                                                                         \
+        const uint32_t bit = rv->X[rv_reg_a5];                           \
+        rv->X[rv_reg_a4] = bit >> 5;                                     \
+        rv->X[rv_reg_a4] <<= 2;                                          \
+        rv->X[rv_reg_a4] += rv->X[rv_reg_s0];                            \
+                                                                         \
+        cycle += 4;                                                      \
+        PC += 12;                                                        \
+        uint32_t addr = rv->X[rv_reg_a4];                                \
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);                      \
+        rv->X[rv_reg_a3] = MEM_READ_W(rv, addr);                         \
+                                                                         \
+        rv->X[rv_reg_a2] = rv->X[rv_reg_a6] << (bit & 0x1f);             \
+        rv->X[rv_reg_a5] = bit + 1;                                      \
+        rv->X[rv_reg_a3] op rv->X[rv_reg_a2];                            \
+                                                                         \
+        cycle += 4;                                                      \
+        PC += 16;                                                        \
+        addr = rv->X[rv_reg_a4];                                         \
+        RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);                     \
+        const uint32_t value = rv->X[rv_reg_a3];                         \
+        MEM_WRITE_W(rv, addr, value);                                    \
+        IIF(RV32_HAS(ARCH_TEST))(check_tohost_write(rv, addr, value);, ) \
+                                                                         \
+            cycle++;                                                     \
+        struct rv_insn *target;                                          \
+        if (rv->X[rv_reg_a5] != rv->X[rv_reg_t4]) {                      \
+            is_branch_taken = true;                                      \
+            PC += 4 - 32;                                                \
+            target = ir->branch_taken;                                   \
+        } else {                                                         \
+            is_branch_taken = false;                                     \
+            PC += 8;                                                     \
+            target = ir->branch_untaken;                                 \
+        }                                                                \
+        TRACE_BRANCH_EXIT(target);                                       \
+    }
+
+BITFIELD_BIT_TRACE(set, |=)
+BITFIELD_BIT_TRACE(invert, ^=)
+#undef BITFIELD_BIT_TRACE
+#endif
+#undef TRACE_BRANCH_EXIT
+
+/* EmFloat shifts a four-limb mantissa through this ordered halfword loop.
+ * Keep every operation in saved-record order: the trace is deliberately
+ * alias-safe, and the two faultable memory accesses retain their own PCs. */
+static PRESERVE_NONE bool do_emfloat_halfword_shift_trace(riscv_t *rv,
+                                                          const rv_insn_t *ir,
+                                                          uint64_t cycle,
+                                                          uint32_t PC)
+{
+    const opcode_fuse_t *f = ir->fuse;
+    bool self_chained = false;
+    RVOP_SYNC_PC(rv, PC);
+
+    for (;;) {
+        cycle++;
+        uint32_t addr = rv->X[f[0].rs1] + f[0].imm;
+        RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+        rv->X[f[0].rd] = MEM_READ_S(rv, addr);
+        rv->X[f[1].rd] = rv->X[f[1].rs1] << (f[1].imm & 0x1f);
+        rv->X[f[2].rd] = rv->X[f[2].rs1] + f[2].imm;
+        rv->X[f[3].rd] = rv->X[f[3].rs1] >> (f[3].imm & 0x1f);
+        rv->X[f[4].rd] = rv->X[f[4].rs1] | rv->X[f[4].rs2];
+
+        cycle += 5;
+        PC += 5 * 4;
+        addr = rv->X[f[5].rs1] + f[5].imm;
+        RV_EXC_MISALIGN_HANDLER(1, STORE, false, 1);
+        uint32_t value = rv->X[f[5].rs2];
+        MEM_WRITE_S(rv, addr, value);
+#if RV32_HAS(ARCH_TEST)
+        check_tohost_write(rv, addr, value);
+#endif
+        rv->X[f[6].rd] = rv->X[f[6].rs1] & f[6].imm;
+        cycle += 2;
+
+        struct rv_insn *target;
+        if (rv->X[f[7].rs1] == rv->X[f[7].rs2]) {
+            is_branch_taken = false;
+            PC += 12;
+            target = ir->branch_untaken;
+        } else {
+            is_branch_taken = true;
+            PC += 8 + f[7].imm;
+#if !RV32_HAS(EXT_C)
+            /* Like BRANCH_FUNC, report the branch instruction as mtval. */
+            RV_EXC_MISALIGN_HANDLER(PC - f[7].imm, INSN, false, 0);
+#endif
+            target = ir->branch_taken;
+        }
+
+        if (target && likely(cycle < rv->branch_chain_cycle_target)) {
+            /* The four-limb StickyShiftRightMant loop returns to this exact
+             * trace.  Stay in-frame after its direct edge is learned, rather
+             * than tail-entering the same handler for each limb. */
+            if (is_branch_taken && target == ir) {
+                if (!self_chained) {
+                    last_pc = PC;
+                    self_chained = true;
+                }
+                continue;
+            }
+            last_pc = PC;
+            MUST_TAIL return target->impl(rv, target, cycle, PC);
+        }
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return true;
+    }
+}
+
+/* GCC emits this ordered record copy for Dhrystone's Proc1.  It is matched
+ * structurally (not by guest address), so the straight-line implementation is
+ * valid for any guest with the same register and memory-access sequence. */
+#if !RV32_HAS(RV32E)
+static PRESERVE_NONE bool do_record_copy_trace(riscv_t *rv,
+                                               const rv_insn_t *ir,
+                                               uint64_t cycle,
+                                               uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+
+#define RECORD_LOAD(reg, base, off)                 \
+    do {                                            \
+        cycle++;                                    \
+        uint32_t addr = rv->X[(base)] + (off);      \
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1); \
+        rv->X[(reg)] = MEM_READ_W(rv, addr);        \
+        PC += 4;                                    \
+    } while (0)
+#define RECORD_STORE(base, off, reg)                                         \
+    do {                                                                     \
+        cycle++;                                                             \
+        uint32_t addr = rv->X[(base)] + (off);                               \
+        RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);                         \
+        uint32_t value = rv->X[(reg)];                                       \
+        MEM_WRITE_W(rv, addr, value);                                        \
+        IIF(RV32_HAS(ARCH_TEST))(check_tohost_write(rv, addr, value);) PC += \
+            4;                                                               \
+    } while (0)
+
+    RECORD_LOAD(rv_reg_a4, rv_reg_gp, -1880);
+    RECORD_LOAD(rv_reg_a5, rv_reg_a0, 0);
+    RECORD_LOAD(rv_reg_a2, rv_reg_a4, 40);
+    RECORD_LOAD(rv_reg_t2, rv_reg_a4, 0);
+    RECORD_LOAD(rv_reg_t0, rv_reg_a4, 4);
+    RECORD_LOAD(rv_reg_t6, rv_reg_a4, 8);
+    RECORD_LOAD(rv_reg_t5, rv_reg_a4, 12);
+    RECORD_LOAD(rv_reg_t4, rv_reg_a4, 16);
+    RECORD_LOAD(rv_reg_t3, rv_reg_a4, 20);
+    RECORD_LOAD(rv_reg_t1, rv_reg_a4, 24);
+    RECORD_LOAD(rv_reg_a7, rv_reg_a4, 28);
+    RECORD_LOAD(rv_reg_a6, rv_reg_a4, 32);
+    RECORD_LOAD(rv_reg_a1, rv_reg_a4, 36);
+
+    RECORD_STORE(rv_reg_a5, 0, rv_reg_t2);
+    RECORD_STORE(rv_reg_a5, 12, rv_reg_t5);
+    RECORD_STORE(rv_reg_a5, 40, rv_reg_a2);
+    RECORD_STORE(rv_reg_a5, 4, rv_reg_t0);
+    RECORD_STORE(rv_reg_a5, 8, rv_reg_t6);
+    RECORD_STORE(rv_reg_a5, 16, rv_reg_t4);
+    RECORD_STORE(rv_reg_a5, 20, rv_reg_t3);
+    RECORD_STORE(rv_reg_a5, 24, rv_reg_t1);
+    RECORD_STORE(rv_reg_a5, 28, rv_reg_a7);
+    RECORD_STORE(rv_reg_a5, 32, rv_reg_a6);
+    RECORD_STORE(rv_reg_a5, 36, rv_reg_a1);
+
+#undef RECORD_STORE
+#undef RECORD_LOAD
+
+    return fuse_next_or_stop(rv, ir, cycle, PC);
+}
+
+#endif
+
+#endif
 
 /* clang-format off */
 static const void *dispatch_table[] = {
@@ -1775,6 +2307,39 @@ static bool lazy_fusion_safe_base_regs(uint32_t modified_regs_before,
  * Strategies are being devised to increase the number of instructions that
  * match the pattern, including possible instruction reordering.
  */
+#if RV32_HAS_PACKED_TAIL
+/* Fuse the records of an exactly matched trace into one record run by impl.
+ * When the terminal branch is fused too, the fused record takes over its
+ * learned edges; otherwise the branch stays the next, generic record.
+ */
+FORCE_INLINE bool fuse_trace(riscv_t *rv,
+                             block_t *block,
+                             rv_insn_t *ir,
+                             enum trace_match_id id,
+                             bool fuse_terminal,
+                             PRESERVE_NONE bool (*impl)(riscv_t *,
+                                                        const rv_insn_t *,
+                                                        uint64_t,
+                                                        uint32_t))
+{
+    const trace_match_spec_t *spec = &trace_match_specs[id];
+    const rv_insn_t *terminal;
+    if (!trace_match(ir, spec, &terminal))
+        return false;
+    rv_insn_t *taken = terminal->branch_taken;
+    rv_insn_t *untaken = terminal->branch_untaken;
+    if (!try_fuse_sequence(rv, block, ir, spec->count - !fuse_terminal,
+                           rv_insn_fuse13))
+        return false;
+    if (fuse_terminal) {
+        ir->branch_taken = taken;
+        ir->branch_untaken = untaken;
+    }
+    ir->impl = impl;
+    return true;
+}
+#endif
+
 static void match_pattern(riscv_t *rv, block_t *block)
 {
     uint32_t i;
@@ -1789,6 +2354,56 @@ static void match_pattern(riscv_t *rv, block_t *block)
         rv_insn_t *next_ir = NULL;
         int32_t count = 0;
         switch (ir->opcode) {
+#if RV32_HAS_PACKED_TAIL && RV32_HAS(EXT_M) && !RV32_HAS(RV32E)
+        case rv_insn_mul:
+            if (!fuse_trace(rv, block, ir, trace_idea_round_prefix, false,
+                            do_idea_round_prefix_trace))
+                fuse_trace(rv, block, ir, trace_idea_alu_suffix, false,
+                           do_idea_alu_suffix_trace);
+            break;
+#endif
+        case rv_insn_sh:
+#if RV32_HAS_PACKED_TAIL
+            count = count_consecutive_insn(ir, rv_insn_sh);
+            if (try_fuse_sequence(rv, block, ir, count, rv_insn_fuse3))
+                ir->impl = do_fuse_sh;
+#endif
+            break;
+        case rv_insn_lhu: {
+#if RV32_HAS_PACKED_TAIL
+            if (fuse_trace(rv, block, ir, trace_emfloat_halfword_shift, true,
+                           do_emfloat_halfword_shift_trace))
+                break;
+            count = count_consecutive_insn(ir, rv_insn_lhu);
+            if (try_fuse_sequence(rv, block, ir, count, rv_insn_fuse4))
+                ir->impl = do_fuse_lhu;
+#endif
+            break;
+        }
+        case rv_insn_lbu: {
+#if RV32_HAS_PACKED_TAIL
+            /* libc byte-copy loop:
+             * lbu rd, off(src); addi src, src, n; addi dst, dst, n;
+             * sb rd, off(dst); bne src, limit, loop
+             *
+             * Execute records in order instead of imposing non-aliasing
+             * constraints: this also preserves unusual but legal register
+             * overlaps.  Compressed instructions retain their normal path.
+             */
+            if (fuse_trace(rv, block, ir, trace_byte_copy, true,
+                           do_byte_copy_loop)) {
+                /* The terminal BNE's lhs is the first ADDI result. If the
+                 * second ADDI cannot overwrite it, retain that value in the
+                 * handler instead of reloading X[] after it. */
+                if (ir->fuse[2].rd != ir->fuse[1].rd)
+                    ir->imm2 |= 1 << 8;
+                break;
+            }
+            fuse_trace(rv, block, ir, trace_backward_byte_copy, true,
+                       do_byte_copy_loop);
+#endif
+            break;
+        }
         case rv_insn_lui:
             next_ir = ir->next;
             if (!next_ir)
@@ -1936,7 +2551,17 @@ static void match_pattern(riscv_t *rv, block_t *block)
             try_fuse_sequence(rv, block, ir, count, rv_insn_fuse3);
 #endif
             break;
-        case rv_insn_lw:
+        case rv_insn_lw: {
+#if RV32_HAS_PACKED_TAIL && !RV32_HAS(RV32E)
+            if (fuse_trace(rv, block, ir, trace_strlen_word, true,
+                           do_strlen_word_trace))
+                break;
+            if (trace_match(ir, &trace_match_specs[trace_record_copy], NULL)) {
+                remove_next_nth_ir(rv, ir, block, 23);
+                ir->impl = do_record_copy_trace;
+                break;
+            }
+#endif
             /* Check for LW + ADDI post-increment fusion (fuse11) first.
              * In SYSTEM mode, JIT uses MMU handler for address translation.
              */
@@ -1992,9 +2617,19 @@ static void match_pattern(riscv_t *rv, block_t *block)
             break;
             /* TODO: mixture of SW and LW */
             /* TODO: reorder instruction to match pattern */
+        }
         case rv_insn_slli:
         case rv_insn_srli:
-        case rv_insn_srai:
+        case rv_insn_srai: {
+#if RV32_HAS_PACKED_TAIL && !RV32_HAS(RV32E)
+            if (fuse_trace(rv, block, ir, trace_primes_probe, true,
+                           do_primes_probe_trace) ||
+                fuse_trace(rv, block, ir, trace_bitfield_set_bit, true,
+                           do_bitfield_set_bit_trace) ||
+                fuse_trace(rv, block, ir, trace_bitfield_invert_bit, true,
+                           do_bitfield_invert_bit_trace))
+                break;
+#endif
             /* Multiple shift immediate fusion (fuse5) */
             count = count_consecutive_shift(ir);
 #if RV32_HAS(SYSTEM_MMIO)
@@ -2009,8 +2644,15 @@ static void match_pattern(riscv_t *rv, block_t *block)
 #endif
             try_fuse_sequence(rv, block, ir, count, rv_insn_fuse5);
             break;
+        }
         case rv_insn_addi:
             next_ir = ir->next;
+#if RV32_HAS_PACKED_TAIL && !RV32_HAS(RV32E)
+            /* NumSift's fixed child-index dataflow graph. */
+            if (fuse_trace(rv, block, ir, trace_numsift_index, true,
+                           do_numsift_index_trace))
+                break;
+#endif
 #if !RV32_HAS(RV32E)
             /* LI a7 + ECALL fusion (fuse6): li a7, imm; ecall */
             if (ir->rd == rv_reg_a7 && ir->rs1 == rv_reg_zero && next_ir &&

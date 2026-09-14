@@ -607,6 +607,32 @@ static inline void rvv_zero_reg_bytes(riscv_t *rv, uint32_t reg, uint32_t nregs)
     memset(&rv->V[reg][0], 0, rvv_whole_reg_bytes(rv, nregs));
 }
 
+/* Whole vector register move (V 1.0 §16.6). Copies NREG whole registers,
+ * i.e. all VLEN bits each, as if EEW=SEW and EMUL=NREG. The effective
+ * length is evl = NREG * VLEN/SEW; unlike most instructions the guard is
+ * vstart >= evl rather than vstart >= vl. vd == vs2 is an architectural
+ * NOP.
+ */
+static inline bool rvv_exec_whole_reg_move(riscv_t *rv,
+                                           const rv_insn_t *ir,
+                                           uint32_t nregs)
+{
+    uint32_t sew_bits = rvv_sew_bits(rv->csr_vtype);
+    uint32_t evl, bytes;
+
+    if (!rvv_validate_reg_span(ir->vd, nregs) ||
+        !rvv_validate_reg_span(ir->vs2, nregs))
+        return rvv_trap_illegal_state(rv, 0);
+
+    evl = nregs * ((uint32_t) VLEN / sew_bits);
+    if (rv->csr_vstart < evl && ir->vd != ir->vs2) {
+        bytes = rvv_whole_reg_bytes(rv, nregs);
+        memmove(&rv->V[ir->vd][0], &rv->V[ir->vs2][0], bytes);
+    }
+    rv->csr_vstart = 0;
+    return true;
+}
+
 /* Whole-register vl<n>r.v / vs<n>r.v transfers. Per V 1.0 §7.9 these
  * instructions ignore vl AND vstart entirely, AND must NOT modify vstart
  * on completion. Caller is responsible for vd alignment validation; this
@@ -6427,6 +6453,34 @@ RVOP(vmv_s_x, {
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_vmv_s_x(rv, ir);
+})
+
+RVOP(vmv1r_v, {
+    if (rvv_require_operable(rv))
+        return false;
+    if (!rvv_exec_whole_reg_move(rv, ir, 1))
+        return false;
+})
+
+RVOP(vmv2r_v, {
+    if (rvv_require_operable(rv))
+        return false;
+    if (!rvv_exec_whole_reg_move(rv, ir, 2))
+        return false;
+})
+
+RVOP(vmv4r_v, {
+    if (rvv_require_operable(rv))
+        return false;
+    if (!rvv_exec_whole_reg_move(rv, ir, 4))
+        return false;
+})
+
+RVOP(vmv8r_v, {
+    if (rvv_require_operable(rv))
+        return false;
+    if (!rvv_exec_whole_reg_move(rv, ir, 8))
+        return false;
 })
 
 RVOP(vmv_x_s, {

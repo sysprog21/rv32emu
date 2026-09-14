@@ -1594,11 +1594,30 @@ static inline bool op_100111(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = rv_insn_vmulh_vv;
         break;
     case 3:
-        /* OPIVI / vmv<nr>r.v (whole-register move). Not implemented;
-         * reject explicitly so the encoding does not fall through to
-         * vsmul.vx below and silently execute the wrong instruction.
+        /* OPIVI / vmv<nr>r.v (V 1.0 §16.6): simm[2:0] holds NREG-1 using
+         * the nf encoding, so only 0, 1, 3 and 7 are defined; every other
+         * simm[4:0] is reserved. Only the unmasked form exists.
          */
-        return false;
+        if (!decode_vm(insn))
+            return false;
+        switch (decode_rs1(insn)) {
+        case 0:
+            ir->opcode = rv_insn_vmv1r_v;
+            break;
+        case 1:
+            ir->opcode = rv_insn_vmv2r_v;
+            break;
+        case 3:
+            ir->opcode = rv_insn_vmv4r_v;
+            break;
+        case 7:
+            ir->opcode = rv_insn_vmv8r_v;
+            break;
+        default:
+            return false;
+        }
+        decode_vvtype(ir, insn);
+        break;
     case 4:
         decode_vxtype(ir, insn);
         ir->opcode = rv_insn_vsmul_vx;

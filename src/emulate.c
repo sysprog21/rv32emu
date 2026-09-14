@@ -1009,6 +1009,42 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #include "rv32_template.c"
 #undef RVOP
 
+#if RV32_HAS_PACKED_TAIL
+/* Decode-time specialization for the common uncompressed loop-induction
+ * form, addi rd, rd, imm.  Keeping the opcode as ADDI preserves all block
+ * and branch metadata; only the native packed handler avoids decoding rs1 a
+ * second time.  Other execution modes continue to use do_addi. */
+static PRESERVE_NONE bool do_addi_self(riscv_t *rv,
+                                       const rv_insn_t *ir,
+                                       uint64_t cycle,
+                                       uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+    cycle++;
+    rv->X[ir->rd] += (uint32_t) ir->imm;
+    PC += 4;
+    if (unlikely(RVOP_NO_NEXT(ir)))
+        goto end_op;
+    const rv_insn_t *next = RVOP_NEXT_IR(ir);
+    RVOP_TAIL_INTRA_IMPL(rv, RVOP_NEXT_IMPL(ir), next, cycle, PC);
+
+end_op:
+#if RV32_HAS(BLOCK_CHAINING)
+{
+    struct rv_insn *taken = ir->branch_taken;
+    if (taken) {
+        last_pc = PC;
+        RVOP_TAIL(rv, taken, cycle, PC);
+    }
+}
+#endif
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
+    return true;
+}
+
+#endif
+
 #if RV32_HAS_PACKED_TAIL && RV32_HAS(MOP_FUSION) && RV32_HAS(EXT_M) && \
     !RV32_HAS(RV32E)
 /* IDEA's multiply-mod-65537 round opens with this exact 16-instruction graph
@@ -2213,7 +2249,7 @@ static inline bool try_fuse_sequence(riscv_t *rv,
 
     ir->fuse = fuse_data;
     /* Copy original instruction BEFORE changing opcode (preserves original
-     * opcode in fuse[0] for handlers like shift_func that need it) */
+     * opcode in fuse[0] for handlers like fuse_shift_exec that need it) */
     memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
     ir->opcode = fuse_opcode;
     ir->imm2 = count;
@@ -2819,6 +2855,14 @@ static void optimize_constant(riscv_t *rv UNUSED, block_t *block)
 }
 
 #if RV32_HAS_PACKED_TAIL
+static inline void specialize_native_addi_self(block_t *block)
+{
+    for (rv_insn_t *ir = block->ir_head; ir; ir = ir->next) {
+        if (IF_insn(ir, addi) && ir->rd == ir->rs1)
+            ir->impl = do_addi_self;
+    }
+}
+
 /* Translation and fusion use the linked pool representation.  Once both have
  * completed, lay the records out consecutively and replace each link with the
  * already-resolved successor handler. */
@@ -2913,6 +2957,9 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #endif
 
     optimize_constant(rv, next_blk);
+#if RV32_HAS_PACKED_TAIL
+    specialize_native_addi_self(next_blk);
+#endif
 #if RV32_HAS(MOP_FUSION)
     /* macro operation fusion */
     match_pattern(rv, next_blk);

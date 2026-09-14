@@ -445,38 +445,20 @@ RVOP(ori, { rv->X[ir->rd] = rv->X[ir->rs1] | ir->imm; })
  */
 RVOP(andi, { rv->X[ir->rd] = rv->X[ir->rs1] & ir->imm; })
 
-FORCE_INLINE void shift_func(riscv_t *rv, const rv_insn_t *ir)
-{
-    switch (ir->opcode) {
-    case rv_insn_slli:
-        rv->X[ir->rd] = rv->X[ir->rs1] << (ir->imm & 0x1f);
-        break;
-    case rv_insn_srli:
-        rv->X[ir->rd] = rv->X[ir->rs1] >> (ir->imm & 0x1f);
-        break;
-    case rv_insn_srai:
-        rv->X[ir->rd] = ((int32_t) rv->X[ir->rs1]) >> (ir->imm & 0x1f);
-        break;
-    default:
-        __UNREACHABLE;
-        break;
-    }
-};
-
 /* SLLI performs logical left shift on the value in register rs1 by the shift
  * amount held in the lower 5 bits of the immediate.
  */
-RVOP(slli, { shift_func(rv, ir); })
+RVOP(slli, { rv->X[ir->rd] = rv->X[ir->rs1] << (ir->imm & 0x1f); })
 
 /* SRLI performs logical right shift on the value in register rs1 by the shift
  * amount held in the lower 5 bits of the immediate.
  */
-RVOP(srli, { shift_func(rv, ir); })
+RVOP(srli, { rv->X[ir->rd] = rv->X[ir->rs1] >> (ir->imm & 0x1f); })
 
 /* SRAI performs arithmetic right shift on the value in register rs1 by the
  * shift amount held in the lower 5 bits of the immediate.
  */
-RVOP(srai, { shift_func(rv, ir); })
+RVOP(srai, { rv->X[ir->rd] = ((int32_t) rv->X[ir->rs1]) >> (ir->imm & 0x1f); })
 
 /* ADD */
 RVOP(add, { rv->X[ir->rd] = rv->X[ir->rs1] + rv->X[ir->rs2]; })

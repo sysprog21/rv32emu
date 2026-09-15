@@ -222,7 +222,7 @@ jobs:
     name: x64 ${{ matrix.compiler }} boot (${{ matrix.boot_type }})
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    timeout-minutes: 40  # T2C boot ~30min + build ~3min + setup ~3min
+    timeout-minutes: 45  # T2C boot ~30min + build ~3min + setup ~3min
     strategy:
       fail-fast: false
       matrix:
@@ -394,7 +394,7 @@ jobs:
 
      - name: boot Linux kernel test (JIT)
        env:
-         BOOT_TIMEOUT: 120  # JIT under macOS load has flaked at 90s
+         BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
        run: |
              make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
              .ci/boot-linux-test.sh

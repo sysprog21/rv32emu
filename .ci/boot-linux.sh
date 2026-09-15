@@ -27,4 +27,31 @@ RET=$((${RET} + $?))
 (. "${SCRIPT_DIR}/virtio-blk.sh")
 RET=$((${RET} + $?))
 
+# Virtio-net user-mode backend test
+if grep -q '^CONFIG_VIRTIO_NET_USER=y$' .config; then
+    (
+        export VNET_BACKEND=user
+        . "${SCRIPT_DIR}/netdev.sh"
+    )
+    RET=$((${RET} + $?))
+fi
+
+# Virtio-net TAP backend test
+if grep -q '^CONFIG_VIRTIO_NET_TAP=y$' .config; then
+    (
+        export VNET_BACKEND=tap
+        . "${SCRIPT_DIR}/netdev.sh"
+    )
+    RET=$((${RET} + $?))
+fi
+
+# Virtio-net vmnet backend test
+if grep -q '^CONFIG_VIRTIO_NET_VMNET=y$' .config; then
+    (
+        export VNET_BACKEND=vmnet
+        . "${SCRIPT_DIR}/netdev.sh"
+    )
+    RET=$((${RET} + $?))
+fi
+
 exit ${RET}

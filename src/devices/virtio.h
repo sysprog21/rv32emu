@@ -5,6 +5,15 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "feature.h"
+
+#if RV32_HAS(VIRTIO_NET)
+#include "netdev.h"
+#endif
+
 #define VIRTIO_VENDOR_ID 0x12345678
 #define VIRTIO_MAGIC_NUMBER 0x74726976
 #define VIRTIO_VERSION 2
@@ -37,6 +46,16 @@
 #define VIRTIO_BLK_F_RO (1 << 5)
 
 #define VIRTIO_RNG_DEV_ID 4
+
+#if RV32_HAS(VIRTIO_NET)
+#define VIRTIO_NET_DEV_ID 1
+
+#define VIRTIO_NET_F_MTU (1U << 3)
+#define VIRTIO_NET_F_MAC (1U << 5)
+#define VIRTIO_NET_F_STATUS (1U << 16)
+
+#define IRQ_VNET_BIT(base) (1U << (base))
+#endif
 
 /* VirtIO MMIO registers */
 #define VIRTIO_REG_LIST                  \
@@ -162,3 +181,54 @@ bool virtio_rng_init(virtio_rng_state_t *vrng);
 virtio_rng_state_t *vrng_new(void);
 
 void vrng_delete(virtio_rng_state_t *vrng);
+
+#if RV32_HAS(VIRTIO_NET)
+typedef struct {
+    uint32_t queue_num;
+    uint32_t queue_desc;
+    uint32_t queue_avail;
+    uint32_t queue_used;
+    uint16_t last_avail;
+    bool ready;
+    bool fd_ready;
+} virtio_net_queue_t;
+
+typedef struct {
+    /* feature negotiation */
+    uint32_t device_features;
+    uint32_t device_features_sel;
+    uint32_t driver_features;
+    uint32_t driver_features_sel;
+
+    /* queue config */
+    uint32_t queue_sel;
+    virtio_net_queue_t queues[2];
+
+    /* status */
+    uint32_t status;
+    uint32_t interrupt_status;
+
+    /* supplied by environment */
+    uint32_t *ram;
+
+    /* host network backend */
+    netdev_t peer;
+
+    /* implementation-specific */
+    void *priv;
+} virtio_net_state_t;
+
+uint32_t virtio_net_read(virtio_net_state_t *vnet, uint32_t addr);
+
+void virtio_net_write(virtio_net_state_t *vnet, uint32_t addr, uint32_t value);
+
+bool virtio_net_init(virtio_net_state_t *vnet, const char *net_type);
+
+virtio_net_state_t *vnet_new(void);
+
+void vnet_delete(virtio_net_state_t *vnet);
+
+void virtio_net_refresh_queue(virtio_net_state_t *vnet);
+
+void virtio_net_reset(virtio_net_state_t *vnet);
+#endif /* RV32_HAS(VIRTIO_NET) */

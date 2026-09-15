@@ -15,6 +15,7 @@
 #if RV32_HAS(SYSTEM_MMIO)
 #include <termios.h>
 #include "dtc/libfdt/libfdt.h"
+#include "system.h"
 
 /* TODO: support WASM target by leveraging -sUSE_ZLIB=1 */
 #if RV32_HAS(LINK_ZLIB)
@@ -52,6 +53,10 @@
 #endif
 
 #define BLOCK_IR_MAP_CAPACITY_BITS 10
+
+#if RV32_HAS(VIRTIO_NET)
+#define VNET_REFRESH_INTERVAL 5000ULL
+#endif
 
 #if !RV32_HAS(JIT)
 /* initialize the block map */
@@ -542,6 +547,12 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
     char *bootargs = attr->data.system.bootargs;
     char **vblk = attr->data.system.vblk_device;
     bool vrng_enabled = attr->data.system.vrng_enabled;
+#if RV32_HAS(VIRTIO_NET)
+    char *vnet = attr->data.system.vnet_backend;
+    bool have_optional_virtio = vblk || vrng_enabled || vnet;
+#else
+    bool have_optional_virtio = vblk || vrng_enabled;
+#endif
     char *blob = *ram_loc;
     char *buf;
     size_t len;
@@ -593,7 +604,8 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
         rv_log_warn("Failed to remove rtc node from DTB");
 #endif
 
-    if (vblk || vrng_enabled) {
+    int32_t dev_idx = 0;
+    if (have_optional_virtio) {
         int node = fdt_path_offset(dtb_buf, "/soc@F0000000");
         assert(node >= 0);
 
@@ -672,11 +684,12 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
             DTB_SET_OR_FAIL(
                 fdt_setprop(dtb_buf, subnode, "interrupts", &irq, sizeof(irq)),
                 "virtio-blk interrupts");
+            dev_idx = attr->vblk_cnt;
         }
 
         if (vrng_enabled) {
-            uint32_t new_addr = next_addr + attr->vblk_cnt * addr_offset;
-            uint32_t new_irq = next_irq + attr->vblk_cnt;
+            uint32_t new_addr = next_addr + dev_idx * addr_offset;
+            uint32_t new_irq = next_irq + dev_idx;
 
             attr->vrng_mmio_base_hi = new_addr >> 20;
             attr->vrng_irq = new_irq;
@@ -702,7 +715,40 @@ void load_dtb(char **ram_loc, vm_attr_t *attr)
             DTB_SET_OR_FAIL(
                 fdt_setprop(dtb_buf, subnode, "interrupts", &irq, sizeof(irq)),
                 "virtio-rng interrupts");
+            dev_idx++;
         }
+
+#if RV32_HAS(VIRTIO_NET)
+        if (vnet) {
+            uint32_t new_addr = next_addr + dev_idx * addr_offset;
+            uint32_t new_irq = next_irq + dev_idx;
+
+            attr->vnet_mmio_base_hi = new_addr >> 20;
+            attr->vnet_irq = new_irq;
+
+            char node_name[32];
+            snprintf(node_name, sizeof(node_name), "virtio@%x", new_addr);
+
+            int subnode = fdt_add_subnode(dtb_buf, node, node_name);
+            if (subnode == -FDT_ERR_NOSPACE)
+                rv_log_warn("add virtio-net subnode no space!\n");
+            assert(subnode >= 0);
+
+            DTB_SET_OR_FAIL(fdt_setprop_string(dtb_buf, subnode, "compatible",
+                                               "virtio,mmio"),
+                            "virtio-net compatible");
+
+            uint32_t reg[2] = {cpu_to_fdt32(new_addr), cpu_to_fdt32(size)};
+            DTB_SET_OR_FAIL(
+                fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)),
+                "virtio-net reg");
+
+            uint32_t irq = cpu_to_fdt32(new_irq);
+            DTB_SET_OR_FAIL(
+                fdt_setprop(dtb_buf, subnode, "interrupts", &irq, sizeof(irq)),
+                "virtio-net interrupts");
+        }
+#endif
     }
 
 dtb_end:
@@ -821,6 +867,13 @@ static void rv_fsync_device()
         vrng_delete(attr->vrng);
         attr->vrng = NULL;
     }
+
+#if RV32_HAS(VIRTIO_NET)
+    if (attr->vnet) {
+        vnet_delete(attr->vnet);
+        attr->vnet = NULL;
+    }
+#endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
@@ -893,6 +946,9 @@ void rv_run(riscv_t *rv)
     assert(rv);
 
     vm_attr_t *attr = PRIV(rv);
+#if RV32_HAS(VIRTIO_NET)
+    uint64_t last_vnet_refresh = rv->csr_cycle;
+#endif
     assert(attr &&
 #if RV32_HAS(SYSTEM_MMIO)
            attr->data.system.kernel && attr->data.system.initrd
@@ -906,8 +962,21 @@ void rv_run(riscv_t *rv)
         emscripten_set_main_loop_arg(rv_step, (void *) rv, 0, 1);
 #else
         /* default main loop */
-        for (; !rv_has_halted(rv);) /* run until the flag is done */
-            rv_step(rv);            /* step instructions */
+        for (; !rv_has_halted(rv);) { /* run until the flag is done */
+            rv_step(rv);              /* step instructions */
+
+#if RV32_HAS(VIRTIO_NET)
+            if (attr->vnet) {
+                if (rv->csr_cycle - last_vnet_refresh >=
+                    VNET_REFRESH_INTERVAL) {
+                    virtio_net_refresh_queue(attr->vnet);
+                    last_vnet_refresh = rv->csr_cycle;
+                }
+
+                emu_update_vnet_interrupts(rv);
+            }
+#endif
+        }
 #endif
     }
 #if !RV32_HAS(SYSTEM_MMIO)
@@ -1706,6 +1775,24 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         }
     }
 
+#if RV32_HAS(VIRTIO_NET)
+    if (attr->data.system.vnet_backend) {
+        if (attr->vnet) { /* check for reboot */
+            virtio_net_reset(attr->vnet);
+        } else {
+            attr->vnet = vnet_new();
+            assert(attr->vnet);
+
+            if (!virtio_net_init(attr->vnet, attr->data.system.vnet_backend)) {
+                rv_log_error("Failed to initialize virtio-net");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        attr->vnet->ram = (uint32_t *) attr->mem->mem_base;
+    }
+#endif
+
     capture_keyboard_input();
 #endif /* !RV32_HAS(SYSTEM_MMIO) */
 
@@ -1769,6 +1856,11 @@ fail_mpool:
 
     if (attr->vrng)
         vrng_delete(attr->vrng);
+
+#if RV32_HAS(VIRTIO_NET)
+    if (attr->vnet)
+        vnet_delete(attr->vnet);
+#endif
 #endif
     map_delete(attr->fd_map);
     memory_delete(attr->mem);

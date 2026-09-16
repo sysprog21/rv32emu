@@ -7,22 +7,22 @@
 
 #if defined(__EMSCRIPTEN__)
 #if RV32_HAS(SYSTEM)
-EM_JS(void, enable_run_button, (), {
+EM_JS(void, enable_run_button, (void), {
     document.getElementById('runSysButton').disabled = false;
 });
-EM_JS(void, disable_run_button, (), {
+EM_JS(void, disable_run_button, (void), {
     document.getElementById('runSysButton').disabled = true;
 });
-EM_JS(void, report_run_completion, (), {});
+EM_JS(void, report_run_completion, (void), {});
 #else
-EM_JS(void, enable_run_button, (), {
+EM_JS(void, enable_run_button, (void), {
     document.getElementById('runButton').disabled = false;
     document.getElementById('stopButton').disabled = true;
 });
-EM_JS(void, disable_run_button, (), {
+EM_JS(void, disable_run_button, (void), {
     document.getElementById('runButton').disabled = true;
 });
-EM_JS(void, report_run_completion, (), {
+EM_JS(void, report_run_completion, (void), {
     var statusText = document.getElementById('statusText');
     var statusBadge = document.getElementById('statusBadge');
     if (statusText)
@@ -38,13 +38,4 @@ EM_JS(void, report_run_completion, (), {
 });
 #endif
 
-#if RV32_HAS(SYSTEM_MMIO)
-extern uint8_t input_buf_size;
-
-char *get_input_buf();
-uint8_t get_input_buf_cap();
-void set_input_buf_size(uint8_t size);
-uint8_t get_input_buf_size();
-void u8250_put_rx_char(uint8_t c);
-#endif
 #endif

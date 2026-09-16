@@ -341,7 +341,7 @@ riscv_t *rv;
 #ifdef __EMSCRIPTEN__
 static bool rv_stop_requested;
 
-void indirect_rv_halt()
+void indirect_rv_halt(void)
 {
     if (rv) {
         rv_stop_requested = true;
@@ -349,12 +349,12 @@ void indirect_rv_halt()
     }
 }
 
-int indirect_rv_alive()
+int indirect_rv_alive(void)
 {
     return rv != NULL;
 }
 
-void indirect_rv_cleanup()
+void indirect_rv_cleanup(void)
 {
     if (rv) {
         rv_delete(rv);
@@ -366,7 +366,7 @@ void indirect_rv_cleanup()
     rv_stop_requested = false;
 }
 
-int indirect_rv_stop_requested()
+int indirect_rv_stop_requested(void)
 {
     return rv_stop_requested;
 }

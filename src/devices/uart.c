@@ -15,6 +15,7 @@
 #include "em_runtime.h"
 #endif
 
+#include "syscall_sdl.h"
 #include "uart.h"
 /* Emulate 8250 (plain, without loopback mode support) */
 
@@ -43,12 +44,12 @@ static char input_buf[INPUT_BUF_MAX_CAP];
 static uint8_t input_buf_start = 0;
 uint8_t input_buf_size = 0;
 
-char *get_input_buf()
+char *get_input_buf(void)
 {
     return input_buf;
 }
 
-uint8_t get_input_buf_cap()
+uint8_t get_input_buf_cap(void)
 {
     return INPUT_BUF_MAX_CAP;
 }
@@ -58,12 +59,12 @@ void set_input_buf_size(uint8_t size)
     input_buf_size = size;
 }
 
-uint8_t get_input_buf_size()
+uint8_t get_input_buf_size(void)
 {
     return input_buf_size;
 }
 
-void u8250_reset_input_buffer()
+void u8250_reset_input_buffer(void)
 {
     input_buf_start = 0;
     input_buf_size = 0;
@@ -141,7 +142,6 @@ static uint8_t u8250_handle_in(u8250_state_t *uart)
      * Need to trap the ctrl-c key and ensure the SDL window and
      * SDL mixer are destroyed properly.
      */
-    extern void sdl_video_audio_cleanup();
     if (value == 3) /* ctrl-c */
         sdl_video_audio_cleanup();
 #endif

@@ -50,6 +50,10 @@ OUT ?= build
 BIN := $(OUT)/rv32emu
 
 CFLAGS = -std=gnu11 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
+# Cross-TU entry points must be declared in a header rather than by a local
+# extern at each use site, and an empty parameter list must not stand in for
+# (void), which would disable argument checking.
+CFLAGS += -Wmissing-prototypes -Wstrict-prototypes
 CFLAGS += -Wno-unused-label -include src/common.h -Isrc/ $(CFLAGS_NO_CET)
 LDFLAGS += $(KCONFIG_LDFLAGS)
 OBJS_EXT :=

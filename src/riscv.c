@@ -323,7 +323,7 @@ fail_jit_cache:
     return false;
 }
 
-void rv_destroy_t2c(riscv_t *rv)
+static void rv_destroy_t2c(riscv_t *rv)
 {
     /* Signal the thread to quit */
     pthread_mutex_lock(&rv->wait_queue_lock);
@@ -538,7 +538,7 @@ static char *realloc_property(char *fdt,
         }                                               \
     } while (0)
 
-void load_dtb(char **ram_loc, vm_attr_t *attr)
+static void load_dtb(char **ram_loc, vm_attr_t *attr)
 {
 #include "minimal_dtb.h"
     char *bootargs = attr->data.system.bootargs;
@@ -734,7 +734,7 @@ dtb_end:
  *
  */
 #define TERMIOS_C_CFLAG (ICANON | ECHO | ISIG)
-static void reset_keyboard_input()
+static void reset_keyboard_input(void)
 {
     struct termios term;
     tcgetattr(0, &term);
@@ -743,7 +743,7 @@ static void reset_keyboard_input()
 }
 
 /* Asynchronous communication to capture all keyboard input for the VM. */
-static void capture_keyboard_input()
+static void capture_keyboard_input(void)
 {
     /* Hook exit, because we want to re-enable default control modes. */
     atexit(reset_keyboard_input);
@@ -766,7 +766,7 @@ static void capture_keyboard_input()
  *
  */
 extern riscv_t *rv;
-static void rv_async_block_clear()
+static void rv_async_block_clear(void)
 {
 #if !RV32_HAS(JIT)
     if (rv && rv->block_map.size)
@@ -776,7 +776,7 @@ static void rv_async_block_clear()
 #endif /* !RV32_HAS(JIT) */
 }
 
-static void rv_fsync_device()
+static void rv_fsync_device(void)
 {
     if (!rv)
         return;

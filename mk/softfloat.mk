@@ -14,6 +14,8 @@ CFLAGS_softfloat := \
     -Wno-sign-compare \
     -Wno-implicit-fallthrough \
     -Wno-uninitialized \
+    -Wno-missing-prototypes \
+    -Wno-strict-prototypes \
     -I$(SOFTFLOAT_DIR)/RISCV \
     -I$(SOFTFLOAT_DIR)/include
 

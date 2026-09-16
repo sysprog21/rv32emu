@@ -21,6 +21,7 @@
 
 #include "riscv.h"
 #include "riscv_private.h"
+#include "syscall_sdl.h"
 
 /* The DSITMBK sound effect in DOOM1.WAD uses a sample rate of 22050, but since
  * the game is played in single-player mode, it is acceptable to stick with
@@ -255,8 +256,6 @@ static inline uint32_t round_pow2(uint32_t x)
 #endif
     return x;
 }
-
-void syscall_submit_queue(riscv_t *rv);
 
 /* check if SDL needs to be set up and run the event loop */
 static bool check_sdl(riscv_t *rv, int width, int height)
@@ -648,7 +647,7 @@ static int convert(void)
     return 0;
 }
 
-uint8_t *mus2midi(uint8_t *data, int *length)
+static uint8_t *mus2midi(uint8_t *data, int *length)
 {
     mus_header_t *mus_hdr = (mus_header_t *) data;
     midi_header_t midi_hdr;
@@ -994,7 +993,7 @@ static void play_music(riscv_t *rv)
 #endif /* RV32_HAS(SDL_MIXER) */
 }
 
-static void stop_music()
+static void stop_music(void)
 {
     if (Mix_PlayingMusic())
         Mix_HaltMusic();
@@ -1040,7 +1039,7 @@ static void init_audio(void)
     audio_init = true;
 }
 
-static void shutdown_audio()
+static void shutdown_audio(void)
 {
 #if RV32_HAS(SDL_MIXER)
     /* Stop all playback first */
@@ -1084,7 +1083,7 @@ static void shutdown_audio()
     audio_init = sfx_thread_init = music_thread_init = false;
 }
 
-void sdl_video_audio_cleanup()
+void sdl_video_audio_cleanup(void)
 {
     if (window) {
         SDL_DestroyWindow(window);

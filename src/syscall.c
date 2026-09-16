@@ -12,6 +12,7 @@
 
 #include "riscv.h"
 #include "riscv_private.h"
+#include "syscall_sdl.h"
 #include "utils.h"
 
 #define PREALLOC_SIZE 4096
@@ -426,13 +427,6 @@ static void syscall_open(riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, fd);
 }
 
-#if RV32_HAS(SDL)
-extern void syscall_draw_frame(riscv_t *rv);
-extern void syscall_setup_queue(riscv_t *rv);
-extern void syscall_submit_queue(riscv_t *rv);
-extern void syscall_setup_audio(riscv_t *rv);
-extern void syscall_control_audio(riscv_t *rv);
-#endif
 
 #if RV32_HAS(SYSTEM_MMIO)
 /* SBI related system calls */

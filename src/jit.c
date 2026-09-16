@@ -1646,7 +1646,7 @@ void jit_misaligned_handler(riscv_t *rv,
 }
 
 #if RV32_HAS(SYSTEM_MMIO)
-uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
+static uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
 {
     MMIO_READ();
     __UNREACHABLE;
@@ -1660,11 +1660,11 @@ uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
  * (is_mmio, paddr) still land in rv->jit_mmu for the JIT to read back; once
  * we have a register-return story those reads can go too.
  */
-void jit_mmu_handler(riscv_t *rv,
-                     uint32_t vreg_idx,
-                     uint32_t vaddr,
-                     uint32_t type,
-                     uint32_t pc)
+static void jit_mmu_handler(riscv_t *rv,
+                            uint32_t vreg_idx,
+                            uint32_t vaddr,
+                            uint32_t type,
+                            uint32_t pc)
 {
     assert(vreg_idx < 32);
 
@@ -2374,11 +2374,11 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
  * The C handler now reads vaddr/type/pc directly from its arguments.  Results
  * (is_mmio, paddr) still land in rv->jit_mmu for the JIT to read back.
  */
-void emit_jit_mmu_handler(struct jit_state *state,
-                          uint8_t vreg_idx,
-                          int vaddr_reg,
-                          uint32_t insn_type,
-                          uint32_t insn_pc)
+static void emit_jit_mmu_handler(struct jit_state *state,
+                                 uint8_t vreg_idx,
+                                 int vaddr_reg,
+                                 uint32_t insn_type,
+                                 uint32_t insn_pc)
 {
     assert(vreg_idx < 32);
 

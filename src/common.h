@@ -180,10 +180,13 @@ static inline uint8_t ilog2(uint32_t x)
 #define __UNREACHABLE __builtin_unreachable()
 #elif defined(_MSC_VER)
 #define __UNREACHABLE __assume(false)
-#else /* unspported compilers */
-/* clang-format off */
-#define __UNREACHABLE do { /* nop */ } while (0)
-/* clang-format on */
+#else /* unsupported compilers */
+/* No intrinsic to lean on, so trap instead of falling through. Several call
+ * sites are the last statement of a non-void function and rely on this never
+ * returning; a no-op here would let those functions run off the end.
+ */
+#include <stdlib.h>
+#define __UNREACHABLE abort()
 #endif
 
 /* Non-optimized builds do not have tail-call optimization (TCO). To work

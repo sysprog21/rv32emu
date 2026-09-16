@@ -49,6 +49,12 @@ $(eval $(require-config))
 OUT ?= build
 BIN := $(OUT)/rv32emu
 
+# Define the effective-config stamp before including mk/system.mk so device
+# object rules can depend on it. The stamp tracks effective feature values,
+# including legacy ENABLE_* overrides, and forces stale objects to rebuild
+# when command-line configuration changes.
+EFFECTIVE_CONFIG_STAMP := $(OUT)/.effective-config
+
 CFLAGS = -std=gnu11 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
 # Cross-TU entry points must be declared in a header rather than by a local
 # extern at each use site, and an empty parameter list must not stand in for
@@ -232,13 +238,13 @@ include mk/http.mk
 # ENABLE_* flags after loading .config, so derive the effective build state here
 # instead of relying only on the Kconfig dependency graph.
 VIRTIO_NET_BUILD_ENABLED := n
-ifeq ($(CONFIG_SYSTEM),y)
-ifneq ($(CONFIG_ELF_LOADER),y)
-ifeq ($(CONFIG_VIRTIO_NET),y)
-ifneq ($(filter y, \
-    $(CONFIG_VIRTIO_NET_TAP) \
-    $(CONFIG_VIRTIO_NET_USER) \
-    $(CONFIG_VIRTIO_NET_VMNET)),)
+ifeq ($(call has,SYSTEM),1)
+ifneq ($(call has,ELF_LOADER),1)
+ifeq ($(call has,VIRTIO_NET),1)
+ifneq ($(filter 1, \
+    $(call has,VIRTIO_NET_TAP) \
+    $(call has,VIRTIO_NET_USER) \
+    $(call has,VIRTIO_NET_VMNET)),)
 VIRTIO_NET_BUILD_ENABLED := y
 endif
 endif
@@ -247,14 +253,14 @@ endif
 
 VIRTIO_NET_USER_BUILD_ENABLED := n
 ifeq ($(VIRTIO_NET_BUILD_ENABLED),y)
-ifeq ($(CONFIG_VIRTIO_NET_USER),y)
+ifeq ($(call has,VIRTIO_NET_USER),1)
 VIRTIO_NET_USER_BUILD_ENABLED := y
 endif
 endif
 
 VIRTIO_NET_VMNET_BUILD_ENABLED := n
 ifeq ($(VIRTIO_NET_BUILD_ENABLED),y)
-ifeq ($(CONFIG_VIRTIO_NET_VMNET),y)
+ifeq ($(call has,VIRTIO_NET_VMNET),1)
 VIRTIO_NET_VMNET_BUILD_ENABLED := y
 endif
 endif
@@ -313,7 +319,6 @@ OBJS += emulate.o riscv.o log.o elf.o cache.o mpool.o $(OBJS_EXT) main.o
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps += $(OBJS:%.o=%.o.d)
 
-EFFECTIVE_CONFIG_STAMP := $(OUT)/.effective-config
 EFFECTIVE_CONFIG_VARS := \
 	CONFIG_BUILD_WASM CONFIG_SYSTEM CONFIG_GOLDFISH_RTC CONFIG_ELF_LOADER \
 	CONFIG_VIRTIO_NET CONFIG_VIRTIO_NET_TAP CONFIG_VIRTIO_NET_USER \
@@ -327,6 +332,11 @@ EFFECTIVE_CONFIG_VARS := \
 	MEM_START MEM_SIZE DTB_SIZE INITRD_SIZE USER_MEM_SIZE \
 	INITRD_ACTUAL_BYTES REAL_MEM_SIZE REAL_DTB_SIZE REAL_INITRD_SIZE \
 	VLEN
+EFFECTIVE_VNET_FEATURES := \
+    VIRTIO_NET \
+    VIRTIO_NET_TAP \
+    VIRTIO_NET_USER \
+    VIRTIO_NET_VMNET
 
 ifeq ($(CONFIG_EXT_F),y)
 $(OBJS): $(SOFTFLOAT_LIB)
@@ -341,6 +351,7 @@ $(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
 		printf 'CC_IS_EMCC=%s\n' '$(CC_IS_EMCC)'; \
 		printf 'CROSS_COMPILE=%s\n' '$(CROSS_COMPILE)'; \
 		$(foreach var,$(EFFECTIVE_CONFIG_VARS),printf '$(var)=%s\n' '$($(var))';) \
+		$(foreach var,$(EFFECTIVE_VNET_FEATURES),printf 'EFFECTIVE_$(var)=%s\n' '$(call has,$(var))';) \
 	} > $@.tmp
 	$(Q)if ! cmp -s $@.tmp $@ 2>/dev/null; then \
 		mv $@.tmp $@; \
@@ -374,7 +385,8 @@ tool: $(TOOLS_BIN)
 # Clean Targets
 clean:
 	$(VECHO) "Cleaning... "
-	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP)
+	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) $(CACHE_OUT) \
+    $(EFFECTIVE_CONFIG_STAMP)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
 	$(Q)$(call notice, [OK])
 
@@ -398,12 +410,12 @@ distclean: cleanconfig
 # build prerequisite rather than a parse-time error so maintenance targets such
 # as clean and config remain usable with an incomplete configuration.
 check-vnet-config:
-	$(Q)if [ "$(CONFIG_SYSTEM)" = "y" ] && \
-	    [ "$(CONFIG_ELF_LOADER)" != "y" ] && \
-	    [ "$(CONFIG_VIRTIO_NET)" = "y" ] && \
-	    [ "$(CONFIG_VIRTIO_NET_TAP)" != "y" ] && \
-	    [ "$(CONFIG_VIRTIO_NET_USER)" != "y" ] && \
-	    [ "$(CONFIG_VIRTIO_NET_VMNET)" != "y" ]; then \
+	$(Q)if [ "$(call has,SYSTEM)" = "1" ] && \
+	    [ "$(call has,ELF_LOADER)" != "1" ] && \
+	    [ "$(call has,VIRTIO_NET)" = "1" ] && \
+	    [ "$(call has,VIRTIO_NET_TAP)" != "1" ] && \
+	    [ "$(call has,VIRTIO_NET_USER)" != "1" ] && \
+	    [ "$(call has,VIRTIO_NET_VMNET)" != "1" ]; then \
 		echo "Error: VirtIO network device requires at least one backend." >&2; \
 		exit 1; \
 	fi

@@ -333,7 +333,7 @@ config VIRTIO_NET_VMNET
 
       vmnet.framework requires macOS and Apple Blocks support, so this
       backend is enabled only when building with Clang.
-      
+
 endmenu
 
 # Performance Optimizations

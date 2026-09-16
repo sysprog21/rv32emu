@@ -74,7 +74,7 @@ elf_t *elf_new(void)
     assert(e);
     e->hdr = NULL;
     e->raw_size = 0;
-    e->symbols = map_init(int, char *, map_cmp_uint);
+    e->symbols = map_init(uint32_t, char *, map_cmp_uint);
     e->raw_data = NULL;
     return e;
 }
@@ -309,7 +309,7 @@ static void fill_symbols(elf_t *e)
 {
     /* initialize the symbol table */
     map_clear(e->symbols);
-    map_insert(e->symbols, &(int) {0}, &(char *) {NULL});
+    map_insert(e->symbols, &(uint32_t) {0}, &(char *) {NULL});
 
     /* get the string table */
     const struct Elf32_Shdr *strtab = get_strtab(e);
@@ -345,7 +345,7 @@ const char *elf_find_symbol(elf_t *e, uint32_t addr)
         fill_symbols(e);
     map_iter_t it;
     map_find(e->symbols, &it, &addr);
-    return map_at_end(e->symbols, &it) ? NULL : map_iter_value(&it, char *);
+    return map_at_end(&it) ? NULL : map_iter_value(&it, char *);
 }
 
 bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)

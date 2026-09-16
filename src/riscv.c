@@ -177,12 +177,14 @@ void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
         if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO)
             continue;
 
-        /* check if standard stream refered by fd exists or not */
-        map_iter_t it;
-        map_find(attr->fd_map, &it, &fd);
-        if (it.node) /* found, remove first */
-            map_erase(attr->fd_map, &it);
-        map_insert(attr->fd_map, &fd, &file);
+        /* map_set() only fails on allocation, and leaving the descriptor
+         * unmapped would make every later read or write on it fail with no
+         * explanation.
+         */
+        if (!map_set(attr->fd_map, &fd, &file)) {
+            rv_log_error("Failed to remap standard stream fd %d", fd);
+            continue;
+        }
 
         /* store new fd to make the vm_attr_t consistent */
         int new_fd = FILENO(file);

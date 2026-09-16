@@ -66,7 +66,7 @@ static int find_free_fd(vm_attr_t *attr)
     for (int i = 3;; ++i) {
         map_iter_t it;
         map_find(attr->fd_map, &it, &i);
-        if (map_at_end(attr->fd_map, &it))
+        if (map_at_end(&it))
             return i;
     }
 }
@@ -105,7 +105,7 @@ static void syscall_write(riscv_t *rv)
     /* lookup the file descriptor */
     map_iter_t it;
     map_find(attr->fd_map, &it, &fd);
-    if (map_at_end(attr->fd_map, &it))
+    if (map_at_end(&it))
         goto error_handler;
 
     uint32_t total_write = 0;
@@ -255,13 +255,13 @@ static void syscall_close(riscv_t *rv)
     if (fd >= 3) { /* lookup the file descriptor */
         map_iter_t it;
         map_find(attr->fd_map, &it, &fd);
-        if (!map_at_end(attr->fd_map, &it)) {
+        if (!map_at_end(&it)) {
             if (fclose(map_iter_value(&it, FILE *))) {
                 /* error */
                 rv_set_reg(rv, rv_reg_a0, -1);
                 return;
             }
-            map_erase(attr->fd_map, &it);
+            map_erase(&it);
 
             /* success */
             rv_set_reg(rv, rv_reg_a0, 0);
@@ -288,7 +288,7 @@ static void syscall_lseek(riscv_t *rv)
     /* find the file descriptor */
     map_iter_t it;
     map_find(attr->fd_map, &it, &fd);
-    if (map_at_end(attr->fd_map, &it)) {
+    if (map_at_end(&it)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
@@ -324,7 +324,7 @@ static void syscall_read(riscv_t *rv)
     /* lookup the file */
     map_iter_t it;
     map_find(attr->fd_map, &it, &fd);
-    if (map_at_end(attr->fd_map, &it)) {
+    if (map_at_end(&it)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;

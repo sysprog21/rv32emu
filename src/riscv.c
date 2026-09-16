@@ -1153,26 +1153,30 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     uintptr_t stack_top = stack_bottom - stack_size;
     stack_top &= -16;
 
-    /* argc */
-    uintptr_t *sp = (uintptr_t *) stack_top;
-    if (!memory_write(mem, (uintptr_t) sp,
-                      (void *) (mem->mem_base + (uintptr_t) args_p),
+    /* argc.
+     *
+     * sp walks guest memory, so it is a guest address rather than a pointer the
+     * host may dereference. Every slot is one RV32 word: writing a host
+     * uintptr_t here would put eight bytes into a four-byte slot and depend on
+     * the host being little-endian for the result to come out right.
+     */
+    uintptr_t sp = stack_top;
+    if (!memory_write(mem, sp, (void *) (mem->mem_base + (uintptr_t) args_p),
                       sizeof(int)))
         goto args_too_large;
     args_p++;
     /* keep argc and args[0] within one word due to RV32 ABI */
-    sp = (uintptr_t *) ((uint32_t *) sp + 1);
+    sp += sizeof(uint32_t);
 
     /* args */
     for (int i = 0; i < argc; i++) {
-        uintptr_t offset = (uintptr_t) args_p;
-        if (!memory_write(mem, (uintptr_t) sp, (void *) &offset,
-                          sizeof(uintptr_t)))
+        uint32_t offset = (uint32_t) (uintptr_t) args_p;
+        if (!memory_write(mem, sp, (void *) &offset, sizeof(offset)))
             goto args_too_large;
         args_p = (uintptr_t *) ((uintptr_t) args_p + strlen(args[i]) + 1);
-        sp = (uintptr_t *) ((uint32_t *) sp + 1);
+        sp += sizeof(uint32_t);
     }
-    if (!memory_fill(mem, (uintptr_t) sp, sizeof(uint32_t), 0))
+    if (!memory_fill(mem, sp, sizeof(uint32_t), 0))
         goto args_too_large;
 
     /* reset sp pointing to argc */

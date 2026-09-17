@@ -980,8 +980,41 @@ static inline bool op_010010(rv_insn_t *ir, const uint32_t insn)
         ir->opcode = rv_insn_vsbc_vvm;
         break;
     case 1:
-        /* FIXME: Implement the decoding for VFUNARY0. */
-        return false;
+        /* OPFVV / VFUNARY0 dispatch (V 1.0 §13.17): vs1 carries the
+         * sub-opcode. Only the single-width conversions are decoded here;
+         * the widening (vfwcvt, vs1 0x08-0x0f) and narrowing (vfncvt,
+         * vs1 0x10-0x17) forms are not implemented yet and fall through
+         * to the reject below rather than being misdecoded.
+         */
+        switch (decode_rs1(insn)) {
+        case 0b00000:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfcvt_xu_f_v;
+            break;
+        case 0b00001:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfcvt_x_f_v;
+            break;
+        case 0b00010:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfcvt_f_xu_v;
+            break;
+        case 0b00011:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfcvt_f_x_v;
+            break;
+        case 0b00110:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfcvt_rtz_xu_f_v;
+            break;
+        case 0b00111:
+            decode_vvtype(ir, insn);
+            ir->opcode = rv_insn_vfcvt_rtz_x_f_v;
+            break;
+        default:
+            return false;
+        }
+        break;
     case 2:
         /* OPMVV / VXUNARY0 (vzext.vf{2,4,8} and vsext.vf{2,4,8}). The
          * RVOPs for these are not implemented yet, so refuse the encoding

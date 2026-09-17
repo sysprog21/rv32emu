@@ -12,6 +12,7 @@
 
 #include "riscv.h"
 #include "riscv_private.h"
+#include "syscall_sdl.h"
 #include "utils.h"
 
 #define PREALLOC_SIZE 4096
@@ -66,7 +67,7 @@ static int find_free_fd(vm_attr_t *attr)
     for (int i = 3;; ++i) {
         map_iter_t it;
         map_find(attr->fd_map, &it, &i);
-        if (map_at_end(attr->fd_map, &it))
+        if (map_at_end(&it))
             return i;
     }
 }
@@ -105,7 +106,7 @@ static void syscall_write(riscv_t *rv)
     /* lookup the file descriptor */
     map_iter_t it;
     map_find(attr->fd_map, &it, &fd);
-    if (map_at_end(attr->fd_map, &it))
+    if (map_at_end(&it))
         goto error_handler;
 
     uint32_t total_write = 0;
@@ -255,13 +256,13 @@ static void syscall_close(riscv_t *rv)
     if (fd >= 3) { /* lookup the file descriptor */
         map_iter_t it;
         map_find(attr->fd_map, &it, &fd);
-        if (!map_at_end(attr->fd_map, &it)) {
+        if (!map_at_end(&it)) {
             if (fclose(map_iter_value(&it, FILE *))) {
                 /* error */
                 rv_set_reg(rv, rv_reg_a0, -1);
                 return;
             }
-            map_erase(attr->fd_map, &it);
+            map_erase(&it);
 
             /* success */
             rv_set_reg(rv, rv_reg_a0, 0);
@@ -288,7 +289,7 @@ static void syscall_lseek(riscv_t *rv)
     /* find the file descriptor */
     map_iter_t it;
     map_find(attr->fd_map, &it, &fd);
-    if (map_at_end(attr->fd_map, &it)) {
+    if (map_at_end(&it)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
@@ -324,7 +325,7 @@ static void syscall_read(riscv_t *rv)
     /* lookup the file */
     map_iter_t it;
     map_find(attr->fd_map, &it, &fd);
-    if (map_at_end(attr->fd_map, &it)) {
+    if (map_at_end(&it)) {
         /* error */
         rv_set_reg(rv, rv_reg_a0, -1);
         return;
@@ -426,13 +427,6 @@ static void syscall_open(riscv_t *rv)
     rv_set_reg(rv, rv_reg_a0, fd);
 }
 
-#if RV32_HAS(SDL)
-extern void syscall_draw_frame(riscv_t *rv);
-extern void syscall_setup_queue(riscv_t *rv);
-extern void syscall_submit_queue(riscv_t *rv);
-extern void syscall_setup_audio(riscv_t *rv);
-extern void syscall_control_audio(riscv_t *rv);
-#endif
 
 #if RV32_HAS(SYSTEM_MMIO)
 /* SBI related system calls */

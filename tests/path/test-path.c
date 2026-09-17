@@ -4,7 +4,7 @@
 #include <string.h>
 #include "utils.h"
 
-void compare(char *input, char *expected_output)
+static void compare(char *input, char *expected_output)
 {
     char *input_sanitized = sanitize_path(input);
     if (!input_sanitized) {
@@ -21,7 +21,7 @@ void compare(char *input, char *expected_output)
     free(input_sanitized);
 }
 
-void sanitize_path_test(void)
+static void sanitize_path_test(void)
 {
     /* Already clean */
     compare("", ".");

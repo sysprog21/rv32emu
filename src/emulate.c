@@ -29,6 +29,7 @@ extern struct target_ops gdbstub_ops;
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#include "syscall_sdl.h"
 #include "trace_match.h"
 #include "utils.h"
 
@@ -3711,7 +3712,6 @@ void ecall_handler(riscv_t *rv)
              * ensure the SDL window and SDL mixer are destroyed properly.
              */
             {
-                extern void sdl_video_audio_cleanup();
                 if (unlikely(PRIV(rv)->running_sdl && reg_a7 == 93)) {
                     sdl_video_audio_cleanup();
                     PRIV(rv)->running_sdl = false;
@@ -3780,7 +3780,7 @@ void dump_registers(riscv_t *rv, char *out_file_path)
 
     fprintf(f, "{\n");
     for (unsigned i = 0; i < N_RV_REGS; i++) {
-        char *comma = i < N_RV_REGS - 1 ? "," : "";
+        const char *comma = i < N_RV_REGS - 1 ? "," : "";
         fprintf(f, "  \"x%d\": %u%s\n", i, rv->X[i], comma);
     }
     fprintf(f, "}\n");

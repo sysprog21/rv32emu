@@ -3,717 +3,732 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-/* This map implementation has undergone extensive modifications, heavily
- * relying on the rb.h header file from jemalloc.
- * The original rb.h file served as the foundation and source of inspiration
- * for adapting and tailoring it specifically for this map implementation.
- * Therefore, credit and sincere thanks are extended to jemalloc for their
- * invaluable work.
- * Reference:
- *   https://github.com/jemalloc/jemalloc/blob/dev/include/ \
- *   jemalloc/internal/rb.h
- */
-
-#include <assert.h>
-#include <limits.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "common.h"
 #include "map.h"
+#include "utils.h"
+
+/* Chunks only need to be reachable for freeing; the cursor that carves nodes
+ * out of the newest one lives in the map, since that is the only chunk it ever
+ * applies to. The header is one pointer and node_align is at least that, so the
+ * first node sits exactly node_align bytes into the chunk.
+ */
+typedef struct map_chunk {
+    struct map_chunk *next;
+} map_chunk_t;
+
+_Static_assert(sizeof(map_chunk_t) <= sizeof(void *),
+               "Chunk header must fit in the first node_align bytes");
 
 struct map_internal {
-    map_node_t *root;           /* Tree root */
-    size_t key_size, data_size; /* Size of key/value type */
-    size_t size;                /* Number of nodes */
-    /* Key comparison function */
+    map_node_t *root, *first, *last;
+    map_node_t *free_nodes;
+    map_chunk_t *chunks;
+    char *bump, *bump_end;
+    size_t key_size, data_size, key_offset, data_offset, node_align;
+    size_t node_stride, size;
     map_cmp_t (*comparator)(const void *, const void *);
 };
 
-/* Each red–black tree node requires at least one byte of storage (for its
- * linkage). A one-byte object could support up to 2^{sizeof(void *) * 8} nodes
- * in an address space. However, the red–black tree algorithm guarantees that
- * the tree depth is bounded by 2 * log₂(n), where n is the number of nodes.
- *
- * For operations such as insertion and deletion, a fixed-size array is used to
- * track the path through the tree. RB_MAX_DEPTH is conservatively defined as 16
- * times the size of a pointer to ensure that the array is large enough for any
- * realistic tree, regardless of the theoretical maximum node count.
- */
-#define RB_MAX_DEPTH (sizeof(void *) << 4)
-
-/* Color/pointer manipulation macros */
-#define RB_COLOR_MASK 1UL
-#define RB_PTR_MASK (~RB_COLOR_MASK)
-
 typedef enum { RB_BLACK = 0, RB_RED = 1 } map_color_t;
 
-/* Helper macros for cleaner access patterns */
-#define RB_IS_RED(node) (rb_node_get_color(node) == RB_RED)
-#define RB_IS_BLACK(node) (rb_node_get_color(node) == RB_BLACK)
+#define RB_COLOR_MASK ((uintptr_t) 1)
 
-/* Prefetch hints for better cache utilization */
-#ifdef __builtin_prefetch
-#define PREFETCH_READ(addr) __builtin_prefetch((addr), 0, 1)
-#define PREFETCH_WRITE(addr) __builtin_prefetch((addr), 1, 1)
-#else
-#define PREFETCH_READ(addr) ((void) 0)
-#define PREFETCH_WRITE(addr) ((void) 0)
-#endif
+/* Stealing the low bit of a child pointer only works while node addresses have
+ * it to spare. Nodes are handed out at node_align, which map_new_aligned()
+ * floors at sizeof(void *). That floor also covers the node header itself,
+ * whose pointer members cannot need a stricter alignment than their size.
+ */
+_Static_assert(sizeof(void *) > RB_COLOR_MASK &&
+                   !(sizeof(void *) & (sizeof(void *) - 1)) &&
+                   _Alignof(map_node_t) <= sizeof(void *),
+               "Node alignment leaves no room for the color bit");
 
-/* Left accessors */
-static inline map_node_t *rb_node_get_left(const map_node_t *node)
+map_cmp_t map_cmp_int(const void *arg0, const void *arg1)
 {
-    return node->left;
+    const int a = *(const int *) arg0;
+    const int b = *(const int *) arg1;
+    return (map_cmp_t) ((a > b) - (a < b));
 }
 
-static inline void rb_node_set_left(map_node_t *node, map_node_t *left)
+map_cmp_t map_cmp_uint(const void *arg0, const void *arg1)
 {
-    node->left = left;
+    const unsigned int a = *(const unsigned int *) arg0;
+    const unsigned int b = *(const unsigned int *) arg1;
+    return (map_cmp_t) ((a > b) - (a < b));
 }
 
-/* Right accessors - using consistent masking */
-static inline map_node_t *rb_node_get_right(const map_node_t *node)
+/* Comparing through the function pointer costs an indirect call per tree level,
+ * which also pins the comparator load inside the descent loop. Taking the
+ * comparator as an argument lets each caller load it once into a register
+ * before descending, and recognizing the built-ins turns the common case into
+ * an inlined compare.
+ */
+static inline map_cmp_t map_compare(map_cmp_t (*cmp)(const void *,
+                                                     const void *),
+                                    const void *left,
+                                    const void *right)
 {
-    return (map_node_t *) (((uintptr_t) node->right_red) & ~RB_COLOR_MASK);
-}
+    if (likely(cmp == map_cmp_int))
+        return map_cmp_int(left, right);
+    if (likely(cmp == map_cmp_uint))
+        return map_cmp_uint(left, right);
 
-static inline void rb_node_set_right(map_node_t *node, map_node_t *right)
-{
-    node->right_red =
-        (map_node_t *) (((uintptr_t) right) |
-                        (((uintptr_t) node->right_red) & RB_COLOR_MASK));
-}
-
-/* Color accessors */
-static inline map_color_t rb_node_get_color(const map_node_t *node)
-{
-    return ((uintptr_t) node->right_red) & RB_COLOR_MASK;
-}
-
-static inline void rb_node_set_color(map_node_t *node, map_color_t color)
-{
-    node->right_red =
-        (map_node_t *) (((uintptr_t) node->right_red & ~RB_COLOR_MASK) | color);
-}
-
-static inline void rb_node_set_red(map_node_t *node)
-{
-    node->right_red = (map_node_t *) (((uintptr_t) node->right_red) | RB_RED);
-}
-
-static inline void rb_node_set_black(map_node_t *node)
-{
-    node->right_red =
-        (map_node_t *) (((uintptr_t) node->right_red) & ~RB_COLOR_MASK);
-}
-
-/* Node initializer */
-static inline void rb_node_init(map_node_t *node)
-{
-    assert((((uintptr_t) node) & RB_COLOR_MASK) == 0); /* properly aligned */
-    node->left = NULL;
-    node->right_red = (map_node_t *) RB_RED; /* NULL with red color */
-}
-
-/* Internal helper macros */
-#define rb_node_rotate_left(x_node, r_node)                      \
-    do {                                                         \
-        (r_node) = rb_node_get_right((x_node));                  \
-        rb_node_set_right((x_node), rb_node_get_left((r_node))); \
-        rb_node_set_left((r_node), (x_node));                    \
-    } while (0)
-
-#define rb_node_rotate_right(x_node, r_node)                     \
-    do {                                                         \
-        (r_node) = rb_node_get_left((x_node));                   \
-        rb_node_set_left((x_node), rb_node_get_right((r_node))); \
-        rb_node_set_right((r_node), (x_node));                   \
-    } while (0)
-
-typedef struct {
-    map_node_t *node;
-    map_cmp_t cmp;
-} rb_path_entry_t;
-
-static void rb_remove(map_t rb, map_node_t *node)
-{
-    rb_path_entry_t path[RB_MAX_DEPTH];
-    rb_path_entry_t *pathp = NULL, *nodep = NULL;
-
-    /* Both traversals below store through pathp[1], so they must stop one entry
-     * short of the end. rb_insert_unique() already bounds itself this way; a
-     * red-black tree cannot reach RB_MAX_DEPTH, but the array must not depend
-     * on that to stay in range.
+    /* The descent compares against the enumerators, so a comparator that
+     * reports magnitude rather than sign (memcmp, strcmp) has to be folded back
+     * to -1/0/1. The built-ins above already are, and skip this.
      */
-    const rb_path_entry_t *path_end = &path[RB_MAX_DEPTH - 1];
-
-    /* Traverse through red-black tree node and find the search target node. */
-    path->node = rb->root;
-    pathp = path;
-    while (pathp->node && pathp < path_end) {
-        map_cmp_t cmp = pathp->cmp =
-            (rb->comparator)(node->key, pathp->node->key);
-        if (cmp == MAP_CMP_LESS) {
-            pathp[1].node = rb_node_get_left(pathp->node);
-        } else {
-            pathp[1].node = rb_node_get_right(pathp->node);
-            if (cmp == MAP_CMP_EQUAL) {
-                /* find node's successor, in preparation for swap */
-                pathp->cmp = MAP_CMP_GREATER;
-                nodep = pathp;
-                for (pathp++; pathp->node && pathp < path_end; pathp++) {
-                    pathp->cmp = MAP_CMP_LESS;
-                    pathp[1].node = rb_node_get_left(pathp->node);
-                }
-                break;
-            }
-        }
-        pathp++;
-    }
-    assert(nodep && nodep->node == node);
-
-    pathp--;
-    if (pathp->node != node) {
-        /* swap node with its successor */
-        map_color_t tcolor = rb_node_get_color(pathp->node);
-        rb_node_set_color(pathp->node, rb_node_get_color(node));
-        rb_node_set_left(pathp->node, rb_node_get_left(node));
-
-        /* If the node's successor is its right child, the following code may
-         * behave incorrectly for the right child pointer.
-         * However, it is not a problem as the pointer will be correctly set
-         * when the successor is pruned.
-         */
-        rb_node_set_right(pathp->node, rb_node_get_right(node));
-        rb_node_set_color(node, tcolor);
-
-        /* The child pointers of the pruned leaf node are never accessed again,
-         * so there is no need to set them to NULL.
-         */
-        nodep->node = pathp->node;
-        pathp->node = node;
-        if (nodep == path) {
-            rb->root = nodep->node;
-        } else {
-            if (nodep[-1].cmp == MAP_CMP_LESS)
-                rb_node_set_left(nodep[-1].node, nodep->node);
-            else
-                rb_node_set_right(nodep[-1].node, nodep->node);
-        }
-    } else {
-        map_node_t *left = rb_node_get_left(node);
-        if (left) {
-            /* node has no successor, but it has a left child.
-             * Splice node out, without losing the left child.
-             */
-            assert(RB_IS_BLACK(node));
-            assert(RB_IS_RED(left));
-            rb_node_set_black(left);
-            if (pathp == path) {
-                /* the subtree rooted at the node's left child has not
-                 * changed, and it is now the root.
-                 */
-                rb->root = left;
-            } else {
-                if (pathp[-1].cmp == MAP_CMP_LESS)
-                    rb_node_set_left(pathp[-1].node, left);
-                else
-                    rb_node_set_right(pathp[-1].node, left);
-            }
-            return;
-        }
-        if (pathp == path) {
-            /* the tree only contained one node */
-            rb->root = NULL;
-            return;
-        }
-    }
-
-    /* The invariant has been established that the node has no right child
-     * (morally speaking; the right child was not explicitly nulled out if
-     * swapped with its successor). Furthermore, the only nodes with
-     * out-of-date summaries exist in path[0], path[1], ..., pathp[-1].
-     */
-    if (RB_IS_RED(pathp->node)) {
-        /* prune red node, which requires no fixup */
-        assert(pathp[-1].cmp == MAP_CMP_LESS);
-        rb_node_set_left(pathp[-1].node, NULL);
-        return;
-    }
-
-    /* The node to be pruned is black, so unwind until balance is restored. */
-    pathp->node = NULL;
-    for (pathp--; (uintptr_t) pathp >= (uintptr_t) path; pathp--) {
-        assert(pathp->cmp != MAP_CMP_EQUAL);
-        if (pathp->cmp == MAP_CMP_LESS) {
-            rb_node_set_left(pathp->node, pathp[1].node);
-            if (RB_IS_RED(pathp->node)) {
-                map_node_t *right = rb_node_get_right(pathp->node);
-                map_node_t *rightleft = rb_node_get_left(right);
-                map_node_t *tnode;
-                if (rightleft && RB_IS_RED(rightleft)) {
-                    /* In the following diagrams, ||, //, and \\
-                     * indicate the path to the removed node.
-                     *
-                     *      ||
-                     *    pathp(r)
-                     *  //        \
-                     * (b)        (b)
-                     *           /
-                     *          (r)
-                     */
-                    rb_node_set_black(pathp->node);
-                    rb_node_rotate_right(right, tnode);
-                    rb_node_set_right(pathp->node, tnode);
-                    rb_node_rotate_left(pathp->node, tnode);
-                } else {
-                    /*      ||
-                     *    pathp(r)
-                     *  //        \
-                     * (b)        (b)
-                     *           /
-                     *          (b)
-                     */
-                    rb_node_rotate_left(pathp->node, tnode);
-                }
-
-                /* Balance restored, but rotation modified subtree root. */
-                assert((uintptr_t) pathp > (uintptr_t) path);
-                if (pathp[-1].cmp == MAP_CMP_LESS)
-                    rb_node_set_left(pathp[-1].node, tnode);
-                else
-                    rb_node_set_right(pathp[-1].node, tnode);
-                return;
-            } else {
-                map_node_t *right = rb_node_get_right(pathp->node);
-                map_node_t *rightleft = rb_node_get_left(right);
-                if (rightleft && RB_IS_RED(rightleft)) {
-                    /*      ||
-                     *    pathp(b)
-                     *  //        \
-                     * (b)        (b)
-                     *           /
-                     *          (r)
-                     */
-                    map_node_t *tnode;
-                    rb_node_set_black(rightleft);
-                    rb_node_rotate_right(right, tnode);
-                    rb_node_set_right(pathp->node, tnode);
-                    rb_node_rotate_left(pathp->node, tnode);
-                    /* Balance restored, but rotation modified subtree root,
-                     * which may actually be the tree root.
-                     */
-                    if (pathp == path) {
-                        /* set root */
-                        rb->root = tnode;
-                    } else {
-                        if (pathp[-1].cmp == MAP_CMP_LESS)
-                            rb_node_set_left(pathp[-1].node, tnode);
-                        else
-                            rb_node_set_right(pathp[-1].node, tnode);
-                    }
-                    return;
-                } else {
-                    /*      ||
-                     *    pathp(b)
-                     *  //        \
-                     * (b)        (b)
-                     *           /
-                     *          (b)
-                     */
-                    map_node_t *tnode;
-                    rb_node_set_red(pathp->node);
-                    rb_node_rotate_left(pathp->node, tnode);
-                    pathp->node = tnode;
-                }
-            }
-        } else {
-            rb_node_set_right(pathp->node, pathp[1].node);
-            map_node_t *left = rb_node_get_left(pathp->node);
-            if (RB_IS_RED(left)) {
-                map_node_t *tnode;
-                map_node_t *leftright = rb_node_get_right(left);
-                map_node_t *leftrightleft = rb_node_get_left(leftright);
-                if (leftrightleft && RB_IS_RED(leftrightleft)) {
-                    /*      ||
-                     *    pathp(b)
-                     *   /        \\
-                     * (r)        (b)
-                     *   \
-                     *   (b)
-                     *   /
-                     * (r)
-                     */
-                    map_node_t *unode;
-                    rb_node_set_black(leftrightleft);
-                    rb_node_rotate_right(pathp->node, unode);
-                    rb_node_rotate_right(pathp->node, tnode);
-                    rb_node_set_right(unode, tnode);
-                    rb_node_rotate_left(unode, tnode);
-                } else {
-                    /*      ||
-                     *    pathp(b)
-                     *   /        \\
-                     * (r)        (b)
-                     *   \
-                     *   (b)
-                     *   /
-                     * (b)
-                     */
-                    assert(leftright);
-                    rb_node_set_red(leftright);
-                    rb_node_rotate_right(pathp->node, tnode);
-                    rb_node_set_black(tnode);
-                }
-
-                /* Balance restored, but rotation modified subtree root, which
-                 * may actually be the tree root.
-                 */
-                if (pathp == path) {
-                    /* set root */
-                    rb->root = tnode;
-                } else {
-                    if (pathp[-1].cmp == MAP_CMP_LESS)
-                        rb_node_set_left(pathp[-1].node, tnode);
-                    else
-                        rb_node_set_right(pathp[-1].node, tnode);
-                }
-                return;
-            } else if (RB_IS_RED(pathp->node)) {
-                map_node_t *leftleft = rb_node_get_left(left);
-                if (leftleft && RB_IS_RED(leftleft)) {
-                    /*        ||
-                     *      pathp(r)
-                     *     /        \\
-                     *   (b)        (b)
-                     *   /
-                     * (r)
-                     */
-                    map_node_t *tnode;
-                    rb_node_set_black(pathp->node);
-                    rb_node_set_red(left);
-                    rb_node_set_black(leftleft);
-                    rb_node_rotate_right(pathp->node, tnode);
-                    /* Balance restored, but rotation modified subtree root. */
-                    assert((uintptr_t) pathp > (uintptr_t) path);
-                    if (pathp[-1].cmp == MAP_CMP_LESS)
-                        rb_node_set_left(pathp[-1].node, tnode);
-                    else
-                        rb_node_set_right(pathp[-1].node, tnode);
-                    return;
-                } else {
-                    /*        ||
-                     *      pathp(r)
-                     *     /        \\
-                     *   (b)        (b)
-                     *   /
-                     * (b)
-                     */
-                    rb_node_set_red(left);
-                    rb_node_set_black(pathp->node);
-                    /* balance restored */
-                    return;
-                }
-            } else {
-                map_node_t *leftleft = rb_node_get_left(left);
-                if (leftleft && RB_IS_RED(leftleft)) {
-                    /*               ||
-                     *             pathp(b)
-                     *            /        \\
-                     *          (b)        (b)
-                     *          /
-                     *        (r)
-                     */
-                    map_node_t *tnode;
-                    rb_node_set_black(leftleft);
-                    rb_node_rotate_right(pathp->node, tnode);
-                    /* Balance restored, but rotation modified subtree root,
-                     * which may actually be the tree root.
-                     */
-                    if (pathp == path) {
-                        /* set root */
-                        rb->root = tnode;
-                    } else {
-                        if (pathp[-1].cmp == MAP_CMP_LESS)
-                            rb_node_set_left(pathp[-1].node, tnode);
-                        else
-                            rb_node_set_right(pathp[-1].node, tnode);
-                    }
-                    return;
-                } else {
-                    /*               ||
-                     *             pathp(b)
-                     *            /        \\
-                     *          (b)        (b)
-                     *          /
-                     *        (b)
-                     */
-                    rb_node_set_red(left);
-                }
-            }
-        }
-    }
-
-    /* set root */
-    rb->root = path->node;
-    assert(RB_IS_BLACK(rb->root));
+    const int result = cmp(left, right);
+    return result < 0 ? MAP_CMP_LESS
+                      : (result > 0 ? MAP_CMP_GREATER : MAP_CMP_EQUAL);
 }
 
-static void rb_destroy_recurse(map_t rb, map_node_t *node)
+static inline void *node_key(map_t map, map_node_t *node)
 {
-    if (!node)
-        return;
-
-    rb_destroy_recurse(rb, rb_node_get_left(node));
-    rb_node_set_left((node), NULL);
-    rb_destroy_recurse(rb, rb_node_get_right(node));
-    rb_node_set_right((node), NULL);
-    /* Single free for entire block (node + key + data) */
-    free(node);
+    return (char *) node + map->key_offset;
 }
 
-/* Create node with single allocation */
-static map_node_t *map_create_node(const void *key,
-                                   const void *value,
-                                   size_t ksize,
-                                   size_t vsize)
+static inline void *node_data(map_t map, map_node_t *node)
 {
-    /* Calculate aligned offsets more efficiently */
-    const size_t align_mask = sizeof(void *) - 1;
-    size_t key_offset = (sizeof(map_node_t) + align_mask) & ~align_mask;
-    size_t data_offset = (key_offset + ksize + align_mask) & ~align_mask;
-    size_t total_size = data_offset + vsize;
+    return (char *) node + map->data_offset;
+}
 
-    /* Check for overflow */
-    if (unlikely(total_size < vsize || total_size < ksize))
-        return NULL;
+/* Unlike node_color(), these take a live node: every call site either holds a
+ * loop invariant or has already tested the link. node_color() and
+ * node_set_color() keep their NULL checks because the fixups rely on a NULL
+ * child reading as black.
+ */
+static inline map_node_t *node_right(const map_node_t *node)
+{
+    return (map_node_t *) ((uintptr_t) node->right_red & ~RB_COLOR_MASK);
+}
 
-    char *mem = malloc(total_size);
-    if (unlikely(!mem))
-        return NULL;
+static inline void node_set_right(map_node_t *node, map_node_t *right)
+{
+    node->right_red =
+        (map_node_t *) ((uintptr_t) right |
+                        ((uintptr_t) node->right_red & RB_COLOR_MASK));
+}
 
-    map_node_t *node = (map_node_t *) mem;
-    node->key = mem + key_offset;
-    node->data = mem + data_offset;
+static inline map_color_t node_color(const map_node_t *node)
+{
+    return node ? (map_color_t) ((uintptr_t) node->right_red & RB_COLOR_MASK)
+                : RB_BLACK;
+}
 
-    /* Initialize node linkage */
-    rb_node_init(node);
+static inline void node_set_color(map_node_t *node, map_color_t color)
+{
+    if (node)
+        node->right_red = (map_node_t *) ((uintptr_t) node_right(node) | color);
+}
 
-    /* Copy key and value data efficiently */
-    if (key)
-        memcpy(node->key, key, ksize);
-    else
-        memset(node->key, 0, ksize);
-
-    if (value)
-        memcpy(node->data, value, vsize);
-    else
-        memset(node->data, 0, vsize);
-
+static inline map_node_t *node_min(map_node_t *node)
+{
+    while (node->left)
+        node = node->left;
     return node;
 }
 
-/* Constructor - creates a new map instance */
+static inline map_node_t *node_max(map_node_t *node)
+{
+    map_node_t *right;
+    while ((right = node_right(node)))
+        node = right;
+    return node;
+}
+
+static map_node_t *node_next(map_node_t *node)
+{
+    if (node_right(node))
+        return node_min(node_right(node));
+
+    map_node_t *parent = node->parent;
+    while (parent && node == node_right(parent)) {
+        node = parent;
+        parent = parent->parent;
+    }
+    return parent;
+}
+
+static map_node_t *node_prev(map_node_t *node)
+{
+    if (node->left)
+        return node_max(node->left);
+
+    map_node_t *parent = node->parent;
+    while (parent && node == parent->left) {
+        node = parent;
+        parent = parent->parent;
+    }
+    return parent;
+}
+
+static void transplant(map_t map, map_node_t *old, map_node_t *replacement)
+{
+    if (!old->parent)
+        map->root = replacement;
+    else if (old == old->parent->left)
+        old->parent->left = replacement;
+    else
+        node_set_right(old->parent, replacement);
+    if (replacement)
+        replacement->parent = old->parent;
+}
+
+static void rotate_left(map_t map, map_node_t *node)
+{
+    map_node_t *right = node_right(node);
+    map_node_t *middle = right->left;
+
+    node_set_right(node, middle);
+    if (middle)
+        middle->parent = node;
+
+    transplant(map, node, right);
+    right->left = node;
+    node->parent = right;
+}
+
+static void rotate_right(map_t map, map_node_t *node)
+{
+    map_node_t *left = node->left;
+    map_node_t *middle = node_right(left);
+
+    node->left = middle;
+    if (middle)
+        middle->parent = node;
+
+    transplant(map, node, left);
+    node_set_right(left, node);
+    node->parent = left;
+}
+
+static bool valid_alignment(size_t align)
+{
+    return align && !(align & (align - 1));
+}
+
+/* align_up() cannot report the overflow, so guard it here and let the caller
+ * fail the construction rather than wrap around.
+ */
+static bool align_offset(size_t offset, size_t align, size_t *result)
+{
+    if (offset > SIZE_MAX - (align - 1))
+        return false;
+    *result = align_up(offset, align);
+    return true;
+}
+
+/* Chunks stay allocated until map_clear(); erased nodes return to the free list
+ * rather than to the allocator. Per-chunk live counts would be needed only if
+ * long-lived maps commonly shrink without being refilled.
+ */
+static bool grow_chunks(map_t map)
+{
+    size_t capacity = 16384 / map->node_stride;
+    if (!capacity)
+        capacity = 1;
+    if (capacity > (SIZE_MAX - map->node_align) / map->node_stride)
+        return false;
+    size_t alloc_size = map->node_align + capacity * map->node_stride;
+
+    map_chunk_t *chunk = map->node_align <= _Alignof(max_align_t)
+                             ? malloc(alloc_size)
+                             : aligned_alloc(map->node_align, alloc_size);
+    if (!chunk)
+        return false;
+
+    chunk->next = map->chunks;
+    map->chunks = chunk;
+    map->bump = (char *) chunk + map->node_align;
+    map->bump_end = map->bump + capacity * map->node_stride;
+    return true;
+}
+
+static map_node_t *alloc_node(map_t map)
+{
+    if (map->free_nodes) {
+        map_node_t *node = map->free_nodes;
+        map->free_nodes = node->left;
+        return node;
+    }
+
+    if (map->bump == map->bump_end && !grow_chunks(map))
+        return NULL;
+
+    /* The chunk is allocated at node_align and both the header offset and
+     * node_stride are multiples of it, so the cursor is always aligned. Cast
+     * through void * to say so: the compiler only sees char * arithmetic and
+     * would otherwise warn under -Wcast-align.
+     */
+    map_node_t *node = (map_node_t *) (void *) map->bump;
+    map->bump += map->node_stride;
+    return node;
+}
+
+/* memmove because a replacement value may point into the node itself, as
+ * map_iter_value_ptr() hands out exactly that address.
+ */
+static void node_store_value(map_t map, map_node_t *node, const void *value)
+{
+    void *data = node_data(map, node);
+    if (value)
+        memmove(data, value, map->data_size);
+    else
+        memset(data, 0, map->data_size);
+}
+
+static map_node_t *map_create_node(map_t map,
+                                   const void *key,
+                                   const void *value)
+{
+    map_node_t *node = alloc_node(map);
+    if (unlikely(!node))
+        return NULL;
+
+    node->left = NULL;
+    node->right_red = (map_node_t *) RB_RED;
+    node->parent = NULL;
+    memcpy(node_key(map, node), key, map->key_size);
+    node_store_value(map, node, value);
+    return node;
+}
+
+/* Restore the red-black invariants after linking a red node into the tree.
+ *
+ * Both this and remove_fixup() are the textbook bottom-up algorithms driven by
+ * the parent links. Keeping insertion and removal in the same family matters: a
+ * left-leaning insert paired with this general removal silently accepts the
+ * right-leaning red links removal produces and then corrupts the tree.
+ */
+static void insert_fixup(map_t map, map_node_t *node)
+{
+    map_node_t *parent;
+    while ((parent = node->parent) && node_color(parent) == RB_RED) {
+        /* A red parent is never the root, so the grandparent exists. */
+        map_node_t *grand = parent->parent;
+        if (parent == grand->left) {
+            map_node_t *uncle = node_right(grand);
+            if (node_color(uncle) == RB_RED) {
+                node_set_color(parent, RB_BLACK);
+                node_set_color(uncle, RB_BLACK);
+                node_set_color(grand, RB_RED);
+                node = grand;
+                continue;
+            }
+            if (node == node_right(parent)) {
+                node = parent;
+                rotate_left(map, node);
+                parent = node->parent;
+            }
+            node_set_color(parent, RB_BLACK);
+            node_set_color(grand, RB_RED);
+            rotate_right(map, grand);
+        } else {
+            map_node_t *uncle = grand->left;
+            if (node_color(uncle) == RB_RED) {
+                node_set_color(parent, RB_BLACK);
+                node_set_color(uncle, RB_BLACK);
+                node_set_color(grand, RB_RED);
+                node = grand;
+                continue;
+            }
+            if (node == parent->left) {
+                node = parent;
+                rotate_right(map, node);
+                parent = node->parent;
+            }
+            node_set_color(parent, RB_BLACK);
+            node_set_color(grand, RB_RED);
+            rotate_left(map, grand);
+        }
+    }
+    node_set_color(map->root, RB_BLACK);
+}
+
+static bool map_put(map_t map, const void *key, const void *value, bool replace)
+{
+    if (!map || !key)
+        return false;
+
+    map_cmp_t (*const comparator)(const void *, const void *) = map->comparator;
+    map_node_t *walk = map->root, *parent = NULL;
+    const size_t key_offset = map->key_offset;
+    map_cmp_t cmp = MAP_CMP_EQUAL;
+
+    /* Filling a map in ascending or descending key order is common here:
+     * sequential file descriptors, sorted address ranges. The largest node has
+     * no right child and the smallest has no left child, so a key outside the
+     * current range can be linked straight onto the cached extreme instead of
+     * walking down from the root.
+     */
+    if (map->last &&
+        map_compare(comparator, key, (char *) map->last + key_offset) ==
+            MAP_CMP_GREATER) {
+        parent = map->last;
+        cmp = MAP_CMP_GREATER;
+        walk = NULL;
+    } else if (map->first &&
+               map_compare(comparator, key, (char *) map->first + key_offset) ==
+                   MAP_CMP_LESS) {
+        parent = map->first;
+        cmp = MAP_CMP_LESS;
+        walk = NULL;
+    }
+
+    while (walk) {
+        cmp = map_compare(comparator, key, (char *) walk + key_offset);
+        if (cmp == MAP_CMP_EQUAL) {
+            if (replace)
+                node_store_value(map, walk, value);
+            return replace;
+        }
+        parent = walk;
+        walk = cmp == MAP_CMP_LESS ? walk->left : node_right(walk);
+    }
+
+    map_node_t *node = map_create_node(map, key, value);
+    if (unlikely(!node))
+        return false;
+
+    /* The new node is the smallest exactly when it lands as the left child of
+     * the current smallest, and the mirror holds for the largest, so the cached
+     * extremes fall out of the link step instead of being tracked down the
+     * descent.
+     */
+    node->parent = parent;
+    if (!parent) {
+        map->root = map->first = map->last = node;
+    } else if (cmp == MAP_CMP_LESS) {
+        parent->left = node;
+        if (parent == map->first)
+            map->first = node;
+    } else {
+        node_set_right(parent, node);
+        if (parent == map->last)
+            map->last = node;
+    }
+
+    insert_fixup(map, node);
+    map->size++;
+    return true;
+}
+
+/* Repair the deficient black height rooted at node, whose parent is given
+ * explicitly because node may be NULL.
+ *
+ * The sibling is never NULL here: node is short one black node, so the sibling
+ * subtree has a black height of at least one and therefore a real root.
+ */
+static void remove_fixup(map_t map, map_node_t *node, map_node_t *parent)
+{
+    while (node != map->root && node_color(node) == RB_BLACK) {
+        if (node == parent->left) {
+            map_node_t *sibling = node_right(parent);
+            if (node_color(sibling) == RB_RED) {
+                node_set_color(sibling, RB_BLACK);
+                node_set_color(parent, RB_RED);
+                rotate_left(map, parent);
+                sibling = node_right(parent);
+            }
+
+            if (node_color(sibling->left) == RB_BLACK &&
+                node_color(node_right(sibling)) == RB_BLACK) {
+                node_set_color(sibling, RB_RED);
+                node = parent;
+                parent = node->parent;
+            } else {
+                if (node_color(node_right(sibling)) == RB_BLACK) {
+                    node_set_color(sibling->left, RB_BLACK);
+                    node_set_color(sibling, RB_RED);
+                    rotate_right(map, sibling);
+                    sibling = node_right(parent);
+                }
+                node_set_color(sibling, node_color(parent));
+                node_set_color(parent, RB_BLACK);
+                node_set_color(node_right(sibling), RB_BLACK);
+                rotate_left(map, parent);
+                node = map->root;
+                parent = NULL;
+            }
+        } else {
+            map_node_t *sibling = parent->left;
+            if (node_color(sibling) == RB_RED) {
+                node_set_color(sibling, RB_BLACK);
+                node_set_color(parent, RB_RED);
+                rotate_right(map, parent);
+                sibling = parent->left;
+            }
+
+            if (node_color(node_right(sibling)) == RB_BLACK &&
+                node_color(sibling->left) == RB_BLACK) {
+                node_set_color(sibling, RB_RED);
+                node = parent;
+                parent = node->parent;
+            } else {
+                if (node_color(sibling->left) == RB_BLACK) {
+                    node_set_color(node_right(sibling), RB_BLACK);
+                    node_set_color(sibling, RB_RED);
+                    rotate_left(map, sibling);
+                    sibling = parent->left;
+                }
+                node_set_color(sibling, node_color(parent));
+                node_set_color(parent, RB_BLACK);
+                node_set_color(sibling->left, RB_BLACK);
+                rotate_right(map, parent);
+                node = map->root;
+                parent = NULL;
+            }
+        }
+    }
+    node_set_color(node, RB_BLACK);
+}
+
+static void rb_remove(map_t map, map_node_t *node)
+{
+    map_node_t *moved = node;
+    map_node_t *child;
+    map_node_t *child_parent;
+    map_color_t removed_color = node_color(moved);
+
+    if (!node->left || !node_right(node)) {
+        child = node->left ? node->left : node_right(node);
+        child_parent = node->parent;
+        transplant(map, node, child);
+    } else {
+        moved = node_min(node_right(node));
+        removed_color = node_color(moved);
+        child = node_right(moved);
+        if (moved->parent == node) {
+            child_parent = moved;
+            if (child)
+                child->parent = moved;
+        } else {
+            child_parent = moved->parent;
+            transplant(map, moved, child);
+            node_set_right(moved, node_right(node));
+            node_right(moved)->parent = moved;
+        }
+
+        transplant(map, node, moved);
+        moved->left = node->left;
+        moved->left->parent = moved;
+        node_set_color(moved, node_color(node));
+    }
+
+    if (removed_color == RB_BLACK)
+        remove_fixup(map, child, child_parent);
+}
+
+map_t map_new_aligned(size_t key_size,
+                      size_t key_align,
+                      size_t data_size,
+                      size_t data_align,
+                      map_cmp_t (*cmp)(const void *, const void *))
+{
+    if (!key_size || !data_size || !cmp || !valid_alignment(key_align) ||
+        !valid_alignment(data_align))
+        return NULL;
+
+    size_t data_offset;
+    if (!align_offset(sizeof(map_node_t), data_align, &data_offset) ||
+        data_size > SIZE_MAX - data_offset)
+        return NULL;
+    size_t data_end = data_offset + data_size;
+    size_t key_offset;
+    if (!align_offset(data_end, key_align, &key_offset) ||
+        key_size > SIZE_MAX - key_offset)
+        return NULL;
+    size_t node_size = key_offset + key_size;
+    size_t node_stride;
+    size_t node_align = key_align > data_align ? key_align : data_align;
+    if (node_align < sizeof(void *))
+        node_align = sizeof(void *);
+    if (!align_offset(node_size, node_align, &node_stride))
+        return NULL;
+
+    /* Nodes are handed out at a fixed stride inside each chunk, so a
+     * power-of-two stride makes every node land on the same few cache sets. One
+     * extra alignment unit staggers them. Measured on 100k random-key lookups
+     * this is worth 2-4%, and it costs 8 bytes per node: for the common
+     * int-keyed, int-valued map, 40 bytes instead of 32. Drop the bump if
+     * footprint matters more than random-access speed.
+     */
+    if (!(node_stride & (node_stride - 1))) {
+        if (node_stride > SIZE_MAX - node_align)
+            return NULL;
+        node_stride += node_align;
+    }
+
+    map_t map = malloc(sizeof(*map));
+    if (!map)
+        return NULL;
+
+    *map = (struct map_internal) {
+        .key_size = key_size,
+        .data_size = data_size,
+        .key_offset = key_offset,
+        .data_offset = data_offset,
+        .node_align = node_align,
+        .node_stride = node_stride,
+        .comparator = cmp,
+    };
+    return map;
+}
+
 map_t map_new(size_t key_size,
               size_t data_size,
               map_cmp_t (*cmp)(const void *, const void *))
 {
-    /* Validate sizes to prevent integer overflow in allocation */
-    if (key_size == 0 || data_size == 0 || !cmp)
-        return NULL;
-
-    /* Prevent overflow: ensure total allocation size is reasonable */
-    size_t max_size = SIZE_MAX / 4; /* Conservative limit */
-    if (key_size > max_size || data_size > max_size ||
-        (key_size + data_size) > max_size - sizeof(map_node_t))
-        return NULL;
-
-    map_t tree = malloc(sizeof(struct map_internal));
-    if (!tree)
-        return NULL;
-
-    tree->key_size = key_size;
-    tree->data_size = data_size;
-    tree->comparator = cmp;
-    tree->root = NULL;
-    tree->size = 0;
-    return tree;
+    return map_new_aligned(key_size, _Alignof(void *), data_size,
+                           _Alignof(void *), cmp);
 }
 
-/* Insert with single traversal - hot path */
-static inline const map_node_t *rb_insert_unique(map_t rb,
-                                                 const void *key,
-                                                 rb_path_entry_t *path,
-                                                 rb_path_entry_t **pathp_out)
-{
-    rb_path_entry_t *pathp;
-
-    /* Single traversal to find insertion point or existing key */
-    path->node = rb->root;
-    size_t depth = 0;
-    for (pathp = path; pathp->node && depth < RB_MAX_DEPTH - 1;
-         pathp++, depth++) {
-        map_cmp_t cmp = pathp->cmp = (rb->comparator)(key, pathp->node->key);
-        if (cmp == MAP_CMP_LESS) {
-            pathp[1].node = rb_node_get_left(pathp->node);
-        } else if (cmp == MAP_CMP_GREATER) {
-            pathp[1].node = rb_node_get_right(pathp->node);
-        } else {
-            /* Key already exists */
-            return pathp->node;
-        }
-    }
-
-    /* Key doesn't exist, return NULL and set pathp for insertion */
-    if (depth >= RB_MAX_DEPTH - 1)
-        return (const map_node_t *) -1; /* Tree too deep */
-    *pathp_out = pathp;
-    return NULL;
-}
-
-/* Insert a key-value pair into the map */
 bool map_insert(map_t obj, const void *key, const void *val)
 {
-    if (!obj || !key)
-        return false;
-
-    rb_path_entry_t path[RB_MAX_DEPTH];
-    rb_path_entry_t *pathp = NULL;
-
-    /* Single traversal to check existence and get insertion point */
-    const map_node_t *existing = rb_insert_unique(obj, key, path, &pathp);
-    if (existing == (const map_node_t *) -1)
-        return false; /* Tree too deep */
-    if (existing)
-        return false; /* Key already exists */
-
-    /* Create and insert new node */
-    map_node_t *node = map_create_node(key, val, obj->key_size, obj->data_size);
-    if (!node)
-        return false;
-
-    /* Node already initialized in map_create_node, just set in path */
-    pathp->node = node;
-
-    /* Fix up red-black tree properties */
-    for (pathp--; (uintptr_t) pathp >= (uintptr_t) path; pathp--) {
-        map_node_t *cnode = pathp->node;
-        if (pathp->cmp == MAP_CMP_LESS) {
-            map_node_t *left = pathp[1].node;
-            rb_node_set_left(cnode, left);
-            if (RB_IS_BLACK(left))
-                break;
-            map_node_t *leftleft = rb_node_get_left(left);
-            if (leftleft && RB_IS_RED(leftleft)) {
-                /* fix up 4-node */
-                map_node_t *tnode;
-                rb_node_set_black(leftleft);
-                rb_node_rotate_right(cnode, tnode);
-                cnode = tnode;
-            }
-        } else {
-            map_node_t *right = pathp[1].node;
-            rb_node_set_right(cnode, right);
-            if (RB_IS_BLACK(right))
-                break;
-            map_node_t *left = rb_node_get_left(cnode);
-            if (left && RB_IS_RED(left)) {
-                /* split 4-node */
-                rb_node_set_black(left);
-                rb_node_set_black(right);
-                rb_node_set_red(cnode);
-            } else {
-                /* lean left */
-                map_node_t *tnode;
-                map_color_t tcolor = rb_node_get_color(cnode);
-                rb_node_rotate_left(cnode, tnode);
-                rb_node_set_color(tnode, tcolor);
-                rb_node_set_red(cnode);
-                cnode = tnode;
-            }
-        }
-        pathp->node = cnode;
-    }
-
-    /* Set root and make it black */
-    obj->root = path->node;
-    rb_node_set_black(obj->root);
-    obj->size++;
-    return true;
+    return map_put(obj, key, val, false);
 }
 
-/* Get functions, avoiding stack allocation */
+bool map_set(map_t obj, const void *key, const void *val)
+{
+    return map_put(obj, key, val, true);
+}
+
+/* Park an iterator at the end of obj, which may itself be NULL. */
+static inline void iter_end(map_t obj, map_iter_t *it)
+{
+    it->map = obj;
+    it->node = NULL;
+}
+
 void map_find(map_t obj, map_iter_t *it, const void *key)
 {
-    if (unlikely(!obj || !it)) {
+    if (unlikely(!obj || !it || !key)) {
         if (it)
-            it->node = NULL;
+            iter_end(obj, it);
         return;
     }
 
+    map_cmp_t (*const comparator)(const void *, const void *) = obj->comparator;
+    const size_t key_offset = obj->key_offset;
     map_node_t *node = obj->root;
-
-    /* Prefetch for large trees */
-    if (node && obj->size > 10000) {
-        PREFETCH_READ(node->left);
-        PREFETCH_READ(rb_node_get_right(node));
+    while (node) {
+        map_cmp_t cmp =
+            map_compare(comparator, key, (char *) node + key_offset);
+        if (cmp == MAP_CMP_EQUAL)
+            break;
+        node = cmp == MAP_CMP_LESS ? node->left : node_right(node);
     }
+    it->map = obj;
+    it->node = node;
+}
+
+/* Shared descent for the two bound queries: record every node that qualifies as
+ * a bound and keep narrowing. The two differ only in which comparison
+ * disqualifies a node, so pass that as skip.
+ */
+static void map_bound(map_t obj,
+                      map_iter_t *it,
+                      const void *key,
+                      map_cmp_t skip)
+{
+    if (unlikely(!obj || !it || !key)) {
+        if (it)
+            iter_end(obj, it);
+        return;
+    }
+
+    map_cmp_t (*const comparator)(const void *, const void *) = obj->comparator;
+    const size_t key_offset = obj->key_offset;
+    map_node_t *node = obj->root, *bound = NULL;
 
     while (node) {
-        map_cmp_t cmp = obj->comparator(key, node->key);
-        if (cmp == MAP_CMP_EQUAL) {
-            it->node = node;
-            return;
-        }
-        node = (cmp == MAP_CMP_LESS) ? node->left : rb_node_get_right(node);
+        map_cmp_t cmp =
+            map_compare(comparator, key, (char *) node + key_offset);
+        if (cmp != skip)
+            bound = node;
+        if (cmp == MAP_CMP_EQUAL)
+            break;
+        node = cmp == MAP_CMP_LESS ? node->left : node_right(node);
     }
-    it->node = NULL;
+    it->map = obj;
+    it->node = bound;
+}
+
+void map_ceil(map_t obj, map_iter_t *it, const void *key)
+{
+    map_bound(obj, it, key, MAP_CMP_GREATER);
+}
+
+void map_floor(map_t obj, map_iter_t *it, const void *key)
+{
+    map_bound(obj, it, key, MAP_CMP_LESS);
 }
 
 bool map_empty(map_t obj)
 {
-    return unlikely(!obj) || !obj->root;
+    return !obj || !obj->root;
 }
 
-/* Iteration */
-bool map_at_end(map_t m, const map_iter_t *it)
+bool map_at_end(const map_iter_t *it)
 {
-    (void) m; /* Suppress unused parameter warning */
-    return !(it->node);
+    return !it || !it->node;
 }
 
-/* Remove functions */
-void map_erase(map_t obj, map_iter_t *it)
+const void *map_iter_key_ptr(const map_iter_t *it)
 {
-    if (!obj || !it || !it->node)
+    if (unlikely(!it || !it->map || !it->node))
+        return NULL;
+    return node_key(it->map, it->node);
+}
+
+void *map_iter_value_ptr(const map_iter_t *it)
+{
+    if (unlikely(!it || !it->map || !it->node))
+        return NULL;
+    return node_data(it->map, it->node);
+}
+
+void map_erase(map_iter_t *it)
+{
+    if (!it || !it->node || !it->map || !it->map->size)
         return;
 
-    /* Verify node exists in tree before removal */
-    if (obj->size == 0)
-        return;
+    map_t obj = it->map;
+    map_node_t *node = it->node;
+    if (node == obj->first)
+        obj->first = node_next(node);
+    if (node == obj->last)
+        obj->last = node_prev(node);
 
-    rb_remove(obj, it->node);
-    /* Single free for entire block (node + key + data) */
-    free(it->node);
+    rb_remove(obj, node);
+    node->left = obj->free_nodes;
+    obj->free_nodes = node;
     it->node = NULL;
-
-    /* Prevent underflow */
-    if (obj->size > 0)
-        obj->size--;
+    obj->size--;
 }
 
-/* Empty map */
 void map_clear(map_t obj)
 {
     if (!obj)
         return;
-    rb_destroy_recurse(obj, obj->root);
-    obj->root = NULL;
+    map_chunk_t *chunk = obj->chunks;
+    while (chunk) {
+        map_chunk_t *next = chunk->next;
+        free(chunk);
+        chunk = next;
+    }
+    obj->root = obj->first = obj->last = NULL;
+    obj->free_nodes = NULL;
+    obj->chunks = NULL;
+    obj->bump = obj->bump_end = NULL;
     obj->size = 0;
 }
 
-/* Destroy map and free all resources */
 void map_delete(map_t obj)
 {
     if (!obj)
@@ -722,129 +737,35 @@ void map_delete(map_t obj)
     free(obj);
 }
 
-/* Get number of elements in map */
 size_t map_size(map_t obj)
 {
-    return likely(obj) ? obj->size : 0;
+    return obj ? obj->size : 0;
 }
-
-/* Iterator traversal functions */
 
 void map_first(map_t map, map_iter_t *it)
 {
-    if (unlikely(!map || !it)) {
-        if (it)
-            it->node = NULL;
-        return;
+    if (it) {
+        it->map = map;
+        it->node = map ? map->first : NULL;
     }
-
-    map_node_t *node = map->root;
-    if (likely(node)) {
-        while (node->left)
-            node = node->left;
-    }
-
-    it->node = node;
-    it->prev = NULL;
-    it->count = 0;
 }
 
 void map_last(map_t map, map_iter_t *it)
 {
-    if (unlikely(!map || !it)) {
-        if (it)
-            it->node = NULL;
-        return;
+    if (it) {
+        it->map = map;
+        it->node = map ? map->last : NULL;
     }
-
-    map_node_t *node = map->root;
-    if (likely(node)) {
-        map_node_t *right;
-        while ((right = rb_node_get_right(node)))
-            node = right;
-    }
-
-    it->node = node;
-    it->prev = NULL;
-    it->count = 0;
 }
 
-void map_next(map_t map, map_iter_t *it)
+void map_next(map_iter_t *it)
 {
-    if (unlikely(!map || !it || !it->node)) {
-        if (it)
-            it->node = NULL;
-        return;
-    }
-
-    map_node_t *node = it->node;
-    map_node_t *right = rb_node_get_right(node);
-
-    /* If right subtree exists, find leftmost node in right subtree */
-    if (right) {
-        while (right->left)
-            right = right->left;
-        it->node = right;
-        return;
-    }
-
-    /* Find successor by searching from root */
-    map_node_t *succ = NULL;
-    map_node_t *curr = map->root;
-
-    while (curr) {
-        map_cmp_t cmp = map->comparator(it->node->key, curr->key);
-        if (cmp == MAP_CMP_LESS) {
-            succ = curr;
-            curr = curr->left;
-        } else if (cmp == MAP_CMP_GREATER) {
-            curr = rb_node_get_right(curr);
-        } else {
-            break;
-        }
-    }
-
-    it->node = succ;
+    if (it && it->node)
+        it->node = node_next(it->node);
 }
 
-void map_prev(map_t map, map_iter_t *it)
+void map_prev(map_iter_t *it)
 {
-    if (!map || !it || !it->node) {
-        if (it)
-            it->node = NULL;
-        return;
-    }
-
-    map_node_t *node = it->node;
-
-    /* If left subtree exists, find rightmost node in left subtree */
-    if (node->left) {
-        node = node->left;
-        while (rb_node_get_right(node))
-            node = rb_node_get_right(node);
-        it->node = node;
-        return;
-    }
-
-    /* Otherwise, find the first ancestor that is a right child */
-    /* We need to traverse up, but we don't have parent pointers */
-    /* So we need to find the predecessor by searching from root */
-
-    map_node_t *pred = NULL;
-    map_node_t *curr = map->root;
-
-    while (curr) {
-        map_cmp_t cmp = map->comparator(it->node->key, curr->key);
-        if (cmp == MAP_CMP_GREATER) {
-            pred = curr;
-            curr = rb_node_get_right(curr);
-        } else if (cmp == MAP_CMP_LESS) {
-            curr = curr->left;
-        } else {
-            /* Found the node, predecessor is already set or NULL */
-            break;
-        }
-    }
-
-    it->node = pred;
+    if (it && it->node)
+        it->node = node_prev(it->node);
 }

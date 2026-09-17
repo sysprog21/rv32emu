@@ -177,12 +177,14 @@ void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
         if (fd != STDIN_FILENO && fd != STDOUT_FILENO && fd != STDERR_FILENO)
             continue;
 
-        /* check if standard stream refered by fd exists or not */
-        map_iter_t it;
-        map_find(attr->fd_map, &it, &fd);
-        if (it.node) /* found, remove first */
-            map_erase(attr->fd_map, &it);
-        map_insert(attr->fd_map, &fd, &file);
+        /* map_set() only fails on allocation, and leaving the descriptor
+         * unmapped would make every later read or write on it fail with no
+         * explanation.
+         */
+        if (!map_set(attr->fd_map, &fd, &file)) {
+            rv_log_error("Failed to remap standard stream fd %d", fd);
+            continue;
+        }
 
         /* store new fd to make the vm_attr_t consistent */
         int new_fd = FILENO(file);
@@ -321,7 +323,7 @@ fail_jit_cache:
     return false;
 }
 
-void rv_destroy_t2c(riscv_t *rv)
+static void rv_destroy_t2c(riscv_t *rv)
 {
     /* Signal the thread to quit */
     pthread_mutex_lock(&rv->wait_queue_lock);
@@ -536,7 +538,7 @@ static char *realloc_property(char *fdt,
         }                                               \
     } while (0)
 
-void load_dtb(char **ram_loc, vm_attr_t *attr)
+static void load_dtb(char **ram_loc, vm_attr_t *attr)
 {
 #include "minimal_dtb.h"
     char *bootargs = attr->data.system.bootargs;
@@ -732,7 +734,7 @@ dtb_end:
  *
  */
 #define TERMIOS_C_CFLAG (ICANON | ECHO | ISIG)
-static void reset_keyboard_input()
+static void reset_keyboard_input(void)
 {
     struct termios term;
     tcgetattr(0, &term);
@@ -741,7 +743,7 @@ static void reset_keyboard_input()
 }
 
 /* Asynchronous communication to capture all keyboard input for the VM. */
-static void capture_keyboard_input()
+static void capture_keyboard_input(void)
 {
     /* Hook exit, because we want to re-enable default control modes. */
     atexit(reset_keyboard_input);
@@ -764,7 +766,7 @@ static void capture_keyboard_input()
  *
  */
 extern riscv_t *rv;
-static void rv_async_block_clear()
+static void rv_async_block_clear(void)
 {
 #if !RV32_HAS(JIT)
     if (rv && rv->block_map.size)
@@ -774,7 +776,7 @@ static void rv_async_block_clear()
 #endif /* !RV32_HAS(JIT) */
 }
 
-static void rv_fsync_device()
+static void rv_fsync_device(void)
 {
     if (!rv)
         return;
@@ -1151,26 +1153,30 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     uintptr_t stack_top = stack_bottom - stack_size;
     stack_top &= -16;
 
-    /* argc */
-    uintptr_t *sp = (uintptr_t *) stack_top;
-    if (!memory_write(mem, (uintptr_t) sp,
-                      (void *) (mem->mem_base + (uintptr_t) args_p),
+    /* argc.
+     *
+     * sp walks guest memory, so it is a guest address rather than a pointer the
+     * host may dereference. Every slot is one RV32 word: writing a host
+     * uintptr_t here would put eight bytes into a four-byte slot and depend on
+     * the host being little-endian for the result to come out right.
+     */
+    uintptr_t sp = stack_top;
+    if (!memory_write(mem, sp, (void *) (mem->mem_base + (uintptr_t) args_p),
                       sizeof(int)))
         goto args_too_large;
     args_p++;
     /* keep argc and args[0] within one word due to RV32 ABI */
-    sp = (uintptr_t *) ((uint32_t *) sp + 1);
+    sp += sizeof(uint32_t);
 
     /* args */
     for (int i = 0; i < argc; i++) {
-        uintptr_t offset = (uintptr_t) args_p;
-        if (!memory_write(mem, (uintptr_t) sp, (void *) &offset,
-                          sizeof(uintptr_t)))
+        uint32_t offset = (uint32_t) (uintptr_t) args_p;
+        if (!memory_write(mem, sp, (void *) &offset, sizeof(offset)))
             goto args_too_large;
         args_p = (uintptr_t *) ((uintptr_t) args_p + strlen(args[i]) + 1);
-        sp = (uintptr_t *) ((uint32_t *) sp + 1);
+        sp += sizeof(uint32_t);
     }
-    if (!memory_fill(mem, (uintptr_t) sp, sizeof(uint32_t), 0))
+    if (!memory_fill(mem, sp, sizeof(uint32_t), 0))
         goto args_too_large;
 
     /* reset sp pointing to argc */

@@ -4,10 +4,9 @@ This document explains how to configure and use virtio-net networking in rv32emu
 
 rv32emu provides a virtio-net device with platform-specific host networking backends. The currently supported backends are:
 
-- Linux : TAP and user-mode SLIRP
-- macOS : user-mode SLIRP and vmnet.framework
-- Emscripten : networking backends are disabled
-
+- Linux: TAP and user-mode SLIRP
+- macOS: user-mode SLIRP and vmnet.framework
+- Emscripten: networking backends are disabled
 
 ## Backend overview
 
@@ -58,6 +57,7 @@ The virtio-net backend is selected with:
 ```shell
 -x vnet:<backend>
 ```
+
 where `<backend>` is one of the supported backend names for the current host.
 
 ### Linux TAP mode
@@ -66,7 +66,7 @@ TAP mode requires root privileges or `CAP_NET_ADMIN`.
 
 Start rv32emu:
 
-```
+```shell
 sudo -E build/rv32emu \
   -k build/linux-image/Image \
   -i build/linux-image/rootfs.cpio \
@@ -77,14 +77,14 @@ rv32emu allocates a TAP interface, for example `tap0`.
 
 In another terminal, configure the host TAP interface:
 
-```
+```shell
 sudo ip addr replace 192.168.100.1/24 dev tap0
 sudo ip link set tap0 up
 ```
 
 Inside the guest:
 
-```
+```shell
 ip link set eth0 up
 ip addr flush dev eth0
 ip addr add 192.168.100.2/24 dev eth0
@@ -97,7 +97,7 @@ User-mode SLIRP does not require root privileges.
 
 Start rv32emu:
 
-```
+```shell
 build/rv32emu \
   -k build/linux-image/Image \
   -i build/linux-image/rootfs.cpio \
@@ -106,7 +106,7 @@ build/rv32emu \
 
 Inside the guest:
 
-```
+```shell
 ip link set eth0 up
 ip addr flush dev eth0
 ip addr add 10.0.2.15/24 dev eth0
@@ -117,6 +117,7 @@ ping -c 3 10.0.2.2
 The `10.0.2.2` address is the SLIRP gateway.
 
 ### macOS vmnet
+
 The backend implements shared, host-only, and bridged vmnet operation
 modes internally. The current command-line interface exposes shared
 mode through:
@@ -127,20 +128,43 @@ sudo -E build/rv32emu \
   -i build/linux-image/rootfs.cpio \
   -x vnet:vmnet
 ```
-Inside the guest:
+
+Shared vmnet selects its private IPv4 subnet at runtime. Do not assume
+that the network is always `192.168.2.0/24`.
+
+Before starting rv32emu, record the existing macOS bridge interfaces:
+
+```shell
+ifconfig -l | tr ' ' '\n' | grep '^bridge'
 ```
+
+After rv32emu starts, run the same command again. The newly created
+bridge belongs to the shared vmnet instance. Inspect its IPv4 address:
+
+```shell
+ifconfig bridge<N>
+```
+
+For example, if the new bridge reports an address such as
+`192.168.105.1`, use that address as the gateway and configure another
+address from the same `/24` subnet inside the guest:
+
+```shell
 ip link set eth0 up
 ip addr flush dev eth0
-ip addr add 192.168.2.10/24 dev eth0
+ip addr add 192.168.105.10/24 dev eth0
 ip addr show eth0
-ping -c 3 -W 5 192.168.2.1
+ping -c 3 -W 5 192.168.105.1
 ```
+
+The exact bridge name and IPv4 subnet are selected by vmnet.framework at
+runtime.
 
 ### macOS user-mode SLIRP
 
 On macOS, use the user-mode SLIRP backend:
 
-```
+```shell
 build/rv32emu \
   -k build/linux-image/Image \
   -i build/linux-image/rootfs.cpio \
@@ -149,7 +173,7 @@ build/rv32emu \
 
 Inside the guest, use the same static configuration as Linux user mode:
 
-```
+```shell
 ip link set eth0 up
 ip addr flush dev eth0
 ip addr add 10.0.2.15/24 dev eth0
@@ -163,7 +187,7 @@ The CI tests validate virtio-net through the existing Linux boot flow.
 
 Linux x64 interpreter jobs run both:
 
-```
+```shell
 VNET_BACKEND=user .ci/boot-linux.sh
 VNET_BACKEND=tap sudo -E .ci/boot-linux.sh
 ```
@@ -178,9 +202,16 @@ VNET_BACKEND=vmnet .ci/netdev.sh
 
 TAP is only tested on Linux because it depends on the Linux TUN/TAP interface.
 
-The vmnet test starts rv32emu with elevated privileges, detects the
-private network created by vmnet.framework, configures the guest
-interface, and verifies packet delivery by pinging the vmnet gateway.
+For TAP, the test configures only the interface name reported by
+rv32emu. It does not fall back to an unrelated pre-existing `tap*`
+interface.
+
+For vmnet, the test records the existing macOS `bridge*` interfaces
+before starting rv32emu and then selects the bridge created for the
+current vmnet invocation. The gateway and guest address are derived
+from that runtime bridge instead of selecting the first bridge on the
+host or assuming a fixed subnet.
+
 The vmnet backend is not built for macOS GCC because vmnet.framework's
 callback API uses Apple Blocks syntax.
 
@@ -202,7 +233,7 @@ The user-mode SLIRP backend uses non-blocking socketpairs to connect the virtio-
 
 At the moment, SLIRP progress is driven from rv32emu's existing virtio-net refresh path. A future improvement could replace frequent non-blocking polling with an event-driven wakeup mechanism, such as `eventfd`, a pipe, or a condition-variable based notification path.
 
-The vmnet backend uses vmnet.framework callbacks for host packet delivery and a non-blocking pipe to integrate those asynchronous callbacks with rv32emu's existing polling-based virtio-net refresh path.
+The vmnet backend uses vmnet.framework callbacks for host packet delivery and a non-blocking datagram socketpair to integrate those asynchronous callbacks with rv32emu's existing polling-based virtio-net refresh path.
 
 ## Future work
 

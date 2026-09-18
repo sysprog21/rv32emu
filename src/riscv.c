@@ -844,13 +844,13 @@ static void rv_fsync_device(void)
                     -1) {
                     rv_log_error("pwrite block device failed: %s",
                                  strerror(errno));
-                    return;
+                    goto end;
                 }
 
                 if (fsync(vblk->disk_fd) == -1) {
                     rv_log_error("fsync block device failed: %s",
                                  strerror(errno));
-                    return;
+                    goto end;
                 }
                 rv_log_info("Sync block device OK");
 
@@ -872,8 +872,10 @@ static void rv_fsync_device(void)
 
 #if RV32_HAS(VIRTIO_NET)
     if (attr->vnet) {
-        vnet_delete(attr->vnet);
-        attr->vnet = NULL;
+        if (vnet_delete(attr->vnet))
+            attr->vnet = NULL;
+        else
+            rv_log_error("Failed to clean up virtio-net backend");
     }
 #endif
 }

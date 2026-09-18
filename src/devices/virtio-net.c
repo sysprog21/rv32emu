@@ -758,20 +758,6 @@ static uint32_t virtio_net_config_read(virtio_net_state_t *vnet, uint32_t addr)
     return value;
 }
 
-static void virtio_net_config_write(virtio_net_state_t *vnet,
-                                    uint32_t addr,
-                                    uint32_t value)
-{
-    virtio_net_config_t *cfg = (virtio_net_config_t *) vnet->priv;
-    uint32_t offset = (addr - VIRTIO_Config) * sizeof(uint32_t);
-
-    if (offset >= sizeof(*cfg))
-        return;
-
-    memcpy((uint8_t *) cfg + offset, &value,
-           vnet_min(sizeof(value), sizeof(*cfg) - offset));
-}
-
 uint32_t virtio_net_read(virtio_net_state_t *vnet, uint32_t addr)
 {
 #define _(reg) VIRTIO_##reg
@@ -811,7 +797,15 @@ uint32_t virtio_net_read(virtio_net_state_t *vnet, uint32_t addr)
 
 void virtio_net_write(virtio_net_state_t *vnet, uint32_t addr, uint32_t value)
 {
-    addr = addr >> 2;
+    /*
+     * The virtio-net configuration fields exposed by this device are all
+     * device-owned, so writes to the device-specific configuration region are
+     * ignored.
+     */
+    if (addr >= (VIRTIO_Config << 2))
+        return;
+
+    addr >>= 2;
 
 #define _(reg) VIRTIO_##reg
     switch (addr) {
@@ -889,8 +883,6 @@ void virtio_net_write(virtio_net_state_t *vnet, uint32_t addr, uint32_t value)
         virtio_net_update_status(vnet, value);
         break;
     default:
-        if (addr >= _(Config))
-            virtio_net_config_write(vnet, addr, value);
         break;
     }
 #undef _
@@ -949,12 +941,21 @@ virtio_net_state_t *vnet_new(void)
     return vnet;
 }
 
-void vnet_delete(virtio_net_state_t *vnet)
+bool vnet_delete(virtio_net_state_t *vnet)
 {
     if (!vnet)
-        return;
+        return true;
 
-    netdev_delete(&vnet->peer);
+    /*
+     * A vmnet interface may still own asynchronous callbacks if its stop
+     * request fails. Keep the enclosing virtio-net state alive until backend
+     * cleanup is confirmed instead of freeing memory that the backend can
+     * still reference.
+     */
+    if (!netdev_delete(&vnet->peer))
+        return false;
+
     free(vnet->priv);
     free(vnet);
+    return true;
 }

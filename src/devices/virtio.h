@@ -5,9 +5,6 @@
 
 #pragma once
 
-#include <stdbool.h>
-#include <stdint.h>
-
 #include "feature.h"
 
 #if RV32_HAS(VIRTIO_NET)
@@ -228,7 +225,7 @@ bool virtio_net_init(virtio_net_state_t *vnet, const char *net_type);
 
 virtio_net_state_t *vnet_new(void);
 
-void vnet_delete(virtio_net_state_t *vnet);
+bool vnet_delete(virtio_net_state_t *vnet);
 
 void virtio_net_refresh_queue(virtio_net_state_t *vnet);
 

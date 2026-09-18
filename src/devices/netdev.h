@@ -148,7 +148,7 @@ ssize_t net_vmnet_writev(net_vmnet_state_t *state,
 
 int net_vmnet_get_fd(net_vmnet_state_t *state);
 
-void net_vmnet_cleanup(net_vmnet_state_t *state);
+bool net_vmnet_cleanup(net_vmnet_state_t *state);
 
 #endif
 
@@ -160,4 +160,4 @@ struct netdev {
 
 bool netdev_init(netdev_t *netdev, const char *net_type);
 
-void netdev_delete(netdev_t *netdev);
+bool netdev_delete(netdev_t *netdev);

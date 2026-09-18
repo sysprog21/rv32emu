@@ -148,8 +148,13 @@ static vmnet_return_t vmnet_register_packet_callback(net_vmnet_state_t *state,
 
 static int vmnet_stop_interface_sync(net_vmnet_state_t *state)
 {
-    if (!state || !state->iface || !state->queue)
+    if (!state || !state->iface)
         return 0;
+
+    if (!state->queue) {
+        rv_log_error("vmnet: cannot stop interface without dispatch queue");
+        return -1;
+    }
 
     interface_ref iface = (interface_ref) state->iface;
     dispatch_queue_t queue = (dispatch_queue_t) state->queue;
@@ -175,12 +180,15 @@ static int vmnet_stop_interface_sync(net_vmnet_state_t *state)
          * Drain callbacks that were already queued before returning to the
          * caller. The event callback is cleared before this function is used
          * during normal cleanup.
+         *
+         * Keep iface and queue owned by state when the stop request cannot be
+         * scheduled. Callers must retain the backend state and retry cleanup
+         * later rather than freeing resources that the live interface may use.
          */
         dispatch_sync(queue, ^{
                       });
 
         dispatch_release(stop_sem);
-        state->iface = NULL;
 
         return -1;
     }
@@ -197,13 +205,11 @@ static int vmnet_stop_interface_sync(net_vmnet_state_t *state)
 
     dispatch_release(stop_sem);
 
-    state->iface = NULL;
-
     if (stop_status != VMNET_SUCCESS) {
         rv_log_error("vmnet: failed to stop interface: %d", stop_status);
         return -1;
     }
-
+    state->iface = NULL;
     return 0;
 }
 
@@ -352,7 +358,8 @@ static int vmnet_init_interface(net_vmnet_state_t *state,
     if (ret != VMNET_SUCCESS) {
         rv_log_error("vmnet: failed to register packet callback: %d", ret);
 
-        vmnet_stop_interface_sync(state);
+        if (vmnet_stop_interface_sync(state) < 0)
+            rv_log_error("vmnet: retaining interface after stop failure");
 
         xpc_release(iface_desc);
         return -1;
@@ -463,6 +470,14 @@ int net_vmnet_init(netdev_t *netdev,
     }
 
     if (ret < 0) {
+        /*
+         * If interface shutdown could not be confirmed, keep every object the
+         * live interface may still reference. netdev_delete() will retry the
+         * cleanup path instead of freeing the backend state.
+         */
+        if (state->iface)
+            return -1;
+
         if (state->queue) {
             dispatch_release((dispatch_queue_t) state->queue);
             state->queue = NULL;
@@ -587,10 +602,10 @@ int net_vmnet_get_fd(net_vmnet_state_t *state)
     return state->rx_fds[0];
 }
 
-void net_vmnet_cleanup(net_vmnet_state_t *state)
+bool net_vmnet_cleanup(net_vmnet_state_t *state)
 {
     if (!state)
-        return;
+        return true;
 
     /*
      * Packet callbacks may already be queued when shutdown begins. Mark the
@@ -613,10 +628,13 @@ void net_vmnet_cleanup(net_vmnet_state_t *state)
             rv_log_error("vmnet: failed to clear packet callback: %d", ret);
 
         /*
-         * Wait for vmnet_stop_interface's completion and then drain the serial
-         * queue before any state used by packet callbacks is destroyed.
+         * Do not release the queue, socketpair, or backend state until vmnet
+         * confirms that the interface has stopped. If the stop cannot be
+         * scheduled or completes with an error, retain the resources so a
+         * later cleanup attempt remains safe.
          */
-        vmnet_stop_interface_sync(state);
+        if (vmnet_stop_interface_sync(state) < 0)
+            return false;
     }
 
     if (state->rx_fds[0] >= 0) {
@@ -633,6 +651,7 @@ void net_vmnet_cleanup(net_vmnet_state_t *state)
         dispatch_release((dispatch_queue_t) state->queue);
         state->queue = NULL;
     }
+    return true;
 }
 
 #endif /* RV32EMU_NET_HAS_VMNET */

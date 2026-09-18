@@ -11,8 +11,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "utils.h"
-
 #if RV32EMU_NET_HAS_TAP
 #include <linux/if.h>
 #include <linux/if_tun.h>
@@ -50,8 +48,9 @@ static bool netdev_setup(netdev_t *netdev,
     }
 
     if (init_fn(netdev) < 0) {
-        free(netdev->op);
-        netdev_reset(netdev);
+        if (!netdev_delete(netdev))
+            rv_log_error("failed to clean up %s backend after init error",
+                         name);
         return false;
     }
 
@@ -149,6 +148,9 @@ bool netdev_init(netdev_t *netdev, const char *net_type)
     if (!netdev)
         return false;
 
+    if (netdev->op && !netdev_delete(netdev))
+        return false;
+
     netdev_reset(netdev);
 
     const char *requested = net_type ? net_type : netdev_default_backend();
@@ -182,10 +184,15 @@ bool netdev_init(netdev_t *netdev, const char *net_type)
     return false;
 }
 
-void netdev_delete(netdev_t *netdev)
+bool netdev_delete(netdev_t *netdev)
 {
-    if (!netdev || !netdev->op)
-        return;
+    if (!netdev)
+        return true;
+
+    if (!netdev->op) {
+        netdev_reset(netdev);
+        return true;
+    }
 
     switch (netdev->type) {
 #if RV32EMU_NET_HAS_TAP
@@ -205,7 +212,8 @@ void netdev_delete(netdev_t *netdev)
 
 #if RV32EMU_NET_HAS_VMNET
     case NETDEV_IMPL_VMNET:
-        net_vmnet_cleanup((net_vmnet_state_t *) netdev->op);
+        if (!net_vmnet_cleanup((net_vmnet_state_t *) netdev->op))
+            return false;
         break;
 #endif
 
@@ -216,4 +224,5 @@ void netdev_delete(netdev_t *netdev)
 
     free(netdev->op);
     netdev_reset(netdev);
+    return true;
 }

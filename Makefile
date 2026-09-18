@@ -234,35 +234,56 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 include mk/http.mk
 
 # VirtIO networking is available only for kernel system emulation and requires
-# at least one host backend. CONFIG_* values may be overridden by legacy
-# ENABLE_* flags after loading .config, so derive the effective build state here
-# instead of relying only on the Kconfig dependency graph.
-VIRTIO_NET_BUILD_ENABLED := n
+# at least one backend supported by the selected host/compiler. CONFIG_* values
+# may be overridden by legacy ENABLE_* flags after loading .config, so mirror
+# the remaining Kconfig host/compiler constraints here as part of the effective
+# build state instead of relying only on the Kconfig dependency graph.
+VIRTIO_NET_COMMON_BUILD_ENABLED := n
 ifeq ($(call has,SYSTEM),1)
 ifneq ($(call has,ELF_LOADER),1)
 ifeq ($(call has,VIRTIO_NET),1)
-ifneq ($(filter 1, \
-    $(call has,VIRTIO_NET_TAP) \
-    $(call has,VIRTIO_NET_USER) \
-    $(call has,VIRTIO_NET_VMNET)),)
-VIRTIO_NET_BUILD_ENABLED := y
+ifneq ($(CC_IS_EMCC),1)
+ifneq ($(filter Linux Darwin,$(UNAME_S)),)
+VIRTIO_NET_COMMON_BUILD_ENABLED := y
+endif
 endif
 endif
 endif
 endif
 
+VIRTIO_NET_TAP_BUILD_ENABLED := n
+ifeq ($(VIRTIO_NET_COMMON_BUILD_ENABLED),y)
+ifeq ($(UNAME_S),Linux)
+ifeq ($(call has,VIRTIO_NET_TAP),1)
+VIRTIO_NET_TAP_BUILD_ENABLED := y
+endif
+endif
+endif
+
 VIRTIO_NET_USER_BUILD_ENABLED := n
-ifeq ($(VIRTIO_NET_BUILD_ENABLED),y)
+ifeq ($(VIRTIO_NET_COMMON_BUILD_ENABLED),y)
 ifeq ($(call has,VIRTIO_NET_USER),1)
 VIRTIO_NET_USER_BUILD_ENABLED := y
 endif
 endif
 
 VIRTIO_NET_VMNET_BUILD_ENABLED := n
-ifeq ($(VIRTIO_NET_BUILD_ENABLED),y)
+ifeq ($(VIRTIO_NET_COMMON_BUILD_ENABLED),y)
+ifeq ($(UNAME_S),Darwin)
+ifeq ($(CC_IS_CLANG),1)
 ifeq ($(call has,VIRTIO_NET_VMNET),1)
 VIRTIO_NET_VMNET_BUILD_ENABLED := y
 endif
+endif
+endif
+endif
+
+VIRTIO_NET_BUILD_ENABLED := n
+ifneq ($(filter y, \
+    $(VIRTIO_NET_TAP_BUILD_ENABLED) \
+    $(VIRTIO_NET_USER_BUILD_ENABLED) \
+    $(VIRTIO_NET_VMNET_BUILD_ENABLED)),)
+VIRTIO_NET_BUILD_ENABLED := y
 endif
 
 # External Dependencies & System Emulation
@@ -348,7 +369,9 @@ endif
 $(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
 	$(Q){ \
 		printf 'CC=%s\n' '$(CC)'; \
+		printf 'CC_IS_CLANG=%s\n' '$(CC_IS_CLANG)'; \
 		printf 'CC_IS_EMCC=%s\n' '$(CC_IS_EMCC)'; \
+		printf 'UNAME_S=%s\n' '$(UNAME_S)'; \
 		printf 'CROSS_COMPILE=%s\n' '$(CROSS_COMPILE)'; \
 		$(foreach var,$(EFFECTIVE_CONFIG_VARS),printf '$(var)=%s\n' '$($(var))';) \
 		$(foreach var,$(EFFECTIVE_VNET_FEATURES),printf 'EFFECTIVE_$(var)=%s\n' '$(call has,$(var))';) \
@@ -413,10 +436,8 @@ check-vnet-config:
 	$(Q)if [ "$(call has,SYSTEM)" = "1" ] && \
 	    [ "$(call has,ELF_LOADER)" != "1" ] && \
 	    [ "$(call has,VIRTIO_NET)" = "1" ] && \
-	    [ "$(call has,VIRTIO_NET_TAP)" != "1" ] && \
-	    [ "$(call has,VIRTIO_NET_USER)" != "1" ] && \
-	    [ "$(call has,VIRTIO_NET_VMNET)" != "1" ]; then \
-		echo "Error: VirtIO network device requires at least one backend." >&2; \
+	    [ "$(VIRTIO_NET_BUILD_ENABLED)" != "y" ]; then \
+		echo "Error: VirtIO network device requires a backend supported by this host and compiler." >&2; \
 		exit 1; \
 	fi
 

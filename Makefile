@@ -233,98 +233,14 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 # HTTP Utilities (shared by external.mk and artifact.mk)
 include mk/http.mk
 
-# VirtIO networking is available only for kernel system emulation and requires
-# at least one backend supported by the selected host/compiler. CONFIG_* values
-# may be overridden by legacy ENABLE_* flags after loading .config, so mirror
-# the remaining Kconfig host/compiler constraints here as part of the effective
-# build state instead of relying only on the Kconfig dependency graph.
-VIRTIO_NET_COMMON_BUILD_ENABLED := n
-ifeq ($(call has,SYSTEM),1)
-ifneq ($(call has,ELF_LOADER),1)
-ifeq ($(call has,VIRTIO_NET),1)
-ifneq ($(CC_IS_EMCC),1)
-ifneq ($(filter Linux Darwin,$(UNAME_S)),)
-VIRTIO_NET_COMMON_BUILD_ENABLED := y
-endif
-endif
-endif
-endif
-endif
-
-VIRTIO_NET_TAP_BUILD_ENABLED := n
-ifeq ($(VIRTIO_NET_COMMON_BUILD_ENABLED),y)
-ifeq ($(UNAME_S),Linux)
-ifeq ($(call has,VIRTIO_NET_TAP),1)
-VIRTIO_NET_TAP_BUILD_ENABLED := y
-endif
-endif
-endif
-
-VIRTIO_NET_USER_BUILD_ENABLED := n
-ifeq ($(VIRTIO_NET_COMMON_BUILD_ENABLED),y)
-ifeq ($(call has,VIRTIO_NET_USER),1)
-VIRTIO_NET_USER_BUILD_ENABLED := y
-endif
-endif
-
-VIRTIO_NET_VMNET_BUILD_ENABLED := n
-ifeq ($(VIRTIO_NET_COMMON_BUILD_ENABLED),y)
-ifeq ($(UNAME_S),Darwin)
-ifeq ($(CC_IS_CLANG),1)
-ifeq ($(call has,VIRTIO_NET_VMNET),1)
-VIRTIO_NET_VMNET_BUILD_ENABLED := y
-endif
-endif
-endif
-endif
-
-VIRTIO_NET_BUILD_ENABLED := n
-ifneq ($(filter y, \
-    $(VIRTIO_NET_TAP_BUILD_ENABLED) \
-    $(VIRTIO_NET_USER_BUILD_ENABLED) \
-    $(VIRTIO_NET_VMNET_BUILD_ENABLED)),)
-VIRTIO_NET_BUILD_ENABLED := y
-endif
+# VirtIO networking
+include mk/virtio-net.mk
 
 # External Dependencies & System Emulation
 include mk/external.mk
 include mk/artifact.mk
 include mk/system.mk
 include mk/wasm.mk
-
-ifeq ($(VIRTIO_NET_VMNET_BUILD_ENABLED),y)
-ifeq ($(UNAME_S),Darwin)
-$(OUT)/devices/netdev-vmnet.o: CFLAGS += -fblocks
-LDFLAGS += -framework vmnet
-endif
-endif
-
-MINISLIRP_DIR := src/minislirp
-MINISLIRP_LIB := $(MINISLIRP_DIR)/src/libslirp.a
-
-ifeq ($(VIRTIO_NET_USER_BUILD_ENABLED),y)
-ifneq ($(CC_IS_EMCC),1)
-MINISLIRP_CFLAGS :=
-
-CFLAGS += -I$(MINISLIRP_DIR)/src
-LDFLAGS += $(MINISLIRP_LIB)
-
-ifeq ($(UNAME_S),Darwin)
-MINISLIRP_CFLAGS := MYCFLAGS="-D_DARWIN_C_SOURCE"
-LDFLAGS += -lresolv
-endif
-
-minislirp:
-	$(Q)git submodule update --init $(MINISLIRP_DIR)
-	$(Q)$(MAKE) -C $(MINISLIRP_DIR)/src CC="$(CC)" $(MINISLIRP_CFLAGS)
-
-$(MINISLIRP_LIB): minislirp
-	$(Q)test -f $@
-
-$(OUT)/devices/slirp.o: $(MINISLIRP_LIB)
-$(BIN): $(MINISLIRP_LIB)
-endif
-endif
 
 # Build Targets
 DTB_DEPS :=
@@ -355,11 +271,6 @@ EFFECTIVE_CONFIG_VARS := \
 	MEM_START MEM_SIZE DTB_SIZE INITRD_SIZE USER_MEM_SIZE \
 	INITRD_ACTUAL_BYTES REAL_MEM_SIZE REAL_DTB_SIZE REAL_INITRD_SIZE \
 	VLEN
-EFFECTIVE_VNET_FEATURES := \
-    VIRTIO_NET \
-    VIRTIO_NET_TAP \
-    VIRTIO_NET_USER \
-    VIRTIO_NET_VMNET
 
 ifeq ($(CONFIG_EXT_F),y)
 $(OBJS): $(SOFTFLOAT_LIB)
@@ -410,10 +321,10 @@ tool: $(TOOLS_BIN)
 # Clean Targets
 clean:
 	$(VECHO) "Cleaning... "
-	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) $(CACHE_OUT) \
-    $(EFFECTIVE_CONFIG_STAMP)
+	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) \
+	    $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) \
+	    $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP) $(VIRTIO_NET_CLEAN_FILES)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
-	$(Q)-$(RM) $(MINISLIRP_LIB) $(MINISLIRP_DIR)/src/*.o
 	$(Q)$(call notice, [OK])
 
 # Clean build objects and config (preserves artifacts for CI efficiency)
@@ -432,20 +343,6 @@ distclean: cleanconfig
 	$(Q)$(RM) $(OUT)/rv32emu-prebuilt*.tar.gz $(OUT)/rv32emu-prebuilt-sail-*
 	$(Q)$(call notice, [OK])
 
-# Reject a build that enables virtio-net without a host backend. Keep this as a
-# build prerequisite rather than a parse-time error so maintenance targets such
-# as clean and config remain usable with an incomplete configuration.
-check-vnet-config:
-	$(Q)if [ "$(call has,SYSTEM)" = "1" ] && \
-	    [ "$(call has,ELF_LOADER)" != "1" ] && \
-	    [ "$(call has,VIRTIO_NET)" = "1" ] && \
-	    [ "$(VIRTIO_NET_BUILD_ENABLED)" != "y" ]; then \
-		echo "Error: VirtIO network device requires a backend supported by this host and compiler." >&2; \
-		exit 1; \
-	fi
-
-$(BIN): | check-vnet-config
-
-.PHONY: all tool clean cleanconfig distclean gdbstub-test check-vnet-config minislirp FORCE
+.PHONY: all tool clean cleanconfig distclean gdbstub-test FORCE
 
 -include $(deps)

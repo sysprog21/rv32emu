@@ -30,12 +30,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #include <dispatch/dispatch.h>
 #include <vmnet/vmnet.h>
-
-#include "utils.h"
 
 #define VMNET_START_TIMEOUT_NS (10LL * 1000000000LL)
 
@@ -57,7 +56,7 @@ static void vmnet_packet_handler(net_vmnet_state_t *state,
                                  const uint8_t *buf,
                                  ssize_t len)
 {
-    if (!state || !state->running || len <= 0)
+    if (!state || len <= 0)
         return;
 
     /*
@@ -115,16 +114,27 @@ static vmnet_return_t vmnet_register_packet_callback(net_vmnet_state_t *state,
           (void) event;
 
           struct vmpktdesc pkts[32];
-          uint8_t bufs[32][VMNET_PKT_MAX];
           struct iovec iovs[32];
-
           int pkt_cnt = (int) (sizeof(pkts) / sizeof(pkts[0]));
 
-          for (int i = 0; i < pkt_cnt; i++) {
-              iovs[i].iov_base = bufs[i];
-              iovs[i].iov_len = VMNET_PKT_MAX;
+          if (!state->max_packet_size ||
+              state->max_packet_size > SIZE_MAX / (size_t) pkt_cnt) {
+              rv_log_error("vmnet: invalid maximum packet size");
+              return;
+          }
 
-              pkts[i].vm_pkt_size = VMNET_PKT_MAX;
+          uint8_t *bufs = malloc(state->max_packet_size * (size_t) pkt_cnt);
+
+          if (!bufs) {
+              rv_log_error("vmnet: failed to allocate receive buffers");
+              return;
+          }
+
+          for (int i = 0; i < pkt_cnt; i++) {
+              iovs[i].iov_base = bufs + (size_t) i * state->max_packet_size;
+              iovs[i].iov_len = state->max_packet_size;
+
+              pkts[i].vm_pkt_size = state->max_packet_size;
               pkts[i].vm_pkt_iov = &iovs[i];
               pkts[i].vm_pkt_iovcnt = 1;
               pkts[i].vm_flags = 0;
@@ -136,13 +146,16 @@ static vmnet_return_t vmnet_register_packet_callback(net_vmnet_state_t *state,
 
           if (ret != VMNET_SUCCESS) {
               rv_log_error("vmnet: read failed: %d", ret);
+              free(bufs);
               return;
           }
 
           for (int i = 0; i < received; i++) {
-              vmnet_packet_handler(state, bufs[i],
+              vmnet_packet_handler(state, (const uint8_t *) iovs[i].iov_base,
                                    (ssize_t) pkts[i].vm_pkt_size);
           }
+
+          free(bufs);
         });
 }
 
@@ -270,6 +283,9 @@ static int vmnet_init_interface(net_vmnet_state_t *state,
 
     __block vmnet_return_t status = VMNET_FAILURE;
     __block vmnet_mac_t mac = {0};
+    __block uint64_t mtu = 0;
+    __block uint64_t max_packet_size = 0;
+    __block bool config_valid = false;
 
     /*
      * Keep one reference for the completion block. If the bounded wait below
@@ -278,17 +294,21 @@ static int vmnet_init_interface(net_vmnet_state_t *state,
      */
     dispatch_retain(start_sem);
 
-    interface_ref iface =
-        vmnet_start_interface(iface_desc, (dispatch_queue_t) state->queue,
-                              ^(vmnet_return_t ret, xpc_object_t param) {
-                                status = ret;
+    interface_ref iface = vmnet_start_interface(
+        iface_desc, (dispatch_queue_t) state->queue,
+        ^(vmnet_return_t ret, xpc_object_t param) {
+          status = ret;
 
-                                if (ret == VMNET_SUCCESS)
-                                    vmnet_store_mac(mac.bytes, param);
+          if (ret == VMNET_SUCCESS && param) {
+              config_valid = vmnet_store_mac(mac.bytes, param);
+              mtu = xpc_dictionary_get_uint64(param, vmnet_mtu_key);
+              max_packet_size =
+                  xpc_dictionary_get_uint64(param, vmnet_max_packet_size_key);
+          }
 
-                                dispatch_semaphore_signal(start_sem);
-                                dispatch_release(start_sem);
-                              });
+          dispatch_semaphore_signal(start_sem);
+          dispatch_release(start_sem);
+        });
 
     /*
      * vmnet_start_interface returning NULL means the request was rejected
@@ -343,16 +363,38 @@ static int vmnet_init_interface(net_vmnet_state_t *state,
 
     /*
      * vmnet_start_interface has returned and the completion handler has
-     * finished, so iface is now valid here. Register the packet callback only
-     * after this point instead of capturing iface inside the completion block.
+     * finished, so iface is now valid here.
      */
     state->iface = iface;
+
+    if (!config_valid || !mtu || mtu > UINT16_MAX || !max_packet_size ||
+        max_packet_size > SIZE_MAX || max_packet_size < mtu) {
+        rv_log_error(
+            "vmnet: invalid interface parameters "
+            "(mtu=%llu, max packet size=%llu)",
+            (unsigned long long) mtu, (unsigned long long) max_packet_size);
+
+        if (vmnet_stop_interface_sync(state) < 0)
+            rv_log_error("vmnet: retaining interface after stop failure");
+
+        xpc_release(iface_desc);
+        return -1;
+    }
+
     memcpy(state->mac, mac.bytes, sizeof(state->mac));
+    state->mtu = (uint16_t) mtu;
+    state->max_packet_size = (size_t) max_packet_size;
 
-    rv_log_warn("vmnet: %s mode started, MAC %02x:%02x:%02x:%02x:%02x:%02x",
-                mode_name, state->mac[0], state->mac[1], state->mac[2],
-                state->mac[3], state->mac[4], state->mac[5]);
+    rv_log_warn(
+        "vmnet: %s mode started, MAC %02x:%02x:%02x:%02x:%02x:%02x, "
+        "MTU %u, max packet size %zu",
+        mode_name, state->mac[0], state->mac[1], state->mac[2], state->mac[3],
+        state->mac[4], state->mac[5], state->mtu, state->max_packet_size);
 
+    /*
+     * Register the packet callback only after the runtime interface parameters
+     * have been stored in state.
+     */
     vmnet_return_t ret = vmnet_register_packet_callback(state, iface);
 
     if (ret != VMNET_SUCCESS) {
@@ -418,6 +460,8 @@ int net_vmnet_init(netdev_t *netdev,
     state->queue = NULL;
     state->rx_fds[0] = -1;
     state->rx_fds[1] = -1;
+    state->mtu = 0;
+    state->max_packet_size = 0;
     state->running = false;
 
     /*
@@ -608,9 +652,9 @@ bool net_vmnet_cleanup(net_vmnet_state_t *state)
         return true;
 
     /*
-     * Packet callbacks may already be queued when shutdown begins. Mark the
-     * backend stopped first so such callbacks discard their packets rather
-     * than writing more data into the socketpair.
+     * Stop emulator-side guest-to-host writes before shutting down the
+     * interface. Packet callbacks are removed below and the serial dispatch
+     * queue is drained before the socketpair is closed.
      */
     state->running = false;
 

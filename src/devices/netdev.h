@@ -5,13 +5,7 @@
 
 #pragma once
 
-#include <poll.h>
-#include <stdbool.h>
-#include <stdint.h>
 #include <sys/types.h>
-#include <sys/uio.h>
-
-#include "feature.h"
 
 /*
  * Networking backends:
@@ -39,10 +33,6 @@
 #define RV32EMU_NET_HAS_SLIRP 0
 #endif
 
-/*
- * vmnet.framework uses Apple Blocks. Keep the backend restricted to
- * macOS builds using Clang.
- */
 #if RV32_HAS(VIRTIO_NET_VMNET) && defined(__APPLE__) && defined(__clang__) && \
     !defined(__EMSCRIPTEN__)
 #define RV32EMU_NET_HAS_VMNET 1
@@ -76,6 +66,7 @@ typedef struct {
 #define SLIRP_READ_SIDE 0
 #define SLIRP_WRITE_SIDE 1
 
+struct pollfd;
 struct rv_slirp_timer;
 
 typedef struct {
@@ -96,7 +87,7 @@ int net_slirp_read(net_user_options_t *usr);
 
 #if RV32EMU_NET_HAS_VMNET
 
-#define VMNET_PKT_MAX 2048
+struct iovec;
 
 typedef struct {
     /*
@@ -114,6 +105,8 @@ typedef struct {
     int rx_fds[2];
 
     uint8_t mac[6];
+    uint16_t mtu;
+    size_t max_packet_size;
     bool running;
 } net_vmnet_state_t;
 

@@ -43,6 +43,12 @@ $(BUILD_DTB2C): $(BIN_TO_C) $(BUILD_DTB) $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  BIN2C\t$@\n"
 	$(Q)$(BIN_TO_C) $(BUILD_DTB) > $@
 
+# riscv.c includes the generated minimal_dtb.h when booting a kernel, so make
+# the dependency explicit for clean parallel builds.
+ifneq ($(CONFIG_ELF_LOADER),y)
+$(OUT)/riscv.o: $(BUILD_DTB2C)
+endif
+
 # Device object compilation
 $(DEV_OUT):
 	$(Q)mkdir -p $@

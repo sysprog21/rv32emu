@@ -299,10 +299,11 @@ LDFLAGS += -framework vmnet
 endif
 endif
 
-ifeq ($(VIRTIO_NET_USER_BUILD_ENABLED),y)
-ifneq ($(CC_IS_EMCC),1)
 MINISLIRP_DIR := src/minislirp
 MINISLIRP_LIB := $(MINISLIRP_DIR)/src/libslirp.a
+
+ifeq ($(VIRTIO_NET_USER_BUILD_ENABLED),y)
+ifneq ($(CC_IS_EMCC),1)
 MINISLIRP_CFLAGS :=
 
 CFLAGS += -I$(MINISLIRP_DIR)/src
@@ -313,11 +314,12 @@ MINISLIRP_CFLAGS := MYCFLAGS="-D_DARWIN_C_SOURCE"
 LDFLAGS += -lresolv
 endif
 
-$(MINISLIRP_DIR)/src/Makefile:
+minislirp:
 	$(Q)git submodule update --init $(MINISLIRP_DIR)
+	$(Q)$(MAKE) -C $(MINISLIRP_DIR)/src CC="$(CC)" $(MINISLIRP_CFLAGS)
 
-$(MINISLIRP_LIB): $(MINISLIRP_DIR)/src/Makefile
-	$(Q)$(MAKE) -C $(dir $<) CC="$(CC)" $(MINISLIRP_CFLAGS)
+$(MINISLIRP_LIB): minislirp
+	$(Q)test -f $@
 
 $(OUT)/devices/slirp.o: $(MINISLIRP_LIB)
 $(BIN): $(MINISLIRP_LIB)
@@ -411,6 +413,7 @@ clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) $(CACHE_OUT) \
     $(EFFECTIVE_CONFIG_STAMP)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
+	$(Q)-$(RM) $(MINISLIRP_LIB) $(MINISLIRP_DIR)/src/*.o
 	$(Q)$(call notice, [OK])
 
 # Clean build objects and config (preserves artifacts for CI efficiency)
@@ -443,6 +446,6 @@ check-vnet-config:
 
 $(BIN): | check-vnet-config
 
-.PHONY: all tool clean cleanconfig distclean gdbstub-test check-vnet-config FORCE
+.PHONY: all tool clean cleanconfig distclean gdbstub-test check-vnet-config minislirp FORCE
 
 -include $(deps)

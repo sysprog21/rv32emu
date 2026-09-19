@@ -40,7 +40,7 @@ case "${MODE}" in
         cp build/rv32emu.wasm "${STAGE}/"
         # Only emitted for pthread-enabled builds.
         cp build/rv32emu.worker.js "${STAGE}/" || true
-        cp build/linux-image/Image "${STAGE}/"
+        cp build/linux-image/Image.gz "${STAGE}/"
         cp build/linux-image/rootfs.web.cpio "${STAGE}/rootfs.cpio"
         cp build/timidity.tar "${STAGE}/"
         cp build/timidity.tar.gz "${STAGE}/"

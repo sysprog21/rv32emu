@@ -28,13 +28,13 @@ endif
 # at runtime by user.html and written into MEMFS at the paths the binaries
 # expect (/DOOM1.WAD, /id1/pak0.pak, /etc/timidity/*).
 WEB_FILES := $(BIN).js \
-             $(BIN).wasm
+             $(BIN).wasm \
+             $(OUT)/timidity.tar \
+             $(OUT)/timidity.tar.gz
 ifneq ($(CONFIG_SYSTEM),y)
 WEB_FILES += $(OUT)/elf_list.js \
              $(OUT)/DOOM1.WAD \
-             $(OUT)/pak0.pak \
-             $(OUT)/timidity.tar \
-             $(OUT)/timidity.tar.gz
+             $(OUT)/pak0.pak
 endif
 
 # Only configure Emscripten settings when using emcc
@@ -195,10 +195,10 @@ $(XTERM_CSS): | $(XTERM_VENDOR)
 XTERM_DATA := $(XTERM_JS) $(XTERM_CSS)
 
 # Dependencies for WASM build
-# System mode: kernel image only (no audio/games)
+# System mode: kernel image games, and timidity for MIDI audio
 # User mode: ELFs, games, and timidity for MIDI audio
 ifeq ($(CONFIG_SYSTEM),y)
-deps_emcc += artifact
+deps_emcc += artifact $(TIMIDITY_DATA)
 else
 deps_emcc += artifact $(OUT)/elf_list.js $(DOOM_DATA) $(QUAKE_DATA) $(TIMIDITY_DATA)
 endif
@@ -276,7 +276,8 @@ ifeq ($(CONFIG_SYSTEM),y)
 # overlay so the guest auto-mounts /dev/vda at /mnt during boot.
 start_web_deps += $(BUILD_DTB) $(BUILD_DTB2C) \
                   $(OUT)/linux-image/Image \
-                  $(OUT)/linux-image/rootfs.web.cpio
+                  $(OUT)/linux-image/rootfs.web.cpio \
+                  $(OUT)/timidity.tar $(OUT)/timidity.tar.gz
 else
 # User mode also stages large game data alongside the WASM bundle so the
 # WEB_FILES copy step succeeds. These targets pull from DOOM_DATA/QUAKE_DATA

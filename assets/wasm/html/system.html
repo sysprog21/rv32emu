@@ -633,6 +633,54 @@
     const progressElement = document.getElementById('progress');
     const runSysButton = document.getElementById('runSysButton');
 
+    function extractTarToMemfs(data, destPrefix) {
+      const decoder = new TextDecoder('ascii');
+      let offset = 0;
+      let count = 0;
+      while (offset + 512 <= data.length) {
+        const header = data.subarray(offset, offset + 512);
+        let allZero = true;
+        for (let i = 0; i < 512; i++) if (header[i] !== 0) { allZero = false; break; }
+        if (allZero) break;
+        let name = decoder.decode(header.subarray(0, 100)).replace(/\0.*$/, '');
+        if (name.startsWith('./')) name = name.substring(2);
+        const sizeOctal = decoder.decode(header.subarray(124, 136)).replace(/\0.*$/, '').trim();
+        const size = sizeOctal ? parseInt(sizeOctal, 8) : 0;
+        const type = String.fromCharCode(header[156] || 0x30);
+        offset += 512;
+        // Skip macOS AppleDouble metadata entries (._foo). They're useless
+        // to the guest and would pollute /etc/timidity with junk.
+        const base = name.split('/').pop();
+        const isAppleDouble = base && base.startsWith('._');
+        if (name && !isAppleDouble) {
+          const isDir = type === '5';
+          const fullPath = destPrefix + '/' + name;
+          const parts = fullPath.split('/').filter(p => p && p !== '.');
+          const dirDepth = isDir ? parts.length : parts.length - 1;
+          let cur = '';
+          for (let i = 0; i < dirDepth; i++) {
+            cur += '/' + parts[i];
+            try { Module.FS.mkdir(cur); } catch (e) {
+              const code = e && (e.code || e.errno);
+              if (code !== 'EEXIST' && code !== 20 && code !== 17 &&
+                  !String(e).includes('exist')) throw e;
+            }
+          }
+          if (!isDir && (type === '0' || type === '\0' || type === '')) {
+            try {
+              Module.FS.writeFile(fullPath, data.subarray(offset, offset + size));
+              count++;
+            } catch (e) {
+              throw new Error(`writeFile ${fullPath} failed: ` +
+                  `${e?.message || e?.code || e}`);
+            }
+          }
+        }
+        offset += Math.ceil(size / 512) * 512;
+      }
+      return count;
+    }
+
     // Fetch a file with progress reporting, return Uint8Array
     async function fetchWithProgress(url, label) {
       const resp = await fetch(url);
@@ -665,6 +713,19 @@
       return result;
     }
 
+    function formatError(e) {
+      if (!e) return 'undefined error';
+      if (typeof e === 'string') return e;
+      const parts = [];
+      if (e.name) parts.push(e.name);
+      if (e.code) parts.push(`code=${e.code}`);
+      if (e.errno !== undefined) parts.push(`errno=${e.errno}`);
+      if (e.status) parts.push(`status=${e.status}`);
+      const msg = e.message || e.toString?.() || '';
+      if (msg && msg !== '[object Object]') parts.push(msg);
+      return parts.length ? parts.join(' ') : '[object Object]';
+    }
+
     // Optional virtio-blk image. If `disk.img` is present at the same origin,
     // attach it read-only so the booted Linux can `mount /dev/vda /mnt`. Keeps
     // the rootfs.cpio small and lets extra payloads (game data, datasets) ride
@@ -692,10 +753,21 @@
           fetchWithProgress('rootfs.cpio', 'Rootfs'),
           fetchOptionalDisk(),
         ]);
+        const timidityGzip = await fetch("timidity.tar.gz");
 
         if (term) term.write('\x1b[33mWriting artifacts to VFS...\x1b[0m\r\n');
         Module.FS.writeFile('/Image', kernelData);
         Module.FS.writeFile('/rootfs.cpio', rootfsData);
+        Module.FS.mkdirTree('/etc/timidity');
+	try {
+          const gunzipped = timidityGzip.body.pipeThrough(new DecompressionStream('gzip'));
+          let tarBuf = await new Response(gunzipped).arrayBuffer();
+          const n = extractTarToMemfs(new Uint8Array(tarBuf), "/etc/timidity");
+          if (term) term.write(
+            `\x1b[36m> Unpacked ${n} files to /etc/timidity\x1b[0m\r\n`);
+	} catch (e) {
+          throw new Error(`Processing timitidy.tar.gz failed: ${formatError(e)}`);
+	}
 
         let bootArgs = '-k Image -i rootfs.cpio';
         if (diskData) {

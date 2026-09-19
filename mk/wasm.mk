@@ -255,7 +255,7 @@ endef
 # into the main JS file. Copy the sidecar only when it exists so the build is
 # correct on both toolchains and a pthread build doesn't ship missing it.
 define cp-web-worker
-    $(Q)if [ -f $(BIN).worker.js ]; then cp $(BIN).worker.js $(DEMO_DIR)/; fi
+    $(Q)if [ -f $(basename $(BIN)).worker.js ]; then cp $(basename $(BIN)).worker.js $(DEMO_DIR)/; fi
 endef
 
 STATIC_WEB_FILES := $(WEB_JS_RESOURCES)/coi-serviceworker.min.js \

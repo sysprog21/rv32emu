@@ -1481,6 +1481,17 @@ void rv_warm_reboot(riscv_t *rv, riscv_word_t pc)
 
     vm_attr_t *attr = PRIV(rv);
 
+#if RV32_HAS(VIRTIO_NET)
+    if (attr->vnet) {
+        virtio_net_reset(attr->vnet);
+
+        uint32_t irq_bit = IRQ_VNET_BIT(attr->vnet_irq);
+        attr->plic->active &= ~irq_bit;
+        attr->plic->ip &= ~irq_bit;
+        attr->plic->masked &= ~irq_bit;
+    }
+#endif
+
     /* clear memory */
     memory_fill(attr->mem, 0, attr->mem->mem_size, 0);
 

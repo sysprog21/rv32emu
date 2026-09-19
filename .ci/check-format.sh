@@ -76,4 +76,17 @@ else
     DTS_FORMAT_EXIT=0
 fi
 
-exit $((C_FORMAT_EXIT + SH_FORMAT_EXIT + PY_FORMAT_EXIT + DTS_FORMAT_EXIT))
+HTML_SOURCES=()
+while IFS= read -r file; do
+    [ -n "$file" ] && HTML_SOURCES+=("$file")
+done < <(git ls-files -- '*.html')
+
+if [ ${#HTML_SOURCES[@]} -gt 0 ]; then
+    echo "Checking HTML files..."
+    npx --no-install prettier --check "${HTML_SOURCES[@]}"
+    HTML_FORMAT_EXIT=$?
+else
+    HTML_FORMAT_EXIT=0
+fi
+
+exit $((C_FORMAT_EXIT + SH_FORMAT_EXIT + PY_FORMAT_EXIT + DTS_FORMAT_EXIT + HTML_FORMAT_EXIT))

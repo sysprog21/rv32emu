@@ -26,3 +26,6 @@ pip3 install --break-system-packages black==25.1.0
 DTSFMT_URL="https://github.com/mskelton/dtsfmt/releases/download/${DTSFMT_VERSION}/dtsfmt-x86_64-unknown-linux-musl.tar.gz"
 curl -fsSL --retry 3 "${DTSFMT_URL}" | sudo tar -xz -C /usr/local/bin dtsfmt
 dtsfmt --version
+
+# HTML/JS formatter
+npm install -g prettier@3.9.8

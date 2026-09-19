@@ -17,6 +17,11 @@ $ source ~/emsdk/emsdk_env.sh
 ```
 Change the Emscripten SDK environment path if necessary.
 
+Create wasm default config:
+```shell
+$ make wasm_defconfig
+```
+
 At this point, you can build and start a web server service to serve
 WebAssembly by running:
 

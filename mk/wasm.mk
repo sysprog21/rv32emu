@@ -56,6 +56,11 @@ LDFLAGS += -pthread
 # Note: Emscripten 4.x inlines worker code into the main JS file
 endif
 
+# Enable ZLIB
+ifeq ($(CONFIG_LINK_ZLIB),y)
+CFLAGS_emcc += -sUSE_ZLIB=1
+endif
+
 # setjmp/longjmp needs -pthread
 ifeq ($(call has, SYSTEM), 1)
 ifeq ($(call has, ELF_LOADER), 0)

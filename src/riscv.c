@@ -17,7 +17,6 @@
 #include "dtc/libfdt/libfdt.h"
 #include "system.h"
 
-/* TODO: support WASM target by leveraging -sUSE_ZLIB=1 */
 #if RV32_HAS(LINK_ZLIB)
 #include <zlib.h>
 #endif

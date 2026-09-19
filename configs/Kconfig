@@ -481,8 +481,10 @@ config DEBUG_SYMBOLS
       Increases binary size significantly.
 
 config LINK_ZLIB
-    def_bool $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-zlib'))
-    depends on SYSTEM && !ELF_LOADER && !CC_IS_EMCC
+    bool
+    default y if CC_IS_EMCC
+    default $(python,assert run(sys.executable, 'tools/detect-env.py', '--have-zlib'))
+    depends on SYSTEM && !ELF_LOADER
 
 endmenu
 

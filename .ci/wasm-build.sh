@@ -28,8 +28,7 @@ case "${MODE}" in
         # Ship the timidity instrument set twice: browsers with
         # DecompressionStream take the gzip payload, older Safari and Firefox
         # fall back to the plain tar.
-        tar -cf build/timidity.tar -C build/timidity .
-        gzip -9 -c build/timidity.tar > build/timidity.tar.gz
+        make build/timidity.tar build/timidity.tar.gz
 
         mkdir -p "${STAGE}"
         cp assets/wasm/html/system.html "${STAGE}/index.html"
@@ -53,8 +52,7 @@ case "${MODE}" in
         # Ship the timidity instrument set twice: browsers with
         # DecompressionStream take the gzip payload, older Safari and Firefox
         # fall back to the plain tar.
-        tar -cf build/timidity.tar -C build/timidity .
-        gzip -9 -c build/timidity.tar > build/timidity.tar.gz
+        make build/timidity.tar build/timidity.tar.gz
 
         mkdir -p "${STAGE}"
 

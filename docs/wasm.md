@@ -17,22 +17,19 @@ $ source ~/emsdk/emsdk_env.sh
 ```
 Change the Emscripten SDK environment path if necessary.
 
-Create wasm default config:
-```shell
-$ make wasm_defconfig
-```
-
 At this point, you can build and start a web server service to serve
 WebAssembly by running:
 
 - User-mode emulation:
 ```shell
+$ make wasm_defconfig
 $ make CC=emcc start-web -j8
 ```
 
 - System emulation:
 ```shell
-$ make CC=emcc start-web ENABLE_SYSTEM=1 INITRD_SIZE=32 -j8
+$ make wasm_system_defconfig
+$ make CC=emcc start-web INITRD_SIZE=32 -j8
 ```
 
 You would see the server's IP:PORT in your terminal. Copy and paste it to

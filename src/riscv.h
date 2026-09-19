@@ -430,6 +430,11 @@ void rv_step(void *arg);
 /* step the RISC-V emulator for debug mode */
 void rv_step_debug(void *arg);
 
+#if RV32_HAS(VIRTIO_NET)
+/* Refresh the virtio-net backend periodically while the guest is running. */
+void rv_refresh_vnet(riscv_t *rv);
+#endif
+
 /* set the program counter of a RISC-V emulator */
 bool rv_set_pc(riscv_t *rv, riscv_word_t pc);
 

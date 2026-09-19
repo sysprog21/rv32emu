@@ -945,14 +945,30 @@ void rv_debug(riscv_t *rv);
 
 void rv_profile(riscv_t *rv, char *out_file_path);
 
+#if RV32_HAS(VIRTIO_NET)
+void rv_refresh_vnet(riscv_t *rv)
+{
+    assert(rv);
+
+    vm_attr_t *attr = PRIV(rv);
+
+    if (!attr->vnet)
+        return;
+
+    if (rv->csr_cycle - rv->last_vnet_refresh < VNET_REFRESH_INTERVAL)
+        return;
+
+    virtio_net_refresh_queue(attr->vnet);
+    emu_update_vnet_interrupts(rv);
+    rv->last_vnet_refresh = rv->csr_cycle;
+}
+#endif
+
 void rv_run(riscv_t *rv)
 {
     assert(rv);
 
     vm_attr_t *attr = PRIV(rv);
-#if RV32_HAS(VIRTIO_NET)
-    uint64_t last_vnet_refresh = rv->csr_cycle;
-#endif
     assert(attr &&
 #if RV32_HAS(SYSTEM_MMIO)
            attr->data.system.kernel && attr->data.system.initrd
@@ -970,14 +986,7 @@ void rv_run(riscv_t *rv)
             rv_step(rv);              /* step instructions */
 
 #if RV32_HAS(VIRTIO_NET)
-            if (attr->vnet) {
-                if (rv->csr_cycle - last_vnet_refresh >=
-                    VNET_REFRESH_INTERVAL) {
-                    virtio_net_refresh_queue(attr->vnet);
-                    emu_update_vnet_interrupts(rv);
-                    last_vnet_refresh = rv->csr_cycle;
-                }
-            }
+            rv_refresh_vnet(rv);
 #endif
         }
 #endif
@@ -1131,6 +1140,10 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 
     /* Not being halted */
     rv->halt = false;
+
+#if RV32_HAS(VIRTIO_NET)
+    rv->last_vnet_refresh = rv->csr_cycle;
+#endif
 
     /* Set the reset address */
     rv->PC = pc;

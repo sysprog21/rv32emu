@@ -1,0 +1,8 @@
+# WebAssembly build with Emscripten
+CONFIG_BUILD_WASM=y
+# CONFIG_LTO is not set
+CONFIG_OPTIMIZE_LEVEL=3
+CONFIG_BLOCK_CHAINING=y
+# System emulation for Linux kernel
+CONFIG_SYSTEM=y
+CONFIG_GOLDFISH_RTC=y

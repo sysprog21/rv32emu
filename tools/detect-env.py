@@ -175,7 +175,7 @@ def have_riscv_toolchain():
 
 def have_zlib():
     """Check if ZLIB is available."""
-    return check_pkg_config("zlib") and _compiler_type() != "Emscripten"
+    return check_pkg_config("zlib")
 
 
 def print_summary():

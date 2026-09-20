@@ -330,6 +330,7 @@ endif
 # sentinel would always fail there (issue identified by cubic).
 ifeq ($(call has, PREBUILT), 1)
 $(OUT)/linux-image/Image \
+$(OUT)/linux-image/Image.gz \
 $(OUT)/linux-image/rootfs.cpio \
 $(OUT)/linux-image/simplefs.ko: artifact
 	$(Q)test -f $@

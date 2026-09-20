@@ -56,6 +56,11 @@ LDFLAGS += -pthread
 # Note: Emscripten 4.x inlines worker code into the main JS file
 endif
 
+# Enable ZLIB
+ifeq ($(CONFIG_LINK_ZLIB),y)
+CFLAGS_emcc += -sUSE_ZLIB=1
+endif
+
 # setjmp/longjmp needs -pthread
 ifeq ($(call has, SYSTEM), 1)
 ifeq ($(call has, ELF_LOADER), 0)
@@ -276,7 +281,7 @@ ifeq ($(CONFIG_SYSTEM),y)
 # rootfs.web.cpio is the upstream rootfs.cpio with an /etc/init.d/S99automount
 # overlay so the guest auto-mounts /dev/vda at /mnt during boot.
 start_web_deps += $(BUILD_DTB) $(BUILD_DTB2C) \
-                  $(OUT)/linux-image/Image \
+                  $(OUT)/linux-image/Image.gz \
                   $(OUT)/linux-image/rootfs.web.cpio \
                   $(OUT)/timidity.tar $(OUT)/timidity.tar.gz
 else
@@ -297,8 +302,8 @@ prepare-web: $(start_web_deps)
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(call cp-web-worker)
 ifeq ($(CONFIG_SYSTEM),y)
-	$(Q)cp build/linux-image/Image $(DEMO_DIR)/
-	$(Q)cp $(OUT)/linux-image/rootfs.web.cpio $(DEMO_DIR)/rootfs.cpio
+	$(Q)cp build/linux-image/Image.gz $(DEMO_DIR)/
+	$(Q)gzip -9 -c $(OUT)/linux-image/rootfs.web.cpio > $(DEMO_DIR)/rootfs.cpio.gz
 endif
 	$(Q)mv $(DEMO_DIR)/*.html $(DEMO_DIR)/index.html
 	$(Q)cp $(LANDING_PAGE) $(DEMO_DIR_BASE)/index.html
@@ -318,8 +323,8 @@ compress-web: $(start_web_deps)
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(call cp-web-worker)
 ifeq ($(CONFIG_SYSTEM),y)
-	$(Q)cp build/linux-image/Image $(DEMO_DIR)/
-	$(Q)cp $(OUT)/linux-image/rootfs.web.cpio $(DEMO_DIR)/rootfs.cpio
+	$(Q)cp build/linux-image/Image.gz $(DEMO_DIR)/
+	$(Q)gzip -9 -c $(OUT)/linux-image/rootfs.web.cpio > $(DEMO_DIR)/rootfs.cpio.gz
 endif
 	$(Q)mv $(DEMO_DIR)/*.html $(DEMO_DIR)/index.html
 	$(Q)cp $(LANDING_PAGE) $(DEMO_DIR_BASE)/index.html

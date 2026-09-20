@@ -718,13 +718,13 @@
 
       try {
         const [kernelData, rootfsData, diskData] = await Promise.all([
-          fetchWithProgress('Image', 'Kernel'),
-          fetchWithProgress('rootfs.cpio', 'Rootfs'),
+          fetchWithProgress('Image.gz', 'Kernel'),
+          fetchWithProgress('rootfs.cpio.gz', 'Rootfs'),
           fetchOptionalDisk(),
         ]);
         if (term) term.write('\x1b[33mWriting artifacts to VFS...\x1b[0m\r\n');
-        Module.FS.writeFile('/Image', kernelData);
-        Module.FS.writeFile('/rootfs.cpio', rootfsData);
+        Module.FS.writeFile('/Image.gz', kernelData);
+        Module.FS.writeFile('/rootfs.cpio.gz', rootfsData);
 
         // The instrument set only feeds host-side SDL_mixer MIDI playback, so
         // a missing or unreadable tar must not stop the guest from booting.
@@ -739,7 +739,7 @@
             `\x1b[33m> ${formatError(e)}; booting without MIDI music\x1b[0m\r\n`);
         }
 
-        let bootArgs = '-k Image -i rootfs.cpio';
+        let bootArgs = '-k Image.gz -i rootfs.cpio.gz';
         if (diskData) {
           Module.FS.writeFile('/disk.img', diskData);
           bootArgs += ' -x vblk:disk.img,readonly';

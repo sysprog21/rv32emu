@@ -24,9 +24,16 @@ function extractTarToMemfs(data, destPrefix) {
     offset += 512;
     // Skip macOS AppleDouble metadata entries (._foo). They're useless
     // to the guest and would pollute /etc/timidity with junk.
-    const base = name.split('/').pop();
+    const components = name.split('/');
+    const base = components[components.length - 1];
     const isAppleDouble = base && base.startsWith('._');
-    if (name && !isAppleDouble) {
+    // Reject anything that would escape destPrefix: an absolute member name
+    // or a ".." component lets a tampered archive overwrite unrelated MEMFS
+    // files such as /Image or /rootfs.cpio.
+    const escapesDest = name.startsWith('/') || components.includes('..');
+    if (escapesDest)
+      console.warn(`skipping unsafe tar entry: ${name}`);
+    if (name && !isAppleDouble && !escapesDest) {
       const isDir = type === '5';
       const fullPath = destPrefix + '/' + name;
       const parts = fullPath.split('/').filter(p => p && p !== '.');

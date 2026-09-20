@@ -40,7 +40,7 @@ However, participation requires adherence to fundamental ground rules:
   Complex algorithmic constructs without proper comments will not be accepted.
 * Shell scripts must be formatted before submission. Use consistent flags across the project to ensure uniform formatting.
 * Python scripts must be formatted before submission. Use consistent flags across the project to ensure uniform formatting.
-* HTML files must be formatted before submission. Use consistent flags across the project to ensure uniform formatting.
+* HTML/JS files must be formatted before submission. Use consistent flags across the project to ensure uniform formatting.
 * External pull requests should include thorough documentation in the pull request comments for consideration.
 * When composing documentation, code comments, and other materials in English,
   please adhere to the American English (`en_US`) dialect.
@@ -52,14 +52,15 @@ Software requirements:
 * [shfmt](https://github.com/mvdan/sh).
 * [black](https://github.com/psf/black) version 25.1.0.
 * [dtsfmt](https://github.com/mskelton/dtsfmt).
-* [prettier](https://github.com/prettier/prettier).
+* [prettier](https://github.com/prettier/prettier) version 3.9.8. See [.ci/install-formatters.sh](.ci/install-formatters.sh) for installation.
 
 To maintain a uniform style across languages, run:
 * `clang-format -i *.{c,h}` to apply the project’s C/C++ formatting rules from the up-to-date .clang-format file.
 * `shfmt -w $(find . -type f -name "*.sh")` to clean and standardize all shell scripts.
 * `black .` to enforce a consistent, idiomatic layout for Python code.
 * `dtsfmt ./src/devices/` to enforce a consistent layout for device tree source (and include).
-* `npx prettier --write ./assets/wasm/html/` to enforce a consistent layout for HTML files.
+* `npx --no-install prettier --write ./assets/wasm/html/` to enforce a consistent layout for HTML files.
+* `npx --no-install prettier --write ./assets/wasm/js/` to enforce a consistent layout for JS files.
 * `make format` to automatically run all formatters.
 
 ## Coding Style for Device Tree Source and Device Tree Source Include
@@ -98,7 +99,7 @@ Python scripts must be clean, consistent, and adhere to modern Python best pract
 * Remove trailing whitespace at the end of lines.
 * Ensure files end with a newline.
 
-## Coding Style for HTML
+## Coding Style for HTML/JS
 
 Prettier is an opinionated code formatter.
 

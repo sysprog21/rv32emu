@@ -52,7 +52,8 @@ Software requirements:
 * [shfmt](https://github.com/mvdan/sh).
 * [black](https://github.com/psf/black) version 25.1.0.
 * [dtsfmt](https://github.com/mskelton/dtsfmt).
-* [prettier](https://github.com/prettier/prettier) version 3.9.8. See [.ci/install-formatters.sh](.ci/install-formatters.sh) for installation.
+* [prettier](https://github.com/prettier/prettier) version 3.9.8. Please ensure that [node](https://nodejs.org/en/download) is
+  installed on the system and updated to v24.18.0 or higher, then run `npm install -g prettier@3.9.8` to install prettier.
 
 To maintain a uniform style across languages, run:
 * `clang-format -i *.{c,h}` to apply the project’s C/C++ formatting rules from the up-to-date .clang-format file.

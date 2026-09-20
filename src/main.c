@@ -295,17 +295,12 @@ static bool parse_args(int argc, char **args)
     opt_prog_name = prog_args[0];
 
     if (opt_prof_data) {
-        char cwd_path[PATH_MAX] = {0};
-        /* Not an assert: NDEBUG would drop the call and leave the path empty */
-        if (!getcwd(cwd_path, PATH_MAX)) {
-            rv_log_fatal("Cannot determine the current working directory");
-            return false;
-        }
-
         /* Write the report beside the emulator binary. Take the directory
          * with dirname() rather than trimming a fixed strlen("rv32emu") from
          * argv[0]: that only lands correctly when the binary is invoked under
          * exactly that name, and silently builds a spliced path otherwise.
+         * A relative directory needs no working-directory prefix, since it
+         * already resolves against the same one fopen() will use.
          *
          * Both dirname() and the XPG basename() may write through their
          * argument, so hand each one a copy. opt_prog_name in particular is
@@ -318,18 +313,15 @@ static bool parse_args(int argc, char **args)
         const char *emu_dir = dirname(emu_path);
         const char *prog_basename = basename(prog_path);
 
-        /* An absolute emulator path already names the directory in full. */
-        const char *prefix = emu_dir[0] == '/' ? "" : cwd_path;
-        size_t total_len = strlen(prefix) + 1 + strlen(emu_dir) + 1 +
-                           strlen(prog_basename) + 5 + 1;
+        size_t total_len = strlen(emu_dir) + 1 + strlen(prog_basename) + 5 + 1;
         prof_out_file = malloc(total_len);
         if (!prof_out_file) {
             rv_log_error("Failed to allocate profiling output filename");
             return false;
         }
 
-        snprintf(prof_out_file, total_len, "%s%s%s/%s.prof", prefix,
-                 *prefix ? "/" : "", emu_dir, prog_basename);
+        snprintf(prof_out_file, total_len, "%s/%s.prof", emu_dir,
+                 prog_basename);
     }
     return true;
 }

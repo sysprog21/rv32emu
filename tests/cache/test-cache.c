@@ -45,19 +45,21 @@ int main(int argc, char *argv[])
     size_t len = 0;
     struct cache *cache = NULL;
     int key, freq, *ans, *val;
+    uint32_t put_freq;
     while (getline(&line, &len, fp) != -1) {
         char *arr[3];
         split(arr, line, " ");
         if (!strcmp(arr[0], "GET")) {
             key = (int) strtol(arr[1], NULL, 10);
-            ans = cache_get(cache, key, true);
-            freq = cache_freq(cache, key);
+            cache_lookup_t got = cache_get_with_freq(cache, key, true);
+            ans = got.value;
+            freq = (int) got.freq;
             print_value(ans, freq);
         } else if (!strcmp(arr[0], "PUT")) {
             key = (int) strtol(arr[1], NULL, 10);
             val = malloc(sizeof(int));
             *val = (int) strtol(arr[2], NULL, 10);
-            val = cache_put(cache, key, val);
+            val = cache_put(cache, key, val, &put_freq);
             if (val) {
                 printf("REPLACE %d\n", *val);
                 free(val);

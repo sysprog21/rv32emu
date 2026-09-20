@@ -1000,14 +1000,12 @@ typedef struct {
  */
 static inline void bht_record_target(branch_history_table_t *bt,
                                      uint32_t pc,
-                                     uint32_t satp)
+                                     uint32_t satp UNUSED)
 {
     const uint32_t idx = (pc >> 2) & (HISTORY_SIZE - 1);
     bool match = bt->PC[idx] == pc;
 #if RV32_HAS(SYSTEM)
     match = match && bt->satp[idx] == satp;
-#else
-    (void) satp;
 #endif
     if (match) {
         if (bt->times[idx] != UINT32_MAX)

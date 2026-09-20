@@ -13,8 +13,6 @@ $(eval $(call test-framework,cache,test-cache.o,$(OUT)/cache.o $(OUT)/mpool.o,$(
 
 # Block-edge test: verifies predecessor ownership and target-first unlinking
 $(eval $(call test-framework,block-edge,test-block-edge.o,,))
-# The block edge helpers are compiled out unless JIT and block chaining are on.
-$(OUT)/block-edge/test-block-edge.o: $(EFFECTIVE_CONFIG_STAMP)
 
 # Map test: tests red-black tree map implementation
 $(eval $(call test-framework,map,test-map.o mt19937.o,$(OUT)/map.o,))
@@ -22,18 +20,14 @@ $(eval $(call test-framework,map,test-map.o mt19937.o,$(OUT)/map.o,))
 # Path test: tests path utility functions
 $(eval $(call test-framework,path,test-path.o,$(OUT)/utils.o,))
 
-# Runtime loop tracking: generations, collisions, and capacity limits
-$(eval $(call test-framework,loop-tracker,test-loop-tracker.o,$(OUT)/utils.o,))
-# The tracker layout depends on SYSTEM/JIT through rv_hash_key_t.
-$(OUT)/loop-tracker/test-loop-tracker.o: $(EFFECTIVE_CONFIG_STAMP)
+# Hashed set: generations, collisions, capacity limits, and key zero
+$(eval $(call test-framework,set,test-set.o,$(OUT)/utils.o,))
 
 # IO test: guest memory accessors reject out-of-range addresses
 $(eval $(call test-framework,io,test-io.o,$(OUT)/io.o $(OUT)/log.o,))
 
 # Decode test: reserved encodings and JIT indirect-target history updates
 $(eval $(call test-framework,decode,test-decode.o,$(OUT)/decode.o,))
-# The branch-history assertions depend on JIT and SYSTEM through decode.h.
-$(OUT)/decode/test-decode.o: $(EFFECTIVE_CONFIG_STAMP)
 
 # ELF test: rejects malformed ELF input without reading outside the file
 $(eval $(call test-framework,elf,test-elf.o,$(OUT)/elf.o $(OUT)/io.o $(OUT)/map.o $(OUT)/utils.o $(OUT)/log.o,))
@@ -47,14 +41,14 @@ $(eval $(call run-test-simple,block-edge))
 # Map and path tests use simple exit code checking
 $(eval $(call run-test-simple,map))
 $(eval $(call run-test-simple,path))
-$(eval $(call run-test-simple,loop-tracker))
+$(eval $(call run-test-simple,set))
 $(eval $(call run-test-simple,elf))
 $(eval $(call run-test-simple,io))
 $(eval $(call run-test-simple,decode))
 
 # Main Test Target
 
-tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-loop-tracker
+tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-set
 
 # Integration Tests (run emulator with test programs)
 
@@ -87,6 +81,11 @@ EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 EXPECTED_fused-misalign = fused misalign passed
 EXPECTED_block-eviction = block eviction OK
+EXPECTED_jit-alu-alias = JIT ALU aliases OK
+EXPECTED_jit-indirect-targets = JIT indirect targets OK
+EXPECTED_jit-identity-normalize = JIT identity normalize OK
+EXPECTED_jit-signed-div = JIT signed division OK
+EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
 EXPECTED_trace_match = trace matcher corpus passed
 
@@ -107,42 +106,81 @@ GUEST_CFLAGS := -march=rv32i -mabi=ilp32
 GUEST_CHECKS := fused-misalign syscall-zero-write
 GUEST_CHECK_TARGETS :=
 GUEST_ASM_CHECK_TARGETS :=
+# Every check below runs a user-mode guest ELF, which a system-mode emulator
+# can only load with the ELF loader selected; otherwise it expects a kernel
+# image and the program never runs.
+RUN_USER_ELF :=
+ifneq ($(CONFIG_SYSTEM),y)
+RUN_USER_ELF := y
+else ifeq ($(CONFIG_ELF_LOADER),y)
+RUN_USER_ELF := y
+endif
+
 ifneq ($(CROSS_COMPILE),)
 ifneq ($(CONFIG_RV32E),y)
 ifneq ($(filter check,$(MAKECMDGOALS)),)
-# Freestanding regressions do not require the rv32 libc multilib.
-GUEST_ASM_WORKS := $(shell printf '' | $(CROSS_COMPILE)gcc $(GUEST_CFLAGS) \
-	-nostdlib -static -Wl,-e,0 -x assembler -o /dev/null - \
+# Freestanding regressions need no rv32 libc multilib, but they do need the
+# assembler and linker to accept each ISA string in use. Probe every one,
+# because a toolchain that handles rv32i need not handle rv32imc.
+guest-asm-arch-works = $(shell printf '' | $(CROSS_COMPILE)gcc -march=$(1) \
+	-mabi=ilp32 -nostdlib -static -Wl,-e,0 -x assembler -o /dev/null - \
 	>/dev/null 2>&1 && echo y)
-ifeq ($(GUEST_ASM_WORKS),y)
+GUEST_ASM_WORKS := $(call guest-asm-arch-works,rv32i)
+GUEST_ASM_M_WORKS := $(call guest-asm-arch-works,rv32im)
+GUEST_ASM_C_WORKS := $(call guest-asm-arch-works,rv32ic)
+GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
+
+ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
 # The jit-* programs assert tier-1 code generation, so they prove nothing when
 # the emulator under test has no JIT. Report them as skipped rather than
 # passing them through the interpreter and reporting green.
 ifeq ($(CONFIG_JIT),y)
-GUEST_ASM_CHECK_TARGETS += check-jit-alu-alias check-jit-memory-address \
-	check-jit-indirect-targets
-ifeq ($(CONFIG_EXT_M),y)
-GUEST_ASM_CHECK_TARGETS += check-jit-identity-normalize
+GUEST_ASM_CHECK_TARGETS += check-jit-alu-alias check-jit-indirect-targets
+# check-jit-memory-address assembles for rv32i and, with compressed
+# instructions configured, rv32ic as well.
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-memory-address
+else ifneq ($(CONFIG_EXT_C),y)
+GUEST_ASM_CHECK_TARGETS += check-jit-memory-address
+endif
+ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-identity-normalize check-jit-signed-div \
+	check-jit-interp-diff
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_MC_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-interp-diff-rvc
+endif
 endif
 else
 $(info Skipping JIT codegen regressions: CONFIG_JIT is not enabled)
 endif
+else ifneq ($(RUN_USER_ELF),y)
+$(info Skipping guest regressions: system mode without CONFIG_ELF_LOADER cannot run user ELFs)
 endif
 # An auto-detected toolchain may lack an rv32i/ilp32 multilib; probe it so such
 # a toolchain skips these programs instead of failing make check.
 GUEST_CC_WORKS := $(shell printf 'int main(void) { return 0; }\n' | \
 	$(CROSS_COMPILE)gcc $(GUEST_CFLAGS) -x c -o /dev/null - >/dev/null 2>&1 && \
 	echo y)
-ifeq ($(GUEST_CC_WORKS),y)
-GUEST_CHECK_TARGETS := $(addprefix check-,$(GUEST_CHECKS))
-else
+ifneq ($(GUEST_CC_WORKS),y)
 $(info Skipping guest regression programs: $(CROSS_COMPILE)gcc cannot build $(GUEST_CFLAGS) programs)
+else ifeq ($(RUN_USER_ELF),y)
+GUEST_CHECK_TARGETS := $(addprefix check-,$(GUEST_CHECKS))
 endif
 endif
 endif
 endif
+
+# Build a freestanding guest program from tests/$(1).S for ISA $(2) and compare
+# its output, so these report like every other check instead of staying silent.
+define guest-asm-check-target
+.PHONY: check-$(1)
+check-$(1): $$(BIN) tests/$(1).S | $$(OUT)
+	$$(Q)$$(CROSS_COMPILE)gcc -march=$(2) -mabi=ilp32 -nostdlib -static \
+	    -Wl,-e,_start -o $$(OUT)/$(1) tests/$(1).S
+	$$(call check-test, , $$(OUT)/$(1), $(1), tail -n 1,$$(EXPECTED_$(1)))
+endef
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c
@@ -164,14 +202,8 @@ check-block-eviction: $(BIN) tests/block-eviction.c tests/block-eviction-start.S
 	    tests/block-eviction-start.S tests/block-eviction.c
 	$(call check-test, , $(OUT)/block-eviction, block-eviction, uniq,$(EXPECTED_block-eviction))
 
-.PHONY: check-jit-alu-alias
-check-jit-alu-alias: $(BIN) tests/jit-alu-alias.S | $(OUT)
-	$(Q)$(CROSS_COMPILE)gcc $(GUEST_CFLAGS) -nostdlib -static -Wl,-e,_start \
-	    -o $(OUT)/jit-alu-alias tests/jit-alu-alias.S
-	$(Q)output="$$($(BIN) -q $(OUT)/jit-alu-alias)" || exit 1; \
-	    test "$$output" = "JIT ALU aliases OK"
-
 # Exercise base/destination aliases and signed offsets with and without RVC.
+# This one stays hand-written: it runs the same program for two ISAs.
 .PHONY: check-jit-memory-address
 check-jit-memory-address: $(BIN) tests/jit-memory-address.S | $(OUT)
 	$(Q)for arch in rv32i $(if $(filter y,$(CONFIG_EXT_C)),rv32ic); do \
@@ -182,26 +214,32 @@ check-jit-memory-address: $(BIN) tests/jit-memory-address.S | $(OUT)
 	    test "$$output" = "JIT memory address OK" || exit 1; \
 	done
 
-.PHONY: check-jit-identity-normalize
-check-jit-identity-normalize: $(BIN) tests/jit-identity-normalize.S | $(OUT)
-	$(Q)$(CROSS_COMPILE)gcc -march=rv32im -mabi=ilp32 -nostdlib -static \
-	    -Wl,-e,_start -o $(OUT)/jit-identity-normalize \
-	    tests/jit-identity-normalize.S
-	$(Q)$(BIN) -q $(OUT)/jit-identity-normalize
-
+$(eval $(call guest-asm-check-target,jit-alu-alias,rv32i))
 # Guard emission additionally requires JIT_INDIRECT_TARGETS, which is off in
 # tiered builds; the program still covers history recording and chaining.
-.PHONY: check-jit-indirect-targets
-check-jit-indirect-targets: $(BIN) tests/jit-indirect-targets.S | $(OUT)
-	$(Q)$(CROSS_COMPILE)gcc $(GUEST_CFLAGS) -nostdlib -static -Wl,-e,_start \
-	    -o $(OUT)/jit-indirect-targets tests/jit-indirect-targets.S
-	$(Q)output="$$($(BIN) -q $(OUT)/jit-indirect-targets)" || exit 1; \
-	    test "$$output" = "JIT indirect targets OK"
+$(eval $(call guest-asm-check-target,jit-indirect-targets,rv32i))
+$(eval $(call guest-asm-check-target,jit-identity-normalize,rv32im))
+$(eval $(call guest-asm-check-target,jit-signed-div,rv32im))
+$(eval $(call guest-asm-check-target,jit-interp-diff,rv32im))
 
-CHECK_TARGETS := check-hello $(GUEST_CHECK_TARGETS) $(GUEST_ASM_CHECK_TARGETS) \
-	check-trace-match \
-	$(addprefix check-,$(CHECK_ELF_FILES))
-ifeq ($(CONFIG_EXT_V),y)
+# The same program assembled with compressed encodings must agree, which is
+# what exercises the compressed load/store generators.
+.PHONY: check-jit-interp-diff-rvc
+check-jit-interp-diff-rvc: $(BIN) tests/jit-interp-diff.S | $(OUT)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32imc -mabi=ilp32 -nostdlib -static \
+	    -Wl,-e,_start -o $(OUT)/jit-interp-diff-rvc tests/jit-interp-diff.S
+	$(call check-test, , $(OUT)/jit-interp-diff-rvc, jit-interp-diff-rvc, \
+	    tail -n 1,$(EXPECTED_jit-interp-diff))
+
+# check-trace-match builds and runs a host program, so it is independent of
+# whether the emulator can load a user ELF. Everything else here is a guest
+# ELF and belongs behind the same gate as the regressions above.
+CHECK_TARGETS := check-trace-match
+ifeq ($(RUN_USER_ELF),y)
+CHECK_TARGETS += check-hello $(GUEST_CHECK_TARGETS) \
+	$(GUEST_ASM_CHECK_TARGETS) $(addprefix check-,$(CHECK_ELF_FILES))
+endif
+ifeq ($(CONFIG_EXT_V)$(RUN_USER_ELF),yy)
 EXPECTED_rvv_smoke = RVV smoke OK
 CHECK_TARGETS += check-rvv-smoke
 
@@ -226,7 +264,7 @@ mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
-	run-test-elf run-test-io run-test-decode run-test-loop-tracker
+	run-test-elf run-test-io run-test-decode run-test-set
 .PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
 
 endif # _MK_TESTS_INCLUDED

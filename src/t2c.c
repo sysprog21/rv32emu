@@ -529,7 +529,7 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         pthread_mutex_unlock(cache_lock);
         return;
     }
-    set_reset(set);
+    set_init(set);
     struct LLVM_block_map map;
     map.count = 0;
     /* Translate custom IR into LLVM IR */
@@ -650,6 +650,9 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         if (block->should_free) {
             /* Free IRs that main thread skipped during deferred eviction */
 #if RV32_HAS(BLOCK_CHAINING)
+        block_unlink_outgoing_edges(block);
+#endif
+#if RV32_HAS(BLOCK_CHAINING)
             block_unlink_outgoing_edges(block);
 #endif
             for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
@@ -674,9 +677,6 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         /* Dispose engine (we own it) */
         LLVMDisposeExecutionEngine(engine);
         /* Free IRs that main thread skipped during deferred eviction */
-#if RV32_HAS(BLOCK_CHAINING)
-        block_unlink_outgoing_edges(block);
-#endif
         for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
             next_ir = ir->next;
             free(ir->branch_table);

@@ -815,6 +815,7 @@ static void capture_keyboard_input(void)
  * Memory must be freed at runtime. block_map_clear() requires a RISC-V instance
  * and runs in interpreter mode. Instead of modifying its signature, access the
  * global RISC-V instance in main.c with external linkage.
+ *
  */
 extern riscv_t *rv;
 static void rv_async_block_clear(void)

@@ -250,24 +250,7 @@ static cache_entry_t *cache_find(const cache_t *cache, uint32_t key)
 
 void *cache_get(const cache_t *cache, uint32_t key, bool update)
 {
-    cache_entry_t *entry = cache_find(cache, key);
-    if (!entry)
-        return NULL;
-
-    /*
-     * FIXME: In system simulation, there might be several identical PC from
-     * different processes. We need to check the SATP CSR to update the correct
-     * entry.
-     */
-    /* When the frequency of use for a specific block exceeds the predetermined
-     * THRESHOLD, the block is dispatched to the code generator to generate C
-     * code. The generated C code is then compiled into machine code by the
-     * target compiler.
-     */
-    if (update)
-        entry->freq++;
-
-    return entry->value;
+    return cache_get_with_freq(cache, key, update).value;
 }
 
 /*
@@ -294,8 +277,10 @@ FORCE_INLINE void cache_ghost_list_update(cache_t *cache)
  * - updates the existing cache
  * - retrieves the information from the history in the glost list
  */
-void *cache_put(cache_t *cache, uint32_t key, void *value)
+void *cache_put(cache_t *cache, uint32_t key, void *value, uint32_t *freq)
 {
+    assert(freq);
+    *freq = 0;
     assert(cache->size <= cache->capacity);
 
     cache_entry_t *replaced = NULL, *revived = NULL, *entry;
@@ -385,6 +370,7 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
                    &cache->map.ht_list_head[cache_hash(key)]);
 
     cache->size++;
+    *freq = new_entry->freq;
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
     /* Page index for O(1) invalidation - blocks are page-terminated
@@ -433,13 +419,16 @@ void cache_free(cache_t *cache)
     free(cache);
 }
 
-uint32_t cache_freq(const struct cache *cache, uint32_t key)
-{
-    const cache_entry_t *entry = cache_find(cache, key);
-    return entry ? entry->freq : 0;
-}
-
-#if RV32_HAS(JIT)
+/*
+ * FIXME: In system simulation, there might be several identical PC from
+ * different processes. We need to check the SATP CSR to update the correct
+ * entry.
+ */
+/* When the frequency of use for a specific block exceeds the predetermined
+ * THRESHOLD, the block is dispatched to the code generator to generate C
+ * code. The generated C code is then compiled into machine code by the
+ * target compiler.
+ */
 cache_lookup_t cache_get_with_freq(const cache_t *cache,
                                    uint32_t key,
                                    bool update)
@@ -456,6 +445,7 @@ cache_lookup_t cache_get_with_freq(const cache_t *cache,
     return result;
 }
 
+#if RV32_HAS(JIT)
 void cache_profile(const struct cache *cache,
                    FILE *output_file,
                    prof_func_t func)

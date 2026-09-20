@@ -27,8 +27,8 @@ int main(void)
     source_b.pc_start = 8;
     target.pc_start = 12;
 
-    block_link_edge(&source_a, &ir_a.branch_taken, &target);
-    block_link_edge(&source_b, &ir_b.branch_untaken, &target);
+    block_link_edge(&source_a, true, &target);
+    block_link_edge(&source_b, false, &target);
     assert(block_incoming_edge_count(&target) == 2);
 
     /* Target eviction must clear both still-live predecessor slots. */
@@ -40,11 +40,11 @@ int main(void)
     /* A compiling source retains its outgoing edges after eviction. A new
      * predecessor may arrive before deferred cleanup unlinks the old source.
      */
-    block_link_edge(&source_a, &ir_a.branch_taken, &target);
-    block_link_edge(&source_a, &ir_a.branch_untaken, &source_a);
+    block_link_edge(&source_a, true, &target);
+    block_link_edge(&source_a, false, &source_a);
     block_unlink_incoming_edges(&source_a);
     assert(ir_a.branch_untaken == &ir_a);
-    block_link_edge(&source_b, &ir_b.branch_taken, &target);
+    block_link_edge(&source_b, true, &target);
     assert(block_incoming_edge_count(&target) == 2);
     block_unlink_outgoing_edges(&source_a);
     assert(!ir_a.branch_taken && !ir_a.branch_untaken);
@@ -52,14 +52,14 @@ int main(void)
     assert(block_incoming_edge_count(&target) == 1);
 
     /* The target can instead be evicted before deferred source cleanup. */
-    block_link_edge(&source_a, &ir_a.branch_taken, &target);
+    block_link_edge(&source_a, true, &target);
     block_unlink_incoming_edges(&source_a);
     block_unlink_edges(&target);
     block_unlink_outgoing_edges(&source_a);
     assert(!ir_a.branch_taken && !ir_b.branch_taken);
     assert(block_incoming_edge_count(&target) == 0);
 
-    block_link_edge(&target, &ir_target.branch_taken, &target);
+    block_link_edge(&target, true, &target);
     assert(block_incoming_edge_count(&target) == 1);
     block_unlink_edges(&target);
     assert(!ir_target.branch_taken);
@@ -80,7 +80,7 @@ int main(void)
     block_init_edge_lists(&shrinking);
     shrinking.pc_start = 16;
 
-    block_link_edge(&shrinking, &ir_pair[1].branch_taken, &target);
+    block_link_edge(&shrinking, true, &target);
     assert(block_incoming_edge_count(&target) == 1);
 
     /* What remove_next_nth_ir() does once the retired run reaches the tail. */

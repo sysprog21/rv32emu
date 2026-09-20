@@ -180,6 +180,19 @@ typedef struct block {
 #endif
 } block_t;
 
+#if RV32_HAS(BLOCK_CHAINING)
+/* The chain pointer for an edge lives on its source block's current tail
+ * instruction. Deriving it on demand rather than pinning it keeps the edge
+ * valid when macro-op fusion shortens an already-chained block and moves
+ * @ir_tail back over the instruction that held the link.
+ */
+static inline rv_insn_t **block_chain_slot(block_t *source, bool taken)
+{
+    return taken ? &source->ir_tail->branch_taken
+                 : &source->ir_tail->branch_untaken;
+}
+#endif
+
 #if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
 /* With T2C active, callers must hold cache_lock when reading or changing
  * shared edge lists. Initialization and teardown after joining T2C are exempt.
@@ -202,17 +215,7 @@ static inline void block_init_edge_lists(block_t *block)
  */
 static inline rv_insn_t **block_edge_slot(const block_edge_t *edge)
 {
-    block_t *source = edge->source;
-    return edge == &source->taken_edge ? &source->ir_tail->branch_taken
-                                       : &source->ir_tail->branch_untaken;
-}
-
-static inline block_edge_t *block_edge_for(block_t *source, rv_insn_t **slot)
-{
-    assert(slot == &source->ir_tail->branch_taken ||
-           slot == &source->ir_tail->branch_untaken);
-    return slot == &source->ir_tail->branch_taken ? &source->taken_edge
-                                                  : &source->untaken_edge;
+    return block_chain_slot(edge->source, edge == &edge->source->taken_edge);
 }
 
 static inline void block_edge_unlink(block_edge_t *edge)
@@ -229,15 +232,18 @@ static inline void block_edge_unlink(block_edge_t *edge)
     edge->target = NULL;
 }
 
-static inline void block_link_edge(block_t *source,
-                                   rv_insn_t **slot,
-                                   block_t *target)
+/* Install a chain edge while the slot is still open, so the first transition
+ * observed through it wins. An eviction clears the slot and the edge together,
+ * which is what lets a later transition re-chain it.
+ */
+static inline void block_link_edge(block_t *source, bool taken, block_t *target)
 {
-    block_edge_t *edge = block_edge_for(source, slot);
-
-    if (*slot == target->ir_head)
+    rv_insn_t **slot = block_chain_slot(source, taken);
+    if (*slot)
         return;
-    block_edge_unlink(edge);
+
+    block_edge_t *edge = taken ? &source->taken_edge : &source->untaken_edge;
+    assert(!edge->target);
     *slot = target->ir_head;
     edge->target = target;
     list_add(&edge->target_link, &target->incoming_edges);
@@ -267,18 +273,25 @@ static inline void block_unlink_edges(block_t *block)
     block_unlink_incoming_edges(block);
 }
 
-static inline uint32_t block_incoming_edge_count(const block_t *block)
+static inline uint32_t block_incoming_edge_count(block_t *block)
 {
     uint32_t count = 0;
-    const struct list_head *edge;
+    block_edge_t *edge;
 
-    /* list_for_each_entry splits on __typeof__ and drops const, so walk the
-     * nodes directly: the count never needs the containing edge.
-     */
-    for (edge = block->incoming_edges.next; edge != &block->incoming_edges;
-         edge = edge->next)
+    list_for_each_entry (edge, &block->incoming_edges, target_link)
         count++;
     return count;
+}
+#elif RV32_HAS(BLOCK_CHAINING)
+/* Without the JIT there is no eviction to unlink from, so a chain edge is
+ * just the pointer. Keeping the name and the rule lets rv_step spell chaining
+ * one way across both builds.
+ */
+static inline void block_link_edge(block_t *source, bool taken, block_t *target)
+{
+    rv_insn_t **slot = block_chain_slot(source, taken);
+    if (!*slot)
+        *slot = target->ir_head;
 }
 #endif
 
@@ -571,6 +584,23 @@ struct riscv_internal {
     uint32_t csr_vlenb;  /* VLEN/8 (vector register length in bytes) */
 #endif
 };
+
+/* A cached block is usable from here only when it belongs to the address space
+ * executing now. Address translation makes that a real question in system
+ * mode; user mode has one space, so this folds away to a null check.
+ */
+static inline bool block_matches_context(const riscv_t *rv UNUSED,
+                                         const block_t *block)
+{
+    /* satp and invalidated only exist where the JIT caches blocks across
+     * address spaces; elsewhere there is nothing to disambiguate.
+     */
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    return block && block->satp == rv->csr_satp && !block->invalidated;
+#else
+    return block;
+#endif
+}
 
 /* sign extend a 16 bit value */
 FORCE_INLINE uint32_t sign_extend_h(const uint32_t x)

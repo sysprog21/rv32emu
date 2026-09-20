@@ -792,7 +792,7 @@ static uint32_t last_pc = 0;
 static block_t *prev = NULL;
 
 #if RV32_HAS(JIT)
-static loop_tracker_t pc_set;
+static set_t pc_set;
 static bool has_loops = false;
 #endif
 
@@ -806,7 +806,7 @@ void reset_rv_run_state(void)
     is_branch_taken = false;
     last_pc = 0;
 #if RV32_HAS(JIT)
-    loop_tracker_reset(&pc_set);
+    set_reset(&pc_set);
     has_loops = false;
 #endif
 #if RV32_HAS(SYSTEM)
@@ -2243,6 +2243,7 @@ static inline int count_consecutive_shift(rv_insn_t *ir)
     }
     return count;
 }
+
 /* Allocate and rewrite a fused sequence.
  * Returns true on success, false on allocation failure (graceful degradation).
  * Uses pooled allocation for fuse arrays up to FUSE_MAX_ENTRIES.
@@ -2267,7 +2268,6 @@ static inline bool try_fuse_sequence(riscv_t *rv,
         return false;
 
     ir->fuse = fuse_data;
-
     /* Copy original instruction BEFORE changing opcode (preserves original
      * opcode in fuse[0] for handlers like fuse_shift_exec that need it) */
     memcpy(ir->fuse, ir, sizeof(opcode_fuse_t));
@@ -2942,12 +2942,9 @@ static block_t *block_find_or_translate(riscv_t *rv
     cache_lookup_t lookup = cache_get_with_freq(rv->block_cache, rv->PC, true);
     block_t *next_blk = lookup.value;
     *freq = lookup.freq;
-#if RV32_HAS(SYSTEM)
     /* discard cache if satp mismatch or block was invalidated by SFENCE.VMA */
-    if (next_blk && (next_blk->satp != rv->csr_satp || next_blk->invalidated)) {
+    if (!block_matches_context(rv, next_blk))
         next_blk = NULL;
-    }
-#endif
 #endif
 
     if (next_blk) {
@@ -3011,10 +3008,10 @@ static block_t *block_find_or_translate(riscv_t *rv
 #endif
 
     /* insert the block into block cache */
-    block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, next_blk);
-    /* A cache miss is cold. Preserve the initial or revived frequency without
-     * another lookup on the execution hot path. */
-    *freq = cache_get_with_freq(rv->block_cache, rv->PC, false).freq;
+    /* A cache miss is cold. cache_put knows the initial or revived frequency
+     * it just installed, so take it from there rather than probing again.
+     */
+    block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, next_blk, freq);
 
     if (!replaced_blk) {
 #if RV32_HAS(T2C)
@@ -3113,11 +3110,8 @@ static block_t *block_find_or_translate(riscv_t *rv
  * JIT compiler in architecture test.
  */
 #if RV32_HAS(JIT) && !RV32_HAS(ARCH_TEST)
-static bool runtime_profiler(riscv_t *rv, block_t *block, uint32_t freq)
+static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
 {
-#if !RV32_HAS(SYSTEM)
-    (void) rv;
-#endif
 #if RV32_HAS(SYSTEM)
     if (block->satp != rv->csr_satp)
         return false;
@@ -3316,44 +3310,18 @@ void rv_step(void *arg)
              */
             pthread_mutex_lock(&rv->cache_lock);
 #endif
-            rv_insn_t *last_ir = prev->ir_tail;
-            /* chain block */
-            if (prev->page_terminated) {
-                /* Page-terminated block: always falls through to next address.
-                 * Use branch_taken for fallthrough (like unconditional jump).
-                 */
-                if (!last_ir->branch_taken) {
-#if RV32_HAS(JIT)
-                    block_link_edge(prev, &last_ir->branch_taken, block);
-#else
-                    last_ir->branch_taken = block->ir_head;
-#endif
-                }
-            } else if (!insn_is_unconditional_branch(last_ir->opcode)) {
-                /* Conditional branch: chain based on taken/untaken path */
-                if (is_branch_taken && !last_ir->branch_taken) {
-#if RV32_HAS(JIT)
-                    block_link_edge(prev, &last_ir->branch_taken, block);
-#else
-                    last_ir->branch_taken = block->ir_head;
-#endif
-                } else if (!is_branch_taken && !last_ir->branch_untaken) {
-#if RV32_HAS(JIT)
-                    block_link_edge(prev, &last_ir->branch_untaken, block);
-#else
-                    last_ir->branch_untaken = block->ir_head;
-#endif
-                }
-            } else if (insn_is_direct_branch(last_ir->opcode)) {
-                /* Unconditional direct branch: always use branch_taken */
-                if (!last_ir->branch_taken) {
-#if RV32_HAS(JIT)
-                    block_link_edge(prev, &last_ir->branch_taken, block);
-#else
-                    last_ir->branch_taken = block->ir_head;
-#endif
-                }
-            }
+            const rv_insn_t *last_ir = prev->ir_tail;
+            /* Chain onto the edge this transition actually took. A
+             * page-terminated block and an unconditional direct branch both
+             * always leave through their taken slot; a conditional branch
+             * leaves through the one is_branch_taken names.
+             */
+            if (prev->page_terminated)
+                block_link_edge(prev, true, block);
+            else if (!insn_is_unconditional_branch(last_ir->opcode))
+                block_link_edge(prev, is_branch_taken, block);
+            else if (insn_is_direct_branch(last_ir->opcode))
+                block_link_edge(prev, true, block);
 #if RV32_HAS(T2C)
             pthread_mutex_unlock(&rv->cache_lock);
 #endif
@@ -3371,7 +3339,6 @@ void rv_step(void *arg)
             /* Ensure instruction cache coherency before executing T2C code */
             __asm__ volatile("isb" ::: "memory");
 #endif
-
             /* Defensive NULL check - should not occur if seqlocks work
              * correctly but protects against races during block invalidation
              */
@@ -3461,7 +3428,7 @@ void rv_step(void *arg)
                 continue;
             }
         }
-        loop_tracker_reset(&pc_set);
+        set_reset(&pc_set);
         has_loops = false;
 #endif
         /* execute the block by interpreter.

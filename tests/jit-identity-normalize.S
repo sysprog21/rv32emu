@@ -56,6 +56,11 @@ loop:
     .endr
     addi s0, s0, -1
     bnez s0, loop
+    li a0, 1
+    la a1, passed
+    li a2, 26
+    li a7, 64
+    ecall
     li a0, 0
     j exit
 fail:
@@ -64,6 +69,8 @@ exit:
     li a7, 93
     ecall
     .section .rodata
+passed:
+    .ascii "JIT identity normalize OK\n"
     .balign 4
 operands:
     .word 0x80000000, 1

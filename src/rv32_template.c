@@ -34,56 +34,30 @@ RVOP(nop, { rv->X[rv_reg_zero] = 0; })
  */
 RVOP(lui, { rv->X[ir->rd] = ir->imm; })
 
-#if RV32_HAS(JIT)
-/* A repeated program counter proves a control-flow cycle. Once one has been
- * found for this dispatch, additional set probes cannot change profiling.
- */
-#define DETECT_LOOP(target_pc)                                     \
-    do {                                                           \
-        if (!has_loops && loop_tracker_seen(&pc_set, (target_pc))) \
-            has_loops = true;                                      \
-    } while (0)
-#else
-#define DETECT_LOOP(target_pc) \
-    do {                       \
-    } while (0)
-#endif
-
 /* Probe a chained target before following it: charge the cache access, record
  * the target for loop detection, and leave the interpreter once the target is
  * hot enough for the JIT to own it.
  *
  * Every branch form shares this, so a compressed branch profiles a target
- * exactly as its uncompressed counterpart does. The loop tracker is fed even
- * on a cache miss: a repeated program counter proves a cycle whether or not
- * the destination has been translated yet.
+ * exactly as its uncompressed counterpart does. In user mode the loop tracker
+ * is fed even on a cache miss, since a repeated program counter proves a cycle
+ * whether or not the destination has been translated yet; system mode has to
+ * confirm the address space first, so an untranslated target is skipped.
  */
-#if RV32_HAS(JIT)
-/* A chained target is worth probing only when it belongs to the address space
- * executing now. Address translation makes that a real question in system
- * mode; user mode has one space, so this folds away.
+/* A repeated program counter proves a control-flow cycle. Once one has been
+ * found for this dispatch, further probes cannot change profiling.
  */
-static inline bool probe_target_live(const riscv_t *rv UNUSED,
-                                     cache_lookup_t lookup UNUSED)
-{
-#if RV32_HAS(SYSTEM)
-    const block_t *next = (const block_t *) lookup.value;
-    return next && next->satp == rv->csr_satp && !next->invalidated;
-#else
-    return true;
-#endif
-}
-#endif
-
-#define RVOP_PROBE_TARGET(target_pc, hot_label)                      \
-    do {                                                             \
-        cache_lookup_t lookup =                                      \
-            cache_get_with_freq(rv->block_cache, (target_pc), true); \
-        if (!probe_target_live(rv, lookup))                          \
-            break;                                                   \
-        DETECT_LOOP(target_pc);                                      \
-        if (lookup.freq >= THRESHOLD)                                \
-            goto hot_label;                                          \
+#define RVOP_PROBE_TARGET(target_pc, hot_label)                                \
+    do {                                                                       \
+        cache_lookup_t lookup =                                                \
+            cache_get_with_freq(rv->block_cache, (target_pc), true);           \
+        IIF(RV32_HAS(SYSTEM))(                                                 \
+            if (!block_matches_context(rv,                                     \
+                                       (const block_t *) lookup.value)) break; \
+            , ) if (!has_loops && set_probe(&pc_set, (target_pc))) has_loops = \
+            true;                                                              \
+        if (lookup.freq >= THRESHOLD)                                          \
+            goto hot_label;                                                    \
     } while (0)
 
 /* AUIPC is used to build pc-relative addresses and uses the U-type format.

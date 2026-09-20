@@ -43,7 +43,9 @@ jobs:
               # Build system configuration
               mk/kconfig.mk
               mk/wasm.mk
-              configs/wasm_defconfig
+              # ZLIB is resolved here
+              configs/Kconfig
+              configs/wasm_system_defconfig
               tools/detect-env.py
               # Helper scripts the deploy job runs
               .ci/wasm-build.sh

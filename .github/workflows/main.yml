@@ -75,8 +75,8 @@ jobs:
       - name: Build system emulation
         run: |
               make distclean
-              make wasm_defconfig
-              make ENABLE_SYSTEM=1 ENABLE_GOLDFISH_RTC=1 $PARALLEL
+              make wasm_system_defconfig
+              make $PARALLEL
 
   host-x64:
     name: x64 ${{ matrix.compiler }}

@@ -1,31 +1,49 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>rv32emu - RISC-V Emulator</title>
-  <!-- xterm.js CSS (small, load immediately) -->
-  <link rel="stylesheet" href="xterm.min.css">
-  <!-- Preload WASM for streaming compilation (largest asset) -->
-  <link rel="preload" href="rv32emu.wasm" as="fetch" type="application/wasm" crossorigin>
-  <style>
-    /* Critical CSS - inline for fast first paint */
-    :root {
-      --bg-primary: #0a0a0a;
-      --bg-secondary: #141414;
-      --bg-terminal: #000000;
-      --text-primary: #e0e0e0;
-      --text-secondary: #707070;
-      --text-muted: #505050;
-      --accent-green: #00ff00;
-      --accent-cyan: #00ffff;
-      --accent-amber: #ffb000;
-      --border-color: #2a2a2a;
-      --error-red: #ff4444;
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>rv32emu - RISC-V Emulator</title>
+    <!-- xterm.js CSS (small, load immediately) -->
+    <link rel="stylesheet" href="xterm.min.css" />
+    <!-- Preload WASM for streaming compilation (largest asset) -->
+    <link
+      rel="preload"
+      href="rv32emu.wasm"
+      as="fetch"
+      type="application/wasm"
+      crossorigin
+    />
+    <style>
+      /* Critical CSS - inline for fast first paint */
+      :root {
+        --bg-primary: #0a0a0a;
+        --bg-secondary: #141414;
+        --bg-terminal: #000000;
+        --text-primary: #e0e0e0;
+        --text-secondary: #707070;
+        --text-muted: #505050;
+        --accent-green: #00ff00;
+        --accent-cyan: #00ffff;
+        --accent-amber: #ffb000;
+        --border-color: #2a2a2a;
+        --error-red: #ff4444;
+      }
 
-    @media (prefers-color-scheme: light) {
-      :root:not(.dark-theme) {
+      @media (prefers-color-scheme: light) {
+        :root:not(.dark-theme) {
+          --bg-primary: #fafafa;
+          --bg-secondary: #f0f0f0;
+          --bg-terminal: #1a1a1a;
+          --text-primary: #1a1a1a;
+          --text-secondary: #666666;
+          --text-muted: #999999;
+          --border-color: #e0e0e0;
+        }
+      }
+
+      /* Manual light theme toggle (single class for efficient reflow) */
+      :root.light-theme {
         --bg-primary: #fafafa;
         --bg-secondary: #f0f0f0;
         --bg-terminal: #1a1a1a;
@@ -34,1458 +52,1677 @@
         --text-muted: #999999;
         --border-color: #e0e0e0;
       }
-    }
 
-    /* Manual light theme toggle (single class for efficient reflow) */
-    :root.light-theme {
-      --bg-primary: #fafafa;
-      --bg-secondary: #f0f0f0;
-      --bg-terminal: #1a1a1a;
-      --text-primary: #1a1a1a;
-      --text-secondary: #666666;
-      --text-muted: #999999;
-      --border-color: #e0e0e0;
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      min-height: 100vh;
-      line-height: 1.5;
-    }
-
-    /* Progressive loading states */
-    .progressive-load {
-      opacity: 0;
-      transform: translateY(10px);
-      transition: opacity 0.3s ease, transform 0.3s ease;
-    }
-
-    .progressive-load.loaded {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    /* Loading overlay */
-    .loading-overlay {
-      position: fixed;
-      inset: 0;
-      background: var(--bg-primary);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      transition: opacity 0.5s ease, visibility 0.5s ease;
-    }
-
-    .loading-overlay.hidden {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-
-    .loading-spinner {
-      width: 48px;
-      height: 48px;
-      border: 3px solid var(--border-color);
-      border-top-color: var(--accent-green);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .loading-text {
-      margin-top: 16px;
-      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-      font-size: 18px;
-      color: var(--text-secondary);
-    }
-
-    .loading-progress {
-      width: 200px;
-      height: 4px;
-      background: var(--border-color);
-      border-radius: 2px;
-      margin-top: 12px;
-      overflow: hidden;
-    }
-
-    .loading-progress-bar {
-      height: 100%;
-      background: var(--accent-green);
-      border-radius: 2px;
-      width: 100%;
-      transform: scaleX(0);
-      transform-origin: left;
-      transition: transform 0.3s ease;
-      will-change: transform;
-    }
-
-    .loading-details {
-      margin-top: 8px;
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    /* Navigation */
-    .nav-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 24px;
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg-secondary);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-
-    .logo {
-      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-      font-size: 28px;
-      color: var(--accent-green);
-      letter-spacing: 2px;
-    }
-
-    .logo span {
-      color: var(--text-secondary);
-      font-size: 14px;
-      margin-left: 8px;
-      vertical-align: middle;
-    }
-
-    .nav-links {
-      display: flex;
-      gap: 24px;
-      align-items: center;
-    }
-
-    .nav-links a {
-      color: var(--text-secondary);
-      text-decoration: none;
-      font-size: 13px;
-      transition: color 0.2s;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .nav-links a:hover {
-      color: var(--accent-green);
-    }
-
-    /* Main Container */
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 24px;
-    }
-
-    /* Hero Section */
-    .hero {
-      text-align: center;
-      padding: 48px 0 32px;
-    }
-
-    .hero h1 {
-      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-      font-size: 48px;
-      font-weight: normal;
-      color: var(--text-primary);
-      margin-bottom: 8px;
-    }
-
-    .hero .subtitle {
-      color: var(--text-secondary);
-      font-size: 14px;
-      margin-bottom: 16px;
-    }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 16px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 20px;
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-
-    .status-badge::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent-green);
-      animation: pulse 2s infinite;
-    }
-
-    .status-badge.loading::before {
-      background: var(--accent-amber);
-    }
-
-    .status-badge.running::before {
-      background: var(--accent-cyan);
-      animation: running-pulse 0.8s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    @keyframes running-pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.6; transform: scale(1.2); }
-    }
-
-    /* Controls Panel */
-    .controls-panel {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 24px;
-      flex-wrap: wrap;
-    }
-
-    .elf-selector {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-      padding: 10px 16px;
-      font-family: inherit;
-      font-size: 14px;
-      border-radius: 4px;
-      min-width: 200px;
-      cursor: pointer;
-    }
-
-    .elf-selector:focus {
-      outline: 2px solid var(--accent-green);
-      outline-offset: 2px;
-      border-color: var(--accent-green);
-    }
-
-    .elf-selector:focus:not(:focus-visible) {
-      outline: none;
-    }
-
-    .btn {
-      background: transparent;
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-      padding: 10px 20px;
-      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-      font-size: 18px;
-      cursor: pointer;
-      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      border-radius: 4px;
-    }
-
-    .btn:hover {
-      background: var(--accent-green);
-      color: var(--bg-primary);
-      border-color: var(--accent-green);
-    }
-
-    .btn:active {
-      transform: scale(0.98);
-    }
-
-    .btn:focus-visible {
-      outline: 2px solid var(--accent-cyan);
-      outline-offset: 2px;
-    }
-
-    .btn-primary {
-      background: var(--accent-green);
-      color: var(--bg-primary);
-      border-color: var(--accent-green);
-    }
-
-    .btn-primary:hover {
-      background: var(--accent-cyan);
-      border-color: var(--accent-cyan);
-    }
-
-    .btn-secondary {
-      border-color: var(--text-muted);
-      color: var(--text-secondary);
-    }
-
-    /* Canvas Panel */
-    .canvas-panel {
-      background: var(--bg-terminal);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 24px;
-    }
-
-    .canvas-panel.collapsed .canvas-wrapper {
-      max-height: 0;
-      min-height: 0;
-      padding-top: 0;
-      padding-bottom: 0;
-      opacity: 0;
-      visibility: hidden;
-      overflow: hidden;
-    }
-
-    .canvas-panel.collapsed .canvas-header {
-      cursor: pointer;
-    }
-
-    .canvas-panel.collapsed .canvas-controls {
-      display: none;
-    }
-
-    .canvas-toggle {
-      background: none;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 12px;
-      padding: 4px 8px;
-      margin-left: 8px;
-    }
-
-    .canvas-toggle:hover {
-      color: var(--accent-green);
-    }
-
-    .canvas-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 16px;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .canvas-title {
-      font-size: 12px;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .canvas-controls {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .canvas-controls label {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--text-secondary);
-      cursor: pointer;
-    }
-
-    .canvas-controls input[type="checkbox"] {
-      accent-color: var(--accent-green);
-    }
-
-    .canvas-wrapper {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 300px;
-      padding: 16px;
-      /* Only animate opacity - avoid layout-triggering properties */
-      transition: opacity 0.3s ease;
-      opacity: 1;
-    }
-
-    #canvas {
-      background: #000;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
-      max-width: 100%;
-      height: auto;
-      /* GPU compositing - translateZ(0) promotes to compositor layer */
-      transform: translateZ(0);
-    }
-
-    /* Terminal Panel */
-    .terminal-panel {
-      background: var(--bg-terminal);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    .terminal-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 16px;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .terminal-title {
-      font-size: 12px;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .terminal-dots {
-      display: flex;
-      gap: 6px;
-    }
-
-    .terminal-dots span {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--border-color);
-    }
-
-    .terminal-dots span:nth-child(1) { background: #ff5f56; }
-    .terminal-dots span:nth-child(2) { background: #ffbd2e; }
-    .terminal-dots span:nth-child(3) { background: #27ca40; }
-
-    #terminal {
-      padding: 8px;
-      min-height: 500px;
-    }
-
-    /* xterm.js theme override */
-    .xterm {
-      padding: 8px;
-    }
-
-    .xterm-viewport {
-      background: var(--bg-terminal) !important;
-    }
-
-    /* Features Grid */
-    .features-section {
-      margin-top: 48px;
-      padding-top: 32px;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .features-title {
-      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-      font-size: 24px;
-      color: var(--text-secondary);
-      text-align: center;
-      margin-bottom: 24px;
-      text-transform: uppercase;
-      letter-spacing: 4px;
-    }
-
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 16px;
-    }
-
-    .feature-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 20px;
-      transition: border-color 0.2s;
-    }
-
-    .feature-card:hover {
-      border-color: var(--accent-green);
-    }
-
-    .feature-card h3 {
-      font-family: 'Menlo', 'Monaco', 'Consolas', monospace;
-      font-size: 20px;
-      color: var(--accent-green);
-      margin-bottom: 8px;
-    }
-
-    .feature-card p {
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.6;
-    }
-
-    /* Progress */
-    #progress {
-      width: 100%;
-      height: 4px;
-      appearance: none;
-      border: none;
-      background: var(--border-color);
-      border-radius: 2px;
-      margin-bottom: 16px;
-    }
-
-    #progress::-webkit-progress-bar {
-      background: var(--border-color);
-      border-radius: 2px;
-    }
-
-    #progress::-webkit-progress-value {
-      background: var(--accent-green);
-      border-radius: 2px;
-    }
-
-    /* Spinner - hidden by default, more minimal */
-    .spinner {
-      display: none;
-    }
-
-    /* Footer */
-    .footer {
-      text-align: center;
-      padding: 32px 0;
-      margin-top: 48px;
-      border-top: 1px solid var(--border-color);
-      color: var(--text-muted);
-      font-size: 12px;
-    }
-
-    .footer a {
-      color: var(--text-secondary);
-      text-decoration: none;
-    }
-
-    .footer a:hover {
-      color: var(--accent-green);
-    }
-
-    /* Responsive */
-    @media (max-width: 768px) {
-      .nav-header {
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          "Menlo", "Monaco", "Consolas", "Liberation Mono", monospace;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        min-height: 100vh;
+        line-height: 1.5;
+      }
+
+      /* Progressive loading states */
+      .progressive-load {
+        opacity: 0;
+        transform: translateY(10px);
+        transition:
+          opacity 0.3s ease,
+          transform 0.3s ease;
+      }
+
+      .progressive-load.loaded {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      /* Loading overlay */
+      .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: var(--bg-primary);
+        display: flex;
         flex-direction: column;
-        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        transition:
+          opacity 0.5s ease,
+          visibility 0.5s ease;
+      }
+
+      .loading-overlay.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .loading-spinner {
+        width: 48px;
+        height: 48px;
+        border: 3px solid var(--border-color);
+        border-top-color: var(--accent-green);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .loading-text {
+        margin-top: 16px;
+        font-family: "Menlo", "Monaco", "Consolas", monospace;
+        font-size: 18px;
+        color: var(--text-secondary);
+      }
+
+      .loading-progress {
+        width: 200px;
+        height: 4px;
+        background: var(--border-color);
+        border-radius: 2px;
+        margin-top: 12px;
+        overflow: hidden;
+      }
+
+      .loading-progress-bar {
+        height: 100%;
+        background: var(--accent-green);
+        border-radius: 2px;
+        width: 100%;
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.3s ease;
+        will-change: transform;
+      }
+
+      .loading-details {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      /* Navigation */
+      .nav-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 24px;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+
+      .logo {
+        font-family: "Menlo", "Monaco", "Consolas", monospace;
+        font-size: 28px;
+        color: var(--accent-green);
+        letter-spacing: 2px;
+      }
+
+      .logo span {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-left: 8px;
+        vertical-align: middle;
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 24px;
+        align-items: center;
+      }
+
+      .nav-links a {
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 13px;
+        transition: color 0.2s;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .nav-links a:hover {
+        color: var(--accent-green);
+      }
+
+      /* Main Container */
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      /* Hero Section */
+      .hero {
+        text-align: center;
+        padding: 48px 0 32px;
       }
 
       .hero h1 {
-        font-size: 36px;
+        font-family: "Menlo", "Monaco", "Consolas", monospace;
+        font-size: 48px;
+        font-weight: normal;
+        color: var(--text-primary);
+        margin-bottom: 8px;
       }
 
+      .hero .subtitle {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-bottom: 16px;
+      }
+
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      .status-badge::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent-green);
+        animation: pulse 2s infinite;
+      }
+
+      .status-badge.loading::before {
+        background: var(--accent-amber);
+      }
+
+      .status-badge.running::before {
+        background: var(--accent-cyan);
+        animation: running-pulse 0.8s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      @keyframes running-pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.6;
+          transform: scale(1.2);
+        }
+      }
+
+      /* Controls Panel */
       .controls-panel {
-        flex-direction: column;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
       }
 
       .elf-selector {
-        width: 100%;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 10px 16px;
+        font-family: inherit;
+        font-size: 14px;
+        border-radius: 4px;
+        min-width: 200px;
+        cursor: pointer;
+      }
+
+      .elf-selector:focus {
+        outline: 2px solid var(--accent-green);
+        outline-offset: 2px;
+        border-color: var(--accent-green);
+      }
+
+      .elf-selector:focus:not(:focus-visible) {
+        outline: none;
       }
 
       .btn {
-        width: 100%;
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 10px 20px;
+        font-family: "Menlo", "Monaco", "Consolas", monospace;
+        font-size: 18px;
+        cursor: pointer;
+        transition:
+          background-color 0.15s ease,
+          color 0.15s ease,
+          border-color 0.15s ease,
+          transform 0.15s ease;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        border-radius: 4px;
       }
-    }
-  </style>
-</head>
-<body>
-  <!-- Progressive loading overlay -->
-  <div class="loading-overlay" id="loadingOverlay" role="dialog" aria-modal="true" aria-labelledby="loadingText" aria-describedby="loadingDetails">
-    <div class="loading-spinner" aria-hidden="true"></div>
-    <div class="loading-text" id="loadingText" role="status" aria-live="polite">Initializing...</div>
-    <div class="loading-progress" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Loading progress">
-      <div class="loading-progress-bar" id="loadingProgressBar"></div>
-    </div>
-    <div class="loading-details" id="loadingDetails">Preparing WASM runtime</div>
-  </div>
 
-  <nav class="nav-header progressive-load">
-    <div class="logo">rv32emu <span>RV32I[MAFC]</span></div>
-    <div class="nav-links">
-      <a href="#features">Features</a>
-      <a href="https://github.com/sysprog21/rv32emu">GitHub</a>
-      <button id="themeToggle" class="btn btn-secondary" style="padding: 6px 12px; font-size: 14px;" title="Toggle theme" aria-pressed="true" aria-label="Dark mode enabled, click to toggle">Dark</button>
-      <a href="../system/" class="btn btn-secondary" style="padding: 6px 12px; font-size: 14px;">System Mode</a>
-    </div>
-  </nav>
+      .btn:hover {
+        background: var(--accent-green);
+        color: var(--bg-primary);
+        border-color: var(--accent-green);
+      }
 
-  <main class="container">
-    <section class="hero progressive-load">
-      <h1>RISC-V RV32 Emulator</h1>
-      <p class="subtitle">Fast interpreter with tiered JIT compilation | Zba/Zbb/Zbc/Zbs bit manipulation</p>
-      <div class="status-badge loading" id="statusBadge" role="status" aria-live="polite">
-        <span id="statusText">Loading...</span>
+      .btn:active {
+        transform: scale(0.98);
+      }
+
+      .btn:focus-visible {
+        outline: 2px solid var(--accent-cyan);
+        outline-offset: 2px;
+      }
+
+      .btn-primary {
+        background: var(--accent-green);
+        color: var(--bg-primary);
+        border-color: var(--accent-green);
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-cyan);
+        border-color: var(--accent-cyan);
+      }
+
+      .btn-secondary {
+        border-color: var(--text-muted);
+        color: var(--text-secondary);
+      }
+
+      /* Canvas Panel */
+      .canvas-panel {
+        background: var(--bg-terminal);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 24px;
+      }
+
+      .canvas-panel.collapsed .canvas-wrapper {
+        max-height: 0;
+        min-height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        opacity: 0;
+        visibility: hidden;
+        overflow: hidden;
+      }
+
+      .canvas-panel.collapsed .canvas-header {
+        cursor: pointer;
+      }
+
+      .canvas-panel.collapsed .canvas-controls {
+        display: none;
+      }
+
+      .canvas-toggle {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        font-size: 12px;
+        padding: 4px 8px;
+        margin-left: 8px;
+      }
+
+      .canvas-toggle:hover {
+        color: var(--accent-green);
+      }
+
+      .canvas-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 16px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .canvas-title {
+        font-size: 12px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .canvas-controls {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .canvas-controls label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+
+      .canvas-controls input[type="checkbox"] {
+        accent-color: var(--accent-green);
+      }
+
+      .canvas-wrapper {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 300px;
+        padding: 16px;
+        /* Only animate opacity - avoid layout-triggering properties */
+        transition: opacity 0.3s ease;
+        opacity: 1;
+      }
+
+      #canvas {
+        background: #000;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        max-width: 100%;
+        height: auto;
+        /* GPU compositing - translateZ(0) promotes to compositor layer */
+        transform: translateZ(0);
+      }
+
+      /* Terminal Panel */
+      .terminal-panel {
+        background: var(--bg-terminal);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .terminal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 16px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .terminal-title {
+        font-size: 12px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .terminal-dots {
+        display: flex;
+        gap: 6px;
+      }
+
+      .terminal-dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--border-color);
+      }
+
+      .terminal-dots span:nth-child(1) {
+        background: #ff5f56;
+      }
+      .terminal-dots span:nth-child(2) {
+        background: #ffbd2e;
+      }
+      .terminal-dots span:nth-child(3) {
+        background: #27ca40;
+      }
+
+      #terminal {
+        padding: 8px;
+        min-height: 500px;
+      }
+
+      /* xterm.js theme override */
+      .xterm {
+        padding: 8px;
+      }
+
+      .xterm-viewport {
+        background: var(--bg-terminal) !important;
+      }
+
+      /* Features Grid */
+      .features-section {
+        margin-top: 48px;
+        padding-top: 32px;
+        border-top: 1px solid var(--border-color);
+      }
+
+      .features-title {
+        font-family: "Menlo", "Monaco", "Consolas", monospace;
+        font-size: 24px;
+        color: var(--text-secondary);
+        text-align: center;
+        margin-bottom: 24px;
+        text-transform: uppercase;
+        letter-spacing: 4px;
+      }
+
+      .features-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 16px;
+      }
+
+      .feature-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 20px;
+        transition: border-color 0.2s;
+      }
+
+      .feature-card:hover {
+        border-color: var(--accent-green);
+      }
+
+      .feature-card h3 {
+        font-family: "Menlo", "Monaco", "Consolas", monospace;
+        font-size: 20px;
+        color: var(--accent-green);
+        margin-bottom: 8px;
+      }
+
+      .feature-card p {
+        font-size: 13px;
+        color: var(--text-secondary);
+        line-height: 1.6;
+      }
+
+      /* Progress */
+      #progress {
+        width: 100%;
+        height: 4px;
+        appearance: none;
+        border: none;
+        background: var(--border-color);
+        border-radius: 2px;
+        margin-bottom: 16px;
+      }
+
+      #progress::-webkit-progress-bar {
+        background: var(--border-color);
+        border-radius: 2px;
+      }
+
+      #progress::-webkit-progress-value {
+        background: var(--accent-green);
+        border-radius: 2px;
+      }
+
+      /* Spinner - hidden by default, more minimal */
+      .spinner {
+        display: none;
+      }
+
+      /* Footer */
+      .footer {
+        text-align: center;
+        padding: 32px 0;
+        margin-top: 48px;
+        border-top: 1px solid var(--border-color);
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .footer a {
+        color: var(--text-secondary);
+        text-decoration: none;
+      }
+
+      .footer a:hover {
+        color: var(--accent-green);
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
+        .nav-header {
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .hero h1 {
+          font-size: 36px;
+        }
+
+        .controls-panel {
+          flex-direction: column;
+        }
+
+        .elf-selector {
+          width: 100%;
+        }
+
+        .btn {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Progressive loading overlay -->
+    <div
+      class="loading-overlay"
+      id="loadingOverlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="loadingText"
+      aria-describedby="loadingDetails"
+    >
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div
+        class="loading-text"
+        id="loadingText"
+        role="status"
+        aria-live="polite"
+      >
+        Initializing...
       </div>
-    </section>
-
-    <progress value="0" max="100" id="progress" hidden></progress>
-
-    <div class="controls-panel progressive-load">
-      <select class="elf-selector" id="elfDropdown" aria-label="Select ELF program">
-        <option value="">Loading programs...</option>
-      </select>
-      <button class="btn btn-primary" id="runButton" disabled>Run</button>
-      <button class="btn btn-secondary" id="stopButton" disabled title="Stop (Esc)">Stop</button>
+      <div
+        class="loading-progress"
+        role="progressbar"
+        aria-valuenow="0"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-label="Loading progress"
+      >
+        <div class="loading-progress-bar" id="loadingProgressBar"></div>
+      </div>
+      <div class="loading-details" id="loadingDetails">
+        Preparing WASM runtime
+      </div>
     </div>
 
-    <div class="canvas-panel progressive-load collapsed" id="canvasPanel">
-      <div class="canvas-header">
-        <!-- Bind the panel toggle to just the title cluster so clicks on
+    <nav class="nav-header progressive-load">
+      <div class="logo">rv32emu <span>RV32I[MAFC]</span></div>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="https://github.com/sysprog21/rv32emu">GitHub</a>
+        <button
+          id="themeToggle"
+          class="btn btn-secondary"
+          style="padding: 6px 12px; font-size: 14px"
+          title="Toggle theme"
+          aria-pressed="true"
+          aria-label="Dark mode enabled, click to toggle"
+        >
+          Dark
+        </button>
+        <a
+          href="../system/"
+          class="btn btn-secondary"
+          style="padding: 6px 12px; font-size: 14px"
+          >System Mode</a
+        >
+      </div>
+    </nav>
+
+    <main class="container">
+      <section class="hero progressive-load">
+        <h1>RISC-V RV32 Emulator</h1>
+        <p class="subtitle">
+          Fast interpreter with tiered JIT compilation | Zba/Zbb/Zbc/Zbs bit
+          manipulation
+        </p>
+        <div
+          class="status-badge loading"
+          id="statusBadge"
+          role="status"
+          aria-live="polite"
+        >
+          <span id="statusText">Loading...</span>
+        </div>
+      </section>
+
+      <progress value="0" max="100" id="progress" hidden></progress>
+
+      <div class="controls-panel progressive-load">
+        <select
+          class="elf-selector"
+          id="elfDropdown"
+          aria-label="Select ELF program"
+        >
+          <option value="">Loading programs...</option>
+        </select>
+        <button class="btn btn-primary" id="runButton" disabled>Run</button>
+        <button
+          class="btn btn-secondary"
+          id="stopButton"
+          disabled
+          title="Stop (Esc)"
+        >
+          Stop
+        </button>
+      </div>
+
+      <div class="canvas-panel progressive-load collapsed" id="canvasPanel">
+        <div class="canvas-header">
+          <!-- Bind the panel toggle to just the title cluster so clicks on
              the resize/pointer-lock checkboxes or the Fullscreen button do
              not collapse/expand the panel. -->
-        <div class="canvas-header-title" onclick="toggleCanvasPanel()" style="display: flex; align-items: center; cursor: pointer;">
-          <span class="canvas-title">Display Output</span>
-          <button class="canvas-toggle" id="canvasToggle" aria-label="Toggle display panel">[Show]</button>
+          <div
+            class="canvas-header-title"
+            onclick="toggleCanvasPanel()"
+            style="display: flex; align-items: center; cursor: pointer"
+          >
+            <span class="canvas-title">Display Output</span>
+            <button
+              class="canvas-toggle"
+              id="canvasToggle"
+              aria-label="Toggle display panel"
+            >
+              [Show]
+            </button>
+          </div>
+          <div class="canvas-controls">
+            <label>
+              <input type="checkbox" id="resize" />
+              Resize
+            </label>
+            <label>
+              <input type="checkbox" id="pointerLock" checked />
+              Lock Mouse
+            </label>
+            <button
+              class="btn btn-secondary"
+              style="padding: 4px 12px; font-size: 14px"
+              onclick="requestCanvasFullscreen()"
+            >
+              Fullscreen
+            </button>
+          </div>
         </div>
-        <div class="canvas-controls">
-          <label>
-            <input type="checkbox" id="resize">
-            Resize
-          </label>
-          <label>
-            <input type="checkbox" id="pointerLock" checked>
-            Lock Mouse
-          </label>
-          <button class="btn btn-secondary" style="padding: 4px 12px; font-size: 14px;"
-            onclick="requestCanvasFullscreen()">
-            Fullscreen
-          </button>
-        </div>
-      </div>
-      <div class="canvas-wrapper">
-        <canvas class="emscripten" id="canvas" tabindex="0" aria-label="Emulator display"></canvas>
-      </div>
-    </div>
-
-    <div class="terminal-panel progressive-load">
-      <div class="terminal-header">
-        <span class="terminal-title">Console Output</span>
-        <div class="terminal-dots">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-      </div>
-      <div id="terminal" aria-label="Console output"></div>
-    </div>
-
-    <section class="features-section progressive-load" id="features">
-      <h2 class="features-title">Features</h2>
-      <div class="features-grid">
-        <div class="feature-card">
-          <h3>Fast Interpreter</h3>
-          <p>Tail-call-optimization based instruction dispatch with fusion for optimal performance on supported platforms.</p>
-        </div>
-        <div class="feature-card">
-          <h3>Tiered JIT</h3>
-          <p>Two-tier JIT compilation using LLVM 18 for hot code paths with block chaining optimization.</p>
-        </div>
-        <div class="feature-card">
-          <h3>System Emulation</h3>
-          <p>Boot full Linux kernel with device emulation including VirtIO, UART, and RTC support.</p>
-        </div>
-        <div class="feature-card">
-          <h3>SDL Graphics</h3>
-          <p>Graphics and audio support via SDL2 for running graphical RISC-V applications.</p>
+        <div class="canvas-wrapper">
+          <canvas
+            class="emscripten"
+            id="canvas"
+            tabindex="0"
+            aria-label="Emulator display"
+          ></canvas>
         </div>
       </div>
-    </section>
-  </main>
 
-  <footer class="footer">
-    <p>rv32emu - <a href="https://github.com/sysprog21/rv32emu">Open Source</a> RISC-V Emulator</p>
-  </footer>
+      <div class="terminal-panel progressive-load">
+        <div class="terminal-header">
+          <span class="terminal-title">Console Output</span>
+          <div class="terminal-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+        <div id="terminal" aria-label="Console output"></div>
+      </div>
 
-  <!-- Helpers shared with the other demo page; must run before the
+      <section class="features-section progressive-load" id="features">
+        <h2 class="features-title">Features</h2>
+        <div class="features-grid">
+          <div class="feature-card">
+            <h3>Fast Interpreter</h3>
+            <p>
+              Tail-call-optimization based instruction dispatch with fusion for
+              optimal performance on supported platforms.
+            </p>
+          </div>
+          <div class="feature-card">
+            <h3>Tiered JIT</h3>
+            <p>
+              Two-tier JIT compilation using LLVM 18 for hot code paths with
+              block chaining optimization.
+            </p>
+          </div>
+          <div class="feature-card">
+            <h3>System Emulation</h3>
+            <p>
+              Boot full Linux kernel with device emulation including VirtIO,
+              UART, and RTC support.
+            </p>
+          </div>
+          <div class="feature-card">
+            <h3>SDL Graphics</h3>
+            <p>
+              Graphics and audio support via SDL2 for running graphical RISC-V
+              applications.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        rv32emu -
+        <a href="https://github.com/sysprog21/rv32emu">Open Source</a> RISC-V
+        Emulator
+      </p>
+    </footer>
+
+    <!-- Helpers shared with the other demo page; must run before the
        inline script below, hence no defer. -->
-  <script src="common.js"></script>
-  <!-- ELF list loaded on-demand when dropdown is clicked -->
-  <script>
-    // Progressive loading controller
-    const ProgressiveLoader = {
-      overlay: null,
-      progressBar: null,
-      loadingText: null,
-      loadingDetails: null,
-      startTime: Date.now(),
-      wasmSize: 0,
-      wasmLoaded: 0,
+    <script src="common.js"></script>
+    <!-- ELF list loaded on-demand when dropdown is clicked -->
+    <script>
+      // Progressive loading controller
+      const ProgressiveLoader = {
+        overlay: null,
+        progressBar: null,
+        loadingText: null,
+        loadingDetails: null,
+        startTime: Date.now(),
+        wasmSize: 0,
+        wasmLoaded: 0,
 
-      init() {
-        this.overlay = document.getElementById('loadingOverlay');
-        this.progressBar = document.getElementById('loadingProgressBar');
-        this.loadingText = document.getElementById('loadingText');
-        this.loadingDetails = document.getElementById('loadingDetails');
-      },
+        init() {
+          this.overlay = document.getElementById("loadingOverlay");
+          this.progressBar = document.getElementById("loadingProgressBar");
+          this.loadingText = document.getElementById("loadingText");
+          this.loadingDetails = document.getElementById("loadingDetails");
+        },
 
-      setProgress(percent, text, details) {
-        if (this.progressBar) {
-          // Use transform for GPU-accelerated animation (no layout thrashing)
-          this.progressBar.style.transform = `scaleX(${percent / 100})`;
-          // Update ARIA for screen readers
-          const progressContainer = this.progressBar.parentElement;
-          if (progressContainer) progressContainer.setAttribute('aria-valuenow', Math.round(percent));
-        }
-        if (text && this.loadingText) this.loadingText.textContent = text;
-        if (details && this.loadingDetails) this.loadingDetails.textContent = details;
-      },
+        setProgress(percent, text, details) {
+          if (this.progressBar) {
+            // Use transform for GPU-accelerated animation (no layout thrashing)
+            this.progressBar.style.transform = `scaleX(${percent / 100})`;
+            // Update ARIA for screen readers
+            const progressContainer = this.progressBar.parentElement;
+            if (progressContainer)
+              progressContainer.setAttribute(
+                "aria-valuenow",
+                Math.round(percent),
+              );
+          }
+          if (text && this.loadingText) this.loadingText.textContent = text;
+          if (details && this.loadingDetails)
+            this.loadingDetails.textContent = details;
+        },
 
-      formatBytes(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-      },
+        formatBytes(bytes) {
+          if (bytes < 1024) return bytes + " B";
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+          return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        },
 
-      hide() {
-        if (this.overlay) {
-          this.overlay.classList.add('hidden');
-          // Enable progressive reveal of main content
-          document.querySelectorAll('.progressive-load').forEach((el, i) => {
-            setTimeout(() => el.classList.add('loaded'), i * 100);
-          });
-        }
-      }
-    };
-
-    // Initialize loader
-    ProgressiveLoader.init();
-    ProgressiveLoader.setProgress(5, 'Loading...', 'Initializing application');
-
-    const statusBadge = document.getElementById('statusBadge');
-    const statusText = document.getElementById('statusText');
-    const progressElement = document.getElementById('progress');
-    const runButton = document.getElementById('runButton');
-    const elfDropdown = document.getElementById('elfDropdown');
-    const canvasPanel = document.getElementById('canvasPanel');
-    const canvasToggle = document.getElementById('canvasToggle');
-
-    // Canvas panel toggle (collapsed by default, expands when SDL initializes)
-    function toggleCanvasPanel() {
-      if (canvasPanel) {
-        canvasPanel.classList.toggle('collapsed');
-        if (canvasToggle) {
-          canvasToggle.textContent = canvasPanel.classList.contains('collapsed') ? '[Show]' : '[Hide]';
-        }
-      }
-    }
-
-    function expandCanvasPanel() {
-      if (canvasPanel && canvasPanel.classList.contains('collapsed')) {
-        canvasPanel.classList.remove('collapsed');
-        if (canvasToggle) canvasToggle.textContent = '[Hide]';
-        // Auto-focus canvas for keyboard input
-        setTimeout(() => {
-          document.getElementById('canvas')?.focus();
-        }, 100);
-      }
-    }
-
-    // Detect SDL initialization by observing canvas attribute changes
-    const canvas = document.getElementById('canvas');
-
-    // Click on canvas wrapper focuses canvas for keyboard input
-    document.querySelector('.canvas-wrapper')?.addEventListener('click', () => {
-      canvas?.focus();
-    });
-
-    // Show focus indicator on canvas
-    canvas?.addEventListener('focus', () => {
-      canvas.style.outline = '2px solid var(--accent-green)';
-      canvas.style.outlineOffset = '2px';
-    });
-    canvas?.addEventListener('blur', () => {
-      canvas.style.outline = 'none';
-    });
-    // Prevent context menu on canvas (moved from inline handler)
-    canvas?.addEventListener('contextmenu', e => e.preventDefault());
-
-    let sdlDetected = false;
-    let sdlCheckInterval = null;
-    let sdlProgramRan = false;  // Track if an SDL program has been run
-
-    function checkSDLInitialized() {
-      if (sdlDetected) return;
-      // Check if canvas has been given dimensions by SDL (via width/height attributes)
-      // Default canvas is 300x150, so check for sizes larger than that (SDL games typically use 320x200+)
-      if (canvas && (canvas.width > 300 || canvas.height > 150)) {
-        sdlDetected = true;
-        sdlProgramRan = true;  // Remember that an SDL program has been run
-        expandCanvasPanel();
-        // Show keyboard hint in terminal
-        if (term) {
-          term.write('\x1b[36m> Tip: Click on the display to enable keyboard input\x1b[0m\r\n');
-        } else {
-          outputBuffer.push('\x1b[36m> Tip: Click on the display to enable keyboard input\x1b[0m');
-        }
-        if (sdlCheckInterval) {
-          clearInterval(sdlCheckInterval);
-          sdlCheckInterval = null;
-        }
-      }
-    }
-
-    // Use MutationObserver to watch for canvas attribute changes
-    const canvasObserver = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.type === 'attributes' &&
-            (mutation.attributeName === 'width' || mutation.attributeName === 'height')) {
-          checkSDLInitialized();
-        }
-      }
-    });
-    if (canvas) {
-      canvasObserver.observe(canvas, { attributes: true });
-    }
-
-    function resetSDLDetection() {
-      sdlDetected = false;
-      // Collapse the panel - SDL will re-expand it if initialized
-      if (canvasPanel && !canvasPanel.classList.contains('collapsed')) {
-        canvasPanel.classList.add('collapsed');
-        if (canvasToggle) canvasToggle.textContent = '[Show]';
-      }
-      // MutationObserver handles most cases; polling is fallback only
-      // Clear any existing interval
-      if (sdlCheckInterval) clearInterval(sdlCheckInterval);
-      // Reduced polling (500ms instead of 200ms) as MutationObserver is primary
-      sdlCheckInterval = setInterval(checkSDLInitialized, 500);
-      // Stop fallback polling after 5 seconds
-      setTimeout(() => {
-        if (sdlCheckInterval) {
-          clearInterval(sdlCheckInterval);
-          sdlCheckInterval = null;
-        }
-      }, 5000);
-    }
-
-    // Cleanup on page unload to prevent memory leaks
-    window.addEventListener('beforeunload', () => {
-      if (sdlCheckInterval) clearInterval(sdlCheckInterval);
-      if (canvasObserver) canvasObserver.disconnect();
-    });
-
-    // Track emulator ready state
-    let emulatorReady = false;
-
-    // Lazy-load xterm.js terminal for ANSI escape sequence support
-    let term = null;
-    let currentElf = null;
-    let xtermLoading = false;
-    const xtermCallbacks = [];
-    // Buffer output when terminal not ready
-    const outputBuffer = [];
-
-    function loadXterm(callback) {
-      if (typeof Terminal !== 'undefined') {
-        callback();
-        return;
-      }
-      xtermCallbacks.push(callback);
-      if (xtermLoading) return;
-
-      xtermLoading = true;
-      const script = document.createElement('script');
-      script.src = 'xterm.min.js';
-      script.onload = () => {
-        xtermCallbacks.forEach(cb => cb());
-        xtermCallbacks.length = 0;
+        hide() {
+          if (this.overlay) {
+            this.overlay.classList.add("hidden");
+            // Enable progressive reveal of main content
+            document.querySelectorAll(".progressive-load").forEach((el, i) => {
+              setTimeout(() => el.classList.add("loaded"), i * 100);
+            });
+          }
+        },
       };
-      document.head.appendChild(script);
-    }
-    function initTerminal() {
-      loadXterm(() => {
-        term = new Terminal({
-          fontFamily: "'Menlo', 'Monaco', 'Consolas', monospace",
-          fontSize: 18,
-          theme: {
-            background: '#000000',
-            foreground: '#00ff00',
-            cursor: '#00ff00',
-            cursorAccent: '#000000',
-            selection: 'rgba(0, 255, 0, 0.3)',
-          },
-          cursorBlink: false,
-          disableStdin: true,
-          rows: window.innerWidth < 768 ? 20 : 30,
-          cols: window.innerWidth < 480 ? 40 : (window.innerWidth < 768 ? 60 : 100),
-        });
-        term.open(document.getElementById('terminal'));
-        term.write('\x1b[32mrv32emu\x1b[0m - RISC-V Emulator\r\n');
-        term.write('Select an ELF program and click Run to start.\r\n\r\n');
-        // Flush any buffered output
-        if (outputBuffer.length > 0) {
-          outputBuffer.forEach(text => term.write(text + '\r\n'));
-          outputBuffer.length = 0;
+
+      // Initialize loader
+      ProgressiveLoader.init();
+      ProgressiveLoader.setProgress(
+        5,
+        "Loading...",
+        "Initializing application",
+      );
+
+      const statusBadge = document.getElementById("statusBadge");
+      const statusText = document.getElementById("statusText");
+      const progressElement = document.getElementById("progress");
+      const runButton = document.getElementById("runButton");
+      const elfDropdown = document.getElementById("elfDropdown");
+      const canvasPanel = document.getElementById("canvasPanel");
+      const canvasToggle = document.getElementById("canvasToggle");
+
+      // Canvas panel toggle (collapsed by default, expands when SDL initializes)
+      function toggleCanvasPanel() {
+        if (canvasPanel) {
+          canvasPanel.classList.toggle("collapsed");
+          if (canvasToggle) {
+            canvasToggle.textContent = canvasPanel.classList.contains(
+              "collapsed",
+            )
+              ? "[Show]"
+              : "[Hide]";
+          }
         }
-      });
-    }
-    // Defer terminal init until browser is idle (off critical rendering path)
-    function deferredInitTerminal() {
-      if ('requestIdleCallback' in window) {
-        requestIdleCallback(initTerminal, { timeout: 2000 });
-      } else {
-        // Fallback for Safari
-        setTimeout(initTerminal, 100);
-      }
-    }
-    if (document.readyState === 'complete') {
-      deferredInitTerminal();
-    } else {
-      window.addEventListener('load', deferredInitTerminal);
-    }
-
-    // Update Run button state based on emulator readiness and ELF selection
-    function updateRunButtonState() {
-      if (runButton && elfDropdown) {
-        runButton.disabled = !(emulatorReady && elfDropdown.value);
-      }
-    }
-
-    // On-demand ELF list loading
-    let elfListLoaded = false;
-    let elfListLoading = false;
-
-    function loadElfList() {
-      if (elfListLoaded || elfListLoading) return;
-      elfListLoading = true;
-
-      // Update placeholder to show loading
-      if (elfDropdown) {
-        elfDropdown.options[0].textContent = 'Loading programs...';
       }
 
-      const script = document.createElement('script');
-      script.src = 'elf_list.js';
-      script.onload = () => {
-        elfListLoaded = true;
-        elfListLoading = false;
-        populateElfDropdown();
-      };
-      script.onerror = () => {
-        elfListLoading = false;
-        if (elfDropdown) {
-          elfDropdown.options[0].textContent = 'Failed to load programs';
-        }
-      };
-      document.head.appendChild(script);
-    }
-
-    function populateElfDropdown() {
-      if (typeof elfFiles !== 'undefined' && elfDropdown) {
-        // Clear placeholder
-        elfDropdown.innerHTML = '';
-
-        // Add default option
-        const defaultOption = document.createElement('option');
-        defaultOption.value = '';
-        defaultOption.textContent = 'Select a program...';
-        elfDropdown.appendChild(defaultOption);
-
-        // Add ELF files
-        const fragment = document.createDocumentFragment();
-        elfFiles.forEach(elf => {
-          const option = document.createElement('option');
-          option.value = elf;
-          option.textContent = elf;
-          fragment.appendChild(option);
-        });
-        elfDropdown.appendChild(fragment);
-      }
-    }
-
-    // Load ELF list eagerly (627 bytes, negligible)
-    loadElfList();
-
-    // Enable button when ELF is selected (if emulator is ready)
-    elfDropdown?.addEventListener('change', updateRunButtonState);
-
-    runButton?.addEventListener('click', () => {
-      if (elfDropdown.value) {
-        void elfHandler(elfDropdown.value);
-      }
-    });
-
-    // Known SDL programs that require full state reset when switching
-    const sdlPrograms = ['doom', 'quake', 'smolnes'];
-
-    function isSDLProgram(elfName) {
-      const name = elfName.toLowerCase();
-      return sdlPrograms.some(p => name.includes(p));
-    }
-
-    // Check if we need to auto-run a program after reload
-    const pendingProgram = sessionStorage.getItem('rv32emu_pending_program');
-    if (pendingProgram) {
-      sessionStorage.removeItem('rv32emu_pending_program');
-      // Wait for emulator to be ready, then run the program (with 10s timeout)
-      const checkAndRun = setInterval(() => {
-        if (emulatorReady && typeof Module !== 'undefined' && Module._indirect_rv_halt) {
-          clearInterval(checkAndRun);
-          clearTimeout(checkAndRunTimeout);
-          // Ensure ELF list is loaded first
-          loadElfList();
+      function expandCanvasPanel() {
+        if (canvasPanel && canvasPanel.classList.contains("collapsed")) {
+          canvasPanel.classList.remove("collapsed");
+          if (canvasToggle) canvasToggle.textContent = "[Hide]";
+          // Auto-focus canvas for keyboard input
           setTimeout(() => {
-            if (elfDropdown) elfDropdown.value = pendingProgram;
-            void elfHandler(pendingProgram);
+            document.getElementById("canvas")?.focus();
           }, 100);
         }
-      }, 100);
-      // Safety timeout: stop polling after 10s if emulator never becomes ready
-      const checkAndRunTimeout = setTimeout(() => {
-        clearInterval(checkAndRun);
-        console.warn('Auto-run timeout: emulator did not become ready');
-      }, 10000);
-    }
-
-    async function waitForPreviousRunToStop() {
-      if (typeof Module === 'undefined' || typeof Module._indirect_rv_alive !== 'function')
-        return;
-      if (!Module._indirect_rv_alive())
-        return;
-
-      Module._indirect_rv_halt();
-      const deadline = performance.now() + 10000;
-      while (Module._indirect_rv_alive()) {
-        if (performance.now() > deadline)
-          throw new Error('Timed out waiting for previous program to stop');
-        await new Promise((resolve) => setTimeout(resolve, 16));
       }
-    }
 
-    // Programs that need large data files outside the WASM bundle. Keep this
-    // table in sync with the WEB_FILES additions in mk/wasm.mk.
-    const programAssets = {
-      'riscv32/doom': [
-        { url: 'DOOM1.WAD', dest: '/DOOM1.WAD' },
-        { url: 'timidity.tar.gz', fallbackUrl: 'timidity.tar', dest: '/etc/timidity', untar: true },
-      ],
-      'riscv32/quake': [
-        { url: 'pak0.pak', dest: '/id1/pak0.pak' },
-        { url: 'timidity.tar.gz', fallbackUrl: 'timidity.tar', dest: '/etc/timidity', untar: true },
-      ],
-    };
+      // Detect SDL initialization by observing canvas attribute changes
+      const canvas = document.getElementById("canvas");
 
-    const loadedAssets = new Set();
-    const supportsGzipDecompression =
-      typeof DecompressionStream === 'function' &&
-      typeof Response !== 'undefined';
+      // Click on canvas wrapper focuses canvas for keyboard input
+      document
+        .querySelector(".canvas-wrapper")
+        ?.addEventListener("click", () => {
+          canvas?.focus();
+        });
 
-    function memfsMkdirP(path) {
-      if (!path || path === '/' || path === '') return;
-      let cur = '';
-      for (const p of path.split('/').filter(Boolean)) {
-        cur += '/' + p;
-        try { Module.FS.mkdir(cur); } catch (e) {
-          if (e && e.code !== 'EEXIST' && !String(e).includes('exists')) throw e;
-        }
-      }
-    }
+      // Show focus indicator on canvas
+      canvas?.addEventListener("focus", () => {
+        canvas.style.outline = "2px solid var(--accent-green)";
+        canvas.style.outlineOffset = "2px";
+      });
+      canvas?.addEventListener("blur", () => {
+        canvas.style.outline = "none";
+      });
+      // Prevent context menu on canvas (moved from inline handler)
+      canvas?.addEventListener("contextmenu", (e) => e.preventDefault());
 
-    function resolveAssetUrl(asset) {
-      if (asset.untar && asset.fallbackUrl && !supportsGzipDecompression)
-        return asset.fallbackUrl;
-      return asset.url;
-    }
+      let sdlDetected = false;
+      let sdlCheckInterval = null;
+      let sdlProgramRan = false; // Track if an SDL program has been run
 
-    async function ensureProgramAssets(targetElf) {
-      const assets = programAssets[targetElf];
-      if (!assets) return;
-      for (const asset of assets) {
-        const assetUrl = resolveAssetUrl(asset);
-        if (loadedAssets.has(assetUrl)) continue;
-        if (term) term.write(`\x1b[36m> Fetching ${assetUrl}...\x1b[0m\r\n`);
-        const resp = await fetch(assetUrl);
-        if (!resp.ok)
-          throw new Error(`Fetch ${assetUrl} failed: HTTP ${resp.status}`);
-        try {
-          if (asset.untar) {
-            memfsMkdirP(asset.dest);
-            let tarBuf;
-            if (assetUrl.endsWith('.gz')) {
-              const gunzipped = resp.body.pipeThrough(new DecompressionStream('gzip'));
-              tarBuf = await new Response(gunzipped).arrayBuffer();
-            } else {
-              tarBuf = await resp.arrayBuffer();
-            }
-            const n = extractTarToMemfs(new Uint8Array(tarBuf), asset.dest);
-            if (term) term.write(
-              `\x1b[36m> ${assetUrl}: unpacked ${n} files to ${asset.dest}\x1b[0m\r\n`);
+      function checkSDLInitialized() {
+        if (sdlDetected) return;
+        // Check if canvas has been given dimensions by SDL (via width/height attributes)
+        // Default canvas is 300x150, so check for sizes larger than that (SDL games typically use 320x200+)
+        if (canvas && (canvas.width > 300 || canvas.height > 150)) {
+          sdlDetected = true;
+          sdlProgramRan = true; // Remember that an SDL program has been run
+          expandCanvasPanel();
+          // Show keyboard hint in terminal
+          if (term) {
+            term.write(
+              "\x1b[36m> Tip: Click on the display to enable keyboard input\x1b[0m\r\n",
+            );
           } else {
-            memfsMkdirP(asset.dest.substring(0, asset.dest.lastIndexOf('/')));
-            const buf = await resp.arrayBuffer();
-            Module.FS.writeFile(asset.dest, new Uint8Array(buf));
-            if (term) term.write(
-              `\x1b[36m> ${assetUrl}: ${buf.byteLength} bytes -> ${asset.dest}\x1b[0m\r\n`);
+            outputBuffer.push(
+              "\x1b[36m> Tip: Click on the display to enable keyboard input\x1b[0m",
+            );
           }
-        } catch (e) {
-          throw new Error(`Processing ${assetUrl} failed: ${formatError(e)}`);
-        }
-        loadedAssets.add(assetUrl);
-      }
-    }
-
-    async function elfHandler(targetElf) {
-      // Ensure path starts with / for Emscripten virtual filesystem
-      const elfPath = targetElf.startsWith('/') ? targetElf : '/' + targetElf;
-
-      // Auto-reload when switching between SDL programs to ensure clean state
-      if (sdlProgramRan && isSDLProgram(targetElf) && targetElf !== currentElf) {
-        // Store target program and reload page for clean SDL state
-        sessionStorage.setItem('rv32emu_pending_program', targetElf);
-        if (term) {
-          term.write('\x1b[36m> Reloading for clean SDL state...\x1b[0m\r\n');
-        }
-        setTimeout(() => location.reload(), 100);
-        return;
-      }
-
-      // Force terminal initialization if not ready
-      if (!term) {
-        initTerminal();
-      }
-
-      // Halt the previous program BEFORE clearing the terminal. Otherwise the
-      // previous program's main-loop ticks keep writing stdout into the freshly
-      // cleared viewport, corrupting the new "Running ..." banner.
-      statusText.textContent = `Running: ${targetElf}`;
-      statusBadge.classList.remove('loading');
-      statusBadge.classList.add('running');
-      await waitForPreviousRunToStop();
-
-      // Clear terminal when switching to a different ELF
-      if (term && targetElf !== currentElf) {
-        term.clear();
-      }
-      currentElf = targetElf;
-
-      // Clear leftover SDL canvas pixels when switching away from a graphics program.
-      // Resetting width clears both 2D and WebGL contexts and restores default size.
-      if (sdlProgramRan && !isSDLProgram(targetElf) && canvas) {
-        canvas.width = 300;
-        canvas.height = 150;
-      }
-
-      const runMsg = `\x1b[33m> Running ${targetElf}...\x1b[0m`;
-      if (term) {
-        term.write(runMsg + '\r\n');
-      } else {
-        outputBuffer.push(runMsg);
-      }
-      // Reset SDL detection for new program
-      resetSDLDetection();
-      // Extra arguments for programs that need them
-      const programArgs = {
-        'riscv32/quake': ['-mem', '64'],
-      };
-      const extraArgs = programArgs[targetElf] || [];
-      try {
-        // Pull any program-specific data assets into MEMFS before launching.
-        // No-op for programs without an entry in programAssets.
-        await ensureProgramAssets(targetElf);
-        const stopBtn = document.getElementById('stopButton');
-        if (stopBtn) stopBtn.disabled = false;
-        const exitCode = Module['run_user'](elfPath, ...extraArgs);
-        // Auto-focus canvas for graphical applications
-        document.getElementById('canvas')?.focus();
-        if (typeof exitCode === 'number') {
-          const exitMsg = exitCode === 0 ? 'Completed' : `Exited (${exitCode})`;
-          statusText.textContent = exitMsg;
-          statusBadge.classList.remove('running');
-          if (term) {
-            term.write(`\x1b[32m> ${exitMsg}\x1b[0m\r\n`);
-          }
-          if (stopBtn) stopBtn.disabled = true;
-        }
-      } catch (e) {
-        console.error('Failed to run ELF:', e);
-        if (term) {
-          term.write(`\x1b[31m> Error: Failed to load '${targetElf}'\x1b[0m\r\n`);
-          term.write(`\x1b[31m> ${formatError(e)}\x1b[0m\r\n`);
-          if (e?.stack) {
-            const firstFrame = e.stack.split('\n')[1] || '';
-            if (firstFrame) term.write(`\x1b[31m> ${firstFrame.trim()}\x1b[0m\r\n`);
+          if (sdlCheckInterval) {
+            clearInterval(sdlCheckInterval);
+            sdlCheckInterval = null;
           }
         }
-        statusText.textContent = 'Error';
-        statusBadge.classList.remove('running');
       }
-    }
 
-    // Stop button handler
-    const stopButton = document.getElementById('stopButton');
-    stopButton?.addEventListener('click', () => {
-      Module._indirect_rv_halt();
-      if (term) {
-        term.write('\x1b[31m> Stopped\x1b[0m\r\n');
+      // Use MutationObserver to watch for canvas attribute changes
+      const canvasObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          if (
+            mutation.type === "attributes" &&
+            (mutation.attributeName === "width" ||
+              mutation.attributeName === "height")
+          ) {
+            checkSDLInitialized();
+          }
+        }
+      });
+      if (canvas) {
+        canvasObserver.observe(canvas, { attributes: true });
       }
-      statusText.textContent = 'Stopped';
-      statusBadge.classList.remove('running');
-      stopButton.disabled = true;
-    });
 
-    // Fullscreen handler with fallback
-    function requestCanvasFullscreen() {
-      const canvas = document.getElementById('canvas');
-      const pointerLock = document.getElementById('pointerLock')?.checked;
-      const resize = document.getElementById('resize')?.checked;
+      function resetSDLDetection() {
+        sdlDetected = false;
+        // Collapse the panel - SDL will re-expand it if initialized
+        if (canvasPanel && !canvasPanel.classList.contains("collapsed")) {
+          canvasPanel.classList.add("collapsed");
+          if (canvasToggle) canvasToggle.textContent = "[Show]";
+        }
+        // MutationObserver handles most cases; polling is fallback only
+        // Clear any existing interval
+        if (sdlCheckInterval) clearInterval(sdlCheckInterval);
+        // Reduced polling (500ms instead of 200ms) as MutationObserver is primary
+        sdlCheckInterval = setInterval(checkSDLInitialized, 500);
+        // Stop fallback polling after 5 seconds
+        setTimeout(() => {
+          if (sdlCheckInterval) {
+            clearInterval(sdlCheckInterval);
+            sdlCheckInterval = null;
+          }
+        }, 5000);
+      }
 
-      // Try Emscripten's fullscreen API first
-      if (typeof Module !== 'undefined' && Module.requestFullscreen) {
-        try {
-          Module.requestFullscreen(pointerLock, resize);
+      // Cleanup on page unload to prevent memory leaks
+      window.addEventListener("beforeunload", () => {
+        if (sdlCheckInterval) clearInterval(sdlCheckInterval);
+        if (canvasObserver) canvasObserver.disconnect();
+      });
+
+      // Track emulator ready state
+      let emulatorReady = false;
+
+      // Lazy-load xterm.js terminal for ANSI escape sequence support
+      let term = null;
+      let currentElf = null;
+      let xtermLoading = false;
+      const xtermCallbacks = [];
+      // Buffer output when terminal not ready
+      const outputBuffer = [];
+
+      function loadXterm(callback) {
+        if (typeof Terminal !== "undefined") {
+          callback();
           return;
-        } catch (e) {
-          console.warn('Emscripten fullscreen failed:', e);
         }
+        xtermCallbacks.push(callback);
+        if (xtermLoading) return;
+
+        xtermLoading = true;
+        const script = document.createElement("script");
+        script.src = "xterm.min.js";
+        script.onload = () => {
+          xtermCallbacks.forEach((cb) => cb());
+          xtermCallbacks.length = 0;
+        };
+        document.head.appendChild(script);
       }
-
-      // Fallback to standard browser Fullscreen API
-      const requestFullscreen = canvas.requestFullscreen ||
-                               canvas.webkitRequestFullscreen ||
-                               canvas.mozRequestFullScreen ||
-                               canvas.msRequestFullscreen;
-
-      if (requestFullscreen) {
-        // Vendor-prefixed APIs (webkit/moz/ms) may return undefined instead
-        // of a Promise. Wrap with Promise.resolve so .then/.catch always
-        // work and a non-Promise return path doesn't throw.
-        Promise.resolve(requestFullscreen.call(canvas)).then(() => {
-          // Lock pointer if checkbox is checked
-          if (pointerLock && canvas.requestPointerLock) {
-            canvas.requestPointerLock();
-          }
-          canvas.focus();
-        }).catch(err => {
-          console.error('Fullscreen request failed:', err);
-          if (term) {
-            term.write(`\x1b[31m> Fullscreen failed: ${err?.message || err}\x1b[0m\r\n`);
+      function initTerminal() {
+        loadXterm(() => {
+          term = new Terminal({
+            fontFamily: "'Menlo', 'Monaco', 'Consolas', monospace",
+            fontSize: 18,
+            theme: {
+              background: "#000000",
+              foreground: "#00ff00",
+              cursor: "#00ff00",
+              cursorAccent: "#000000",
+              selection: "rgba(0, 255, 0, 0.3)",
+            },
+            cursorBlink: false,
+            disableStdin: true,
+            rows: window.innerWidth < 768 ? 20 : 30,
+            cols:
+              window.innerWidth < 480 ? 40 : window.innerWidth < 768 ? 60 : 100,
+          });
+          term.open(document.getElementById("terminal"));
+          term.write("\x1b[32mrv32emu\x1b[0m - RISC-V Emulator\r\n");
+          term.write("Select an ELF program and click Run to start.\r\n\r\n");
+          // Flush any buffered output
+          if (outputBuffer.length > 0) {
+            outputBuffer.forEach((text) => term.write(text + "\r\n"));
+            outputBuffer.length = 0;
           }
         });
+      }
+      // Defer terminal init until browser is idle (off critical rendering path)
+      function deferredInitTerminal() {
+        if ("requestIdleCallback" in window) {
+          requestIdleCallback(initTerminal, { timeout: 2000 });
+        } else {
+          // Fallback for Safari
+          setTimeout(initTerminal, 100);
+        }
+      }
+      if (document.readyState === "complete") {
+        deferredInitTerminal();
       } else {
-        if (term) {
-          term.write('\x1b[31m> Fullscreen not supported in this browser\x1b[0m\r\n');
+        window.addEventListener("load", deferredInitTerminal);
+      }
+
+      // Update Run button state based on emulator readiness and ELF selection
+      function updateRunButtonState() {
+        if (runButton && elfDropdown) {
+          runButton.disabled = !(emulatorReady && elfDropdown.value);
         }
       }
-    }
 
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-      const active = document.activeElement;
-      const canvasEl = document.getElementById('canvas');
+      // On-demand ELF list loading
+      let elfListLoaded = false;
+      let elfListLoading = false;
 
-      // When canvas has focus, let Emscripten/SDL handle all keys.
-      // Prevent browser defaults (scrolling) for game-relevant keys.
-      if (active === canvasEl) {
-        const gameKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-                          ' ', 'Tab', 'Escape'];
-        if (gameKeys.includes(e.key)) {
-          e.preventDefault();
+      function loadElfList() {
+        if (elfListLoaded || elfListLoading) return;
+        elfListLoading = true;
+
+        // Update placeholder to show loading
+        if (elfDropdown) {
+          elfDropdown.options[0].textContent = "Loading programs...";
         }
-        return;  // Don't intercept any keys when game has focus
+
+        const script = document.createElement("script");
+        script.src = "elf_list.js";
+        script.onload = () => {
+          elfListLoaded = true;
+          elfListLoading = false;
+          populateElfDropdown();
+        };
+        script.onerror = () => {
+          elfListLoading = false;
+          if (elfDropdown) {
+            elfDropdown.options[0].textContent = "Failed to load programs";
+          }
+        };
+        document.head.appendChild(script);
       }
 
-      // Escape to stop emulator (only when canvas is NOT focused)
-      if (e.key === 'Escape' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(active?.tagName)) {
-        e.preventDefault();
-        stopButton?.click();
-      }
-    });
+      function populateElfDropdown() {
+        if (typeof elfFiles !== "undefined" && elfDropdown) {
+          // Clear placeholder
+          elfDropdown.innerHTML = "";
 
-    // Theme toggle (single class toggle for efficient rendering)
-    const themeToggle = document.getElementById('themeToggle');
-    let isDark = !window.matchMedia('(prefers-color-scheme: light)').matches;
+          // Add default option
+          const defaultOption = document.createElement("option");
+          defaultOption.value = "";
+          defaultOption.textContent = "Select a program...";
+          elfDropdown.appendChild(defaultOption);
 
-    // Precomputed xterm themes (avoid getComputedStyle read-after-write)
-    const xtermThemeDark = {
-      background: '#000000',
-      foreground: '#00ff00',
-      cursor: '#00ff00',
-      cursorAccent: '#000000',
-      selection: 'rgba(0, 255, 0, 0.3)'
-    };
-    const xtermThemeLight = {
-      background: '#1a1a1a',
-      foreground: '#00ff00',
-      cursor: '#00ff00',
-      cursorAccent: '#1a1a1a',
-      selection: 'rgba(0, 255, 0, 0.3)'
-    };
-
-    function updateTheme() {
-      // Single class toggle instead of multiple style changes (better performance)
-      document.documentElement.classList.toggle('light-theme', !isDark);
-      document.documentElement.classList.toggle('dark-theme', isDark);
-
-      // Sync xterm.js theme with precomputed theme (no layout thrashing)
-      if (term) {
-        term.options.theme = isDark ? xtermThemeDark : xtermThemeLight;
-      }
-
-      if (themeToggle) {
-        themeToggle.textContent = isDark ? 'Light' : 'Dark';
-        themeToggle.setAttribute('aria-pressed', isDark);
-        themeToggle.setAttribute('aria-label', isDark ? 'Dark mode, click for light' : 'Light mode, click for dark');
-      }
-    }
-    themeToggle?.addEventListener('click', () => {
-      isDark = !isDark;
-      updateTheme();
-    });
-    updateTheme();
-
-    var Module = {
-      // Streaming WASM instantiation with progress tracking
-      instantiateWasm: function(imports, successCallback) {
-        const wasmUrl = 'rv32emu.wasm';
-        ProgressiveLoader.setProgress(10, 'Loading WASM...', 'Starting download');
-
-        // Try streaming instantiation first (most efficient)
-        WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
-          .then(result => {
-            ProgressiveLoader.setProgress(90, 'Initializing...', 'Linking modules');
-            successCallback(result.instance, result.module);
-          })
-          .catch(err => {
-            console.warn('Streaming instantiation failed, using fallback:', err.message);
-            ProgressiveLoader.setProgress(30, 'Loading...', 'Using fallback method');
-
-            // Fallback: fetch with progress tracking, then instantiate
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', wasmUrl, true);
-            xhr.responseType = 'arraybuffer';
-
-            xhr.onprogress = (e) => {
-              if (e.lengthComputable) {
-                const percent = Math.min(80, 30 + (e.loaded / e.total) * 50);
-                ProgressiveLoader.setProgress(percent, 'Loading...',
-                  `Downloaded ${ProgressiveLoader.formatBytes(e.loaded)} / ${ProgressiveLoader.formatBytes(e.total)}`);
-              }
-            };
-
-            xhr.onload = () => {
-              if (xhr.status === 200) {
-                ProgressiveLoader.setProgress(85, 'Compiling...', 'Instantiating module');
-                WebAssembly.instantiate(xhr.response, imports)
-                  .then(result => {
-                    ProgressiveLoader.setProgress(90, 'Initializing...', 'Linking modules');
-                    successCallback(result.instance, result.module);
-                  })
-                  .catch(e => {
-                    console.error('WASM instantiation failed:', e);
-                    ProgressiveLoader.setProgress(0, 'Error', e.message);
-                  });
-              } else {
-                ProgressiveLoader.setProgress(0, 'Error', `HTTP ${xhr.status}`);
-              }
-            };
-
-            xhr.onerror = () => {
-              ProgressiveLoader.setProgress(0, 'Error', 'Network error');
-            };
-
-            xhr.send();
+          // Add ELF files
+          const fragment = document.createDocumentFragment();
+          elfFiles.forEach((elf) => {
+            const option = document.createElement("option");
+            option.value = elf;
+            option.textContent = elf;
+            fragment.appendChild(option);
           });
+          elfDropdown.appendChild(fragment);
+        }
+      }
 
-        return {};
-      },
+      // Load ELF list eagerly (627 bytes, negligible)
+      loadElfList();
 
-      print: (function() {
-        let printBuffer = [];
-        let flushPending = false;
-        const MAX_OUTPUT_BUFFER = 2000;
+      // Enable button when ELF is selected (if emulator is ready)
+      elfDropdown?.addEventListener("change", updateRunButtonState);
 
-        function flushPrint() {
-          if (term && printBuffer.length > 0) {
-            // Process max 1000 lines per frame to prevent UI freeze
-            const chunk = printBuffer.splice(0, 1000);
-            term.write(chunk.join('\r\n') + '\r\n');
+      runButton?.addEventListener("click", () => {
+        if (elfDropdown.value) {
+          void elfHandler(elfDropdown.value);
+        }
+      });
 
-            if (printBuffer.length > 0) {
-              requestAnimationFrame(flushPrint);
-              return;
-            }
+      // Known SDL programs that require full state reset when switching
+      const sdlPrograms = ["doom", "quake", "smolnes"];
+
+      function isSDLProgram(elfName) {
+        const name = elfName.toLowerCase();
+        return sdlPrograms.some((p) => name.includes(p));
+      }
+
+      // Check if we need to auto-run a program after reload
+      const pendingProgram = sessionStorage.getItem("rv32emu_pending_program");
+      if (pendingProgram) {
+        sessionStorage.removeItem("rv32emu_pending_program");
+        // Wait for emulator to be ready, then run the program (with 10s timeout)
+        const checkAndRun = setInterval(() => {
+          if (
+            emulatorReady &&
+            typeof Module !== "undefined" &&
+            Module._indirect_rv_halt
+          ) {
+            clearInterval(checkAndRun);
+            clearTimeout(checkAndRunTimeout);
+            // Ensure ELF list is loaded first
+            loadElfList();
+            setTimeout(() => {
+              if (elfDropdown) elfDropdown.value = pendingProgram;
+              void elfHandler(pendingProgram);
+            }, 100);
           }
-          flushPending = false;
+        }, 100);
+        // Safety timeout: stop polling after 10s if emulator never becomes ready
+        const checkAndRunTimeout = setTimeout(() => {
+          clearInterval(checkAndRun);
+          console.warn("Auto-run timeout: emulator did not become ready");
+        }, 10000);
+      }
+
+      async function waitForPreviousRunToStop() {
+        if (
+          typeof Module === "undefined" ||
+          typeof Module._indirect_rv_alive !== "function"
+        )
+          return;
+        if (!Module._indirect_rv_alive()) return;
+
+        Module._indirect_rv_halt();
+        const deadline = performance.now() + 10000;
+        while (Module._indirect_rv_alive()) {
+          if (performance.now() > deadline)
+            throw new Error("Timed out waiting for previous program to stop");
+          await new Promise((resolve) => setTimeout(resolve, 16));
+        }
+      }
+
+      // Programs that need large data files outside the WASM bundle. Keep this
+      // table in sync with the WEB_FILES additions in mk/wasm.mk.
+      const programAssets = {
+        "riscv32/doom": [
+          { url: "DOOM1.WAD", dest: "/DOOM1.WAD" },
+          {
+            url: "timidity.tar.gz",
+            fallbackUrl: "timidity.tar",
+            dest: "/etc/timidity",
+            untar: true,
+          },
+        ],
+        "riscv32/quake": [
+          { url: "pak0.pak", dest: "/id1/pak0.pak" },
+          {
+            url: "timidity.tar.gz",
+            fallbackUrl: "timidity.tar",
+            dest: "/etc/timidity",
+            untar: true,
+          },
+        ],
+      };
+
+      const loadedAssets = new Set();
+      const supportsGzipDecompression =
+        typeof DecompressionStream === "function" &&
+        typeof Response !== "undefined";
+
+      function memfsMkdirP(path) {
+        if (!path || path === "/" || path === "") return;
+        let cur = "";
+        for (const p of path.split("/").filter(Boolean)) {
+          cur += "/" + p;
+          try {
+            Module.FS.mkdir(cur);
+          } catch (e) {
+            if (e && e.code !== "EEXIST" && !String(e).includes("exists"))
+              throw e;
+          }
+        }
+      }
+
+      function resolveAssetUrl(asset) {
+        if (asset.untar && asset.fallbackUrl && !supportsGzipDecompression)
+          return asset.fallbackUrl;
+        return asset.url;
+      }
+
+      async function ensureProgramAssets(targetElf) {
+        const assets = programAssets[targetElf];
+        if (!assets) return;
+        for (const asset of assets) {
+          const assetUrl = resolveAssetUrl(asset);
+          if (loadedAssets.has(assetUrl)) continue;
+          if (term) term.write(`\x1b[36m> Fetching ${assetUrl}...\x1b[0m\r\n`);
+          const resp = await fetch(assetUrl);
+          if (!resp.ok)
+            throw new Error(`Fetch ${assetUrl} failed: HTTP ${resp.status}`);
+          try {
+            if (asset.untar) {
+              memfsMkdirP(asset.dest);
+              let tarBuf;
+              if (assetUrl.endsWith(".gz")) {
+                const gunzipped = resp.body.pipeThrough(
+                  new DecompressionStream("gzip"),
+                );
+                tarBuf = await new Response(gunzipped).arrayBuffer();
+              } else {
+                tarBuf = await resp.arrayBuffer();
+              }
+              const n = extractTarToMemfs(new Uint8Array(tarBuf), asset.dest);
+              if (term)
+                term.write(
+                  `\x1b[36m> ${assetUrl}: unpacked ${n} files to ${asset.dest}\x1b[0m\r\n`,
+                );
+            } else {
+              memfsMkdirP(asset.dest.substring(0, asset.dest.lastIndexOf("/")));
+              const buf = await resp.arrayBuffer();
+              Module.FS.writeFile(asset.dest, new Uint8Array(buf));
+              if (term)
+                term.write(
+                  `\x1b[36m> ${assetUrl}: ${buf.byteLength} bytes -> ${asset.dest}\x1b[0m\r\n`,
+                );
+            }
+          } catch (e) {
+            throw new Error(`Processing ${assetUrl} failed: ${formatError(e)}`);
+          }
+          loadedAssets.add(assetUrl);
+        }
+      }
+
+      async function elfHandler(targetElf) {
+        // Ensure path starts with / for Emscripten virtual filesystem
+        const elfPath = targetElf.startsWith("/") ? targetElf : "/" + targetElf;
+
+        // Auto-reload when switching between SDL programs to ensure clean state
+        if (
+          sdlProgramRan &&
+          isSDLProgram(targetElf) &&
+          targetElf !== currentElf
+        ) {
+          // Store target program and reload page for clean SDL state
+          sessionStorage.setItem("rv32emu_pending_program", targetElf);
+          if (term) {
+            term.write("\x1b[36m> Reloading for clean SDL state...\x1b[0m\r\n");
+          }
+          setTimeout(() => location.reload(), 100);
+          return;
         }
 
-        return function(text) {
-          if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-          console.log(text);
-          if (term) {
-            printBuffer.push(text);
-            if (!flushPending) {
-              flushPending = true;
-              requestAnimationFrame(flushPrint);
-            }
-          } else {
-            outputBuffer.push(text);
-            // Cap outputBuffer to prevent memory spikes before terminal is ready
-            if (outputBuffer.length > MAX_OUTPUT_BUFFER) {
-              outputBuffer.splice(0, outputBuffer.length - MAX_OUTPUT_BUFFER);
-            }
-          }
-        };
-      })(),
-
-      printErr: (function() {
-        let errBuffer = [];
-        let flushPending = false;
-        const MAX_OUTPUT_BUFFER = 2000;
-
-        function flushErr() {
-          if (term && errBuffer.length > 0) {
-            // Process max 1000 lines per frame to prevent UI freeze
-            const chunk = errBuffer.splice(0, 1000);
-            term.write(chunk.join('\r\n') + '\r\n');
-
-            if (errBuffer.length > 0) {
-              requestAnimationFrame(flushErr);
-              return;
-            }
-          }
-          flushPending = false;
+        // Force terminal initialization if not ready
+        if (!term) {
+          initTerminal();
         }
 
-        return function(text) {
-          if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-          console.error(text);
-          const coloredText = '\x1b[31m' + text + '\x1b[0m';
-          if (term) {
-            errBuffer.push(coloredText);
-            if (!flushPending) {
-              flushPending = true;
-              requestAnimationFrame(flushErr);
+        // Halt the previous program BEFORE clearing the terminal. Otherwise the
+        // previous program's main-loop ticks keep writing stdout into the freshly
+        // cleared viewport, corrupting the new "Running ..." banner.
+        statusText.textContent = `Running: ${targetElf}`;
+        statusBadge.classList.remove("loading");
+        statusBadge.classList.add("running");
+        await waitForPreviousRunToStop();
+
+        // Clear terminal when switching to a different ELF
+        if (term && targetElf !== currentElf) {
+          term.clear();
+        }
+        currentElf = targetElf;
+
+        // Clear leftover SDL canvas pixels when switching away from a graphics program.
+        // Resetting width clears both 2D and WebGL contexts and restores default size.
+        if (sdlProgramRan && !isSDLProgram(targetElf) && canvas) {
+          canvas.width = 300;
+          canvas.height = 150;
+        }
+
+        const runMsg = `\x1b[33m> Running ${targetElf}...\x1b[0m`;
+        if (term) {
+          term.write(runMsg + "\r\n");
+        } else {
+          outputBuffer.push(runMsg);
+        }
+        // Reset SDL detection for new program
+        resetSDLDetection();
+        // Extra arguments for programs that need them
+        const programArgs = {
+          "riscv32/quake": ["-mem", "64"],
+        };
+        const extraArgs = programArgs[targetElf] || [];
+        try {
+          // Pull any program-specific data assets into MEMFS before launching.
+          // No-op for programs without an entry in programAssets.
+          await ensureProgramAssets(targetElf);
+          const stopBtn = document.getElementById("stopButton");
+          if (stopBtn) stopBtn.disabled = false;
+          const exitCode = Module["run_user"](elfPath, ...extraArgs);
+          // Auto-focus canvas for graphical applications
+          document.getElementById("canvas")?.focus();
+          if (typeof exitCode === "number") {
+            const exitMsg =
+              exitCode === 0 ? "Completed" : `Exited (${exitCode})`;
+            statusText.textContent = exitMsg;
+            statusBadge.classList.remove("running");
+            if (term) {
+              term.write(`\x1b[32m> ${exitMsg}\x1b[0m\r\n`);
             }
-          } else {
-            outputBuffer.push(coloredText);
-            // Cap outputBuffer to prevent memory spikes before terminal is ready
-            if (outputBuffer.length > MAX_OUTPUT_BUFFER) {
-              outputBuffer.splice(0, outputBuffer.length - MAX_OUTPUT_BUFFER);
+            if (stopBtn) stopBtn.disabled = true;
+          }
+        } catch (e) {
+          console.error("Failed to run ELF:", e);
+          if (term) {
+            term.write(
+              `\x1b[31m> Error: Failed to load '${targetElf}'\x1b[0m\r\n`,
+            );
+            term.write(`\x1b[31m> ${formatError(e)}\x1b[0m\r\n`);
+            if (e?.stack) {
+              const firstFrame = e.stack.split("\n")[1] || "";
+              if (firstFrame)
+                term.write(`\x1b[31m> ${firstFrame.trim()}\x1b[0m\r\n`);
             }
           }
-        };
-      })(),
+          statusText.textContent = "Error";
+          statusBadge.classList.remove("running");
+        }
+      }
 
-      canvas: (() => {
-        const canvas = document.getElementById('canvas');
-        canvas?.addEventListener('webglcontextlost', (e) => {
+      // Stop button handler
+      const stopButton = document.getElementById("stopButton");
+      stopButton?.addEventListener("click", () => {
+        Module._indirect_rv_halt();
+        if (term) {
+          term.write("\x1b[31m> Stopped\x1b[0m\r\n");
+        }
+        statusText.textContent = "Stopped";
+        statusBadge.classList.remove("running");
+        stopButton.disabled = true;
+      });
+
+      // Fullscreen handler with fallback
+      function requestCanvasFullscreen() {
+        const canvas = document.getElementById("canvas");
+        const pointerLock = document.getElementById("pointerLock")?.checked;
+        const resize = document.getElementById("resize")?.checked;
+
+        // Try Emscripten's fullscreen API first
+        if (typeof Module !== "undefined" && Module.requestFullscreen) {
+          try {
+            Module.requestFullscreen(pointerLock, resize);
+            return;
+          } catch (e) {
+            console.warn("Emscripten fullscreen failed:", e);
+          }
+        }
+
+        // Fallback to standard browser Fullscreen API
+        const requestFullscreen =
+          canvas.requestFullscreen ||
+          canvas.webkitRequestFullscreen ||
+          canvas.mozRequestFullScreen ||
+          canvas.msRequestFullscreen;
+
+        if (requestFullscreen) {
+          // Vendor-prefixed APIs (webkit/moz/ms) may return undefined instead
+          // of a Promise. Wrap with Promise.resolve so .then/.catch always
+          // work and a non-Promise return path doesn't throw.
+          Promise.resolve(requestFullscreen.call(canvas))
+            .then(() => {
+              // Lock pointer if checkbox is checked
+              if (pointerLock && canvas.requestPointerLock) {
+                canvas.requestPointerLock();
+              }
+              canvas.focus();
+            })
+            .catch((err) => {
+              console.error("Fullscreen request failed:", err);
+              if (term) {
+                term.write(
+                  `\x1b[31m> Fullscreen failed: ${err?.message || err}\x1b[0m\r\n`,
+                );
+              }
+            });
+        } else {
+          if (term) {
+            term.write(
+              "\x1b[31m> Fullscreen not supported in this browser\x1b[0m\r\n",
+            );
+          }
+        }
+      }
+
+      // Keyboard shortcuts
+      document.addEventListener("keydown", (e) => {
+        const active = document.activeElement;
+        const canvasEl = document.getElementById("canvas");
+
+        // When canvas has focus, let Emscripten/SDL handle all keys.
+        // Prevent browser defaults (scrolling) for game-relevant keys.
+        if (active === canvasEl) {
+          const gameKeys = [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            " ",
+            "Tab",
+            "Escape",
+          ];
+          if (gameKeys.includes(e.key)) {
+            e.preventDefault();
+          }
+          return; // Don't intercept any keys when game has focus
+        }
+
+        // Escape to stop emulator (only when canvas is NOT focused)
+        if (
+          e.key === "Escape" &&
+          !["INPUT", "TEXTAREA", "SELECT"].includes(active?.tagName)
+        ) {
           e.preventDefault();
-          statusText.textContent = 'WebGL context lost';
-          statusBadge?.classList.add('loading');
-          // Show reload prompt instead of auto-reloading
-          const overlay = document.getElementById('loadingOverlay');
-          if (overlay) {
-            overlay.classList.remove('hidden');
-            overlay.innerHTML = `
+          stopButton?.click();
+        }
+      });
+
+      // Theme toggle (single class toggle for efficient rendering)
+      const themeToggle = document.getElementById("themeToggle");
+      let isDark = !window.matchMedia("(prefers-color-scheme: light)").matches;
+
+      // Precomputed xterm themes (avoid getComputedStyle read-after-write)
+      const xtermThemeDark = {
+        background: "#000000",
+        foreground: "#00ff00",
+        cursor: "#00ff00",
+        cursorAccent: "#000000",
+        selection: "rgba(0, 255, 0, 0.3)",
+      };
+      const xtermThemeLight = {
+        background: "#1a1a1a",
+        foreground: "#00ff00",
+        cursor: "#00ff00",
+        cursorAccent: "#1a1a1a",
+        selection: "rgba(0, 255, 0, 0.3)",
+      };
+
+      function updateTheme() {
+        // Single class toggle instead of multiple style changes (better performance)
+        document.documentElement.classList.toggle("light-theme", !isDark);
+        document.documentElement.classList.toggle("dark-theme", isDark);
+
+        // Sync xterm.js theme with precomputed theme (no layout thrashing)
+        if (term) {
+          term.options.theme = isDark ? xtermThemeDark : xtermThemeLight;
+        }
+
+        if (themeToggle) {
+          themeToggle.textContent = isDark ? "Light" : "Dark";
+          themeToggle.setAttribute("aria-pressed", isDark);
+          themeToggle.setAttribute(
+            "aria-label",
+            isDark
+              ? "Dark mode, click for light"
+              : "Light mode, click for dark",
+          );
+        }
+      }
+      themeToggle?.addEventListener("click", () => {
+        isDark = !isDark;
+        updateTheme();
+      });
+      updateTheme();
+
+      var Module = {
+        // Streaming WASM instantiation with progress tracking
+        instantiateWasm: function (imports, successCallback) {
+          const wasmUrl = "rv32emu.wasm";
+          ProgressiveLoader.setProgress(
+            10,
+            "Loading WASM...",
+            "Starting download",
+          );
+
+          // Try streaming instantiation first (most efficient)
+          WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
+            .then((result) => {
+              ProgressiveLoader.setProgress(
+                90,
+                "Initializing...",
+                "Linking modules",
+              );
+              successCallback(result.instance, result.module);
+            })
+            .catch((err) => {
+              console.warn(
+                "Streaming instantiation failed, using fallback:",
+                err.message,
+              );
+              ProgressiveLoader.setProgress(
+                30,
+                "Loading...",
+                "Using fallback method",
+              );
+
+              // Fallback: fetch with progress tracking, then instantiate
+              const xhr = new XMLHttpRequest();
+              xhr.open("GET", wasmUrl, true);
+              xhr.responseType = "arraybuffer";
+
+              xhr.onprogress = (e) => {
+                if (e.lengthComputable) {
+                  const percent = Math.min(80, 30 + (e.loaded / e.total) * 50);
+                  ProgressiveLoader.setProgress(
+                    percent,
+                    "Loading...",
+                    `Downloaded ${ProgressiveLoader.formatBytes(e.loaded)} / ${ProgressiveLoader.formatBytes(e.total)}`,
+                  );
+                }
+              };
+
+              xhr.onload = () => {
+                if (xhr.status === 200) {
+                  ProgressiveLoader.setProgress(
+                    85,
+                    "Compiling...",
+                    "Instantiating module",
+                  );
+                  WebAssembly.instantiate(xhr.response, imports)
+                    .then((result) => {
+                      ProgressiveLoader.setProgress(
+                        90,
+                        "Initializing...",
+                        "Linking modules",
+                      );
+                      successCallback(result.instance, result.module);
+                    })
+                    .catch((e) => {
+                      console.error("WASM instantiation failed:", e);
+                      ProgressiveLoader.setProgress(0, "Error", e.message);
+                    });
+                } else {
+                  ProgressiveLoader.setProgress(
+                    0,
+                    "Error",
+                    `HTTP ${xhr.status}`,
+                  );
+                }
+              };
+
+              xhr.onerror = () => {
+                ProgressiveLoader.setProgress(0, "Error", "Network error");
+              };
+
+              xhr.send();
+            });
+
+          return {};
+        },
+
+        print: (function () {
+          let printBuffer = [];
+          let flushPending = false;
+          const MAX_OUTPUT_BUFFER = 2000;
+
+          function flushPrint() {
+            if (term && printBuffer.length > 0) {
+              // Process max 1000 lines per frame to prevent UI freeze
+              const chunk = printBuffer.splice(0, 1000);
+              term.write(chunk.join("\r\n") + "\r\n");
+
+              if (printBuffer.length > 0) {
+                requestAnimationFrame(flushPrint);
+                return;
+              }
+            }
+            flushPending = false;
+          }
+
+          return function (text) {
+            if (arguments.length > 1)
+              text = Array.prototype.slice.call(arguments).join(" ");
+            console.log(text);
+            if (term) {
+              printBuffer.push(text);
+              if (!flushPending) {
+                flushPending = true;
+                requestAnimationFrame(flushPrint);
+              }
+            } else {
+              outputBuffer.push(text);
+              // Cap outputBuffer to prevent memory spikes before terminal is ready
+              if (outputBuffer.length > MAX_OUTPUT_BUFFER) {
+                outputBuffer.splice(0, outputBuffer.length - MAX_OUTPUT_BUFFER);
+              }
+            }
+          };
+        })(),
+
+        printErr: (function () {
+          let errBuffer = [];
+          let flushPending = false;
+          const MAX_OUTPUT_BUFFER = 2000;
+
+          function flushErr() {
+            if (term && errBuffer.length > 0) {
+              // Process max 1000 lines per frame to prevent UI freeze
+              const chunk = errBuffer.splice(0, 1000);
+              term.write(chunk.join("\r\n") + "\r\n");
+
+              if (errBuffer.length > 0) {
+                requestAnimationFrame(flushErr);
+                return;
+              }
+            }
+            flushPending = false;
+          }
+
+          return function (text) {
+            if (arguments.length > 1)
+              text = Array.prototype.slice.call(arguments).join(" ");
+            console.error(text);
+            const coloredText = "\x1b[31m" + text + "\x1b[0m";
+            if (term) {
+              errBuffer.push(coloredText);
+              if (!flushPending) {
+                flushPending = true;
+                requestAnimationFrame(flushErr);
+              }
+            } else {
+              outputBuffer.push(coloredText);
+              // Cap outputBuffer to prevent memory spikes before terminal is ready
+              if (outputBuffer.length > MAX_OUTPUT_BUFFER) {
+                outputBuffer.splice(0, outputBuffer.length - MAX_OUTPUT_BUFFER);
+              }
+            }
+          };
+        })(),
+
+        canvas: (() => {
+          const canvas = document.getElementById("canvas");
+          canvas?.addEventListener(
+            "webglcontextlost",
+            (e) => {
+              e.preventDefault();
+              statusText.textContent = "WebGL context lost";
+              statusBadge?.classList.add("loading");
+              // Show reload prompt instead of auto-reloading
+              const overlay = document.getElementById("loadingOverlay");
+              if (overlay) {
+                overlay.classList.remove("hidden");
+                overlay.innerHTML = `
               <div style="text-align: center;">
                 <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
                 <div class="loading-text">Graphics context lost</div>
@@ -1493,92 +1730,101 @@
                 <button class="btn btn-primary" onclick="location.reload()">Reload</button>
               </div>
             `;
-          }
-        }, false);
-        return canvas;
-      })(),
+              }
+            },
+            false,
+          );
+          return canvas;
+        })(),
 
-      setStatus: (text) => {
-        if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
-        if (text === Module.setStatus.last.text) return;
+        setStatus: (text) => {
+          if (!Module.setStatus.last)
+            Module.setStatus.last = { time: Date.now(), text: "" };
+          if (text === Module.setStatus.last.text) return;
 
-        const m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
-        const now = Date.now();
-        if (m && now - Module.setStatus.last.time < 30) return;
+          const m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+          const now = Date.now();
+          if (m && now - Module.setStatus.last.time < 30) return;
 
-        Module.setStatus.last.time = now;
-        Module.setStatus.last.text = text;
+          Module.setStatus.last.time = now;
+          Module.setStatus.last.text = text;
 
-        if (m) {
-          statusText.textContent = m[1].trim();
-          progressElement.value = parseInt(m[2]) * 100;
-          progressElement.max = parseInt(m[4]) * 100;
-          progressElement.hidden = false;
-        } else {
-          progressElement.hidden = true;
-          if (text) {
-            statusText.textContent = text;
+          if (m) {
+            statusText.textContent = m[1].trim();
+            progressElement.value = parseInt(m[2]) * 100;
+            progressElement.max = parseInt(m[4]) * 100;
+            progressElement.hidden = false;
           } else {
-            statusText.textContent = 'Ready';
-            statusBadge.classList.remove('loading');
-            // Hide loading overlay when ready
-            ProgressiveLoader.setProgress(100, 'Ready', 'Emulator initialized');
-            setTimeout(() => ProgressiveLoader.hide(), 300);
+            progressElement.hidden = true;
+            if (text) {
+              statusText.textContent = text;
+            } else {
+              statusText.textContent = "Ready";
+              statusBadge.classList.remove("loading");
+              // Hide loading overlay when ready
+              ProgressiveLoader.setProgress(
+                100,
+                "Ready",
+                "Emulator initialized",
+              );
+              setTimeout(() => ProgressiveLoader.hide(), 300);
+            }
           }
-        }
-      },
+        },
 
-      totalDependencies: 0,
-      monitorRunDependencies: function(left) {
-        Module.totalDependencies = Math.max(Module.totalDependencies, left);
-        Module.setStatus(left
-          ? `Loading... (${Module.totalDependencies - left}/${Module.totalDependencies})`
-          : 'All downloads complete.');
-      },
+        totalDependencies: 0,
+        monitorRunDependencies: function (left) {
+          Module.totalDependencies = Math.max(Module.totalDependencies, left);
+          Module.setStatus(
+            left
+              ? `Loading... (${Module.totalDependencies - left}/${Module.totalDependencies})`
+              : "All downloads complete.",
+          );
+        },
 
-      onRuntimeInitialized: function() {
-        ProgressiveLoader.setProgress(100, 'Ready', 'Runtime initialized');
-        emulatorReady = true;
-        updateRunButtonState();
-        setTimeout(() => ProgressiveLoader.hide(), 300);
-      },
+        onRuntimeInitialized: function () {
+          ProgressiveLoader.setProgress(100, "Ready", "Runtime initialized");
+          emulatorReady = true;
+          updateRunButtonState();
+          setTimeout(() => ProgressiveLoader.hide(), 300);
+        },
 
-      onExit: function(status) {
-        // Program terminated (either normally or via exit())
-        const exitMsg = status === 0 ? 'Completed' : `Exited (${status})`;
-        statusText.textContent = exitMsg;
-        statusBadge.classList.remove('running');
-        if (term) {
-          term.write(`\x1b[32m> ${exitMsg}\x1b[0m\r\n`);
-        }
-        // Disable stop button since program ended
-        const stopBtn = document.getElementById('stopButton');
-        if (stopBtn) stopBtn.disabled = true;
-      }
-    };
-
-    Module.setStatus('Downloading...');
-
-    window.onerror = (event, source, lineno, colno, error) => {
-      Module.setStatus('Error - see console');
-      statusBadge?.classList.add('loading');
-      statusBadge?.style.setProperty('--accent-green', 'var(--error-red)');
-      ProgressiveLoader.setProgress(0, 'Error', 'Check console for details');
-      // Show error in terminal
-      const errorMsg = error?.message || event || 'Unknown error';
-      if (term) {
-        term.write(`\x1b[31m> Runtime Error: ${errorMsg}\x1b[0m\r\n`);
-      } else {
-        outputBuffer.push(`\x1b[31m> Runtime Error: ${errorMsg}\x1b[0m`);
-      }
-      Module.setStatus = (text) => {
-        if (text) console.error('[post-exception status] ' + text);
+        onExit: function (status) {
+          // Program terminated (either normally or via exit())
+          const exitMsg = status === 0 ? "Completed" : `Exited (${status})`;
+          statusText.textContent = exitMsg;
+          statusBadge.classList.remove("running");
+          if (term) {
+            term.write(`\x1b[32m> ${exitMsg}\x1b[0m\r\n`);
+          }
+          // Disable stop button since program ended
+          const stopBtn = document.getElementById("stopButton");
+          if (stopBtn) stopBtn.disabled = true;
+        },
       };
-    };
-  </script>
-  <!-- Load main WASM JS with defer for non-blocking -->
-  <script defer type="text/javascript" src="rv32emu.js"></script>
-  <!-- Service worker for caching (loads last) -->
-  <script defer src="coi-serviceworker.min.js"></script>
-</body>
+
+      Module.setStatus("Downloading...");
+
+      window.onerror = (event, source, lineno, colno, error) => {
+        Module.setStatus("Error - see console");
+        statusBadge?.classList.add("loading");
+        statusBadge?.style.setProperty("--accent-green", "var(--error-red)");
+        ProgressiveLoader.setProgress(0, "Error", "Check console for details");
+        // Show error in terminal
+        const errorMsg = error?.message || event || "Unknown error";
+        if (term) {
+          term.write(`\x1b[31m> Runtime Error: ${errorMsg}\x1b[0m\r\n`);
+        } else {
+          outputBuffer.push(`\x1b[31m> Runtime Error: ${errorMsg}\x1b[0m`);
+        }
+        Module.setStatus = (text) => {
+          if (text) console.error("[post-exception status] " + text);
+        };
+      };
+    </script>
+    <!-- Load main WASM JS with defer for non-blocking -->
+    <script defer type="text/javascript" src="rv32emu.js"></script>
+    <!-- Service worker for caching (loads last) -->
+    <script defer src="coi-serviceworker.min.js"></script>
+  </body>
 </html>

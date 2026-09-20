@@ -1,1020 +1,1190 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>rv32emu - System Emulation</title>
-  <!-- Preconnect for faster resource loading -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <!-- Preload critical resources with high priority -->
-  <link rel="preload" href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500&display=swap" as="style" fetchpriority="high">
-  <link rel="preload" href="rv32emu.wasm" as="fetch" type="application/wasm" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <!-- xterm.js for terminal rendering with ANSI support (local bundle) -->
-  <link rel="stylesheet" href="xterm.min.css">
-  <script defer src="xterm.min.js"></script>
-  <style>
-    /* Font fallback for fast first paint */
-    @font-face {
-      font-family: 'VT323-fallback';
-      src: local('Courier New'), local('monospace');
-      font-display: swap;
-    }
-    :root {
-      --bg-primary: #0a0a0a;
-      --bg-secondary: #141414;
-      --bg-terminal: #000000;
-      --text-primary: #e0e0e0;
-      --text-secondary: #707070;
-      --text-muted: #505050;
-      --accent-green: #4ec34e;
-      --accent-cyan: #5cb8c2;
-      --accent-amber: #d4a033;
-      --border-color: #2a2a2a;
-      --error-red: #d94444;
-    }
-
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg-primary: #fafafa;
-        --bg-secondary: #f0f0f0;
-        --text-primary: #1a1a1a;
-        --text-secondary: #555555;
-        --text-muted: #777777;
-        --border-color: #d0d0d0;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>rv32emu - System Emulation</title>
+    <!-- Preconnect for faster resource loading -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <!-- Preload critical resources with high priority -->
+    <link
+      rel="preload"
+      href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500&display=swap"
+      as="style"
+      fetchpriority="high"
+    />
+    <link
+      rel="preload"
+      href="rv32emu.wasm"
+      as="fetch"
+      type="application/wasm"
+      crossorigin
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <!-- xterm.js for terminal rendering with ANSI support (local bundle) -->
+    <link rel="stylesheet" href="xterm.min.css" />
+    <script defer src="xterm.min.js"></script>
+    <style>
+      /* Font fallback for fast first paint */
+      @font-face {
+        font-family: "VT323-fallback";
+        src: local("Courier New"), local("monospace");
+        font-display: swap;
       }
-    }
+      :root {
+        --bg-primary: #0a0a0a;
+        --bg-secondary: #141414;
+        --bg-terminal: #000000;
+        --text-primary: #e0e0e0;
+        --text-secondary: #707070;
+        --text-muted: #505050;
+        --accent-green: #4ec34e;
+        --accent-cyan: #5cb8c2;
+        --accent-amber: #d4a033;
+        --border-color: #2a2a2a;
+        --error-red: #d94444;
+      }
 
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg-primary: #fafafa;
+          --bg-secondary: #f0f0f0;
+          --text-primary: #1a1a1a;
+          --text-secondary: #555555;
+          --text-muted: #777777;
+          --border-color: #d0d0d0;
+        }
+      }
 
-    body {
-      font-family: 'JetBrains Mono', 'Monaco', 'Consolas', monospace;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      min-height: 100vh;
-      line-height: 1.5;
-    }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
 
-    /* Progressive loading states */
-    .loading-overlay {
-      position: fixed;
-      inset: 0;
-      background: var(--bg-primary);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      transition: opacity 0.5s ease, visibility 0.5s ease;
-    }
+      body {
+        font-family: "JetBrains Mono", "Monaco", "Consolas", monospace;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        min-height: 100vh;
+        line-height: 1.5;
+      }
 
-    .loading-overlay.hidden {
-      opacity: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-
-    .loading-spinner {
-      width: 48px;
-      height: 48px;
-      border: 3px solid var(--border-color);
-      border-top-color: var(--accent-green);
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      will-change: transform;
-    }
-
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-
-    .loading-text {
-      margin-top: 16px;
-      font-family: 'VT323', 'VT323-fallback', monospace;
-      font-size: 18px;
-      color: var(--text-secondary);
-    }
-
-    .loading-progress {
-      width: 200px;
-      height: 4px;
-      background: var(--border-color);
-      border-radius: 2px;
-      margin-top: 12px;
-      overflow: hidden;
-    }
-
-    .loading-progress-bar {
-      height: 100%;
-      background: var(--accent-green);
-      border-radius: 2px;
-      width: 100%;
-      transform: scaleX(0);
-      transform-origin: left;
-      transition: transform 0.3s ease;
-      will-change: transform;
-    }
-
-    .loading-details {
-      margin-top: 8px;
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-
-    /* Navigation */
-    .nav-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 24px;
-      border-bottom: 1px solid var(--border-color);
-      background: var(--bg-secondary);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-
-    .logo {
-      font-family: 'VT323', monospace;
-      font-size: 28px;
-      color: var(--accent-green);
-      letter-spacing: 2px;
-    }
-
-    .logo span {
-      color: var(--text-secondary);
-      font-size: 14px;
-      margin-left: 8px;
-      vertical-align: middle;
-    }
-
-    .nav-links {
-      display: flex;
-      gap: 24px;
-      align-items: center;
-    }
-
-    .nav-links a {
-      color: var(--text-secondary);
-      text-decoration: none;
-      font-size: 13px;
-      transition: color 0.2s;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .nav-links a:hover {
-      color: var(--accent-green);
-    }
-
-    /* Main Container */
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 24px;
-    }
-
-    /* Hero Section */
-    .hero {
-      text-align: center;
-      padding: 32px 0 24px;
-    }
-
-    .hero h1 {
-      font-family: 'VT323', monospace;
-      font-size: 42px;
-      font-weight: normal;
-      color: var(--text-primary);
-      margin-bottom: 8px;
-    }
-
-    .hero .subtitle {
-      color: var(--text-secondary);
-      font-size: 14px;
-      margin-bottom: 16px;
-    }
-
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 16px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 20px;
-      font-size: 12px;
-      color: var(--text-secondary);
-    }
-
-    .status-badge::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent-green);
-      animation: pulse 2s infinite;
-    }
-
-    .status-badge.loading::before {
-      background: var(--accent-amber);
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    /* Controls Panel */
-    .controls-panel {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 24px;
-      flex-wrap: wrap;
-    }
-
-    .btn {
-      background: transparent;
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-      padding: 10px 20px;
-      font-family: 'VT323', monospace;
-      font-size: 18px;
-      cursor: pointer;
-      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      border-radius: 4px;
-    }
-
-    .btn:hover {
-      background: var(--accent-green);
-      color: var(--bg-primary);
-      border-color: var(--accent-green);
-    }
-
-    .btn:active {
-      transform: scale(0.98);
-    }
-
-    .btn-primary {
-      background: var(--accent-green);
-      color: var(--bg-primary);
-      border-color: var(--accent-green);
-    }
-
-    .btn-primary:hover {
-      background: var(--accent-cyan);
-      border-color: var(--accent-cyan);
-    }
-
-    .btn-secondary {
-      border-color: var(--text-muted);
-      color: var(--text-secondary);
-    }
-
-    /* Info Box */
-    .info-box {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 16px 20px;
-      margin-bottom: 24px;
-      text-align: center;
-    }
-
-    .info-box p {
-      color: var(--text-secondary);
-      font-size: 14px;
-    }
-
-    .info-box strong {
-      color: var(--accent-cyan);
-    }
-
-    /* Canvas Panel */
-    .canvas-panel {
-      background: var(--bg-terminal);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      overflow: hidden;
-      margin-bottom: 24px;
-    }
-
-    .canvas-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 16px;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .canvas-title {
-      font-size: 12px;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .canvas-controls {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .canvas-controls label {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      color: var(--text-secondary);
-      cursor: pointer;
-    }
-
-    .canvas-controls input[type="checkbox"] {
-      accent-color: var(--accent-green);
-    }
-
-    .canvas-wrapper {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 300px;
-      padding: 16px;
-    }
-
-    #canvas {
-      background: #000;
-      image-rendering: pixelated;
-      image-rendering: crisp-edges;
-    }
-
-    /* Terminal Panel */
-    .terminal-panel {
-      background: var(--bg-terminal);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    .terminal-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 16px;
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .terminal-title {
-      font-size: 12px;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-
-    .terminal-dots {
-      display: flex;
-      gap: 6px;
-    }
-
-    .terminal-dots span {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-
-    .terminal-dots span:nth-child(1) { background: #ff5f56; }
-    .terminal-dots span:nth-child(2) { background: #ffbd2e; }
-    .terminal-dots span:nth-child(3) { background: #27ca40; }
-
-    #terminal {
-      padding: 8px;
-      min-height: 350px;
-    }
-
-    /* xterm.js theme override */
-    .xterm {
-      padding: 8px;
-    }
-
-    .xterm-viewport {
-      background: var(--bg-terminal) !important;
-    }
-
-    /* Progress */
-    #progress {
-      width: 100%;
-      height: 4px;
-      appearance: none;
-      border: none;
-      background: var(--border-color);
-      border-radius: 2px;
-      margin-bottom: 16px;
-    }
-
-    #progress::-webkit-progress-bar {
-      background: var(--border-color);
-      border-radius: 2px;
-    }
-
-    #progress::-webkit-progress-value {
-      background: var(--accent-green);
-      border-radius: 2px;
-    }
-
-    /* Footer */
-    .footer {
-      text-align: center;
-      padding: 32px 0;
-      margin-top: 48px;
-      border-top: 1px solid var(--border-color);
-      color: var(--text-muted);
-      font-size: 12px;
-    }
-
-    .footer a {
-      color: var(--text-secondary);
-      text-decoration: none;
-    }
-
-    .footer a:hover {
-      color: var(--accent-green);
-    }
-
-    /* Responsive */
-    @media (max-width: 768px) {
-      .nav-header {
+      /* Progressive loading states */
+      .loading-overlay {
+        position: fixed;
+        inset: 0;
+        background: var(--bg-primary);
+        display: flex;
         flex-direction: column;
-        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        transition:
+          opacity 0.5s ease,
+          visibility 0.5s ease;
+      }
+
+      .loading-overlay.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .loading-spinner {
+        width: 48px;
+        height: 48px;
+        border: 3px solid var(--border-color);
+        border-top-color: var(--accent-green);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        will-change: transform;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .loading-text {
+        margin-top: 16px;
+        font-family: "VT323", "VT323-fallback", monospace;
+        font-size: 18px;
+        color: var(--text-secondary);
+      }
+
+      .loading-progress {
+        width: 200px;
+        height: 4px;
+        background: var(--border-color);
+        border-radius: 2px;
+        margin-top: 12px;
+        overflow: hidden;
+      }
+
+      .loading-progress-bar {
+        height: 100%;
+        background: var(--accent-green);
+        border-radius: 2px;
+        width: 100%;
+        transform: scaleX(0);
+        transform-origin: left;
+        transition: transform 0.3s ease;
+        will-change: transform;
+      }
+
+      .loading-details {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--text-muted);
+      }
+
+      /* Navigation */
+      .nav-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 24px;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--bg-secondary);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+
+      .logo {
+        font-family: "VT323", monospace;
+        font-size: 28px;
+        color: var(--accent-green);
+        letter-spacing: 2px;
+      }
+
+      .logo span {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-left: 8px;
+        vertical-align: middle;
+      }
+
+      .nav-links {
+        display: flex;
+        gap: 24px;
+        align-items: center;
+      }
+
+      .nav-links a {
+        color: var(--text-secondary);
+        text-decoration: none;
+        font-size: 13px;
+        transition: color 0.2s;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .nav-links a:hover {
+        color: var(--accent-green);
+      }
+
+      /* Main Container */
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      /* Hero Section */
+      .hero {
+        text-align: center;
+        padding: 32px 0 24px;
       }
 
       .hero h1 {
-        font-size: 32px;
+        font-family: "VT323", monospace;
+        font-size: 42px;
+        font-weight: normal;
+        color: var(--text-primary);
+        margin-bottom: 8px;
       }
 
+      .hero .subtitle {
+        color: var(--text-secondary);
+        font-size: 14px;
+        margin-bottom: 16px;
+      }
+
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 16px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+
+      .status-badge::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--accent-green);
+        animation: pulse 2s infinite;
+      }
+
+      .status-badge.loading::before {
+        background: var(--accent-amber);
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      /* Controls Panel */
       .controls-panel {
-        flex-direction: column;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
       }
 
       .btn {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 10px 20px;
+        font-family: "VT323", monospace;
+        font-size: 18px;
+        cursor: pointer;
+        transition:
+          background-color 0.15s ease,
+          color 0.15s ease,
+          border-color 0.15s ease,
+          transform 0.15s ease;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        border-radius: 4px;
+      }
+
+      .btn:hover {
+        background: var(--accent-green);
+        color: var(--bg-primary);
+        border-color: var(--accent-green);
+      }
+
+      .btn:active {
+        transform: scale(0.98);
+      }
+
+      .btn-primary {
+        background: var(--accent-green);
+        color: var(--bg-primary);
+        border-color: var(--accent-green);
+      }
+
+      .btn-primary:hover {
+        background: var(--accent-cyan);
+        border-color: var(--accent-cyan);
+      }
+
+      .btn-secondary {
+        border-color: var(--text-muted);
+        color: var(--text-secondary);
+      }
+
+      /* Info Box */
+      .info-box {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin-bottom: 24px;
+        text-align: center;
+      }
+
+      .info-box p {
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+
+      .info-box strong {
+        color: var(--accent-cyan);
+      }
+
+      /* Canvas Panel */
+      .canvas-panel {
+        background: var(--bg-terminal);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 24px;
+      }
+
+      .canvas-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 16px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .canvas-title {
+        font-size: 12px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .canvas-controls {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .canvas-controls label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        cursor: pointer;
+      }
+
+      .canvas-controls input[type="checkbox"] {
+        accent-color: var(--accent-green);
+      }
+
+      .canvas-wrapper {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 300px;
+        padding: 16px;
+      }
+
+      #canvas {
+        background: #000;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+
+      /* Terminal Panel */
+      .terminal-panel {
+        background: var(--bg-terminal);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      .terminal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 16px;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .terminal-title {
+        font-size: 12px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .terminal-dots {
+        display: flex;
+        gap: 6px;
+      }
+
+      .terminal-dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+
+      .terminal-dots span:nth-child(1) {
+        background: #ff5f56;
+      }
+      .terminal-dots span:nth-child(2) {
+        background: #ffbd2e;
+      }
+      .terminal-dots span:nth-child(3) {
+        background: #27ca40;
+      }
+
+      #terminal {
+        padding: 8px;
+        min-height: 350px;
+      }
+
+      /* xterm.js theme override */
+      .xterm {
+        padding: 8px;
+      }
+
+      .xterm-viewport {
+        background: var(--bg-terminal) !important;
+      }
+
+      /* Progress */
+      #progress {
         width: 100%;
+        height: 4px;
+        appearance: none;
+        border: none;
+        background: var(--border-color);
+        border-radius: 2px;
+        margin-bottom: 16px;
       }
-    }
-  </style>
-</head>
-<body>
-  <!-- Progressive loading overlay -->
-  <div class="loading-overlay" id="loadingOverlay" role="dialog" aria-modal="true" aria-labelledby="loadingText" aria-describedby="loadingDetails">
-    <div class="loading-spinner" aria-hidden="true"></div>
-    <div class="loading-text" id="loadingText" role="status" aria-live="polite">Initializing...</div>
-    <div class="loading-progress" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Loading progress">
-      <div class="loading-progress-bar" id="loadingProgressBar"></div>
-    </div>
-    <div class="loading-details" id="loadingDetails">Preparing system emulator</div>
-  </div>
 
-  <nav class="nav-header progressive-load">
-    <div class="logo">rv32emu <span>System Mode</span></div>
-    <div class="nav-links">
-      <a href="https://github.com/sysprog21/rv32emu">GitHub</a>
-      <a href="../user/" class="btn btn-secondary" style="padding: 6px 12px; font-size: 14px;">User Mode</a>
-    </div>
-  </nav>
+      #progress::-webkit-progress-bar {
+        background: var(--border-color);
+        border-radius: 2px;
+      }
 
-  <main class="container">
-    <section class="hero progressive-load">
-      <h1>Linux System Emulation</h1>
-      <p class="subtitle">Boot Linux kernel with VirtIO devices | Run doom, quake, and smolnes</p>
-      <div class="status-badge loading" id="statusBadge">
-        <span id="statusText">Loading...</span>
+      #progress::-webkit-progress-value {
+        background: var(--accent-green);
+        border-radius: 2px;
+      }
+
+      /* Footer */
+      .footer {
+        text-align: center;
+        padding: 32px 0;
+        margin-top: 48px;
+        border-top: 1px solid var(--border-color);
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .footer a {
+        color: var(--text-secondary);
+        text-decoration: none;
+      }
+
+      .footer a:hover {
+        color: var(--accent-green);
+      }
+
+      /* Responsive */
+      @media (max-width: 768px) {
+        .nav-header {
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .hero h1 {
+          font-size: 32px;
+        }
+
+        .controls-panel {
+          flex-direction: column;
+        }
+
+        .btn {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Progressive loading overlay -->
+    <div
+      class="loading-overlay"
+      id="loadingOverlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="loadingText"
+      aria-describedby="loadingDetails"
+    >
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div
+        class="loading-text"
+        id="loadingText"
+        role="status"
+        aria-live="polite"
+      >
+        Initializing...
       </div>
-    </section>
-
-    <progress value="0" max="100" id="progress" hidden></progress>
-
-    <div class="controls-panel progressive-load">
-      <button class="btn btn-primary" id="runSysButton" disabled>Boot Linux</button>
+      <div
+        class="loading-progress"
+        role="progressbar"
+        aria-valuenow="0"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-label="Loading progress"
+      >
+        <div class="loading-progress-bar" id="loadingProgressBar"></div>
+      </div>
+      <div class="loading-details" id="loadingDetails">
+        Preparing system emulator
+      </div>
     </div>
 
-    <div class="canvas-panel progressive-load">
-      <div class="canvas-header">
-        <span class="canvas-title">Framebuffer Display</span>
-        <div class="canvas-controls">
-          <label>
-            <input type="checkbox" id="resize">
-            Resize
-          </label>
-          <label>
-            <input type="checkbox" id="pointerLock" checked>
-            Lock Mouse
-          </label>
-          <button class="btn btn-secondary" id="fullscreenButton" style="padding: 4px 12px; font-size: 14px;">
-            Fullscreen
-          </button>
+    <nav class="nav-header progressive-load">
+      <div class="logo">rv32emu <span>System Mode</span></div>
+      <div class="nav-links">
+        <a href="https://github.com/sysprog21/rv32emu">GitHub</a>
+        <a
+          href="../user/"
+          class="btn btn-secondary"
+          style="padding: 6px 12px; font-size: 14px"
+          >User Mode</a
+        >
+      </div>
+    </nav>
+
+    <main class="container">
+      <section class="hero progressive-load">
+        <h1>Linux System Emulation</h1>
+        <p class="subtitle">
+          Boot Linux kernel with VirtIO devices | Run doom, quake, and smolnes
+        </p>
+        <div class="status-badge loading" id="statusBadge">
+          <span id="statusText">Loading...</span>
+        </div>
+      </section>
+
+      <progress value="0" max="100" id="progress" hidden></progress>
+
+      <div class="controls-panel progressive-load">
+        <button class="btn btn-primary" id="runSysButton" disabled>
+          Boot Linux
+        </button>
+      </div>
+
+      <div class="canvas-panel progressive-load">
+        <div class="canvas-header">
+          <span class="canvas-title">Framebuffer Display</span>
+          <div class="canvas-controls">
+            <label>
+              <input type="checkbox" id="resize" />
+              Resize
+            </label>
+            <label>
+              <input type="checkbox" id="pointerLock" checked />
+              Lock Mouse
+            </label>
+            <button
+              class="btn btn-secondary"
+              id="fullscreenButton"
+              style="padding: 4px 12px; font-size: 14px"
+            >
+              Fullscreen
+            </button>
+          </div>
+        </div>
+        <div class="canvas-wrapper">
+          <canvas
+            class="emscripten"
+            id="canvas"
+            tabindex="0"
+            aria-label="Emulator display"
+          ></canvas>
         </div>
       </div>
-      <div class="canvas-wrapper">
-        <canvas class="emscripten" id="canvas" tabindex="0" aria-label="Emulator display"></canvas>
-      </div>
-    </div>
 
-    <div class="terminal-panel progressive-load">
-      <div class="terminal-header">
-        <span class="terminal-title">Linux Console</span>
-        <div class="terminal-dots">
-          <span></span>
-          <span></span>
-          <span></span>
+      <div class="terminal-panel progressive-load">
+        <div class="terminal-header">
+          <span class="terminal-title">Linux Console</span>
+          <div class="terminal-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
         </div>
+        <div id="terminal"></div>
       </div>
-      <div id="terminal"></div>
-    </div>
-  </main>
+    </main>
 
-  <footer class="footer">
-    <p>rv32emu - <a href="https://github.com/sysprog21/rv32emu">Open Source</a> RISC-V Emulator</p>
-  </footer>
+    <footer class="footer">
+      <p>
+        rv32emu -
+        <a href="https://github.com/sysprog21/rv32emu">Open Source</a> RISC-V
+        Emulator
+      </p>
+    </footer>
 
-  <!-- Helpers shared with the other demo page; must run before the
+    <!-- Helpers shared with the other demo page; must run before the
        inline script below, hence no defer. -->
-  <script src="common.js"></script>
-  <script>
-    // Progressive loading controller
-    const ProgressiveLoader = {
-      overlay: null,
-      progressBar: null,
-      loadingText: null,
-      loadingDetails: null,
-      wasmSize: 0,
-      wasmLoaded: 0,
+    <script src="common.js"></script>
+    <script>
+      // Progressive loading controller
+      const ProgressiveLoader = {
+        overlay: null,
+        progressBar: null,
+        loadingText: null,
+        loadingDetails: null,
+        wasmSize: 0,
+        wasmLoaded: 0,
 
-      init() {
-        this.overlay = document.getElementById('loadingOverlay');
-        this.progressBar = document.getElementById('loadingProgressBar');
-        this.loadingText = document.getElementById('loadingText');
-        this.loadingDetails = document.getElementById('loadingDetails');
-      },
-
-      setProgress(percent, text, details) {
-        if (this.progressBar) this.progressBar.style.transform = `scaleX(${percent / 100})`;
-        if (text && this.loadingText) this.loadingText.textContent = text;
-        if (details && this.loadingDetails) this.loadingDetails.textContent = details;
-      },
-
-      formatBytes(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-      },
-
-      hide() {
-        if (this.overlay) {
-          this.overlay.classList.add('hidden');
-        }
-      }
-    };
-
-    // Initialize loader immediately
-    ProgressiveLoader.init();
-    ProgressiveLoader.setProgress(5, 'Loading...', 'Initializing system emulator');
-
-    // Terminal will be initialized on runtime ready to avoid conflict with system-pre.js
-    let term = null;
-    let termInitialized = false;
-
-    function initTerminalWithKeyHandler() {
-      if (termInitialized) return;
-      if (typeof Terminal === 'undefined') {
-        setTimeout(initTerminalWithKeyHandler, 50);
-        return;
-      }
-
-      // Create terminal with custom styling
-      term = new Terminal({
-        fontFamily: "'JetBrains Mono', 'Consolas', 'Monaco', monospace",
-        fontSize: 14,
-        letterSpacing: 0,
-        lineHeight: 1.1,
-        theme: {
-          background: '#000000',
-          foreground: '#b0d0b0',
-          cursor: '#4ec34e',
-          cursorAccent: '#000000',
-          selection: 'rgba(78, 195, 78, 0.3)',
+        init() {
+          this.overlay = document.getElementById("loadingOverlay");
+          this.progressBar = document.getElementById("loadingProgressBar");
+          this.loadingText = document.getElementById("loadingText");
+          this.loadingDetails = document.getElementById("loadingDetails");
         },
-        cursorBlink: true,
-        rows: 24,
-        cols: 100,
-      });
-      term.open(document.getElementById('terminal'));
-      term.write('\x1b[32mrv32emu\x1b[0m - RISC-V System Emulator\r\n');
-      term.write('Click "Boot Linux" to start...\r\n\r\n');
 
-      // Set up keyboard input handler using the exported circular-buffer helper.
-      if (typeof Module !== 'undefined' && Module._u8250_put_rx_char) {
-        term.onKey(({ key }) => {
-          for (let i = 0; i < key.length; i++) {
-            Module._u8250_put_rx_char(key.charCodeAt(i));
+        setProgress(percent, text, details) {
+          if (this.progressBar)
+            this.progressBar.style.transform = `scaleX(${percent / 100})`;
+          if (text && this.loadingText) this.loadingText.textContent = text;
+          if (details && this.loadingDetails)
+            this.loadingDetails.textContent = details;
+        },
+
+        formatBytes(bytes) {
+          if (bytes < 1024) return bytes + " B";
+          if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+          return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        },
+
+        hide() {
+          if (this.overlay) {
+            this.overlay.classList.add("hidden");
           }
-        });
-      }
-
-      termInitialized = true;
-    }
-
-    const statusBadge = document.getElementById('statusBadge');
-    const statusText = document.getElementById('statusText');
-    const progressElement = document.getElementById('progress');
-    const runSysButton = document.getElementById('runSysButton');
-
-    // Fetch a file with progress reporting, return Uint8Array
-    async function fetchWithProgress(url, label) {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
-      const total = parseInt(resp.headers.get('Content-Length') || '0', 10);
-      const reader = resp.body.getReader();
-      const chunks = [];
-      let loaded = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        loaded += value.length;
-        if (total > 0) {
-          const pct = ((loaded / total) * 100).toFixed(0);
-          const mb = (loaded / (1024 * 1024)).toFixed(1);
-          const totalMb = (total / (1024 * 1024)).toFixed(1);
-          if (term) term.write(`\r\x1b[K\x1b[33m${label}: ${mb} / ${totalMb} MiB (${pct}%)\x1b[0m`);
-        }
-      }
-      if (term) term.write(`\r\x1b[K\x1b[32m${label}: done (${(loaded / (1024 * 1024)).toFixed(1)} MiB)\x1b[0m\r\n`);
-
-      const result = new Uint8Array(loaded);
-      let offset = 0;
-      for (const chunk of chunks) {
-        result.set(chunk, offset);
-        offset += chunk.length;
-      }
-      return result;
-    }
-
-    // Optional virtio-blk image. If `disk.img` is present at the same origin,
-    // attach it read-only so the booted Linux can `mount /dev/vda /mnt`. Keeps
-    // the rootfs.cpio small and lets extra payloads (game data, datasets) ride
-    // on a separate block device instead of being baked into the boot image.
-    async function fetchOptionalDisk() {
-      try {
-        const head = await fetch('disk.img', { method: 'HEAD' });
-        if (!head.ok) return null;
-        if (term) term.write('\x1b[33mDownloading disk.img (virtio-blk)...\x1b[0m\r\n');
-        return await fetchWithProgress('disk.img', 'Disk');
-      } catch (e) {
-        return null;
-      }
-    }
-
-    // Browsers without DecompressionStream (Firefox < 113, Safari < 16.4)
-    // take the plain tar the build stages next to the gzip.
-    const supportsGzipDecompression =
-      typeof DecompressionStream === 'function' &&
-      typeof Response !== 'undefined';
-
-    // Unpack the timidity instrument set into /etc/timidity, returning the
-    // number of extracted files.
-    async function loadTimidity() {
-      const url = supportsGzipDecompression ? 'timidity.tar.gz' : 'timidity.tar';
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`Fetch ${url} failed: HTTP ${resp.status}`);
-      let tarBuf;
-      if (url.endsWith('.gz')) {
-        // resp.body is null on browsers that do not stream responses; buffer
-        // the payload first so the gzip is still inflated.
-        const gz = resp.body
-          ? resp.body.pipeThrough(new DecompressionStream('gzip'))
-          : new Blob([await resp.arrayBuffer()]).stream()
-              .pipeThrough(new DecompressionStream('gzip'));
-        tarBuf = await new Response(gz).arrayBuffer();
-      } else {
-        tarBuf = await resp.arrayBuffer();
-      }
-      return extractTarToMemfs(new Uint8Array(tarBuf), '/etc/timidity');
-    }
-
-    runSysButton?.addEventListener('click', async () => {
-      runSysButton.disabled = true;
-      statusText.textContent = 'Downloading artifacts...';
-      statusBadge.classList.add('loading');
-      if (term) term.write('\x1b[33mDownloading kernel and rootfs...\x1b[0m\r\n');
-
-      try {
-        const [kernelData, rootfsData, diskData] = await Promise.all([
-          fetchWithProgress('Image.gz', 'Kernel'),
-          fetchWithProgress('rootfs.cpio.gz', 'Rootfs'),
-          fetchOptionalDisk(),
-        ]);
-        if (term) term.write('\x1b[33mWriting artifacts to VFS...\x1b[0m\r\n');
-        Module.FS.writeFile('/Image.gz', kernelData);
-        Module.FS.writeFile('/rootfs.cpio.gz', rootfsData);
-
-        // The instrument set only feeds host-side SDL_mixer MIDI playback, so
-        // a missing or unreadable tar must not stop the guest from booting.
-        try {
-          Module.FS.mkdirTree('/etc/timidity');
-          const n = await loadTimidity();
-          if (term) term.write(
-            `\x1b[36m> Unpacked ${n} files to /etc/timidity\x1b[0m\r\n`);
-        } catch (e) {
-          console.warn('timidity instruments unavailable:', e);
-          if (term) term.write(
-            `\x1b[33m> ${formatError(e)}; booting without MIDI music\x1b[0m\r\n`);
-        }
-
-        let bootArgs = '-k Image.gz -i rootfs.cpio.gz';
-        if (diskData) {
-          Module.FS.writeFile('/disk.img', diskData);
-          bootArgs += ' -x vblk:disk.img,readonly';
-          if (term) term.write('\x1b[36m> Block device attached as /dev/vda; ' +
-            'will auto-mount read-only at /mnt during boot.\x1b[0m\r\n');
-        }
-
-        statusText.textContent = 'Booting Linux...';
-        statusBadge.classList.remove('loading');
-        if (term) term.write('\x1b[33mBooting Linux kernel...\x1b[0m\r\n');
-
-        Module._indirect_rv_halt();
-        Module['run_system'](bootArgs);
-      } catch (err) {
-        console.error('Boot failed:', err);
-        statusText.textContent = 'Download failed';
-        statusBadge.classList.add('loading');
-        if (term) term.write(`\x1b[31mError: ${err.message}\x1b[0m\r\n`);
-        runSysButton.disabled = false;
-      }
-    });
-
-    // Fullscreen handler with fallback
-    function requestCanvasFullscreen() {
-      const canvas = document.getElementById('canvas');
-      const pointerLock = document.getElementById('pointerLock')?.checked;
-      const resize = document.getElementById('resize')?.checked;
-
-      if (typeof Module !== 'undefined' && Module.requestFullscreen) {
-        try {
-          Module.requestFullscreen(pointerLock, resize);
-          return;
-        } catch (e) {
-          console.warn('Emscripten fullscreen failed:', e);
-        }
-      }
-
-      // Fallback to browser API (modern browsers only - no legacy prefixes needed)
-      if (canvas.requestFullscreen) {
-        canvas.requestFullscreen().then(() => {
-          if (pointerLock && canvas.requestPointerLock) {
-            canvas.requestPointerLock();
-          }
-          canvas.focus();
-        }).catch(err => {
-          if (term) {
-            term.write(`\x1b[31m> Fullscreen failed: ${err.message}\x1b[0m\r\n`);
-          }
-        });
-      }
-    }
-
-    document.getElementById('fullscreenButton')?.addEventListener('click', requestCanvasFullscreen);
-
-    // Canvas focus handling for keyboard input
-    const canvas = document.getElementById('canvas');
-    document.querySelector('.canvas-wrapper')?.addEventListener('click', () => {
-      canvas?.focus();
-    });
-
-    canvas?.addEventListener('focus', () => {
-      canvas.style.outline = '2px solid var(--accent-green)';
-      canvas.style.outlineOffset = '2px';
-    });
-
-    canvas?.addEventListener('blur', () => {
-      canvas.style.outline = 'none';
-    });
-
-    // Regex constant for setStatus parsing (performance optimization)
-    const STATUS_REGEX = /([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/;
-
-    var Module = {
-      // Streaming WASM instantiation with progress tracking
-      instantiateWasm: function(imports, successCallback) {
-        const wasmUrl = 'rv32emu.wasm';
-        ProgressiveLoader.setProgress(10, 'Loading WASM...', 'Starting download');
-
-        // Try streaming instantiation first (most efficient)
-        WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
-          .then(result => {
-            ProgressiveLoader.setProgress(90, 'Initializing...', 'Linking modules');
-            successCallback(result.instance, result.module);
-          })
-          .catch(err => {
-            console.warn('Streaming instantiation failed, using fallback:', err.message);
-            ProgressiveLoader.setProgress(30, 'Loading...', 'Using fallback method');
-
-            // Fallback: fetch with progress tracking, then instantiate
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', wasmUrl, true);
-            xhr.responseType = 'arraybuffer';
-
-            xhr.onprogress = (e) => {
-              if (e.lengthComputable) {
-                const percent = Math.min(80, 30 + (e.loaded / e.total) * 50);
-                ProgressiveLoader.setProgress(percent, 'Loading...',
-                  `Downloaded ${ProgressiveLoader.formatBytes(e.loaded)} / ${ProgressiveLoader.formatBytes(e.total)}`);
-              }
-            };
-
-            xhr.onload = () => {
-              if (xhr.status === 200) {
-                ProgressiveLoader.setProgress(85, 'Compiling...', 'Instantiating module');
-                WebAssembly.instantiate(xhr.response, imports)
-                  .then(result => {
-                    ProgressiveLoader.setProgress(90, 'Initializing...', 'Linking modules');
-                    successCallback(result.instance, result.module);
-                  })
-                  .catch(e => {
-                    console.error('WASM instantiation failed:', e);
-                    ProgressiveLoader.setProgress(0, 'Error', e.message);
-                  });
-              } else {
-                ProgressiveLoader.setProgress(0, 'Error', `HTTP ${xhr.status}`);
-              }
-            };
-
-            xhr.onerror = () => {
-              ProgressiveLoader.setProgress(0, 'Error', 'Network error');
-            };
-
-            xhr.send();
-          });
-
-        return {};
-      },
-
-      print: (function() {
-        let printBuffer = [];
-        let flushPending = false;
-
-        function flushPrint() {
-          if (term && printBuffer.length > 0) {
-            // Process max 1000 lines per frame to prevent UI freeze
-            const chunk = printBuffer.splice(0, 1000);
-            term.write(chunk.join('\r\n') + '\r\n');
-
-            if (printBuffer.length > 0) {
-              requestAnimationFrame(flushPrint);
-              return;
-            }
-          }
-          flushPending = false;
-        }
-
-        return function(text) {
-          if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-          console.log(text);
-          if (term) {
-            printBuffer.push(text);
-            if (!flushPending) {
-              flushPending = true;
-              requestAnimationFrame(flushPrint);
-            }
-          }
-        };
-      })(),
-
-      printErr: (function() {
-        let errBuffer = [];
-        let flushPending = false;
-
-        function flushErr() {
-          if (term && errBuffer.length > 0) {
-            // Process max 1000 lines per frame to prevent UI freeze
-            const chunk = errBuffer.splice(0, 1000);
-            term.write('\x1b[31m' + chunk.join('\r\n') + '\x1b[0m\r\n');
-
-            if (errBuffer.length > 0) {
-              requestAnimationFrame(flushErr);
-              return;
-            }
-          }
-          flushPending = false;
-        }
-
-        return function(text) {
-          if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-          console.error(text);
-          if (term) {
-            errBuffer.push(text);
-            if (!flushPending) {
-              flushPending = true;
-              requestAnimationFrame(flushErr);
-            }
-          }
-        };
-      })(),
-
-      preRun: [
-        function() {
-          FS.init(
-            null,
-            (c) => { if (term) term.write(String.fromCharCode(c)); },
-            (c) => { if (term) term.write('\x1b[31m' + String.fromCharCode(c) + '\x1b[0m'); }
-          );
-        }
-      ],
-
-      canvas: (() => {
-        const canvas = document.getElementById('canvas');
-        // Prevent context menu on canvas
-        canvas?.addEventListener('contextmenu', e => e.preventDefault());
-        canvas?.addEventListener('webglcontextlost', (e) => {
-          e.preventDefault();
-          statusText.textContent = 'WebGL context lost';
-          statusBadge?.classList.add('loading');
-          ProgressiveLoader.setProgress(0, 'Error', 'WebGL context lost - Reloading...');
-          setTimeout(() => location.reload(), 2000);
-        }, false);
-        return canvas;
-      })(),
-
-      setStatus: (text) => {
-        if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
-        if (text === Module.setStatus.last.text) return;
-
-        const m = text.match(STATUS_REGEX);
-        const now = Date.now();
-        if (m && now - Module.setStatus.last.time < 30) return;
-
-        Module.setStatus.last.time = now;
-        Module.setStatus.last.text = text;
-
-        if (m) {
-          statusText.textContent = m[1].trim();
-          progressElement.value = parseInt(m[2]) * 100;
-          progressElement.max = parseInt(m[4]) * 100;
-          progressElement.hidden = false;
-        } else {
-          progressElement.hidden = true;
-          if (text) {
-            statusText.textContent = text;
-          } else {
-            statusText.textContent = 'Ready';
-            statusBadge.classList.remove('loading');
-            ProgressiveLoader.setProgress(100, 'Ready', 'System emulator initialized');
-            setTimeout(() => ProgressiveLoader.hide(), 300);
-          }
-        }
-      },
-
-      totalDependencies: 0,
-      monitorRunDependencies: function(left) {
-        Module.totalDependencies = Math.max(Module.totalDependencies, left);
-        Module.setStatus(left
-          ? `Loading... (${Module.totalDependencies - left}/${Module.totalDependencies})`
-          : 'All downloads complete.');
-      },
-
-      onRuntimeInitialized: function() {
-        ProgressiveLoader.setProgress(100, 'Ready', 'Runtime initialized');
-        // Initialize terminal with keyboard handler now that WASM is ready
-        initTerminalWithKeyHandler();
-        // Enable boot button now that emulator is ready
-        if (runSysButton) runSysButton.disabled = false;
-        setTimeout(() => ProgressiveLoader.hide(), 300);
-      }
-    };
-
-    Module.setStatus('Downloading...');
-
-    window.onerror = (event) => {
-      Module.setStatus('Error - see console');
-      if (term) term.write('\x1b[31mError occurred - check browser console\x1b[0m\r\n');
-      ProgressiveLoader.setProgress(0, 'Error', 'Check console for details');
-      Module.setStatus = (text) => {
-        if (text) console.error('[post-exception status] ' + text);
+        },
       };
-    };
-  </script>
-  <!-- Load main WASM JS with defer for non-blocking -->
-  <script defer type="text/javascript" src="rv32emu.js"></script>
-  <!-- Service worker for caching (loads last) -->
-  <script defer src="coi-serviceworker.min.js"></script>
-</body>
+
+      // Initialize loader immediately
+      ProgressiveLoader.init();
+      ProgressiveLoader.setProgress(
+        5,
+        "Loading...",
+        "Initializing system emulator",
+      );
+
+      // Terminal will be initialized on runtime ready to avoid conflict with system-pre.js
+      let term = null;
+      let termInitialized = false;
+
+      function initTerminalWithKeyHandler() {
+        if (termInitialized) return;
+        if (typeof Terminal === "undefined") {
+          setTimeout(initTerminalWithKeyHandler, 50);
+          return;
+        }
+
+        // Create terminal with custom styling
+        term = new Terminal({
+          fontFamily: "'JetBrains Mono', 'Consolas', 'Monaco', monospace",
+          fontSize: 14,
+          letterSpacing: 0,
+          lineHeight: 1.1,
+          theme: {
+            background: "#000000",
+            foreground: "#b0d0b0",
+            cursor: "#4ec34e",
+            cursorAccent: "#000000",
+            selection: "rgba(78, 195, 78, 0.3)",
+          },
+          cursorBlink: true,
+          rows: 24,
+          cols: 100,
+        });
+        term.open(document.getElementById("terminal"));
+        term.write("\x1b[32mrv32emu\x1b[0m - RISC-V System Emulator\r\n");
+        term.write('Click "Boot Linux" to start...\r\n\r\n');
+
+        // Set up keyboard input handler using the exported circular-buffer helper.
+        if (typeof Module !== "undefined" && Module._u8250_put_rx_char) {
+          term.onKey(({ key }) => {
+            for (let i = 0; i < key.length; i++) {
+              Module._u8250_put_rx_char(key.charCodeAt(i));
+            }
+          });
+        }
+
+        termInitialized = true;
+      }
+
+      const statusBadge = document.getElementById("statusBadge");
+      const statusText = document.getElementById("statusText");
+      const progressElement = document.getElementById("progress");
+      const runSysButton = document.getElementById("runSysButton");
+
+      // Fetch a file with progress reporting, return Uint8Array
+      async function fetchWithProgress(url, label) {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Failed to fetch ${url}: ${resp.status}`);
+        const total = parseInt(resp.headers.get("Content-Length") || "0", 10);
+        const reader = resp.body.getReader();
+        const chunks = [];
+        let loaded = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          loaded += value.length;
+          if (total > 0) {
+            const pct = ((loaded / total) * 100).toFixed(0);
+            const mb = (loaded / (1024 * 1024)).toFixed(1);
+            const totalMb = (total / (1024 * 1024)).toFixed(1);
+            if (term)
+              term.write(
+                `\r\x1b[K\x1b[33m${label}: ${mb} / ${totalMb} MiB (${pct}%)\x1b[0m`,
+              );
+          }
+        }
+        if (term)
+          term.write(
+            `\r\x1b[K\x1b[32m${label}: done (${(loaded / (1024 * 1024)).toFixed(1)} MiB)\x1b[0m\r\n`,
+          );
+
+        const result = new Uint8Array(loaded);
+        let offset = 0;
+        for (const chunk of chunks) {
+          result.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return result;
+      }
+
+      // Optional virtio-blk image. If `disk.img` is present at the same origin,
+      // attach it read-only so the booted Linux can `mount /dev/vda /mnt`. Keeps
+      // the rootfs.cpio small and lets extra payloads (game data, datasets) ride
+      // on a separate block device instead of being baked into the boot image.
+      async function fetchOptionalDisk() {
+        try {
+          const head = await fetch("disk.img", { method: "HEAD" });
+          if (!head.ok) return null;
+          if (term)
+            term.write(
+              "\x1b[33mDownloading disk.img (virtio-blk)...\x1b[0m\r\n",
+            );
+          return await fetchWithProgress("disk.img", "Disk");
+        } catch (e) {
+          return null;
+        }
+      }
+
+      // Browsers without DecompressionStream (Firefox < 113, Safari < 16.4)
+      // take the plain tar the build stages next to the gzip.
+      const supportsGzipDecompression =
+        typeof DecompressionStream === "function" &&
+        typeof Response !== "undefined";
+
+      // Unpack the timidity instrument set into /etc/timidity, returning the
+      // number of extracted files.
+      async function loadTimidity() {
+        const url = supportsGzipDecompression
+          ? "timidity.tar.gz"
+          : "timidity.tar";
+        const resp = await fetch(url);
+        if (!resp.ok)
+          throw new Error(`Fetch ${url} failed: HTTP ${resp.status}`);
+        let tarBuf;
+        if (url.endsWith(".gz")) {
+          // resp.body is null on browsers that do not stream responses; buffer
+          // the payload first so the gzip is still inflated.
+          const gz = resp.body
+            ? resp.body.pipeThrough(new DecompressionStream("gzip"))
+            : new Blob([await resp.arrayBuffer()])
+                .stream()
+                .pipeThrough(new DecompressionStream("gzip"));
+          tarBuf = await new Response(gz).arrayBuffer();
+        } else {
+          tarBuf = await resp.arrayBuffer();
+        }
+        return extractTarToMemfs(new Uint8Array(tarBuf), "/etc/timidity");
+      }
+
+      runSysButton?.addEventListener("click", async () => {
+        runSysButton.disabled = true;
+        statusText.textContent = "Downloading artifacts...";
+        statusBadge.classList.add("loading");
+        if (term)
+          term.write("\x1b[33mDownloading kernel and rootfs...\x1b[0m\r\n");
+
+        try {
+          const [kernelData, rootfsData, diskData] = await Promise.all([
+            fetchWithProgress("Image.gz", "Kernel"),
+            fetchWithProgress("rootfs.cpio.gz", "Rootfs"),
+            fetchOptionalDisk(),
+          ]);
+          if (term)
+            term.write("\x1b[33mWriting artifacts to VFS...\x1b[0m\r\n");
+          Module.FS.writeFile("/Image.gz", kernelData);
+          Module.FS.writeFile("/rootfs.cpio.gz", rootfsData);
+
+          // The instrument set only feeds host-side SDL_mixer MIDI playback, so
+          // a missing or unreadable tar must not stop the guest from booting.
+          try {
+            Module.FS.mkdirTree("/etc/timidity");
+            const n = await loadTimidity();
+            if (term)
+              term.write(
+                `\x1b[36m> Unpacked ${n} files to /etc/timidity\x1b[0m\r\n`,
+              );
+          } catch (e) {
+            console.warn("timidity instruments unavailable:", e);
+            if (term)
+              term.write(
+                `\x1b[33m> ${formatError(e)}; booting without MIDI music\x1b[0m\r\n`,
+              );
+          }
+
+          let bootArgs = "-k Image.gz -i rootfs.cpio.gz";
+          if (diskData) {
+            Module.FS.writeFile("/disk.img", diskData);
+            bootArgs += " -x vblk:disk.img,readonly";
+            if (term)
+              term.write(
+                "\x1b[36m> Block device attached as /dev/vda; " +
+                  "will auto-mount read-only at /mnt during boot.\x1b[0m\r\n",
+              );
+          }
+
+          statusText.textContent = "Booting Linux...";
+          statusBadge.classList.remove("loading");
+          if (term) term.write("\x1b[33mBooting Linux kernel...\x1b[0m\r\n");
+
+          Module._indirect_rv_halt();
+          Module["run_system"](bootArgs);
+        } catch (err) {
+          console.error("Boot failed:", err);
+          statusText.textContent = "Download failed";
+          statusBadge.classList.add("loading");
+          if (term) term.write(`\x1b[31mError: ${err.message}\x1b[0m\r\n`);
+          runSysButton.disabled = false;
+        }
+      });
+
+      // Fullscreen handler with fallback
+      function requestCanvasFullscreen() {
+        const canvas = document.getElementById("canvas");
+        const pointerLock = document.getElementById("pointerLock")?.checked;
+        const resize = document.getElementById("resize")?.checked;
+
+        if (typeof Module !== "undefined" && Module.requestFullscreen) {
+          try {
+            Module.requestFullscreen(pointerLock, resize);
+            return;
+          } catch (e) {
+            console.warn("Emscripten fullscreen failed:", e);
+          }
+        }
+
+        // Fallback to browser API (modern browsers only - no legacy prefixes needed)
+        if (canvas.requestFullscreen) {
+          canvas
+            .requestFullscreen()
+            .then(() => {
+              if (pointerLock && canvas.requestPointerLock) {
+                canvas.requestPointerLock();
+              }
+              canvas.focus();
+            })
+            .catch((err) => {
+              if (term) {
+                term.write(
+                  `\x1b[31m> Fullscreen failed: ${err.message}\x1b[0m\r\n`,
+                );
+              }
+            });
+        }
+      }
+
+      document
+        .getElementById("fullscreenButton")
+        ?.addEventListener("click", requestCanvasFullscreen);
+
+      // Canvas focus handling for keyboard input
+      const canvas = document.getElementById("canvas");
+      document
+        .querySelector(".canvas-wrapper")
+        ?.addEventListener("click", () => {
+          canvas?.focus();
+        });
+
+      canvas?.addEventListener("focus", () => {
+        canvas.style.outline = "2px solid var(--accent-green)";
+        canvas.style.outlineOffset = "2px";
+      });
+
+      canvas?.addEventListener("blur", () => {
+        canvas.style.outline = "none";
+      });
+
+      // Regex constant for setStatus parsing (performance optimization)
+      const STATUS_REGEX = /([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/;
+
+      var Module = {
+        // Streaming WASM instantiation with progress tracking
+        instantiateWasm: function (imports, successCallback) {
+          const wasmUrl = "rv32emu.wasm";
+          ProgressiveLoader.setProgress(
+            10,
+            "Loading WASM...",
+            "Starting download",
+          );
+
+          // Try streaming instantiation first (most efficient)
+          WebAssembly.instantiateStreaming(fetch(wasmUrl), imports)
+            .then((result) => {
+              ProgressiveLoader.setProgress(
+                90,
+                "Initializing...",
+                "Linking modules",
+              );
+              successCallback(result.instance, result.module);
+            })
+            .catch((err) => {
+              console.warn(
+                "Streaming instantiation failed, using fallback:",
+                err.message,
+              );
+              ProgressiveLoader.setProgress(
+                30,
+                "Loading...",
+                "Using fallback method",
+              );
+
+              // Fallback: fetch with progress tracking, then instantiate
+              const xhr = new XMLHttpRequest();
+              xhr.open("GET", wasmUrl, true);
+              xhr.responseType = "arraybuffer";
+
+              xhr.onprogress = (e) => {
+                if (e.lengthComputable) {
+                  const percent = Math.min(80, 30 + (e.loaded / e.total) * 50);
+                  ProgressiveLoader.setProgress(
+                    percent,
+                    "Loading...",
+                    `Downloaded ${ProgressiveLoader.formatBytes(e.loaded)} / ${ProgressiveLoader.formatBytes(e.total)}`,
+                  );
+                }
+              };
+
+              xhr.onload = () => {
+                if (xhr.status === 200) {
+                  ProgressiveLoader.setProgress(
+                    85,
+                    "Compiling...",
+                    "Instantiating module",
+                  );
+                  WebAssembly.instantiate(xhr.response, imports)
+                    .then((result) => {
+                      ProgressiveLoader.setProgress(
+                        90,
+                        "Initializing...",
+                        "Linking modules",
+                      );
+                      successCallback(result.instance, result.module);
+                    })
+                    .catch((e) => {
+                      console.error("WASM instantiation failed:", e);
+                      ProgressiveLoader.setProgress(0, "Error", e.message);
+                    });
+                } else {
+                  ProgressiveLoader.setProgress(
+                    0,
+                    "Error",
+                    `HTTP ${xhr.status}`,
+                  );
+                }
+              };
+
+              xhr.onerror = () => {
+                ProgressiveLoader.setProgress(0, "Error", "Network error");
+              };
+
+              xhr.send();
+            });
+
+          return {};
+        },
+
+        print: (function () {
+          let printBuffer = [];
+          let flushPending = false;
+
+          function flushPrint() {
+            if (term && printBuffer.length > 0) {
+              // Process max 1000 lines per frame to prevent UI freeze
+              const chunk = printBuffer.splice(0, 1000);
+              term.write(chunk.join("\r\n") + "\r\n");
+
+              if (printBuffer.length > 0) {
+                requestAnimationFrame(flushPrint);
+                return;
+              }
+            }
+            flushPending = false;
+          }
+
+          return function (text) {
+            if (arguments.length > 1)
+              text = Array.prototype.slice.call(arguments).join(" ");
+            console.log(text);
+            if (term) {
+              printBuffer.push(text);
+              if (!flushPending) {
+                flushPending = true;
+                requestAnimationFrame(flushPrint);
+              }
+            }
+          };
+        })(),
+
+        printErr: (function () {
+          let errBuffer = [];
+          let flushPending = false;
+
+          function flushErr() {
+            if (term && errBuffer.length > 0) {
+              // Process max 1000 lines per frame to prevent UI freeze
+              const chunk = errBuffer.splice(0, 1000);
+              term.write("\x1b[31m" + chunk.join("\r\n") + "\x1b[0m\r\n");
+
+              if (errBuffer.length > 0) {
+                requestAnimationFrame(flushErr);
+                return;
+              }
+            }
+            flushPending = false;
+          }
+
+          return function (text) {
+            if (arguments.length > 1)
+              text = Array.prototype.slice.call(arguments).join(" ");
+            console.error(text);
+            if (term) {
+              errBuffer.push(text);
+              if (!flushPending) {
+                flushPending = true;
+                requestAnimationFrame(flushErr);
+              }
+            }
+          };
+        })(),
+
+        preRun: [
+          function () {
+            FS.init(
+              null,
+              (c) => {
+                if (term) term.write(String.fromCharCode(c));
+              },
+              (c) => {
+                if (term)
+                  term.write("\x1b[31m" + String.fromCharCode(c) + "\x1b[0m");
+              },
+            );
+          },
+        ],
+
+        canvas: (() => {
+          const canvas = document.getElementById("canvas");
+          // Prevent context menu on canvas
+          canvas?.addEventListener("contextmenu", (e) => e.preventDefault());
+          canvas?.addEventListener(
+            "webglcontextlost",
+            (e) => {
+              e.preventDefault();
+              statusText.textContent = "WebGL context lost";
+              statusBadge?.classList.add("loading");
+              ProgressiveLoader.setProgress(
+                0,
+                "Error",
+                "WebGL context lost - Reloading...",
+              );
+              setTimeout(() => location.reload(), 2000);
+            },
+            false,
+          );
+          return canvas;
+        })(),
+
+        setStatus: (text) => {
+          if (!Module.setStatus.last)
+            Module.setStatus.last = { time: Date.now(), text: "" };
+          if (text === Module.setStatus.last.text) return;
+
+          const m = text.match(STATUS_REGEX);
+          const now = Date.now();
+          if (m && now - Module.setStatus.last.time < 30) return;
+
+          Module.setStatus.last.time = now;
+          Module.setStatus.last.text = text;
+
+          if (m) {
+            statusText.textContent = m[1].trim();
+            progressElement.value = parseInt(m[2]) * 100;
+            progressElement.max = parseInt(m[4]) * 100;
+            progressElement.hidden = false;
+          } else {
+            progressElement.hidden = true;
+            if (text) {
+              statusText.textContent = text;
+            } else {
+              statusText.textContent = "Ready";
+              statusBadge.classList.remove("loading");
+              ProgressiveLoader.setProgress(
+                100,
+                "Ready",
+                "System emulator initialized",
+              );
+              setTimeout(() => ProgressiveLoader.hide(), 300);
+            }
+          }
+        },
+
+        totalDependencies: 0,
+        monitorRunDependencies: function (left) {
+          Module.totalDependencies = Math.max(Module.totalDependencies, left);
+          Module.setStatus(
+            left
+              ? `Loading... (${Module.totalDependencies - left}/${Module.totalDependencies})`
+              : "All downloads complete.",
+          );
+        },
+
+        onRuntimeInitialized: function () {
+          ProgressiveLoader.setProgress(100, "Ready", "Runtime initialized");
+          // Initialize terminal with keyboard handler now that WASM is ready
+          initTerminalWithKeyHandler();
+          // Enable boot button now that emulator is ready
+          if (runSysButton) runSysButton.disabled = false;
+          setTimeout(() => ProgressiveLoader.hide(), 300);
+        },
+      };
+
+      Module.setStatus("Downloading...");
+
+      window.onerror = (event) => {
+        Module.setStatus("Error - see console");
+        if (term)
+          term.write(
+            "\x1b[31mError occurred - check browser console\x1b[0m\r\n",
+          );
+        ProgressiveLoader.setProgress(0, "Error", "Check console for details");
+        Module.setStatus = (text) => {
+          if (text) console.error("[post-exception status] " + text);
+        };
+      };
+    </script>
+    <!-- Load main WASM JS with defer for non-blocking -->
+    <script defer type="text/javascript" src="rv32emu.js"></script>
+    <!-- Service worker for caching (loads last) -->
+    <script defer src="coi-serviceworker.min.js"></script>
+  </body>
 </html>

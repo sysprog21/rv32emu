@@ -21,7 +21,7 @@
 #include "riscv.h"
 #include "utils.h"
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 #include "devices/netdev.h"
 #endif
 
@@ -73,7 +73,7 @@ static int opt_virtio_blk_idx = 0;
 
 /* enable virtio-rng device */
 static bool opt_virtio_rng = false;
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 static char *opt_virtio_net_backend;
 #endif
 #endif
@@ -118,7 +118,7 @@ static void reset_runtime_options(void)
     memset(opt_virtio_blk_img, 0, sizeof(opt_virtio_blk_img));
     opt_virtio_blk_idx = 0;
     opt_virtio_rng = false;
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
     opt_virtio_net_backend = NULL;
 #endif
 #endif
@@ -147,7 +147,7 @@ static void print_usage(const char *filename)
         "(default read and write). This option may be specified "
         "multiple times for multiple block devices\n"
         "  -x vrng : enable virtio-rng device\n"
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
         "  -x vnet:<backend>: use <backend> as virtio-net backend "
         "interface (supported backend:"
 #if RV32EMU_NET_HAS_TAP
@@ -168,7 +168,7 @@ static void print_usage(const char *filename)
         filename);
 }
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 static bool virtio_net_backend_supported(const char *backend)
 {
 #if RV32EMU_NET_HAS_TAP
@@ -222,7 +222,7 @@ static bool parse_args(int argc, char **args)
                 }
                 opt_virtio_blk_img[opt_virtio_blk_idx++] =
                     optarg + 5; /* strlen("vblk:") */
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
             } else if (!strncmp("vnet:", optarg, 5)) {
                 if (!optarg[5]) {
                     rv_log_error("Missing virtio-net backend interface.\n");
@@ -457,7 +457,7 @@ int main(int argc, char **args)
     attr.data.system.initrd = opt_rootfs_img;
     attr.data.system.bootargs = opt_bootargs;
     attr.data.system.vrng_enabled = opt_virtio_rng;
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
     attr.data.system.vnet_backend = opt_virtio_net_backend;
 #endif
     if (opt_virtio_blk_idx) {

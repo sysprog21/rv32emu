@@ -49,6 +49,12 @@ $(eval $(require-config))
 OUT ?= build
 BIN := $(OUT)/rv32emu
 
+# Define the effective-config stamp before including mk/system.mk so device
+# object rules can depend on it. The stamp tracks effective feature values,
+# including legacy ENABLE_* overrides, and forces stale objects to rebuild
+# when command-line configuration changes.
+EFFECTIVE_CONFIG_STAMP := $(OUT)/.effective-config
+
 CFLAGS = -std=gnu11 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
 # Cross-TU entry points must be declared in a header rather than by a local
 # extern at each use site, and an empty parameter list must not stand in for
@@ -62,6 +68,7 @@ deps :=
 # Feature Flags (Kconfig -> RV32_FEATURE_*)
 $(call set-features, ELF_LOADER MOP_FUSION BLOCK_CHAINING LOG_COLOR)
 $(call set-features, SYSTEM GOLDFISH_RTC ARCH_TEST)
+$(call set-features, VIRTIO_NET VIRTIO_NET_TAP)
 $(call set-features, EXT_M EXT_A EXT_F EXT_C EXT_V RV32E)
 $(call set-features, Zicsr Zifencei Zba Zbb Zbc Zbs)
 $(call set-features, SDL SDL_MIXER GDBSTUB JIT LINK_ZLIB)
@@ -119,7 +126,7 @@ include mk/softfloat.mk
 OBJS_NEED_SOFTFLOAT := $(OUT)/decode.o $(OUT)/riscv.o
 ifeq ($(CONFIG_SYSTEM),y)
 DEV_OUT := $(OUT)/devices
-OBJS_NEED_SOFTFLOAT += $(DEV_OUT)/uart.o $(DEV_OUT)/plic.o
+OBJS_NEED_SOFTFLOAT += $(DEV_OUT)/uart.o $(DEV_OUT)/plic.o $(DEV_OUT)/virtio-net.o
 endif
 $(OBJS_NEED_SOFTFLOAT): $(SOFTFLOAT_LIB)
 LDFLAGS += $(SOFTFLOAT_LIB) -lm
@@ -226,6 +233,9 @@ $(OUT)/emulate.o: CFLAGS += -foptimize-sibling-calls -fomit-frame-pointer -fno-s
 # HTTP Utilities (shared by external.mk and artifact.mk)
 include mk/http.mk
 
+# VirtIO networking
+include mk/virtio-net.mk
+
 # External Dependencies & System Emulation
 include mk/external.mk
 include mk/artifact.mk
@@ -248,9 +258,9 @@ OBJS += emulate.o riscv.o log.o elf.o cache.o mpool.o $(OBJS_EXT) main.o
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps += $(OBJS:%.o=%.o.d)
 
-EFFECTIVE_CONFIG_STAMP := $(OUT)/.effective-config
 EFFECTIVE_CONFIG_VARS := \
 	CONFIG_BUILD_WASM CONFIG_SYSTEM CONFIG_GOLDFISH_RTC CONFIG_ELF_LOADER \
+	CONFIG_VIRTIO_NET CONFIG_VIRTIO_NET_TAP \
 	CONFIG_EXT_M CONFIG_EXT_A CONFIG_EXT_F CONFIG_EXT_C CONFIG_EXT_V CONFIG_RV32E \
 	CONFIG_Zicsr CONFIG_Zifencei CONFIG_Zba CONFIG_Zbb CONFIG_Zbc CONFIG_Zbs \
 	CONFIG_MOP_FUSION CONFIG_BLOCK_CHAINING CONFIG_LOG_COLOR CONFIG_ARCH_TEST \
@@ -272,8 +282,10 @@ $(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
 	$(Q){ \
 		printf 'CC=%s\n' '$(CC)'; \
 		printf 'CC_IS_EMCC=%s\n' '$(CC_IS_EMCC)'; \
+		printf 'UNAME_S=%s\n' '$(UNAME_S)'; \
 		printf 'CROSS_COMPILE=%s\n' '$(CROSS_COMPILE)'; \
 		$(foreach var,$(EFFECTIVE_CONFIG_VARS),printf '$(var)=%s\n' '$($(var))';) \
+		$(foreach var,$(EFFECTIVE_VNET_FEATURES),printf 'EFFECTIVE_$(var)=%s\n' '$(call has,$(var))';) \
 	} > $@.tmp
 	$(Q)if ! cmp -s $@.tmp $@ 2>/dev/null; then \
 		mv $@.tmp $@; \
@@ -307,7 +319,9 @@ tool: $(TOOLS_BIN)
 # Clean Targets
 clean:
 	$(VECHO) "Cleaning... "
-	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS) $(BUILD_DTB) $(BUILD_DTB2C) $(HIST_BIN) $(HIST_OBJS) $(deps) $(WEB_FILES) $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP)
+	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) \
+	    $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) \
+	    $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
 	$(Q)$(call notice, [OK])
 

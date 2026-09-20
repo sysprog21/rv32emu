@@ -91,7 +91,7 @@ static gdb_action_t rv_cont(void *args)
             break;
 
         rv_step_debug(rv);
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
         rv_refresh_vnet(rv);
 #endif
     }
@@ -108,7 +108,7 @@ static gdb_action_t rv_stepi(void *args)
     assert(rv);
 
     rv_step_debug(rv);
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
     rv_refresh_vnet(rv);
 #endif
     return ACT_RESUME;

@@ -7,7 +7,7 @@
 
 #include "feature.h"
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 #include "netdev.h"
 #endif
 
@@ -45,7 +45,7 @@
 
 #define VIRTIO_RNG_DEV_ID 4
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 #define VIRTIO_NET_DEV_ID 1
 
 #define VIRTIO_NET_F_MTU (1U << 3)
@@ -180,7 +180,7 @@ virtio_rng_state_t *vrng_new(void);
 
 void vrng_delete(virtio_rng_state_t *vrng);
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 typedef struct {
     uint32_t queue_num;
     uint32_t queue_desc;
@@ -230,4 +230,4 @@ void vnet_delete(virtio_net_state_t *vnet);
 void virtio_net_refresh_queue(virtio_net_state_t *vnet);
 
 void virtio_net_reset(virtio_net_state_t *vnet);
-#endif /* RV32_HAS(SYSTEM_MMIO) */
+#endif /* RV32_HAS(VIRTIO_NET) */

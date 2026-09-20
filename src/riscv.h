@@ -430,7 +430,7 @@ void rv_step(void *arg);
 /* step the RISC-V emulator for debug mode */
 void rv_step_debug(void *arg);
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 /* Refresh the virtio-net backend periodically while the guest is running. */
 void rv_refresh_vnet(riscv_t *rv);
 #endif
@@ -531,7 +531,7 @@ typedef struct {
     char **vblk_device;
     int vblk_device_cnt;
     bool vrng_enabled;
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
     char *vnet_backend;
 #endif
 } vm_system_t;
@@ -573,12 +573,12 @@ typedef struct {
     uint32_t vrng_mmio_base_hi;
     int vrng_irq;
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
     /* virtio-net device */
     virtio_net_state_t *vnet;
     uint32_t vnet_mmio_base_hi;
     int vnet_irq;
-#endif
+#endif /* RV32_HAS(VIRTIO_NET) */
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
     /* vm memory object */

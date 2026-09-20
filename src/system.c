@@ -48,7 +48,7 @@ void emu_update_vrng_interrupts(riscv_t *rv)
     plic_update_interrupts(attr->plic);
 }
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
 void emu_update_vnet_interrupts(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);

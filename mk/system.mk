@@ -51,12 +51,24 @@ $(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(EFFECTIVE_CONFIG_STAMP) | $(DEV_OUT)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
 
-DEV_OBJS := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c))
+DEV_OBJS_ALL := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c))
+DEV_OBJS := $(DEV_OBJS_ALL)
+
+# VirtIO networking is optional. Exclude its objects unless kernel system
+# emulation and the Linux TAP backend are both enabled for this build.
+ifneq ($(VIRTIO_NET_BUILD_ENABLED),y)
+DEV_OBJS := $(filter-out \
+    $(DEV_OUT)/virtio-net.o \
+    $(DEV_OUT)/netdev.o, \
+    $(DEV_OBJS))
+endif
+
 # Enable Goldfish RTC peripheral
 ifneq ($(CONFIG_GOLDFISH_RTC),y)
 DEV_OBJS := $(filter-out $(DEV_OUT)/rtc.o, $(DEV_OBJS))
 endif
 deps := $(DEV_OBJS:%.o=%.o.d)
+DEV_DEPS_ALL := $(DEV_OBJS_ALL:%.o=%.o.d)
 
 OBJS_EXT += system.o
 OBJS_EXT += dtc/libfdt/fdt.o dtc/libfdt/fdt_ro.o dtc/libfdt/fdt_rw.o dtc/libfdt/fdt_wip.o

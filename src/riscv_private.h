@@ -286,7 +286,7 @@ struct riscv_internal {
 
     uint64_t timer; /**< strictly increment timer */
 
-#if RV32_HAS(SYSTEM_MMIO)
+#if RV32_HAS(VIRTIO_NET)
     uint64_t last_vnet_refresh;
 #endif
 

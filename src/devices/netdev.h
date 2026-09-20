@@ -7,7 +7,7 @@
 
 #include <stdbool.h>
 
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if RV32_HAS(VIRTIO_NET_TAP) && defined(__linux__) && !defined(__EMSCRIPTEN__)
 #define RV32EMU_NET_HAS_TAP 1
 #else
 #define RV32EMU_NET_HAS_TAP 0
@@ -17,12 +17,16 @@ typedef struct netdev netdev_t;
 
 typedef enum {
     NETDEV_IMPL_NONE = 0,
+#if RV32EMU_NET_HAS_TAP
     NETDEV_IMPL_TAP,
+#endif
 } netdev_impl_t;
 
+#if RV32EMU_NET_HAS_TAP
 typedef struct {
     int tap_fd;
 } net_tap_options_t;
+#endif
 
 struct netdev {
     const char *name;

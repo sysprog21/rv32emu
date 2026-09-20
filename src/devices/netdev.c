@@ -5,17 +5,54 @@
 
 #include "netdev.h"
 
-#include <stdlib.h>
-#include <string.h>
-
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
-
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#if RV32EMU_NET_HAS_TAP
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <sys/ioctl.h>
-#include <unistd.h>
+
+typedef int (*netdev_init_fn_t)(netdev_t *netdev);
+#endif
+
+static void netdev_reset(netdev_t *netdev)
+{
+    if (!netdev)
+        return;
+
+    netdev->name = NULL;
+    netdev->type = NETDEV_IMPL_NONE;
+    netdev->op = NULL;
+}
+
+#if RV32EMU_NET_HAS_TAP
+static bool netdev_setup(netdev_t *netdev,
+                         const char *name,
+                         netdev_impl_t type,
+                         size_t options_size,
+                         netdev_init_fn_t init_fn)
+{
+    netdev->name = name;
+    netdev->type = type;
+    netdev->op = calloc(1, options_size);
+
+    if (!netdev->op) {
+        netdev_reset(netdev);
+        return false;
+    }
+
+    if (init_fn(netdev) < 0) {
+        free(netdev->op);
+        netdev_reset(netdev);
+        return false;
+    }
+
+    return true;
+}
 
 static int net_init_tap(netdev_t *netdev)
 {
@@ -55,6 +92,16 @@ static int net_init_tap(netdev_t *netdev)
 
     return 0;
 }
+#endif
+
+static const char *netdev_default_backend(void)
+{
+#if RV32EMU_NET_HAS_TAP
+    return "tap";
+#else
+    return NULL;
+#endif
+}
 
 bool netdev_init(netdev_t *netdev, const char *net_type)
 {
@@ -64,61 +111,22 @@ bool netdev_init(netdev_t *netdev, const char *net_type)
     if (netdev->op)
         netdev_delete(netdev);
 
-    netdev->name = NULL;
-    netdev->type = NETDEV_IMPL_NONE;
-    netdev->op = NULL;
+    netdev_reset(netdev);
 
-    const char *requested = net_type ? net_type : "tap";
-    if (strcmp(requested, "tap")) {
-        rv_log_error("unsupported virtio-net backend: %s", requested);
+    const char *requested = net_type ? net_type : netdev_default_backend();
+    if (!requested) {
+        rv_log_error("no virtio-net backend was compiled");
         return false;
     }
 
-    netdev->name = "tap";
-    netdev->type = NETDEV_IMPL_TAP;
-    netdev->op = calloc(1, sizeof(net_tap_options_t));
-    if (!netdev->op) {
-        netdev->type = NETDEV_IMPL_NONE;
-        netdev->name = NULL;
-        return false;
+#if RV32EMU_NET_HAS_TAP
+    if (!strcmp(requested, "tap")) {
+        return netdev_setup(netdev, "tap", NETDEV_IMPL_TAP,
+                            sizeof(net_tap_options_t), net_init_tap);
     }
+#endif
 
-    if (net_init_tap(netdev) < 0) {
-        free(netdev->op);
-        netdev->op = NULL;
-        netdev->type = NETDEV_IMPL_NONE;
-        netdev->name = NULL;
-        return false;
-    }
-
-    return true;
-}
-
-void netdev_delete(netdev_t *netdev)
-{
-    if (!netdev)
-        return;
-
-    if (netdev->op && netdev->type == NETDEV_IMPL_TAP) {
-        net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
-        if (tap->tap_fd >= 0)
-            close(tap->tap_fd);
-    }
-
-    free(netdev->op);
-    netdev->op = NULL;
-    netdev->type = NETDEV_IMPL_NONE;
-    netdev->name = NULL;
-}
-
-#else
-
-bool netdev_init(netdev_t *netdev, const char *net_type)
-{
-    (void) netdev;
-    (void) net_type;
-
-    rv_log_error("virtio-net TAP backend is only supported on Linux hosts");
+    rv_log_error("unsupported virtio-net backend: %s", requested);
     return false;
 }
 
@@ -127,10 +135,26 @@ void netdev_delete(netdev_t *netdev)
     if (!netdev)
         return;
 
-    free(netdev->op);
-    netdev->op = NULL;
-    netdev->type = NETDEV_IMPL_NONE;
-    netdev->name = NULL;
-}
+    if (!netdev->op) {
+        netdev_reset(netdev);
+        return;
+    }
 
+    switch (netdev->type) {
+#if RV32EMU_NET_HAS_TAP
+    case NETDEV_IMPL_TAP: {
+        net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
+        if (tap->tap_fd >= 0)
+            close(tap->tap_fd);
+        break;
+    }
 #endif
+
+    case NETDEV_IMPL_NONE:
+    default:
+        break;
+    }
+
+    free(netdev->op);
+    netdev_reset(netdev);
+}

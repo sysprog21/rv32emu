@@ -1635,14 +1635,27 @@ static void muldivmod(struct jit_state *state,
         /* Set the divisor to 1 if it is zero */
         emit_load_imm(state, RDX, 1);
         emit_conditional_move(state, RDX, RCX);
-        /* xor %edx,%edx */
-        emit_alu32(state, 0x31, RDX, RDX);
+        if (sign) {
+            /* CQO sign-extends RAX through RDX, so IDIV sees a 128-bit
+             * dividend holding the 64-bit sign-extended operand.
+             */
+            emit_rex(state, 1, 0, 0, 0);
+            emit1(state, 0x99);
+        } else {
+            /* xor %edx,%edx */
+            emit_alu32(state, 0x31, RDX, RDX);
+        }
     }
 
-    if (is64)
+    /* A signed divide runs 64-bit over the sign-extended operands. That keeps
+     * INT_MIN / -1 representable, so the instruction cannot raise #DE, and its
+     * low half is the result RV32 defines. The overflow fixup below then
+     * agrees with it rather than correcting it.
+     */
+    if (is64 || sign)
         emit_rex(state, 1, 0, 0, 0);
     /* Multiply or divide */
-    emit_alu32(state, 0xf7, mul ? 4 : 6, RCX);
+    emit_alu32(state, 0xf7, mul ? 4 : sign ? 7 : 6, RCX);
 
     /* The division operation stores the remainder in RDX and the quotient
      * in RAX.
@@ -1703,6 +1716,16 @@ static void muldivmod(struct jit_state *state,
         register_map[0].vm_reg_idx = r1;
         register_map[0].dirty = d1;
     }
+
+    /* The signed divide runs 64-bit, so a negative quotient or remainder
+     * arrives sign-extended, and the writeback above is a 64-bit move. A
+     * mapped guest register must hold the zero-extended 32-bit word, or a
+     * later use of it as a memory-address base adds the sign bits and lands
+     * outside the guest mapping. Narrow it here, including when the result
+     * was already in dst and no move happened.
+     */
+    if (sign && (div || mod))
+        emit_mov32(state, dst, dst);
 #elif defined(__aarch64__)
     switch (opcode) {
     case 0x28:

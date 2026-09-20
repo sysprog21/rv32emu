@@ -89,4 +89,17 @@ else
     HTML_FORMAT_EXIT=0
 fi
 
-exit $((C_FORMAT_EXIT + SH_FORMAT_EXIT + PY_FORMAT_EXIT + DTS_FORMAT_EXIT + HTML_FORMAT_EXIT))
+JS_SOURCES=()
+while IFS= read -r file; do
+    [ -n "$file" ] && JS_SOURCES+=("$file")
+done < <(git ls-files -- '*.js')
+
+if [ ${#JS_SOURCES[@]} -gt 0 ]; then
+    echo "Checking JS files..."
+    npx --no-install prettier --check "${JS_SOURCES[@]}"
+    JS_FORMAT_EXIT=$?
+else
+    JS_FORMAT_EXIT=0
+fi
+
+exit $((C_FORMAT_EXIT + SH_FORMAT_EXIT + PY_FORMAT_EXIT + DTS_FORMAT_EXIT + HTML_FORMAT_EXIT + JS_FORMAT_EXIT))

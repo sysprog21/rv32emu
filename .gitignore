@@ -9,6 +9,11 @@ build/gfx.wad
 build/doomrc
 toolchain/
 
+# profiling output
+perf.data
+perf.data.old
+*.prof
+
 # built objects
 .config
 .config.old
@@ -24,8 +29,19 @@ build/linux-x86-softfp/
 build/riscv32/
 build/sail_cSim/
 build/sha1sum-*
+build/.effective-config
+build/.stamp-prebuilt
 build/bin2c
 build/minimal.dtb
+build/trace-match
+build/block-eviction
+build/jit-alu-alias
+build/jit-identity-normalize
+build/jit-indirect-targets
+build/jit-memory-address*
+build/jit-signed-div
+build/jit-interp-diff*
+build/*/test-*
 *.a
 *.o
 *.o.d

@@ -995,19 +995,28 @@ typedef struct {
 } branch_history_table_t;
 
 #if RV32_HAS(JIT)
-/* Find index with maximum times count in branch history table.
- * Used by JIT to identify the most frequently taken indirect jump target.
- * Note: With direct-mapped BHT, zeros can appear at any index, so we must
- * scan all entries (cannot break early on first zero).
+/* Accumulate matching observations; replace only on a tag/context miss.
+ * Resetting a hit to one during warm-up prevents indirect specialization.
  */
-static inline int bht_find_max_idx(const branch_history_table_t *bt)
+static inline void bht_record_target(branch_history_table_t *bt,
+                                     uint32_t pc,
+                                     uint32_t satp UNUSED)
 {
-    int max_idx = 0;
-    for (int i = 1; i < HISTORY_SIZE; i++) {
-        if (bt->times[i] > bt->times[max_idx])
-            max_idx = i;
+    const uint32_t idx = (pc >> 2) & (HISTORY_SIZE - 1);
+    bool match = bt->PC[idx] == pc;
+#if RV32_HAS(SYSTEM)
+    match = match && bt->satp[idx] == satp;
+#endif
+    if (match) {
+        if (bt->times[idx] != UINT32_MAX)
+            bt->times[idx]++;
+    } else {
+        bt->PC[idx] = pc;
+        bt->times[idx] = 1;
+#if RV32_HAS(SYSTEM)
+        bt->satp[idx] = satp;
+#endif
     }
-    return max_idx;
 }
 
 #endif

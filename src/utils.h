@@ -164,15 +164,45 @@ static inline void list_del_init(struct list_head *node)
 /* The set consists of SET_SIZE buckets, with each bucket containing
  * SET_SLOTS_SIZE slots.
  */
+/* A set of hashed keys, cleared by generation rather than by memset: the
+ * interpreter resets one on every dispatch, and the table alone is 128 KiB
+ * (256 KiB once rv_hash_key_t is 64-bit). A bucket stamped with an older
+ * generation is treated as empty and reclaimed when it is next touched.
+ */
 typedef struct {
     rv_hash_key_t table[SET_SIZE][SET_SLOTS_SIZE];
+    uint32_t bucket_epoch[SET_SIZE];
+    uint32_t epoch;
+    uint8_t count[SET_SIZE];
 } set_t;
 
 /**
- * set_reset - clear a set
+ * set_init - prepare a set for first use
  * @set: a pointer points to target set
+ *
+ * Required before any other call on storage that is not already zeroed,
+ * because the generation stamps are only meaningful against a known epoch.
+ */
+void set_init(set_t *set);
+
+/**
+ * set_reset - empty a set
+ * @set: a pointer points to target set
+ *
+ * O(1): retires the current generation rather than clearing the table.
  */
 void set_reset(set_t *set);
+
+/**
+ * set_probe - test membership and record the key in one pass
+ * @set: a pointer points to target set
+ * @key: the key to look for
+ *
+ * Returns true only for a key already seen in this generation. Best-effort:
+ * a full bucket leaves the key unrecorded rather than reporting a membership
+ * that was never stored, which suits callers sampling for a repeat.
+ */
+bool set_probe(set_t *set, rv_hash_key_t key);
 
 /**
  * set_add - insert a new element into the set

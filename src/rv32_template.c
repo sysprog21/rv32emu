@@ -34,6 +34,32 @@ RVOP(nop, { rv->X[rv_reg_zero] = 0; })
  */
 RVOP(lui, { rv->X[ir->rd] = ir->imm; })
 
+/* Probe a chained target before following it: charge the cache access, record
+ * the target for loop detection, and leave the interpreter once the target is
+ * hot enough for the JIT to own it.
+ *
+ * Every branch form shares this, so a compressed branch profiles a target
+ * exactly as its uncompressed counterpart does. In user mode the loop tracker
+ * is fed even on a cache miss, since a repeated program counter proves a cycle
+ * whether or not the destination has been translated yet; system mode has to
+ * confirm the address space first, so an untranslated target is skipped.
+ */
+/* A repeated program counter proves a control-flow cycle. Once one has been
+ * found for this dispatch, further probes cannot change profiling.
+ */
+#define RVOP_PROBE_TARGET(target_pc, hot_label)                                \
+    do {                                                                       \
+        cache_lookup_t lookup =                                                \
+            cache_get_with_freq(rv->block_cache, (target_pc), true);           \
+        IIF(RV32_HAS(SYSTEM))(                                                 \
+            if (!block_matches_context(rv,                                     \
+                                       (const block_t *) lookup.value)) break; \
+            , ) if (!has_loops && set_probe(&pc_set, (target_pc))) has_loops = \
+            true;                                                              \
+        if (lookup.freq >= THRESHOLD)                                          \
+            goto hot_label;                                                    \
+    } while (0)
+
 /* AUIPC is used to build pc-relative addresses and uses the U-type format.
  * AUIPC forms a 32-bit offset from the 20-bit U-immediate, filling in the
  * lowest 12 bits with zeros, adds this offset to the address of the AUIPC
@@ -61,16 +87,7 @@ RVOP(jal, {
 #if RV32_HAS(JIT)
         IIF(RV32_HAS(SYSTEM)(if (!rv->is_trapped && !reloc_enable_mmu), ))
         {
-            IIF(RV32_HAS(SYSTEM))(block_t *next =, )
-                cache_get(rv->block_cache, PC, true);
-            IIF(RV32_HAS(SYSTEM))(
-                if (next->satp == rv->csr_satp && !next->invalidated), )
-            {
-                if (!set_add(&pc_set, PC))
-                    has_loops = true;
-                if (cache_hot(rv->block_cache, PC))
-                    goto end_op;
-            }
+            RVOP_PROBE_TARGET(PC, end_op);
         }
 #endif
 #if RV32_HAS(SYSTEM)
@@ -137,25 +154,12 @@ RVOP(jal, {
 #define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                              \
     IIF(RV32_HAS(SYSTEM))(if (!rv->is_trapped && !reloc_enable_mmu), )       \
     {                                                                        \
-        block_t *block = cache_get(rv->block_cache, PC, true);               \
+        cache_lookup_t lookup =                                              \
+            cache_get_with_freq(rv->block_cache, PC, true);                  \
+        block_t *block = (block_t *) lookup.value;                           \
         if (block) {                                                         \
-            /* Direct-mapped lookup: O(1) instead of O(n) linear search */   \
-            const uint32_t bht_idx = (PC >> 2) & (HISTORY_SIZE - 1);         \
-            if (ir->branch_table->PC[bht_idx] == PC) {                       \
-                IIF(RV32_HAS(SYSTEM))(                                       \
-                    if (ir->branch_table->satp[bht_idx] == rv->csr_satp), )  \
-                {                                                            \
-                    ir->branch_table->times[bht_idx]++;                      \
-                    if (cache_hot(rv->block_cache, PC))                      \
-                        goto end_op;                                         \
-                }                                                            \
-            }                                                                \
-            /* Direct replacement at computed index */                       \
-            ir->branch_table->times[bht_idx] = 1;                            \
-            ir->branch_table->PC[bht_idx] = PC;                              \
-            IIF(RV32_HAS(SYSTEM))(                                           \
-                ir->branch_table->satp[bht_idx] = rv->csr_satp, );           \
-            if (cache_hot(rv->block_cache, PC))                              \
+            bht_record_target(ir->branch_table, PC, rv->csr_satp);           \
+            if (lookup.freq >= THRESHOLD)                                    \
                 goto end_op;                                                 \
             MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, \
                                                   PC);                       \
@@ -213,73 +217,53 @@ RVOP(jalr, {
     (type) x cond (type) y
 /* clang-format on */
 
-#define BRANCH_FUNC(type, cond)                                                \
-    IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                           \
-    if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {             \
-        IIF(RV32_HAS(SYSTEM))(                                                 \
-            {                                                                  \
-                if (!rv->is_trapped) {                                         \
-                    is_branch_taken = false;                                   \
-                }                                                              \
-            },                                                                 \
-            is_branch_taken = false;);                                         \
-        struct rv_insn *untaken = ir->branch_untaken;                          \
-        if (!untaken)                                                          \
-            goto nextop;                                                       \
-        IIF(RV32_HAS(JIT))(                                                    \
-            {                                                                  \
-                block_t *next = cache_get(rv->block_cache, PC + 4, true);      \
-                if (next IIF(RV32_HAS(SYSTEM))(&&next->satp == rv->csr_satp && \
-                                                   !next->invalidated, )) {    \
-                    if (!set_add(&pc_set, PC + 4))                             \
-                        has_loops = true;                                      \
-                    if (cache_hot(rv->block_cache, PC + 4))                    \
-                        goto nextop;                                           \
-                }                                                              \
-            }, );                                                              \
-        PC += 4;                                                               \
-        IIF(RV32_HAS(SYSTEM))(                                                 \
-            {                                                                  \
-                if (!rv->is_trapped) {                                         \
-                    last_pc = PC;                                              \
-                    MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);    \
-                }                                                              \
-            }, );                                                              \
-        RVOP_NATIVE_BRANCH_TAIL(rv, untaken, cycle, PC);                       \
-        goto end_op;                                                           \
-    }                                                                          \
-    IIF(RV32_HAS(SYSTEM))(                                                     \
-        {                                                                      \
-            if (!rv->is_trapped) {                                             \
-                is_branch_taken = true;                                        \
-            }                                                                  \
-        },                                                                     \
-        is_branch_taken = true;);                                              \
-    PC += ir->imm;                                                             \
-    /* check instruction misaligned */                                         \
-    IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););      \
-    struct rv_insn *taken = ir->branch_taken;                                  \
-    if (taken) {                                                               \
-        IIF(RV32_HAS(JIT))(                                                    \
-            {                                                                  \
-                block_t *next = cache_get(rv->block_cache, PC, true);          \
-                if (next IIF(RV32_HAS(SYSTEM))(&&next->satp == rv->csr_satp && \
-                                                   !next->invalidated, )) {    \
-                    if (!set_add(&pc_set, PC))                                 \
-                        has_loops = true;                                      \
-                    if (cache_hot(rv->block_cache, PC))                        \
-                        goto end_op;                                           \
-                }                                                              \
-            }, );                                                              \
-        IIF(RV32_HAS(SYSTEM))(                                                 \
-            {                                                                  \
-                if (!rv->is_trapped) {                                         \
-                    last_pc = PC;                                              \
-                    MUST_TAIL return taken->impl(rv, taken, cycle, PC);        \
-                }                                                              \
-            }, );                                                              \
-        RVOP_NATIVE_BRANCH_TAIL(rv, taken, cycle, PC);                         \
-    }                                                                          \
+#define BRANCH_FUNC(type, cond)                                             \
+    IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                        \
+    if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {          \
+        IIF(RV32_HAS(SYSTEM))(                                              \
+            {                                                               \
+                if (!rv->is_trapped) {                                      \
+                    is_branch_taken = false;                                \
+                }                                                           \
+            },                                                              \
+            is_branch_taken = false;);                                      \
+        struct rv_insn *untaken = ir->branch_untaken;                       \
+        if (!untaken)                                                       \
+            goto nextop;                                                    \
+        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(PC + 4, nextop);, );           \
+        PC += 4;                                                            \
+        IIF(RV32_HAS(SYSTEM))(                                              \
+            {                                                               \
+                if (!rv->is_trapped) {                                      \
+                    last_pc = PC;                                           \
+                    MUST_TAIL return untaken->impl(rv, untaken, cycle, PC); \
+                }                                                           \
+            }, );                                                           \
+        RVOP_NATIVE_BRANCH_TAIL(rv, untaken, cycle, PC);                    \
+        goto end_op;                                                        \
+    }                                                                       \
+    IIF(RV32_HAS(SYSTEM))(                                                  \
+        {                                                                   \
+            if (!rv->is_trapped) {                                          \
+                is_branch_taken = true;                                     \
+            }                                                               \
+        },                                                                  \
+        is_branch_taken = true;);                                           \
+    PC += ir->imm;                                                          \
+    /* check instruction misaligned */                                      \
+    IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););   \
+    struct rv_insn *taken = ir->branch_taken;                               \
+    if (taken) {                                                            \
+        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(PC, end_op);, );               \
+        IIF(RV32_HAS(SYSTEM))(                                              \
+            {                                                               \
+                if (!rv->is_trapped) {                                      \
+                    last_pc = PC;                                           \
+                    MUST_TAIL return taken->impl(rv, taken, cycle, PC);     \
+                }                                                           \
+            }, );                                                           \
+        RVOP_NATIVE_BRANCH_TAIL(rv, taken, cycle, PC);                      \
+    }                                                                       \
     goto end_op;
 
 /* In RV32I and RV64I, if the branch is taken, set pc = pc + offset, where
@@ -1297,16 +1281,7 @@ RVOP(cjal, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        IIF(RV32_HAS(SYSTEM))(block_t *next =, )
-            cache_get(rv->block_cache, PC, true);
-        IIF(RV32_HAS(SYSTEM))(
-            if (next->satp == rv->csr_satp && !next->invalidated), )
-        {
-            if (!set_add(&pc_set, PC))
-                has_loops = true;
-            if (cache_hot(rv->block_cache, PC))
-                goto end_op;
-        }
+        RVOP_PROBE_TARGET(PC, end_op);
 #endif
 
 #if RV32_HAS(SYSTEM)
@@ -1385,16 +1360,7 @@ RVOP(cj, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        IIF(RV32_HAS(SYSTEM))(block_t *next =, )
-            cache_get(rv->block_cache, PC, true);
-        IIF(RV32_HAS(SYSTEM))(
-            if (next->satp == rv->csr_satp && !next->invalidated), )
-        {
-            if (!set_add(&pc_set, PC))
-                has_loops = true;
-            if (cache_hot(rv->block_cache, PC))
-                goto end_op;
-        }
+        RVOP_PROBE_TARGET(PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
         if (!rv->is_trapped)
@@ -1419,16 +1385,7 @@ RVOP(cbeqz, {
         if (!untaken)
             goto nextop;
 #if RV32_HAS(JIT)
-        IIF(RV32_HAS(SYSTEM))(block_t *next =, )
-            cache_get(rv->block_cache, PC + 2, true);
-        IIF(RV32_HAS(SYSTEM))(
-            if (next->satp == rv->csr_satp && !next->invalidated), )
-        {
-            if (!set_add(&pc_set, PC + 2))
-                has_loops = true;
-            if (cache_hot(rv->block_cache, PC + 2))
-                goto nextop;
-        }
+        RVOP_PROBE_TARGET(PC + 2, nextop);
 #endif
         PC += 2;
 #if RV32_HAS(SYSTEM)
@@ -1446,16 +1403,7 @@ RVOP(cbeqz, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        IIF(RV32_HAS(SYSTEM))(block_t *next =, )
-            cache_get(rv->block_cache, PC, true);
-        IIF(RV32_HAS(SYSTEM))(
-            if (next->satp == rv->csr_satp && !next->invalidated), )
-        {
-            if (!set_add(&pc_set, PC))
-                has_loops = true;
-            if (cache_hot(rv->block_cache, PC))
-                goto end_op;
-        }
+        RVOP_PROBE_TARGET(PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
         if (!rv->is_trapped)
@@ -1476,16 +1424,7 @@ RVOP(cbnez, {
         if (!untaken)
             goto nextop;
 #if RV32_HAS(JIT)
-        IIF(RV32_HAS(SYSTEM))(block_t *next =, )
-            cache_get(rv->block_cache, PC + 2, true);
-        IIF(RV32_HAS(SYSTEM))(
-            if (next->satp == rv->csr_satp && !next->invalidated), )
-        {
-            if (!set_add(&pc_set, PC + 2))
-                has_loops = true;
-            if (cache_hot(rv->block_cache, PC + 2))
-                goto nextop;
-        }
+        RVOP_PROBE_TARGET(PC + 2, nextop);
 #endif
         PC += 2;
 #if RV32_HAS(SYSTEM)
@@ -1503,16 +1442,7 @@ RVOP(cbnez, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        IIF(RV32_HAS(SYSTEM))(block_t *next =, )
-            cache_get(rv->block_cache, PC, true);
-        IIF(RV32_HAS(SYSTEM))(
-            if (next->satp == rv->csr_satp && !next->invalidated), )
-        {
-            if (!set_add(&pc_set, PC))
-                has_loops = true;
-            if (cache_hot(rv->block_cache, PC))
-                goto end_op;
-        }
+        RVOP_PROBE_TARGET(PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
         if (!rv->is_trapped)

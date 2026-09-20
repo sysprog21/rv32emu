@@ -295,35 +295,32 @@ static bool parse_args(int argc, char **args)
     opt_prog_name = prog_args[0];
 
     if (opt_prof_data) {
-        char cwd_path[PATH_MAX] = {0};
-        /* Not an assert: NDEBUG would drop the call and leave the path empty */
-        if (!getcwd(cwd_path, PATH_MAX)) {
-            rv_log_fatal("Cannot determine the current working directory");
-            return false;
-        }
+        /* Write the report beside the emulator binary. Take the directory
+         * with dirname() rather than trimming a fixed strlen("rv32emu") from
+         * argv[0]: that only lands correctly when the binary is invoked under
+         * exactly that name, and silently builds a spliced path otherwise.
+         * A relative directory needs no working-directory prefix, since it
+         * already resolves against the same one fopen() will use.
+         *
+         * Both dirname() and the XPG basename() may write through their
+         * argument, so hand each one a copy. opt_prog_name in particular is
+         * still needed intact to open the ELF.
+         */
+        char emu_path[PATH_MAX], prog_path[PATH_MAX];
+        snprintf(emu_path, sizeof(emu_path), "%s", args[0]);
+        snprintf(prog_path, sizeof(prog_path), "%s", opt_prog_name);
 
-        char rel_path[PATH_MAX] = {0};
-        size_t args0_len = strlen(args[0]);
-        /* Ensure args[0] is long enough before subtracting */
-        if (args0_len > 7) { /* strlen("rv32emu") */
-            size_t copy_len = args0_len - 7;
-            if (copy_len >= PATH_MAX)
-                copy_len = PATH_MAX - 1;
-            memcpy(rel_path, args[0], copy_len);
-            rel_path[copy_len] = '\0';
-        }
+        const char *emu_dir = dirname(emu_path);
+        const char *prog_basename = basename(prog_path);
 
-        char *prog_basename = basename(opt_prog_name);
-        size_t total_len = strlen(cwd_path) + 1 + strlen(rel_path) +
-                           strlen(prog_basename) + 5 + 1;
+        size_t total_len = strlen(emu_dir) + 1 + strlen(prog_basename) + 5 + 1;
         prof_out_file = malloc(total_len);
         if (!prof_out_file) {
             rv_log_error("Failed to allocate profiling output filename");
             return false;
         }
-        assert(prof_out_file);
 
-        snprintf(prof_out_file, total_len, "%s/%s%s.prof", cwd_path, rel_path,
+        snprintf(prof_out_file, total_len, "%s/%s.prof", emu_dir,
                  prog_basename);
     }
     return true;

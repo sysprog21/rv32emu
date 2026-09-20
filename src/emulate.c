@@ -656,6 +656,9 @@ static block_t *block_alloc(riscv_t *rv)
     block->n_invoke = 0;
     block->func = NULL;
     INIT_LIST_HEAD(&block->list);
+#if RV32_HAS(BLOCK_CHAINING)
+    block_init_edge_lists(block);
+#endif
 #if RV32_HAS(T2C)
     block->compiled = false;
     block->is_compiling = false;
@@ -2090,6 +2093,9 @@ retranslate:
 #if RV32_HAS(SYSTEM)
         if (!insn && need_retranslate) {
             memset(block, 0, sizeof(block_t));
+#if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
+            block_init_edge_lists(block);
+#endif
             need_retranslate = false;
             goto retranslate;
         }
@@ -2181,13 +2187,26 @@ static inline void remove_next_nth_ir(const riscv_t *rv,
                                       block_t *block,
                                       uint8_t n)
 {
+    /* Block chaining records the successor blocks on the tail instruction.
+     * Lazy fusion runs on blocks that are already live and possibly chained,
+     * so carry those links over when the removed run reaches the tail.
+     * Otherwise the chain would be lost with the freed instruction, and any
+     * edge still naming this block as its source would resolve to a tail that
+     * no longer holds the link.
+     */
+    rv_insn_t *chain_taken = block->ir_tail->branch_taken;
+    rv_insn_t *chain_untaken = block->ir_tail->branch_untaken;
+
     for (uint8_t i = 0; i < n; i++) {
         rv_insn_t *next = ir->next;
         ir->next = ir->next->next;
         mpool_free(rv->block_ir_mp, next);
     }
-    if (!ir->next)
+    if (!ir->next) {
         block->ir_tail = ir;
+        ir->branch_taken = chain_taken;
+        ir->branch_untaken = chain_untaken;
+    }
     block->n_insn -= n;
 }
 
@@ -2487,8 +2506,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  * Skip if rd == x0: LUI x0 produces 0, not imm << 12.
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
+                 * LUI + LW fusion (fuse9)
                  */
-                /* LUI + LW fusion (fuse9) */
                 if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
                     ir->imm2 = next_ir->imm; /* lw offset */
                     ir->rs2 = next_ir->rd;   /* lw destination */
@@ -2511,8 +2530,8 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  * calculation, which would overwrite the value to store.
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
+                 * LUI + SW fusion (fuse10)
                  */
-                /* LUI + SW fusion (fuse10) */
                 if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1 &&
                     ir->rd != next_ir->rs2) {
                     ir->imm2 = next_ir->imm; /* sw offset */
@@ -2907,7 +2926,12 @@ static void free_linked_block(riscv_t *rv, block_t *block)
 }
 #endif
 
-static block_t *block_find_or_translate(riscv_t *rv)
+static block_t *block_find_or_translate(riscv_t *rv
+#if RV32_HAS(JIT)
+                                        ,
+                                        uint32_t *freq
+#endif
+)
 {
 #if !RV32_HAS(JIT)
     block_map_t *map = &rv->block_map;
@@ -2915,12 +2939,12 @@ static block_t *block_find_or_translate(riscv_t *rv)
     block_t *next_blk = block_lookup_or_find(rv, rv->PC);
 #else
     /* lookup the next block in the block cache */
-    block_t *next_blk = (block_t *) cache_get(rv->block_cache, rv->PC, true);
-#if RV32_HAS(SYSTEM)
+    cache_lookup_t lookup = cache_get_with_freq(rv->block_cache, rv->PC, true);
+    block_t *next_blk = lookup.value;
+    *freq = lookup.freq;
     /* discard cache if satp mismatch or block was invalidated by SFENCE.VMA */
-    if (next_blk && (next_blk->satp != rv->csr_satp || next_blk->invalidated))
+    if (!block_matches_context(rv, next_blk))
         next_blk = NULL;
-#endif
 #endif
 
     if (next_blk) {
@@ -2984,7 +3008,10 @@ static block_t *block_find_or_translate(riscv_t *rv)
 #endif
 
     /* insert the block into block cache */
-    block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, next_blk);
+    /* A cache miss is cold. cache_put knows the initial or revived frequency
+     * it just installed, so take it from there rather than probing again.
+     */
+    block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, next_blk, freq);
 
     if (!replaced_blk) {
 #if RV32_HAS(T2C)
@@ -2997,31 +3024,10 @@ static block_t *block_find_or_translate(riscv_t *rv)
         prev = NULL;
 
     /* remove the connection from parents */
-    rv_insn_t *replaced_blk_entry = replaced_blk->ir_head;
-
-    /* TODO: record parents of each block to avoid traversing all blocks */
-    block_t *entry;
-    list_for_each_entry (entry, &rv->block_list, list) {
-        rv_insn_t *taken = entry->ir_tail->branch_taken,
-                  *untaken = entry->ir_tail->branch_untaken;
-
-        if (taken == replaced_blk_entry) {
-            entry->ir_tail->branch_taken = NULL;
-        }
-        if (untaken == replaced_blk_entry) {
-            entry->ir_tail->branch_untaken = NULL;
-        }
-
-        /* upadte JALR LUT */
-        if (!entry->ir_tail->branch_table) {
-            continue;
-        }
-
-        /**
-         * TODO: upadate all JALR instructions which references to this
-         * basic block as the destination.
-         */
-    }
+#if RV32_HAS(BLOCK_CHAINING)
+    /* Remove incoming edges without scanning all translated blocks. */
+    block_unlink_incoming_edges(replaced_blk);
+#endif
 
 #if RV32_HAS(T2C)
     /* Check if T2C thread is currently using this block.
@@ -3030,6 +3036,17 @@ static block_t *block_find_or_translate(riscv_t *rv)
      */
     if (replaced_blk->is_compiling) {
         replaced_blk->should_free = true;
+
+#if RV32_HAS(BLOCK_CHAINING)
+        /* Drop the outgoing edges here rather than leaving them for the T2C
+         * thread to reap. The block is already out of the cache and cannot
+         * execute again, and t2c_compile finished walking its IR before it
+         * published is_compiling, so nothing is reading these. Keeping every
+         * edge-list mutation on this thread is what lets the chaining step in
+         * rv_step run without a lock.
+         */
+        block_unlink_outgoing_edges(replaced_blk);
+#endif
 
         /* Clear jit_cache to prevent new executions, but don't dispose engine
          * or free memory yet. T2C thread owns the engine and block memory.
@@ -3051,6 +3068,10 @@ static block_t *block_find_or_translate(riscv_t *rv)
         pthread_mutex_unlock(&rv->cache_lock);
         return next_blk;
     }
+#endif
+
+#if RV32_HAS(BLOCK_CHAINING)
+    block_unlink_outgoing_edges(replaced_blk);
 #endif
 
     /* free IRs in replaced block */
@@ -3100,18 +3121,13 @@ static block_t *block_find_or_translate(riscv_t *rv)
  * JIT compiler in architecture test.
  */
 #if RV32_HAS(JIT) && !RV32_HAS(ARCH_TEST)
-static bool runtime_profiler(riscv_t *rv, block_t *block)
+static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
 {
 #if RV32_HAS(SYSTEM)
     if (block->satp != rv->csr_satp)
         return false;
 #endif
-    /* Based on our observations, a significant number of true hotspots are
-     * characterized by high usage frequency and including loop. Consequently,
-     * we posit that our profiler could effectively identify hotspots using
-     * three key indicators.
-     */
-    uint32_t freq = cache_freq(rv->block_cache, block->pc_start);
+
     /* To profile a block after chaining, it must first be executed. */
     if (unlikely(freq >= 2 && block->has_loops))
         return true;
@@ -3250,7 +3266,12 @@ void rv_step(void *arg)
         /* lookup the next block in block map or translate a new block,
          * and move onto the next block.
          */
+#if RV32_HAS(JIT)
+        uint32_t freq;
+        block_t *block = block_find_or_translate(rv, &freq);
+#else
         block_t *block = block_find_or_translate(rv);
+#endif
         /* by now, a block should be available */
         if (unlikely(!block)) {
 #if RV32_HAS(SYSTEM)
@@ -3288,34 +3309,24 @@ void rv_step(void *arg)
          * assigned to either the branch_taken or branch_untaken pointer of
          * the previous block.
          */
-
 #if RV32_HAS(BLOCK_CHAINING)
         if (prev
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
             && prev->satp == rv->csr_satp && !prev->invalidated
 #endif
         ) {
-            rv_insn_t *last_ir = prev->ir_tail;
-            /* chain block */
-            if (prev->page_terminated) {
-                /* Page-terminated block: always falls through to next address.
-                 * Use branch_taken for fallthrough (like unconditional jump).
-                 */
-                if (!last_ir->branch_taken)
-                    last_ir->branch_taken = block->ir_head;
-            } else if (!insn_is_unconditional_branch(last_ir->opcode)) {
-                /* Conditional branch: chain based on taken/untaken path */
-                if (is_branch_taken && !last_ir->branch_taken) {
-                    last_ir->branch_taken = block->ir_head;
-                } else if (!is_branch_taken && !last_ir->branch_untaken) {
-                    last_ir->branch_untaken = block->ir_head;
-                }
-            } else if (insn_is_direct_branch(last_ir->opcode)) {
-                /* Unconditional direct branch: always use branch_taken */
-                if (!last_ir->branch_taken) {
-                    last_ir->branch_taken = block->ir_head;
-                }
-            }
+            const rv_insn_t *last_ir = prev->ir_tail;
+            /* Chain onto the edge this transition actually took. A
+             * page-terminated block and an unconditional direct branch both
+             * always leave through their taken slot; a conditional branch
+             * leaves through the one is_branch_taken names.
+             */
+            if (prev->page_terminated)
+                block_link_edge(prev, true, block);
+            else if (!insn_is_unconditional_branch(last_ir->opcode))
+                block_link_edge(prev, is_branch_taken, block);
+            else if (insn_is_direct_branch(last_ir->opcode))
+                block_link_edge(prev, true, block);
         }
 #endif
         last_pc = rv->PC;
@@ -3343,7 +3354,7 @@ void rv_step(void *arg)
             continue;
         } /* check if invoking times of t1 generated code exceed threshold */
         else if (!ATOMIC_LOAD(&block->compiled, ATOMIC_RELAXED) &&
-                 ATOMIC_LOAD(&block->n_invoke, ATOMIC_RELAXED) >= THRESHOLD) {
+                 block->n_invoke >= THRESHOLD) {
             ATOMIC_STORE(&block->compiled, true, ATOMIC_RELAXED);
             queue_entry_t *entry = malloc(sizeof(queue_entry_t));
             if (unlikely(!entry)) {
@@ -3372,11 +3383,10 @@ void rv_step(void *arg)
          *       entry in compiled binary buffer.
          */
         if (block->hot) {
-#if RV32_HAS(T2C)
-            ATOMIC_FETCH_ADD(&block->n_invoke, 1, ATOMIC_RELAXED);
-#else
+            /* Only the emulator thread updates or reads n_invoke. T2C is
+             * notified through compiled, so a locked increment here would
+             * impose synchronization on every tier-1 block execution. */
             block->n_invoke++;
-#endif
 #if defined(__aarch64__)
             /* Ensure instruction cache coherency before executing JIT code */
             __asm__ volatile("isb" ::: "memory");
@@ -3397,7 +3407,7 @@ void rv_step(void *arg)
         } /* check if the execution path is potential hotspot */
         if (block->translatable
 #if !RV32_HAS(ARCH_TEST)
-            && runtime_profiler(rv, block)
+            && runtime_profiler(rv, block, freq)
 #endif
         ) {
             if (jit_translate(rv, block)) {

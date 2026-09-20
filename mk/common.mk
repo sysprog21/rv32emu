@@ -154,7 +154,8 @@ $$($(1)_TEST_OUTDIR) $(4):
 	$$(Q)mkdir -p $$@
 
 # Compile test objects
-$$($(1)_TEST_OUTDIR)/%.o: $$($(1)_TEST_SRCDIR)/%.c $$(CONFIG_HEADER) | $$($(1)_TEST_OUTDIR) $(4)
+$$($(1)_TEST_OUTDIR)/%.o: $$($(1)_TEST_SRCDIR)/%.c $$(CONFIG_HEADER) \
+                          $$(EFFECTIVE_CONFIG_STAMP) | $$($(1)_TEST_OUTDIR) $(4)
 	$$(VECHO) "  CC\t$$@\n"
 	$$(Q)$$(CC) -o $$@ $$(CFLAGS) -I./src -c -MMD -MF $$@.d $$<
 

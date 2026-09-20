@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <assert.h>
+
 /* for system-mode reboot */
 #if RV32_HAS(SYSTEM_MMIO)
 #include <setjmp.h>
@@ -119,6 +121,18 @@ typedef struct {
 #define MAX_LAZY_CANDIDATES 8
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
+/* An edge is owned by its source block and linked into the destination block's
+ * incoming_edges list. Keeping the edge with its source means that either
+ * endpoint can remove it without searching the translated-block list.
+ */
+typedef struct {
+    struct list_head target_link;
+    struct block *source;
+    struct block *target;
+} block_edge_t;
+#endif
+
 /* translated basic block */
 typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompassed */
@@ -159,8 +173,134 @@ typedef struct block {
     void *llvm_engine; /**< LLVM execution engine (keeps func memory alive) */
 #endif
     struct list_head list;
+#if RV32_HAS(BLOCK_CHAINING)
+    struct list_head incoming_edges; /**< edges ending at this block */
+    block_edge_t taken_edge, untaken_edge;
+#endif
 #endif
 } block_t;
+
+#if RV32_HAS(BLOCK_CHAINING)
+/* The chain pointer for an edge lives on its source block's current tail
+ * instruction. Deriving it on demand rather than pinning it keeps the edge
+ * valid when macro-op fusion shortens an already-chained block and moves
+ * @ir_tail back over the instruction that held the link.
+ */
+static inline rv_insn_t **block_chain_slot(block_t *source, bool taken)
+{
+    return taken ? &source->ir_tail->branch_taken
+                 : &source->ir_tail->branch_untaken;
+}
+#endif
+
+#if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
+/* Edge lists are owned by the emulator thread alone. The T2C thread signals a
+ * block it can no longer reach through should_free and never touches an edge
+ * itself, so none of this needs cache_lock.
+ */
+static inline void block_init_edge_lists(block_t *block)
+{
+    INIT_LIST_HEAD(&block->incoming_edges);
+    INIT_LIST_HEAD(&block->taken_edge.target_link);
+    INIT_LIST_HEAD(&block->untaken_edge.target_link);
+    block->taken_edge.source = block;
+    block->untaken_edge.source = block;
+    block->taken_edge.target = NULL;
+    block->untaken_edge.target = NULL;
+}
+
+/* The patch site of an edge always lives on its source block's current tail
+ * instruction. Deriving it on demand rather than pinning it at link time keeps
+ * the edge valid when macro-op fusion shortens an already-chained block and
+ * moves @ir_tail backwards over the instruction that held the link.
+ */
+static inline rv_insn_t **block_edge_slot(const block_edge_t *edge)
+{
+    return block_chain_slot(edge->source, edge == &edge->source->taken_edge);
+}
+
+static inline void block_edge_unlink(block_edge_t *edge)
+{
+    if (!edge->target)
+        return;
+
+    rv_insn_t **slot = block_edge_slot(edge);
+    if (!list_empty(&edge->target_link)) {
+        assert(*slot == edge->target->ir_head);
+        list_del_init(&edge->target_link);
+    }
+    *slot = NULL;
+    edge->target = NULL;
+}
+
+/* Install a chain edge while the slot is still open, so the first transition
+ * observed through it wins. An eviction clears the slot and the edge together,
+ * which is what lets a later transition re-chain it.
+ */
+static inline void block_link_edge(block_t *source, bool taken, block_t *target)
+{
+    rv_insn_t **slot = block_chain_slot(source, taken);
+    if (*slot)
+        return;
+
+    block_edge_t *edge = taken ? &source->taken_edge : &source->untaken_edge;
+    assert(!edge->target);
+    /* The T2C thread reads this slot while tracing, and chaining runs on the
+     * emulator thread without cache_lock. Publish it atomically so that read
+     * is not a data race: a tracer sees either no edge or this one, and both
+     * describe a block it may legitimately compile. Relaxed is enough -
+     * nothing downstream of the pointer is published by this store.
+     */
+    ATOMIC_STORE(slot, target->ir_head, ATOMIC_RELAXED);
+    edge->target = target;
+    list_add(&edge->target_link, &target->incoming_edges);
+}
+
+static inline void block_unlink_outgoing_edges(block_t *block)
+{
+    block_edge_unlink(&block->taken_edge);
+    block_edge_unlink(&block->untaken_edge);
+}
+
+static inline void block_unlink_incoming_edges(block_t *block)
+{
+    while (!list_empty(&block->incoming_edges)) {
+        block_edge_t *edge =
+            list_first_entry(&block->incoming_edges, block_edge_t, target_link);
+        if (edge->source == block)
+            list_del_init(&edge->target_link);
+        else
+            block_edge_unlink(edge);
+    }
+}
+
+static inline void block_unlink_edges(block_t *block)
+{
+    block_unlink_outgoing_edges(block);
+    block_unlink_incoming_edges(block);
+}
+
+static inline uint32_t block_incoming_edge_count(block_t *block)
+{
+    uint32_t count = 0;
+    block_edge_t *edge;
+
+    list_for_each_entry (edge, &block->incoming_edges, target_link)
+        count++;
+    return count;
+}
+#elif RV32_HAS(BLOCK_CHAINING)
+/* Without the JIT there is no eviction to unlink from, so a chain edge is
+ * just the pointer. Keeping the name and the rule lets rv_step spell chaining
+ * one way across both builds.
+ */
+static inline void block_link_edge(block_t *source, bool taken, block_t *target)
+{
+    rv_insn_t **slot = block_chain_slot(source, taken);
+    if (!*slot)
+        *slot = target->ir_head;
+}
+#endif
 
 /* T2C implies JIT (enforced by Kconfig and feature.h) */
 #if RV32_HAS(T2C)
@@ -451,6 +591,23 @@ struct riscv_internal {
     uint32_t csr_vlenb;  /* VLEN/8 (vector register length in bytes) */
 #endif
 };
+
+/* A cached block is usable from here only when it belongs to the address space
+ * executing now. Address translation makes that a real question in system
+ * mode; user mode has one space, so this folds away to a null check.
+ */
+static inline bool block_matches_context(const riscv_t *rv UNUSED,
+                                         const block_t *block)
+{
+    /* satp and invalidated only exist where the JIT caches blocks across
+     * address spaces; elsewhere there is nothing to disambiguate.
+     */
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    return block && block->satp == rv->csr_satp && !block->invalidated;
+#else
+    return block;
+#endif
+}
 
 /* sign extend a 16 bit value */
 FORCE_INLINE uint32_t sign_extend_h(const uint32_t x)

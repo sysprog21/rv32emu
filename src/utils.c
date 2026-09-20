@@ -177,9 +177,33 @@ char *sanitize_path(const char *input)
 
 HASH_FUNC_IMPL(set_hash, SET_SIZE_BITS, 1 << SET_SIZE_BITS);
 
+/* Locate @key's bucket, reclaiming it first when it carries an older
+ * generation. Leaves *count at the bucket's live entry count.
+ */
+static inline uint32_t set_bucket(set_t *set, rv_hash_key_t key, uint8_t *count)
+{
+    const uint32_t index = set_hash(key);
+
+    if (set->bucket_epoch[index] != set->epoch) {
+        set->bucket_epoch[index] = set->epoch;
+        set->count[index] = 0;
+    }
+    *count = set->count[index];
+    return index;
+}
+
+void set_init(set_t *set)
+{
+    memset(set, 0, sizeof(*set));
+}
+
 void set_reset(set_t *set)
 {
-    memset(set, 0, sizeof(set_t));
+    if (++set->epoch == 0) {
+        /* Epoch zero is reserved after a wrap, so no stale stamp can match. */
+        memset(set->bucket_epoch, 0, sizeof(set->bucket_epoch));
+        set->epoch = 1;
+    }
 }
 
 /**
@@ -189,17 +213,20 @@ void set_reset(set_t *set)
  */
 bool set_add(set_t *set, rv_hash_key_t key)
 {
-    const rv_hash_key_t index = set_hash(key);
+    uint8_t count;
+    const uint32_t index = set_bucket(set, key, &count);
 
-    uint8_t count = 0;
-    for (; set->table[index][count]; count++) {
-        assert(count < SET_SLOTS_SIZE);
-        if (set->table[index][count] == key)
+    for (uint8_t i = 0; i < count; i++) {
+        if (set->table[index][i] == key)
             return false;
     }
 
+    /* Callers rely on a later set_has to terminate their recursion, so an
+     * insert that silently did not happen would not be survivable.
+     */
     assert(count < SET_SLOTS_SIZE);
     set->table[index][count] = key;
+    set->count[index] = count + 1;
     return true;
 }
 
@@ -210,12 +237,28 @@ bool set_add(set_t *set, rv_hash_key_t key)
  */
 bool set_has(set_t *set, rv_hash_key_t key)
 {
-    const rv_hash_key_t index = set_hash(key);
+    uint8_t count;
+    const uint32_t index = set_bucket(set, key, &count);
 
-    for (uint8_t count = 0; set->table[index][count]; count++) {
-        assert(count < SET_SLOTS_SIZE);
-        if (set->table[index][count] == key)
+    for (uint8_t i = 0; i < count; i++) {
+        if (set->table[index][i] == key)
             return true;
+    }
+    return false;
+}
+
+bool set_probe(set_t *set, rv_hash_key_t key)
+{
+    uint8_t count;
+    const uint32_t index = set_bucket(set, key, &count);
+
+    for (uint8_t i = 0; i < count; i++) {
+        if (set->table[index][i] == key)
+            return true;
+    }
+    if (count < SET_SLOTS_SIZE) {
+        set->table[index][count] = key;
+        set->count[index] = count + 1;
     }
     return false;
 }

@@ -121,6 +121,47 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 #define MAX_JUMPS 65536
 #define MAX_BLOCKS 8192
 #define IN_JUMP_THRESHOLD 256
+/* Bound both guard overhead and speculative expansion of the code cache. */
+#define IN_JUMP_TARGETS 2
+
+/* Tier-1 indirect-jump specialization: inline guards for the most frequently
+ * observed targets, and chained translation that follows them.
+ *
+ * TODO: allow this under T2C once generated code reports its own execution
+ * count. Tier-2 promotion is measured at the dispatcher - n_invoke advances
+ * only in rv_step - while chained tier-1 code jumps from block to block
+ * without returning there, so a chained successor never promotes. Direct
+ * chaining has that effect already and stays enabled; specializing indirect
+ * jumps as well can absorb the region's entry block too, leaving nothing in
+ * it that tier two ever sees. That is the whole of the difference, and it is
+ * a limitation rather than a choice, so this is not a configuration option;
+ * set it to 1 to measure the trade-off.
+ */
+#define JIT_INDIRECT_TARGETS (!RV32_HAS(T2C))
+
+/* Guest memory base pinning.
+ *
+ * User-mode translation keeps mem_base in a host register the allocator never
+ * hands out, so a guest access needs no address arithmetic at all on x86-64
+ * System V (R12 as the SIB base, the guest register as the index) and only an
+ * integer add on Arm64 (R19). System mode routes every access through the MMU
+ * handler, and the Windows x64 ABI leaves no spare non-volatile register.
+ *
+ * Both the prologue that loads the register and every site that reads it are
+ * spelled with these, so a pinned base can never drift out of lockstep with
+ * its uses.
+ */
+#if defined(__x86_64__) && !defined(_WIN32) && !RV32_HAS(SYSTEM)
+#define JIT_INDEXED_GUEST_MEM 1
+#else
+#define JIT_INDEXED_GUEST_MEM 0
+#endif
+
+#if defined(__aarch64__) && !RV32_HAS(SYSTEM)
+#define JIT_BASED_GUEST_MEM 1
+#else
+#define JIT_BASED_GUEST_MEM 0
+#endif
 
 /* Worst-case jump targets per instruction.  Under SYSTEM_MMIO with the
  * inline dTLB fast path enabled, a single load/store can record:
@@ -143,13 +184,54 @@ static inline bool bht_should_translate(const branch_history_table_t *bt,
 #endif
 )
 {
-    if (!bt->PC[idx] || bt->times[idx] < IN_JUMP_THRESHOLD)
+    if (!JIT_INDIRECT_TARGETS)
+        return false;
+    /* times is the validity signal: a slot never observed still holds zero.
+     * Testing the recorded PC instead would reject a genuine target at guest
+     * address 0, and would not reject anything else, since the table
+     * initializes PC to all ones rather than to zero.
+     */
+    if (bt->times[idx] < IN_JUMP_THRESHOLD)
         return false;
 #if RV32_HAS(SYSTEM)
     if (bt->satp[idx] != csr_satp)
         return false;
 #endif
     return true;
+}
+
+/* Keep guard emission and chained translation in the same frequency order.
+ * Stable ties favor the lower slot; unobserved and foreign-context targets
+ * never consume the limited guard budget.
+ */
+static int bht_select_targets(const branch_history_table_t *bt,
+                              riscv_t *rv UNUSED,
+                              int targets[IN_JUMP_TARGETS])
+{
+    int count = 0;
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+#if RV32_HAS(SYSTEM)
+        if (!bht_should_translate(bt, i, rv->csr_satp))
+#else
+        if (!bht_should_translate(bt, i))
+#endif
+            continue;
+        int pos = count;
+        if (pos == IN_JUMP_TARGETS) {
+            /* Full: displace the weakest kept target, or keep them all. */
+            if (bt->times[i] <= bt->times[targets[IN_JUMP_TARGETS - 1]])
+                continue;
+            pos = IN_JUMP_TARGETS - 1;
+        } else {
+            count++;
+        }
+        while (pos > 0 && bt->times[i] > bt->times[targets[pos - 1]]) {
+            targets[pos] = targets[pos - 1];
+            pos--;
+        }
+        targets[pos] = i;
+    }
+    return count;
 }
 
 #if defined(__x86_64__)
@@ -351,6 +433,7 @@ static int temp_reg = R8;
  * Arm64       Usage
  *   r0 - r4   Function parameters, caller-saved
  *   r6 - r8   Temp - used for storing calculated value during execution
+ *   r19       Guest memory base in user-mode JIT (outside register_map)
  *   r19 - r23 Callee-saved registers
  *   r24       Temp - used for generating 32-bit immediates
  *   r25       Temp - used for modulous calculations
@@ -778,9 +861,15 @@ static inline void emit_jump_target_offset(struct jit_state *state,
     jump->target_offset = jump_state_offset;
 }
 
-static inline void emit_alu32(struct jit_state *state, int op, int src, int dst)
-{
 #if defined(__x86_64__)
+/* Encode an ALU r/m32, r32 form without claiming the destination was written:
+ * CMP shares this encoding but only sets flags.
+ */
+static inline void emit_alu32_raw(struct jit_state *state,
+                                  int op,
+                                  int src,
+                                  int dst)
+{
     /* The REX prefix and ModRM byte are emitted.
      * The MR encoding is utilized when a choice is available. The 'src' is
      * often used as an opcode extension.
@@ -789,7 +878,13 @@ static inline void emit_alu32(struct jit_state *state, int op, int src, int dst)
         emit_basic_rex(state, 0, src, dst);
     emit1(state, op);
     emit_modrm_reg2reg(state, src, dst);
+}
+#endif
 
+static inline void emit_alu32(struct jit_state *state, int op, int src, int dst)
+{
+#if defined(__x86_64__)
+    emit_alu32_raw(state, op, src, dst);
     set_dirty(dst, true);
 #elif defined(__aarch64__)
     switch (op) {
@@ -892,7 +987,10 @@ static inline void emit_alu32_imm8(struct jit_state *state,
 #endif
 }
 
-static inline void emit_alu64(struct jit_state *state, int op, int src, int dst)
+static inline void UNUSED emit_alu64(struct jit_state *state,
+                                     int op,
+                                     int src,
+                                     int dst)
 {
 #if defined(__x86_64__)
     /* The REX.W prefix and ModRM byte are emitted.
@@ -948,6 +1046,20 @@ static inline void emit_mov(struct jit_state *state, int src, int dst)
 #endif
 }
 
+/* Copy an RV32 result and clear the upper bits, even for a self-move, so a
+ * folded identity cannot pass a stale upper half through to a consumer that
+ * reads the host register at full width.
+ */
+static inline void emit_mov32(struct jit_state *state, int src, int dst)
+{
+#if defined(__x86_64__)
+    emit_alu32(state, 0x89, src, dst);
+#elif defined(__aarch64__)
+    emit_logical_register(state, false, LOG_ORR, dst, RZ, src);
+    set_dirty(dst, true);
+#endif
+}
+
 #if defined(__x86_64__)
 /* REX.W prefix, ModRM byte, and 32-bit immediate */
 static inline void emit_alu64_imm32(struct jit_state *state,
@@ -964,7 +1076,8 @@ static inline void emit_alu64_imm32(struct jit_state *state,
 static inline void emit_cmp_imm32(struct jit_state *state, int dst, int32_t imm)
 {
 #if defined(__x86_64__)
-    emit_alu32_imm32(state, 0x81, 7, dst, imm);
+    emit_alu32_raw(state, 0x81, 7, dst); /* GRP1 /7 = CMP r/m32, imm32 */
+    emit4(state, imm);
 #elif defined(__aarch64__)
     emit_load_imm(state, R10, imm);
     emit_addsub_register(state, false, AS_SUBS, RZ, dst, R10);
@@ -974,7 +1087,7 @@ static inline void emit_cmp_imm32(struct jit_state *state, int dst, int32_t imm)
 static inline void emit_cmp32(struct jit_state *state, int src, int dst)
 {
 #if defined(__x86_64__)
-    emit_alu32(state, 0x39, src, dst);
+    emit_alu32_raw(state, 0x39, src, dst);
 #elif defined(__aarch64__)
     emit_addsub_register(state, false, AS_SUBS, RZ, dst, src);
 #endif
@@ -1029,6 +1142,36 @@ static inline void emit_load_imm(struct jit_state *state,
  * from the stack. Otherwise, it is a `read` pseudo instruction that loading
  * the [src] into destination register.
  */
+#if defined(__x86_64__)
+/* Emit the opcode for a guest load of @size. MOVZX and MOVSX are two-byte;
+ * a word load is a plain MOV. The caller has already emitted any REX and
+ * follows with the addressing bytes.
+ */
+static inline void emit_load_opcode(struct jit_state *state,
+                                    enum operand_size size,
+                                    bool sign)
+{
+    if (size == S8 || size == S16) {
+        emit1(state, 0x0f);
+        emit1(state, (sign ? 0xbe : 0xb6) + (size == S16));
+        return;
+    }
+    assert(size == S32 && !sign);
+    emit1(state, 0x8b);
+}
+
+/* Emit the opcode for a guest store of @size from a register. A halfword
+ * store needs the operand-size override, which must precede any REX, so the
+ * caller emits that itself before calling this.
+ */
+static inline void emit_store_opcode(struct jit_state *state,
+                                     enum operand_size size)
+{
+    assert(size == S8 || size == S16 || size == S32);
+    emit1(state, size == S8 ? 0x88 : 0x89);
+}
+#endif
+
 static inline void emit_load(struct jit_state *state,
                              enum operand_size size,
                              int src,
@@ -1045,18 +1188,7 @@ static inline void emit_load(struct jit_state *state,
 #if defined(__x86_64__)
     if (src & 8 || dst & 8)
         emit_basic_rex(state, 0, dst, src);
-    if (size == S8 || size == S16) {
-        /* movzx */
-        emit1(state, 0x0f);
-        emit1(state, size == S8 ? 0xb6 : 0xb7);
-    } else if (size == S32) {
-        /* mov */
-        emit1(state, 0x8b);
-    } else {
-        assert(NULL);
-        __UNREACHABLE;
-    }
-
+    emit_load_opcode(state, size, false);
     emit_modrm_and_displacement(state, dst, src, offset);
 #elif defined(__aarch64__)
     switch (size) {
@@ -1081,12 +1213,19 @@ static inline void emit_load(struct jit_state *state,
     set_dirty(dst, !offset);
 }
 
+/* RV32 has no sign-extending word load, so this never widens past 32 bits:
+ * the destination's upper half is always zero on return. Guest registers are
+ * 32 bits, and a mapped host register that kept a sign extension would move a
+ * later address computation 4 GiB down, so keep that guarantee enforced.
+ */
 static inline void emit_load_sext(struct jit_state *state,
                                   enum operand_size size,
                                   int src,
                                   int dst,
                                   int32_t offset)
 {
+    assert(size == S8 || size == S16);
+
     if (host_reg_maps_x0(dst)) {
         /* if dst is x0, load 0x0 into host register */
         emit_load_imm(state, dst, 0x0);
@@ -1095,54 +1234,42 @@ static inline void emit_load_sext(struct jit_state *state,
     }
 
 #if defined(__x86_64__)
-    if (size == S8 || size == S16) {
-        if (src & 8 || dst & 8)
-            emit_basic_rex(state, 0, dst, src);
-        /* movsx */
-        emit1(state, 0x0f);
-        emit1(state, size == S8 ? 0xbe : 0xbf);
-    } else if (size == S32) {
-        emit_basic_rex(state, 1, dst, src);
-        emit1(state, 0x63);
-    }
-
+    if (src & 8 || dst & 8)
+        emit_basic_rex(state, 0, dst, src);
+    emit_load_opcode(state, size, true);
     emit_modrm_and_displacement(state, dst, src, offset);
 #elif defined(__aarch64__)
-    switch (size) {
-    case S8:
-        emit_loadstore_imm(state, LS_LDRSBW, dst, src, offset);
-        break;
-    case S16:
-        emit_loadstore_imm(state, LS_LDRSHW, dst, src, offset);
-        break;
-    case S32:
-        emit_loadstore_imm(state, LS_LDRSW, dst, src, offset);
-        break;
-    default:
-        __UNREACHABLE;
-        break;
-    }
+    emit_loadstore_imm(state, size == S8 ? LS_LDRSBW : LS_LDRSHW, dst, src,
+                       offset);
 #endif
 
     set_dirty(dst, !offset);
 }
 
-/* Sign-extend 32-bit value in register to 64-bit (in-place) */
-static inline void UNUSED emit_sxtw(struct jit_state *state, int reg)
+/* Copy the low 32 bits of @src into @dst, sign-extended to 64 bits. Both
+ * hosts fold the move and the widening into one instruction, so a caller that
+ * wants a widened copy never needs a separate mov. Passing src == dst widens
+ * in place.
+ */
+static inline void UNUSED emit_mov_sext(struct jit_state *state,
+                                        int src,
+                                        int dst)
 {
 #if defined(__x86_64__)
-    /* MOVSXD reg, reg (sign-extend 32-bit to 64-bit) */
-    emit_basic_rex(state, 1, reg, reg);
+    /* MOVSXD r64, r/m32 */
+    emit_basic_rex(state, 1, dst, src);
     emit1(state, 0x63);
-    emit_modrm_reg2reg(state, reg, reg);
+    emit_modrm_reg2reg(state, dst, src);
 #elif defined(__aarch64__)
     /* SXTW Xd, Wn is SBFM Xd, Xn, #0, #31
      * Encoding: sf=1, opc=00, N=1, immr=0, imms=31
      * = 0x93407C00 | (Rn << 5) | Rd
      */
-    uint32_t insn = 0x93407C00 | ((uint32_t) reg << 5) | (uint32_t) reg;
+    uint32_t insn = 0x93407C00 | ((uint32_t) src << 5) | (uint32_t) dst;
     emit_a64(state, insn);
 #endif
+
+    set_dirty(dst, true);
 }
 
 /* Load 32-bit immediate into register (zero-extend) */
@@ -1177,10 +1304,71 @@ static inline void emit_load_imm_sext(struct jit_state *state,
 
     set_dirty(dst, true);
 #elif defined(__aarch64__)
-    if ((int32_t) imm == imm)
-        emit_movewide_imm(state, false, dst, imm);
+    /* The W-form MOVZ/MOVK pair zeroes bits 63:32, so only a non-negative
+     * immediate may take it. A negative one has to go through the X-form to
+     * keep its sign across the upper half.
+     */
+    emit_movewide_imm(state, imm < 0 || (int32_t) imm != imm, dst, imm);
+#endif
+}
+
+/* Use integer arithmetic so negative offsets do not form a pointer before
+ * the allocation on backends without indexed guest-memory accesses.
+ * Return the displacement left for the memory instruction.
+ */
+static inline int32_t UNUSED emit_guest_address(struct jit_state *state,
+                                                memory_t *m UNUSED,
+                                                int base,
+                                                int32_t offset)
+{
+#if JIT_BASED_GUEST_MEM
+    emit_addsub_register(state, true, AS_ADD, temp_reg, R19, base);
+    if (offset >= -256 && offset < 256)
+        return offset;
+    if (offset > 0 && offset < 4096)
+        emit_addsub_imm(state, true, AS_ADD, temp_reg, temp_reg, offset);
+    else if (offset < 0 && offset > -4096)
+        emit_addsub_imm(state, true, AS_SUB, temp_reg, temp_reg, -offset);
+    else if (offset) {
+        emit_load_imm_sext(state, R10, offset);
+        emit_addsub_register(state, true, AS_ADD, temp_reg, temp_reg, R10);
+    }
+#else
+    emit_load_imm_sext(state, temp_reg, (intptr_t) m->mem_base + offset);
+    emit_alu64(state, 0x01, base, temp_reg);
+#endif
+    return 0;
+}
+
+/* The user-mode x86-64 entry pins mem_base in R12 for the entire JIT call. */
+static inline void emit_guest_load(struct jit_state *state,
+                                   memory_t *m UNUSED,
+                                   enum operand_size size,
+                                   int base,
+                                   int dst,
+                                   int32_t offset,
+                                   bool sign)
+{
+#if JIT_INDEXED_GUEST_MEM
+    if (host_reg_maps_x0(dst)) {
+        emit_load_imm(state, dst, 0);
+        return;
+    }
+    assert((base & 7) != RSP);
+    emit_rex(state, 0, !!(dst & 8), !!(base & 8), 1);
+    emit_load_opcode(state, size, sign);
+    emit_modrm(state, 0x80, dst, 4);
+    emit1(state, ((base & 7) << 3) | (R12 & 7));
+    emit4(state, offset);
+    set_dirty(dst, true);
+#else
+    int32_t displacement = emit_guest_address(state, m, base, offset);
+    if (sign)
+        emit_load_sext(state, size, temp_reg, dst, displacement);
     else
-        emit_movewide_imm(state, true, dst, imm);
+        emit_load(state, size, temp_reg, dst, displacement);
+    /* A nonzero guest displacement is not a clean register-file reload. */
+    set_dirty(dst, true);
 #endif
 }
 
@@ -1262,7 +1450,7 @@ static inline void emit_store(struct jit_state *state,
         emit1(state, 0x66); /* 16-bit override */
     if (src & 8 || dst & 8 || size == S8)
         emit_rex(state, 0, !!(src & 8), 0, !!(dst & 8));
-    emit1(state, size == S8 ? 0x88 : 0x89);
+    emit_store_opcode(state, size);
     emit_modrm_and_displacement(state, src, dst, offset);
 #elif defined(__aarch64__)
     switch (size) {
@@ -1284,7 +1472,10 @@ static inline void emit_store(struct jit_state *state,
     }
 #endif
 
-    if (offset)
+    /* Only register-file writeback makes a guest register clean. A guest
+     * store may also use an immediate displacement without saving rv->X.
+     */
+    if (offset && dst == parameter_reg[0])
         set_dirty(src, false);
 }
 
@@ -1470,14 +1661,27 @@ static void muldivmod(struct jit_state *state,
         /* Set the divisor to 1 if it is zero */
         emit_load_imm(state, RDX, 1);
         emit_conditional_move(state, RDX, RCX);
-        /* xor %edx,%edx */
-        emit_alu32(state, 0x31, RDX, RDX);
+        if (sign) {
+            /* CQO sign-extends RAX through RDX, so IDIV sees a 128-bit
+             * dividend holding the 64-bit sign-extended operand.
+             */
+            emit_rex(state, 1, 0, 0, 0);
+            emit1(state, 0x99);
+        } else {
+            /* xor %edx,%edx */
+            emit_alu32(state, 0x31, RDX, RDX);
+        }
     }
 
-    if (is64)
+    /* A signed divide runs 64-bit over the sign-extended operands. That keeps
+     * INT_MIN / -1 representable, so the instruction cannot raise #DE, and its
+     * low half is the result RV32 defines. The overflow fixup below then
+     * agrees with it rather than correcting it.
+     */
+    if (is64 || sign)
         emit_rex(state, 1, 0, 0, 0);
     /* Multiply or divide */
-    emit_alu32(state, 0xf7, mul ? 4 : 6, RCX);
+    emit_alu32(state, 0xf7, mul ? 4 : sign ? 7 : 6, RCX);
 
     /* The division operation stores the remainder in RDX and the quotient
      * in RAX.
@@ -1538,6 +1742,16 @@ static void muldivmod(struct jit_state *state,
         register_map[0].vm_reg_idx = r1;
         register_map[0].dirty = d1;
     }
+
+    /* The signed divide runs 64-bit, so a negative quotient or remainder
+     * arrives sign-extended, and the writeback above is a 64-bit move. A
+     * mapped guest register must hold the zero-extended 32-bit word, or a
+     * later use of it as a memory-address base adds the sign bits and lands
+     * outside the guest mapping. Narrow it here, including when the result
+     * was already in dst and no move happened.
+     */
+    if (sign && (div || mod))
+        emit_mov32(state, dst, dst);
 #elif defined(__aarch64__)
     switch (opcode) {
     case 0x28:
@@ -2505,7 +2719,8 @@ static void emit_jit_mmu_handler(struct jit_state *state,
 }
 #endif
 
-static void prepare_translate(struct jit_state *state)
+static void prepare_translate(struct jit_state *state,
+                              uintptr_t mem_base UNUSED)
 {
 #if defined(__x86_64__)
     /* Save platform non-volatile registers */
@@ -2532,6 +2747,11 @@ static void prepare_translate(struct jit_state *state)
     /* Windows x64 ABI requires home register space. */
     /* Allocate home register space - 4 registers */
     emit_alu64_imm32(state, 0x81, 5, RSP, 4 * sizeof(uint64_t));
+#endif
+
+    /* R12 is outside the allocator and survives calls and direct chains. */
+#if JIT_INDEXED_GUEST_MEM
+    emit_load_imm_sext(state, R12, mem_base);
 #endif
 
     /* Jump to the entry point, which is stored in the second parameter. */
@@ -2569,6 +2789,10 @@ static void prepare_translate(struct jit_state *state)
                                callee_reg[i + 1], SP, (i + 2) * 8);
     }
 
+#if JIT_BASED_GUEST_MEM
+    /* R19 is already saved above and never allocated to a guest register. */
+    emit_load_imm_sext(state, R19, mem_base);
+#endif
     emit_uncond_branch_reg(state, BR_BR, R1);
     /* Epilogue */
     state->exit_loc = state->offset;
@@ -3078,58 +3302,81 @@ static void ra_load2(struct jit_state *state, int vm_reg_idx1, int vm_reg_idx2)
                   offsetof(riscv_t, X) + 4 * vm_reg_idx2);
 }
 
-#if RV32_HAS(EXT_M)
-static void ra_load2_sext(struct jit_state *state,
-                          int vm_reg_idx1,
-                          int vm_reg_idx2,
-                          bool sext1,
-                          bool sext2)
+/* Keep both operands resident until the store. Unlike an address built in
+ * temp_reg, an indexed address still needs rs1 after rs2 is allocated.
+ */
+static void ra_store_guest(struct jit_state *state,
+                           memory_t *m UNUSED,
+                           enum operand_size size,
+                           int rs1,
+                           int rs2,
+                           int32_t offset)
 {
-    int origin1 = -1, origin2 = -1;
-    for (int i = 0; i < n_host_regs; i++) {
-        if (register_map[i].vm_reg_idx != vm_reg_idx1)
-            continue;
-        origin1 = register_map[i].reg_idx;
-    }
-    for (int i = 0; i < n_host_regs; i++) {
-        if (register_map[i].vm_reg_idx != vm_reg_idx2)
-            continue;
-        origin2 = register_map[i].reg_idx;
-    }
-
-    if (vm_reg_idx1 == vm_reg_idx2) {
-        vm_reg[0] = vm_reg[1] = map_vm_reg(state, vm_reg_idx1);
+#if JIT_INDEXED_GUEST_MEM
+    ra_load2(state, rs1, rs2);
+    int base = vm_reg[0], src = vm_reg[1];
+    assert((base & 7) != RSP);
+    assert(size == S8 || size == S16 || size == S32);
+    if (size == S16)
+        emit1(state, 0x66);
+    /* Always emit REX: byte stores must use SIL/DIL, never AH/CH/DH/BH. */
+    emit_rex(state, 0, rs2 ? !!(src & 8) : 0, !!(base & 8), 1);
+    if (rs2) {
+        emit_store_opcode(state, size);
+        emit_modrm(state, 0x80, src, 4);
     } else {
-        vm_reg[0] = map_vm_reg(state, vm_reg_idx1);
-        vm_reg[1] = map_vm_reg_reserved(state, vm_reg_idx2, vm_reg[0]);
-        assert(vm_reg[0] != vm_reg[1]);
+        emit1(state, size == S8 ? 0xc6 : 0xc7);
+        emit_modrm(state, 0x80, 0, 4);
     }
+    emit1(state, ((base & 7) << 3) | (R12 & 7));
+    emit4(state, offset);
+    if (!rs2) {
+        for (int i = 0; i < (size == S8 ? 1 : size == S16 ? 2 : 4); i++)
+            emit1(state, 0);
+    }
+#else
+    vm_reg[0] = ra_load(state, rs1);
+    int32_t displacement = emit_guest_address(state, m, vm_reg[0], offset);
+    vm_reg[1] = ra_load(state, rs2);
+    emit_store(state, size, vm_reg[1], temp_reg, displacement);
+#endif
+}
 
-    if (origin1 != vm_reg[0]) {
-        if (sext1)
-            emit_load_sext(state, S32, parameter_reg[0], vm_reg[0],
-                           offsetof(riscv_t, X) + 4 * vm_reg_idx1);
-        else
-            emit_load(state, S32, parameter_reg[0], vm_reg[0],
-                      offsetof(riscv_t, X) + 4 * vm_reg_idx1);
-    } else if (sext1) {
-        /* Register already mapped but may not be sign-extended.
-         * On ARM64, emit_mov uses 32-bit ops which zero-extend,
-         * so we must explicitly sign-extend for signed operations.
-         */
-        emit_sxtw(state, vm_reg[0]);
-    }
-    if (origin2 != vm_reg[1]) {
-        if (sext2)
-            emit_load_sext(state, S32, parameter_reg[0], vm_reg[1],
-                           offsetof(riscv_t, X) + 4 * vm_reg_idx2);
-        else
-            emit_load(state, S32, parameter_reg[0], vm_reg[1],
-                      offsetof(riscv_t, X) + 4 * vm_reg_idx2);
-    } else if (sext2) {
-        /* Register already mapped but may not be sign-extended. */
-        emit_sxtw(state, vm_reg[1]);
-    }
+#if RV32_HAS(EXT_M)
+/* Shared preamble for the M-extension forms: load both operands, allocate the
+ * destination, then copy rs2 to the scratch register and rs1 to the
+ * destination, widening either copy whose operation reads it as signed.
+ *
+ * Widen the copies rather than the caller's operand registers. A guest
+ * register is 32 bits, and a later use of the same host register as a
+ * memory-address base adds all 64 (the SIB index on x86-64, the 64-bit ADD on
+ * Arm64), which would move that access 4 GiB down and outside the guest
+ * mapping. User mode spans the full 4 GiB, so an address with bit 31 set -
+ * anything on the stack, for one - is ordinary rather than exotic.
+ *
+ * The destination is one of those copies and may alias rs1, so widening it
+ * does touch a mapped register; muldivmod overwrites it with the result
+ * before the value can outlive this instruction.
+ */
+static void ra_load2_muldiv(struct jit_state *state,
+                            int rs1,
+                            int rs2,
+                            int rd,
+                            bool sext1,
+                            bool sext2)
+{
+    ra_load2(state, rs1, rs2);
+    vm_reg[2] = map_vm_reg_reserved2(state, rd, vm_reg[0], vm_reg[1]);
+
+    if (sext2)
+        emit_mov_sext(state, vm_reg[1], temp_reg);
+    else
+        emit_mov(state, vm_reg[1], temp_reg);
+
+    if (sext1)
+        emit_mov_sext(state, vm_reg[0], vm_reg[2]);
+    else
+        emit_mov(state, vm_reg[0], vm_reg[2]);
 }
 #endif
 
@@ -3138,26 +3385,22 @@ static void parse_branch_history_table(struct jit_state *state,
                                        rv_insn_t *ir)
 {
     branch_history_table_t *bt = ir->branch_table;
-    int max_idx = bht_find_max_idx(bt);
-#if RV32_HAS(SYSTEM)
-    if (!bht_should_translate(bt, max_idx, rv->csr_satp))
+    int targets[IN_JUMP_TARGETS];
+    int count = bht_select_targets(bt, rv, targets);
+    if (!count)
         return;
-#else
-    if (!bht_should_translate(bt, max_idx))
-        return;
-#endif
-    save_reg(state, 0);
-    unmap_vm_reg(0);
-    emit_load_imm(state, register_map[0].reg_idx, bt->PC[max_idx]);
-    emit_cmp32(state, temp_reg, register_map[0].reg_idx);
-    uint32_t jump_loc_0 = state->offset;
-    emit_jcc_offset(state, JCC_JNE);
+    for (int i = 0; i < count; i++) {
+        int idx = targets[i];
+        emit_cmp_imm32(state, temp_reg, bt->PC[idx]);
+        uint32_t jump_loc_0 = state->offset;
+        emit_jcc_offset(state, JCC_JNE);
 #if RV32_HAS(SYSTEM)
-    emit_jmp(state, bt->PC[max_idx], bt->satp[max_idx]);
+        emit_jmp(state, bt->PC[idx], bt->satp[idx]);
 #else
-    emit_jmp(state, bt->PC[max_idx], 0);
+        emit_jmp(state, bt->PC[idx], 0);
 #endif
-    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+        emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+    }
 }
 
 /* Timer increment removed: timer is now derived from cycle counter at
@@ -3199,12 +3442,7 @@ static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     memory_t *m = PRIV(rv)->mem;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
-        vm_reg[0] = ra_load(state, fuse[i].rs1);
-        emit_load_imm_sext(state, temp_reg,
-                           (intptr_t) (m->mem_base + fuse[i].imm));
-        emit_alu64(state, 0x01, vm_reg[0], temp_reg);
-        vm_reg[1] = ra_load(state, fuse[i].rs2);
-        emit_store(state, S32, vm_reg[1], temp_reg, 0);
+        ra_store_guest(state, m, S32, fuse[i].rs1, fuse[i].rs2, fuse[i].imm);
     }
 }
 
@@ -3214,11 +3452,9 @@ static void do_fuse4(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         vm_reg[0] = ra_load(state, fuse[i].rs1);
-        emit_load_imm_sext(state, temp_reg,
-                           (intptr_t) (m->mem_base + fuse[i].imm));
-        emit_alu64(state, 0x01, vm_reg[0], temp_reg);
         vm_reg[1] = map_vm_reg(state, fuse[i].rd);
-        emit_load(state, S32, temp_reg, vm_reg[1], 0);
+        emit_guest_load(state, m, S32, vm_reg[0], vm_reg[1], fuse[i].imm,
+                        false);
     }
 }
 
@@ -3530,11 +3766,9 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 #else
     vm_reg[0] = ra_load(state, ir->rs1);
     /* Compute address: mem_base + rs1 + imm */
-    emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + ir->imm));
-    emit_alu64(state, 0x01, vm_reg[0], temp_reg);
     /* Load value into rd */
     vm_reg[1] = map_vm_reg(state, ir->rd);
-    emit_load(state, S32, temp_reg, vm_reg[1], 0);
+    emit_guest_load(state, m, S32, vm_reg[0], vm_reg[1], ir->imm, false);
     /* Increment rs1 by imm2.  Mapping rd may have evicted rs1, whose value
      * was saved to memory, so reload it rather than assume it is mapped. */
     vm_reg[0] = ra_load(state, ir->rs1);
@@ -3550,13 +3784,7 @@ static void do_fuse13(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 {
 #if !RV32_HAS(SYSTEM)
     memory_t *m = PRIV(rv)->mem;
-    vm_reg[0] = ra_load(state, ir->rs1);
-    /* Integer arithmetic: a negative offset must not form a pointer before
-     * the allocation. */
-    emit_load_imm_sext(state, temp_reg, (intptr_t) m->mem_base + ir->imm);
-    emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);
-    vm_reg[1] = ra_load(state, ir->rs2);
-    emit_store(state, S32, vm_reg[1], temp_reg, 0);
+    ra_store_guest(state, m, S32, ir->rs1, ir->rs2, ir->imm);
     /* Loading rs2 may have evicted rs1, so reload it before the increment. */
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_alu32_imm32(state, 0x81, 0, vm_reg[0], ir->imm2);
@@ -3582,9 +3810,9 @@ static void do_fuse12(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     if (vm_reg[0] != vm_reg[1])
         emit_mov(state, vm_reg[0], vm_reg[1]);
     emit_alu32_imm32(state, 0x81, 0, vm_reg[1], ir->imm);
-    /* Compare rd with 0 for branch decision */
-    emit_cmp_imm32(state, vm_reg[1], 0);
     store_back(state);
+    /* Keep the comparison adjacent to its branch for host macro-fusion. */
+    emit_cmp_imm32(state, vm_reg[1], 0);
     /* jne (jump if not equal) to taken path: 0x85 = JNE */
     uint32_t jump_loc_0 = state->offset;
     emit_jcc_offset(state, 0x85);
@@ -3727,6 +3955,27 @@ static void resolve_jumps(struct jit_state *state)
 
 static void translate_chained_block(struct jit_state *state,
                                     riscv_t *rv,
+                                    block_t *block);
+
+/* Follow one successor edge into the same translation unit. The recursion
+ * guard lives in translate_chained_block, which keys it on RV_HASH_KEY; a
+ * caller-side test on the bare program counter would disagree with it in
+ * system mode, where the key also carries satp.
+ */
+static void translate_successor(struct jit_state *state,
+                                riscv_t *rv,
+                                uint32_t pc)
+{
+    block_t *block = cache_get(rv->block_cache, pc, false);
+    if (!block || !block->translatable)
+        return;
+    if (!block_matches_context(rv, block))
+        return;
+    translate_chained_block(state, rv, block);
+}
+
+static void translate_chained_block(struct jit_state *state,
+                                    riscv_t *rv,
                                     block_t *block)
 {
     if (set_has(&state->set, RV_HASH_KEY(block)))
@@ -3750,43 +3999,17 @@ static void translate_chained_block(struct jit_state *state,
     if (unlikely(should_flush))
         return;
     rv_insn_t *ir = block->ir_tail;
-    if (ir->branch_untaken && !set_has(&state->set, ir->branch_untaken->pc)) {
-        block_t *block1 =
-            cache_get(rv->block_cache, ir->branch_untaken->pc, false);
-        if (block1->translatable) {
-            IIF(RV32_HAS(SYSTEM))(
-                if (block1->satp == rv->csr_satp && !block1->invalidated), )
-                translate_chained_block(state, rv, block1);
-        }
-    }
-    if (ir->branch_taken && !set_has(&state->set, ir->branch_taken->pc)) {
-        block_t *block1 =
-            cache_get(rv->block_cache, ir->branch_taken->pc, false);
-        if (block1->translatable) {
-            IIF(RV32_HAS(SYSTEM))(
-                if (block1->satp == rv->csr_satp && !block1->invalidated), )
-                translate_chained_block(state, rv, block1);
-        }
-    }
+    if (ir->branch_untaken)
+        translate_successor(state, rv, ir->branch_untaken->pc);
+    if (ir->branch_taken)
+        translate_successor(state, rv, ir->branch_taken->pc);
 
     branch_history_table_t *bt = ir->branch_table;
     if (bt) {
-        int max_idx = bht_find_max_idx(bt);
-#if RV32_HAS(SYSTEM)
-        if (bht_should_translate(bt, max_idx, rv->csr_satp) &&
-            !set_has(&state->set, bt->PC[max_idx])) {
-#else
-        if (bht_should_translate(bt, max_idx) &&
-            !set_has(&state->set, bt->PC[max_idx])) {
-#endif
-            block_t *block1 =
-                cache_get(rv->block_cache, bt->PC[max_idx], false);
-            if (block1 && block1->translatable) {
-                IIF(RV32_HAS(SYSTEM))(
-                    if (block1->satp == rv->csr_satp && !block1->invalidated), )
-                    translate_chained_block(state, rv, block1);
-            }
-        }
+        int targets[IN_JUMP_TARGETS];
+        int count = bht_select_targets(bt, rv, targets);
+        for (int i = 0; i < count; i++)
+            translate_successor(state, rv, bt->PC[targets[i]]);
     }
 }
 
@@ -3874,12 +4097,14 @@ restart:
     return true;
 }
 
-struct jit_state *jit_state_init(size_t size)
+struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
 {
     struct jit_state *state = malloc(sizeof(struct jit_state));
     if (!state)
         return NULL;
     assert(state);
+
+    set_init(&state->set);
 
     state->offset = 0;
     state->n_jumps = 0;
@@ -3900,7 +4125,7 @@ struct jit_state *jit_state_init(size_t size)
     state->n_blocks = 0;
     set_reset(&state->set);
     reset_reg();
-    prepare_translate(state);
+    prepare_translate(state, mem_base);
 #if defined(__APPLE__) && defined(__aarch64__)
     /* Final cache flush for prologue/epilogue code.
      * emit_bytes handles per-instruction cache maintenance, but a final

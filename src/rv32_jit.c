@@ -85,8 +85,8 @@
 #define GEN_BRANCH(inst, cond)                            \
     GEN(inst, {                                           \
         ra_load2(state, ir->rs1, ir->rs2);                \
-        emit_cmp32(state, vm_reg[1], vm_reg[0]);          \
         store_back(state);                                \
+        emit_cmp32(state, vm_reg[1], vm_reg[0]);          \
         uint32_t jump_loc_0 = state->offset;              \
         emit_jcc_offset(state, cond);                     \
         EMIT_BRANCH_EPILOGUE(4); /* 4-byte instruction */ \
@@ -98,8 +98,8 @@
 #define GEN_CBRANCH(inst, cond)                           \
     GEN(inst, {                                           \
         vm_reg[0] = ra_load(state, ir->rs1);              \
-        emit_cmp_imm32(state, vm_reg[0], 0);              \
         store_back(state);                                \
+        emit_cmp_imm32(state, vm_reg[0], 0);              \
         uint32_t jump_loc_0 = state->offset;              \
         emit_jcc_offset(state, cond);                     \
         EMIT_BRANCH_EPILOGUE(2); /* 2-byte instruction */ \
@@ -119,15 +119,24 @@
 #define ALU_AND 4
 #define ALU_XOR 6
 
-/* ALU immediate instruction handler macro */
-#define GEN_ALU_IMM(inst, op)                                             \
-    GEN(inst, {                                                           \
-        vm_reg[0] = ra_load(state, ir->rs1);                              \
-        vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);        \
-        if (vm_reg[0] != vm_reg[1]) {                                     \
-            emit_mov(state, vm_reg[0], vm_reg[1]);                        \
-        }                                                                 \
-        emit_alu32_imm32(state, ALU_GRP1_OPCODE, op, vm_reg[1], ir->imm); \
+/* ALU immediate instruction handler macro. Identity operations are resolved
+ * while translating, retaining a 32-bit move to normalize the result.
+ */
+#define GEN_ALU_IMM(inst, op)                                                 \
+    GEN(inst, {                                                               \
+        if (ir->rd == rv_reg_zero)                                            \
+            return;                                                           \
+        vm_reg[0] = ra_load(state, ir->rs1);                                  \
+        vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);            \
+        if ((ir->imm == 0 &&                                                  \
+             (op == ALU_ADD || op == ALU_OR || op == ALU_XOR)) ||             \
+            (ir->imm == -1 && op == ALU_AND)) {                               \
+            emit_mov32(state, vm_reg[0], vm_reg[1]);                          \
+        } else {                                                              \
+            if (vm_reg[0] != vm_reg[1])                                       \
+                emit_mov(state, vm_reg[0], vm_reg[1]);                        \
+            emit_alu32_imm32(state, ALU_GRP1_OPCODE, op, vm_reg[1], ir->imm); \
+        }                                                                     \
     })
 
 /* Shift operation identifiers.
@@ -147,16 +156,23 @@
 /* RV32 shift amount mask - only lower 5 bits used */
 #define RV32_SHIFT_MASK 0x1f
 
-/* Shift immediate instruction handler macro */
-#define GEN_SHIFT_IMM(inst, op)                                    \
-    GEN(inst, {                                                    \
-        vm_reg[0] = ra_load(state, ir->rs1);                       \
-        vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]); \
-        if (vm_reg[0] != vm_reg[1]) {                              \
-            emit_mov(state, vm_reg[0], vm_reg[1]);                 \
-        }                                                          \
-        emit_alu32_imm8(state, SHIFT_IMM_OPCODE, op, vm_reg[1],    \
-                        ir->imm & RV32_SHIFT_MASK);                \
+/* Shift immediate instruction handler macro. A zero shift is a 32-bit move
+ * and a discarded result has no architectural side effect.
+ */
+#define GEN_SHIFT_IMM(inst, op)                                     \
+    GEN(inst, {                                                     \
+        if (ir->rd == rv_reg_zero)                                  \
+            return;                                                 \
+        vm_reg[0] = ra_load(state, ir->rs1);                        \
+        vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);  \
+        if (ir->imm & RV32_SHIFT_MASK) {                            \
+            if (vm_reg[0] != vm_reg[1])                             \
+                emit_mov(state, vm_reg[0], vm_reg[1]);              \
+            emit_alu32_imm8(state, SHIFT_IMM_OPCODE, op, vm_reg[1], \
+                            ir->imm & RV32_SHIFT_MASK);             \
+        } else {                                                    \
+            emit_mov32(state, vm_reg[0], vm_reg[1]);                \
+        }                                                           \
     })
 
 /* ALU opcodes for register-to-register operations (x86-64 encoding).
@@ -173,9 +189,19 @@
     GEN(inst, {                                                                \
         ra_load2(state, ir->rs1, ir->rs2);                                     \
         vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]); \
-        emit_mov(state, vm_reg[1], temp_reg);                                  \
-        emit_mov(state, vm_reg[0], vm_reg[2]);                                 \
-        emit_alu32(state, op, temp_reg, vm_reg[2]);                            \
+        if (vm_reg[2] != vm_reg[1] || vm_reg[0] == vm_reg[1]) {                \
+            if (vm_reg[0] != vm_reg[2])                                        \
+                emit_mov(state, vm_reg[0], vm_reg[2]);                         \
+            emit_alu32(state, op, vm_reg[1], vm_reg[2]);                       \
+        } else if (op != ALU_OP_SUB) {                                         \
+            /* Commutative operations can update the second operand. */        \
+            emit_alu32(state, op, vm_reg[0], vm_reg[2]);                       \
+        } else {                                                               \
+            /* Preserve rhs before overwriting it with lhs for subtraction. */ \
+            emit_mov(state, vm_reg[1], temp_reg);                              \
+            emit_mov(state, vm_reg[0], vm_reg[2]);                             \
+            emit_alu32(state, op, temp_reg, vm_reg[2]);                        \
+        }                                                                      \
     })
 
 /* Shift register instruction handler macro */
@@ -184,9 +210,10 @@
         ra_load2(state, ir->rs1, ir->rs2);                                     \
         vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]); \
         emit_mov(state, vm_reg[1], temp_reg);                                  \
-        emit_mov(state, vm_reg[0], vm_reg[2]);                                 \
-        emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, temp_reg,            \
-                         RV32_SHIFT_MASK);                                     \
+        if (vm_reg[0] != vm_reg[2])                                            \
+            emit_mov(state, vm_reg[0], vm_reg[2]);                             \
+        /* Both x86-64 and AArch64 mask 32-bit variable shift counts to the    \
+         * low five bits, exactly matching RV32. */                            \
         emit_alu32(state, SHIFT_REG_OPCODE, op, vm_reg[2]);                    \
     })
 
@@ -298,11 +325,9 @@
                     emit_jump_target_offset(state, fp_end_loc, state->offset); \
             },                                                                 \
             {                                                                  \
-                emit_load_imm_sext(state, temp_reg,                            \
-                                   (intptr_t) (m->mem_base + ir->imm));        \
-                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);            \
                 vm_reg[1] = map_vm_reg(state, ir->rd);                         \
-                load_fn(state, size, temp_reg, vm_reg[1], 0);                  \
+                emit_guest_load(state, m, size, vm_reg[0], vm_reg[1], ir->imm, \
+                                load_fn == emit_load_sext);                    \
             })                                                                 \
     })
 
@@ -382,13 +407,7 @@
                     emit_jump_target_offset(state, fp_end_loc, state->offset); \
                 reset_reg();                                                   \
             },                                                                 \
-            {                                                                  \
-                emit_load_imm_sext(state, temp_reg,                            \
-                                   (intptr_t) (m->mem_base + ir->imm));        \
-                emit_alu64(state, ALU_OP_ADD, vm_reg[0], temp_reg);            \
-                vm_reg[1] = ra_load(state, ir->rs2);                           \
-                emit_store(state, size, vm_reg[1], temp_reg, 0);               \
-            })                                                                 \
+            { ra_store_guest(state, m, size, ir->rs1, ir->rs2, ir->imm); })    \
     })
 
 GEN(nop, {})
@@ -502,62 +521,38 @@ GEN(csrrci, { assert(NULL); })
 #endif
 #if RV32_HAS(EXT_M)
 GEN(mul, {
-    ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
-    emit_mov(state, vm_reg[1], temp_reg);
-    emit_mov(state, vm_reg[0], vm_reg[2]);
+    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, false, false);
     muldivmod(state, 0x28, temp_reg, vm_reg[2], 0);
 })
 GEN(mulh, {
-    ra_load2_sext(state, ir->rs1, ir->rs2, true, true);
-    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
-    emit_mov(state, vm_reg[1], temp_reg);
-    emit_mov(state, vm_reg[0], vm_reg[2]);
+    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, true);
     muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
     emit_alu64_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHR, vm_reg[2], 32);
 })
 GEN(mulhsu, {
-    ra_load2_sext(state, ir->rs1, ir->rs2, true, false);
-    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
-    emit_mov(state, vm_reg[1], temp_reg);
-    emit_mov(state, vm_reg[0], vm_reg[2]);
+    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, false);
     muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
     emit_alu64_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHR, vm_reg[2], 32);
 })
 GEN(mulhu, {
-    ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
-    emit_mov(state, vm_reg[1], temp_reg);
-    emit_mov(state, vm_reg[0], vm_reg[2]);
+    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, false, false);
     muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
     emit_alu64_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHR, vm_reg[2], 32);
 })
 GEN(div, {
-    ra_load2_sext(state, ir->rs1, ir->rs2, true, true);
-    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
-    emit_mov(state, vm_reg[1], temp_reg);
-    emit_mov(state, vm_reg[0], vm_reg[2]);
+    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, true);
     muldivmod(state, 0x38, temp_reg, vm_reg[2], 1);
 })
 GEN(divu, {
-    ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
-    emit_mov(state, vm_reg[1], temp_reg);
-    emit_mov(state, vm_reg[0], vm_reg[2]);
+    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, false, false);
     muldivmod(state, 0x38, temp_reg, vm_reg[2], 0);
 })
 GEN(rem, {
-    ra_load2_sext(state, ir->rs1, ir->rs2, true, true);
-    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
-    emit_mov(state, vm_reg[1], temp_reg);
-    emit_mov(state, vm_reg[0], vm_reg[2]);
+    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, true);
     muldivmod(state, 0x98, temp_reg, vm_reg[2], 1);
 })
 GEN(remu, {
-    ra_load2(state, ir->rs1, ir->rs2);
-    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
-    emit_mov(state, vm_reg[1], temp_reg);
-    emit_mov(state, vm_reg[0], vm_reg[2]);
+    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, false, false);
     muldivmod(state, 0x98, temp_reg, vm_reg[2], 0);
 })
 #endif
@@ -615,18 +610,12 @@ GEN(caddi4spn, {
 GEN(clw, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, ir->rs1);
-    emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + ir->imm));
-    emit_alu64(state, 0x01, vm_reg[0], temp_reg);
     vm_reg[1] = map_vm_reg(state, ir->rd);
-    emit_load(state, S32, temp_reg, vm_reg[1], 0);
+    emit_guest_load(state, m, S32, vm_reg[0], vm_reg[1], ir->imm, false);
 })
 GEN(csw, {
     memory_t *m = PRIV(rv)->mem;
-    vm_reg[0] = ra_load(state, ir->rs1);
-    emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + ir->imm));
-    emit_alu64(state, 0x01, vm_reg[0], temp_reg);
-    vm_reg[1] = ra_load(state, ir->rs2);
-    emit_store(state, S32, vm_reg[1], temp_reg, 0);
+    ra_store_guest(state, m, S32, ir->rs1, ir->rs2, ir->imm);
 })
 GEN(cnop, {})
 GEN(caddi, {
@@ -713,10 +702,8 @@ GEN(cslli, {
 GEN(clwsp, {
     memory_t *m = PRIV(rv)->mem;
     vm_reg[0] = ra_load(state, rv_reg_sp);
-    emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + ir->imm));
-    emit_alu64(state, 0x01, vm_reg[0], temp_reg);
     vm_reg[1] = map_vm_reg(state, ir->rd);
-    emit_load(state, S32, temp_reg, vm_reg[1], 0);
+    emit_guest_load(state, m, S32, vm_reg[0], vm_reg[1], ir->imm, false);
 })
 GEN(cjr, {
     vm_reg[0] = ra_load(state, ir->rs1);
@@ -761,11 +748,7 @@ GEN(cadd, {
 })
 GEN(cswsp, {
     memory_t *m = PRIV(rv)->mem;
-    vm_reg[0] = ra_load(state, rv_reg_sp);
-    emit_load_imm_sext(state, temp_reg, (intptr_t) (m->mem_base + ir->imm));
-    emit_alu64(state, 0x01, vm_reg[0], temp_reg);
-    vm_reg[1] = ra_load(state, ir->rs2);
-    emit_store(state, S32, vm_reg[1], temp_reg, 0);
+    ra_store_guest(state, m, S32, rv_reg_sp, ir->rs2, ir->imm);
 })
 #endif
 #if RV32_HAS(EXT_C) && RV32_HAS(EXT_F)

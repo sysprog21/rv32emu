@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build & Output directories
+dist/
+build/
+out/
+public/
+
+# Lockfiles
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+bun.lockb
+
+# Environment & Config secrets
+.env
+.env.*
+
+# Minified files
+*.min.js
+*.min.css
+
+# Logs & OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# Test coverage & caches
+coverage/
+.cache/

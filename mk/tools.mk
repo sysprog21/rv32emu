@@ -53,10 +53,16 @@ format:
 	SHFMT=$$(which shfmt 2>/dev/null); \
 	DTSFMT=$$(which dtsfmt 2>/dev/null); \
 	BLACK=$$(which black 2>/dev/null); \
+	NODE=$$(which node 2>/dev/null); \
+	NPX=$$(which npx 2>/dev/null); \
+	PRETTIER=$$(npx --no-install prettier --version 2>/dev/null); \
 	if [ -z "$$CLANG_FORMAT" ]; then echo "clang-format-20 not found."; exit 1; fi && \
 	if [ -z "$$SHFMT" ]; then echo "shfmt not found."; exit 1; fi && \
 	if [ -z "$$DTSFMT" ]; then echo "dtsfmt not found."; exit 1; fi && \
 	if [ -z "$$BLACK" ]; then echo "black not found."; exit 1; fi && \
+	if [ -z "$$NODE" ]; then echo "node not found."; exit 1; fi && \
+	if [ -z "$$NPX" ]; then echo "npx not found."; exit 1; fi && \
+	if [ -z "$$PRETTIER" ]; then echo "prettier not found."; exit 1; fi && \
 	SUBMODULES=$$(git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{ print $$2 }') && \
 	PRUNE_PATHS="./$(OUT)" && \
 	for subm in $$SUBMODULES; do PRUNE_PATHS="$$PRUNE_PATHS ./$$subm"; done && \
@@ -64,7 +70,8 @@ format:
 	find . \( $$PRUNE_ARGS \) -prune -o -name '*.[ch]' -print0 | xargs -0 $$CLANG_FORMAT -i && \
 	find . \( $$PRUNE_ARGS \) -prune -o -name '*.sh' -print0 | xargs -0 $$SHFMT -w && \
 	find . \( $$PRUNE_ARGS \) -prune -o \( -name '*.dts' -o -name '*.dtsi' \) -print0 | xargs -0 -I{} $$DTSFMT {} && \
-	find . \( $$PRUNE_ARGS \) -prune -o \( -name '*.py' -o -name '*.pyi' \) -print0 | xargs -0 $$BLACK --quiet
+	find . \( $$PRUNE_ARGS \) -prune -o \( -name '*.py' -o -name '*.pyi' \) -print0 | xargs -0 $$BLACK --quiet && \
+	find . \( $$PRUNE_ARGS \) -prune -o \( -name '*.html' -o -name '*.js' \) -print0 | xargs -0 $$NPX prettier --write --log-level silent
 	$(Q)$(call notice, All files formatted.)
 
 .PHONY: build-linux-image format

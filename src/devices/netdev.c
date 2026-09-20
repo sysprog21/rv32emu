@@ -15,7 +15,9 @@
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <sys/ioctl.h>
+#endif
 
+#if RV32EMU_NET_HAS_TAP || RV32EMU_NET_HAS_SLIRP
 typedef int (*netdev_init_fn_t)(netdev_t *netdev);
 #endif
 
@@ -29,7 +31,7 @@ static void netdev_reset(netdev_t *netdev)
     netdev->op = NULL;
 }
 
-#if RV32EMU_NET_HAS_TAP
+#if RV32EMU_NET_HAS_TAP || RV32EMU_NET_HAS_SLIRP
 static bool netdev_setup(netdev_t *netdev,
                          const char *name,
                          netdev_impl_t type,
@@ -53,7 +55,9 @@ static bool netdev_setup(netdev_t *netdev,
 
     return true;
 }
+#endif
 
+#if RV32EMU_NET_HAS_TAP
 static int net_init_tap(netdev_t *netdev)
 {
     net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
@@ -94,10 +98,27 @@ static int net_init_tap(netdev_t *netdev)
 }
 #endif
 
+#if RV32EMU_NET_HAS_SLIRP
+static int net_init_user(netdev_t *netdev)
+{
+    net_user_options_t *usr = (net_user_options_t *) netdev->op;
+
+    memset(usr, 0, sizeof(*usr));
+    usr->guest_to_host_channel[SLIRP_READ_SIDE] = -1;
+    usr->guest_to_host_channel[SLIRP_WRITE_SIDE] = -1;
+    usr->host_to_guest_channel[SLIRP_READ_SIDE] = -1;
+    usr->host_to_guest_channel[SLIRP_WRITE_SIDE] = -1;
+
+    return net_slirp_init(usr);
+}
+#endif
+
 static const char *netdev_default_backend(void)
 {
 #if RV32EMU_NET_HAS_TAP
     return "tap";
+#elif RV32EMU_NET_HAS_SLIRP
+    return "user";
 #else
     return NULL;
 #endif
@@ -126,6 +147,13 @@ bool netdev_init(netdev_t *netdev, const char *net_type)
     }
 #endif
 
+#if RV32EMU_NET_HAS_SLIRP
+    if (!strcmp(requested, "user")) {
+        return netdev_setup(netdev, "user", NETDEV_IMPL_USER,
+                            sizeof(net_user_options_t), net_init_user);
+    }
+#endif
+
     rv_log_error("unsupported virtio-net backend: %s", requested);
     return false;
 }
@@ -148,6 +176,12 @@ void netdev_delete(netdev_t *netdev)
             close(tap->tap_fd);
         break;
     }
+#endif
+
+#if RV32EMU_NET_HAS_SLIRP
+    case NETDEV_IMPL_USER:
+        net_slirp_cleanup((net_user_options_t *) netdev->op);
+        break;
 #endif
 
     case NETDEV_IMPL_NONE:

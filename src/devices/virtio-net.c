@@ -254,6 +254,7 @@ static ssize_t vnet_handle_read(virtio_net_state_t *vnet,
                                 size_t niovs)
 {
     switch (netdev->type) {
+#if RV32EMU_NET_HAS_TAP
     case NETDEV_IMPL_TAP: {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         ssize_t plen = readv(tap->tap_fd, iovs, niovs);
@@ -275,6 +276,32 @@ static ssize_t vnet_handle_read(virtio_net_state_t *vnet,
 
         return plen;
     }
+#endif
+
+#if RV32EMU_NET_HAS_SLIRP
+    case NETDEV_IMPL_USER: {
+        net_user_options_t *usr = (net_user_options_t *) netdev->op;
+        ssize_t plen =
+            readv(usr->host_to_guest_channel[SLIRP_READ_SIDE], iovs, niovs);
+
+        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+            queue->fd_ready = false;
+            return -1;
+        }
+
+        if (plen < 0 && errno == EINTR)
+            return -1;
+
+        if (plen < 0) {
+            rv_log_error("virtio-net: could not read packet from SLIRP: %s",
+                         strerror(errno));
+            virtio_net_set_fail(vnet);
+            return -1;
+        }
+
+        return plen;
+    }
+#endif
 
     default:
         return -1;
@@ -287,6 +314,7 @@ static vnet_tx_result_t vnet_handle_write(netdev_t *netdev,
                                           size_t niovs)
 {
     switch (netdev->type) {
+#if RV32EMU_NET_HAS_TAP
     case NETDEV_IMPL_TAP: {
         net_tap_options_t *tap = (net_tap_options_t *) netdev->op;
         ssize_t plen = writev(tap->tap_fd, iovs, niovs);
@@ -305,6 +333,31 @@ static vnet_tx_result_t vnet_handle_write(netdev_t *netdev,
         rv_log_error("virtio-net: could not write packet: %s", strerror(errno));
         return VNET_TX_DROP;
     }
+#endif
+
+#if RV32EMU_NET_HAS_SLIRP
+    case NETDEV_IMPL_USER: {
+        net_user_options_t *usr = (net_user_options_t *) netdev->op;
+        ssize_t plen =
+            writev(usr->guest_to_host_channel[SLIRP_WRITE_SIDE], iovs, niovs);
+
+        if (plen >= 0)
+            return VNET_TX_OK;
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            queue->fd_ready = false;
+            return VNET_TX_RETRY;
+        }
+
+        if (errno == EINTR)
+            return VNET_TX_RETRY;
+
+        rv_log_error("virtio-net: could not write packet to SLIRP: %s",
+                     strerror(errno));
+
+        return VNET_TX_DROP;
+    }
+#endif
 
     default:
         return VNET_TX_DROP;
@@ -406,7 +459,6 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
 
         ssize_t plen =
             vnet_handle_read(vnet, &vnet->peer, queue, cursor, ncursor);
-
         if (plen <= 0)
             break;
 
@@ -516,6 +568,7 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
         return;
 
     switch (vnet->peer.type) {
+#if RV32EMU_NET_HAS_TAP
     case NETDEV_IMPL_TAP: {
         net_tap_options_t *tap = (net_tap_options_t *) vnet->peer.op;
         struct pollfd pfd = {
@@ -537,6 +590,47 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
 
         break;
     }
+#endif
+
+#if RV32EMU_NET_HAS_SLIRP
+    case NETDEV_IMPL_USER: {
+        net_user_options_t *usr = (net_user_options_t *) vnet->peer.op;
+
+        /* First let SLIRP consume any packets written by guest TX. */
+        net_slirp_poll(usr);
+
+        struct pollfd pfd = {
+            .fd = usr->host_to_guest_channel[SLIRP_READ_SIDE],
+            .events = POLLIN,
+        };
+
+        poll(&pfd, 1, 0);
+        if (pfd.revents & POLLIN) {
+            vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+            virtio_net_try_rx(vnet);
+        }
+
+        /*
+         * User-mode backend is memory/socketpair backed.  It is safe to try TX
+         * on every refresh because virtio_net_try_tx() only raises an interrupt
+         * when it actually completes at least one descriptor.
+         */
+        vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+        virtio_net_try_tx(vnet);
+
+        /* A TX packet may synchronously produce a reply through SLIRP. */
+        net_slirp_poll(usr);
+
+        pfd.revents = 0;
+        poll(&pfd, 1, 0);
+        if (pfd.revents & POLLIN) {
+            vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+            virtio_net_try_rx(vnet);
+        }
+
+        break;
+    }
+#endif
 
     default:
         break;

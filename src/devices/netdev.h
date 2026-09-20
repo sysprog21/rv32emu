@@ -5,12 +5,31 @@
 
 #pragma once
 
-#include <stdbool.h>
+#include <sys/types.h>
 
+/*
+ * Networking backends:
+ *
+ * Linux:
+ *   - tap  : kernel TAP device
+ *   - user : user-mode SLIRP
+ *
+ * macOS:
+ *   - user : user-mode SLIRP
+ *
+ * Emscripten:
+ *   - virtio-net networking backends are disabled
+ */
 #if RV32_HAS(VIRTIO_NET_TAP) && defined(__linux__) && !defined(__EMSCRIPTEN__)
 #define RV32EMU_NET_HAS_TAP 1
 #else
 #define RV32EMU_NET_HAS_TAP 0
+#endif
+
+#if RV32_HAS(VIRTIO_NET_USER) && !defined(__EMSCRIPTEN__)
+#define RV32EMU_NET_HAS_SLIRP 1
+#else
+#define RV32EMU_NET_HAS_SLIRP 0
 #endif
 
 typedef struct netdev netdev_t;
@@ -20,12 +39,39 @@ typedef enum {
 #if RV32EMU_NET_HAS_TAP
     NETDEV_IMPL_TAP,
 #endif
+#if RV32EMU_NET_HAS_SLIRP
+    NETDEV_IMPL_USER,
+#endif
 } netdev_impl_t;
 
 #if RV32EMU_NET_HAS_TAP
 typedef struct {
     int tap_fd;
 } net_tap_options_t;
+#endif
+
+#if RV32EMU_NET_HAS_SLIRP
+#define SLIRP_PKT_MAX 16384
+#define SLIRP_READ_SIDE 0
+#define SLIRP_WRITE_SIDE 1
+
+struct pollfd;
+struct rv_slirp_timer;
+
+typedef struct {
+    void *slirp;
+    int guest_to_host_channel[2];
+    int host_to_guest_channel[2];
+    struct pollfd *pfd;
+    int pfd_len;
+    int pfd_size;
+    struct rv_slirp_timer *timers;
+} net_user_options_t;
+
+int net_slirp_init(net_user_options_t *usr);
+void net_slirp_cleanup(net_user_options_t *usr);
+int net_slirp_poll(net_user_options_t *usr);
+int net_slirp_read(net_user_options_t *usr);
 #endif
 
 struct netdev {

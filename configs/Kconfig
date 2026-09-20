@@ -103,6 +103,9 @@ config HAVE_RISCV_TOOLCHAIN
 config HOST_LINUX
     def_bool $(python,assert sys.platform.startswith('linux'))
 
+config HOST_MACOS
+    def_bool $(python,assert sys.platform == 'darwin')
+
 # RISC-V ISA Extensions
 
 menu "RISC-V ISA Configuration"
@@ -290,7 +293,7 @@ config VIRTIO_NET
     bool "Enable VirtIO network device"
     default y
     depends on SYSTEM && !ELF_LOADER && !CC_IS_EMCC
-    depends on HOST_LINUX
+    depends on HOST_LINUX || HOST_MACOS
     help
       Enable VirtIO network device emulation.
 
@@ -306,6 +309,16 @@ config VIRTIO_NET_TAP
 
       This backend uses /dev/net/tun and normally requires root
       privileges or CAP_NET_ADMIN.
+
+config VIRTIO_NET_USER
+    bool "Enable user-mode SLIRP backend"
+    default y
+    depends on VIRTIO_NET && (HOST_LINUX || HOST_MACOS)
+    help
+      Enable user-mode networking through minislirp.
+
+      This backend does not require a TAP interface or root privileges,
+      but it adds minislirp to the final executable.
 
 endmenu
 

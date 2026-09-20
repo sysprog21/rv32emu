@@ -544,6 +544,9 @@
     <p>rv32emu - <a href="https://github.com/sysprog21/rv32emu">Open Source</a> RISC-V Emulator</p>
   </footer>
 
+  <!-- Helpers shared with the other demo page; must run before the
+       inline script below, hence no defer. -->
+  <script src="common.js"></script>
   <script>
     // Progressive loading controller
     const ProgressiveLoader = {
@@ -680,6 +683,33 @@
       }
     }
 
+    // Browsers without DecompressionStream (Firefox < 113, Safari < 16.4)
+    // take the plain tar the build stages next to the gzip.
+    const supportsGzipDecompression =
+      typeof DecompressionStream === 'function' &&
+      typeof Response !== 'undefined';
+
+    // Unpack the timidity instrument set into /etc/timidity, returning the
+    // number of extracted files.
+    async function loadTimidity() {
+      const url = supportsGzipDecompression ? 'timidity.tar.gz' : 'timidity.tar';
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Fetch ${url} failed: HTTP ${resp.status}`);
+      let tarBuf;
+      if (url.endsWith('.gz')) {
+        // resp.body is null on browsers that do not stream responses; buffer
+        // the payload first so the gzip is still inflated.
+        const gz = resp.body
+          ? resp.body.pipeThrough(new DecompressionStream('gzip'))
+          : new Blob([await resp.arrayBuffer()]).stream()
+              .pipeThrough(new DecompressionStream('gzip'));
+        tarBuf = await new Response(gz).arrayBuffer();
+      } else {
+        tarBuf = await resp.arrayBuffer();
+      }
+      return extractTarToMemfs(new Uint8Array(tarBuf), '/etc/timidity');
+    }
+
     runSysButton?.addEventListener('click', async () => {
       runSysButton.disabled = true;
       statusText.textContent = 'Downloading artifacts...';
@@ -692,10 +722,22 @@
           fetchWithProgress('rootfs.cpio', 'Rootfs'),
           fetchOptionalDisk(),
         ]);
-
         if (term) term.write('\x1b[33mWriting artifacts to VFS...\x1b[0m\r\n');
         Module.FS.writeFile('/Image', kernelData);
         Module.FS.writeFile('/rootfs.cpio', rootfsData);
+
+        // The instrument set only feeds host-side SDL_mixer MIDI playback, so
+        // a missing or unreadable tar must not stop the guest from booting.
+        try {
+          Module.FS.mkdirTree('/etc/timidity');
+          const n = await loadTimidity();
+          if (term) term.write(
+            `\x1b[36m> Unpacked ${n} files to /etc/timidity\x1b[0m\r\n`);
+        } catch (e) {
+          console.warn('timidity instruments unavailable:', e);
+          if (term) term.write(
+            `\x1b[33m> ${formatError(e)}; booting without MIDI music\x1b[0m\r\n`);
+        }
 
         let bootArgs = '-k Image -i rootfs.cpio';
         if (diskData) {

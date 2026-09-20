@@ -25,9 +25,15 @@ case "${MODE}" in
         # guest mounts /dev/vda at boot.
         make build/linux-image/rootfs.web.cpio ENABLE_SYSTEM=1
 
+        # Ship the timidity instrument set twice: browsers with
+        # DecompressionStream take the gzip payload, older Safari and Firefox
+        # fall back to the plain tar.
+        make build/timidity.tar build/timidity.tar.gz
+
         mkdir -p "${STAGE}"
         cp assets/wasm/html/system.html "${STAGE}/index.html"
         cp assets/wasm/js/coi-serviceworker.min.js "${STAGE}/"
+        cp assets/wasm/js/common.js "${STAGE}/"
         cp assets/wasm/vendor/xterm.min.js "${STAGE}/"
         cp assets/wasm/vendor/xterm.min.css "${STAGE}/"
         cp build/rv32emu.js "${STAGE}/"
@@ -36,6 +42,8 @@ case "${MODE}" in
         cp build/rv32emu.worker.js "${STAGE}/" || true
         cp build/linux-image/Image "${STAGE}/"
         cp build/linux-image/rootfs.web.cpio "${STAGE}/rootfs.cpio"
+        cp build/timidity.tar "${STAGE}/"
+        cp build/timidity.tar.gz "${STAGE}/"
         ;;
     user)
         STAGE=/tmp/rv32emu-demo
@@ -45,8 +53,7 @@ case "${MODE}" in
         # Ship the timidity instrument set twice: browsers with
         # DecompressionStream take the gzip payload, older Safari and Firefox
         # fall back to the plain tar.
-        tar -cf build/timidity.tar -C build/timidity .
-        gzip -9 -c build/timidity.tar > build/timidity.tar.gz
+        make build/timidity.tar build/timidity.tar.gz
 
         mkdir -p "${STAGE}"
 
@@ -55,6 +62,7 @@ case "${MODE}" in
         cp assets/wasm/html/demo-index.html "${STAGE}/landing.html"
         cp assets/wasm/html/user.html "${STAGE}/index.html"
         cp assets/wasm/js/coi-serviceworker.min.js "${STAGE}/"
+        cp assets/wasm/js/common.js "${STAGE}/"
         cp assets/wasm/vendor/xterm.min.js "${STAGE}/"
         cp assets/wasm/vendor/xterm.min.css "${STAGE}/"
         cp build/elf_list.js "${STAGE}/"

@@ -194,8 +194,9 @@ static inline rv_insn_t **block_chain_slot(block_t *source, bool taken)
 #endif
 
 #if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
-/* With T2C active, callers must hold cache_lock when reading or changing
- * shared edge lists. Initialization and teardown after joining T2C are exempt.
+/* Edge lists are owned by the emulator thread alone. The T2C thread signals a
+ * block it can no longer reach through should_free and never touches an edge
+ * itself, so none of this needs cache_lock.
  */
 static inline void block_init_edge_lists(block_t *block)
 {
@@ -244,7 +245,13 @@ static inline void block_link_edge(block_t *source, bool taken, block_t *target)
 
     block_edge_t *edge = taken ? &source->taken_edge : &source->untaken_edge;
     assert(!edge->target);
-    *slot = target->ir_head;
+    /* The T2C thread reads this slot while tracing, and chaining runs on the
+     * emulator thread without cache_lock. Publish it atomically so that read
+     * is not a data race: a tracer sees either no edge or this one, and both
+     * describe a block it may legitimately compile. Relaxed is enough -
+     * nothing downstream of the pointer is published by this store.
+     */
+    ATOMIC_STORE(slot, target->ir_head, ATOMIC_RELAXED);
     edge->target = target;
     list_add(&edge->target_link, &target->incoming_edges);
 }

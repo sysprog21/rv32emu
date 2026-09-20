@@ -1998,7 +1998,9 @@ void rv_profile(riscv_t *rv, char *out_file_path)
 #endif
     fprintf(f, "untaken | taken | IR list | indirect_history\n");
 #if RV32_HAS(T2C)
-    /* Deferred cleanup can remove predecessors while profiling live blocks. */
+    /* The compiler thread publishes block->func and hot2 under this lock;
+     * take it so a report cannot catch a block mid-publication.
+     */
     pthread_mutex_lock(&rv->cache_lock);
 #endif
     cache_profile(rv->block_cache, f, (prof_func_t) profile);

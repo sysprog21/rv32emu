@@ -3037,6 +3037,17 @@ static block_t *block_find_or_translate(riscv_t *rv
     if (replaced_blk->is_compiling) {
         replaced_blk->should_free = true;
 
+#if RV32_HAS(BLOCK_CHAINING)
+        /* Drop the outgoing edges here rather than leaving them for the T2C
+         * thread to reap. The block is already out of the cache and cannot
+         * execute again, and t2c_compile finished walking its IR before it
+         * published is_compiling, so nothing is reading these. Keeping every
+         * edge-list mutation on this thread is what lets the chaining step in
+         * rv_step run without a lock.
+         */
+        block_unlink_outgoing_edges(replaced_blk);
+#endif
+
         /* Clear jit_cache to prevent new executions, but don't dispose engine
          * or free memory yet. T2C thread owns the engine and block memory.
          */
@@ -3304,12 +3315,6 @@ void rv_step(void *arg)
             && prev->satp == rv->csr_satp && !prev->invalidated
 #endif
         ) {
-#if RV32_HAS(T2C)
-            /* Deferred T2C cleanup removes outgoing edges from live targets.
-             * Serialize predecessor-list insertion with that cleanup.
-             */
-            pthread_mutex_lock(&rv->cache_lock);
-#endif
             const rv_insn_t *last_ir = prev->ir_tail;
             /* Chain onto the edge this transition actually took. A
              * page-terminated block and an unconditional direct branch both
@@ -3322,9 +3327,6 @@ void rv_step(void *arg)
                 block_link_edge(prev, is_branch_taken, block);
             else if (insn_is_direct_branch(last_ir->opcode))
                 block_link_edge(prev, true, block);
-#if RV32_HAS(T2C)
-            pthread_mutex_unlock(&rv->cache_lock);
-#endif
         }
 #endif
         last_pc = rv->PC;

@@ -348,14 +348,23 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
          * Branch instruction handlers (jal, beq, etc.) set tk/utk themselves,
          * but non-branch instruction handlers (lw, sw, add, etc.) don't.
          */
-        if (!tk && ir->branch_taken)
+        /* Read each chain pointer once, atomically: the emulator thread
+         * installs edges without holding cache_lock, so a plain load here
+         * would race with it. The block it names is in the cache and cannot
+         * be evicted while this thread holds the lock, so whichever value
+         * arrives is safe to follow.
+         */
+        const rv_insn_t *taken = ATOMIC_LOAD(&ir->branch_taken, ATOMIC_RELAXED);
+        const rv_insn_t *untaken =
+            ATOMIC_LOAD(&ir->branch_untaken, ATOMIC_RELAXED);
+
+        if (!tk && taken)
             tk = *builder;
-        if (!utk && ir->branch_untaken)
+        if (!utk && untaken)
             utk = *builder;
 
-        if (ir->branch_untaken) {
-            /* Cache untaken_pc to avoid race condition with main thread */
-            uint32_t untaken_pc = ir->branch_untaken->pc;
+        if (untaken) {
+            uint32_t untaken_pc = untaken->pc;
             if (set_has(set, untaken_pc)) {
                 LLVMBuildBr(utk, t2c_block_map_search(map, untaken_pc));
             } else {
@@ -377,14 +386,11 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
                 }
             }
         }
-        if (ir->branch_taken) {
-            uint32_t taken_pc = ir->branch_taken->pc;
+        if (taken) {
+            uint32_t taken_pc = taken->pc;
             if (set_has(set, taken_pc)) {
                 LLVMBuildBr(tk, t2c_block_map_search(map, taken_pc));
             } else {
-                /* Use stored taken_pc instead of re-reading
-                 * ir->branch_taken->pc to avoid race condition with main thread
-                 */
                 block_t *blk = cache_get(rv->block_cache, taken_pc, false);
                 if (blk && blk->translatable
 #if RV32_HAS(SYSTEM)
@@ -649,12 +655,6 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         /* Check if block was evicted - if so, free it and its IRs */
         if (block->should_free) {
             /* Free IRs that main thread skipped during deferred eviction */
-#if RV32_HAS(BLOCK_CHAINING)
-        block_unlink_outgoing_edges(block);
-#endif
-#if RV32_HAS(BLOCK_CHAINING)
-            block_unlink_outgoing_edges(block);
-#endif
             for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
                 next_ir = ir->next;
                 free(ir->branch_table);

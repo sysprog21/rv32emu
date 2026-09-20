@@ -286,6 +286,10 @@ struct riscv_internal {
 
     uint64_t timer; /**< strictly increment timer */
 
+#if RV32_HAS(SYSTEM_MMIO)
+    uint64_t last_vnet_refresh;
+#endif
+
 #if RV32_HAS(SYSTEM)
     /* is_trapped must be within 256-byte offset for ARM64 JIT access */
     bool is_trapped;

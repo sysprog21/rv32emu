@@ -91,6 +91,9 @@ static gdb_action_t rv_cont(void *args)
             break;
 
         rv_step_debug(rv);
+#if RV32_HAS(SYSTEM_MMIO)
+        rv_refresh_vnet(rv);
+#endif
     }
 
     /* Clear the interrupt if it's pending */
@@ -105,6 +108,9 @@ static gdb_action_t rv_stepi(void *args)
     assert(rv);
 
     rv_step_debug(rv);
+#if RV32_HAS(SYSTEM_MMIO)
+    rv_refresh_vnet(rv);
+#endif
     return ACT_RESUME;
 }
 

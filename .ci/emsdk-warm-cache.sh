@@ -17,6 +17,6 @@ embuilder build sdl2 sdl2-mt libmimalloc libmimalloc-mt
 WARMUP=$(mktemp -d)
 trap 'rm -rf "${WARMUP}"' EXIT
 echo 'int main(void) { return 0; }' > "${WARMUP}/warmup.c"
-emcc -sSTRICT=0 -sUSE_SDL=2 -sUSE_SDL_MIXER=2 \
+emcc -sSTRICT=0 -sUSE_SDL=2 -sUSE_SDL_MIXER=2 -sUSE_ZLIB=1 \
     -sSDL2_MIXER_FORMATS=wav,mid -sMALLOC=mimalloc -pthread \
     -O2 "${WARMUP}/warmup.c" -o "${WARMUP}/warmup.js"

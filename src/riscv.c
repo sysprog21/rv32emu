@@ -357,7 +357,6 @@ static void rv_destroy_t2c(riscv_t *rv)
 
 #if RV32_HAS(SYSTEM_MMIO)
 
-#if RV32_HAS(LINK_ZLIB)
 /* Helper to check if a file is gzip-compressed by checking its magic number. */
 static bool is_gzip_file(const char *file)
 {
@@ -373,7 +372,6 @@ static bool is_gzip_file(const char *file)
     }
     return false;
 }
-#endif /* RV32_HAS(LINK_ZLIB) */
 
 /* Load or map a file into memory at the specified RAM location.
  * If the file is gzip-compressed, it will be decompressed on-the-fly.
@@ -388,16 +386,25 @@ static off_t map_file(char **ram_loc, const char *name, off_t max_size)
 
     int fd;
     off_t file_size;
+    bool is_gzip_image;
+
+    is_gzip_image = is_gzip_file(name);
+#if !RV32_HAS(LINK_ZLIB)
+    if (is_gzip_image) {
+        rv_log_fatal(
+            "%s is gzipped file and zlib is not linked, fail to map file",
+            name);
+        exit(EXIT_FAILURE);
+    }
+#endif
 
 #if RV32_HAS(LINK_ZLIB)
-    bool is_gzip_image;
     gzFile gzfile = NULL;
     int gzerrno;
     char *gz_err_str = NULL;
     off_t dec_buf_off = 0;
     uint8_t buf[BUFSIZ];
 
-    is_gzip_image = is_gzip_file(name);
     if (is_gzip_image) {
         gzfile = gzopen(name, "rb");
         if (!gzfile)

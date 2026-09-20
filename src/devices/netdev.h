@@ -15,7 +15,8 @@
  *   - user : user-mode SLIRP
  *
  * macOS:
- *   - user : user-mode SLIRP
+ *   - user  : user-mode SLIRP
+ *   - vmnet : Apple vmnet.framework
  *
  * Emscripten:
  *   - virtio-net networking backends are disabled
@@ -32,6 +33,13 @@
 #define RV32EMU_NET_HAS_SLIRP 0
 #endif
 
+#if RV32_HAS(VIRTIO_NET_VMNET) && defined(__APPLE__) && defined(__clang__) && \
+    !defined(__EMSCRIPTEN__)
+#define RV32EMU_NET_HAS_VMNET 1
+#else
+#define RV32EMU_NET_HAS_VMNET 0
+#endif
+
 typedef struct netdev netdev_t;
 
 typedef enum {
@@ -41,6 +49,9 @@ typedef enum {
 #endif
 #if RV32EMU_NET_HAS_SLIRP
     NETDEV_IMPL_USER,
+#endif
+#if RV32EMU_NET_HAS_VMNET
+    NETDEV_IMPL_VMNET,
 #endif
 } netdev_impl_t;
 
@@ -74,6 +85,66 @@ int net_slirp_poll(net_user_options_t *usr);
 int net_slirp_read(net_user_options_t *usr);
 #endif
 
+#if RV32EMU_NET_HAS_VMNET
+
+struct iovec;
+
+typedef struct {
+    /*
+     * Keep Apple-specific types opaque here so the rest of rv32emu does
+     * not need to include vmnet.framework or libdispatch headers.
+     */
+    void *iface; /* interface_ref */
+    void *queue; /* dispatch_queue_t */
+
+    /*
+     * vmnet callbacks are asynchronous. Received Ethernet frames are
+     * forwarded through a datagram socketpair so virtio-net can poll them
+     * without losing packet boundaries.
+     */
+    int rx_fds[2];
+
+    uint8_t mac[6];
+    uint16_t mtu;
+    size_t max_packet_size;
+    bool running;
+} net_vmnet_state_t;
+
+typedef net_vmnet_state_t net_vmnet_options_t;
+
+/*
+ * Keep the three modes implemented by semu.
+ *
+ * The current rv32emu frontend uses only RV32EMU_VMNET_SHARED for
+ * "vnet:vmnet". Host and bridged modes remain available internally for
+ * future frontend support.
+ */
+typedef enum {
+    RV32EMU_VMNET_SHARED = 0,
+    RV32EMU_VMNET_HOST = 1,
+    RV32EMU_VMNET_BRIDGED = 2,
+} rv32emu_vmnet_mode_t;
+
+int net_vmnet_init(netdev_t *netdev,
+                   rv32emu_vmnet_mode_t mode,
+                   const char *iface_name);
+
+ssize_t net_vmnet_read(net_vmnet_state_t *state, uint8_t *buf, size_t len);
+
+ssize_t net_vmnet_write(net_vmnet_state_t *state,
+                        const uint8_t *buf,
+                        size_t len);
+
+ssize_t net_vmnet_writev(net_vmnet_state_t *state,
+                         const struct iovec *iov,
+                         size_t iovcnt);
+
+int net_vmnet_get_fd(net_vmnet_state_t *state);
+
+bool net_vmnet_cleanup(net_vmnet_state_t *state);
+
+#endif
+
 struct netdev {
     const char *name;
     netdev_impl_t type;
@@ -82,4 +153,4 @@ struct netdev {
 
 bool netdev_init(netdev_t *netdev, const char *net_type);
 
-void netdev_delete(netdev_t *netdev);
+bool netdev_delete(netdev_t *netdev);

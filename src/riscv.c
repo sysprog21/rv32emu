@@ -872,8 +872,10 @@ static void rv_fsync_device(void)
 
 #if RV32_HAS(VIRTIO_NET)
     if (attr->vnet) {
-        vnet_delete(attr->vnet);
-        attr->vnet = NULL;
+        if (vnet_delete(attr->vnet))
+            attr->vnet = NULL;
+        else
+            rv_log_error("Failed to clean up virtio-net backend");
     }
 #endif
 }

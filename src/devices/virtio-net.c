@@ -51,6 +51,22 @@ static size_t vnet_min(size_t a, size_t b)
     return a < b ? a : b;
 }
 
+#if RV32EMU_NET_HAS_VMNET
+static size_t vnet_iovec_size(const struct iovec *iovs, size_t niovs)
+{
+    size_t size = 0;
+
+    for (size_t i = 0; i < niovs; i++) {
+        if (iovs[i].iov_len > SIZE_MAX - size)
+            return SIZE_MAX;
+
+        size += iovs[i].iov_len;
+    }
+
+    return size;
+}
+#endif
+
 static void virtio_net_set_fail(virtio_net_state_t *vnet)
 {
     vnet->status |= VIRTIO_STATUS_DEVICE_NEEDS_RESET;
@@ -251,8 +267,11 @@ static ssize_t vnet_handle_read(virtio_net_state_t *vnet,
                                 netdev_t *netdev,
                                 virtio_net_queue_t *queue,
                                 struct iovec *iovs,
-                                size_t niovs)
+                                size_t niovs,
+                                bool *dropped)
 {
+    *dropped = false;
+
     switch (netdev->type) {
 #if RV32EMU_NET_HAS_TAP
     case NETDEV_IMPL_TAP: {
@@ -299,6 +318,71 @@ static ssize_t vnet_handle_read(virtio_net_state_t *vnet,
             return -1;
         }
 
+        return plen;
+    }
+#endif
+
+
+#if RV32EMU_NET_HAS_VMNET
+    case NETDEV_IMPL_VMNET: {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) netdev->op;
+
+        if (!vmnet->max_packet_size) {
+            rv_log_error("virtio-net: invalid vmnet maximum packet size");
+            return -1;
+        }
+
+        uint8_t *buf = malloc(vmnet->max_packet_size);
+
+        if (!buf) {
+            rv_log_error("virtio-net: failed to allocate vmnet RX buffer");
+            return -1;
+        }
+
+        ssize_t plen = net_vmnet_read(vmnet, buf, vmnet->max_packet_size);
+
+        if (plen < 0 && (errno == EWOULDBLOCK || errno == EAGAIN)) {
+            queue->fd_ready = false;
+            free(buf);
+            return -1;
+        }
+
+        if (plen < 0 && errno == EINTR) {
+            free(buf);
+            return -1;
+        }
+
+        if (plen < 0) {
+            rv_log_error(
+                "virtio-net: could not read packet "
+                "from vmnet: %s",
+                strerror(errno));
+
+            free(buf);
+            virtio_net_set_fail(vnet);
+            return -1;
+        }
+
+        if ((size_t) plen > vnet_iovec_size(iovs, niovs)) {
+            rv_log_warn(
+                "virtio-net: dropping vmnet packet larger than "
+                "guest RX buffer");
+
+            free(buf);
+            *dropped = true;
+            return 0;
+        }
+
+        struct iovec *vecs = iovs;
+        size_t nvecs = niovs;
+
+        if (vnet_iovec_write(&vecs, &nvecs, buf, (size_t) plen)) {
+            free(buf);
+            virtio_net_set_fail(vnet);
+            return -1;
+        }
+
+        free(buf);
         return plen;
     }
 #endif
@@ -354,6 +438,32 @@ static vnet_tx_result_t vnet_handle_write(netdev_t *netdev,
 
         rv_log_error("virtio-net: could not write packet to SLIRP: %s",
                      strerror(errno));
+
+        return VNET_TX_DROP;
+    }
+#endif
+
+#if RV32EMU_NET_HAS_VMNET
+    case NETDEV_IMPL_VMNET: {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) netdev->op;
+
+        ssize_t plen = net_vmnet_writev(vmnet, iovs, niovs);
+
+        if (plen >= 0)
+            return VNET_TX_OK;
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            queue->fd_ready = false;
+            return VNET_TX_RETRY;
+        }
+
+        if (errno == EINTR)
+            return VNET_TX_RETRY;
+
+        rv_log_error(
+            "virtio-net: could not write packet "
+            "to vmnet: %s",
+            strerror(errno));
 
         return VNET_TX_DROP;
     }
@@ -457,13 +567,17 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
             return virtio_net_set_fail(vnet);
         }
 
-        ssize_t plen =
-            vnet_handle_read(vnet, &vnet->peer, queue, cursor, ncursor);
-        if (plen <= 0)
+        bool dropped = false;
+        ssize_t plen = vnet_handle_read(vnet, &vnet->peer, queue, cursor,
+                                        ncursor, &dropped);
+
+        if (plen <= 0 && !dropped)
             break;
 
-        if (!vnet_put_used_elem(vnet, queue, new_used, buffer_idx,
-                                (uint32_t) plen + sizeof(virtio_header)))
+        uint32_t used_len =
+            dropped ? 0 : (uint32_t) plen + sizeof(virtio_header);
+
+        if (!vnet_put_used_elem(vnet, queue, new_used, buffer_idx, used_len))
             return;
 
         queue->last_avail++;
@@ -632,6 +746,39 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet)
     }
 #endif
 
+#if RV32EMU_NET_HAS_VMNET
+    case NETDEV_IMPL_VMNET: {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) vnet->peer.op;
+
+        int fd = net_vmnet_get_fd(vmnet);
+
+        struct pollfd pfd = {
+            .fd = fd,
+            .events = POLLIN,
+        };
+
+        poll(&pfd, 1, 0);
+
+        if (pfd.revents & POLLIN) {
+            vnet->queues[VNET_QUEUE_RX].fd_ready = true;
+
+            virtio_net_try_rx(vnet);
+        }
+
+        /*
+         * vmnet_write() does not expose a writable file descriptor.
+         * Treat TX as writable and let net_vmnet_writev() report
+         * VMNET_BUFFER_EXHAUSTED as EAGAIN when the framework cannot
+         * currently accept another packet.
+         */
+        vnet->queues[VNET_QUEUE_TX].fd_ready = true;
+
+        virtio_net_try_tx(vnet);
+
+        break;
+    }
+#endif
+
     default:
         break;
     }
@@ -790,6 +937,23 @@ bool virtio_net_init(virtio_net_state_t *vnet, const char *net_type)
         return false;
     }
 
+#if RV32EMU_NET_HAS_VMNET
+    /*
+     * vmnet.framework assigns a MAC address to the created interface.
+     *
+     * rv32emu advertises VIRTIO_NET_F_MAC, so expose that same address
+     * through the VirtIO configuration instead of keeping the static
+     * default MAC.
+     */
+    if (vnet->peer.type == NETDEV_IMPL_VMNET) {
+        net_vmnet_state_t *vmnet = (net_vmnet_state_t *) vnet->peer.op;
+        virtio_net_config_t *cfg = (virtio_net_config_t *) vnet->priv;
+
+        memcpy(cfg->mac, vmnet->mac, sizeof(cfg->mac));
+        cfg->mtu = vmnet->mtu;
+    }
+#endif
+
     return true;
 }
 
@@ -818,12 +982,21 @@ virtio_net_state_t *vnet_new(void)
     return vnet;
 }
 
-void vnet_delete(virtio_net_state_t *vnet)
+bool vnet_delete(virtio_net_state_t *vnet)
 {
     if (!vnet)
-        return;
+        return true;
 
-    netdev_delete(&vnet->peer);
+    /*
+     * A vmnet interface may still own asynchronous callbacks if its stop
+     * request fails. Keep the enclosing virtio-net state alive until backend
+     * cleanup is confirmed instead of freeing memory that the backend can
+     * still reference.
+     */
+    if (!netdev_delete(&vnet->peer))
+        return false;
+
     free(vnet->priv);
     free(vnet);
+    return true;
 }

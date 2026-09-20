@@ -47,11 +47,24 @@ VIRTIO_NET_USER_BUILD_ENABLED := y
 endif
 endif
 
+# macOS vmnet.framework backend.
+VIRTIO_NET_VMNET_BUILD_ENABLED := n
+ifeq ($(VIRTIO_NET_COMMON_BUILD_ENABLED),y)
+ifeq ($(UNAME_S),Darwin)
+ifeq ($(CC_IS_CLANG),1)
+ifeq ($(call has,VIRTIO_NET_VMNET),1)
+VIRTIO_NET_VMNET_BUILD_ENABLED := y
+endif
+endif
+endif
+endif
+
 # At least one usable backend is required for the virtio-net device.
 VIRTIO_NET_BUILD_ENABLED := n
 ifneq ($(filter y, \
     $(VIRTIO_NET_TAP_BUILD_ENABLED) \
-    $(VIRTIO_NET_USER_BUILD_ENABLED)),)
+    $(VIRTIO_NET_USER_BUILD_ENABLED) \
+    $(VIRTIO_NET_VMNET_BUILD_ENABLED)),)
 VIRTIO_NET_BUILD_ENABLED := y
 endif
 
@@ -59,7 +72,14 @@ endif
 EFFECTIVE_VNET_FEATURES := \
     VIRTIO_NET \
     VIRTIO_NET_TAP \
-    VIRTIO_NET_USER
+    VIRTIO_NET_USER \
+    VIRTIO_NET_VMNET
+
+# macOS vmnet.framework uses Apple Blocks for asynchronous callbacks.
+ifeq ($(VIRTIO_NET_VMNET_BUILD_ENABLED),y)
+$(OUT)/devices/netdev-vmnet.o: CFLAGS += -fblocks
+LDFLAGS += -framework vmnet
+endif
 
 # User-mode networking is provided by minislirp.
 MINISLIRP_DIR := src/minislirp

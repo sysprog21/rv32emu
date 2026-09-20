@@ -12,11 +12,10 @@ set -e -u -o pipefail
 
 MODE=${1:-}
 
-# Note: wasm_defconfig sets CONFIG_BUILD_WASM=y, which auto-selects CC=emcc.
-make wasm_defconfig
-
 case "${MODE}" in
     system)
+        make wasm_system_defconfig
+
         STAGE=/tmp/rv32emu-system-demo
         make ENABLE_SYSTEM=1 ENABLE_GOLDFISH_RTC=1 ${PARALLEL}
         make assets/wasm/vendor/xterm.min.js assets/wasm/vendor/xterm.min.css
@@ -46,6 +45,8 @@ case "${MODE}" in
         cp build/timidity.tar.gz "${STAGE}/"
         ;;
     user)
+        make wasm_defconfig
+
         STAGE=/tmp/rv32emu-demo
         make ${PARALLEL}
         make assets/wasm/vendor/xterm.min.js assets/wasm/vendor/xterm.min.css

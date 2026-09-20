@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include <assert.h>
+
 /* for system-mode reboot */
 #if RV32_HAS(SYSTEM_MMIO)
 #include <setjmp.h>
@@ -119,6 +121,18 @@ typedef struct {
 #define MAX_LAZY_CANDIDATES 8
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
+/* An edge is owned by its source block and linked into the destination block's
+ * incoming_edges list. Keeping the edge with its source means that either
+ * endpoint can remove it without searching the translated-block list.
+ */
+typedef struct {
+    struct list_head target_link;
+    struct block *source;
+    struct block *target;
+} block_edge_t;
+#endif
+
 /* translated basic block */
 typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompassed */
@@ -159,8 +173,114 @@ typedef struct block {
     void *llvm_engine; /**< LLVM execution engine (keeps func memory alive) */
 #endif
     struct list_head list;
+#if RV32_HAS(BLOCK_CHAINING)
+    struct list_head incoming_edges; /**< edges ending at this block */
+    block_edge_t taken_edge, untaken_edge;
+#endif
 #endif
 } block_t;
+
+#if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
+/* With T2C active, callers must hold cache_lock when reading or changing
+ * shared edge lists. Initialization and teardown after joining T2C are exempt.
+ */
+static inline void block_init_edge_lists(block_t *block)
+{
+    INIT_LIST_HEAD(&block->incoming_edges);
+    INIT_LIST_HEAD(&block->taken_edge.target_link);
+    INIT_LIST_HEAD(&block->untaken_edge.target_link);
+    block->taken_edge.source = block;
+    block->untaken_edge.source = block;
+    block->taken_edge.target = NULL;
+    block->untaken_edge.target = NULL;
+}
+
+/* The patch site of an edge always lives on its source block's current tail
+ * instruction. Deriving it on demand rather than pinning it at link time keeps
+ * the edge valid when macro-op fusion shortens an already-chained block and
+ * moves @ir_tail backwards over the instruction that held the link.
+ */
+static inline rv_insn_t **block_edge_slot(const block_edge_t *edge)
+{
+    block_t *source = edge->source;
+    return edge == &source->taken_edge ? &source->ir_tail->branch_taken
+                                       : &source->ir_tail->branch_untaken;
+}
+
+static inline block_edge_t *block_edge_for(block_t *source, rv_insn_t **slot)
+{
+    assert(slot == &source->ir_tail->branch_taken ||
+           slot == &source->ir_tail->branch_untaken);
+    return slot == &source->ir_tail->branch_taken ? &source->taken_edge
+                                                  : &source->untaken_edge;
+}
+
+static inline void block_edge_unlink(block_edge_t *edge)
+{
+    if (!edge->target)
+        return;
+
+    rv_insn_t **slot = block_edge_slot(edge);
+    if (!list_empty(&edge->target_link)) {
+        assert(*slot == edge->target->ir_head);
+        list_del_init(&edge->target_link);
+    }
+    *slot = NULL;
+    edge->target = NULL;
+}
+
+static inline void block_link_edge(block_t *source,
+                                   rv_insn_t **slot,
+                                   block_t *target)
+{
+    block_edge_t *edge = block_edge_for(source, slot);
+
+    if (*slot == target->ir_head)
+        return;
+    block_edge_unlink(edge);
+    *slot = target->ir_head;
+    edge->target = target;
+    list_add(&edge->target_link, &target->incoming_edges);
+}
+
+static inline void block_unlink_outgoing_edges(block_t *block)
+{
+    block_edge_unlink(&block->taken_edge);
+    block_edge_unlink(&block->untaken_edge);
+}
+
+static inline void block_unlink_incoming_edges(block_t *block)
+{
+    while (!list_empty(&block->incoming_edges)) {
+        block_edge_t *edge =
+            list_first_entry(&block->incoming_edges, block_edge_t, target_link);
+        if (edge->source == block)
+            list_del_init(&edge->target_link);
+        else
+            block_edge_unlink(edge);
+    }
+}
+
+static inline void block_unlink_edges(block_t *block)
+{
+    block_unlink_outgoing_edges(block);
+    block_unlink_incoming_edges(block);
+}
+
+static inline uint32_t block_incoming_edge_count(const block_t *block)
+{
+    uint32_t count = 0;
+    const struct list_head *edge;
+
+    /* list_for_each_entry splits on __typeof__ and drops const, so walk the
+     * nodes directly: the count never needs the containing edge.
+     */
+    for (edge = block->incoming_edges.next; edge != &block->incoming_edges;
+         edge = edge->next)
+        count++;
+    return count;
+}
+#endif
 
 /* T2C implies JIT (enforced by Kconfig and feature.h) */
 #if RV32_HAS(T2C)

@@ -168,6 +168,23 @@ typedef struct {
     rv_hash_key_t table[SET_SIZE][SET_SLOTS_SIZE];
 } set_t;
 
+/* Best-effort visited-PC tracking, owned by the emulator thread. Initialize
+ * to zero before first use. Unlike compilation sets, this is reset on every
+ * interpreted dispatch, so stale buckets are discarded by generation.
+ */
+typedef struct {
+    rv_hash_key_t table[SET_SIZE][SET_SLOTS_SIZE];
+    uint32_t bucket_epoch[SET_SIZE];
+    uint32_t epoch;
+    uint8_t count[SET_SIZE];
+} loop_tracker_t;
+
+void loop_tracker_reset(loop_tracker_t *tracker);
+/* True only for a previously observed key in this generation. A full bucket
+ * leaves new keys untracked rather than claiming a nonexistent loop.
+ */
+bool loop_tracker_seen(loop_tracker_t *tracker, rv_hash_key_t key);
+
 /**
  * set_reset - clear a set
  * @set: a pointer points to target set

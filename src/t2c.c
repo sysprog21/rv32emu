@@ -649,6 +649,9 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         /* Check if block was evicted - if so, free it and its IRs */
         if (block->should_free) {
             /* Free IRs that main thread skipped during deferred eviction */
+#if RV32_HAS(BLOCK_CHAINING)
+            block_unlink_outgoing_edges(block);
+#endif
             for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
                 next_ir = ir->next;
                 free(ir->branch_table);
@@ -671,6 +674,9 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
         /* Dispose engine (we own it) */
         LLVMDisposeExecutionEngine(engine);
         /* Free IRs that main thread skipped during deferred eviction */
+#if RV32_HAS(BLOCK_CHAINING)
+        block_unlink_outgoing_edges(block);
+#endif
         for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
             next_ir = ir->next;
             free(ir->branch_table);

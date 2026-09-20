@@ -65,7 +65,7 @@ struct host_reg {
                        block */
 };
 
-struct jit_state *jit_state_init(size_t size);
+struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);
 bool jit_translate(riscv_t *rv, block_t *block);
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);

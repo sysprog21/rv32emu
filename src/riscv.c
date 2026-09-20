@@ -815,7 +815,6 @@ static void capture_keyboard_input(void)
  * Memory must be freed at runtime. block_map_clear() requires a RISC-V instance
  * and runs in interpreter mode. Instead of modifying its signature, access the
  * global RISC-V instance in main.c with external linkage.
- *
  */
 extern riscv_t *rv;
 static void rv_async_block_clear(void)
@@ -1313,6 +1312,9 @@ static void block_list_clear(riscv_t *rv)
 {
     block_t *entry, *safe;
     list_for_each_entry_safe (entry, safe, &rv->block_list, list) {
+#if RV32_HAS(BLOCK_CHAINING)
+        block_unlink_edges(entry);
+#endif
         list_del(&entry->list);
         free_block_branch_tables(entry);
 
@@ -1343,8 +1345,7 @@ void rv_delete(riscv_t *rv)
 #if RV32_HAS(T2C)
     rv_destroy_t2c(rv);
 #endif
-    /* Free branch tables for all remaining blocks before freeing cache */
-    clear_cache_hot(rv->block_cache, free_block_branch_tables);
+    block_list_clear(rv);
     jit_state_exit(rv->jit_state);
     cache_free(rv->block_cache);
     mpool_destroy(rv->block_ir_mp);
@@ -1445,7 +1446,8 @@ static bool rv_init_jit(riscv_t *rv)
     /* Init the block list empty for first boot and reboot */
     INIT_LIST_HEAD(&rv->block_list);
 
-    rv->jit_state = jit_state_init(CODE_CACHE_SIZE);
+    rv->jit_state =
+        jit_state_init(CODE_CACHE_SIZE, (uintptr_t) PRIV(rv)->mem->mem_base);
     if (!rv->jit_state) {
         rv_log_fatal("Failed to initialize JIT state");
         return false;
@@ -1547,7 +1549,6 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
      * rv_remap_stdstream() can be called to overwrite them
      *
      * The logging stdout stream will be remapped as well
-     *
      */
     if (!attr->fd_map) { /* check for reboot */
         attr->fd_map = map_init(int, FILE *, map_cmp_int);
@@ -1923,6 +1924,10 @@ static void profile(block_t *block, uint32_t freq, FILE *output_file)
     fprintf(output_file, " %-10u|", freq);
     fprintf(output_file, " %-5s |", block->hot ? "true" : "false");
     fprintf(output_file, " %-6s |", block->has_loops ? "true" : "false");
+    fprintf(output_file, " %-12u|", block->n_invoke);
+#if RV32_HAS(BLOCK_CHAINING)
+    fprintf(output_file, " %-12u|", block_incoming_edge_count(block));
+#endif
     rv_insn_t *taken = block->ir_tail->branch_taken,
               *untaken = block->ir_tail->branch_untaken;
     if (untaken)
@@ -1942,6 +1947,19 @@ static void profile(block_t *block, uint32_t freq, FILE *output_file)
         ir = ir->next;
         fprintf(output_file, " - ");
     }
+    fprintf(output_file, " | ");
+    const branch_history_table_t *bt = block->ir_tail->branch_table;
+    if (bt) {
+        for (int i = 0; i < HISTORY_SIZE; i++) {
+            if (!bt->times[i])
+                continue;
+            fprintf(output_file, "%#x", bt->PC[i]);
+#if RV32_HAS(SYSTEM)
+            fprintf(output_file, "@%#x", bt->satp[i]);
+#endif
+            fprintf(output_file, ":%u ", bt->times[i]);
+        }
+    }
     fprintf(output_file, "\n");
 }
 #endif
@@ -1958,10 +1976,34 @@ void rv_profile(riscv_t *rv, char *out_file_path)
         return;
     }
 #if RV32_HAS(JIT)
+    fprintf(f, "# frequency counts cache accesses, not block executions.\n");
     fprintf(f,
-            "PC start |PC end  | frequency |  hot  | loop  | untaken | taken | "
-            "IR list \n");
+            "# t1_reentries counts dispatcher entries to already-hot T1 "
+            "code; initial compilation entries and internal chains are "
+            "excluded.\n");
+    fprintf(f,
+            "# indirect_history lists interpreter-observed PC:count "
+            "(PC@SATP:count in system mode), not compiled executions.\n");
+#if RV32_HAS(T2C)
+    fprintf(f,
+            "# T1 indirect guards are disabled in tiered builds, so "
+            "indirect_history feeds no compiled guard.\n");
+#endif
+    fprintf(f,
+            "PC start |PC end  | frequency |  hot  | loop  | "
+            "t1_reentries | ");
+#if RV32_HAS(BLOCK_CHAINING)
+    fprintf(f, "predecessors | ");
+#endif
+    fprintf(f, "untaken | taken | IR list | indirect_history\n");
+#if RV32_HAS(T2C)
+    /* Deferred cleanup can remove predecessors while profiling live blocks. */
+    pthread_mutex_lock(&rv->cache_lock);
+#endif
     cache_profile(rv->block_cache, f, (prof_func_t) profile);
+#if RV32_HAS(T2C)
+    pthread_mutex_unlock(&rv->cache_lock);
+#endif
 #else
     fprintf(f, "PC start |PC end  | untaken | taken  | IR list \n");
     block_map_t *map = &rv->block_map;

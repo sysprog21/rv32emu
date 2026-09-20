@@ -177,6 +177,34 @@ char *sanitize_path(const char *input)
 
 HASH_FUNC_IMPL(set_hash, SET_SIZE_BITS, 1 << SET_SIZE_BITS);
 
+void loop_tracker_reset(loop_tracker_t *tracker)
+{
+    if (++tracker->epoch == 0) {
+        /* Epoch zero is reserved after wrap: no old bucket may match. */
+        memset(tracker->bucket_epoch, 0, sizeof(tracker->bucket_epoch));
+        tracker->epoch = 1;
+    }
+}
+
+bool loop_tracker_seen(loop_tracker_t *tracker, rv_hash_key_t key)
+{
+    const uint32_t index = set_hash(key);
+    if (tracker->bucket_epoch[index] != tracker->epoch) {
+        tracker->bucket_epoch[index] = tracker->epoch;
+        tracker->count[index] = 0;
+    }
+    uint8_t count = tracker->count[index];
+    for (uint8_t i = 0; i < count; i++) {
+        if (tracker->table[index][i] == key)
+            return true;
+    }
+    if (count < SET_SLOTS_SIZE) {
+        tracker->table[index][count] = key;
+        tracker->count[index] = count + 1;
+    }
+    return false;
+}
+
 void set_reset(set_t *set)
 {
     memset(set, 0, sizeof(set_t));

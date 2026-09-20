@@ -216,29 +216,42 @@ fail_cache:
     return NULL;
 }
 
-void *cache_get(const cache_t *cache, uint32_t key, bool update)
+/* Locate the live entry for @key, or NULL on a miss.
+ *
+ * cache_put keeps at most one entry per key, reviving a ghost rather than
+ * adding a second, so the first key match is the only candidate. Every lookup
+ * shares one hash computation and one bucket walk.
+ */
+static cache_entry_t *cache_find(const cache_t *cache, uint32_t key)
 {
     if (unlikely(!cache->capacity))
         return NULL;
 
-    if (hlist_empty(&cache->map.ht_list_head[cache_hash(key)]))
+    const uint32_t hash = cache_hash(key);
+    if (hlist_empty(&cache->map.ht_list_head[hash]))
         return NULL;
 
     cache_entry_t *entry = NULL;
 #ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list)
+    hlist_for_each_entry (entry, &cache->map.ht_list_head[hash], ht_list)
 #else
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list, cache_entry_t)
+    hlist_for_each_entry (entry, &cache->map.ht_list_head[hash], ht_list,
+                          cache_entry_t)
 #endif
     {
         if (entry->key == key)
             break;
     }
 
-    /* return NULL if cache miss */
     if (!entry || entry->key != key || !entry->alive)
+        return NULL;
+    return entry;
+}
+
+void *cache_get(const cache_t *cache, uint32_t key, bool update)
+{
+    cache_entry_t *entry = cache_find(cache, key);
+    if (!entry)
         return NULL;
 
     /*
@@ -342,6 +355,10 @@ void *cache_put(cache_t *cache, uint32_t key, void *value)
             list_add(&replaced->list, &cache->list);
             cache->size++;
             cache->ghost_list_size--;
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
+            if (replaced_value)
+                page_index_insert(cache, (block_t *) replaced_value);
+#endif
         }
         return NULL;
     }
@@ -418,51 +435,27 @@ void cache_free(cache_t *cache)
 
 uint32_t cache_freq(const struct cache *cache, uint32_t key)
 {
-    if (unlikely(!cache->capacity))
-        return 0;
-
-    if (hlist_empty(&cache->map.ht_list_head[cache_hash(key)]))
-        return 0;
-
-    cache_entry_t *entry = NULL;
-#ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list)
-#else
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list, cache_entry_t)
-#endif
-    {
-        if (entry->key == key && entry->alive)
-            return entry->freq;
-    }
-    return 0;
+    const cache_entry_t *entry = cache_find(cache, key);
+    return entry ? entry->freq : 0;
 }
 
 #if RV32_HAS(JIT)
-bool cache_hot(const struct cache *cache, uint32_t key)
+cache_lookup_t cache_get_with_freq(const cache_t *cache,
+                                   uint32_t key,
+                                   bool update)
 {
-    if (unlikely(!cache->capacity))
-        return false;
+    cache_lookup_t result = {0};
+    cache_entry_t *entry = cache_find(cache, key);
+    if (!entry)
+        return result;
 
-    if (hlist_empty(&cache->map.ht_list_head[cache_hash(key)]))
-        return false;
-
-    cache_entry_t *entry = NULL;
-#ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list)
-#else
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list, cache_entry_t)
-#endif
-    {
-        if (entry->key == key && entry->alive && entry->freq >= THRESHOLD) {
-            return true;
-        }
-    }
-    return false;
+    if (update)
+        entry->freq++;
+    result.value = entry->value;
+    result.freq = entry->freq;
+    return result;
 }
+
 void cache_profile(const struct cache *cache,
                    FILE *output_file,
                    prof_func_t func)

@@ -21,6 +21,51 @@ static int expect_decode(uint32_t insn, bool expected, uint16_t opcode)
 
 int main(void)
 {
+#if RV32_HAS(JIT)
+    branch_history_table_t bt = {0};
+    /* Keep both observed targets inside the table: a direct-mapped index is
+     * taken from PC bits, so pc and pc + 4 must not straddle the wrap.
+     */
+    const uint32_t pc = 0x1000;
+    const uint32_t idx = (pc >> 2) & (HISTORY_SIZE - 1);
+    const uint32_t next_idx = ((pc + 4) >> 2) & (HISTORY_SIZE - 1);
+    uint32_t satp = 1;
+    if (next_idx != idx + 1) {
+        fprintf(stderr, "BHT test PC must not wrap the history table\n");
+        return 1;
+    }
+    for (unsigned i = 0; i < 512; i++)
+        bht_record_target(&bt, pc, satp);
+    if (bt.PC[idx] != pc || bt.times[idx] != 512) {
+        fprintf(stderr, "BHT warm-up hits must accumulate\n");
+        return 1;
+    }
+    for (unsigned i = 0; i < 7; i++)
+        bht_record_target(&bt, pc + 4, satp);
+    if (bt.times[idx] != 512 || bt.times[next_idx] != 7) {
+        fprintf(stderr, "BHT targets must keep independent counts\n");
+        return 1;
+    }
+    bht_record_target(&bt, pc + 4 * HISTORY_SIZE, satp);
+    if (bt.PC[idx] != pc + 4 * HISTORY_SIZE || bt.times[idx] != 1) {
+        fprintf(stderr, "BHT collision must replace the old observation\n");
+        return 1;
+    }
+#if RV32_HAS(SYSTEM)
+    satp = 2;
+    bht_record_target(&bt, pc + 4 * HISTORY_SIZE, satp);
+    if (bt.satp[idx] != satp || bt.times[idx] != 1) {
+        fprintf(stderr, "BHT context change must reset the count\n");
+        return 1;
+    }
+#endif
+    bt.times[idx] = UINT32_MAX;
+    bht_record_target(&bt, bt.PC[idx], satp);
+    if (bt.times[idx] != UINT32_MAX) {
+        fprintf(stderr, "BHT counts must not wrap\n");
+        return 1;
+    }
+#endif
     /* SLLI accepts funct7=0 only.  Test both a normal destination and x0,
      * which must not bypass encoding validation as a NOP. */
     if (expect_decode(0x00109093, true, rv_insn_slli) ||

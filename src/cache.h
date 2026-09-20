@@ -49,13 +49,18 @@ void *cache_put(struct cache *cache, uint32_t key, void *value);
 void cache_free(struct cache *cache);
 
 #if RV32_HAS(JIT)
-/**
- * cache_hot - check whether the frequency of the cache entry exceeds the
- * threshold or not
- * @cache: a pointer points to target cache
- * @key: the key of the specified entry
+typedef struct {
+    void *value;
+    uint32_t freq;
+} cache_lookup_t;
+
+/* cache_get_with_freq - retrieve an entry and its post-update frequency with
+ * one hash lookup. The two fields are returned in registers on supported JIT
+ * targets, avoiding a second probe or caller-owned output storage.
  */
-bool cache_hot(const struct cache *cache, uint32_t key);
+cache_lookup_t cache_get_with_freq(const struct cache *cache,
+                                   uint32_t key,
+                                   bool update);
 
 typedef void (*prof_func_t)(void *, uint32_t, FILE *);
 void cache_profile(const struct cache *cache,

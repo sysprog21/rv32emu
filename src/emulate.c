@@ -231,6 +231,20 @@ static inline void check_tohost_write(riscv_t *rv,
  * @compress: compressed instruction or not
  * @IO: whether the misaligned handler is for load/store or insn.
  */
+/* LR.W and SC.W have no misaligned form: the A extension requires a
+ * naturally aligned address, and the option that relaxes ordinary loads and
+ * stores must not relax them, or a reservation could be armed on an address
+ * that spans two words.
+ */
+#define RV_EXC_ALIGNED_ONLY_HANDLER(mask, type)                    \
+    if (unlikely(addr & (mask))) {                                 \
+        rv->compressed = false;                                    \
+        rv->csr_cycle = cycle;                                     \
+        rv->PC = PC;                                               \
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, type##_MISALIGNED, addr); \
+        return false;                                              \
+    }
+
 #define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)              \
     IIF(IO)(if (!PRIV(rv)->allow_misalign && unlikely(addr & (mask_or_pc))), \
             if (unlikely(insn_is_misaligned(PC))))                           \

@@ -329,6 +329,18 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 #define MEM_WRITE_B(rv, addr, val) (rv)->io.mem_write_b(rv, addr, val)
 #endif
 
+/* True when the access just performed raised a trap.
+ *
+ * In system mode a faulting translation does not unwind: it records the trap
+ * and returns, and the RVOP wrapper only inspects the flag once the body has
+ * run.  Anything in the body that must not happen on a fault has to ask.
+ */
+#if RV32_HAS(SYSTEM)
+#define MEM_ACCESS_FAULTED() unlikely(need_handle_signal)
+#else
+#define MEM_ACCESS_FAULTED() false
+#endif
+
 /* LB: Load Byte */
 RVOP(lb, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
@@ -576,6 +588,10 @@ RVOP(mret, {
  */
 RVOP(sfencevma, {
     PC += 4;
+    /* The reservation records a virtual address, so a mapping change could
+     * otherwise leave it pointing at a different physical word.
+     */
+    RV_RESERVE_CLEAR(rv);
 #if RV32_HAS(SYSTEM)
     if (ir->rs1 == 0) {
         /* Global flush: invalidate all TLB entries */
@@ -839,27 +855,54 @@ RVOP(remu, {
 /* LR.W: Load Reserved */
 RVOP(lrw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    if (ir->rd)
-        rv->X[ir->rd] = MEM_READ_W(rv, addr);
-    /* skip registration of the 'reservation set'
-     * FIXME: unimplemented
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, LOAD);
+    /* The load is performed even when rd is x0, because it still faults on
+     * an inaccessible address and still has the side effects of an MMIO
+     * read; only writing the result back is conditional.
      */
+    const uint32_t value = MEM_READ_W(rv, addr);
+    /* Nothing is committed when the access faulted.  The trap has already
+     * been taken and the instruction will be retried from sepc, so writing
+     * the fault's placeholder into rd would corrupt the retry whenever rd
+     * and rs1 are the same register, and re-arming the reservation would
+     * undo the clearing the trap just did.
+     */
+    if (!MEM_ACCESS_FAULTED()) {
+        if (ir->rd)
+            rv->X[ir->rd] = value;
+        RV_RESERVE_SET(rv, addr);
+    }
 })
 
 /* SC.W: Store Conditional */
 RVOP(scw, {
-    /* assume the 'reservation set' is valid
-     * FIXME: unimplemented
-     */
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
-    const uint32_t value = rv->X[ir->rs2];
-    MEM_WRITE_W(rv, addr, value);
-    rv->X[ir->rd] = 0;
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
+    /* A reservation is consumed whether or not it matches, so that a
+     * failing SC.W cannot be retried against a stale one.
+     */
+    const bool reserved = RV_RESERVE_MATCHES(rv, addr);
+    RV_RESERVE_CLEAR(rv);
+    if (!reserved) {
+        /* Nonzero means failure, and the store does not happen.  rd is
+         * checked because x0 must stay zero.
+         */
+        if (ir->rd)
+            rv->X[ir->rd] = 1;
+    } else {
+        const uint32_t value = rv->X[ir->rs2];
+        MEM_WRITE_W(rv, addr, value);
+        /* A faulting store reports nothing: the trap is taken and the
+         * instruction is retried, so rd must not be told it succeeded.
+         */
+        if (!MEM_ACCESS_FAULTED()) {
+            if (ir->rd)
+                rv->X[ir->rd] = 0;
 #if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, value);
+            check_tohost_write(rv, addr, value);
 #endif
+        }
+    }
 })
 
 /* AMOSWAP.W: Atomic Swap */

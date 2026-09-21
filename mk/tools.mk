@@ -49,14 +49,14 @@ build-linux-image: $(LINUX_IMAGE_SRC)
 # Code Formatting (tool detection deferred to recipe)
 # Uses find -print0 | xargs -0 for safe handling of paths with special characters
 format:
-	$(Q)CLANG_FORMAT=$$(which clang-format-20 2>/dev/null); \
+	$(Q)CLANG_FORMAT=$$(which $(CLANG_FORMAT) 2>/dev/null); \
 	SHFMT=$$(which shfmt 2>/dev/null); \
 	DTSFMT=$$(which dtsfmt 2>/dev/null); \
 	BLACK=$$(which black 2>/dev/null); \
 	NODE=$$(which node 2>/dev/null); \
 	NPX=$$(which npx 2>/dev/null); \
 	PRETTIER=$$(npx --no-install prettier --version 2>/dev/null); \
-	if [ -z "$$CLANG_FORMAT" ]; then echo "clang-format-20 not found."; exit 1; fi && \
+	if [ -z "$$CLANG_FORMAT" ]; then echo "$(CLANG_FORMAT) not found."; exit 1; fi && \
 	if [ -z "$$SHFMT" ]; then echo "shfmt not found."; exit 1; fi && \
 	if [ -z "$$DTSFMT" ]; then echo "dtsfmt not found."; exit 1; fi && \
 	if [ -z "$$BLACK" ]; then echo "black not found."; exit 1; fi && \

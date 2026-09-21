@@ -208,6 +208,18 @@ run-test-$(1): $$($(1)_TEST_OUT)
 	)
 endef
 
+# The clang-format the project pins, shared by the format target, the
+# decoder generation rule and the decoder freshness check.  Reading
+# .ci/llvm-version keeps this from silently drifting after an LLVM bump,
+# which is the same reason .ci/check-format.sh reads it.
+#
+# The version is read with ":=" right here: $(MAKEFILE_LIST) keeps growing
+# as later makefiles and the generated .o.d files are included, so a
+# deferred expansion would resolve the path against $(OUT) instead of this
+# directory.
+CLANG_FORMAT_VERSION := $(shell cat $(dir $(lastword $(MAKEFILE_LIST)))../.ci/llvm-version)
+CLANG_FORMAT ?= clang-format-$(CLANG_FORMAT_VERSION)
+
 # Feature Extension Templates
 
 # Set feature flags for extensions

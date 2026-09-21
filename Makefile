@@ -296,6 +296,40 @@ $(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
 		rm -f $@.tmp; \
 	fi
 
+# Auto-generate decoder from ISA descriptor.
+#
+# src/decode.c is a tracked source file, so it is generated into a
+# temporary and moved into place only once both the generator and the
+# formatter have succeeded: a failed run must never leave a truncated
+# src/decode.c behind with a fresh timestamp.  The style file is named
+# explicitly, because clang-format otherwise searches upward from the
+# temporary, and a temporary outside the tree would silently be
+# formatted in clang-format's built-in style instead.
+#
+# Formatting is skipped when the pinned clang-format is unavailable,
+# rather than failing the build; "make format" and the CI format check
+# remain the enforcement points.  A clang-format that is present but
+# fails is a different matter: that must abort rather than install an
+# unformatted file.
+#
+# $(1): output path
+define gen-decoder
+	$(Q)python3 $(DECODER_GEN) $(DECODER_DESC) > $(1).tmp || \
+		{ rm -f $(1).tmp; exit 1; }
+	$(Q)if command -v $(CLANG_FORMAT) >/dev/null; then \
+		$(CLANG_FORMAT) --style=file:$(CURDIR)/.clang-format -i $(1).tmp \
+			|| { rm -f $(1).tmp; exit 1; }; \
+	fi
+	$(Q)mv $(1).tmp $(1)
+endef
+
+DECODER_DESC := src/instructions.in
+DECODER_GEN := scripts/gen-decoder.py
+
+src/decode.c: $(DECODER_DESC) $(DECODER_GEN)
+	$(VECHO) "  GEN\t$@\n"
+	$(call gen-decoder,$@)
+
 $(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(Q)mkdir -p $(dir $@)
 	$(VECHO) "  CC\t$@\n"

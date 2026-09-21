@@ -67,9 +67,12 @@ error_msg = $(PRINTF) "$(RED)$(strip $1)$(NC)\n"
 # cleanconfig belongs here for the same reason as clean and distclean: it
 # deletes .config, so demanding one first is backwards, and it made a fresh
 # clone unable to run it at all.
+# check-decoder reads only the descriptor and the generator scripts, so it
+# is listed here to keep it from pulling in .config (and with it the
+# Kconfiglib clone) just to verify the committed decoder.
 CONFIG_TARGETS := config menuconfig defconfig oldconfig savedefconfig \
                   clean cleanconfig distclean env-check artifact \
-                  fetch-checksum build-linux-image
+                  fetch-checksum build-linux-image check-decoder
 
 # Targets where we can skip expensive dependency detection (pkg-config, llvm-config, etc.)
 # This speeds up 'make clean', etc. significantly

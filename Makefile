@@ -325,10 +325,29 @@ endef
 
 DECODER_DESC := src/instructions.in
 DECODER_GEN := scripts/gen-decoder.py
+DECODER_VERIFY := scripts/verify-tree.py
 
 src/decode.c: $(DECODER_DESC) $(DECODER_GEN)
 	$(VECHO) "  GEN\t$@\n"
 	$(call gen-decoder,$@)
+
+# Verify that the committed decoder matches what the descriptor generates,
+# so src/decode.c and src/instructions.in cannot drift apart.  Note this
+# only reports drift before a build: a plain "make" regenerates the file
+# in place, after which it trivially matches.  CI runs it on a fresh
+# checkout, which is where it does its job.
+.PHONY: check-decoder
+check-decoder: $(DECODER_DESC) $(DECODER_GEN) $(DECODER_VERIFY) | $(OUT)
+	$(Q)python3 $(DECODER_VERIFY) $(DECODER_DESC)
+	$(Q)command -v $(CLANG_FORMAT) >/dev/null || \
+		{ echo "$(CLANG_FORMAT) not found."; exit 1; }
+	$(call gen-decoder,$(OUT)/decode.gen.c)
+	$(Q)if ! diff -u src/decode.c $(OUT)/decode.gen.c; then \
+		echo "src/decode.c is stale; re-run make to regenerate it."; \
+		exit 1; \
+	fi
+	$(Q)rm -f $(OUT)/decode.gen.c
+	$(VECHO) "  DECODER\tup to date\n"
 
 $(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(Q)mkdir -p $(dir $@)

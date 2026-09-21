@@ -442,6 +442,13 @@ jobs:
       run: |
             .ci/check-newline.sh
             .ci/check-format.sh
+    # src/decode.c is generated from src/instructions.in but committed, so
+    # the two can drift apart.  Regenerate and diff against the tree; this
+    # job already has the pinned clang-format installed.  check-decoder
+    # reads only the descriptor and the scripts, so it needs no .config
+    # and does not pull in the Kconfiglib clone.
+    - name: decoder matches ISA descriptor
+      run: make check-decoder
 
   static-analysis:
     needs: [detect-code-related-file-changes]

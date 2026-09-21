@@ -336,8 +336,12 @@ the number of lines parsed, so a line can never be silently dropped.
 
 ```bash
 # Check that every instruction in instructions.in is reachable in the
-# decision tree:
-python3 scripts/verify-tree.py src/instructions.in
+# decision tree, and that the committed src/decode.c matches what the
+# descriptor generates (this is what CI runs):
+make defconfig && make check-decoder
+
+# Reserved-encoding and illegal-instruction regression tests:
+make run-test-decode
 
 # Rebuild and run basic tests:
 make clean && make defconfig && make
@@ -359,4 +363,8 @@ format check remain the enforcement points.
 
 `src/decode.c` is committed to the repository so that a checkout can be
 built without a clang-format dependency, and so that decoder changes are
-reviewable as a diff.
+reviewable as a diff. Because it is both generated and committed, the
+two can drift apart, so `make check-decoder` regenerates it and diffs
+the result against the tree; CI runs that target in the `coding-style`
+job. Note it only reports drift on a fresh checkout: a plain `make`
+regenerates the file in place, after which it trivially matches.

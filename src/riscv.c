@@ -1028,6 +1028,9 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     /* Reset timer */
     rv->timer = 0;
 
+    /* A reboot must not leave a reservation armed from before the reset. */
+    RV_RESERVE_CLEAR(rv);
+
     /* Reset privilege mode */
 #if RV32_HAS(SYSTEM)
     /*

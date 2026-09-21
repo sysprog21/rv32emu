@@ -181,6 +181,35 @@ enum {
 #define RV_PRIV_M_MODE 3
 #define RV_PRIV_IS_U_OR_S_MODE() (rv->priv_mode <= RV_PRIV_S_MODE)
 
+/* LR/SC reservation set.
+ *
+ * One naturally aligned word, held by the single hart.  RV_RESERVE_CLEAR is
+ * also invoked from the trap path, so that a reservation cannot outlive the
+ * task that took it.  With EXT_A disabled these collapse to nothing, and the
+ * fields do not exist.
+ *
+ * Stores are deliberately not hooked: the ISA only requires a reservation to
+ * be broken by a write from another hart or a device, and rv32emu runs a
+ * single hart, so a same-hart store may leave it intact.  Failing an SC.W
+ * more often is always permitted, but paying for a check on every store
+ * would buy no correctness here.
+ */
+#if RV32_HAS(EXT_A)
+#define RV_RESERVE_SET(rv, addr) \
+    do {                         \
+        (rv)->lr_valid = true;   \
+        (rv)->lr_addr = (addr);  \
+    } while (0)
+#define RV_RESERVE_CLEAR(rv)    \
+    do {                        \
+        (rv)->lr_valid = false; \
+    } while (0)
+#define RV_RESERVE_MATCHES(rv, addr) ((rv)->lr_valid && (rv)->lr_addr == (addr))
+#else
+#define RV_RESERVE_SET(rv, addr) ((void) 0)
+#define RV_RESERVE_CLEAR(rv) ((void) 0)
+#endif /* RV32_HAS(EXT_A) */
+
 #define RV_MVENDORID 0x12345678
 #define RV_MARCHID ((1ULL << 31) | 1)
 #define RV_MIMPID 1
@@ -228,6 +257,8 @@ enum TRAP_CODE {
          * FIXME: ECALL_U cannot be trap directly to __trap_handler            \
          */                                                                    \
         IIF(RV32_HAS(SYSTEM))(if (cause != ECALL_U) rv->is_trapped = true;, ); \
+        /* A trap may switch tasks, so no reservation may survive it. */       \
+        RV_RESERVE_CLEAR(rv);                                                  \
         if (RV_PRIV_IS_U_OR_S_MODE()) {                                        \
             rv->csr_scause = cause;                                            \
             rv->csr_stval = tval;                                              \

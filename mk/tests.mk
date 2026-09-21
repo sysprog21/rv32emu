@@ -81,6 +81,7 @@ EXPECTED_fcalc = Performed 12 tests, 0 failures, 100% success rate.
 EXPECTED_pi = 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067982148086
 EXPECTED_fused-misalign = fused misalign passed
 EXPECTED_block-eviction = block eviction OK
+EXPECTED_lrsc = LR/SC reservation OK
 EXPECTED_jit-alu-alias = JIT ALU aliases OK
 EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
@@ -129,10 +130,16 @@ GUEST_ASM_WORKS := $(call guest-asm-arch-works,rv32i)
 GUEST_ASM_M_WORKS := $(call guest-asm-arch-works,rv32im)
 GUEST_ASM_C_WORKS := $(call guest-asm-arch-works,rv32ic)
 GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
+GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
 
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
+# LR/SC runs in the interpreter under every configuration, since the pair is
+# marked untranslatable, so this needs only the A extension.
+ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-lrsc
+endif
 # The jit-* programs assert tier-1 code generation, so they prove nothing when
 # the emulator under test has no JIT. Report them as skipped rather than
 # passing them through the interpreter and reporting green.
@@ -214,6 +221,7 @@ check-jit-memory-address: $(BIN) tests/jit-memory-address.S | $(OUT)
 	    test "$$output" = "JIT memory address OK" || exit 1; \
 	done
 
+$(eval $(call guest-asm-check-target,lrsc,rv32ia))
 $(eval $(call guest-asm-check-target,jit-alu-alias,rv32i))
 # Guard emission additionally requires JIT_INDIRECT_TARGETS, which is off in
 # tiered builds; the program still covers history recording and chaining.

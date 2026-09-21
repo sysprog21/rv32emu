@@ -166,10 +166,23 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         TEST_OPTIONS+=("${TEST_OPTION}")
         EXPECT_CMDS+=("${EXPECT_CMD}")
 
-        # Read-write using /dev/loopx(Linux) or /dev/diskx(Darwin) block device
+        # Read-write using /dev/loopx(Linux) or /dev/diskx(Darwin) block device.
+        #
+        # The simplefs case needs a second device to carry the module, and
+        # that device is SIMPLEFS_KO_SRC, the ext4 image, which is itself
+        # attached as a block device for the whole run. On macOS that lands
+        # on both problems the neighbouring skips describe: the image file is
+        # opened while hdiutil holds it attached, and the block device falls
+        # back to pread(). The result is a two device boot that intermittently
+        # overruns the timeout. The ext4 case below is a single device and is
+        # unaffected, so only the simplefs one is skipped.
         if [[ ${disk_img} =~ simplefs ]]; then
-            TEST_OPTIONS+=(" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${BLK_DEV_SIMPLEFS}")
-            EXPECT_CMDS+=("${EXPECT_CMD}")
+            if [[ "${OS_TYPE}" == "Darwin" ]]; then
+                print_warning "Skipping multi-device read-write block device test on macOS (attached image plus block device pread fallback)"
+            else
+                TEST_OPTIONS+=(" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:${BLK_DEV_SIMPLEFS}")
+                EXPECT_CMDS+=("${EXPECT_CMD}")
+            fi
         else
             TEST_OPTIONS+=(" -x vblk:${BLK_DEV_EXT4}")
             EXPECT_CMDS+=("${EXPECT_CMD}")

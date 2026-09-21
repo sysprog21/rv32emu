@@ -506,6 +506,22 @@ struct riscv_internal {
     uint32_t priv_mode; /* U-mode or S-mode or M-mode */
 
     bool compressed; /**< current instruction is compressed or not */
+
+#if RV32_HAS(EXT_A)
+    /* LR/SC reservation set.
+     *
+     * LR.W registers the naturally aligned word it loaded; SC.W stores only
+     * if that reservation is still valid and covers the same address.  The
+     * spec lets an implementation invalidate a reservation for its own
+     * reasons, so the set is kept deliberately small (one word, one hart):
+     * it is armed by LR.W and cleared by SC.W and by any trap or interrupt.
+     * Clearing on traps is what stops a reservation from surviving a context
+     * switch, which would otherwise let an SC.W succeed against an LR.W
+     * performed by a different task.
+     */
+    bool lr_valid;    /**< a reservation is currently held */
+    uint32_t lr_addr; /**< address reserved by the last LR.W */
+#endif
 #if !RV32_HAS(JIT)
     block_map_t block_map; /**< basic block map (fallback on L1 miss) */
 #else

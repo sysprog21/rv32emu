@@ -109,5 +109,88 @@ int main(void)
         return 1;
 #endif
 
+    /* Reserved and unallocated encodings must stay illegal.  Each case
+     * below is a code point the generated decoder has to reject; they are
+     * grouped by the rule in the ISA manual that makes them reserved. */
+
+    /* SYSTEM: only the allocated funct3 values and imm code points exist,
+     * and ECALL/EBREAK/MRET require rd and rs1 to be zero. */
+    if (expect_decode(0x00000073, true, rv_insn_ecall) ||
+        expect_decode(0x00100073, true, rv_insn_ebreak) ||
+        expect_decode(0x00004073, false, 0) ||
+        expect_decode(0x10014073, false, 0) ||
+        expect_decode(0x000e0e73, false, 0) ||
+        expect_decode(0x00200073, false, 0) ||
+        expect_decode(0x20200073, false, 0))
+        return 1;
+
+#if RV32_HAS(Zicsr)
+    /* A CSR instruction naming a read-only CSR (csr >= 0xc00) is illegal
+     * unless rs1 is x0.  That exemption is exact for CSRRS/CSRRC, which
+     * skip the write when the source is x0; CSRRW always writes, so
+     * 0xc0001073 below is accepted more permissively than the ISA
+     * requires.  The decoder has behaved this way since before the
+     * generator, and narrowing it is a separate change -- this asserts
+     * the current rule so that a decoder rewrite cannot silently drop
+     * the read-only check altogether, which is what regressed here. */
+    if (expect_decode(0xc00110f3, false, 0) ||
+        expect_decode(0xc0001073, true, rv_insn_csrrw) ||
+        expect_decode(0x30011073, true, rv_insn_csrrw))
+        return 1;
+#endif
+
+    /* FENCE has no register fields: bits 24..20 are pred/succ, not rs2, so
+     * the RV32E register-range check must not reject a full-barrier fence. */
+    if (expect_decode(0x0ff0000f, true, rv_insn_fence) ||
+        expect_decode(0x0330000f, true, rv_insn_fence))
+        return 1;
+
+#if RV32_HAS(EXT_C)
+    /* RVC code points that the spec reserves.  The all-zero word is the
+     * canonical illegal instruction and must never decode. */
+    if (expect_decode(0x00000000, false, 0) || /* c.addi4spn nzuimm=0 */
+        expect_decode(0x00006101, false, 0) || /* c.addi16sp nzimm=0 */
+        expect_decode(0x00006081, false, 0) || /* c.lui rd=x1, nzimm=0 */
+        expect_decode(0x00008002, false, 0))   /* c.jr rs1=x0 */
+        return 1;
+
+    /* On RV32 shamt[5] (bit 12) is reserved for every compressed shift;
+     * accepting it would make the interpreter shift a uint32_t by >= 32. */
+    if (expect_decode(0x00001082, false, 0) || /* c.slli shamt=32 */
+        expect_decode(0x00009001, false, 0) || /* c.srli shamt=32 */
+        expect_decode(0x00009401, false, 0))   /* c.srai shamt=32 */
+        return 1;
+
+    /* The valid neighbours of those code points still decode, including
+     * c.lui with rd=x0, which is a HINT rather than a reserved encoding. */
+    if (expect_decode(0x00000082, true, rv_insn_cslli) ||
+        expect_decode(0x00008082, true, rv_insn_cjr) ||
+        expect_decode(0x00006001, true, rv_insn_cnop))
+        return 1;
+#endif
+
+#if RV32_HAS(EXT_V)
+    /* RVV fields the spec fixes to one value: vadc/vsbc carry a mask so
+     * vm must be 0, while vmv.x.s / vmv.s.x are unmasked so vm must be 1
+     * (and vmv.s.x reserves vs2). */
+    if (expect_decode(0x42000057, false, 0) ||
+        expect_decode(0x40000057, true, rv_insn_vadc_vvm) ||
+        expect_decode(0x4a000057, false, 0) ||
+        expect_decode(0x48000057, true, rv_insn_vsbc_vvm) ||
+        expect_decode(0x40002057, false, 0) ||
+        expect_decode(0x42002057, true, rv_insn_vmv_x_s) ||
+        expect_decode(0x40006057, false, 0) ||
+        expect_decode(0x42006057, true, rv_insn_vmv_s_x) ||
+        expect_decode(0x41f86dd7, false, 0))
+        return 1;
+
+    /* Whole-register stores are EEW=8 and unmasked only.  Without those
+     * two fixed fields their pattern would also swallow scalar fsw. */
+    if (expect_decode(0x02800027, true, rv_insn_vs1r_v) ||
+        expect_decode(0x00800027, false, 0) ||
+        expect_decode(0x0080a027, true, rv_insn_fsw))
+        return 1;
+#endif
+
     return 0;
 }

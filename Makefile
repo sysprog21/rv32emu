@@ -296,6 +296,59 @@ $(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
 		rm -f $@.tmp; \
 	fi
 
+# Auto-generate decoder from ISA descriptor.
+#
+# src/decode.c is a tracked source file, so it is generated into a
+# temporary and moved into place only once both the generator and the
+# formatter have succeeded: a failed run must never leave a truncated
+# src/decode.c behind with a fresh timestamp.  The style file is named
+# explicitly, because clang-format otherwise searches upward from the
+# temporary, and a temporary outside the tree would silently be
+# formatted in clang-format's built-in style instead.
+#
+# Formatting is skipped when the pinned clang-format is unavailable,
+# rather than failing the build; "make format" and the CI format check
+# remain the enforcement points.  A clang-format that is present but
+# fails is a different matter: that must abort rather than install an
+# unformatted file.
+#
+# $(1): output path
+define gen-decoder
+	$(Q)python3 $(DECODER_GEN) $(DECODER_DESC) > $(1).tmp || \
+		{ rm -f $(1).tmp; exit 1; }
+	$(Q)if command -v $(CLANG_FORMAT) >/dev/null; then \
+		$(CLANG_FORMAT) --style=file:$(CURDIR)/.clang-format -i $(1).tmp \
+			|| { rm -f $(1).tmp; exit 1; }; \
+	fi
+	$(Q)mv $(1).tmp $(1)
+endef
+
+DECODER_DESC := src/instructions.in
+DECODER_GEN := scripts/gen-decoder.py
+DECODER_VERIFY := scripts/verify-tree.py
+
+src/decode.c: $(DECODER_DESC) $(DECODER_GEN)
+	$(VECHO) "  GEN\t$@\n"
+	$(call gen-decoder,$@)
+
+# Verify that the committed decoder matches what the descriptor generates,
+# so src/decode.c and src/instructions.in cannot drift apart.  Note this
+# only reports drift before a build: a plain "make" regenerates the file
+# in place, after which it trivially matches.  CI runs it on a fresh
+# checkout, which is where it does its job.
+.PHONY: check-decoder
+check-decoder: $(DECODER_DESC) $(DECODER_GEN) $(DECODER_VERIFY) | $(OUT)
+	$(Q)python3 $(DECODER_VERIFY) $(DECODER_DESC)
+	$(Q)command -v $(CLANG_FORMAT) >/dev/null || \
+		{ echo "$(CLANG_FORMAT) not found."; exit 1; }
+	$(call gen-decoder,$(OUT)/decode.gen.c)
+	$(Q)if ! diff -u src/decode.c $(OUT)/decode.gen.c; then \
+		echo "src/decode.c is stale; re-run make to regenerate it."; \
+		exit 1; \
+	fi
+	$(Q)rm -f $(OUT)/decode.gen.c
+	$(VECHO) "  DECODER\tup to date\n"
+
 $(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(Q)mkdir -p $(dir $@)
 	$(VECHO) "  CC\t$@\n"

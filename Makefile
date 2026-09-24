@@ -72,7 +72,7 @@ deps :=
 # Feature Flags (Kconfig -> RV32_FEATURE_*)
 $(call set-features, ELF_LOADER MOP_FUSION BLOCK_CHAINING LOG_COLOR)
 $(call set-features, SYSTEM GOLDFISH_RTC ARCH_TEST)
-$(call set-features, VIRTIO_NET VIRTIO_NET_TAP VIRTIO_NET_USER VIRTIO_NET_VMNET)
+$(call set-features, VIRTIO_NET VIRTIO_NET_TAP VIRTIO_NET_USER VIRTIO_NET_VMNET VIRTIO_SND)
 $(call set-features, EXT_M EXT_A EXT_F EXT_C EXT_V RV32E)
 $(call set-features, Zicsr Zifencei Zba Zbb Zbc Zbs)
 $(call set-features, SDL SDL_MIXER GDBSTUB JIT LINK_ZLIB ROOTFS_EXT4)
@@ -219,7 +219,7 @@ ifeq ($(CONFIG_JIT),y)
             $(error JIT only supports x86_64 and ARM64 platforms.)
         endif
     endif
-$(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER)
+$(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 # T2C optimization level from Kconfig (0-3, default 3)
@@ -239,6 +239,9 @@ include mk/http.mk
 
 # VirtIO networking
 include mk/virtio-net.mk
+
+# VirtIO sound
+include mk/virtio-snd.mk
 
 # External Dependencies & System Emulation
 include mk/external.mk
@@ -265,7 +268,7 @@ deps += $(OBJS:%.o=%.o.d)
 EFFECTIVE_CONFIG_VARS := \
 	CONFIG_BUILD_WASM CONFIG_SYSTEM CONFIG_GOLDFISH_RTC CONFIG_ELF_LOADER \
 	CONFIG_VIRTIO_NET CONFIG_VIRTIO_NET_TAP CONFIG_VIRTIO_NET_USER \
-	CONFIG_VIRTIO_NET_VMNET \
+	CONFIG_VIRTIO_NET_VMNET CONFIG_VIRTIO_SND CONFIG_HAVE_PORTAUDIO \
 	CONFIG_EXT_M CONFIG_EXT_A CONFIG_EXT_F CONFIG_EXT_C CONFIG_EXT_V CONFIG_RV32E \
 	CONFIG_Zicsr CONFIG_Zifencei CONFIG_Zba CONFIG_Zbb CONFIG_Zbc CONFIG_Zbs \
 	CONFIG_MOP_FUSION CONFIG_BLOCK_CHAINING CONFIG_LOG_COLOR CONFIG_ARCH_TEST \

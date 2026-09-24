@@ -432,6 +432,10 @@ struct riscv_internal {
     uint64_t last_vnet_refresh;
 #endif
 
+#if RV32_HAS(VIRTIO_SND)
+    uint64_t last_vsnd_refresh;
+#endif
+
 #if RV32_HAS(SYSTEM)
     /* Nesting depth of the traps being handled by __trap_handler(). Raising
      * a trap increments it and sret decrements it, so the sret of a nested

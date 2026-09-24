@@ -81,6 +81,15 @@ DEV_OBJS := $(filter-out $(DEV_OUT)/netdev-vmnet.o, $(DEV_OBJS))
 endif
 endif
 
+# VirtIO sound is available only for native kernel system emulation.
+ifneq ($(SYSTEM_MMIO),1)
+DEV_OBJS := $(filter-out $(DEV_OUT)/virtio-snd.o, $(DEV_OBJS))
+else ifeq ($(CC_IS_EMCC),1)
+DEV_OBJS := $(filter-out $(DEV_OUT)/virtio-snd.o, $(DEV_OBJS))
+else ifneq ($(CONFIG_VIRTIO_SND),y)
+DEV_OBJS := $(filter-out $(DEV_OUT)/virtio-snd.o, $(DEV_OBJS))
+endif
+
 # Enable Goldfish RTC peripheral
 ifneq ($(CONFIG_GOLDFISH_RTC),y)
 DEV_OBJS := $(filter-out $(DEV_OUT)/rtc.o, $(DEV_OBJS))

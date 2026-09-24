@@ -88,6 +88,7 @@ button that switches directly to the other.
 | Prebuilt binaries | [docs/prebuilt.md](docs/prebuilt.md) |
 | Base image preparation | [docs/base-image.md](docs/base-image.md) |
 | Networking guidance | [docs/networking.md](docs/networking.md) |
+| Sound guidance | [docs/sound.md](docs/sound.md) |
 
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.

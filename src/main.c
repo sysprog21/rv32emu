@@ -71,10 +71,13 @@ static char *opt_bootargs;
 static char *opt_virtio_blk_img[VBLK_DEV_MAX];
 static int opt_virtio_blk_idx = 0;
 
-/* enable virtio-rng device */
+/* enable virtio-rng, virtio-net, virtio-snd device */
 static bool opt_virtio_rng = false;
 #if RV32_HAS(VIRTIO_NET)
 static char *opt_virtio_net_backend;
+#endif
+#if RV32_HAS(VIRTIO_SND)
+static bool opt_virtio_snd = false;
 #endif
 #endif
 
@@ -121,6 +124,9 @@ static void reset_runtime_options(void)
 #if RV32_HAS(VIRTIO_NET)
     opt_virtio_net_backend = NULL;
 #endif
+#if RV32_HAS(VIRTIO_SND)
+    opt_virtio_snd = false;
+#endif
 #endif
 
     reset_getopt_state();
@@ -147,6 +153,9 @@ static void print_usage(const char *filename)
         "(default read and write). This option may be specified "
         "multiple times for multiple block devices\n"
         "  -x vrng : enable virtio-rng device\n"
+#if RV32_HAS(VIRTIO_SND)
+        "  -x vsnd : enable virtio-snd device\n"
+#endif
 #if RV32_HAS(VIRTIO_NET)
         "  -x vnet:<backend>: use <backend> as virtio-net backend "
         "interface (supported backend:"
@@ -255,6 +264,10 @@ static bool parse_args(int argc, char **args)
 #endif
             } else if (!strcmp("vrng", optarg)) {
                 opt_virtio_rng = true;
+#if RV32_HAS(VIRTIO_SND)
+            } else if (!strcmp("vsnd", optarg)) {
+                opt_virtio_snd = true;
+#endif
             } else {
                 return false;
             }
@@ -470,6 +483,9 @@ int main(int argc, char **args)
     attr.data.system.vrng_enabled = opt_virtio_rng;
 #if RV32_HAS(VIRTIO_NET)
     attr.data.system.vnet_backend = opt_virtio_net_backend;
+#endif
+#if RV32_HAS(VIRTIO_SND)
+    attr.data.system.vsnd_enabled = opt_virtio_snd;
 #endif
     if (opt_virtio_blk_idx) {
         attr.data.system.vblk_device = opt_virtio_blk_img;

@@ -81,6 +81,11 @@ DEV_OBJS := $(filter-out $(DEV_OUT)/netdev-vmnet.o, $(DEV_OBJS))
 endif
 endif
 
+# VirtIO sound is optional.
+ifneq ($(VIRTIO_SND_BUILD_ENABLED),y)
+DEV_OBJS := $(filter-out $(DEV_OUT)/virtio-snd.o, $(DEV_OBJS))
+endif
+
 # Enable Goldfish RTC peripheral
 ifneq ($(CONFIG_GOLDFISH_RTC),y)
 DEV_OBJS := $(filter-out $(DEV_OUT)/rtc.o, $(DEV_OBJS))

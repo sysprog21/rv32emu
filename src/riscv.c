@@ -57,6 +57,12 @@
 #define VNET_REFRESH_INTERVAL 5000ULL
 #endif
 
+#if RV32_HAS(VIRTIO_SND)
+#define VSND_REFRESH_INTERVAL 5000ULL
+static void rv_destroy_vsnd(vm_attr_t *attr);
+static bool rv_init_vsnd(vm_attr_t *attr);
+#endif
+
 #if !RV32_HAS(JIT)
 /* initialize the block map */
 static void block_map_init(block_map_t *map, const uint8_t bits)
@@ -555,11 +561,14 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
     char *bootargs = attr->data.system.bootargs;
     char **vblk = attr->data.system.vblk_device;
     bool vrng_enabled = attr->data.system.vrng_enabled;
+    bool have_optional_virtio = vblk || vrng_enabled;
 #if RV32_HAS(VIRTIO_NET)
     char *vnet = attr->data.system.vnet_backend;
-    bool have_optional_virtio = vblk || vrng_enabled || vnet;
-#else
-    bool have_optional_virtio = vblk || vrng_enabled;
+    have_optional_virtio = have_optional_virtio || vnet;
+#endif
+#if RV32_HAS(VIRTIO_SND)
+    bool vsnd_enabled = attr->data.system.vsnd_enabled;
+    have_optional_virtio = have_optional_virtio || vsnd_enabled;
 #endif
     char *blob = *ram_loc;
     char *buf;
@@ -755,6 +764,41 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             DTB_SET_OR_FAIL(
                 fdt_setprop(dtb_buf, subnode, "interrupts", &irq, sizeof(irq)),
                 "virtio-net interrupts");
+            dev_idx++;
+        }
+#endif
+#if RV32_HAS(VIRTIO_SND)
+        if (vsnd_enabled) {
+            uint32_t new_addr = next_addr + dev_idx * addr_offset;
+            uint32_t new_irq = next_irq + dev_idx;
+
+            attr->vsnd_mmio_base_hi = new_addr >> 20;
+            attr->vsnd_irq = new_irq;
+
+            char node_name[32];
+            snprintf(node_name, sizeof(node_name), "virtio@%x", new_addr);
+
+            int subnode = fdt_add_subnode(dtb_buf, node, node_name);
+            if (subnode == -FDT_ERR_NOSPACE)
+                rv_log_warn("add virtio-snd subnode no space!\n");
+            assert(subnode >= 0);
+
+            DTB_SET_OR_FAIL(fdt_setprop_string(dtb_buf, subnode, "compatible",
+                                               "virtio,mmio"),
+                            "virtio-snd compatible");
+
+            uint32_t reg[2] = {
+                cpu_to_fdt32(new_addr),
+                cpu_to_fdt32(size),
+            };
+            DTB_SET_OR_FAIL(
+                fdt_setprop(dtb_buf, subnode, "reg", reg, sizeof(reg)),
+                "virtio-snd reg");
+
+            uint32_t irq = cpu_to_fdt32(new_irq);
+            DTB_SET_OR_FAIL(
+                fdt_setprop(dtb_buf, subnode, "interrupts", &irq, sizeof(irq)),
+                "virtio-snd interrupts");
         }
 #endif
     }
@@ -884,6 +928,9 @@ static void rv_fsync_device(void)
             rv_log_error("Failed to clean up virtio-net backend");
     }
 #endif
+#if RV32_HAS(VIRTIO_SND)
+    rv_destroy_vsnd(attr);
+#endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
@@ -970,6 +1017,29 @@ void rv_refresh_vnet(riscv_t *rv)
 }
 #endif
 
+#if RV32_HAS(VIRTIO_SND)
+void rv_refresh_vsnd(riscv_t *rv)
+{
+    assert(rv);
+
+    vm_attr_t *attr = PRIV(rv);
+
+    if (!attr->vsnd)
+        return;
+
+    if (rv->csr_cycle - rv->last_vsnd_refresh < VSND_REFRESH_INTERVAL)
+        return;
+
+    /*
+     * PCM TX completion is asynchronous. The completion thread updates the
+     * VirtIO interrupt status, while the emulator thread propagates that state
+     * to the PLIC periodically.
+     */
+    emu_update_vsnd_interrupts(rv);
+    rv->last_vsnd_refresh = rv->csr_cycle;
+}
+#endif
+
 void rv_run(riscv_t *rv)
 {
     assert(rv);
@@ -993,6 +1063,9 @@ void rv_run(riscv_t *rv)
 
 #if RV32_HAS(VIRTIO_NET)
             rv_refresh_vnet(rv);
+#endif
+#if RV32_HAS(VIRTIO_SND)
+            rv_refresh_vsnd(rv);
 #endif
         }
 #endif
@@ -1152,6 +1225,10 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 
 #if RV32_HAS(VIRTIO_NET)
     rv->last_vnet_refresh = rv->csr_cycle;
+#endif
+
+#if RV32_HAS(VIRTIO_SND)
+    rv->last_vsnd_refresh = rv->csr_cycle;
 #endif
 
     /* Set the reset address */
@@ -1341,6 +1418,15 @@ void rv_delete(riscv_t *rv)
 {
     assert(rv);
     vm_attr_t *attr = PRIV(rv);
+
+#if RV32_HAS(VIRTIO_SND)
+    /*
+     * Sound workers may still access VirtIO descriptors in guest RAM.
+     * Destroy the device before releasing guest memory.
+     */
+    rv_destroy_vsnd(attr);
+#endif
+
 #if !RV32_HAS(JIT)
     map_delete(attr->fd_map);
     memory_delete(attr->mem);
@@ -1427,6 +1513,47 @@ static void load_boot_images(vm_attr_t *attr)
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
+#if RV32_HAS(VIRTIO_SND)
+static void rv_destroy_vsnd(vm_attr_t *attr)
+{
+    if (!attr->vsnd)
+        return;
+
+    /*
+     * virtio-snd owns worker threads which may still access guest queue
+     * descriptors and PCM status in RAM. They must be stopped before guest
+     * memory is cleared or released.
+     */
+    vsnd_delete(attr->vsnd);
+    attr->vsnd = NULL;
+}
+
+static bool rv_init_vsnd(vm_attr_t *attr)
+{
+    if (!attr->data.system.vsnd_enabled)
+        return true;
+
+    if (attr->vsnd) {
+        attr->vsnd->ram = (uint32_t *) attr->mem->mem_base;
+        return true;
+    }
+
+    attr->vsnd = vsnd_new();
+    if (!attr->vsnd)
+        return false;
+
+    attr->vsnd->ram = (uint32_t *) attr->mem->mem_base;
+
+    if (!virtio_snd_init(attr->vsnd)) {
+        vsnd_delete(attr->vsnd);
+        attr->vsnd = NULL;
+        return false;
+    }
+
+    return true;
+}
+#endif
+
 #if RV32_HAS(JIT)
 /* Initialize or reinitialize JIT state.
  * Cleans up existing state if present (reboot case).
@@ -1504,6 +1631,21 @@ void rv_warm_reboot(riscv_t *rv, riscv_word_t pc)
     }
 #endif
 
+#if RV32_HAS(VIRTIO_SND)
+    if (attr->vsnd) {
+        /*
+         * Reset guest-visible VirtIO sound state while preserving the host
+         * backend and worker threads across a warm reboot.
+         */
+        virtio_snd_reset(attr->vsnd);
+
+        uint32_t irq_bit = IRQ_VSND_BIT(attr->vsnd_irq);
+        attr->plic->active &= ~irq_bit;
+        attr->plic->ip &= ~irq_bit;
+        attr->plic->masked &= ~irq_bit;
+    }
+#endif
+
     /* clear memory */
     memory_fill(attr->mem, 0, attr->mem->mem_size, 0);
 
@@ -1534,6 +1676,16 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
 {
     assert(rv);
     vm_attr_t *attr = PRIV(rv);
+
+#if RV32_HAS(VIRTIO_SND)
+    /*
+     * A reboot invalidates all guest-owned VirtIO state. Reset the device
+     * before clearing guest memory so outstanding requests can be retired
+     * while their descriptors are still accessible.
+     */
+    if (attr->vsnd)
+        virtio_snd_reset(attr->vsnd);
+#endif
 
     /* Initialize memory */
     if (attr->mem) /* check for reboot */
@@ -1657,6 +1809,11 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     attr->vrng = NULL;
     attr->vrng_mmio_base_hi = 0;
     attr->vrng_irq = 0;
+
+#if RV32_HAS(VIRTIO_SND)
+    attr->vsnd_mmio_base_hi = 0;
+    attr->vsnd_irq = 0;
+#endif
 
     /* Load kernel, DTB, and initrd */
     load_boot_images(attr);
@@ -1835,6 +1992,13 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     }
 #endif
 
+#if RV32_HAS(VIRTIO_SND)
+    if (!rv_init_vsnd(attr)) {
+        rv_log_error("Failed to initialize virtio-snd");
+        exit(EXIT_FAILURE);
+    }
+#endif
+
     capture_keyboard_input();
 #endif /* !RV32_HAS(SYSTEM_MMIO) */
 
@@ -1903,6 +2067,11 @@ fail_mpool:
     if (attr->vnet)
         vnet_delete(attr->vnet);
 #endif
+
+#if RV32_HAS(VIRTIO_SND)
+    rv_destroy_vsnd(attr);
+#endif
+
 #endif
     map_delete(attr->fd_map);
     memory_delete(attr->mem);

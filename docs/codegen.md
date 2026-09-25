@@ -94,6 +94,11 @@ Each handler translates the RISC-V instruction semantics into LLVM IR using the 
 LLVM then applies its optimization passes and register allocation,
 producing native code that typically outperforms Tier-1 for hot paths.
 
+An indirect jump in Tier-2 code, such as a function return, calls the target's
+compiled function directly when it finds it in the jit-cache, and otherwise
+returns to the dispatcher. `jit_cache_slot()` in `src/jit.h` defines the slot
+for both the C code that fills the cache and the IR that probes it.
+
 Tier-2 compilation requires LLVM 18-21 (LLVM 20+ is the validated default
 exercised by CI on macOS arm64 and Ubuntu 24.04 x86-64). The Makefile
 auto-detects `llvm-config` in `$PATH` (preferring the newest supported

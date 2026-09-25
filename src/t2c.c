@@ -827,12 +827,10 @@ void t2c_dispose_block_engine(void *block)
 
 void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry)
 {
-    /* XOR high 32 bits (satp) with low 32 bits (pc) before masking.
-     * This distributes entries from different address spaces across the table,
-     * reducing cache thrashing when multiple processes share virtual addresses.
+    /* The key packs satp above pc. Mixing satp into the slot spreads entries
+     * from different address spaces across the table.
      */
-    uint32_t pos =
-        ((uint32_t) key ^ (uint32_t) (key >> 32)) & (N_JIT_CACHE_ENTRIES - 1);
+    uint32_t pos = jit_cache_slot((uint32_t) key, (uint32_t) (key >> 32));
 
     /* Seqlock write pattern:
      * 1. Increment seq to odd (signals write in progress)

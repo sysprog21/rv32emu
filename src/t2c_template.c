@@ -193,7 +193,7 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
         ic_miss_builder, LLVMPointerType(t2c_jit_cache_struct_type, 0),
         jit_cache_ptr, "");
 
-    /* Compute jit_cache index */
+    /* Compute jit_cache index; must match jit_cache_slot() */
     LLVMValueRef addr_high = LLVMBuildLShr(
         ic_miss_builder, addr, LLVMConstInt(LLVMInt32Type(), 12, false), "");
     LLVMValueRef addr_mixed =

@@ -93,6 +93,17 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
  */
 #define N_JIT_CACHE_ENTRIES (1 << 12)
 
+/* Slot of the jit-cache entry for pc in address space satp (0 outside system
+ * mode). t2c_jit_cache_helper() computes the same index in LLVM IR for the
+ * lookup in generated code, so the two must change together: an entry stored
+ * under any other index is never found, and every indirect jump falls back to
+ * the dispatcher.
+ */
+static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
+{
+    return (pc ^ (pc >> 12) ^ satp) & (N_JIT_CACHE_ENTRIES - 1);
+}
+
 /* Inline cache for fast-path indirect jump resolution.
  * Stores the most recently used (target, entry) pair per call site.
  * Hit rate is typically >90% for stable branch patterns (returns, vtables).

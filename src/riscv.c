@@ -1043,7 +1043,7 @@ void rv_run(riscv_t *rv)
     vm_attr_t *attr = PRIV(rv);
     assert(attr &&
 #if RV32_HAS(SYSTEM_MMIO)
-           attr->data.system.kernel && attr->data.system.initrd
+           attr->data.system.kernel
 #else
            attr->data.user.elf_program
 #endif

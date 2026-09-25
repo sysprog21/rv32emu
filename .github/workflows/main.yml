@@ -325,6 +325,7 @@ jobs:
     - name: boot Linux kernel test (T2C)
       env:
         BOOT_TIMEOUT: 120  # T2C with O1 optimization (via defconfig) is faster than O3
+        BOOT_ATTEMPTS_DEFAULT: 2
       run: |
             # A stale object would mask a failed LLVM detection below.
             rm -f build/t2c.o

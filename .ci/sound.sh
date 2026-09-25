@@ -31,7 +31,9 @@ RUN_LINUX="build/rv32emu ${OPTS_BASE} -x vsnd"
 
 printf "${COLOR_Y}===== Test option: ${OPTS_BASE} -x vsnd =====${COLOR_N}\n"
 
-ASSERT expect <<- DONE
+run_sound_case()
+{
+    expect <<- DONE
 	set timeout ${TIMEOUT}
 
 	spawn ${RUN_LINUX}
@@ -137,10 +139,19 @@ ASSERT expect <<- DONE
 	send "\x01"
 	send "x"
 DONE
+}
+
+BOOT_ATTEMPTS=$(
+    normalize_test_attempts "${BOOT_ATTEMPTS_DEFAULT:-1}" 1
+)
+
+run_test_with_retry \
+    "Virtio-snd Test" \
+    "${BOOT_ATTEMPTS}" \
+    run_sound_case
 
 ret=$?
 RET=$((${RET} + ${ret}))
-cleanup
 
 printf "\nVirtio-snd Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
 

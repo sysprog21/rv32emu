@@ -88,23 +88,38 @@ EXPECT_CMDS+=('
     expect "# " { send "\x01"; send "x" } timeout { exit 3 }
 ')
 
-for i in "${!TEST_OPTIONS[@]}"; do
-    printf "${COLOR_Y}===== Test option: ${TEST_OPTIONS[$i]} =====${COLOR_N}\n"
+BOOT_ATTEMPTS=$(
+    normalize_test_attempts "${BOOT_ATTEMPTS_DEFAULT:-1}" 1
+)
 
-    RUN_LINUX="build/rv32emu ${TEST_OPTIONS[$i]}"
-
-    ASSERT expect <<- DONE
+run_rtc_case()
+{
+    expect <<- DONE
 	set host_utc_year ${HOST_UTC_YEAR}
 	set year1 ${YEAR1}
 	set year2 ${YEAR2}
 	set timeout ${TIMEOUT}
 	spawn ${RUN_LINUX}
 	${EXPECT_CMDS[$i]}
-	DONE
+DONE
+}
+
+for i in "${!TEST_OPTIONS[@]}"; do
+    printf "${COLOR_Y}===== Test option: ${TEST_OPTIONS[$i]} =====${COLOR_N}\n"
+
+    RUN_LINUX="build/rv32emu ${TEST_OPTIONS[$i]}"
+
+    run_test_with_retry \
+        "RTC boot test" \
+        "${BOOT_ATTEMPTS}" \
+        run_rtc_case
 
     ret=$?
     RET=$((${RET} + ${ret}))
-    cleanup
+
+    if [ "${ret}" -ne 0 ]; then
+        exit "${ret}"
+    fi
 
     printf "\nBoot Linux Test with RTC: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
 done

@@ -65,11 +65,30 @@ ASSERT()
     fi
 }
 
-# Kill rv32emu processes - use in test cleanup
+# Print the executable of process $1: /proc on Linux, lsof on macOS.
+process_executable()
+{
+    if [ -r "/proc/$1/exe" ]; then
+        # A binary rebuilt while the process runs reads as "... (deleted)".
+        readlink "/proc/$1/exe" | sed 's/ (deleted)$//'
+    else
+        lsof -a -p "$1" -d txt -Fn 2> /dev/null | sed -n 's/^n//p' | head -n 1
+    fi
+}
+
+# Kill the emulators started from this checkout - use in test cleanup. Other
+# rv32emu processes on the host, such as another checkout's tests or benchmarks,
+# are left alone.
 cleanup_emulator()
 {
     sleep 1
-    pkill -9 rv32emu 2> /dev/null || true
+    local emu pid
+    emu="$(cd "$(dirname "${BASH_SOURCE[0]}")/../build" 2> /dev/null && pwd -P)/rv32emu"
+    for pid in $(pgrep -x rv32emu 2> /dev/null); do
+        if [ "$(process_executable "${pid}")" = "${emu}" ]; then
+            kill -9 "${pid}" 2> /dev/null || true
+        fi
+    done
 }
 
 # Cleanup function registry

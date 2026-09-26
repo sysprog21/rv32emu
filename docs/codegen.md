@@ -94,8 +94,24 @@ Each handler translates the RISC-V instruction semantics into LLVM IR using the 
 LLVM then applies its optimization passes and register allocation,
 producing native code that typically outperforms Tier-1 for hot paths.
 
-An indirect jump in Tier-2 code, such as a function return, calls the target's
-compiled function directly when it finds it in the jit-cache, and otherwise
+Tier-2 compiles a region: the hot block plus the blocks its branches lead to,
+traced through `t2c_trace_ebb()`. Within a region:
+
+- Guest registers live in local variables that LLVM keeps in host registers.
+  `t2c_promote_guest_regs()` fills them from `rv->X` on entry, writes back the
+  ones the region changes before any call or return, and refills them after a
+  call that comes back, since callees and the dispatcher read and write
+  `rv->X`. A function that reaches `rv->X` any other way is left unpromoted.
+- An indirect jump, such as a function return, whose branch history shows one
+  target at least 90% of the time is compared against that target, and the
+  region continues there. This lets a loop that calls and returns through
+  several functions compile as one loop. Prediction is off in system mode,
+  where timer interrupts are taken only between regions.
+- After `T2C_REGION_BUDGET` traced instructions, successors are no longer
+  traced; the region jumps to their compiled code instead.
+
+An indirect jump that leaves the region calls the target's compiled function
+as a guaranteed tail call when it finds it in the jit-cache, and otherwise
 returns to the dispatcher. `jit_cache_slot()` in `src/jit.h` defines the slot
 for both the C code that fills the cache and the IR that probes it.
 

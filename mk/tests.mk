@@ -88,6 +88,7 @@ EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-memory-address = JIT memory address OK
+EXPECTED_misalign-page-fault = misaligned page fault OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
 EXPECTED_trace_match = trace matcher corpus passed
@@ -143,6 +144,10 @@ GUEST_ASM_CHECK_TARGETS := check-block-eviction
 # marked untranslatable, so this needs only the A extension.
 ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-lrsc
+endif
+# A directly loaded system program has no handler for its own page faults.
+ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
+GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault
 endif
 # The jit-* programs assert tier-1 code generation, so they prove nothing when
 # the emulator under test has no JIT. Report them as skipped rather than
@@ -228,6 +233,20 @@ $(eval $(call guest-asm-check-target,jit-memory-address,rv32i))
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))
 
 $(eval $(call guest-asm-check-target,lrsc,rv32ia))
+$(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
+
+# The program must stop at its first instruction page fault, reporting it and
+# failing, instead of retrying the fetch forever.
+.PHONY: check-insn-page-fault
+check-insn-page-fault: $(BIN) tests/insn-page-fault.S | $(OUT)
+	$(Q)$(call guest-asm-build,insn-page-fault,rv32i_zicsr)
+	$(Q)$(PRINTF) "Running insn-page-fault ... "; \
+	if output="$$($(BIN) $(OUT)/insn-page-fault 2>&1)"; then \
+	    $(PRINTF) "Failed.\n"; exit 1; \
+	elif ! echo "$$output" | grep -q "Instruction page fault"; then \
+	    $(PRINTF) "Failed.\n"; exit 1; \
+	fi; \
+	$(call notice, [OK])
 $(eval $(call guest-asm-check-target,jit-alu-alias,rv32i))
 # Guard emission additionally requires JIT_INDIRECT_TARGETS, which is off in
 # tiered builds; the program still covers history recording and chaining.

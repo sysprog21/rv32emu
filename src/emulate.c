@@ -56,10 +56,11 @@ bool need_handle_signal = false;
 #endif
 
 /* Emulate misaligned load/store operations.
- * Only used in non-SYSTEM builds for userspace misaligned access emulation.
- * In SYSTEM mode, misaligned access traps are handled by the guest OS.
+ * Used where a program runs without an operating system: user-mode builds,
+ * and system builds that load an ELF program directly. Under a guest OS,
+ * misaligned access traps are handled by the guest.
  */
-#if !RV32_HAS(SYSTEM)
+#if !RV32_HAS(SYSTEM) || RV32_HAS(ELF_LOADER)
 /* Emulate misaligned load operation.
  * Fast-path: Use halfword operations for 2-byte aligned word accesses.
  * Slow-path: Fall back to byte-level operations for odd addresses.
@@ -154,23 +155,37 @@ static bool emulate_misaligned_store(riscv_t *rv,
     return true;
 }
 
-/* Default trap handler for userspace simulation without a configured trap
- * vector. When misaligned memory operations occur, this handler emulates them
- * using byte-level accesses instead of simply skipping the instruction.
- * Note: In SYSTEM mode, unconfigured trap vectors are handled differently
- * (by restoring PC and clearing is_trapped), so this function is only used
- * in non-SYSTEM builds.
+/* Default handler for an exception taken without a configured trap vector, for
+ * a program running without an operating system. A misaligned memory operation
+ * is emulated with byte-level accesses; any other exception skips the
+ * instruction. cause and tval are the trap's, and *epc the exception PC
+ * register of the privilege level that took it.
  */
-static void rv_trap_default_handler(riscv_t *rv)
+static void rv_trap_default_handler(riscv_t *rv,
+                                    uint32_t cause,
+                                    uint32_t tval,
+                                    uint32_t *epc)
 {
-    uint32_t cause = rv->csr_mcause;
-    uint32_t tval = rv->csr_mtval; /* Contains the misaligned address */
-    uint32_t insn_addr = rv->csr_mepc;
+#if RV32_HAS(SYSTEM)
+    /* An instruction that cannot be fetched cannot be skipped either, and with
+     * no OS to map its page, the program cannot go on.
+     */
+    if (cause == PAGEFAULT_INSN) {
+        rv_log_fatal("Instruction page fault at 0x%08x without a trap vector",
+                     tval);
+        rv->halt = true;
+        return;
+    }
+#endif
+
+    /* Take the length from the instruction itself: rv->compressed describes the
+     * last instruction to set it, which need not be this one.
+     */
+    uint32_t insn = rv->io.mem_ifetch(rv, *epc);
+    const uint32_t len = (insn ? is_compressed(insn) : rv->compressed) ? 2 : 4;
 
     /* Handle misaligned load/store by emulating with byte operations */
     if (cause == LOAD_MISALIGNED || cause == STORE_MISALIGNED) {
-        /* Fetch the faulting instruction */
-        uint32_t insn = rv->io.mem_ifetch(rv, insn_addr);
         if (!insn)
             goto skip_insn;
 
@@ -181,26 +196,18 @@ static void rv_trap_default_handler(riscv_t *rv)
             goto skip_insn;
 
         /* Emulate the misaligned operation */
-        bool handled = false;
         if (cause == LOAD_MISALIGNED)
-            handled = emulate_misaligned_load(rv, &ir, tval);
+            emulate_misaligned_load(rv, &ir, tval);
         else
-            handled = emulate_misaligned_store(rv, &ir, tval);
-
-        if (handled) {
-            /* Advance PC past the handled instruction */
-            rv->csr_mepc += rv->compressed ? 2 : 4;
-            rv->PC = rv->csr_mepc;
-            return;
-        }
+            emulate_misaligned_store(rv, &ir, tval);
     }
 
 skip_insn:
-    /* For other exceptions or if emulation failed, skip the instruction */
-    rv->csr_mepc += rv->compressed ? 2 : 4;
-    rv->PC = rv->csr_mepc; /* mret */
+    /* Whether it was emulated or not, move past the instruction */
+    *epc += len;
+    rv->PC = *epc; /* xret */
 }
-#endif /* !RV32_HAS(SYSTEM) */
+#endif /* !RV32_HAS(SYSTEM) || RV32_HAS(ELF_LOADER) */
 
 #if RV32_HAS(SYSTEM)
 static void __trap_handler(riscv_t *rv);
@@ -3652,12 +3659,23 @@ static void _trap_handler(riscv_t *rv)
 #if RV32_HAS(SYSTEM)
         rv->last_csr_sepc = rv->csr_sepc;
         if (!rv->csr_stvec) { /* in case CSR is not configured */
+            rv->is_trapped = false;
+#if RV32_HAS(ELF_LOADER)
+            /* A directly loaded program has no OS to handle its exceptions;
+             * treat them as user mode does. Resuming at sepc would retry a
+             * misaligned access forever.
+             */
+            if (!(cause & (1U << 31))) {
+                rv_trap_default_handler(rv, cause, rv->csr_stval,
+                                        &rv->csr_sepc);
+                return;
+            }
+#endif
             /* For system mode without trap vector, restore PC from sepc
              * and clear is_trapped to continue execution. This handles
              * spurious interrupts during early boot before handlers are set.
              */
             rv->PC = rv->csr_sepc;
-            rv->is_trapped = false;
             return;
         }
 #endif
@@ -3681,7 +3699,7 @@ static void _trap_handler(riscv_t *rv)
             rv->PC = rv->csr_mepc;
             rv->is_trapped = false;
 #else
-            rv_trap_default_handler(rv);
+            rv_trap_default_handler(rv, cause, rv->csr_mtval, &rv->csr_mepc);
 #endif
             return;
         }
@@ -3718,6 +3736,10 @@ void ecall_handler(riscv_t *rv)
     assert(rv);
 
 #if RV32_HAS(ELF_LOADER)
+    /* The emulator services the call in place of a trap, but it must still
+     * discard the reservation as a trap would.
+     */
+    RV_RESERVE_CLEAR(rv);
     rv->PC += 4;
     syscall_handler(rv);
 #elif RV32_HAS(SYSTEM)

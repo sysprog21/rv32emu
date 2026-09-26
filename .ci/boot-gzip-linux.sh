@@ -32,20 +32,35 @@ EXPECT_CMDS+=('
     expect "riscv32 GNU/Linux" { send "\x01"; send "x" } timeout { exit 3 }
 ')
 
+BOOT_ATTEMPTS=$(
+    normalize_test_attempts "${BOOT_ATTEMPTS_DEFAULT:-1}" 1
+)
+
+run_gzip_boot_case()
+{
+    expect <<- DONE
+	set timeout ${TIMEOUT}
+	spawn ${RUN_LINUX}
+	${EXPECT_CMDS[$i]}
+DONE
+}
+
 for i in "${!TEST_OPTIONS[@]}"; do
     printf "${COLOR_Y}===== Test option: ${TEST_OPTIONS[$i]} =====${COLOR_N}\n"
 
     RUN_LINUX="build/rv32emu ${TEST_OPTIONS[$i]}"
 
-    ASSERT expect <<- DONE
-	set timeout ${TIMEOUT}
-	spawn ${RUN_LINUX}
-	${EXPECT_CMDS[$i]}
-	DONE
+    run_test_with_retry \
+        "Boot Linux with gzipped images test" \
+        "${BOOT_ATTEMPTS}" \
+        run_gzip_boot_case
 
     ret=$?
     RET=$((${RET} + ${ret}))
-    cleanup
+
+    if [ "${ret}" -ne 0 ]; then
+        exit "${ret}"
+    fi
 
     printf "\nBoot Linux with gzipped images test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
 done

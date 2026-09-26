@@ -237,6 +237,9 @@ include mk/http.mk
 # VirtIO networking
 include mk/virtio-net.mk
 
+# VirtIO sound
+include mk/virtio-snd.mk
+
 # External Dependencies & System Emulation
 include mk/external.mk
 include mk/artifact.mk
@@ -262,7 +265,7 @@ deps += $(OBJS:%.o=%.o.d)
 EFFECTIVE_CONFIG_VARS := \
 	CONFIG_BUILD_WASM CONFIG_SYSTEM CONFIG_GOLDFISH_RTC CONFIG_ELF_LOADER \
 	CONFIG_VIRTIO_NET CONFIG_VIRTIO_NET_TAP CONFIG_VIRTIO_NET_USER \
-	CONFIG_VIRTIO_NET_VMNET \
+	CONFIG_VIRTIO_NET_VMNET CONFIG_VIRTIO_SND CONFIG_HAVE_PORTAUDIO \
 	CONFIG_EXT_M CONFIG_EXT_A CONFIG_EXT_F CONFIG_EXT_C CONFIG_EXT_V CONFIG_RV32E \
 	CONFIG_Zicsr CONFIG_Zifencei CONFIG_Zba CONFIG_Zbb CONFIG_Zbc CONFIG_Zbs \
 	CONFIG_MOP_FUSION CONFIG_BLOCK_CHAINING CONFIG_LOG_COLOR CONFIG_ARCH_TEST \
@@ -289,6 +292,8 @@ $(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
 		printf 'CROSS_COMPILE=%s\n' '$(CROSS_COMPILE)'; \
 		$(foreach var,$(EFFECTIVE_CONFIG_VARS),printf '$(var)=%s\n' '$($(var))';) \
 		$(foreach var,$(EFFECTIVE_VNET_FEATURES),printf 'EFFECTIVE_$(var)=%s\n' '$(call has,$(var))';) \
+		$(foreach var,$(EFFECTIVE_VSND_FEATURES),printf 'EFFECTIVE_$(var)=%s\n' '$(call has,$(var))';) \
+		$(foreach var,$(EFFECTIVE_VSND_VARS),printf '$(var)=%s\n' '$($(var))';) \
 	} > $@.tmp
 	$(Q)if ! cmp -s $@.tmp $@ 2>/dev/null; then \
 		mv $@.tmp $@; \

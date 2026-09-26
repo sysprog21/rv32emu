@@ -91,6 +91,65 @@ cleanup()
 
 trap cleanup EXIT
 
+# Validate the number of attempts used by transient boot-test retries.
+# Usage: normalize_test_attempts <value> [fallback]
+normalize_test_attempts()
+{
+    local attempts="${1:-1}"
+    local fallback="${2:-1}"
+
+    if [[ "${attempts}" =~ ^[1-9][0-9]*$ ]]; then
+        printf '%s\n' "${attempts}"
+        return 0
+    fi
+
+    print_warning \
+        "Invalid test attempt count '${attempts}'; using ${fallback}" >&2
+    printf '%s\n' "${fallback}"
+}
+
+# Run one test case repeatedly when the emulator exits transiently.
+#
+# Usage:
+#   run_test_with_retry <test-name> <attempts> <command> [args...]
+#
+# cleanup() runs after every attempt so each retry starts without a stale
+# rv32emu process.
+run_test_with_retry()
+{
+    local test_name="$1"
+    local max_attempts="$2"
+    shift 2
+
+    max_attempts=$(normalize_test_attempts "${max_attempts}" 1)
+
+    local attempt
+    local ret=0
+
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        if "$@"; then
+            ret=0
+        else
+            ret=$?
+        fi
+
+        cleanup
+
+        if [ "${ret}" -eq 0 ]; then
+            return 0
+        fi
+
+        if [ "${attempt}" -lt "${max_attempts}" ]; then
+            print_warning \
+                "${test_name} attempt ${attempt} failed (exit ${ret}); retrying..."
+        fi
+    done
+
+    print_error \
+        "${test_name} failed after ${max_attempts} attempt(s)"
+    return "${ret}"
+}
+
 # Universal download utility with curl/wget compatibility
 # Provides consistent interface regardless of which tool is available
 

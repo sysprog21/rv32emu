@@ -163,6 +163,16 @@
 #define RV32_FEATURE_SYSTEM_MMIO 0
 #endif
 
+/* VirtIO sound device */
+#ifndef RV32_FEATURE_VIRTIO_SND
+#define RV32_FEATURE_VIRTIO_SND 0
+#endif
+
+/* VirtIO sound is only valid for kernel system emulation. */
+#if RV32_FEATURE_VIRTIO_SND && !RV32_FEATURE_SYSTEM_MMIO
+#error "VirtIO sound requires SYSTEM mode without ELF_LOADER"
+#endif
+
 /* VirtIO network device */
 #ifndef RV32_FEATURE_VIRTIO_NET
 #define RV32_FEATURE_VIRTIO_NET 0

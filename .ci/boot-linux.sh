@@ -54,4 +54,10 @@ if grep -q '^CONFIG_VIRTIO_NET_VMNET=y$' .config; then
     RET=$((${RET} + $?))
 fi
 
+# Virtio-snd tests
+if grep -q '^CONFIG_VIRTIO_SND=y$' .config; then
+    (. "${SCRIPT_DIR}/sound.sh")
+    RET=$((${RET} + $?))
+fi
+
 exit ${RET}

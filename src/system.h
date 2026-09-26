@@ -33,6 +33,9 @@ enum SUPPORTED_MMIO {
 #if RV32_HAS(VIRTIO_NET)
     MMIO_VIRTIONET,
 #endif
+#if RV32_HAS(VIRTIO_SND)
+    MMIO_VIRTIOSND,
+#endif
 #if RV32_HAS(GOLDFISH_RTC)
     MMIO_RTC,
 #endif /* RV32_HAS(GOLDFISH_RTC) */
@@ -98,6 +101,19 @@ enum SUPPORTED_MMIO {
             )                                                                         \
             break;                                                                    \
         )                                                                             \
+        IIF(RV32_FEATURE_VIRTIO_SND)(                                                 \
+        case MMIO_VIRTIOSND:                                                          \
+            IIF(rw)( /* read */                                                       \
+                mmio_read_val = virtio_snd_read(PRIV(rv)->vsnd, addr & 0xFFFFF);      \
+                emu_update_vsnd_interrupts(rv);                                       \
+                return mmio_read_val;                                                 \
+                ,    /* write */                                                      \
+                virtio_snd_write(PRIV(rv)->vsnd, addr & 0xFFFFF, val);                \
+                emu_update_vsnd_interrupts(rv);                                       \
+                return;                                                               \
+            )                                                                         \
+            break;                                                                    \
+        )                                                                             \
         IIF(RV32_FEATURE_GOLDFISH_RTC)(                                               \
         case MMIO_RTC:                                                                \
             IIF(rw)( /* read */                                                       \
@@ -135,6 +151,12 @@ enum SUPPORTED_MMIO {
                 MMIO_OP(MMIO_VIRTIONET, MMIO_R);                                      \
             }                                                                         \
             )                                                                         \
+            IIF(RV32_FEATURE_VIRTIO_SND)(                                     \
+            else if (PRIV(rv)->vsnd &&                                       \
+                     hi == PRIV(rv)->vsnd_mmio_base_hi) {                     \
+                MMIO_OP(MMIO_VIRTIOSND, MMIO_R);                             \
+            }                                                                 \
+            )                                                                 \
             else {                                                                    \
                 switch (hi) {                                                 \
                 case 0x0:                                                     \
@@ -175,6 +197,11 @@ enum SUPPORTED_MMIO {
                 MMIO_OP(MMIO_VIRTIONET, MMIO_W);                                      \
             }                                                                         \
             )                                                                         \
+            IIF(RV32_FEATURE_VIRTIO_SND)(                                     \
+            else if (PRIV(rv)->vsnd && hi == PRIV(rv)->vsnd_mmio_base_hi) {   \
+                MMIO_OP(MMIO_VIRTIOSND, MMIO_W);                              \
+            }                                                                 \
+            )                                                                 \
             else {                                                                    \
                 switch (hi) {                                                 \
                 case 0x0:                                                     \
@@ -203,6 +230,9 @@ void emu_update_vblk_interrupts(riscv_t *rv);
 void emu_update_vrng_interrupts(riscv_t *rv);
 #if RV32_HAS(VIRTIO_NET)
 void emu_update_vnet_interrupts(riscv_t *rv);
+#endif
+#if RV32_HAS(VIRTIO_SND)
+void emu_update_vsnd_interrupts(riscv_t *rv);
 #endif
 #if RV32_HAS(GOLDFISH_RTC)
 void emu_update_rtc_interrupts(riscv_t *rv);

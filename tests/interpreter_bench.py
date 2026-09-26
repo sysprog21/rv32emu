@@ -242,7 +242,7 @@ def require_interpreter_only(config: Path, executable: Path) -> None:
         or settings.get("CONFIG_JIT") == "y"
     ):
         raise ValueError(
-            "rv32emu must be built interpreter-only; run make defconfig and "
+            "rv32emu must be built interpreter-only; run make interpreter_defconfig and "
             "pass that build's .effective-config"
         )
     if config.stat().st_mtime > executable.stat().st_mtime:

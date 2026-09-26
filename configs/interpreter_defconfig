@@ -1,5 +1,5 @@
-# rv32emu default configuration
-# Standard desktop build with all extensions enabled
+# Interpreter-only configuration
+# The default configuration with the JIT disabled
 
 # RISC-V ISA Configuration
 CONFIG_RV32I=y
@@ -16,10 +16,8 @@ CONFIG_Zbc=y
 CONFIG_Zbs=y
 
 # Execution Modes
-# Tier-1 JIT only; T2C additionally needs LLVM (see jit_defconfig). Hosts the
-# JIT does not support fall back to the interpreter.
-# CONFIG_INTERPRETER_ONLY is not set
-CONFIG_JIT=y
+CONFIG_INTERPRETER_ONLY=y
+# CONFIG_JIT is not set
 # CONFIG_T2C is not set
 # CONFIG_SYSTEM is not set
 # CONFIG_ELF_LOADER is not set

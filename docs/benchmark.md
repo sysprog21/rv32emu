@@ -75,8 +75,8 @@ the RV32 newlib runner with `-DRISCV_BRK_MEMORY_SIZE=33554432`.
 results from different modes stay apart:
 
 ```sh
-make defconfig && make && python3 tests/bench.py
-make jit_defconfig && make ENABLE_T2C=0 && python3 tests/bench.py --label T1C
+make interpreter_defconfig && make && python3 tests/bench.py
+make defconfig && make && python3 tests/bench.py --label T1C
 make jit_defconfig && make && python3 tests/bench.py --label T2C
 ```
 

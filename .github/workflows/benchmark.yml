@@ -63,7 +63,7 @@ jobs:
           - mode: interpreter
             label: ''
             defconfig: defconfig
-            flags: ''
+            flags: ENABLE_JIT=0
             llvm: 'false'
             parallel: 2
           - mode: T1C
@@ -111,6 +111,8 @@ jobs:
 
       # Both trees run the same configuration commands, each reading its own
       # defconfig files, so a change to those files is part of what is measured.
+      # The flags pin the engine, so a base commit from before defconfig
+      # selected the JIT builds the same mode.
       - name: Build
         run: |
             trees=(.)

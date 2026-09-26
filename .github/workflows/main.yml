@@ -135,6 +135,9 @@ jobs:
       run: |
             make -C tests/system/mmu/
             make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test $PARALLEL
+            # Page faults a loaded program cannot handle: the emulator stops
+            # at one on a fetch, and skips exactly the faulting access.
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_JIT=1 ENABLE_T2C=0 mmu-test check-insn-page-fault check-misalign-page-fault $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL

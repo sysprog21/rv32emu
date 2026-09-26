@@ -392,7 +392,11 @@ static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t vaddr)
     bool ok = MMU_FAULT_CHECK(ifetch, rv, pte, vaddr, PTE_X);
     if (unlikely(!ok)) {
         CHECK_PENDING_SIGNAL(rv, need_handle_signal);
-        if (need_handle_signal)
+
+        /* Retry only if the handler returned to the access and let the hart run
+         * on; a halted hart would otherwise retry forever.
+         */
+        if (need_handle_signal || rv_has_halted(rv))
             return 0;
         /* Retry walk after trap handler has set up the page */
         pte = mmu_walk(rv, vaddr, &level);
@@ -542,7 +546,11 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
                  : MMU_FAULT_CHECK(write, rv, pte, vaddr, PTE_W);
     if (unlikely(!ok)) {
         CHECK_PENDING_SIGNAL(rv, need_handle_signal);
-        if (need_handle_signal)
+
+        /* Retry only if the handler returned to the access and let the hart run
+         * on; a halted hart would otherwise retry forever.
+         */
+        if (need_handle_signal || rv_has_halted(rv))
             return 0;
         /* Retry walk after trap handler has set up the page */
         pte = mmu_walk(rv, vaddr, &level);

@@ -61,6 +61,16 @@ bool need_handle_signal = false;
  * misaligned access traps are handled by the guest.
  */
 #if !RV32_HAS(SYSTEM) || RV32_HAS(ELF_LOADER)
+/* Whether a part of an emulated access faulted, and the handler that ran for
+ * the fault already moved past the instruction. The remaining parts must be
+ * abandoned: each would fault again and skip one more instruction.
+ */
+#if RV32_HAS(SYSTEM)
+#define MISALIGN_PART_FAULTED() unlikely(need_handle_signal)
+#else
+#define MISALIGN_PART_FAULTED() false
+#endif
+
 /* Emulate misaligned load operation.
  * Fast-path: Use halfword operations for 2-byte aligned word accesses.
  * Slow-path: Fall back to byte-level operations for odd addresses.
@@ -81,28 +91,32 @@ static bool emulate_misaligned_load(riscv_t *rv,
         if ((addr & 1) == 0) {
             /* 2-byte aligned: use two halfword reads */
             value = (uint32_t) rv->io.mem_read_s(rv, addr);
-            value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
+            if (!MISALIGN_PART_FAULTED())
+                value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
         } else {
             /* Odd address: use four byte reads */
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
                 value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
                          << (i * 8);
         }
-        rv->X[ir->rd] = value;
+        if (!MISALIGN_PART_FAULTED())
+            rv->X[ir->rd] = value;
         break;
 
     case rv_insn_lh:
         /* Load halfword (signed): 2 bytes - always use byte reads for odd */
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
-        rv->X[ir->rd] = sign_extend_h(value);
+        if (!MISALIGN_PART_FAULTED())
+            rv->X[ir->rd] = sign_extend_h(value);
         break;
 
     case rv_insn_lhu:
         /* Load halfword unsigned: 2 bytes - always use byte reads for odd */
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
-        rv->X[ir->rd] = value;
+        if (!MISALIGN_PART_FAULTED())
+            rv->X[ir->rd] = value;
         break;
 
     default:
@@ -133,10 +147,11 @@ static bool emulate_misaligned_store(riscv_t *rv,
         if ((addr & 1) == 0) {
             /* 2-byte aligned: use two halfword writes */
             rv->io.mem_write_s(rv, addr, value & 0xFFFF);
-            rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
+            if (!MISALIGN_PART_FAULTED())
+                rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
         } else {
             /* Odd address: use four byte writes */
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
                 rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
         }
         break;
@@ -144,7 +159,7 @@ static bool emulate_misaligned_store(riscv_t *rv,
     case rv_insn_sh:
         /* Store halfword: 2 bytes - always use byte writes for odd */
         value = rv->X[ir->rs2];
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
         break;
 
@@ -173,6 +188,7 @@ static void rv_trap_default_handler(riscv_t *rv,
     if (cause == PAGEFAULT_INSN) {
         rv_log_fatal("Instruction page fault at 0x%08x without a trap vector",
                      tval);
+        PRIV(rv)->exit_code = EXIT_FAILURE;
         rv->halt = true;
         return;
     }
@@ -195,11 +211,23 @@ static void rv_trap_default_handler(riscv_t *rv,
         if (!rv_decode(&ir, insn))
             goto skip_insn;
 
-        /* Emulate the misaligned operation */
+        /* Emulate the misaligned operation. Its byte accesses may fault in
+         * turn, and a handler that ran for such a fault has already moved past
+         * this instruction, so leave the PC to it.
+         */
         if (cause == LOAD_MISALIGNED)
             emulate_misaligned_load(rv, &ir, tval);
         else
             emulate_misaligned_store(rv, &ir, tval);
+        if (MISALIGN_PART_FAULTED()) {
+#if RV32_HAS(SYSTEM)
+            /* The fault is settled here; left set, the flag would make the next
+             * instruction return early and run again.
+             */
+            need_handle_signal = false;
+#endif
+            return;
+        }
     }
 
 skip_insn:
@@ -3337,6 +3365,8 @@ void rv_step(void *arg)
 #endif
         /* by now, a block should be available */
         if (unlikely(!block)) {
+            if (rv_has_halted(rv)) /* a fault handler stopped the hart */
+                return;
 #if RV32_HAS(SYSTEM)
             /* A page fault while fetching the first instruction: settle it and
              * continue instead of halting.

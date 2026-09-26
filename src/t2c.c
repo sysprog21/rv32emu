@@ -229,6 +229,64 @@ UNUSED FORCE_INLINE LLVMValueRef t2c_gen_mem_loc(LLVMValueRef start,
     return addr;
 }
 
+/* Tier-2 counterpart of emit_misalign_guard() in jit.c: when a halfword or word
+ * access at vaddr is misaligned, and misaligned accesses are not allowed, store
+ * the faulting pc, raise the exception through jit_misaligned_trap(), and
+ * return from the block. Generated code keeps guest registers in rv->X, so
+ * nothing needs writing back first. A constant vaddr folds the branch. The
+ * helper runs in this process, so its address can be embedded directly.
+ */
+static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
+                                   LLVMValueRef start,
+                                   riscv_t *rv,
+                                   LLVMValueRef vaddr,
+                                   uint32_t size,
+                                   uint32_t flags,
+                                   uint32_t pc,
+                                   LLVMValueRef insn_counter)
+{
+    if (PRIV(rv)->allow_misalign)
+        return;
+
+    LLVMValueRef low = LLVMBuildAnd(
+        *builder, vaddr, LLVMConstInt(LLVMInt32Type(), size - 1, false), "");
+    LLVMValueRef misaligned =
+        LLVMBuildICmp(*builder, LLVMIntNE, low,
+                      LLVMConstInt(LLVMInt32Type(), 0, false), "misaligned");
+    LLVMBasicBlockRef trap = LLVMAppendBasicBlock(start, "misaligned");
+    LLVMBasicBlockRef aligned = LLVMAppendBasicBlock(start, "aligned");
+    LLVMBuildCondBr(*builder, misaligned, trap, aligned);
+
+    LLVMPositionBuilderAtEnd(*builder, trap);
+    LLVMBuildStore(*builder, LLVMConstInt(LLVMInt32Type(), pc, false),
+                   t2c_gen_PC_addr(start, builder, NULL));
+    LLVMTypeRef param_types[] = {LLVMPointerType(LLVMVoidType(), 0),
+                                 LLVMInt32Type(), LLVMInt32Type()};
+    LLVMTypeRef fn_type =
+        LLVMFunctionType(LLVMVoidType(), param_types, 3, false);
+    LLVMValueRef fn = LLVMConstIntToPtr(
+        LLVMConstInt(LLVMInt64Type(), (uintptr_t) &jit_misaligned_trap, false),
+        LLVMPointerType(fn_type, 0));
+    LLVMValueRef args[] = {LLVMGetParam(start, 0), vaddr,
+                           LLVMConstInt(LLVMInt32Type(), flags, false)};
+    LLVMBuildCall2(*builder, fn_type, fn, args, 3, "");
+    T2C_STORE_TIMER(*builder, start, insn_counter);
+    LLVMBuildRetVoid(*builder);
+
+    LLVMPositionBuilderAtEnd(*builder, aligned);
+}
+
+/* The address rs1 + imm that a load or store accesses. */
+static LLVMValueRef t2c_gen_vaddr(LLVMValueRef start,
+                                  LLVMBuilderRef *builder,
+                                  rv_insn_t *ir)
+{
+    LLVMValueRef val_rs1 = LLVMBuildLoad2(
+        *builder, LLVMInt32Type(), t2c_gen_rs1_addr(start, builder, ir), "");
+    return LLVMBuildAdd(*builder, val_rs1,
+                        LLVMConstInt(LLVMInt32Type(), ir->imm, true), "vaddr");
+}
+
 /* Load and call a function pointer from rv->io struct.
  *
  * The byte_offset parameter is the offset from the start of riscv_t to the

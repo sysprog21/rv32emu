@@ -199,3 +199,21 @@ IIF(RV32_HAS(SYSTEM_MMIO))(
 
 When MMIO is not enabled, the generated code performs direct memory access
 without the overhead of region checking.
+
+## Misaligned Accesses
+Both JIT tiers keep the interpreter's semantics for halfword and word
+accesses that are not naturally aligned. Unless the emulator runs with `-m`,
+such an access raises an address-misaligned exception: a guest trap handler
+sees it exactly as under the interpreter, and without one the user-mode
+default handler emulates the access and resumes after it. In system mode this
+also keeps a word that straddles a page boundary from being read through the
+translation of its first byte.
+
+Tier-1 emits a test of the address and a branch, not taken on the aligned
+path, to a stub placed after the block that writes the guest registers back
+and calls `jit_misaligned_trap()`. When the offset is itself aligned, the base
+register is tested directly. A passed check also proves the base aligned, so
+later accesses in the same block through the unmodified base register need no
+check; any write to that register discards the fact. Tier-2 emits the
+equivalent branch in LLVM IR. `tests/jit-misalign.S` covers the plain,
+compressed, and fused forms with and without a guest trap vector.

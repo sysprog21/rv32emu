@@ -2521,8 +2521,11 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
                  * LUI + LW fusion (fuse9)
+                 * Skip a misaligned address: it traps, and only the unfused
+                 * instructions carry the JIT's alignment checks.
                  */
-                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
+                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1 &&
+                    !(((uint32_t) ir->imm + (uint32_t) next_ir->imm) & 3)) {
                     ir->imm2 = next_ir->imm; /* lw offset */
                     ir->rs2 = next_ir->rd;   /* lw destination */
                     ir->opcode = rv_insn_fuse9;
@@ -2545,9 +2548,11 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
                  * LUI + SW fusion (fuse10)
+                 * Skip a misaligned address, as for fuse9.
                  */
                 if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1 &&
-                    ir->rd != next_ir->rs2) {
+                    ir->rd != next_ir->rs2 &&
+                    !(((uint32_t) ir->imm + (uint32_t) next_ir->imm) & 3)) {
                     ir->imm2 = next_ir->imm; /* sw offset */
                     ir->rs1 = next_ir->rs2;  /* sw source (data to store) */
                     ir->opcode = rv_insn_fuse10;

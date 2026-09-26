@@ -11,7 +11,10 @@
 set -u -o pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TMP_FILE=$(mktemp "${RUNNER_TEMP:-/tmp}/rv32emu-boot.XXXXXX")
+# Root writes TMP_FILE, so keep it in a private directory: with
+# fs.protected_regular, root may not write a user's file in sticky /tmp.
+TMP_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/rv32emu-boot.XXXXXX")
+TMP_FILE="${TMP_DIR}/devices"
 
 cleanup()
 {
@@ -26,6 +29,7 @@ cleanup()
         BLK_DEV_EXT4="${BLK_DEV_EXT4:-}" \
         BLK_DEV_SIMPLEFS="${BLK_DEV_SIMPLEFS:-}" \
         "${SCRIPT_DIR}/boot-linux-prepare.sh" cleanup
+    sudo rm -rf "${TMP_DIR}"
 }
 trap cleanup EXIT
 

@@ -51,7 +51,7 @@ done
 # cleanconfig rather than distclean: the prebuilt artifacts under build/ are
 # expensive to re-fetch and a configuration change does not invalidate them.
 for feature in "${FEATURES[@]}"; do
-    for defconfig in defconfig jit_defconfig; do
+    for defconfig in interpreter_defconfig jit_defconfig; do
         echo "Testing ${feature}=0 (${defconfig})"
         if ! (make cleanconfig && make "${defconfig}" && make "${feature}"=0 check ${PARALLEL}); then
             print_error "${defconfig} check failed with ${feature}=0"

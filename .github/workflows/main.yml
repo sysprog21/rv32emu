@@ -105,7 +105,9 @@ jobs:
         cache-suffix: host-${{ matrix.compiler }}
 
     - name: Build with various optimization levels
-      run: .ci/build-opt-levels.sh defconfig
+      run: |
+            .ci/build-opt-levels.sh defconfig
+            .ci/build-opt-levels.sh interpreter_defconfig
 
     - name: Build system emulation with various optimization levels
       run: .ci/build-opt-levels.sh system_defconfig
@@ -113,7 +115,7 @@ jobs:
     - name: check + tests
       run: |
             make cleanconfig
-            make defconfig
+            make interpreter_defconfig
             make check $PARALLEL
             make tests $PARALLEL
             make misalign $PARALLEL
@@ -122,7 +124,7 @@ jobs:
     - name: SDL disable test
       run: |
             # SDL is the graphics subsystem; an interpreter-only test suffices.
-            make distclean && make defconfig && make ENABLE_SDL=0 check $PARALLEL
+            make distclean && make interpreter_defconfig && make ENABLE_SDL=0 check $PARALLEL
 
     - name: misalignment test in block emulation
       run: |
@@ -133,17 +135,23 @@ jobs:
       run: |
             make -C tests/system/mmu/
             make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test $PARALLEL
+            # Page faults a loaded program cannot handle: the emulator stops
+            # at one on a fetch, and skips exactly the faulting access.
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_JIT=1 ENABLE_T2C=0 mmu-test check-insn-page-fault check-misalign-page-fault $PARALLEL
 
     - name: gdbstub test
-      run: make distclean && make defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
+      run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
 
     - name: JIT base test
-      run: make distclean && make jit_defconfig && make check $PARALLEL
+      run: |
+            # defconfig is the tier-1 JIT alone; jit_defconfig adds T2C.
+            make distclean && make defconfig && make check $PARALLEL
+            make cleanconfig && make jit_defconfig && make check $PARALLEL
 
     - name: undefined behavior test
       if: success() || failure()
       run: |
-            make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+            make distclean && make interpreter_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
             make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
   # Each optional feature is independently switchable, so every one of them is
@@ -310,13 +318,14 @@ jobs:
     - name: check + tests
       run: |
             make cleanconfig
-            make defconfig
+            make interpreter_defconfig
             make check $PARALLEL
 
     - name: JIT tests
       run: |
             set -euo pipefail
-            make distclean && make jit_defconfig && make check $PARALLEL
+            make distclean && make defconfig && make check $PARALLEL
+            make cleanconfig && make jit_defconfig && make check $PARALLEL
             for ext in ENABLE_EXT_A ENABLE_EXT_F ENABLE_EXT_C; do
               echo "JIT test with ${ext}=0"
               make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL
@@ -362,7 +371,7 @@ jobs:
      - name: check + tests
        run: |
              make cleanconfig
-             make defconfig
+             make interpreter_defconfig
              make check $PARALLEL
              make tests $PARALLEL
              make misalign $PARALLEL
@@ -371,19 +380,22 @@ jobs:
      - name: SDL disable test
        run: |
              # SDL is the graphics subsystem; an interpreter-only test suffices.
-             make distclean && make defconfig && make ENABLE_SDL=0 check $PARALLEL
+             make distclean && make interpreter_defconfig && make ENABLE_SDL=0 check $PARALLEL
 
      - name: gdbstub test, need RV32 toolchain
-       run: make distclean && make defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
+       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
 
      - name: JIT base test
-       run: make distclean && make jit_defconfig && make check $PARALLEL
+       run: |
+             # defconfig is the tier-1 JIT alone; jit_defconfig adds T2C.
+             make distclean && make defconfig && make check $PARALLEL
+             make cleanconfig && make jit_defconfig && make check $PARALLEL
 
      - name: undefined behavior test
        # gcc on macOS/arm64 does not support sanitizers
        if: (success() || failure()) && matrix.compiler == 'clang'
        run: |
-             make distclean && make defconfig && make ENABLE_UBSAN=1 check $PARALLEL
+             make distclean && make interpreter_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
              make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
      - name: boot Linux kernel test

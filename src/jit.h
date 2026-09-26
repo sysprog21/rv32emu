@@ -65,19 +65,22 @@ struct host_reg {
                        block */
 };
 
+/* Flags passed from generated code to jit_misaligned_trap(). */
+#define JIT_MISALIGN_STORE 1U
+#define JIT_MISALIGN_COMPRESSED 2U
+
+/* Raise the exception the interpreter raises for a misaligned load or store.
+ * Both JIT tiers call this with rv->PC set to the faulting instruction and
+ * every guest register in rv->X, then leave the block: the trap handler has
+ * already set rv->PC to the trap vector, or, in user mode without one, emulated
+ * the access and advanced past it.
+ */
+void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags);
+
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);
 bool jit_translate(riscv_t *rv, block_t *block);
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
-
-/* JIT misaligned memory access handler.
- * Performs misaligned load/store operations using byte-level memory accesses.
- */
-void jit_misaligned_handler(riscv_t *rv,
-                            uint32_t addr,
-                            uint32_t vreg_idx,
-                            uint32_t type,
-                            bool is_store);
 
 #if RV32_HAS(T2C)
 void t2c_compile(riscv_t *, block_t *, pthread_mutex_t *);
@@ -92,6 +95,17 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
  * access the element by masking the program counter.
  */
 #define N_JIT_CACHE_ENTRIES (1 << 12)
+
+/* Slot of the jit-cache entry for pc in address space satp (0 outside system
+ * mode). t2c_jit_cache_helper() computes the same index in LLVM IR for the
+ * lookup in generated code, so the two must change together: an entry stored
+ * under any other index is never found, and every indirect jump falls back to
+ * the dispatcher.
+ */
+static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
+{
+    return (pc ^ (pc >> 12) ^ satp) & (N_JIT_CACHE_ENTRIES - 1);
+}
 
 /* Inline cache for fast-path indirect jump resolution.
  * Stores the most recently used (target, entry) pair per call site.
@@ -193,8 +207,11 @@ void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
 void jit_cache_clear(struct jit_cache *cache);
 void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp);
 
-/* Dispose LLVM execution engine when a T2C-compiled block is freed */
-void t2c_dispose_engine(void *engine);
+/* Hand an evicted block's LLVM engine to the T2C thread, which disposes it in
+ * t2c_reap_engines().
+ */
+void t2c_retire_engine(riscv_t *rv, void *engine);
+void t2c_reap_engines(riscv_t *rv);
 
 /* Wrapper for cache cleanup - disposes LLVM engine from a block */
 void t2c_dispose_block_engine(void *block);

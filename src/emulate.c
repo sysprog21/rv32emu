@@ -56,10 +56,21 @@ bool need_handle_signal = false;
 #endif
 
 /* Emulate misaligned load/store operations.
- * Only used in non-SYSTEM builds for userspace misaligned access emulation.
- * In SYSTEM mode, misaligned access traps are handled by the guest OS.
+ * Used where a program runs without an operating system: user-mode builds,
+ * and system builds that load an ELF program directly. Under a guest OS,
+ * misaligned access traps are handled by the guest.
  */
-#if !RV32_HAS(SYSTEM)
+#if !RV32_HAS(SYSTEM) || RV32_HAS(ELF_LOADER)
+/* Whether a part of an emulated access faulted, and the handler that ran for
+ * the fault already moved past the instruction. The remaining parts must be
+ * abandoned: each would fault again and skip one more instruction.
+ */
+#if RV32_HAS(SYSTEM)
+#define MISALIGN_PART_FAULTED() unlikely(need_handle_signal)
+#else
+#define MISALIGN_PART_FAULTED() false
+#endif
+
 /* Emulate misaligned load operation.
  * Fast-path: Use halfword operations for 2-byte aligned word accesses.
  * Slow-path: Fall back to byte-level operations for odd addresses.
@@ -80,28 +91,32 @@ static bool emulate_misaligned_load(riscv_t *rv,
         if ((addr & 1) == 0) {
             /* 2-byte aligned: use two halfword reads */
             value = (uint32_t) rv->io.mem_read_s(rv, addr);
-            value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
+            if (!MISALIGN_PART_FAULTED())
+                value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
         } else {
             /* Odd address: use four byte reads */
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
                 value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
                          << (i * 8);
         }
-        rv->X[ir->rd] = value;
+        if (!MISALIGN_PART_FAULTED())
+            rv->X[ir->rd] = value;
         break;
 
     case rv_insn_lh:
         /* Load halfword (signed): 2 bytes - always use byte reads for odd */
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
-        rv->X[ir->rd] = sign_extend_h(value);
+        if (!MISALIGN_PART_FAULTED())
+            rv->X[ir->rd] = sign_extend_h(value);
         break;
 
     case rv_insn_lhu:
         /* Load halfword unsigned: 2 bytes - always use byte reads for odd */
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
-        rv->X[ir->rd] = value;
+        if (!MISALIGN_PART_FAULTED())
+            rv->X[ir->rd] = value;
         break;
 
     default:
@@ -132,10 +147,11 @@ static bool emulate_misaligned_store(riscv_t *rv,
         if ((addr & 1) == 0) {
             /* 2-byte aligned: use two halfword writes */
             rv->io.mem_write_s(rv, addr, value & 0xFFFF);
-            rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
+            if (!MISALIGN_PART_FAULTED())
+                rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
         } else {
             /* Odd address: use four byte writes */
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
                 rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
         }
         break;
@@ -143,7 +159,7 @@ static bool emulate_misaligned_store(riscv_t *rv,
     case rv_insn_sh:
         /* Store halfword: 2 bytes - always use byte writes for odd */
         value = rv->X[ir->rs2];
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
         break;
 
@@ -154,23 +170,38 @@ static bool emulate_misaligned_store(riscv_t *rv,
     return true;
 }
 
-/* Default trap handler for userspace simulation without a configured trap
- * vector. When misaligned memory operations occur, this handler emulates them
- * using byte-level accesses instead of simply skipping the instruction.
- * Note: In SYSTEM mode, unconfigured trap vectors are handled differently
- * (by restoring PC and clearing is_trapped), so this function is only used
- * in non-SYSTEM builds.
+/* Default handler for an exception taken without a configured trap vector, for
+ * a program running without an operating system. A misaligned memory operation
+ * is emulated with byte-level accesses; any other exception skips the
+ * instruction. cause and tval are the trap's, and *epc the exception PC
+ * register of the privilege level that took it.
  */
-static void rv_trap_default_handler(riscv_t *rv)
+static void rv_trap_default_handler(riscv_t *rv,
+                                    uint32_t cause,
+                                    uint32_t tval,
+                                    uint32_t *epc)
 {
-    uint32_t cause = rv->csr_mcause;
-    uint32_t tval = rv->csr_mtval; /* Contains the misaligned address */
-    uint32_t insn_addr = rv->csr_mepc;
+#if RV32_HAS(SYSTEM)
+    /* An instruction that cannot be fetched cannot be skipped either, and with
+     * no OS to map its page, the program cannot go on.
+     */
+    if (cause == PAGEFAULT_INSN) {
+        rv_log_fatal("Instruction page fault at 0x%08x without a trap vector",
+                     tval);
+        PRIV(rv)->exit_code = EXIT_FAILURE;
+        rv->halt = true;
+        return;
+    }
+#endif
+
+    /* Take the length from the instruction itself: rv->compressed describes the
+     * last instruction to set it, which need not be this one.
+     */
+    uint32_t insn = rv->io.mem_ifetch(rv, *epc);
+    const uint32_t len = (insn ? is_compressed(insn) : rv->compressed) ? 2 : 4;
 
     /* Handle misaligned load/store by emulating with byte operations */
     if (cause == LOAD_MISALIGNED || cause == STORE_MISALIGNED) {
-        /* Fetch the faulting instruction */
-        uint32_t insn = rv->io.mem_ifetch(rv, insn_addr);
         if (!insn)
             goto skip_insn;
 
@@ -180,27 +211,31 @@ static void rv_trap_default_handler(riscv_t *rv)
         if (!rv_decode(&ir, insn))
             goto skip_insn;
 
-        /* Emulate the misaligned operation */
-        bool handled = false;
+        /* Emulate the misaligned operation. Its byte accesses may fault in
+         * turn, and a handler that ran for such a fault has already moved past
+         * this instruction, so leave the PC to it.
+         */
         if (cause == LOAD_MISALIGNED)
-            handled = emulate_misaligned_load(rv, &ir, tval);
+            emulate_misaligned_load(rv, &ir, tval);
         else
-            handled = emulate_misaligned_store(rv, &ir, tval);
-
-        if (handled) {
-            /* Advance PC past the handled instruction */
-            rv->csr_mepc += rv->compressed ? 2 : 4;
-            rv->PC = rv->csr_mepc;
+            emulate_misaligned_store(rv, &ir, tval);
+        if (MISALIGN_PART_FAULTED()) {
+#if RV32_HAS(SYSTEM)
+            /* The fault is settled here; left set, the flag would make the next
+             * instruction return early and run again.
+             */
+            need_handle_signal = false;
+#endif
             return;
         }
     }
 
 skip_insn:
-    /* For other exceptions or if emulation failed, skip the instruction */
-    rv->csr_mepc += rv->compressed ? 2 : 4;
-    rv->PC = rv->csr_mepc; /* mret */
+    /* Whether it was emulated or not, move past the instruction */
+    *epc += len;
+    rv->PC = *epc; /* xret */
 }
-#endif /* !RV32_HAS(SYSTEM) */
+#endif /* !RV32_HAS(SYSTEM) || RV32_HAS(ELF_LOADER) */
 
 #if RV32_HAS(SYSTEM)
 static void __trap_handler(riscv_t *rv);
@@ -1240,6 +1275,7 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
     for (int i = 0; i < ir->imm2; i++) {
         cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        RVOP_SYNC_PC(rv, PC); /* a page fault names this access */
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         uint32_t value = rv->X[fuse[i].rs2];
         MEM_WRITE_W(rv, addr, value);
@@ -1262,6 +1298,7 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
     for (int i = 0; i < ir->imm2; i++) {
         cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        RVOP_SYNC_PC(rv, PC); /* a page fault names this access */
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
         rv->X[fuse[i].rd] = MEM_READ_W(rv, addr);
         PC += 4;
@@ -1439,6 +1476,7 @@ static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
      */
     rv->X[ir->rd] = ir->imm;
     PC += 4;
+    RVOP_SYNC_PC(rv, PC); /* a page fault names the LW or SW */
     cycle++;
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
@@ -1468,6 +1506,7 @@ static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
      */
     rv->X[ir->rd] = ir->imm;
     PC += 4;
+    RVOP_SYNC_PC(rv, PC); /* a page fault names the LW or SW */
     cycle++;
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
@@ -2521,8 +2560,11 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
                  * LUI + LW fusion (fuse9)
+                 * Skip a misaligned address: it traps, and only the unfused
+                 * instructions carry the JIT's alignment checks.
                  */
-                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1) {
+                if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1 &&
+                    !(((uint32_t) ir->imm + (uint32_t) next_ir->imm) & 3)) {
                     ir->imm2 = next_ir->imm; /* lw offset */
                     ir->rs2 = next_ir->rd;   /* lw destination */
                     ir->opcode = rv_insn_fuse9;
@@ -2545,9 +2587,11 @@ static void match_pattern(riscv_t *rv, block_t *block)
                  *
                  * In SYSTEM mode, JIT uses MMU handler for address translation.
                  * LUI + SW fusion (fuse10)
+                 * Skip a misaligned address, as for fuse9.
                  */
                 if (ir->rd != rv_reg_zero && ir->rd == next_ir->rs1 &&
-                    ir->rd != next_ir->rs2) {
+                    ir->rd != next_ir->rs2 &&
+                    !(((uint32_t) ir->imm + (uint32_t) next_ir->imm) & 3)) {
                     ir->imm2 = next_ir->imm; /* sw offset */
                     ir->rs1 = next_ir->rs2;  /* sw source (data to store) */
                     ir->opcode = rv_insn_fuse10;
@@ -2993,6 +3037,14 @@ static block_t *block_find_or_translate(riscv_t *rv
      */
     next_blk->satp = rv->csr_satp;
     next_blk->invalidated = false;
+#if RV32_HAS(ELF_LOADER)
+    /* T1C builds its MMU path only for SYSTEM_MMIO, and otherwise addresses
+     * guest memory physically, so code that runs with paging on stays
+     * interpreted. Building that path for every system build would lift this.
+     */
+    if (next_blk->satp)
+        next_blk->translatable = false;
+#endif
 #endif
 
     optimize_constant(rv, next_blk);
@@ -3114,10 +3166,11 @@ static block_t *block_find_or_translate(riscv_t *rv
         jit_cache_update(rv->jit_cache, key, NULL);
     }
     inline_cache_clear_key(rv->inline_cache, key);
-    /* Dispose LLVM execution engine before freeing the block.
-     * The engine owns the memory where block->func points.
+
+    /* The engine owns the memory where block->func points. Nothing can reach
+     * that code any more, so let the T2C thread dispose it.
      */
-    t2c_dispose_engine(replaced_blk->llvm_engine);
+    t2c_retire_engine(rv, replaced_blk->llvm_engine);
 #endif
 
     list_del_init(&replaced_blk->list);
@@ -3217,6 +3270,30 @@ static void rv_check_interrupt(riscv_t *rv)
 }
 #endif
 
+#if RV32_HAS(JIT) || RV32_HAS(SYSTEM)
+/* Settle a trap that stopped generated code or block translation, and return
+ * whether there was one. A page fault runs the guest's handler inside the MMU
+ * helper. If that handler resumed somewhere else (need_handle_signal),
+ * execution stopped at the access and rv->PC already names the new target. A
+ * trap still pending, from that handler faulting in turn or otherwise, is taken
+ * here.
+ */
+static inline bool settle_trap(riscv_t *rv UNUSED)
+{
+#if RV32_HAS(SYSTEM)
+    bool settled = need_handle_signal;
+    need_handle_signal = false;
+    if (rv->is_trapped) {
+        trap_handler(rv);
+        return true;
+    }
+    return settled;
+#else
+    return false;
+#endif
+}
+#endif
+
 void rv_step(void *arg)
 {
     assert(arg);
@@ -3288,12 +3365,13 @@ void rv_step(void *arg)
 #endif
         /* by now, a block should be available */
         if (unlikely(!block)) {
+            if (rv_has_halted(rv)) /* a fault handler stopped the hart */
+                return;
 #if RV32_HAS(SYSTEM)
-            /* Check if a trap is pending (page fault during translation).
-             * If so, invoke trap handler and continue instead of halting.
+            /* A page fault while fetching the first instruction: settle it and
+             * continue instead of halting.
              */
-            if (rv->is_trapped) {
-                trap_handler(rv);
+            if (settle_trap(rv)) {
                 prev = NULL;
                 continue;
             }
@@ -3364,6 +3442,7 @@ void rv_step(void *arg)
                 continue;
             }
             ((exec_t2c_func_t) block->func)(rv);
+            settle_trap(rv);
             prev = NULL;
             continue;
         } /* check if invoking times of t1 generated code exceed threshold */
@@ -3407,15 +3486,7 @@ void rv_step(void *arg)
 #endif
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
-            rv->csr_cycle += block->cycle_cost;
-#if RV32_HAS(SYSTEM)
-            /* Handle trap if one occurred during JIT block execution */
-            if (rv->is_trapped) {
-                trap_handler(rv);
-                prev = NULL;
-                continue;
-            }
-#endif
+            settle_trap(rv);
             prev = NULL;
             continue;
         } /* check if the execution path is potential hotspot */
@@ -3431,15 +3502,7 @@ void rv_step(void *arg)
 #endif
                 ((exec_block_func_t) state->buf)(
                     rv, (uintptr_t) (state->buf + block->offset));
-                rv->csr_cycle += block->cycle_cost;
-#if RV32_HAS(SYSTEM)
-                /* Handle trap if one occurred during JIT block execution */
-                if (rv->is_trapped) {
-                    trap_handler(rv);
-                    prev = NULL;
-                    continue;
-                }
-#endif
+                settle_trap(rv);
                 prev = NULL;
                 continue;
             }
@@ -3647,12 +3710,23 @@ static void _trap_handler(riscv_t *rv)
 #if RV32_HAS(SYSTEM)
         rv->last_csr_sepc = rv->csr_sepc;
         if (!rv->csr_stvec) { /* in case CSR is not configured */
+            rv->is_trapped = false;
+#if RV32_HAS(ELF_LOADER)
+            /* A directly loaded program has no OS to handle its exceptions;
+             * treat them as user mode does. Resuming at sepc would retry a
+             * misaligned access forever.
+             */
+            if (!(cause & (1U << 31))) {
+                rv_trap_default_handler(rv, cause, rv->csr_stval,
+                                        &rv->csr_sepc);
+                return;
+            }
+#endif
             /* For system mode without trap vector, restore PC from sepc
              * and clear is_trapped to continue execution. This handles
              * spurious interrupts during early boot before handlers are set.
              */
             rv->PC = rv->csr_sepc;
-            rv->is_trapped = false;
             return;
         }
 #endif
@@ -3676,7 +3750,7 @@ static void _trap_handler(riscv_t *rv)
             rv->PC = rv->csr_mepc;
             rv->is_trapped = false;
 #else
-            rv_trap_default_handler(rv);
+            rv_trap_default_handler(rv, cause, rv->csr_mtval, &rv->csr_mepc);
 #endif
             return;
         }
@@ -3713,6 +3787,10 @@ void ecall_handler(riscv_t *rv)
     assert(rv);
 
 #if RV32_HAS(ELF_LOADER)
+    /* The emulator services the call in place of a trap, but it must still
+     * discard the reservation as a trap would.
+     */
+    RV_RESERVE_CLEAR(rv);
     rv->PC += 4;
     syscall_handler(rv);
 #elif RV32_HAS(SYSTEM)

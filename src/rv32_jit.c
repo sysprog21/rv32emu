@@ -249,11 +249,15 @@
  *   insn_type: rv_insn_* constant for MMIO handler
  *   size: memory access size (S8, S16, S32)
  *   load_fn: emit_load or emit_load_sext
+ *   flags: JIT_MISALIGN_COMPRESSED for compressed forms, otherwise 0
+ * Compressed forms reuse the word handler; the decoder sets rs1 to sp for
+ * C.LWSP, and insn_type selects the access size for the MMU handler.
  */
-#define GEN_LOAD(inst, insn_type, size, load_fn)                               \
+#define GEN_LOAD(inst, insn_type, size, load_fn, flags)                        \
     GEN(inst, {                                                                \
         memory_t *m = PRIV(rv)->mem;                                           \
         vm_reg[0] = ra_load(state, ir->rs1);                                   \
+        emit_misalign_guard(state, rv, ir->rs1, ir->imm, size, flags, ir->pc); \
         IIF(RV32_HAS(SYSTEM_MMIO))(                                            \
             {                                                                  \
                 emit_load_imm_sext(state, temp_reg, ir->imm);                  \
@@ -288,7 +292,7 @@
                                                                                \
                 /* Check if trap occurred - skip load if trapped */            \
                 emit_load(state, S8, parameter_reg[0], temp_reg,               \
-                          offsetof(riscv_t, is_trapped));                      \
+                          offsetof(riscv_t, jit_mmu.abort));                   \
                 emit_cmp_imm32(state, temp_reg, 0);                            \
                 uint32_t jump_trap = state->offset;                            \
                 emit_jcc_offset(state, JCC_JNE);                               \
@@ -336,11 +340,14 @@
  *   inst: instruction name (sb, sh, sw)
  *   insn_type: rv_insn_* constant for MMIO handler
  *   size: memory access size (S8, S16, S32)
+ *   flags: JIT_MISALIGN_COMPRESSED for compressed forms, otherwise 0
  */
-#define GEN_STORE(inst, insn_type, size)                                       \
+#define GEN_STORE(inst, insn_type, size, flags)                                \
     GEN(inst, {                                                                \
         memory_t *m = PRIV(rv)->mem;                                           \
         vm_reg[0] = ra_load(state, ir->rs1);                                   \
+        emit_misalign_guard(state, rv, ir->rs1, ir->imm, size,                 \
+                            JIT_MISALIGN_STORE | (flags), ir->pc);             \
         IIF(RV32_HAS(SYSTEM_MMIO))(                                            \
             {                                                                  \
                 emit_load_imm_sext(state, temp_reg, ir->imm);                  \
@@ -370,7 +377,7 @@
                                                                                \
                 /* Check if trap occurred - skip store if trapped */           \
                 emit_load(state, S8, parameter_reg[0], temp_reg,               \
-                          offsetof(riscv_t, is_trapped));                      \
+                          offsetof(riscv_t, jit_mmu.abort));                   \
                 emit_cmp_imm32(state, temp_reg, 0);                            \
                 uint32_t jump_trap = state->offset;                            \
                 emit_jcc_offset(state, JCC_JNE);                               \
@@ -453,15 +460,15 @@ GEN_BRANCH(bge, JCC_JGE)
 GEN_BRANCH(bltu, JCC_JB)
 GEN_BRANCH(bgeu, JCC_JAE)
 /* RV32I Load Instructions */
-GEN_LOAD(lb, rv_insn_lb, S8, emit_load_sext)
-GEN_LOAD(lh, rv_insn_lh, S16, emit_load_sext)
-GEN_LOAD(lw, rv_insn_lw, S32, emit_load)
-GEN_LOAD(lbu, rv_insn_lbu, S8, emit_load)
-GEN_LOAD(lhu, rv_insn_lhu, S16, emit_load)
+GEN_LOAD(lb, rv_insn_lb, S8, emit_load_sext, 0)
+GEN_LOAD(lh, rv_insn_lh, S16, emit_load_sext, 0)
+GEN_LOAD(lw, rv_insn_lw, S32, emit_load, 0)
+GEN_LOAD(lbu, rv_insn_lbu, S8, emit_load, 0)
+GEN_LOAD(lhu, rv_insn_lhu, S16, emit_load, 0)
 /* RV32I Store Instructions */
-GEN_STORE(sb, rv_insn_sb, S8)
-GEN_STORE(sh, rv_insn_sh, S16)
-GEN_STORE(sw, rv_insn_sw, S32)
+GEN_STORE(sb, rv_insn_sb, S8, 0)
+GEN_STORE(sh, rv_insn_sh, S16, 0)
+GEN_STORE(sw, rv_insn_sw, S32, 0)
 /* RV32I ALU Immediate Instructions */
 GEN_ALU_IMM(addi, ALU_ADD)
 GEN_SLT_IMM(slti, JCC_JL)
@@ -607,16 +614,8 @@ GEN(caddi4spn, {
     emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_ADD, vm_reg[1],
                      (uint16_t) ir->imm);
 })
-GEN(clw, {
-    memory_t *m = PRIV(rv)->mem;
-    vm_reg[0] = ra_load(state, ir->rs1);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
-    emit_guest_load(state, m, S32, vm_reg[0], vm_reg[1], ir->imm, false);
-})
-GEN(csw, {
-    memory_t *m = PRIV(rv)->mem;
-    ra_store_guest(state, m, S32, ir->rs1, ir->rs2, ir->imm);
-})
+GEN_LOAD(clw, rv_insn_lw, S32, emit_load, JIT_MISALIGN_COMPRESSED)
+GEN_STORE(csw, rv_insn_sw, S32, JIT_MISALIGN_COMPRESSED)
 GEN(cnop, {})
 GEN(caddi, {
     vm_reg[0] = ra_load(state, ir->rd);
@@ -699,12 +698,7 @@ GEN(cslli, {
     emit_alu32_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHL, vm_reg[0],
                     (uint8_t) ir->imm);
 })
-GEN(clwsp, {
-    memory_t *m = PRIV(rv)->mem;
-    vm_reg[0] = ra_load(state, rv_reg_sp);
-    vm_reg[1] = map_vm_reg(state, ir->rd);
-    emit_guest_load(state, m, S32, vm_reg[0], vm_reg[1], ir->imm, false);
-})
+GEN_LOAD(clwsp, rv_insn_lw, S32, emit_load, JIT_MISALIGN_COMPRESSED)
 GEN(cjr, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_mov(state, vm_reg[0], temp_reg);
@@ -746,10 +740,7 @@ GEN(cadd, {
     emit_mov(state, vm_reg[0], vm_reg[2]);
     emit_alu32(state, 0x01, temp_reg, vm_reg[2]);
 })
-GEN(cswsp, {
-    memory_t *m = PRIV(rv)->mem;
-    ra_store_guest(state, m, S32, rv_reg_sp, ir->rs2, ir->imm);
-})
+GEN_STORE(cswsp, rv_insn_sw, S32, JIT_MISALIGN_COMPRESSED)
 #endif
 #if RV32_HAS(EXT_C) && RV32_HAS(EXT_F)
 GEN(cflwsp, { assert(NULL); })

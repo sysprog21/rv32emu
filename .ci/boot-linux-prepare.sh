@@ -113,10 +113,8 @@ case "$ACTION" in
             # root:root. Even if "others" have read and write (rw) permissions,
             # accessing the file for certain operations may still require
             # elevated privileges (e.g., setuid). To simplify this, we change
-            # the ownership to a non-root user. Use this with caution—changing
-            # ownership to runner:runner is specific to the GitHub CI
-            # environment.
-            chown runner: ${disk_img}
+            # the ownership to the user who invoked sudo: runner on GitHub CI.
+            chown "${SUDO_USER:-$(id -un)}": ${disk_img}
 
             # Add other's rw permission to the disk image and device, so
             # non-superuser can rw them

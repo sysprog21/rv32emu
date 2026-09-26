@@ -41,6 +41,10 @@ enum {
 };
 
 enum {
+    PF_X = 1, /* executable segment */
+};
+
+enum {
     STT_NOTYPE = 0,
     STT_OBJECT = 1,
     STT_FUNC = 2,
@@ -403,6 +407,37 @@ bool elf_load(elf_t *e, memory_t *mem)
     }
 
     return true;
+}
+
+/* A program that never installs a trap vector has every exception it raises
+ * handled by the emulator itself. Scan the loadable executable segments, at
+ * every halfword as compressed code places 32-bit instructions there, for a CSR
+ * instruction that names mtvec or stvec and may write it. Data that happens to
+ * match only makes the answer conservative.
+ */
+bool elf_may_set_trap_vector(elf_t *e)
+{
+    for (int p = 0; p < e->hdr->e_phnum; ++p) {
+        const struct Elf32_Phdr *phdr =
+            (const struct Elf32_Phdr *) (e->raw_data + e->hdr->e_phoff +
+                                         (uint32_t) p * e->hdr->e_phentsize);
+        if (phdr->p_type != PT_LOAD || !(phdr->p_flags & PF_X))
+            continue;
+
+        const uint8_t *text = e->raw_data + phdr->p_offset;
+        for (uint32_t i = 0; i + 4 <= phdr->p_filesz; i += 2) {
+            const uint32_t insn = text[i] | text[i + 1] << 8 |
+                                  text[i + 2] << 16 |
+                                  (uint32_t) text[i + 3] << 24;
+            const uint32_t funct3 = (insn >> 12) & 7;
+            const uint32_t csr = insn >> 20;
+            /* SYSTEM opcode; funct3 0 and 4 are not CSR instructions */
+            if ((insn & 0x7f) == 0x73 && (funct3 & 3) &&
+                (csr == 0x305 || csr == 0x105)) /* mtvec, stvec */
+                return true;
+        }
+    }
+    return false;
 }
 
 bool elf_open(elf_t *e, const char *input)

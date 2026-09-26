@@ -49,7 +49,7 @@ make distclean
 
 # Generate config with all RISC-V extensions (including B-extension:
 # Zba/Zbb/Zbc/Zbs)
-make defconfig
+make interpreter_defconfig
 make ENABLE_ARCH_TEST=1 ENABLE_EXT_M=1 ENABLE_EXT_A=1 ENABLE_EXT_F=1 ENABLE_EXT_C=1 \
     ENABLE_Zicsr=1 ENABLE_Zifencei=1 \
     ENABLE_Zba=1 ENABLE_Zbb=1 ENABLE_Zbc=1 ENABLE_Zbs=1 $PARALLEL
@@ -74,39 +74,39 @@ chmod +x tests/arch-test-target/sail_cSim/riscv_sim_RV32
 
 # Run architecture tests in parallel (each uses device-specific work directory
 # and config)
-arch_test_pids=()
-arch_test_devices=("IMAFCZicsrZifencei" "FCZicsr" "IMZbaZbbZbcZbs")
+run_arch_tests()
+{
+    local arch_test_devices=("IMAFCZicsrZifencei" "FCZicsr" "IMZbaZbbZbcZbs")
+    local arch_test_pids=()
+    for device in "${arch_test_devices[@]}"; do
+        make ENABLE_ARCH_TEST=1 arch-test RISCV_DEVICE="$device" hw_data_misaligned_support=1 SKIP_PREREQ=1 $PARALLEL &
+        arch_test_pids+=($!)
+    done
 
-for device in "${arch_test_devices[@]}"; do
-    make ENABLE_ARCH_TEST=1 arch-test RISCV_DEVICE="$device" hw_data_misaligned_support=1 SKIP_PREREQ=1 $PARALLEL &
-    arch_test_pids+=($!)
-done
+    # Wait for all parallel arch-tests and check results
+    local arch_test_failed=0
+    for i in "${!arch_test_pids[@]}"; do
+        if ! wait "${arch_test_pids[$i]}"; then
+            print_error "arch-test failed for device: ${arch_test_devices[$i]} ($1)"
+            arch_test_failed=1
+        fi
+    done
+    return "$arch_test_failed"
+}
 
-# Wait for all parallel arch-tests and check results
-arch_test_failed=0
-for i in "${!arch_test_pids[@]}"; do
-    if ! wait "${arch_test_pids[$i]}"; then
-        print_error "arch-test failed for device: ${arch_test_devices[$i]}"
-        arch_test_failed=1
-    fi
-done
-
-if [ "$arch_test_failed" -ne 0 ]; then
-    exit 1
-fi
+run_arch_tests interpreter || exit 1
 
 # Rebuild with RV32E
 make distclean
-make defconfig
+make interpreter_defconfig
 make ENABLE_ARCH_TEST=1 ENABLE_RV32E=1 $PARALLEL
 make ENABLE_ARCH_TEST=1 arch-test RISCV_DEVICE=E SKIP_PREREQ=1 $PARALLEL || exit 1
 
-# Rebuild with JIT.
-# Do not run the architecture test with "Zicsr" extension. It
-# ignores the hardware misalignment (hw_data_misaligned_support) option.
+# Rebuild with the tier-1 JIT, the default engine. Architecture-test builds
+# compile every translatable block, so these runs exercise generated code.
 make distclean
-make jit_defconfig
-make ENABLE_ARCH_TEST=1 ENABLE_T2C=0 \
-    ENABLE_EXT_M=1 ENABLE_EXT_A=1 ENABLE_EXT_F=1 ENABLE_EXT_C=1 \
-    ENABLE_Zicsr=1 ENABLE_Zifencei=1 $PARALLEL
+# defconfig already selects every extension these device sets need.
+make defconfig
+make ENABLE_ARCH_TEST=1 $PARALLEL
+run_arch_tests T1C || exit 1
 make ENABLE_ARCH_TEST=1 arch-test RISCV_DEVICE=IMC hw_data_misaligned_support=0 SKIP_PREREQ=1 $PARALLEL || exit 1

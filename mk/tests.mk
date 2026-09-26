@@ -86,6 +86,9 @@ EXPECTED_jit-alu-alias = JIT ALU aliases OK
 EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
+EXPECTED_jit-misalign = JIT misaligned accesses OK
+EXPECTED_jit-memory-address = JIT memory address OK
+EXPECTED_misalign-page-fault = misaligned page fault OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
 EXPECTED_trace_match = trace matcher corpus passed
@@ -131,6 +134,8 @@ GUEST_ASM_M_WORKS := $(call guest-asm-arch-works,rv32im)
 GUEST_ASM_C_WORKS := $(call guest-asm-arch-works,rv32ic)
 GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
 GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
+GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
+GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
 
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
@@ -140,23 +145,40 @@ GUEST_ASM_CHECK_TARGETS := check-block-eviction
 ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-lrsc
 endif
+# A directly loaded system program has no handler for its own page faults.
+ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
+GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault
+endif
 # The jit-* programs assert tier-1 code generation, so they prove nothing when
 # the emulator under test has no JIT. Report them as skipped rather than
 # passing them through the interpreter and reporting green.
 ifeq ($(CONFIG_JIT),y)
 GUEST_ASM_CHECK_TARGETS += check-jit-alu-alias check-jit-indirect-targets
-# check-jit-memory-address assembles for rv32i and, with compressed
-# instructions configured, rv32ic as well.
+GUEST_ASM_CHECK_TARGETS += check-jit-memory-address
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-jit-memory-address
-else ifneq ($(CONFIG_EXT_C),y)
-GUEST_ASM_CHECK_TARGETS += check-jit-memory-address
+GUEST_ASM_CHECK_TARGETS += check-jit-memory-address-rvc
 endif
 ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-identity-normalize check-jit-signed-div \
 	check-jit-interp-diff
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_MC_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-interp-diff-rvc
+endif
+endif
+# check-jit-misalign installs a machine-mode trap vector, so it needs Zicsr,
+# and a user-mode emulator: system builds run the program in supervisor mode.
+# Its -notvec variant installs none, which lets JIT code skip the alignment
+# checks.
+ifneq ($(CONFIG_SYSTEM),y)
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-notvec
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-notvec-rvc
+endif
+ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-rvc
+endif
 endif
 endif
 else
@@ -181,12 +203,16 @@ endif
 
 # Build a freestanding guest program from tests/$(1).S for ISA $(2) and compare
 # its output, so these report like every other check instead of staying silent.
+# An optional suffix $(3) names a variant built for another ISA, or with the
+# extra assembler flags in $(4).
+guest-asm-build = $(CROSS_COMPILE)gcc -march=$(2) -mabi=ilp32 -nostdlib \
+	-static -Wl,-e,_start $(4) -o $(OUT)/$(1)$(3) tests/$(1).S
+
 define guest-asm-check-target
-.PHONY: check-$(1)
-check-$(1): $$(BIN) tests/$(1).S | $$(OUT)
-	$$(Q)$$(CROSS_COMPILE)gcc -march=$(2) -mabi=ilp32 -nostdlib -static \
-	    -Wl,-e,_start -o $$(OUT)/$(1) tests/$(1).S
-	$$(call check-test, , $$(OUT)/$(1), $(1), tail -n 1,$$(EXPECTED_$(1)))
+.PHONY: check-$(1)$(3)
+check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
+	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3),$(4))
+	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
 define guest-check-target
@@ -210,18 +236,24 @@ check-block-eviction: $(BIN) tests/block-eviction.c tests/block-eviction-start.S
 	$(call check-test, , $(OUT)/block-eviction, block-eviction, uniq,$(EXPECTED_block-eviction))
 
 # Exercise base/destination aliases and signed offsets with and without RVC.
-# This one stays hand-written: it runs the same program for two ISAs.
-.PHONY: check-jit-memory-address
-check-jit-memory-address: $(BIN) tests/jit-memory-address.S | $(OUT)
-	$(Q)for arch in rv32i $(if $(filter y,$(CONFIG_EXT_C)),rv32ic); do \
-	    $(CROSS_COMPILE)gcc -march=$$arch -mabi=ilp32 -nostdlib -static \
-	        -Wl,-e,_start -o $(OUT)/jit-memory-address-$$arch \
-	        tests/jit-memory-address.S || exit 1; \
-	    output="$$($(BIN) -q $(OUT)/jit-memory-address-$$arch)" || exit 1; \
-	    test "$$output" = "JIT memory address OK" || exit 1; \
-	done
+$(eval $(call guest-asm-check-target,jit-memory-address,rv32i))
+$(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))
 
 $(eval $(call guest-asm-check-target,lrsc,rv32ia))
+$(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
+
+# The program must stop at its first instruction page fault, reporting it and
+# failing, instead of retrying the fetch forever.
+.PHONY: check-insn-page-fault
+check-insn-page-fault: $(BIN) tests/insn-page-fault.S | $(OUT)
+	$(Q)$(call guest-asm-build,insn-page-fault,rv32i_zicsr)
+	$(Q)$(PRINTF) "Running insn-page-fault ... "; \
+	if output="$$($(BIN) $(OUT)/insn-page-fault 2>&1)"; then \
+	    $(PRINTF) "Failed.\n"; exit 1; \
+	elif ! echo "$$output" | grep -q "Instruction page fault"; then \
+	    $(PRINTF) "Failed.\n"; exit 1; \
+	fi; \
+	$(call notice, [OK])
 $(eval $(call guest-asm-check-target,jit-alu-alias,rv32i))
 # Guard emission additionally requires JIT_INDIRECT_TARGETS, which is off in
 # tiered builds; the program still covers history recording and chaining.
@@ -229,15 +261,15 @@ $(eval $(call guest-asm-check-target,jit-indirect-targets,rv32i))
 $(eval $(call guest-asm-check-target,jit-identity-normalize,rv32im))
 $(eval $(call guest-asm-check-target,jit-signed-div,rv32im))
 $(eval $(call guest-asm-check-target,jit-interp-diff,rv32im))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr))
 
-# The same program assembled with compressed encodings must agree, which is
-# what exercises the compressed load/store generators.
-.PHONY: check-jit-interp-diff-rvc
-check-jit-interp-diff-rvc: $(BIN) tests/jit-interp-diff.S | $(OUT)
-	$(Q)$(CROSS_COMPILE)gcc -march=rv32imc -mabi=ilp32 -nostdlib -static \
-	    -Wl,-e,_start -o $(OUT)/jit-interp-diff-rvc tests/jit-interp-diff.S
-	$(call check-test, , $(OUT)/jit-interp-diff-rvc, jit-interp-diff-rvc, \
-	    tail -n 1,$(EXPECTED_jit-interp-diff))
+# The same programs assembled with compressed encodings must agree, which is
+# what exercises the compressed load/store generators. In jit-misalign, the
+# misaligned bases in s0 and s1 turn the accesses through them into C.LW/C.SW.
+$(eval $(call guest-asm-check-target,jit-interp-diff,rv32imc,-rvc))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32ic_zicsr,-rvc))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32i,-notvec,-DNO_TRAP_VECTOR))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32ic,-notvec-rvc,-DNO_TRAP_VECTOR))
 
 # check-trace-match builds and runs a host program, so it is independent of
 # whether the emulator can load a user ELF. Everything else here is a guest
@@ -267,7 +299,7 @@ EXPECTED_misalign = MISALIGNED INSTRUCTION FETCH TEST PASSED!
 misalign-in-blk-emu: $(BIN)
 	$(call check-test, , tests/system/alignment/misalign.elf, misalign.elf, tail -n 1,$(EXPECTED_misalign))
 
-EXPECTED_mmu = Store page fault test passed!
+EXPECTED_mmu = Redirected page fault test passed!
 mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 

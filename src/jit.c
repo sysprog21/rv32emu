@@ -111,6 +111,17 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 #define JIT_OP_MOD_REG (JIT_CLS_ALU | JIT_SRC_REG | 0x90)
 
 #define STACK_SIZE 512
+/* JIT_CALL_PAD follows a pushed rv at a call site: together they keep RSP
+ * 16-byte aligned, and on Windows the pad also holds the callee's home space.
+ */
+#if defined(_WIN32)
+#define JIT_FRAME_SIZE (STACK_SIZE + 4 * sizeof(uint64_t))
+#define JIT_CALL_PAD 0x28
+#else
+#define JIT_FRAME_SIZE STACK_SIZE
+#define JIT_CALL_PAD 0x8
+#endif
+
 /* The SYSTEM_MMIO fast path adds ~8 jump-table entries per load/store
  * (7 slow-path gating branches + 1 unconditional B), pushing
  * JUMPS_PER_INSN to 16.  state->jumps accumulates across chained blocks,
@@ -172,8 +183,49 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
  *   - 1 implicit jump inside emit_exit
  * Total: 13.  Branch epilogues are still 5 (2x emit_jmp + 2x emit_exit +
  * 1x emit_jump_target_offset).  We round up to 16 for headroom.
+ *
+ * Each load or store also has a misaligned-access guard: the branch to its
+ * stub, the stub's emit_exit, and the jump around an inline stub.
+ * block_jump_budget() adds those, for every access of a fused run.
  */
 #define JUMPS_PER_INSN 16
+#define JUMPS_PER_GUARD 3
+
+/* Worst-case jump targets a block records, including 2 for a page-terminated
+ * epilogue (emit_jmp + emit_exit).
+ */
+static uint32_t block_jump_budget(const block_t *block)
+{
+    uint32_t n = 2;
+    const rv_insn_t *ir = block->ir_head;
+    for (uint32_t i = 0; i < block->n_insn; i++, ir = ir->next) {
+        n += JUMPS_PER_INSN;
+        switch (ir->opcode) {
+        case rv_insn_fuse3:
+        case rv_insn_fuse4:
+            n += ir->imm2 * JUMPS_PER_GUARD;
+            break;
+        case rv_insn_lh:
+        case rv_insn_lhu:
+        case rv_insn_lw:
+        case rv_insn_sh:
+        case rv_insn_sw:
+        case rv_insn_fuse11:
+        case rv_insn_fuse13:
+#if RV32_HAS(EXT_C)
+        case rv_insn_clw:
+        case rv_insn_csw:
+        case rv_insn_clwsp:
+        case rv_insn_cswsp:
+#endif
+            n += JUMPS_PER_GUARD;
+            break;
+        default:
+            break;
+        }
+    }
+    return n;
+}
 
 /* Check if branch history table entry should trigger JIT translation */
 static inline bool bht_should_translate(const branch_history_table_t *bt,
@@ -407,7 +459,7 @@ static const int parameter_reg[] = {RCX, RDX, R8, R9};
 static struct host_reg register_map[] = {
     {RAX, -1, 0, 0}, {R10, -1, 0, 0}, {RDX, -1, 0, 0}, {R8, -1, 0, 0},
     {R9, -1, 0, 0},  {R14, -1, 0, 0}, {R15, -1, 0, 0}, {RDI, -1, 0, 0},
-    {RSI, -1, 0, 0}, {RBX, -1, 0, 0}, {RBP, -1, 0, 0},
+    {RSI, -1, 0, 0}, {RBX, -1, 0, 0},
 };
 static int temp_reg = R11;
 #else
@@ -434,6 +486,7 @@ static int temp_reg = R8;
  *   r0 - r4   Function parameters, caller-saved
  *   r6 - r8   Temp - used for storing calculated value during execution
  *   r19       Guest memory base in user-mode JIT (outside register_map)
+ *   r20       Guest cycle count while generated code runs (cycle_reg)
  *   r19 - r23 Callee-saved registers
  *   r24       Temp - used for generating 32-bit immediates
  *   r25       Temp - used for modulous calculations
@@ -454,6 +507,14 @@ static struct host_reg register_map[] = {
 static const int n_host_regs =
     ARRAY_SIZE(register_map); /* the number of avavliable host register */
 
+/* Alignment, in bytes, that a passed guard has proven for each guest register
+ * since it was last written in the current block; 0 if unknown. Every write to
+ * a guest register goes through map_vm_reg() or its reserved variants, or marks
+ * the host register dirty, and each of those clears the entry, as does
+ * reset_reg() after a call into C.
+ */
+static uint8_t reg_align[N_RV_REGS];
+
 static inline void set_dirty(int reg_idx, bool is_dirty)
 {
     for (int i = 0; i < n_host_regs; i++) {
@@ -462,6 +523,8 @@ static inline void set_dirty(int reg_idx, bool is_dirty)
             continue;
 
         register_map[i].dirty = is_dirty;
+        if (is_dirty && register_map[i].vm_reg_idx >= 0)
+            reg_align[register_map[i].vm_reg_idx] = 0;
         return;
     }
 }
@@ -1499,31 +1562,119 @@ static inline void emit_jmp(struct jit_state *state,
 #endif
 }
 
+/* Guest cycle counting.
+ *
+ * Blocks jump to one another inside generated code, so the dispatcher sees only
+ * the first block of a chain and cannot charge the rest. Instead, each block
+ * adds its cost to cycle_reg on entry. While generated code runs, the register
+ * stands in for rv->csr_cycle: it is loaded on entry, stored on exit, and
+ * stored before and reloaded after any call, since a callee may read or advance
+ * the counter. It is callee-saved, so it survives the calls themselves.
+ */
+#if defined(__x86_64__)
+static const int cycle_reg = RBP;
+#elif defined(__aarch64__)
+static const int cycle_reg = R20;
+#endif
+
+static void emit_cycle_count(struct jit_state *state, uint32_t n)
+{
+#if defined(__x86_64__)
+    /* add rbp, imm: block costs nearly always fit the 8-bit form */
+    if (n < 0x80) {
+        emit_alu64(state, 0x83, 0, cycle_reg);
+        emit1(state, n);
+    } else {
+        emit_alu64_imm32(state, 0x81, 0, cycle_reg, n);
+    }
+#elif defined(__aarch64__)
+    if (n < 0x1000) {
+        emit_addsub_imm(state, true, AS_ADD, cycle_reg, cycle_reg, n);
+    } else {
+        emit_load_imm(state, temp_imm_reg, n);
+        emit_addsub_register(state, true, AS_ADD, cycle_reg, cycle_reg,
+                             temp_imm_reg);
+    }
+#endif
+}
+
+/* Arm64 reaches the counter with a scaled 12-bit offset. */
+_Static_assert(offsetof(riscv_t, csr_cycle) % 8 == 0 &&
+                   offsetof(riscv_t, csr_cycle) / 8 < 4096,
+               "csr_cycle must be reachable by a scaled LDR/STR offset");
+
+/* Move rv->csr_cycle into cycle_reg (load) or back (store). */
+static void emit_cycle_move(struct jit_state *state, bool load)
+{
+    const uint32_t offset = offsetof(riscv_t, csr_cycle);
+#if defined(__x86_64__)
+    /* mov rbp, [rv + offset] / mov [rv + offset], rbp */
+    emit_basic_rex(state, 1, cycle_reg, parameter_reg[0]);
+    emit1(state, load ? 0x8b : 0x89);
+    emit_modrm_and_displacement(state, cycle_reg, parameter_reg[0], offset);
+#elif defined(__aarch64__)
+    /* LDR/STR Xt, [Xn, #offset], unsigned scaled offset */
+    emit_a64(state, (load ? UINT32_C(0xf9400000) : UINT32_C(0xf9000000)) |
+                        ((offset / 8) << 10) |
+                        ((uint32_t) parameter_reg[0] << 5) |
+                        (uint32_t) cycle_reg);
+#endif
+}
+
 static inline void save_reg(struct jit_state *, int);
 static inline void unmap_vm_reg(int);
 
+#if defined(__x86_64__)
+/* Open (enter) or close a call frame: save rv, which the callee may clobber,
+ * and pad RSP by JIT_CALL_PAD, which with the push keeps it 16-byte aligned.
+ */
+static inline void emit_call_frame(struct jit_state *state, bool enter)
+{
+    if (enter) {
+        emit_push(state, parameter_reg[0]);
+        emit_alu64_imm32(state, 0x81, 5, RSP, JIT_CALL_PAD);
+    } else {
+        emit_alu64_imm32(state, 0x81, 0, RSP, JIT_CALL_PAD);
+        emit_pop(state, parameter_reg[0]);
+    }
+}
+#endif
+
+/* Call a helper that takes rv as its first argument. rv is preserved across the
+ * call, since the epilogue reaches rv->csr_cycle through it.
+ */
 static inline void emit_call(struct jit_state *state, intptr_t target)
 {
+    emit_cycle_move(state, false);
 #if defined(__x86_64__)
+    emit_call_frame(state, true);
     emit_load_imm_sext(state, RAX, target);
     /* callq *%rax */
     emit1(state, 0xff);
     /* ModR/M byte: b11010000b = xd0, rax is register 0 */
     emit1(state, 0xd0);
+    emit_call_frame(state, false);
+    emit_cycle_move(state, true);
 #elif defined(__aarch64__)
-    uint32_t stack_movement = align_up(8, 16);
-    emit_addsub_imm(state, true, AS_SUB, SP, SP, stack_movement);
+    /* Save the link register and rv in one 16-byte slot. */
+    emit_addsub_imm(state, true, AS_SUB, SP, SP, 16);
     emit_loadstore_imm(state, LS_STRX, R30, SP, 0);
+    emit_loadstore_imm(state, LS_STRX, parameter_reg[0], SP, 8);
 
     emit_movewide_imm(state, true, temp_imm_reg, target);
     emit_uncond_branch_reg(state, BR_BLR, temp_imm_reg);
 
+    /* Hold the result while rv is restored, since save_reg stores through it.
+     */
+    emit_logical_register(state, true, LOG_ORR, temp_imm_reg, RZ, R0);
+    emit_loadstore_imm(state, LS_LDRX, parameter_reg[0], SP, 8);
+    emit_cycle_move(state, true);
     save_reg(state, 0); /* R5 */
     unmap_vm_reg(0);    /* R5 */
-    emit_logical_register(state, true, LOG_ORR, R5, RZ, R0);
+    emit_logical_register(state, true, LOG_ORR, R5, RZ, temp_imm_reg);
 
     emit_loadstore_imm(state, LS_LDRX, R30, SP, 0);
-    emit_addsub_imm(state, true, AS_ADD, SP, SP, stack_movement);
+    emit_addsub_imm(state, true, AS_ADD, SP, SP, 16);
 #endif
 }
 
@@ -1774,89 +1925,13 @@ static void muldivmod(struct jit_state *state,
 }
 #endif /* RV32_HAS(EXT_M) */
 
-/* JIT misaligned memory access handler.
- * This function performs misaligned load/store operations using byte-level
- * memory accesses. It mirrors the behavior of the interpreter's default
- * trap handler for misaligned operations.
- * @rv: RISC-V emulator state
- * @addr: The misaligned memory address
- * @vreg_idx: Register index (rd for loads, rs2 for stores)
- * @type: Instruction type (rv_insn_lw, rv_insn_lh, etc.)
- * @is_store: true for store operations, false for loads
- *
- * Note: This handler is called when JIT-generated code detects a misaligned
- * memory access and the emulator is configured to handle misalignment
- * (allow_misalign is false).
- */
-void jit_misaligned_handler(riscv_t *rv,
-                            uint32_t addr,
-                            uint32_t vreg_idx,
-                            uint32_t type,
-                            bool is_store)
+void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags)
 {
-    assert(vreg_idx < 32);
-
-    if (is_store) {
-        /* Misaligned store */
-        uint32_t value = rv->X[vreg_idx];
-        switch (type) {
-        case rv_insn_sw:
-#if RV32_HAS(EXT_C)
-        case rv_insn_csw:
-        case rv_insn_cswsp:
-#endif
-            /* Fast-path for 2-byte aligned, slow-path for odd addresses */
-            if ((addr & 1) == 0) {
-                rv->io.mem_write_s(rv, addr, value & 0xFFFF);
-                rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
-            } else {
-                for (int i = 0; i < 4; i++)
-                    rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
-            }
-            break;
-        case rv_insn_sh:
-            for (int i = 0; i < 2; i++)
-                rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
-            break;
-        default:
-            break;
-        }
-    } else {
-        /* Misaligned load */
-        uint32_t value = 0;
-        switch (type) {
-        case rv_insn_lw:
-#if RV32_HAS(EXT_C)
-        case rv_insn_clw:
-        case rv_insn_clwsp:
-#endif
-            /* Fast-path for 2-byte aligned, slow-path for odd addresses */
-            if ((addr & 1) == 0) {
-                value = (uint32_t) rv->io.mem_read_s(rv, addr);
-                value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
-            } else {
-                for (int i = 0; i < 4; i++)
-                    value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
-                             << (i * 8);
-            }
-            rv->X[vreg_idx] = value;
-            break;
-        case rv_insn_lh:
-            for (int i = 0; i < 2; i++)
-                value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
-                         << (i * 8);
-            rv->X[vreg_idx] = (int32_t) ((int16_t) value); /* sign extend */
-            break;
-        case rv_insn_lhu:
-            for (int i = 0; i < 2; i++)
-                value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
-                         << (i * 8);
-            rv->X[vreg_idx] = value;
-            break;
-        default:
-            break;
-        }
-    }
+    rv->compressed = flags & JIT_MISALIGN_COMPRESSED;
+    if (flags & JIT_MISALIGN_STORE)
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, STORE_MISALIGNED, addr)
+    else
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, LOAD_MISALIGNED, addr)
 }
 
 #if RV32_HAS(SYSTEM_MMIO)
@@ -1921,12 +1996,14 @@ static void jit_mmu_handler(riscv_t *rv,
     else
         addr = rv->io.mem_translate(rv, vaddr, W);
 
-    /* Check for trap during address translation.
-     * mem_translate may trigger a page fault which sets is_trapped=true.
-     * In this case, mark as MMIO to skip direct memory access in JIT code,
-     * but don't actually perform any MMIO operation.
+    /* A page fault in mem_translate may leave a trap pending (is_trapped), or
+     * its handler may have run already and resumed somewhere else
+     * (need_handle_signal). Either way the access did not complete, and the
+     * block stops here for the dispatcher to settle. Mark it as MMIO so that no
+     * direct memory access follows, without performing an MMIO operation.
      */
-    if (rv->is_trapped) {
+    rv->jit_mmu.abort = rv->is_trapped || need_handle_signal;
+    if (rv->jit_mmu.abort) {
         rv->jit_mmu.is_mmio = 1;
         return;
     }
@@ -2596,14 +2673,14 @@ static void emit_jit_mmu_handler(struct jit_state *state,
 {
     assert(vreg_idx < 32);
 
+    emit_cycle_move(state, false);
 #if defined(__x86_64__) && defined(_WIN32)
     /* Preserve rv across the call, then reserve the required 32-byte shadow
      * space plus one 8-byte stack slot for the 5th argument.
      * prepare_translate() leaves %rsp 16-byte aligned inside the JIT body, so
      * push+sub 40 preserves Windows x64 call-site alignment.
      */
-    emit_push(state, parameter_reg[0]);
-    emit_alu64_imm32(state, 0x81, 5, RSP, 0x28);
+    emit_call_frame(state, true);
 
     /* mov r8, vaddr_reg — arg2 */
     if (vaddr_reg != R8) {
@@ -2638,15 +2715,13 @@ static void emit_jit_mmu_handler(struct jit_state *state,
     emit1(state, 0xff);
     emit_modrm(state, 0x3 << 6, 0x2, R11 & 7);
 
-    emit_alu64_imm32(state, 0x81, 0, RSP, 0x28);
-    emit_pop(state, parameter_reg[0]);
+    emit_call_frame(state, false);
 #elif defined(__x86_64__)
     /* Preserve rv across the call. prepare_translate() leaves %rsp 16-byte
      * aligned inside the JIT body, so a matching 8-byte alignment slot keeps
      * the SysV call-site stack invariant after the push.
      */
-    emit_push(state, parameter_reg[0]);
-    emit_alu64_imm32(state, 0x81, 5, RSP, 0x8);
+    emit_call_frame(state, true);
 
     /* mov rdx, vaddr_reg — arg2. Must precede the type load that overwrites
      * RCX (== temp_reg == parameter_reg[3]).
@@ -2680,8 +2755,7 @@ static void emit_jit_mmu_handler(struct jit_state *state,
     emit1(state, 0xff);
     emit_modrm(state, 0x3 << 6, 0x2, R11 & 7);
 
-    emit_alu64_imm32(state, 0x81, 0, RSP, 0x8);
-    emit_pop(state, parameter_reg[0]);
+    emit_call_frame(state, false);
 #elif defined(__aarch64__)
     uint32_t insn;
 
@@ -2716,6 +2790,7 @@ static void emit_jit_mmu_handler(struct jit_state *state,
     insn = (0xf84107e << 4) | R0;
     emit_a64(state, insn);
 #endif
+    emit_cycle_move(state, true);
 }
 #endif
 
@@ -2737,17 +2812,12 @@ static void prepare_translate(struct jit_state *state,
     if (!(ARRAY_SIZE(nonvolatile_reg) % 2))
         emit_alu64_imm32(state, 0x81, 5, RSP, 0x8);
 
-    /* Set JIT R10 (the way to access the frame in JIT) to match RSP. */
-    emit_mov(state, RSP, RBP);
-
-    /* Allocate stack space */
-    emit_alu64_imm32(state, 0x81, 5, RSP, STACK_SIZE);
-
-#if defined(_WIN32)
-    /* Windows x64 ABI requires home register space. */
-    /* Allocate home register space - 4 registers */
-    emit_alu64_imm32(state, 0x81, 5, RSP, 4 * sizeof(uint64_t));
-#endif
+    /* Allocate stack space, and on Windows the home space for 4 registers
+     * that its ABI requires. Generated code leaves RSP balanced, so the
+     * epilogue releases the same amount.
+     */
+    emit_alu64_imm32(state, 0x81, 5, RSP, JIT_FRAME_SIZE);
+    emit_cycle_move(state, true);
 
     /* R12 is outside the allocator and survives calls and direct chains. */
 #if JIT_INDEXED_GUEST_MEM
@@ -2761,8 +2831,8 @@ static void prepare_translate(struct jit_state *state,
     /* Epilogue */
     state->exit_loc = state->offset;
 
-    /* Deallocate stack space by restoring RSP from JIT R10. */
-    emit_mov(state, RBP, RSP);
+    emit_cycle_move(state, false);
+    emit_alu64_imm32(state, 0x81, 0, RSP, JIT_FRAME_SIZE);
 
     if (!(ARRAY_SIZE(nonvolatile_reg) % 2))
         emit_alu64_imm32(state, 0x81, 0, RSP, 0x8);
@@ -2793,9 +2863,11 @@ static void prepare_translate(struct jit_state *state,
     /* R19 is already saved above and never allocated to a guest register. */
     emit_load_imm_sext(state, R19, mem_base);
 #endif
+    emit_cycle_move(state, true);
     emit_uncond_branch_reg(state, BR_BR, R1);
     /* Epilogue */
     state->exit_loc = state->offset;
+    emit_cycle_move(state, false);
 
     /* Restore callee-saved registers).  */
     for (size_t i = 0; i < ARRAY_SIZE(callee_reg); i += 2) {
@@ -2818,6 +2890,7 @@ static int vm_reg[3]; /* enum x64_reg/a64_reg */
 
 static void reset_reg(void)
 {
+    memset(reg_align, 0, sizeof(reg_align));
     for (int i = 0; i < n_host_regs; i++) {
         register_map[i].vm_reg_idx = -1;
         register_map[i].dirty = false;
@@ -3188,7 +3261,11 @@ static inline void set_vm_reg(int idx, int vm_reg_idx)
 /* Map the vm register to a host register. If the host register file is
  * exhausted, pick a register and swap it out.
  */
-static inline int map_vm_reg(struct jit_state *state, int vm_reg_idx)
+/* Map a guest register without implying it is about to be written. Callers
+ * must not write the guest register through the result without marking it
+ * dirty, or reg_align would keep a stale alignment proof.
+ */
+static inline int lookup_vm_reg(struct jit_state *state, int vm_reg_idx)
 {
     for (int i = 0; i < n_host_regs; i++) {
         if (register_map[i].vm_reg_idx != vm_reg_idx)
@@ -3204,6 +3281,13 @@ static inline int map_vm_reg(struct jit_state *state, int vm_reg_idx)
     return target_reg;
 }
 
+/* Map a guest register that the caller is about to write. */
+static inline int map_vm_reg(struct jit_state *state, int vm_reg_idx)
+{
+    reg_align[vm_reg_idx] = 0;
+    return lookup_vm_reg(state, vm_reg_idx);
+}
+
 static int ra_load(struct jit_state *state, int vm_reg_idx)
 {
     int origin = -1;
@@ -3213,7 +3297,7 @@ static int ra_load(struct jit_state *state, int vm_reg_idx)
         origin = register_map[i].reg_idx;
     }
 
-    int target_reg = map_vm_reg(state, vm_reg_idx);
+    int target_reg = lookup_vm_reg(state, vm_reg_idx);
 
     if (origin != target_reg)
         emit_load(state, S32, parameter_reg[0], target_reg,
@@ -3225,9 +3309,9 @@ static int ra_load(struct jit_state *state, int vm_reg_idx)
  * been mapped and the second one is going to be mapped to the same host
  * register and invoke swapping.
  */
-static inline int map_vm_reg_reserved(struct jit_state *state,
-                                      int vm_reg_idx,
-                                      int reserved_reg_idx)
+static inline int lookup_vm_reg_reserved(struct jit_state *state,
+                                         int vm_reg_idx,
+                                         int reserved_reg_idx)
 {
     for (int i = 0; i < n_host_regs; i++) {
         if (register_map[i].vm_reg_idx != vm_reg_idx)
@@ -3247,6 +3331,14 @@ static inline int map_vm_reg_reserved(struct jit_state *state,
     return target_reg;
 }
 
+static inline int map_vm_reg_reserved(struct jit_state *state,
+                                      int vm_reg_idx,
+                                      int reserved_reg_idx)
+{
+    reg_align[vm_reg_idx] = 0;
+    return lookup_vm_reg_reserved(state, vm_reg_idx, reserved_reg_idx);
+}
+
 /* Map a vm register while protecting two already-allocated host registers.
  * This prevents the register allocator from evicting either of the reserved
  * registers when allocating a third register (e.g., for rd after loading rs1
@@ -3257,6 +3349,7 @@ static inline int map_vm_reg_reserved2(struct jit_state *state,
                                        int reserved_reg_idx1,
                                        int reserved_reg_idx2)
 {
+    reg_align[vm_reg_idx] = 0;
     for (int i = 0; i < n_host_regs; i++) {
         if (register_map[i].vm_reg_idx != vm_reg_idx)
             continue;
@@ -3287,10 +3380,10 @@ static void ra_load2(struct jit_state *state, int vm_reg_idx1, int vm_reg_idx2)
     }
 
     if (vm_reg_idx1 == vm_reg_idx2) {
-        vm_reg[0] = vm_reg[1] = map_vm_reg(state, vm_reg_idx1);
+        vm_reg[0] = vm_reg[1] = lookup_vm_reg(state, vm_reg_idx1);
     } else {
-        vm_reg[0] = map_vm_reg(state, vm_reg_idx1);
-        vm_reg[1] = map_vm_reg_reserved(state, vm_reg_idx2, vm_reg[0]);
+        vm_reg[0] = lookup_vm_reg(state, vm_reg_idx1);
+        vm_reg[1] = lookup_vm_reg_reserved(state, vm_reg_idx2, vm_reg[0]);
         assert(vm_reg[0] != vm_reg[1]);
     }
 
@@ -3403,6 +3496,140 @@ static void parse_branch_history_table(struct jit_state *state,
     }
 }
 
+/* Set the zero flag from the low bits of dst that mask selects, leaving dst
+ * intact. mask is a run of low bits that fits a byte, such as 1 or 3.
+ */
+static inline void emit_test_low_bits(struct jit_state *state,
+                                      int dst,
+                                      uint32_t mask)
+{
+    assert(mask && mask <= 0xff && !(mask & (mask + 1)));
+#if defined(__x86_64__)
+    /* TEST r/m8, imm8; a REX prefix selects SIL/DIL rather than DH/BH. */
+    if (dst >= 4)
+        emit1(state, 0x40 | !!(dst & 8));
+    emit1(state, 0xf6);
+    emit_modrm_reg2reg(state, 0, dst);
+    emit1(state, mask);
+#elif defined(__aarch64__)
+    /* A run of low bits is a logical immediate: TST Wn, #(2^len - 1) is ANDS
+     * WZR, Wn with N=0, immr=0, imms=len-1.
+     */
+    uint32_t len = (uint32_t) __builtin_popcount(mask);
+    emit_a64(state, UINT32_C(0x72000000) | ((len - 1) << 10) |
+                        ((uint32_t) dst << 5) | RZ);
+#endif
+}
+
+/* A misaligned-access exit, emitted after the block so that the aligned path
+ * stays contiguous. The branch into it leaves the host register base, the one
+ * holding the access's rs1, unchanged.
+ */
+struct misalign_stub {
+    uint32_t jump_loc; /* where to patch the branch that enters the stub */
+    uint32_t pc;
+    uint32_t flags;
+    int base;
+    int32_t offset;
+    struct host_reg map[ARRAY_SIZE(register_map)];
+};
+#define MAX_MISALIGN_STUBS 256
+static struct misalign_stub misalign_stubs[MAX_MISALIGN_STUBS];
+static int n_misalign_stubs;
+
+/* Form base + offset in temp_reg. */
+static void emit_misalign_address(struct jit_state *state,
+                                  int base,
+                                  int32_t offset)
+{
+    emit_mov(state, base, temp_reg);
+    if (offset)
+        emit_alu32_imm32(state, 0x81, 0, temp_reg, offset);
+}
+
+/* Patch the stub's branch to here, write every guest register back as the guard
+ * left them, raise the misaligned exception, and leave the block.
+ */
+static void emit_misalign_stub(struct jit_state *state,
+                               const struct misalign_stub *stub)
+{
+    emit_jump_target_offset(state, stub->jump_loc, state->offset);
+    emit_misalign_address(state, stub->base, stub->offset);
+    memcpy(register_map, stub->map, sizeof(register_map));
+    store_back(state);
+    emit_mov(state, temp_reg, parameter_reg[1]);
+    emit_load_imm(state, parameter_reg[2], stub->flags);
+    emit_load_imm(state, temp_reg, stub->pc);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_call(state, (intptr_t) &jit_misaligned_trap);
+    emit_exit(state);
+}
+
+/* Emit the interpreter's alignment check for a halfword or word access at
+ * X[rs1] + offset. A misaligned access branches to a stub, emitted after the
+ * block by emit_misalign_stubs(), that raises the exception. Nothing is emitted
+ * for byte accesses, for an offset that keeps a base already proven aligned in
+ * this block aligned, or when misaligned accesses are allowed (-m) or the
+ * program has no trap vector to observe them, in which case the host performs
+ * them directly.
+ */
+static void emit_misalign_guard(struct jit_state *state,
+                                riscv_t *rv,
+                                int rs1,
+                                int32_t offset,
+                                enum operand_size size,
+                                uint32_t flags,
+                                uint32_t pc)
+{
+    const uint32_t mask = size == S32 ? 3 : size == S16 ? 1 : 0;
+    if (!mask || PRIV(rv)->allow_misalign || rv->no_trap_vector)
+        return;
+    const bool offset_aligned = !((uint32_t) offset & mask);
+    if (offset_aligned && reg_align[rs1] > mask)
+        return;
+
+    struct misalign_stub stub = {.pc = pc, .flags = flags, .offset = offset};
+    stub.base = ra_load(state, rs1);
+    memcpy(stub.map, register_map, sizeof(stub.map));
+
+    /* An aligned offset leaves the low bits of the base unchanged. */
+    if (offset_aligned) {
+        emit_test_low_bits(state, stub.base, mask);
+    } else {
+        emit_misalign_address(state, stub.base, offset);
+        emit_test_low_bits(state, temp_reg, mask);
+    }
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    stub.jump_loc = JUMP_LOC_0;
+
+    if (n_misalign_stubs < MAX_MISALIGN_STUBS) {
+        misalign_stubs[n_misalign_stubs++] = stub;
+    } else {
+        /* Out of stub slots: emit this one inline and branch around it. */
+        uint32_t jump_normal = state->offset;
+        emit_jcc_offset(state, JCC_JMP);
+        emit_misalign_stub(state, &stub);
+        memcpy(register_map, stub.map, sizeof(register_map));
+        emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
+    }
+
+    /* Past the guard, X[rs1] + offset is aligned, and so is X[rs1] itself when
+     * offset is.
+     */
+    if (offset_aligned)
+        reg_align[rs1] = mask + 1;
+}
+
+/* Emit the stubs that the block's guards branch to. translate() empties the
+ * list before each block.
+ */
+static void emit_misalign_stubs(struct jit_state *state)
+{
+    for (int i = 0; i < n_misalign_stubs; i++)
+        emit_misalign_stub(state, &misalign_stubs[i]);
+}
+
 /* Timer increment removed: timer is now derived from cycle counter at
  * interrupt check points (rv_check_interrupt) rather than per-instruction.
  * This eliminates per-instruction memory operations in the JIT hot path.
@@ -3442,6 +3669,8 @@ static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     memory_t *m = PRIV(rv)->mem;
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
+        emit_misalign_guard(state, rv, fuse[i].rs1, fuse[i].imm, S32,
+                            JIT_MISALIGN_STORE, ir->pc + 4 * i);
         ra_store_guest(state, m, S32, fuse[i].rs1, fuse[i].rs2, fuse[i].imm);
     }
 }
@@ -3452,6 +3681,8 @@ static void do_fuse4(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         vm_reg[0] = ra_load(state, fuse[i].rs1);
+        emit_misalign_guard(state, rv, fuse[i].rs1, fuse[i].imm, S32, 0,
+                            ir->pc + 4 * i);
         vm_reg[1] = map_vm_reg(state, fuse[i].rd);
         emit_guest_load(state, m, S32, vm_reg[0], vm_reg[1], fuse[i].imm,
                         false);
@@ -3577,7 +3808,7 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
      * If trapped, skip the load entirely to avoid loading garbage.
      */
     emit_load(state, S8, parameter_reg[0], temp_reg,
-              offsetof(riscv_t, is_trapped));
+              offsetof(riscv_t, jit_mmu.abort));
     emit_cmp_imm32(state, temp_reg, 0);
     uint32_t jump_trap = state->offset;
     emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */
@@ -3649,7 +3880,7 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 
     /* Check if trap occurred - skip store if trapped */
     emit_load(state, S8, parameter_reg[0], temp_reg,
-              offsetof(riscv_t, is_trapped));
+              offsetof(riscv_t, jit_mmu.abort));
     emit_cmp_imm32(state, temp_reg, 0);
     uint32_t jump_trap = state->offset;
     emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */
@@ -3706,6 +3937,7 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
      * temp_reg and is handed to jit_mmu_handler as the vaddr argument.
      */
     vm_reg[0] = ra_load(state, ir->rs1);
+    emit_misalign_guard(state, rv, ir->rs1, ir->imm, S32, 0, ir->pc);
     emit_load_imm_sext(state, temp_reg, ir->imm);
     emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);
 
@@ -3718,7 +3950,7 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
      * is_trapped is set by jit_mmu_handler when mem_translate faults.
      */
     emit_load(state, S8, parameter_reg[0], temp_reg,
-              offsetof(riscv_t, is_trapped));
+              offsetof(riscv_t, jit_mmu.abort));
     emit_cmp_imm32(state, temp_reg, 0);
     uint32_t jump_trap = state->offset;
     emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */
@@ -3765,6 +3997,7 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
 #else
     vm_reg[0] = ra_load(state, ir->rs1);
+    emit_misalign_guard(state, rv, ir->rs1, ir->imm, S32, 0, ir->pc);
     /* Compute address: mem_base + rs1 + imm */
     /* Load value into rd */
     vm_reg[1] = map_vm_reg(state, ir->rd);
@@ -3784,6 +4017,8 @@ static void do_fuse13(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 {
 #if !RV32_HAS(SYSTEM)
     memory_t *m = PRIV(rv)->mem;
+    emit_misalign_guard(state, rv, ir->rs1, ir->imm, S32, JIT_MISALIGN_STORE,
+                        ir->pc);
     ra_store_guest(state, m, S32, ir->rs1, ir->rs2, ir->imm);
     /* Loading rs2 may have evicted rs1, so reload it before the increment. */
     vm_reg[0] = ra_load(state, ir->rs1);
@@ -3873,7 +4108,9 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
 {
     uint32_t idx;
     rv_insn_t *ir, *next;
+    n_misalign_stubs = 0;
     reset_reg();
+    emit_cycle_count(state, block->cycle_cost);
     liveness_reset();
     liveness_calc(block);
     for (idx = 0, ir = block->ir_head; idx < block->n_insn && !should_flush;
@@ -3902,6 +4139,8 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
         emit_exit(state);
     }
 #endif
+    if (!should_flush)
+        emit_misalign_stubs(state);
 }
 
 static void resolve_jumps(struct jit_state *state)
@@ -3984,12 +4223,8 @@ static void translate_chained_block(struct jit_state *state,
     if (state->n_blocks == MAX_BLOCKS)
         return;
 
-    /* Check whether the remaining jump slots can accommodate this block.
-     * Each instruction emits up to JUMPS_PER_INSN jump targets (SYSTEM_MMIO
-     * load paths are the worst case) plus up to 2 for a page-terminated
-     * block epilogue (emit_jmp + emit_exit).
-     */
-    if (state->n_jumps + block->n_insn * JUMPS_PER_INSN + 2 >= MAX_JUMPS)
+    /* Check whether the remaining jump slots can accommodate this block. */
+    if (state->n_jumps + block_jump_budget(block) >= MAX_JUMPS)
         return;
 
     bool added UNUSED = set_add(&state->set, RV_HASH_KEY(block));

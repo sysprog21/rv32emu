@@ -1,15 +1,24 @@
 name: Benchmark
 
-on: [push, pull_request_target, workflow_dispatch]
+# Pull requests are compared against the commit they merge into, inside one
+# job, so both builds share a runner. Only master is recorded on the dashboard:
+# absolute scores from different runners are not comparable, and recording
+# pull requests mixed unmerged code into the history that master is judged by.
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
 
+# A new push to a pull request supersedes the running comparison. Master runs
+# are keyed by commit instead, so that each merge is recorded.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# github-action-benchmark authenticates with RV32EMU_BENCH_TOKEN for both the
-# gh-pages push and the PR comment, so GITHUB_TOKEN needs nothing beyond read.
-# This workflow runs on pull_request_target, where the default write-all token
-# would be in scope for fork-triggered runs.
+# pull_request runs get a read-only token even for same-repository branches.
+# The comparison is posted by benchmark-comment.yml, and only the master job
+# that publishes the dashboard receives RV32EMU_BENCH_TOKEN.
 permissions:
   contents: read
 
@@ -17,7 +26,6 @@ jobs:
   # Resolved in its own job so the benchmark carries a single condition rather
   # than repeating it on every step.
   detect-file-changes:
-    if: contains(toJSON(github.event.head_commit.message), 'Merge pull request ') == false
     runs-on: ubuntu-24.04
     outputs:
       has_changed_files: ${{ steps.changed-files.outputs.any_changed }}
@@ -29,51 +37,204 @@ jobs:
         uses: tj-actions/changed-files@v47
         with:
           files: |
-              src/riscv.c
-              src/decode.c
-              src/emulate.c
-              src/rv32_template.c
-              src/rv32_constopt.c
-              src/cache.c
-              src/io.c
-              src/jit.c
-              # Build system configuration (may affect optimization flags)
-              mk/kconfig.mk
-              mk/toolchain.mk
+              src/**
+              configs/**
+              Makefile
+              mk/**
               tools/detect-env.py
+              tests/bench.py
+              .github/workflows/benchmark.yml
 
-  benchmark:
-    name: Performance regression check
+  # A pull request is compared against the commit it merges into; any other
+  # event records absolute scores for the dashboard.
+  bench:
+    name: Benchmark (${{ matrix.mode }})
     needs: [detect-file-changes]
     if: needs.detect-file-changes.outputs.has_changed_files == 'true' || github.event_name == 'workflow_dispatch'
-    timeout-minutes: 30
+    timeout-minutes: 60
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The interpreter keeps its unlabeled series names, which carry the
+          # dashboard history recorded before the JIT modes were added. It runs
+          # Dhrystone for about three minutes a pair, which bounds the job.
+          - mode: interpreter
+            label: ''
+            defconfig: defconfig
+            flags: ENABLE_JIT=0
+            llvm: 'false'
+            parallel: 2
+          - mode: T1C
+            label: T1C
+            defconfig: jit_defconfig
+            flags: ENABLE_T2C=0
+            llvm: 'false'
+            parallel: 2
+          # Each T2C emulator also runs an LLVM compile thread, so its pairs
+          # take the runner's four CPUs one benchmark at a time.
+          - mode: T2C
+            label: T2C
+            defconfig: jit_defconfig
+            flags: ENABLE_T2C=1
+            llvm: 'true'
+            parallel: 1
+    env:
+      # Raises the anonymous-API rate limit (60 req/hr) used by the parse-time
+      # call to fetch-releases-tag.
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      COMPARE: ${{ github.event_name == 'pull_request' }}
+    steps:
+      # The pull_request ref is the merge of the branch into master, so its
+      # first parent is exactly the code the change would land on.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          submodules: 'true'
+
+      - name: Check out baseline
+        if: env.COMPARE == 'true'
+        run: |
+            git worktree add --detach baseline HEAD^1
+            # Building needs only the sources under src/, not the test suites.
+            git -C baseline config --file .gitmodules --get-regexp '\.path$' \
+                | awk '$2 ~ /^src\// { print $2 }' \
+                | xargs git -C baseline submodule update --init --
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          llvm: ${{ matrix.llvm }}
+          artifacts: elf
+          cache-suffix: bench-${{ matrix.mode }}
+
+      # Both trees run the same configuration commands, each reading its own
+      # defconfig files, so a change to those files is part of what is measured.
+      # The flags pin the engine, so a base commit from before defconfig
+      # selected the JIT builds the same mode.
+      - name: Build
+        run: |
+            trees=(.)
+            [ "${COMPARE}" = true ] && trees+=(baseline)
+            for tree in "${trees[@]}"; do
+              make -C "${tree}" cleanconfig
+              make -C "${tree}" ${{ matrix.defconfig }}
+              make -C "${tree}" ENABLE_SDL=0 ${{ matrix.flags }} "${PARALLEL}"
+              if [ "${{ matrix.mode }}" = "T2C" ] && [ ! -f "${tree}/build/t2c.o" ]; then
+                echo "ERROR: T2C disabled in ${tree} (build/t2c.o missing)"
+                exit 1
+              fi
+            done
+
+      - name: Compare with baseline
+        if: env.COMPARE == 'true'
+        run: |
+            # Dhrystone and CoreMark each run as a pair; with parallel 2, both
+            # pairs at once on the runner's four CPUs.
+            python3 tests/bench.py --quiet --runs 6 \
+                --parallel ${{ matrix.parallel }} --max-seconds 900 \
+                --label ${{ matrix.mode }} \
+                --emu build/rv32emu --baseline baseline/build/rv32emu \
+                --markdown "compare-${{ matrix.mode }}.md" \
+                --json "compare-${{ matrix.mode }}.json"
+            cat "compare-${{ matrix.mode }}.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record
+        if: env.COMPARE != 'true'
+        run: |
+            python3 tests/bench.py --quiet --label "${{ matrix.label }}" \
+                --json "bench-${{ matrix.mode }}.json"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-${{ env.COMPARE == 'true' && 'compare' || 'record' }}-${{ matrix.mode }}
+          path: |
+            compare-${{ matrix.mode }}.*
+            bench-${{ matrix.mode }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # Apple Silicon scores on demand. GitHub's macOS arm64 runners are virtual
+  # machines, so the absolute scores run below bare metal, but the ratios
+  # between modes carry over. One job builds each mode in turn, with the same
+  # engine selection as the bench matrix, since macOS minutes are billed at a
+  # multiple. The scores go to the job summary, never to the dashboard.
+  apple-silicon:
+    name: Apple Silicon
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 90
+    runs-on: macos-15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: 'true'
 
-      - name: Cache benchmark artifacts
-        uses: actions/cache@v6
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
         with:
-          path: build/
-          key: benchmark-artifacts-${{ runner.os }}-${{ hashFiles('mk/artifact.mk') }}
-          restore-keys: |
-            benchmark-artifacts-${{ runner.os }}-
+          compiler: clang
+          artifacts: elf
+          cache-suffix: bench-macos
 
-      - name: Install dependencies
-        run: sudo pip3 install numpy --break-system-packages
+      - name: Benchmark each mode
+        run: |
+            # tee must not hide a failed run
+            set -o pipefail
+            {
+              echo '### Apple Silicon'
+              echo '```'
+              sysctl -n machdep.cpu.brand_string
+            } >> "$GITHUB_STEP_SUMMARY"
+            # mode:label:defconfig:flags, as in the bench matrix.
+            for spec in interpreter::defconfig:ENABLE_JIT=0 \
+                        T1C:T1C:jit_defconfig:ENABLE_T2C=0 \
+                        T2C:T2C:jit_defconfig:ENABLE_T2C=1; do
+              IFS=: read -r mode label defconfig flags <<< "${spec}"
+              make cleanconfig
+              make "${defconfig}"
+              make ENABLE_SDL=0 "${flags}" $PARALLEL
+              if [ "${mode}" = "T2C" ] && [ ! -f build/t2c.o ]; then
+                echo "ERROR: T2C disabled (build/t2c.o missing)"
+                exit 1
+              fi
+              python3 tests/bench.py --quiet --runs 3 --label "${label}" \
+                  --json "bench-${mode}.json" | tee -a "$GITHUB_STEP_SUMMARY"
+            done
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build for benchmark
-        # GH_TOKEN raises the anonymous-API rate limit (60 req/hr) so the
-        # parse-time call to fetch-releases-tag stops flaking when the
-        # cache misses and several PRs build back-to-back.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: make defconfig && make ENABLE_SDL=0 all artifact
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bench-apple-silicon
+          path: bench-*.json
+          retention-days: 30
 
-      - name: Run benchmark
-        run: python3 tests/bench.py --json --quiet
+  # Only master reaches the dashboard, even when dispatched manually from another
+  # branch. A mode that failed to record does not hold back the others, but a
+  # push that skipped recording altogether publishes nothing.
+  publish:
+    name: Publish to dashboard
+    needs: [bench]
+    if: ${{ !cancelled() && needs.bench.result != 'skipped' && github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-24.04
+    # Serializes pushes to the dashboard repository across master commits.
+    concurrency:
+      group: benchmark-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bench-record-*
+          merge-multiple: true
+
+      - name: Merge results
+        run: |
+            shopt -s nullglob
+            present=(bench-*.json)
+            [ "${#present[@]}" -gt 0 ] || { echo "No mode recorded a result"; exit 1; }
+            jq -s 'add' "${present[@]}" > benchmark_output.json
 
       - name: Store benchmark results
         uses: benchmark-action/github-action-benchmark@v1
@@ -85,5 +246,4 @@ jobs:
           gh-repository: 'github.com/sysprog21/rv32emu-bench'
           gh-pages-branch: 'master'
           auto-push: true
-          comment-always: true
           benchmark-data-dir-path: .

@@ -94,12 +94,13 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
     return NULL;
 }
 
-/* T2C_OP generates code for each RISC-V instruction with batched cycle updates.
+/* T2C_OP generates code for each RISC-V instruction.
  *
- * Cycle optimization: Instead of updating rv->csr_cycle per instruction, we
- * increment a local counter (alloca) and store to csr_cycle only at block
- * exits. This reduces memory traffic significantly - LLVM's mem2reg pass
- * promotes the alloca to a register, making per-instruction increments free.
+ * Cycle counting: instead of updating rv->csr_cycle per instruction, each block
+ * entry adds the block's cycle cost to a local counter (alloca), which is
+ * stored to csr_cycle only at region exits. LLVM's mem2reg pass promotes the
+ * alloca to a register. The cost counts the instructions a fused one replaced,
+ * as the interpreter does.
  *
  * The insn_counter parameter is an alloca created at function entry in
  * t2c_compile(). Before any LLVMBuildRetVoid(), T2C_STORE_TIMER must be called
@@ -114,15 +115,11 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
         uint64_t mem_base UNUSED, block_t *block UNUSED, rv_insn_t *ir UNUSED, \
         LLVMValueRef insn_counter UNUSED)                                      \
     {                                                                          \
-        /* Increment local instruction counter (promoted to register by LLVM)  \
-         */                                                                    \
-        LLVMValueRef cnt =                                                     \
-            LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");       \
-        cnt = LLVMBuildAdd(*builder, cnt,                                      \
-                           LLVMConstInt(LLVMInt64Type(), 1, false), "");       \
-        LLVMBuildStore(*builder, cnt, insn_counter);                           \
         code;                                                                  \
     }
+
+/* Index of rv->X[0] among the 32-bit words of riscv_t. */
+#define X_BASE (offsetof(riscv_t, X) / sizeof(uint32_t))
 
 #define T2C_LLVM_GEN_ADDR(reg, rv_member, ir_member)                          \
     FORCE_INLINE LLVMValueRef t2c_gen_##reg##_addr(                           \
@@ -229,39 +226,154 @@ UNUSED FORCE_INLINE LLVMValueRef t2c_gen_mem_loc(LLVMValueRef start,
     return addr;
 }
 
-/* Load and call a function pointer from rv->io struct.
- *
- * The byte_offset parameter is the offset from the start of riscv_t to the
- * target function pointer. Callers should use:
- *   - offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ecall) for ecall
- *   - offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ebreak) for ebreak
- *
- * This approach is correct regardless of RV32_HAS(SYSTEM) configuration,
- * which adds extra MMU function pointers to riscv_io_t.
- *
- * Uses byte-based pointer arithmetic from the real riscv_t base rather than
- * the synthetic prefix type used for the T2C function parameter.
+/* Branch on cond to the rare block, else to the common one, and keep the rare
+ * path out of the way of the common one.
  */
-FORCE_INLINE void t2c_gen_call_io_func(LLVMValueRef start,
-                                       LLVMBuilderRef *builder,
-                                       LLVMTypeRef *param_types,
-                                       size_t byte_offset)
+static void t2c_gen_unlikely_br(LLVMBuilderRef builder,
+                                LLVMValueRef cond,
+                                LLVMBasicBlockRef rare,
+                                LLVMBasicBlockRef common)
 {
-    LLVMValueRef rv_ptr = LLVMGetParam(start, 0);
-    LLVMValueRef func_ptr_ptr = t2c_gen_rv_field_ptr(
-        start, builder, byte_offset, LLVMPointerType(LLVMVoidType(), 0));
+    LLVMValueRef br = LLVMBuildCondBr(builder, cond, rare, common);
+    LLVMContextRef ctx = LLVMGetGlobalContext();
+    LLVMMetadataRef weights[] = {
+        LLVMMDStringInContext2(ctx, "branch_weights", 14),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1, false)),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1 << 20, false)),
+    };
+    LLVMSetMetadata(
+        br, LLVMGetMDKindIDInContext(ctx, "prof", 4),
+        LLVMMetadataAsValue(ctx, LLVMMDNodeInContext2(ctx, weights, 3)));
+}
 
-    /* Load function pointer and call */
-    LLVMValueRef io_func = LLVMBuildLoad2(
-        *builder, LLVMPointerType(LLVMVoidType(), 0), func_ptr_ptr, "io_func");
-    LLVMBuildCall2(*builder,
-                   LLVMFunctionType(LLVMVoidType(), param_types, 1, 0), io_func,
-                   &rv_ptr, 1, "");
+/* Tier-2 counterpart of emit_misalign_guard() in jit.c: when a halfword or word
+ * access at vaddr is misaligned, and misaligned accesses are not allowed, store
+ * the faulting pc, raise the exception through jit_misaligned_trap(), and
+ * return from the block. Generated code keeps guest registers in rv->X, so
+ * nothing needs writing back first. A constant vaddr folds the branch. The
+ * helper runs in this process, so its address can be embedded directly.
+ */
+static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
+                                   LLVMValueRef start,
+                                   riscv_t *rv,
+                                   LLVMValueRef vaddr,
+                                   uint32_t size,
+                                   uint32_t flags,
+                                   uint32_t pc,
+                                   LLVMValueRef insn_counter)
+{
+    if (PRIV(rv)->allow_misalign || rv->no_trap_vector)
+        return;
+
+    LLVMValueRef low = LLVMBuildAnd(
+        *builder, vaddr, LLVMConstInt(LLVMInt32Type(), size - 1, false), "");
+    LLVMValueRef misaligned =
+        LLVMBuildICmp(*builder, LLVMIntNE, low,
+                      LLVMConstInt(LLVMInt32Type(), 0, false), "misaligned");
+    LLVMBasicBlockRef trap = LLVMAppendBasicBlock(start, "misaligned");
+    LLVMBasicBlockRef aligned = LLVMAppendBasicBlock(start, "aligned");
+    t2c_gen_unlikely_br(*builder, misaligned, trap, aligned);
+
+    LLVMPositionBuilderAtEnd(*builder, trap);
+    LLVMBuildStore(*builder, LLVMConstInt(LLVMInt32Type(), pc, false),
+                   t2c_gen_PC_addr(start, builder, NULL));
+    LLVMTypeRef param_types[] = {LLVMPointerType(LLVMVoidType(), 0),
+                                 LLVMInt32Type(), LLVMInt32Type()};
+    LLVMTypeRef fn_type =
+        LLVMFunctionType(LLVMVoidType(), param_types, 3, false);
+    LLVMValueRef fn = LLVMConstIntToPtr(
+        LLVMConstInt(LLVMInt64Type(), (uintptr_t) &jit_misaligned_trap, false),
+        LLVMPointerType(fn_type, 0));
+    LLVMValueRef args[] = {LLVMGetParam(start, 0), vaddr,
+                           LLVMConstInt(LLVMInt32Type(), flags, false)};
+    LLVMBuildCall2(*builder, fn_type, fn, args, 3, "");
+    T2C_STORE_TIMER(*builder, start, insn_counter);
+    LLVMBuildRetVoid(*builder);
+
+    LLVMPositionBuilderAtEnd(*builder, aligned);
+
+    /* State the proven alignment, so that later checks of the same address bits
+     * fold away.
+     */
+    unsigned assume_id = LLVMLookupIntrinsicID("llvm.assume", 11);
+    LLVMValueRef assume = LLVMGetIntrinsicDeclaration(
+        LLVMGetGlobalParent(start), assume_id, NULL, 0);
+    LLVMValueRef aligned_cond = LLVMBuildNot(*builder, misaligned, "");
+    LLVMBuildCall2(
+        *builder,
+        LLVMIntrinsicGetType(LLVMGetGlobalContext(), assume_id, NULL, 0),
+        assume, &aligned_cond, 1, "");
+}
+
+/* The address rs1 + imm that a load or store accesses. */
+static LLVMValueRef t2c_gen_vaddr(LLVMValueRef start,
+                                  LLVMBuilderRef *builder,
+                                  rv_insn_t *ir)
+{
+    LLVMValueRef val_rs1 = LLVMBuildLoad2(
+        *builder, LLVMInt32Type(), t2c_gen_rs1_addr(start, builder, ir), "");
+    return LLVMBuildAdd(*builder, val_rs1,
+                        LLVMConstInt(LLVMInt32Type(), ir->imm, true), "vaddr");
+}
+
+/* Load the function pointer at io_field in rv->io, and call it with rv and the
+ * n values in args, returning its result.
+ *
+ * io_field is an offset in riscv_io_t, which is correct whether or not SYSTEM
+ * adds the MMU function pointers. The pointer is loaded at run time, from the
+ * real riscv_t base rather than the synthetic prefix type used for the T2C
+ * function parameter.
+ */
+static LLVMValueRef t2c_gen_call_io_func(LLVMValueRef start,
+                                         LLVMBuilderRef *builder,
+                                         size_t io_field,
+                                         LLVMTypeRef ret_type,
+                                         LLVMValueRef *args,
+                                         unsigned n)
+{
+    LLVMValueRef params[3] = {LLVMGetParam(start, 0)};
+    LLVMTypeRef types[3] = {LLVMPointerType(LLVMVoidType(), 0)};
+    assert(n < 3);
+    for (unsigned i = 0; i < n; i++) {
+        params[i + 1] = args[i];
+        types[i + 1] = LLVMTypeOf(args[i]);
+    }
+    LLVMTypeRef fn_type = LLVMFunctionType(ret_type, types, n + 1, false);
+    LLVMTypeRef fn_ptr_type = LLVMPointerType(fn_type, 0);
+    LLVMValueRef fn = LLVMBuildLoad2(
+        *builder, fn_ptr_type,
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, io) + io_field,
+                             fn_ptr_type),
+        "");
+    return LLVMBuildCall2(*builder, fn_type, fn, params, n + 1, "");
 }
 
 static LLVMTypeRef t2c_jit_cache_func_type;
 static LLVMTypeRef t2c_jit_cache_struct_type;
 static LLVMTypeRef t2c_inline_cache_struct_type;
+
+/* Leave the region at pc: store it, flush the instruction count, return. */
+static void t2c_gen_exit(LLVMBuilderRef builder,
+                         LLVMValueRef start,
+                         uint32_t pc,
+                         LLVMValueRef insn_counter)
+{
+    T2C_LLVM_GEN_STORE_IMM32(builder, pc,
+                             t2c_gen_PC_addr(start, &builder, NULL));
+    T2C_STORE_TIMER(builder, start, insn_counter);
+    LLVMBuildRetVoid(builder);
+}
+
+/* Region state, kept in file scope because a single thread runs t2c_compile.
+ * t2c_region_insns counts the IR instructions traced into the current region;
+ * past T2C_REGION_BUDGET, successors are linked through the jit-cache rather
+ * than traced, which bounds the code a region duplicates from others.
+ * t2c_predicted_pc passes an indirect jump's predicted target from its handler
+ * to t2c_trace_ebb().
+ */
+#define T2C_REGION_BUDGET 2048
+static uint32_t t2c_region_insns;
+static uint32_t t2c_predicted_pc;
 
 #include "t2c_template.c"
 #undef T2C_OP
@@ -311,7 +423,59 @@ typedef void (*t2c_codegen_block_func_t)(LLVMBuilderRef *builder UNUSED,
                                          LLVMValueRef insn_counter UNUSED);
 
 static void t2c_trace_ebb(LLVMBuilderRef *builder,
-                          LLVMTypeRef *param_types UNUSED,
+                          LLVMTypeRef *param_types,
+                          LLVMValueRef start,
+                          LLVMBasicBlockRef *entry,
+                          riscv_t *rv,
+                          block_t *block,
+                          set_t *set,
+                          struct LLVM_block_map *map,
+                          LLVMValueRef insn_counter);
+
+/* Continue from the path at the end of from to the block at pc: branch to it if
+ * the region already holds it, trace it into the region, or, past the region
+ * budget, jump to its compiled code through the jit-cache. A block that cannot
+ * be translated ends the path with an exit to pc. A path that already ended, as
+ * a branch handler ends one whose target it could not validate, is left alone.
+ */
+static void t2c_follow(LLVMBuilderRef from,
+                       uint32_t pc,
+                       LLVMTypeRef *param_types,
+                       LLVMValueRef start,
+                       riscv_t *rv,
+                       block_t *block,
+                       set_t *set,
+                       struct LLVM_block_map *map,
+                       LLVMValueRef insn_counter)
+{
+    if (LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(from)))
+        return;
+    if (set_has(set, pc)) {
+        LLVMBuildBr(from, t2c_block_map_search(map, pc));
+        return;
+    }
+    block_t *blk = t2c_check_valid_blk(rv, block, pc);
+    if (!blk) {
+        t2c_gen_exit(from, start, pc, insn_counter);
+        return;
+    }
+    if (t2c_region_insns >= T2C_REGION_BUDGET) {
+        t2c_jit_cache_helper(&from, start,
+                             LLVMConstInt(LLVMInt32Type(), pc, false), rv,
+                             block, NULL, insn_counter);
+        return;
+    }
+    LLVMBasicBlockRef next_entry = LLVMAppendBasicBlock(start, "next_entry");
+    LLVMBuilderRef next = LLVMCreateBuilder();
+    LLVMPositionBuilderAtEnd(next, next_entry);
+    LLVMBuildBr(from, next_entry);
+    t2c_trace_ebb(&next, param_types, start, &next_entry, rv, blk, set, map,
+                  insn_counter);
+    LLVMDisposeBuilder(next);
+}
+
+static void t2c_trace_ebb(LLVMBuilderRef *builder,
+                          LLVMTypeRef *param_types,
                           LLVMValueRef start,
                           LLVMBasicBlockRef *entry,
                           riscv_t *rv,
@@ -328,11 +492,18 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
     t2c_block_map_insert(map, entry, ir->pc);
     LLVMBuilderRef tk = NULL, utk = NULL;
 
+    LLVMValueRef cnt =
+        LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");
+    LLVMBuildStore(*builder,
+                   T2C_LLVM_GEN_ALU64_IMM(Add, cnt, block->cycle_cost),
+                   insn_counter);
+
     /* Get mem_base once at the start, not on every instruction */
     vm_attr_t *priv = PRIV(rv);
     uint64_t mem_base = (uint64_t) ((memory_t *) priv->mem)->mem_base;
 
     while (1) {
+        t2c_region_insns++;
         ((t2c_codegen_block_func_t) dispatch_table[ir->opcode])(
             builder, param_types, start, entry, &tk, &utk, rv, mem_base, block,
             ir, insn_counter);
@@ -341,7 +512,14 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
         ir = ir->next;
     }
 
-    if (!t2c_insn_is_terminal(ir->opcode)) {
+    if (t2c_insn_is_terminal(ir->opcode)) {
+        /* An indirect jump with a dominant target left that path open. */
+        uint32_t predicted = t2c_predicted_pc;
+        t2c_predicted_pc = 0;
+        if (predicted)
+            t2c_follow(tk, predicted, param_types, start, rv, block, set, map,
+                       insn_counter);
+    } else {
         /* For non-branch instructions that have fall-through continuation,
          * use the current builder since the instruction handler doesn't
          * create a separate taken/untaken path.
@@ -363,74 +541,217 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
         if (!utk && untaken)
             utk = *builder;
 
-        if (untaken) {
-            uint32_t untaken_pc = untaken->pc;
-            if (set_has(set, untaken_pc)) {
-                LLVMBuildBr(utk, t2c_block_map_search(map, untaken_pc));
-            } else {
-                block_t *blk = cache_get(rv->block_cache, untaken_pc, false);
-                if (blk && blk->translatable
-#if RV32_HAS(SYSTEM)
-                    && blk->satp == block->satp
-#endif
-                ) {
-                    LLVMBasicBlockRef untaken_entry =
-                        LLVMAppendBasicBlock(start, "untaken_entry");
-                    LLVMBuilderRef untaken_builder = LLVMCreateBuilder();
-                    LLVMPositionBuilderAtEnd(untaken_builder, untaken_entry);
-                    LLVMBuildBr(utk, untaken_entry);
-                    t2c_trace_ebb(&untaken_builder, param_types, start,
-                                  &untaken_entry, rv, blk, set, map,
-                                  insn_counter);
-                    LLVMDisposeBuilder(untaken_builder);
-                }
-            }
-        }
-        if (taken) {
-            uint32_t taken_pc = taken->pc;
-            if (set_has(set, taken_pc)) {
-                LLVMBuildBr(tk, t2c_block_map_search(map, taken_pc));
-            } else {
-                block_t *blk = cache_get(rv->block_cache, taken_pc, false);
-                if (blk && blk->translatable
-#if RV32_HAS(SYSTEM)
-                    && blk->satp == block->satp
-#endif
-                ) {
-                    LLVMBasicBlockRef taken_entry =
-                        LLVMAppendBasicBlock(start, "taken_entry");
-                    LLVMBuilderRef taken_builder = LLVMCreateBuilder();
-                    LLVMPositionBuilderAtEnd(taken_builder, taken_entry);
-                    LLVMBuildBr(tk, taken_entry);
-                    t2c_trace_ebb(&taken_builder, param_types, start,
-                                  &taken_entry, rv, blk, set, map,
-                                  insn_counter);
-                    LLVMDisposeBuilder(taken_builder);
-                }
-            }
-        }
+        if (untaken)
+            t2c_follow(utk, untaken->pc, param_types, start, rv, block, set,
+                       map, insn_counter);
+        if (taken)
+            t2c_follow(tk, taken->pc, param_types, start, rv, block, set, map,
+                       insn_counter);
 
         /* Ensure the basic block has a terminator. When a block ends with a
          * non-branching instruction (e.g., addi, lw, sw) whose branch_taken
-         * and branch_untaken are both NULL, or whose target block cannot be
-         * resolved from the cache, no terminator is emitted above. This
-         * produces malformed LLVM IR that crashes LLVMRunPasses.
+         * and branch_untaken are both NULL, no terminator is emitted above.
+         * This produces malformed LLVM IR that crashes LLVMRunPasses.
          *
          * Store the next PC (block->pc_end) and return to the interpreter.
          */
-        LLVMBasicBlockRef bb = LLVMGetInsertBlock(*builder);
-        if (!LLVMGetBasicBlockTerminator(bb)) {
-            T2C_LLVM_GEN_STORE_IMM32(*builder, block->pc_end,
-                                     t2c_gen_PC_addr(start, builder, NULL));
-            T2C_STORE_TIMER(*builder, start, insn_counter);
-            LLVMBuildRetVoid(*builder);
-        }
+        if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(*builder)))
+            t2c_gen_exit(*builder, start, block->pc_end, insn_counter);
     }
 
     if (tk && tk != *builder)
         LLVMDisposeBuilder(tk);
     if (utk && utk != *builder)
         LLVMDisposeBuilder(utk);
+}
+
+/* Guest register promotion.
+ *
+ * Instruction handlers read and write guest registers in rv->X directly, and
+ * LLVM must keep every such access: it cannot tell rv->X from guest memory,
+ * which is reached through integer-to-pointer casts. Redirect them to one local
+ * variable per register instead, which LLVM keeps in host registers. The
+ * variables are filled from rv->X on entry, written back before any call or
+ * return, since callees and the dispatcher read rv->X, and refilled after a
+ * call that returns here, since callees may write it. The guest register an
+ * address names: an i32 GEP off rv with a constant index into X. -1 for any
+ * other address.
+ */
+static int t2c_guest_reg(LLVMValueRef ptr, LLVMValueRef rv_arg)
+{
+    if (!LLVMIsAGetElementPtrInst(ptr) || LLVMGetOperand(ptr, 0) != rv_arg ||
+        LLVMGetNumOperands(ptr) != 2 ||
+        LLVMGetGEPSourceElementType(ptr) != LLVMInt32Type())
+        return -1;
+    LLVMValueRef idx = LLVMGetOperand(ptr, 1);
+    if (!LLVMIsAConstantInt(idx))
+        return -1;
+    long long i = LLVMConstIntGetSExtValue(idx);
+    return i >= (long long) X_BASE && i < (long long) X_BASE + N_RV_REGS
+               ? (int) (i - X_BASE)
+               : -1;
+}
+
+/* Whether a use of rv, other than through t2c_guest_reg(), may reach X. Such a
+ * function is left alone, so a promoted value can never be read stale.
+ */
+static bool t2c_may_alias_x(LLVMValueRef user, LLVMValueRef rv_arg)
+{
+    if (LLVMIsACallInst(user))
+        return false; /* calls are bracketed by write-back and refill */
+    if (!LLVMIsAGetElementPtrInst(user))
+        return true;
+    if (t2c_guest_reg(user, rv_arg) >= 0)
+        return false;
+    if (LLVMGetNumOperands(user) != 2 ||
+        !LLVMIsAConstantInt(LLVMGetOperand(user, 1)))
+        return true;
+    long long scale;
+    LLVMTypeRef type = LLVMGetGEPSourceElementType(user);
+    if (type == LLVMInt8Type())
+        scale = 1;
+    else if (type == LLVMInt32Type())
+        scale = 4;
+    else if (type == LLVMInt64Type())
+        scale = 8;
+    else
+        return true;
+    long long off = LLVMConstIntGetSExtValue(LLVMGetOperand(user, 1)) * scale;
+    long long x = offsetof(riscv_t, X);
+    return off + 8 > x && off < x + (long long) sizeof(((riscv_t *) 0)->X);
+}
+
+/* Copy the registers in mask from one set of addresses to the other. */
+static void t2c_copy_regs(LLVMBuilderRef b,
+                          uint32_t mask,
+                          const LLVMValueRef *from,
+                          const LLVMValueRef *to)
+{
+    for (int r = 1; r < N_RV_REGS; r++) {
+        if (mask & (UINT32_C(1) << r))
+            LLVMBuildStore(b, LLVMBuildLoad2(b, LLVMInt32Type(), from[r], ""),
+                           to[r]);
+    }
+}
+
+/* Whether the instructions after a call run straight to a return without
+ * touching guest registers or calling again. Such a call needs no refill, and
+ * the return no write-back of its own.
+ */
+static bool t2c_runs_to_return(LLVMValueRef call, const LLVMValueRef *var)
+{
+    for (LLVMValueRef in = LLVMGetNextInstruction(call); in;
+         in = LLVMGetNextInstruction(in)) {
+        if (LLVMIsAReturnInst(in))
+            return true;
+        if (LLVMIsACallInst(in) && !LLVMIsAIntrinsicInst(in))
+            return false;
+        LLVMValueRef ptr = LLVMIsALoadInst(in)    ? LLVMGetOperand(in, 0)
+                           : LLVMIsAStoreInst(in) ? LLVMGetOperand(in, 1)
+                                                  : NULL;
+        for (int r = 1; ptr && r < N_RV_REGS; r++) {
+            if (ptr == var[r])
+                return false;
+        }
+    }
+    return false;
+}
+
+static void t2c_promote_guest_regs(LLVMValueRef fn, LLVMBasicBlockRef entry)
+{
+    LLVMValueRef rv_arg = LLVMGetParam(fn, 0);
+    uint32_t used = 0, written = 0;
+    for (LLVMUseRef use = LLVMGetFirstUse(rv_arg); use;
+         use = LLVMGetNextUse(use)) {
+        LLVMValueRef user = LLVMGetUser(use);
+        if (t2c_may_alias_x(user, rv_arg))
+            goto keep_in_memory;
+
+        /* x0 stays in memory: it must read zero, whatever a handler stores
+         * there. A promoted address must only be loaded from or stored to.
+         */
+        int r = t2c_guest_reg(user, rv_arg);
+        if (r <= 0)
+            continue;
+        uint32_t bit = UINT32_C(1) << r;
+        for (LLVMUseRef u = LLVMGetFirstUse(user); u; u = LLVMGetNextUse(u)) {
+            LLVMValueRef in = LLVMGetUser(u);
+            bool store = LLVMIsAStoreInst(in) && LLVMGetOperand(in, 1) == user;
+            if (!(LLVMIsALoadInst(in) || store) ||
+                LLVMGetOrdering(in) != LLVMAtomicOrderingNotAtomic)
+                goto keep_in_memory;
+            used |= bit;
+            if (store)
+                written |= bit;
+        }
+    }
+    if (!used)
+        return;
+
+    /* Fill the variables in the entry block, where mem2reg promotes them. */
+    LLVMBuilderRef b = LLVMCreateBuilder();
+    LLVMPositionBuilderBefore(b, LLVMGetBasicBlockTerminator(entry));
+    LLVMValueRef var[N_RV_REGS] = {0}, home[N_RV_REGS] = {0};
+    for (int r = 1; r < N_RV_REGS; r++) {
+        if (!(used & (UINT32_C(1) << r)))
+            continue;
+        LLVMValueRef idx = LLVMConstInt(LLVMInt32Type(), X_BASE + r, false);
+        home[r] =
+            LLVMBuildInBoundsGEP2(b, LLVMInt32Type(), rv_arg, &idx, 1, "x");
+        var[r] = LLVMBuildAlloca(b, LLVMInt32Type(), "reg");
+    }
+    t2c_copy_regs(b, used, home, var);
+
+    /* Redirect the handlers' accesses. The addresses themselves stay users of
+     * rv, so the walk is unaffected.
+     */
+    for (LLVMUseRef use = LLVMGetFirstUse(rv_arg); use;
+         use = LLVMGetNextUse(use)) {
+        LLVMValueRef user = LLVMGetUser(use);
+        int r = t2c_guest_reg(user, rv_arg);
+        if (r > 0 && user != home[r])
+            LLVMReplaceAllUsesWith(user, var[r]);
+    }
+
+    /* Write back before calls and returns; refill after calls that return here
+     * and then touch guest registers again.
+     */
+    for (LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(fn); bb;
+         bb = LLVMGetNextBasicBlock(bb)) {
+        bool written_back = false;
+        for (LLVMValueRef in = LLVMGetFirstInstruction(bb); in;
+             in = LLVMGetNextInstruction(in)) {
+            bool call = LLVMIsACallInst(in) &&
+                        !LLVMIsAInlineAsm(LLVMGetCalledValue(in)) &&
+                        !LLVMIsAIntrinsicInst(in);
+            if (LLVMIsAReturnInst(in)) {
+                if (!written_back) {
+                    LLVMPositionBuilderBefore(b, in);
+                    t2c_copy_regs(b, written, var, home);
+                }
+                continue;
+            }
+            if (!call)
+                continue;
+            LLVMPositionBuilderBefore(b, in);
+            t2c_copy_regs(b, written, var, home);
+            /* A tail call does not come back, and nothing may follow it. */
+            written_back =
+                LLVMGetTailCallKind(in) == LLVMTailCallKindMustTail ||
+                t2c_runs_to_return(in, var);
+            if (written_back)
+                continue;
+            LLVMValueRef next = LLVMGetNextInstruction(in);
+            LLVMPositionBuilderBefore(b, next);
+            t2c_copy_regs(b, used, home, var);
+            in = LLVMGetPreviousInstruction(next);
+        }
+    }
+    LLVMDisposeBuilder(b);
+    return;
+
+keep_in_memory:
+    rv_log_debug("T2C: guest registers left in memory");
 }
 
 void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
@@ -529,18 +850,29 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     set_t *set = malloc(sizeof(set_t));
     if (!set) {
         rv_log_error("Failed to allocate set for T2C compilation");
-        LLVMDisposeBuilder(first_builder);
-        LLVMDisposeBuilder(builder);
-        LLVMDisposeModule(module);
-        pthread_mutex_unlock(cache_lock);
-        return;
+        goto abandon;
     }
     set_init(set);
     struct LLVM_block_map map;
     map.count = 0;
     /* Translate custom IR into LLVM IR */
+    t2c_region_insns = 0;
+    t2c_predicted_pc = 0;
     t2c_trace_ebb(&builder, param_types, start, &entry, rv, block, set, &map,
                   insn_counter);
+    t2c_promote_guest_regs(start, first_block);
+
+    /* Malformed IR would otherwise surface as a crash deep inside an LLVM pass.
+     * Leave such a block to tier-1 instead.
+     */
+    char *verify_msg = NULL;
+    if (LLVMVerifyModule(module, LLVMReturnStatusAction, &verify_msg)) {
+        rv_log_error("T2C built invalid IR for 0x%08x; skipped: %s",
+                     block->pc_start, verify_msg);
+        LLVMDisposeMessage(verify_msg);
+        goto abandon;
+    }
+    LLVMDisposeMessage(verify_msg);
 
     block->is_compiling = true; /* Mark block as busy to prevent eviction */
 
@@ -569,18 +901,29 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     }
     /* Use PIC relocation mode for JIT code - helps with indirect calls.
      * Code model selection:
-     * - Apple Silicon (ARM64 macOS): Use Small model to avoid MCJIT bugs with
-     *   movz/movk sequences that Large model generates for 64-bit constants.
-     *   ARM64's limited addressing modes make Large model problematic.
+     * - Arm64: Use Small model. The Large model materializes every 64-bit
+     *   constant with a movz/movk sequence, which MCJIT mishandles on Apple
+     *   Silicon and which costs instructions on every region exit elsewhere.
      * - Other platforms: Use Large model per LLVM MCJIT recommendations.
      */
-#if defined(__aarch64__) && defined(__APPLE__)
+#if defined(__aarch64__)
     LLVMCodeModel code_model = LLVMCodeModelSmall;
 #else
     LLVMCodeModel code_model = LLVMCodeModelLarge;
 #endif
     char *cpu_name = LLVMGetHostCPUName();
     char *cpu_features = LLVMGetHostCPUFeatures();
+    /* MCJIT builds its own target machine without a CPU, so name the host on
+     * the function itself; the attributes steer both the passes and codegen.
+     */
+    LLVMAddAttributeAtIndex(
+        start, LLVMAttributeFunctionIndex,
+        LLVMCreateStringAttribute(LLVMGetGlobalContext(), "target-cpu", 10,
+                                  cpu_name, strlen(cpu_name)));
+    LLVMAddAttributeAtIndex(
+        start, LLVMAttributeFunctionIndex,
+        LLVMCreateStringAttribute(LLVMGetGlobalContext(), "target-features", 15,
+                                  cpu_features, strlen(cpu_features)));
     LLVMTargetMachineRef tm =
         LLVMCreateTargetMachine(target, triple, cpu_name, cpu_features,
                                 LLVMCodeGenLevelNone, LLVMRelocPIC, code_model);
@@ -721,6 +1064,15 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
 
     pthread_mutex_unlock(cache_lock);
     free(set);
+    return;
+
+    /* Leave the block to tier-1, before any machine code exists. */
+abandon:
+    LLVMDisposeBuilder(first_builder);
+    LLVMDisposeBuilder(builder);
+    LLVMDisposeModule(module);
+    free(set);
+    pthread_mutex_unlock(cache_lock);
 }
 
 struct jit_cache *jit_cache_init(void)
@@ -796,14 +1148,47 @@ void inline_cache_clear_key(struct inline_cache *cache, uint64_t key)
     }
 }
 
-/* Dispose LLVM execution engine when a T2C-compiled block is freed.
- * The engine owns the memory where block->func points, so it must be
- * disposed before the block is freed to prevent dangling pointers.
+/* The engine of an evicted block. The emulator thread evicts blocks, but must
+ * not dispose their engines itself: the T2C thread optimizes and emits code
+ * without holding cache_lock, and LLVM state is not safe to touch from two
+ * threads at once.
  */
-void t2c_dispose_engine(void *engine)
+struct t2c_retired_engine {
+    struct t2c_retired_engine *next;
+    void *engine;
+};
+
+/* Hand an evicted block's engine to the T2C thread. The caller holds cache_lock
+ * and has already unpublished the block's code.
+ */
+void t2c_retire_engine(riscv_t *rv, void *engine)
 {
-    if (engine)
-        LLVMDisposeExecutionEngine((LLVMExecutionEngineRef) engine);
+    if (!engine)
+        return;
+    struct t2c_retired_engine *node = malloc(sizeof(*node));
+    if (unlikely(!node))
+        return; /* leaking the engine is safe; disposing it here is not */
+    node->engine = engine;
+    node->next = rv->retired_engines;
+    rv->retired_engines = node;
+}
+
+/* Dispose the retired engines. Called by the T2C thread between compilations
+ * and at shutdown, without cache_lock held.
+ */
+void t2c_reap_engines(riscv_t *rv)
+{
+    pthread_mutex_lock(&rv->cache_lock);
+    struct t2c_retired_engine *node = rv->retired_engines;
+    rv->retired_engines = NULL;
+    pthread_mutex_unlock(&rv->cache_lock);
+
+    while (node) {
+        struct t2c_retired_engine *next = node->next;
+        LLVMDisposeExecutionEngine((LLVMExecutionEngineRef) node->engine);
+        free(node);
+        node = next;
+    }
 }
 
 /* Wrapper for clear_cache_hot callback - disposes block's LLVM engine.
@@ -827,12 +1212,10 @@ void t2c_dispose_block_engine(void *block)
 
 void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry)
 {
-    /* XOR high 32 bits (satp) with low 32 bits (pc) before masking.
-     * This distributes entries from different address spaces across the table,
-     * reducing cache thrashing when multiple processes share virtual addresses.
+    /* The key packs satp above pc. Mixing satp into the slot spreads entries
+     * from different address spaces across the table.
      */
-    uint32_t pos =
-        ((uint32_t) key ^ (uint32_t) (key >> 32)) & (N_JIT_CACHE_ENTRIES - 1);
+    uint32_t pos = jit_cache_slot((uint32_t) key, (uint32_t) (key >> 32));
 
     /* Seqlock write pattern:
      * 1. Increment seq to odd (signals write in progress)

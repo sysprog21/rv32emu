@@ -94,6 +94,27 @@ Each handler translates the RISC-V instruction semantics into LLVM IR using the 
 LLVM then applies its optimization passes and register allocation,
 producing native code that typically outperforms Tier-1 for hot paths.
 
+Tier-2 compiles a region: the hot block plus the blocks its branches lead to,
+traced through `t2c_trace_ebb()`. Within a region:
+
+- Guest registers live in local variables that LLVM keeps in host registers.
+  `t2c_promote_guest_regs()` fills them from `rv->X` on entry, writes back the
+  ones the region changes before any call or return, and refills them after a
+  call that comes back, since callees and the dispatcher read and write
+  `rv->X`. A function that reaches `rv->X` any other way is left unpromoted.
+- An indirect jump, such as a function return, whose branch history shows one
+  target at least 90% of the time is compared against that target, and the
+  region continues there. This lets a loop that calls and returns through
+  several functions compile as one loop. Prediction is off in system mode,
+  where timer interrupts are taken only between regions.
+- After `T2C_REGION_BUDGET` traced instructions, successors are no longer
+  traced; the region jumps to their compiled code instead.
+
+An indirect jump that leaves the region calls the target's compiled function
+as a guaranteed tail call when it finds it in the jit-cache, and otherwise
+returns to the dispatcher. `jit_cache_slot()` in `src/jit.h` defines the slot
+for both the C code that fills the cache and the IR that probes it.
+
 Tier-2 compilation requires LLVM 18-21 (LLVM 20+ is the validated default
 exercised by CI on macOS arm64 and Ubuntu 24.04 x86-64). The Makefile
 auto-detects `llvm-config` in `$PATH` (preferring the newest supported
@@ -194,3 +215,31 @@ IIF(RV32_HAS(SYSTEM_MMIO))(
 
 When MMIO is not enabled, the generated code performs direct memory access
 without the overhead of region checking.
+
+## Misaligned Accesses
+Both JIT tiers keep the interpreter's semantics for halfword and word
+accesses that are not naturally aligned. Unless the emulator runs with `-m`,
+such an access raises an address-misaligned exception: a guest trap handler
+sees it exactly as under the interpreter, and without one the user-mode
+default handler emulates the access and resumes after it. In system mode this
+also keeps a word that straddles a page boundary from being read through the
+translation of its first byte.
+
+Tier-1 emits a test of the address and a branch, not taken on the aligned
+path, to a stub placed after the block that writes the guest registers back
+and calls `jit_misaligned_trap()`. When the offset is itself aligned, the base
+register is tested directly. A passed check also proves the base aligned, so
+later accesses in the same block through the unmodified base register need no
+check; any write to that register discards the fact. Tier-2 emits the
+equivalent branch in LLVM IR, weighted as unlikely and followed by an
+`llvm.assume` of the alignment, which lets LLVM drop later checks it implies.
+
+A user-mode program that never installs a trap vector cannot tell the default
+handler's emulation from the host performing the access, so neither tier emits
+the checks for it. When the ELF is loaded, its executable segments are scanned
+for any CSR instruction that may write `mtvec` or `stvec`; finding none, the
+JIT treats the program as if it ran with `-m`. On Dhrystone, the checks
+otherwise add about 18% to the host instructions of tier-1 code.
+`tests/jit-misalign.S` covers the plain, compressed, and fused forms with and
+without a guest trap vector, and its `-notvec` build without any CSR
+instruction.

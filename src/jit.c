@@ -111,6 +111,17 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 #define JIT_OP_MOD_REG (JIT_CLS_ALU | JIT_SRC_REG | 0x90)
 
 #define STACK_SIZE 512
+/* JIT_CALL_PAD follows a pushed rv at a call site: together they keep RSP
+ * 16-byte aligned, and on Windows the pad also holds the callee's home space.
+ */
+#if defined(_WIN32)
+#define JIT_FRAME_SIZE (STACK_SIZE + 4 * sizeof(uint64_t))
+#define JIT_CALL_PAD 0x28
+#else
+#define JIT_FRAME_SIZE STACK_SIZE
+#define JIT_CALL_PAD 0x8
+#endif
+
 /* The SYSTEM_MMIO fast path adds ~8 jump-table entries per load/store
  * (7 slow-path gating branches + 1 unconditional B), pushing
  * JUMPS_PER_INSN to 16.  state->jumps accumulates across chained blocks,
@@ -448,7 +459,7 @@ static const int parameter_reg[] = {RCX, RDX, R8, R9};
 static struct host_reg register_map[] = {
     {RAX, -1, 0, 0}, {R10, -1, 0, 0}, {RDX, -1, 0, 0}, {R8, -1, 0, 0},
     {R9, -1, 0, 0},  {R14, -1, 0, 0}, {R15, -1, 0, 0}, {RDI, -1, 0, 0},
-    {RSI, -1, 0, 0}, {RBX, -1, 0, 0}, {RBP, -1, 0, 0},
+    {RSI, -1, 0, 0}, {RBX, -1, 0, 0},
 };
 static int temp_reg = R11;
 #else
@@ -475,6 +486,7 @@ static int temp_reg = R8;
  *   r0 - r4   Function parameters, caller-saved
  *   r6 - r8   Temp - used for storing calculated value during execution
  *   r19       Guest memory base in user-mode JIT (outside register_map)
+ *   r20       Guest cycle count while generated code runs (cycle_reg)
  *   r19 - r23 Callee-saved registers
  *   r24       Temp - used for generating 32-bit immediates
  *   r25       Temp - used for modulous calculations
@@ -1550,31 +1562,119 @@ static inline void emit_jmp(struct jit_state *state,
 #endif
 }
 
+/* Guest cycle counting.
+ *
+ * Blocks jump to one another inside generated code, so the dispatcher sees only
+ * the first block of a chain and cannot charge the rest. Instead, each block
+ * adds its cost to cycle_reg on entry. While generated code runs, the register
+ * stands in for rv->csr_cycle: it is loaded on entry, stored on exit, and
+ * stored before and reloaded after any call, since a callee may read or advance
+ * the counter. It is callee-saved, so it survives the calls themselves.
+ */
+#if defined(__x86_64__)
+static const int cycle_reg = RBP;
+#elif defined(__aarch64__)
+static const int cycle_reg = R20;
+#endif
+
+static void emit_cycle_count(struct jit_state *state, uint32_t n)
+{
+#if defined(__x86_64__)
+    /* add rbp, imm: block costs nearly always fit the 8-bit form */
+    if (n < 0x80) {
+        emit_alu64(state, 0x83, 0, cycle_reg);
+        emit1(state, n);
+    } else {
+        emit_alu64_imm32(state, 0x81, 0, cycle_reg, n);
+    }
+#elif defined(__aarch64__)
+    if (n < 0x1000) {
+        emit_addsub_imm(state, true, AS_ADD, cycle_reg, cycle_reg, n);
+    } else {
+        emit_load_imm(state, temp_imm_reg, n);
+        emit_addsub_register(state, true, AS_ADD, cycle_reg, cycle_reg,
+                             temp_imm_reg);
+    }
+#endif
+}
+
+/* Arm64 reaches the counter with a scaled 12-bit offset. */
+_Static_assert(offsetof(riscv_t, csr_cycle) % 8 == 0 &&
+                   offsetof(riscv_t, csr_cycle) / 8 < 4096,
+               "csr_cycle must be reachable by a scaled LDR/STR offset");
+
+/* Move rv->csr_cycle into cycle_reg (load) or back (store). */
+static void emit_cycle_move(struct jit_state *state, bool load)
+{
+    const uint32_t offset = offsetof(riscv_t, csr_cycle);
+#if defined(__x86_64__)
+    /* mov rbp, [rv + offset] / mov [rv + offset], rbp */
+    emit_basic_rex(state, 1, cycle_reg, parameter_reg[0]);
+    emit1(state, load ? 0x8b : 0x89);
+    emit_modrm_and_displacement(state, cycle_reg, parameter_reg[0], offset);
+#elif defined(__aarch64__)
+    /* LDR/STR Xt, [Xn, #offset], unsigned scaled offset */
+    emit_a64(state, (load ? UINT32_C(0xf9400000) : UINT32_C(0xf9000000)) |
+                        ((offset / 8) << 10) |
+                        ((uint32_t) parameter_reg[0] << 5) |
+                        (uint32_t) cycle_reg);
+#endif
+}
+
 static inline void save_reg(struct jit_state *, int);
 static inline void unmap_vm_reg(int);
 
+#if defined(__x86_64__)
+/* Open (enter) or close a call frame: save rv, which the callee may clobber,
+ * and pad RSP by JIT_CALL_PAD, which with the push keeps it 16-byte aligned.
+ */
+static inline void emit_call_frame(struct jit_state *state, bool enter)
+{
+    if (enter) {
+        emit_push(state, parameter_reg[0]);
+        emit_alu64_imm32(state, 0x81, 5, RSP, JIT_CALL_PAD);
+    } else {
+        emit_alu64_imm32(state, 0x81, 0, RSP, JIT_CALL_PAD);
+        emit_pop(state, parameter_reg[0]);
+    }
+}
+#endif
+
+/* Call a helper that takes rv as its first argument. rv is preserved across the
+ * call, since the epilogue reaches rv->csr_cycle through it.
+ */
 static inline void emit_call(struct jit_state *state, intptr_t target)
 {
+    emit_cycle_move(state, false);
 #if defined(__x86_64__)
+    emit_call_frame(state, true);
     emit_load_imm_sext(state, RAX, target);
     /* callq *%rax */
     emit1(state, 0xff);
     /* ModR/M byte: b11010000b = xd0, rax is register 0 */
     emit1(state, 0xd0);
+    emit_call_frame(state, false);
+    emit_cycle_move(state, true);
 #elif defined(__aarch64__)
-    uint32_t stack_movement = align_up(8, 16);
-    emit_addsub_imm(state, true, AS_SUB, SP, SP, stack_movement);
+    /* Save the link register and rv in one 16-byte slot. */
+    emit_addsub_imm(state, true, AS_SUB, SP, SP, 16);
     emit_loadstore_imm(state, LS_STRX, R30, SP, 0);
+    emit_loadstore_imm(state, LS_STRX, parameter_reg[0], SP, 8);
 
     emit_movewide_imm(state, true, temp_imm_reg, target);
     emit_uncond_branch_reg(state, BR_BLR, temp_imm_reg);
 
+    /* Hold the result while rv is restored, since save_reg stores through it.
+     */
+    emit_logical_register(state, true, LOG_ORR, temp_imm_reg, RZ, R0);
+    emit_loadstore_imm(state, LS_LDRX, parameter_reg[0], SP, 8);
+    emit_cycle_move(state, true);
     save_reg(state, 0); /* R5 */
     unmap_vm_reg(0);    /* R5 */
-    emit_logical_register(state, true, LOG_ORR, R5, RZ, R0);
+    emit_logical_register(state, true, LOG_ORR, R5, RZ, temp_imm_reg);
 
     emit_loadstore_imm(state, LS_LDRX, R30, SP, 0);
-    emit_addsub_imm(state, true, AS_ADD, SP, SP, stack_movement);
+    emit_addsub_imm(state, true, AS_ADD, SP, SP, 16);
 #endif
 }
 
@@ -2573,14 +2673,14 @@ static void emit_jit_mmu_handler(struct jit_state *state,
 {
     assert(vreg_idx < 32);
 
+    emit_cycle_move(state, false);
 #if defined(__x86_64__) && defined(_WIN32)
     /* Preserve rv across the call, then reserve the required 32-byte shadow
      * space plus one 8-byte stack slot for the 5th argument.
      * prepare_translate() leaves %rsp 16-byte aligned inside the JIT body, so
      * push+sub 40 preserves Windows x64 call-site alignment.
      */
-    emit_push(state, parameter_reg[0]);
-    emit_alu64_imm32(state, 0x81, 5, RSP, 0x28);
+    emit_call_frame(state, true);
 
     /* mov r8, vaddr_reg — arg2 */
     if (vaddr_reg != R8) {
@@ -2615,15 +2715,13 @@ static void emit_jit_mmu_handler(struct jit_state *state,
     emit1(state, 0xff);
     emit_modrm(state, 0x3 << 6, 0x2, R11 & 7);
 
-    emit_alu64_imm32(state, 0x81, 0, RSP, 0x28);
-    emit_pop(state, parameter_reg[0]);
+    emit_call_frame(state, false);
 #elif defined(__x86_64__)
     /* Preserve rv across the call. prepare_translate() leaves %rsp 16-byte
      * aligned inside the JIT body, so a matching 8-byte alignment slot keeps
      * the SysV call-site stack invariant after the push.
      */
-    emit_push(state, parameter_reg[0]);
-    emit_alu64_imm32(state, 0x81, 5, RSP, 0x8);
+    emit_call_frame(state, true);
 
     /* mov rdx, vaddr_reg — arg2. Must precede the type load that overwrites
      * RCX (== temp_reg == parameter_reg[3]).
@@ -2657,8 +2755,7 @@ static void emit_jit_mmu_handler(struct jit_state *state,
     emit1(state, 0xff);
     emit_modrm(state, 0x3 << 6, 0x2, R11 & 7);
 
-    emit_alu64_imm32(state, 0x81, 0, RSP, 0x8);
-    emit_pop(state, parameter_reg[0]);
+    emit_call_frame(state, false);
 #elif defined(__aarch64__)
     uint32_t insn;
 
@@ -2693,6 +2790,7 @@ static void emit_jit_mmu_handler(struct jit_state *state,
     insn = (0xf84107e << 4) | R0;
     emit_a64(state, insn);
 #endif
+    emit_cycle_move(state, true);
 }
 #endif
 
@@ -2714,17 +2812,12 @@ static void prepare_translate(struct jit_state *state,
     if (!(ARRAY_SIZE(nonvolatile_reg) % 2))
         emit_alu64_imm32(state, 0x81, 5, RSP, 0x8);
 
-    /* Set JIT R10 (the way to access the frame in JIT) to match RSP. */
-    emit_mov(state, RSP, RBP);
-
-    /* Allocate stack space */
-    emit_alu64_imm32(state, 0x81, 5, RSP, STACK_SIZE);
-
-#if defined(_WIN32)
-    /* Windows x64 ABI requires home register space. */
-    /* Allocate home register space - 4 registers */
-    emit_alu64_imm32(state, 0x81, 5, RSP, 4 * sizeof(uint64_t));
-#endif
+    /* Allocate stack space, and on Windows the home space for 4 registers
+     * that its ABI requires. Generated code leaves RSP balanced, so the
+     * epilogue releases the same amount.
+     */
+    emit_alu64_imm32(state, 0x81, 5, RSP, JIT_FRAME_SIZE);
+    emit_cycle_move(state, true);
 
     /* R12 is outside the allocator and survives calls and direct chains. */
 #if JIT_INDEXED_GUEST_MEM
@@ -2738,8 +2831,8 @@ static void prepare_translate(struct jit_state *state,
     /* Epilogue */
     state->exit_loc = state->offset;
 
-    /* Deallocate stack space by restoring RSP from JIT R10. */
-    emit_mov(state, RBP, RSP);
+    emit_cycle_move(state, false);
+    emit_alu64_imm32(state, 0x81, 0, RSP, JIT_FRAME_SIZE);
 
     if (!(ARRAY_SIZE(nonvolatile_reg) % 2))
         emit_alu64_imm32(state, 0x81, 0, RSP, 0x8);
@@ -2770,9 +2863,11 @@ static void prepare_translate(struct jit_state *state,
     /* R19 is already saved above and never allocated to a guest register. */
     emit_load_imm_sext(state, R19, mem_base);
 #endif
+    emit_cycle_move(state, true);
     emit_uncond_branch_reg(state, BR_BR, R1);
     /* Epilogue */
     state->exit_loc = state->offset;
+    emit_cycle_move(state, false);
 
     /* Restore callee-saved registers).  */
     for (size_t i = 0; i < ARRAY_SIZE(callee_reg); i += 2) {
@@ -4014,6 +4109,7 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
     rv_insn_t *ir, *next;
     n_misalign_stubs = 0;
     reset_reg();
+    emit_cycle_count(state, block->cycle_cost);
     liveness_reset();
     liveness_calc(block);
     for (idx = 0, ir = block->ir_head; idx < block->n_insn && !should_flush;

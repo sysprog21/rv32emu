@@ -26,19 +26,21 @@ T2C_OP(auipc, {
                              t2c_gen_rd_addr(start, builder, ir));
 })
 
-/* Query the block by pc and return if it is valid. */
-static bool t2c_check_valid_blk(riscv_t *rv, block_t *block UNUSED, uint32_t pc)
+/* The block at pc if a region may continue into it, or NULL. */
+static block_t *t2c_check_valid_blk(riscv_t *rv,
+                                    block_t *block UNUSED,
+                                    uint32_t pc)
 {
     block_t *blk = cache_get(rv->block_cache, pc, false);
     if (!blk || !blk->translatable)
-        return false;
+        return NULL;
 
 #if RV32_HAS(SYSTEM)
     if (blk->satp != block->satp)
-        return false;
+        return NULL;
 #endif
 
-    return true;
+    return blk;
 }
 
 T2C_OP(jal, {
@@ -50,10 +52,7 @@ T2C_OP(jal, {
         t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
         *taken_builder = *builder;
     } else {
-        T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + ir->imm,
-                                 t2c_gen_PC_addr(start, builder, ir));
-        T2C_STORE_TIMER(*builder, start, insn_counter);
-        LLVMBuildRetVoid(*builder);
+        t2c_gen_exit(*builder, start, ir->pc + ir->imm, insn_counter);
     }
 })
 
@@ -319,6 +318,76 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     LLVMDisposeBuilder(fallback_builder);
 }
 
+/* The target an indirect jump takes, when it takes one target at least
+ * T2C_PREDICT_PERCENT of the time. The interpreter records targets in the
+ * jump's branch history table while the block runs there. Outside system mode
+ * only: a region built along predicted returns can loop through several guest
+ * functions, and in system mode that would delay timer interrupts, which are
+ * taken only between regions.
+ */
+#define T2C_PREDICT_PERCENT 90
+#define T2C_PREDICT_MIN_HITS 16
+static uint32_t t2c_predicted_target(riscv_t *rv, block_t *block, rv_insn_t *ir)
+{
+    if (RV32_HAS(SYSTEM))
+        return 0;
+    const branch_history_table_t *bt = ir->branch_table;
+    if (!bt || t2c_region_insns >= T2C_REGION_BUDGET)
+        return 0;
+    uint64_t total = 0;
+    uint32_t best = 0, best_times = 0;
+    for (int i = 0; i < HISTORY_SIZE; i++) {
+        /* The emulator thread keeps counting while this one reads. */
+        uint32_t pc = ATOMIC_LOAD(&bt->PC[i], ATOMIC_RELAXED);
+        uint32_t times = ATOMIC_LOAD(&bt->times[i], ATOMIC_RELAXED);
+        if (pc == UINT32_MAX || !times)
+            continue;
+        total += times;
+        if (times > best_times) {
+            best_times = times;
+            best = pc;
+        }
+    }
+    if (best_times < T2C_PREDICT_MIN_HITS ||
+        (uint64_t) best_times * 100 < total * T2C_PREDICT_PERCENT ||
+        !t2c_check_valid_blk(rv, block, best))
+        return 0;
+    return best;
+}
+
+/* Jump to addr. When the jump has a dominant target, compare against it and
+ * leave the matching path to t2c_trace_ebb() to continue into, so the region
+ * keeps going instead of leaving through the jit-cache.
+ */
+static void t2c_indirect_jump(LLVMBuilderRef *builder,
+                              LLVMValueRef start,
+                              LLVMValueRef addr,
+                              riscv_t *rv,
+                              block_t *block,
+                              rv_insn_t *ir,
+                              LLVMValueRef insn_counter,
+                              LLVMBuilderRef *taken_builder)
+{
+    uint32_t target = t2c_predicted_target(rv, block, ir);
+    if (!target) {
+        t2c_jit_cache_helper(builder, start, addr, rv, block, ir, insn_counter);
+        return;
+    }
+    LLVMValueRef hit = LLVMBuildICmp(
+        *builder, LLVMIntEQ, addr, LLVMConstInt(LLVMInt32Type(), target, false),
+        "predicted");
+    LLVMBasicBlockRef hit_bb = LLVMAppendBasicBlock(start, "predicted");
+    LLVMBasicBlockRef miss_bb = LLVMAppendBasicBlock(start, "mispredicted");
+    LLVMBuildCondBr(*builder, hit, hit_bb, miss_bb);
+    LLVMBuilderRef miss = LLVMCreateBuilder();
+    LLVMPositionBuilderAtEnd(miss, miss_bb);
+    t2c_jit_cache_helper(&miss, start, addr, rv, block, ir, insn_counter);
+    LLVMDisposeBuilder(miss);
+    *taken_builder = LLVMCreateBuilder();
+    LLVMPositionBuilderAtEnd(*taken_builder, hit_bb);
+    t2c_predicted_pc = target;
+}
+
 T2C_OP(jalr, {
     /* The register which stores the indirect address needs to be loaded first
      * to avoid being overriden by other operation.
@@ -331,12 +400,12 @@ T2C_OP(jalr, {
         T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 4,
                                  t2c_gen_rd_addr(start, builder, ir));
 
-    t2c_jit_cache_helper(builder, start, val_rs1, rv, block, ir, insn_counter);
+    t2c_indirect_jump(builder, start, val_rs1, rv, block, ir, insn_counter,
+                      taken_builder);
 })
 
 #define BRANCH_FUNC(type, cond)                                             \
     T2C_OP(type, {                                                          \
-        LLVMValueRef addr_PC = t2c_gen_PC_addr(start, builder, ir);         \
         T2C_LLVM_GEN_LOAD_VMREG(rs1, 32,                                    \
                                 t2c_gen_rs1_addr(start, builder, ir));      \
         T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,                                    \
@@ -349,9 +418,7 @@ T2C_OP(jalr, {
             t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {         \
             *taken_builder = builder2;                                      \
         } else {                                                            \
-            T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + ir->imm, addr_PC);  \
-            T2C_STORE_TIMER(builder2, start, insn_counter);                 \
-            LLVMBuildRetVoid(builder2);                                     \
+            t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter);  \
             LLVMDisposeBuilder(builder2);                                   \
         }                                                                   \
         LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken"); \
@@ -361,9 +428,7 @@ T2C_OP(jalr, {
             t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {       \
             *untaken_builder = builder3;                                    \
         } else {                                                            \
-            T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 4, addr_PC);        \
-            T2C_STORE_TIMER(builder3, start, insn_counter);                 \
-            LLVMBuildRetVoid(builder3);                                     \
+            t2c_gen_exit(builder3, start, ir->pc + 4, insn_counter);        \
             LLVMDisposeBuilder(builder3);                                   \
         }                                                                   \
         LLVMBuildCondBr(*builder, cmp, taken, untaken);                     \
@@ -423,7 +488,6 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     if (mem->mem_size < access_size)
         return NULL;
 
-    LLVMValueRef rv = LLVMGetParam(start, 0);
     LLVMTypeRef i8 = LLVMInt8Type();
     LLVMTypeRef i32 = LLVMInt32Type();
     LLVMTypeRef i64 = LLVMInt64Type();
@@ -467,12 +531,15 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     LLVMValueRef idx64 = LLVMBuildZExt(*builder, idx32, i64, "");
     LLVMValueRef byte_off =
         LLVMBuildShl(*builder, idx64, LLVMConstInt(i64, 4, false), "");
-    LLVMValueRef dtlb_off = LLVMConstInt(i64, offsetof(riscv_t, dtlb), false);
-    LLVMValueRef total_off = LLVMBuildAdd(*builder, byte_off, dtlb_off, "");
-    LLVMValueRef rv_bytes =
-        LLVMBuildBitCast(*builder, rv, LLVMPointerType(i8, 0), "");
+
+    /* Form the table's base at a constant offset first, so that rv is only ever
+     * offset by constants and guest register promotion can tell these accesses
+     * from rv->X.
+     */
+    LLVMValueRef dtlb =
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, dtlb), i8);
     LLVMValueRef entry_ptr =
-        LLVMBuildGEP2(*builder, i8, rv_bytes, &total_off, 1, "");
+        LLVMBuildGEP2(*builder, i8, dtlb, &byte_off, 1, "");
 
     /* VPN match: vpn == *((u32 *) entry_ptr). */
     LLVMValueRef vpn_field_ptr =
@@ -1383,10 +1450,7 @@ T2C_OP(cjal, {
     if (ir->branch_taken)
         *taken_builder = *builder;
     else {
-        T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + ir->imm,
-                                 t2c_gen_PC_addr(start, builder, ir));
-        T2C_STORE_TIMER(*builder, start, insn_counter);
-        LLVMBuildRetVoid(*builder);
+        t2c_gen_exit(*builder, start, ir->pc + ir->imm, insn_counter);
     }
 })
 
@@ -1460,15 +1524,11 @@ T2C_OP(cj, {
     if (ir->branch_taken)
         *taken_builder = *builder;
     else {
-        T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + ir->imm,
-                                 t2c_gen_PC_addr(start, builder, ir));
-        T2C_STORE_TIMER(*builder, start, insn_counter);
-        LLVMBuildRetVoid(*builder);
+        t2c_gen_exit(*builder, start, ir->pc + ir->imm, insn_counter);
     }
 })
 
 T2C_OP(cbeqz, {
-    LLVMValueRef addr_PC = t2c_gen_PC_addr(start, builder, ir);
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(EQ, val_rs1, 0);
     LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");
@@ -1478,9 +1538,7 @@ T2C_OP(cbeqz, {
         t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
         *taken_builder = builder2;
     } else {
-        T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + ir->imm, addr_PC);
-        T2C_STORE_TIMER(builder2, start, insn_counter);
-        LLVMBuildRetVoid(builder2);
+        t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter);
         LLVMDisposeBuilder(builder2);
     }
 
@@ -1491,16 +1549,13 @@ T2C_OP(cbeqz, {
         t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
         *untaken_builder = builder3;
     } else {
-        T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 2, addr_PC);
-        T2C_STORE_TIMER(builder3, start, insn_counter);
-        LLVMBuildRetVoid(builder3);
+        t2c_gen_exit(builder3, start, ir->pc + 2, insn_counter);
         LLVMDisposeBuilder(builder3);
     }
     LLVMBuildCondBr(*builder, cmp, taken, untaken);
 })
 
 T2C_OP(cbnez, {
-    LLVMValueRef addr_PC = t2c_gen_PC_addr(start, builder, ir);
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(NE, val_rs1, 0);
     LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");
@@ -1510,9 +1565,7 @@ T2C_OP(cbnez, {
         t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
         *taken_builder = builder2;
     } else {
-        T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + ir->imm, addr_PC);
-        T2C_STORE_TIMER(builder2, start, insn_counter);
-        LLVMBuildRetVoid(builder2);
+        t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter);
         LLVMDisposeBuilder(builder2);
     }
 
@@ -1523,9 +1576,7 @@ T2C_OP(cbnez, {
         t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
         *untaken_builder = builder3;
     } else {
-        T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 2, addr_PC);
-        T2C_STORE_TIMER(builder3, start, insn_counter);
-        LLVMBuildRetVoid(builder3);
+        t2c_gen_exit(builder3, start, ir->pc + 2, insn_counter);
         LLVMDisposeBuilder(builder3);
     }
     LLVMBuildCondBr(*builder, cmp, taken, untaken);
@@ -1563,7 +1614,8 @@ T2C_OP(clwsp, {
 
 T2C_OP(cjr, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
-    t2c_jit_cache_helper(builder, start, val_rs1, rv, block, ir, insn_counter);
+    t2c_indirect_jump(builder, start, val_rs1, rv, block, ir, insn_counter,
+                      taken_builder);
 })
 
 T2C_OP(cmv, {
@@ -1591,7 +1643,8 @@ T2C_OP(cjalr, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 2,
                              t2c_gen_ra_addr(start, builder, ir));
-    t2c_jit_cache_helper(builder, start, val_rs1, rv, block, ir, insn_counter);
+    t2c_indirect_jump(builder, start, val_rs1, rv, block, ir, insn_counter,
+                      taken_builder);
 })
 
 T2C_OP(cadd, {
@@ -1988,7 +2041,6 @@ T2C_OP(fuse13, {
  * if rd != 0, branch to PC + 4 + imm2
  */
 T2C_OP(fuse12, {
-    LLVMValueRef addr_PC = t2c_gen_PC_addr(start, builder, ir);
     /* Compute rd = rs1 + imm */
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     LLVMValueRef res = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);
@@ -2004,9 +2056,7 @@ T2C_OP(fuse12, {
         *taken_builder = builder2;
     } else {
         /* PC = ir->pc + 4 + ir->imm2 (ADDI is 4 bytes, then branch offset) */
-        T2C_LLVM_GEN_STORE_IMM32(builder2, ir->pc + 4 + ir->imm2, addr_PC);
-        T2C_STORE_TIMER(builder2, start, insn_counter);
-        LLVMBuildRetVoid(builder2);
+        t2c_gen_exit(builder2, start, ir->pc + 4 + ir->imm2, insn_counter);
         LLVMDisposeBuilder(builder2);
     }
     LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken");
@@ -2017,9 +2067,7 @@ T2C_OP(fuse12, {
         *untaken_builder = builder3;
     } else {
         /* PC = ir->pc + 8 (skip both ADDI and BNE, each 4 bytes) */
-        T2C_LLVM_GEN_STORE_IMM32(builder3, ir->pc + 8, addr_PC);
-        T2C_STORE_TIMER(builder3, start, insn_counter);
-        LLVMBuildRetVoid(builder3);
+        t2c_gen_exit(builder3, start, ir->pc + 8, insn_counter);
         LLVMDisposeBuilder(builder3);
     }
     LLVMBuildCondBr(*builder, cmp, taken, untaken);

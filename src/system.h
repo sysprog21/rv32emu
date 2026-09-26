@@ -208,12 +208,16 @@ void emu_update_vnet_interrupts(riscv_t *rv);
 void emu_update_rtc_interrupts(riscv_t *rv);
 #endif /* RV32_HAS(GOLDFISH_RTC) */
 
+#endif /* !RV32_HAS(ELF_LOADER) */
+
+/* Whether the trap handler that just ran inline resumed somewhere other than
+ * the faulting instruction, as a kernel does to deliver a signal or to take
+ * an exception-table fixup. The access must then be abandoned, not retried.
+ */
 #define CHECK_PENDING_SIGNAL(rv, signal_flag)              \
     do {                                                   \
         signal_flag = (rv->csr_sepc != rv->last_csr_sepc); \
     } while (0)
-
-#endif /* !RV32_HAS(ELF_LOADER) */
 
 /*
  * Signal to RVOP macro that inline trap handling occurred.

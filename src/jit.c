@@ -1896,12 +1896,14 @@ static void jit_mmu_handler(riscv_t *rv,
     else
         addr = rv->io.mem_translate(rv, vaddr, W);
 
-    /* Check for trap during address translation.
-     * mem_translate may trigger a page fault which sets is_trapped=true.
-     * In this case, mark as MMIO to skip direct memory access in JIT code,
-     * but don't actually perform any MMIO operation.
+    /* A page fault in mem_translate may leave a trap pending (is_trapped), or
+     * its handler may have run already and resumed somewhere else
+     * (need_handle_signal). Either way the access did not complete, and the
+     * block stops here for the dispatcher to settle. Mark it as MMIO so that no
+     * direct memory access follows, without performing an MMIO operation.
      */
-    if (rv->is_trapped) {
+    rv->jit_mmu.abort = rv->is_trapped || need_handle_signal;
+    if (rv->jit_mmu.abort) {
         rv->jit_mmu.is_mmio = 1;
         return;
     }
@@ -3710,7 +3712,7 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
      * If trapped, skip the load entirely to avoid loading garbage.
      */
     emit_load(state, S8, parameter_reg[0], temp_reg,
-              offsetof(riscv_t, is_trapped));
+              offsetof(riscv_t, jit_mmu.abort));
     emit_cmp_imm32(state, temp_reg, 0);
     uint32_t jump_trap = state->offset;
     emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */
@@ -3782,7 +3784,7 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 
     /* Check if trap occurred - skip store if trapped */
     emit_load(state, S8, parameter_reg[0], temp_reg,
-              offsetof(riscv_t, is_trapped));
+              offsetof(riscv_t, jit_mmu.abort));
     emit_cmp_imm32(state, temp_reg, 0);
     uint32_t jump_trap = state->offset;
     emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */
@@ -3852,7 +3854,7 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
      * is_trapped is set by jit_mmu_handler when mem_translate faults.
      */
     emit_load(state, S8, parameter_reg[0], temp_reg,
-              offsetof(riscv_t, is_trapped));
+              offsetof(riscv_t, jit_mmu.abort));
     emit_cmp_imm32(state, temp_reg, 0);
     uint32_t jump_trap = state->offset;
     emit_jcc_offset(state, JCC_JNE); /* Jump to end if trapped */

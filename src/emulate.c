@@ -1247,6 +1247,7 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
     for (int i = 0; i < ir->imm2; i++) {
         cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        RVOP_SYNC_PC(rv, PC); /* a page fault names this access */
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         uint32_t value = rv->X[fuse[i].rs2];
         MEM_WRITE_W(rv, addr, value);
@@ -1269,6 +1270,7 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
     for (int i = 0; i < ir->imm2; i++) {
         cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
+        RVOP_SYNC_PC(rv, PC); /* a page fault names this access */
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
         rv->X[fuse[i].rd] = MEM_READ_W(rv, addr);
         PC += 4;
@@ -1446,6 +1448,7 @@ static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
      */
     rv->X[ir->rd] = ir->imm;
     PC += 4;
+    RVOP_SYNC_PC(rv, PC); /* a page fault names the LW or SW */
     cycle++;
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
@@ -1475,6 +1478,7 @@ static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
      */
     rv->X[ir->rd] = ir->imm;
     PC += 4;
+    RVOP_SYNC_PC(rv, PC); /* a page fault names the LW or SW */
     cycle++;
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
@@ -3005,6 +3009,14 @@ static block_t *block_find_or_translate(riscv_t *rv
      */
     next_blk->satp = rv->csr_satp;
     next_blk->invalidated = false;
+#if RV32_HAS(ELF_LOADER)
+    /* T1C builds its MMU path only for SYSTEM_MMIO, and otherwise addresses
+     * guest memory physically, so code that runs with paging on stays
+     * interpreted. Building that path for every system build would lift this.
+     */
+    if (next_blk->satp)
+        next_blk->translatable = false;
+#endif
 #endif
 
     optimize_constant(rv, next_blk);
@@ -3229,6 +3241,30 @@ static void rv_check_interrupt(riscv_t *rv)
 }
 #endif
 
+#if RV32_HAS(JIT) || RV32_HAS(SYSTEM)
+/* Settle a trap that stopped generated code or block translation, and return
+ * whether there was one. A page fault runs the guest's handler inside the MMU
+ * helper. If that handler resumed somewhere else (need_handle_signal),
+ * execution stopped at the access and rv->PC already names the new target. A
+ * trap still pending, from that handler faulting in turn or otherwise, is taken
+ * here.
+ */
+static inline bool settle_trap(riscv_t *rv UNUSED)
+{
+#if RV32_HAS(SYSTEM)
+    bool settled = need_handle_signal;
+    need_handle_signal = false;
+    if (rv->is_trapped) {
+        trap_handler(rv);
+        return true;
+    }
+    return settled;
+#else
+    return false;
+#endif
+}
+#endif
+
 void rv_step(void *arg)
 {
     assert(arg);
@@ -3301,11 +3337,10 @@ void rv_step(void *arg)
         /* by now, a block should be available */
         if (unlikely(!block)) {
 #if RV32_HAS(SYSTEM)
-            /* Check if a trap is pending (page fault during translation).
-             * If so, invoke trap handler and continue instead of halting.
+            /* A page fault while fetching the first instruction: settle it and
+             * continue instead of halting.
              */
-            if (rv->is_trapped) {
-                trap_handler(rv);
+            if (settle_trap(rv)) {
                 prev = NULL;
                 continue;
             }
@@ -3376,6 +3411,7 @@ void rv_step(void *arg)
                 continue;
             }
             ((exec_t2c_func_t) block->func)(rv);
+            settle_trap(rv);
             prev = NULL;
             continue;
         } /* check if invoking times of t1 generated code exceed threshold */
@@ -3420,14 +3456,7 @@ void rv_step(void *arg)
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
             rv->csr_cycle += block->cycle_cost;
-#if RV32_HAS(SYSTEM)
-            /* Handle trap if one occurred during JIT block execution */
-            if (rv->is_trapped) {
-                trap_handler(rv);
-                prev = NULL;
-                continue;
-            }
-#endif
+            settle_trap(rv);
             prev = NULL;
             continue;
         } /* check if the execution path is potential hotspot */
@@ -3444,14 +3473,7 @@ void rv_step(void *arg)
                 ((exec_block_func_t) state->buf)(
                     rv, (uintptr_t) (state->buf + block->offset));
                 rv->csr_cycle += block->cycle_cost;
-#if RV32_HAS(SYSTEM)
-                /* Handle trap if one occurred during JIT block execution */
-                if (rv->is_trapped) {
-                    trap_handler(rv);
-                    prev = NULL;
-                    continue;
-                }
-#endif
+                settle_trap(rv);
                 prev = NULL;
                 continue;
             }

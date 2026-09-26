@@ -94,12 +94,13 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
     return NULL;
 }
 
-/* T2C_OP generates code for each RISC-V instruction with batched cycle updates.
+/* T2C_OP generates code for each RISC-V instruction.
  *
- * Cycle optimization: Instead of updating rv->csr_cycle per instruction, we
- * increment a local counter (alloca) and store to csr_cycle only at block
- * exits. This reduces memory traffic significantly - LLVM's mem2reg pass
- * promotes the alloca to a register, making per-instruction increments free.
+ * Cycle counting: instead of updating rv->csr_cycle per instruction, each block
+ * entry adds the block's cycle cost to a local counter (alloca), which is
+ * stored to csr_cycle only at region exits. LLVM's mem2reg pass promotes the
+ * alloca to a register. The cost counts the instructions a fused one replaced,
+ * as the interpreter does.
  *
  * The insn_counter parameter is an alloca created at function entry in
  * t2c_compile(). Before any LLVMBuildRetVoid(), T2C_STORE_TIMER must be called
@@ -114,13 +115,6 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
         uint64_t mem_base UNUSED, block_t *block UNUSED, rv_insn_t *ir UNUSED, \
         LLVMValueRef insn_counter UNUSED)                                      \
     {                                                                          \
-        /* Increment local instruction counter (promoted to register by LLVM)  \
-         */                                                                    \
-        LLVMValueRef cnt =                                                     \
-            LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");       \
-        cnt = LLVMBuildAdd(*builder, cnt,                                      \
-                           LLVMConstInt(LLVMInt64Type(), 1, false), "");       \
-        LLVMBuildStore(*builder, cnt, insn_counter);                           \
         code;                                                                  \
     }
 
@@ -497,6 +491,12 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
     set_add(set, ir->pc);
     t2c_block_map_insert(map, entry, ir->pc);
     LLVMBuilderRef tk = NULL, utk = NULL;
+
+    LLVMValueRef cnt =
+        LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");
+    LLVMBuildStore(*builder,
+                   T2C_LLVM_GEN_ALU64_IMM(Add, cnt, block->cycle_cost),
+                   insn_counter);
 
     /* Get mem_base once at the start, not on every instruction */
     vm_attr_t *priv = PRIV(rv);

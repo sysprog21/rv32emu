@@ -1,0 +1,84 @@
+name: Benchmark comment
+
+# Posts the pull request comparison from benchmark.yml. That workflow runs the
+# pull request's code with a read-only token; this one runs master's code with
+# permission to comment, and treats the uploaded tables purely as text.
+on:
+  workflow_run:
+    workflows: [Benchmark]
+    types: [completed]
+
+permissions: {}
+
+# Two quick pushes finish in either order; posting one at a time keeps a
+# single comment instead of racing to create two.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bench-compare-*
+          merge-multiple: true
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post comparison
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+            shopt -s nullglob
+            present=(compare-*.md)
+            # No table means the benchmark was skipped for lack of relevant
+            # changes, or failed before measuring; either way, say nothing.
+            [ "${#present[@]}" -gt 0 ] || exit 0
+
+            # Look the pull request up from the event rather than from the
+            # artifact, which the pull request's own code wrote. The event's
+            # pull_requests list is empty for forks, hence the search.
+            # Closed ones are included, so a pull request merged while the
+            # benchmark ran still gets its result.
+            PR=$(gh api -X GET "repos/${REPO}/pulls" -f state=all \
+                -f head="${HEAD_OWNER}:${HEAD_BRANCH}" \
+                --jq ".[] | select(.head.sha == \"${HEAD_SHA}\") | .number" | head -n 1)
+            [ -n "${PR}" ] || { echo "No pull request for ${HEAD_SHA}"; exit 0; }
+
+            MARKER='<!-- rv32emu-benchmark-comparison -->'
+            {
+              echo "${MARKER}"
+              echo "## Benchmark comparison against the base commit"
+              echo
+              echo "Head: ${HEAD_SHA}. Workflow result: ${CONCLUSION} ([details](${RUN_URL}))."
+              echo "Measured on one shared runner; treat verdicts as advisory."
+              for f in "${present[@]}"; do
+                echo
+                # Defuse @mentions and cap the size of content we did not write:
+                # by lines, so a table row is rarely cut, and by bytes, so one
+                # long line cannot overflow the comment.
+                head -n 64 "$f" | head -c 16384 | sed 's/@/@\&#8203;/g'
+              done
+            } > body.md
+
+            # Keep a single comment per pull request, updated on each push.
+            COMMENT=$(gh api --paginate "repos/${REPO}/issues/${PR}/comments" \
+                --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"${MARKER}\"))) | .id" \
+                | head -n 1)
+            if [ -n "${COMMENT}" ]; then
+              gh api -X PATCH "repos/${REPO}/issues/comments/${COMMENT}" -F body=@body.md > /dev/null
+            else
+              gh api -X POST "repos/${REPO}/issues/${PR}/comments" -F body=@body.md > /dev/null
+            fi

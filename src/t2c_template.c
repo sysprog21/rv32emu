@@ -57,6 +57,20 @@ T2C_OP(jal, {
     }
 })
 
+/* Jump to the compiled region fn with a guaranteed tail call: the target runs
+ * in this frame, so a chain of indirect jumps neither grows the host stack nor
+ * pairs host calls with returns.
+ */
+static void t2c_gen_tail_jump(LLVMBuilderRef builder,
+                              LLVMValueRef fn,
+                              LLVMValueRef rv_param)
+{
+    LLVMSetTailCallKind(
+        LLVMBuildCall2(builder, t2c_jit_cache_func_type, fn, &rv_param, 1, ""),
+        LLVMTailCallKindMustTail);
+    LLVMBuildRetVoid(builder);
+}
+
 FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
                                        LLVMValueRef start,
                                        LLVMValueRef addr,
@@ -170,10 +184,7 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
      * The instruction cache was coherent at that time.
      */
     T2C_STORE_TIMER(ic_hit_builder, start, insn_counter);
-    LLVMValueRef ic_call_args[1] = {rv_param};
-    LLVMBuildCall2(ic_hit_builder, t2c_jit_cache_func_type, ic_entry,
-                   ic_call_args, 1, "");
-    LLVMBuildRetVoid(ic_hit_builder);
+    t2c_gen_tail_jump(ic_hit_builder, ic_entry, rv_param);
 
     /* === INLINE CACHE MISS PATH (slow - use seqlock jit_cache) === */
 
@@ -291,10 +302,7 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
 #endif
 
     T2C_STORE_TIMER(call_builder, start, insn_counter);
-    LLVMValueRef t2c_args[1] = {rv_param};
-    LLVMBuildCall2(call_builder, t2c_jit_cache_func_type, entry, t2c_args, 1,
-                   "");
-    LLVMBuildRetVoid(call_builder);
+    t2c_gen_tail_jump(call_builder, entry, rv_param);
 
     /* Fallback: seq odd, key mismatch, or seq changed - return to interp */
     LLVMBuildStore(fallback_builder, addr,

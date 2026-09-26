@@ -207,8 +207,11 @@ void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
 void jit_cache_clear(struct jit_cache *cache);
 void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp);
 
-/* Dispose LLVM execution engine when a T2C-compiled block is freed */
-void t2c_dispose_engine(void *engine);
+/* Hand an evicted block's LLVM engine to the T2C thread, which disposes it in
+ * t2c_reap_engines().
+ */
+void t2c_retire_engine(riscv_t *rv, void *engine);
+void t2c_reap_engines(riscv_t *rv);
 
 /* Wrapper for cache cleanup - disposes LLVM engine from a block */
 void t2c_dispose_block_engine(void *block);

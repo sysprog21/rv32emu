@@ -450,7 +450,9 @@ struct riscv_internal {
      */
     struct {
         uint8_t is_mmio; /* whether is MMIO or not (0=RAM, 1=MMIO/trap) */
-        uint32_t type;   /* instruction type for MMIO handler */
+        /* the access did not complete: stop the block (see settle_trap) */
+        uint8_t abort;
+        uint32_t type; /* instruction type for MMIO handler */
         uint32_t vaddr;
         uint32_t paddr;
         uint32_t pc; /* PC of the instruction (for trap return address) */

@@ -292,7 +292,7 @@
                                                                                \
                 /* Check if trap occurred - skip load if trapped */            \
                 emit_load(state, S8, parameter_reg[0], temp_reg,               \
-                          offsetof(riscv_t, is_trapped));                      \
+                          offsetof(riscv_t, jit_mmu.abort));                   \
                 emit_cmp_imm32(state, temp_reg, 0);                            \
                 uint32_t jump_trap = state->offset;                            \
                 emit_jcc_offset(state, JCC_JNE);                               \
@@ -377,7 +377,7 @@
                                                                                \
                 /* Check if trap occurred - skip store if trapped */           \
                 emit_load(state, S8, parameter_reg[0], temp_reg,               \
-                          offsetof(riscv_t, is_trapped));                      \
+                          offsetof(riscv_t, jit_mmu.abort));                   \
                 emit_cmp_imm32(state, temp_reg, 0);                            \
                 uint32_t jump_trap = state->offset;                            \
                 emit_jcc_offset(state, JCC_JNE);                               \

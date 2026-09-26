@@ -15,11 +15,18 @@
  * 3. Store Page Fault (scause=15): Triggered by writing to VA 0x2000.
  *    The fault handler allocates a writable page and sets the Dirty bit.
  *
+ * 4. Redirected Page Faults: loads from and a call to VA 0x3000, which the
+ *    handler never maps; it resumes after the load, or at the return address,
+ *    as a kernel does for an exception-table fixup or a signal. The loads
+ *    repeat in a hot loop first, as code a JIT tier would compile.
+ *
  * Memory Layout (defined in linker.ld):
  *   0x0000 - User code (.text.main) - this file
  *   0x1000 - User read-only data (.mystring) - pf_str
  *   0x2000 - User read-write data (.data.main, .bss.main)
  */
+
+#include <stdint.h>
 
 /* Place code/data in user VA sections (mapped by vm_boot's L2 page table) */
 #define SECTION_TEXT_MAIN __attribute__((section(".text.main")))
@@ -63,6 +70,9 @@ __attribute__((section(".mystring"))) const char pf_str[] = "rv32emu";
 
 extern void _exit(int status);
 
+static uint32_t load_words(const volatile uint32_t *p, uint32_t n);
+
+/* main() must come first in .text.main: user_entry jumps to VA 0x0. */
 int SECTION_TEXT_MAIN main()
 {
     /* TEST 1: Instruction Fetch Page Fault
@@ -133,5 +143,51 @@ int SECTION_TEXT_MAIN main()
     }
     TEST_LOGGER("Store page fault test passed!\n");
 
+    /* TEST 4: Redirected Page Faults
+     *
+     * Call load_words() often enough on a mapped page for its code to become
+     * hot, then on VA 0x3000. Every load from there must fault once and be
+     * skipped, and nothing else may be skipped with it. A call into VA 0x3000
+     * must fault once on its first fetch and return.
+     */
+    for (int i = 0; i < 200000; i++) {
+        if (load_words((const volatile uint32_t *) 0x2000, 16)) {
+            TEST_LOGGER("[Redirected page fault test] mapped load skipped\n")
+            _exit(FAIL);
+        }
+    }
+    if (load_words((const volatile uint32_t *) 0x3000, 64) != 64) {
+        TEST_LOGGER("[Redirected page fault test] wrong number of skips\n")
+        _exit(FAIL);
+    }
+    register uint32_t skipped asm("t6") = 0;
+    asm volatile("jalr ra, 0(%1)"
+                 : "+r"(skipped)
+                 : "r"(0x3000)
+                 : "ra", "memory");
+    if (skipped != 1) {
+        TEST_LOGGER("[Redirected page fault test] call not returned\n")
+        _exit(FAIL);
+    }
+    TEST_LOGGER("Redirected page fault test passed!\n");
+
     _exit(SUCCESS);
+}
+
+/* Load n words from p, alternating between its first two words, and return how
+ * many loads the kernel skipped: its handler counts them in t6.
+ */
+__attribute__((noinline)) static uint32_t SECTION_TEXT_MAIN
+load_words(const volatile uint32_t *p, uint32_t n)
+{
+    register uint32_t skipped asm("t6") = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t v;
+        asm volatile("lw %0, 0(%2)"
+                     : "=r"(v), "+r"(skipped)
+                     : "r"(p + (i & 1))
+                     : "memory");
+        (void) v;
+    }
+    return skipped;
 }

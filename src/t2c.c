@@ -232,6 +232,26 @@ UNUSED FORCE_INLINE LLVMValueRef t2c_gen_mem_loc(LLVMValueRef start,
     return addr;
 }
 
+/* Branch on cond to the rare block, else to the common one, and keep the rare
+ * path out of the way of the common one.
+ */
+static void t2c_gen_unlikely_br(LLVMBuilderRef builder,
+                                LLVMValueRef cond,
+                                LLVMBasicBlockRef rare,
+                                LLVMBasicBlockRef common)
+{
+    LLVMValueRef br = LLVMBuildCondBr(builder, cond, rare, common);
+    LLVMContextRef ctx = LLVMGetGlobalContext();
+    LLVMMetadataRef weights[] = {
+        LLVMMDStringInContext2(ctx, "branch_weights", 14),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1, false)),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1 << 20, false)),
+    };
+    LLVMSetMetadata(
+        br, LLVMGetMDKindIDInContext(ctx, "prof", 4),
+        LLVMMetadataAsValue(ctx, LLVMMDNodeInContext2(ctx, weights, 3)));
+}
+
 /* Tier-2 counterpart of emit_misalign_guard() in jit.c: when a halfword or word
  * access at vaddr is misaligned, and misaligned accesses are not allowed, store
  * the faulting pc, raise the exception through jit_misaligned_trap(), and
@@ -258,17 +278,7 @@ static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
                       LLVMConstInt(LLVMInt32Type(), 0, false), "misaligned");
     LLVMBasicBlockRef trap = LLVMAppendBasicBlock(start, "misaligned");
     LLVMBasicBlockRef aligned = LLVMAppendBasicBlock(start, "aligned");
-    LLVMValueRef br = LLVMBuildCondBr(*builder, misaligned, trap, aligned);
-    /* Keep the trap path out of the way of the aligned one. */
-    LLVMContextRef ctx = LLVMGetGlobalContext();
-    LLVMMetadataRef weights[] = {
-        LLVMMDStringInContext2(ctx, "branch_weights", 14),
-        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1, false)),
-        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1 << 20, false)),
-    };
-    LLVMSetMetadata(
-        br, LLVMGetMDKindIDInContext(ctx, "prof", 4),
-        LLVMMetadataAsValue(ctx, LLVMMDNodeInContext2(ctx, weights, 3)));
+    t2c_gen_unlikely_br(*builder, misaligned, trap, aligned);
 
     LLVMPositionBuilderAtEnd(*builder, trap);
     LLVMBuildStore(*builder, LLVMConstInt(LLVMInt32Type(), pc, false),
@@ -295,8 +305,10 @@ static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
     LLVMValueRef assume = LLVMGetIntrinsicDeclaration(
         LLVMGetGlobalParent(start), assume_id, NULL, 0);
     LLVMValueRef aligned_cond = LLVMBuildNot(*builder, misaligned, "");
-    LLVMBuildCall2(*builder, LLVMIntrinsicGetType(ctx, assume_id, NULL, 0),
-                   assume, &aligned_cond, 1, "");
+    LLVMBuildCall2(
+        *builder,
+        LLVMIntrinsicGetType(LLVMGetGlobalContext(), assume_id, NULL, 0),
+        assume, &aligned_cond, 1, "");
 }
 
 /* The address rs1 + imm that a load or store accesses. */
@@ -310,34 +322,36 @@ static LLVMValueRef t2c_gen_vaddr(LLVMValueRef start,
                         LLVMConstInt(LLVMInt32Type(), ir->imm, true), "vaddr");
 }
 
-/* Load and call a function pointer from rv->io struct.
+/* Load the function pointer at io_field in rv->io, and call it with rv and the
+ * n values in args, returning its result.
  *
- * The byte_offset parameter is the offset from the start of riscv_t to the
- * target function pointer. Callers should use:
- *   - offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ecall) for ecall
- *   - offsetof(riscv_t, io) + offsetof(riscv_io_t, on_ebreak) for ebreak
- *
- * This approach is correct regardless of RV32_HAS(SYSTEM) configuration,
- * which adds extra MMU function pointers to riscv_io_t.
- *
- * Uses byte-based pointer arithmetic from the real riscv_t base rather than
- * the synthetic prefix type used for the T2C function parameter.
+ * io_field is an offset in riscv_io_t, which is correct whether or not SYSTEM
+ * adds the MMU function pointers. The pointer is loaded at run time, from the
+ * real riscv_t base rather than the synthetic prefix type used for the T2C
+ * function parameter.
  */
-FORCE_INLINE void t2c_gen_call_io_func(LLVMValueRef start,
-                                       LLVMBuilderRef *builder,
-                                       LLVMTypeRef *param_types,
-                                       size_t byte_offset)
+static LLVMValueRef t2c_gen_call_io_func(LLVMValueRef start,
+                                         LLVMBuilderRef *builder,
+                                         size_t io_field,
+                                         LLVMTypeRef ret_type,
+                                         LLVMValueRef *args,
+                                         unsigned n)
 {
-    LLVMValueRef rv_ptr = LLVMGetParam(start, 0);
-    LLVMValueRef func_ptr_ptr = t2c_gen_rv_field_ptr(
-        start, builder, byte_offset, LLVMPointerType(LLVMVoidType(), 0));
-
-    /* Load function pointer and call */
-    LLVMValueRef io_func = LLVMBuildLoad2(
-        *builder, LLVMPointerType(LLVMVoidType(), 0), func_ptr_ptr, "io_func");
-    LLVMBuildCall2(*builder,
-                   LLVMFunctionType(LLVMVoidType(), param_types, 1, 0), io_func,
-                   &rv_ptr, 1, "");
+    LLVMValueRef params[3] = {LLVMGetParam(start, 0)};
+    LLVMTypeRef types[3] = {LLVMPointerType(LLVMVoidType(), 0)};
+    assert(n < 3);
+    for (unsigned i = 0; i < n; i++) {
+        params[i + 1] = args[i];
+        types[i + 1] = LLVMTypeOf(args[i]);
+    }
+    LLVMTypeRef fn_type = LLVMFunctionType(ret_type, types, n + 1, false);
+    LLVMTypeRef fn_ptr_type = LLVMPointerType(fn_type, 0);
+    LLVMValueRef fn = LLVMBuildLoad2(
+        *builder, fn_ptr_type,
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, io) + io_field,
+                             fn_ptr_type),
+        "");
+    return LLVMBuildCall2(*builder, fn_type, fn, params, n + 1, "");
 }
 
 static LLVMTypeRef t2c_jit_cache_func_type;

@@ -215,5 +215,6 @@ and calls `jit_misaligned_trap()`. When the offset is itself aligned, the base
 register is tested directly. A passed check also proves the base aligned, so
 later accesses in the same block through the unmodified base register need no
 check; any write to that register discards the fact. Tier-2 emits the
-equivalent branch in LLVM IR. `tests/jit-misalign.S` covers the plain,
+equivalent branch in LLVM IR, weighted as unlikely and followed by an
+`llvm.assume` of the alignment, which lets LLVM drop later checks it implies. `tests/jit-misalign.S` covers the plain,
 compressed, and fused forms with and without a guest trap vector.

@@ -255,7 +255,17 @@ static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
                       LLVMConstInt(LLVMInt32Type(), 0, false), "misaligned");
     LLVMBasicBlockRef trap = LLVMAppendBasicBlock(start, "misaligned");
     LLVMBasicBlockRef aligned = LLVMAppendBasicBlock(start, "aligned");
-    LLVMBuildCondBr(*builder, misaligned, trap, aligned);
+    LLVMValueRef br = LLVMBuildCondBr(*builder, misaligned, trap, aligned);
+    /* Keep the trap path out of the way of the aligned one. */
+    LLVMContextRef ctx = LLVMGetGlobalContext();
+    LLVMMetadataRef weights[] = {
+        LLVMMDStringInContext2(ctx, "branch_weights", 14),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1, false)),
+        LLVMValueAsMetadata(LLVMConstInt(LLVMInt32Type(), 1 << 20, false)),
+    };
+    LLVMSetMetadata(
+        br, LLVMGetMDKindIDInContext(ctx, "prof", 4),
+        LLVMMetadataAsValue(ctx, LLVMMDNodeInContext2(ctx, weights, 3)));
 
     LLVMPositionBuilderAtEnd(*builder, trap);
     LLVMBuildStore(*builder, LLVMConstInt(LLVMInt32Type(), pc, false),
@@ -274,6 +284,16 @@ static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
     LLVMBuildRetVoid(*builder);
 
     LLVMPositionBuilderAtEnd(*builder, aligned);
+
+    /* State the proven alignment, so that later checks of the same address bits
+     * fold away.
+     */
+    unsigned assume_id = LLVMLookupIntrinsicID("llvm.assume", 11);
+    LLVMValueRef assume = LLVMGetIntrinsicDeclaration(
+        LLVMGetGlobalParent(start), assume_id, NULL, 0);
+    LLVMValueRef aligned_cond = LLVMBuildNot(*builder, misaligned, "");
+    LLVMBuildCall2(*builder, LLVMIntrinsicGetType(ctx, assume_id, NULL, 0),
+                   assume, &aligned_cond, 1, "");
 }
 
 /* The address rs1 + imm that a load or store accesses. */
@@ -627,18 +647,29 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     }
     /* Use PIC relocation mode for JIT code - helps with indirect calls.
      * Code model selection:
-     * - Apple Silicon (ARM64 macOS): Use Small model to avoid MCJIT bugs with
-     *   movz/movk sequences that Large model generates for 64-bit constants.
-     *   ARM64's limited addressing modes make Large model problematic.
+     * - Arm64: Use Small model. The Large model materializes every 64-bit
+     *   constant with a movz/movk sequence, which MCJIT mishandles on Apple
+     *   Silicon and which costs instructions on every region exit elsewhere.
      * - Other platforms: Use Large model per LLVM MCJIT recommendations.
      */
-#if defined(__aarch64__) && defined(__APPLE__)
+#if defined(__aarch64__)
     LLVMCodeModel code_model = LLVMCodeModelSmall;
 #else
     LLVMCodeModel code_model = LLVMCodeModelLarge;
 #endif
     char *cpu_name = LLVMGetHostCPUName();
     char *cpu_features = LLVMGetHostCPUFeatures();
+    /* MCJIT builds its own target machine without a CPU, so name the host on
+     * the function itself; the attributes steer both the passes and codegen.
+     */
+    LLVMAddAttributeAtIndex(
+        start, LLVMAttributeFunctionIndex,
+        LLVMCreateStringAttribute(LLVMGetGlobalContext(), "target-cpu", 10,
+                                  cpu_name, strlen(cpu_name)));
+    LLVMAddAttributeAtIndex(
+        start, LLVMAttributeFunctionIndex,
+        LLVMCreateStringAttribute(LLVMGetGlobalContext(), "target-features", 15,
+                                  cpu_features, strlen(cpu_features)));
     LLVMTargetMachineRef tm =
         LLVMCreateTargetMachine(target, triple, cpu_name, cpu_features,
                                 LLVMCodeGenLevelNone, LLVMRelocPIC, code_model);

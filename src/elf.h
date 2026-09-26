@@ -143,6 +143,9 @@ bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end);
 /* Load the ELF file into a memory abstraction */
 bool elf_load(elf_t *e, memory_t *mem);
 
+/* Check whether executable segments may write mtvec or stvec */
+bool elf_may_set_trap_vector(elf_t *e);
+
 /* get the ELF header */
 struct Elf32_Ehdr *get_elf_header(elf_t *e);
 

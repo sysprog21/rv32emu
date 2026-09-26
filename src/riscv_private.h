@@ -541,6 +541,12 @@ struct riscv_internal {
 #endif
     void *jit_state;
     void *jit_cache;
+
+    /* The loaded program cannot install a trap vector, so a misaligned access
+     * ends in the emulator's own handler, which performs it just as the host
+     * does. JIT code then leaves alignment to the host.
+     */
+    bool no_trap_vector;
 #if RV32_HAS(T2C)
     void *inline_cache; /* Inline cache for fast indirect jump resolution */
 #endif

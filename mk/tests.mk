@@ -167,7 +167,13 @@ endif
 endif
 # check-jit-misalign installs a machine-mode trap vector, so it needs Zicsr,
 # and a user-mode emulator: system builds run the program in supervisor mode.
+# Its -notvec variant installs none, which lets JIT code skip the alignment
+# checks.
 ifneq ($(CONFIG_SYSTEM),y)
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-notvec
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-notvec-rvc
+endif
 ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-misalign
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
@@ -197,14 +203,15 @@ endif
 
 # Build a freestanding guest program from tests/$(1).S for ISA $(2) and compare
 # its output, so these report like every other check instead of staying silent.
-# An optional suffix $(3) names a variant built for another ISA.
+# An optional suffix $(3) names a variant built for another ISA, or with the
+# extra assembler flags in $(4).
 guest-asm-build = $(CROSS_COMPILE)gcc -march=$(2) -mabi=ilp32 -nostdlib \
-	-static -Wl,-e,_start -o $(OUT)/$(1)$(3) tests/$(1).S
+	-static -Wl,-e,_start $(4) -o $(OUT)/$(1)$(3) tests/$(1).S
 
 define guest-asm-check-target
 .PHONY: check-$(1)$(3)
 check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
-	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3))
+	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3),$(4))
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
@@ -261,6 +268,8 @@ $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr))
 # misaligned bases in s0 and s1 turn the accesses through them into C.LW/C.SW.
 $(eval $(call guest-asm-check-target,jit-interp-diff,rv32imc,-rvc))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32ic_zicsr,-rvc))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32i,-notvec,-DNO_TRAP_VECTOR))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32ic,-notvec-rvc,-DNO_TRAP_VECTOR))
 
 # check-trace-match builds and runs a host program, so it is independent of
 # whether the emulator can load a user ELF. Everything else here is a guest

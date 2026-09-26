@@ -1597,6 +1597,10 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     const struct Elf32_Sym *exit_sym;
     if ((exit_sym = elf_get_symbol(elf, "exit")))
         attr->exit_addr = exit_sym->st_value;
+
+#if RV32_HAS(JIT)
+    rv->no_trap_vector = !elf_may_set_trap_vector(elf);
+#endif
 #endif
 
     /* Load the program and set the entry pc. Neither is an assert: this is

@@ -3569,8 +3569,9 @@ static void emit_misalign_stub(struct jit_state *state,
  * X[rs1] + offset. A misaligned access branches to a stub, emitted after the
  * block by emit_misalign_stubs(), that raises the exception. Nothing is emitted
  * for byte accesses, for an offset that keeps a base already proven aligned in
- * this block aligned, or when misaligned accesses are allowed (-m), in which
- * case the host performs them directly.
+ * this block aligned, or when misaligned accesses are allowed (-m) or the
+ * program has no trap vector to observe them, in which case the host performs
+ * them directly.
  */
 static void emit_misalign_guard(struct jit_state *state,
                                 riscv_t *rv,
@@ -3581,7 +3582,7 @@ static void emit_misalign_guard(struct jit_state *state,
                                 uint32_t pc)
 {
     const uint32_t mask = size == S32 ? 3 : size == S16 ? 1 : 0;
-    if (!mask || PRIV(rv)->allow_misalign)
+    if (!mask || PRIV(rv)->allow_misalign || rv->no_trap_vector)
         return;
     const bool offset_aligned = !((uint32_t) offset & mask);
     if (offset_aligned && reg_align[rs1] > mask)

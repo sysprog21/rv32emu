@@ -232,5 +232,14 @@ register is tested directly. A passed check also proves the base aligned, so
 later accesses in the same block through the unmodified base register need no
 check; any write to that register discards the fact. Tier-2 emits the
 equivalent branch in LLVM IR, weighted as unlikely and followed by an
-`llvm.assume` of the alignment, which lets LLVM drop later checks it implies. `tests/jit-misalign.S` covers the plain,
-compressed, and fused forms with and without a guest trap vector.
+`llvm.assume` of the alignment, which lets LLVM drop later checks it implies.
+
+A user-mode program that never installs a trap vector cannot tell the default
+handler's emulation from the host performing the access, so neither tier emits
+the checks for it. When the ELF is loaded, its executable segments are scanned
+for any CSR instruction that may write `mtvec` or `stvec`; finding none, the
+JIT treats the program as if it ran with `-m`. On Dhrystone, the checks
+otherwise add about 18% to the host instructions of tier-1 code.
+`tests/jit-misalign.S` covers the plain, compressed, and fused forms with and
+without a guest trap vector, and its `-notvec` build without any CSR
+instruction.

@@ -262,7 +262,7 @@ static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
                                    uint32_t pc,
                                    LLVMValueRef insn_counter)
 {
-    if (PRIV(rv)->allow_misalign)
+    if (PRIV(rv)->allow_misalign || rv->no_trap_vector)
         return;
 
     LLVMValueRef low = LLVMBuildAnd(

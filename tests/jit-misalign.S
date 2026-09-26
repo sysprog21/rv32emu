@@ -15,6 +15,10 @@
  * post-increment, LUI with LW) and, when assembled for rv32ic, compressed
  * forms, which is why the misaligned bases live in s0 and s1. Phase 2 also
  * checks that a base proven aligned stops counting as aligned once written.
+ *
+ * Built with NO_TRAP_VECTOR, the program is phase 1 alone and has no CSR
+ * instruction, so the emulator knows no trap vector can be installed and JIT
+ * code leaves the accesses to the host, which must produce the same values.
  */
     .text
     .global _start
@@ -85,6 +89,7 @@ _start:
     addi s2, s2, -1
     bnez s2, 1b
 
+#ifndef NO_TRAP_VECTOR
     /* Phase 2: a trap vector is installed, so each access must reach it. */
     la   t0, handler
     csrw mtvec, t0
@@ -130,6 +135,7 @@ _start:
     la   t3, scratch
     lw   t0, 0(t3)
     bnez t0, fail               /* a trapped store must not write memory */
+#endif
 
     li   a0, 1
     la   a1, passed
@@ -144,6 +150,7 @@ exit:
     li   a7, 93
     ecall
 
+#ifndef NO_TRAP_VECTOR
     /* Count the exception, record its cause, and skip the instruction. */
     .balign 4
 handler:
@@ -162,6 +169,7 @@ handler:
 3:
     csrw mepc, t5
     mret
+#endif
 
     .data
     .balign 4

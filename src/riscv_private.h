@@ -534,6 +534,10 @@ struct riscv_internal {
     pthread_mutex_t wait_queue_lock, cache_lock;
     pthread_cond_t wait_queue_cond;
     bool quit; /**< termination flag, protected by wait_queue_lock */
+    /* Engines of evicted blocks, for the T2C thread to dispose; protected by
+     * cache_lock. See t2c_retire_engine().
+     */
+    struct t2c_retired_engine *retired_engines;
 #endif
     void *jit_state;
     void *jit_cache;

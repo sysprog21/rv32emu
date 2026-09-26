@@ -253,6 +253,9 @@ static void *t2c_runloop(void *arg)
         list_del_init(&entry->list);
         pthread_mutex_unlock(&rv->wait_queue_lock);
 
+        /* Only this thread runs LLVM, so evicted engines are disposed here */
+        t2c_reap_engines(rv);
+
         /* Perform compilation with minimal lock contention.
          *
          * Lock strategy: Hold cache_lock only when accessing shared data:
@@ -336,6 +339,7 @@ static void rv_destroy_t2c(riscv_t *rv)
     pthread_mutex_unlock(&rv->wait_queue_lock);
 
     pthread_join(t2c_thread, NULL);
+    t2c_reap_engines(rv);
 
     /* Clean up any remaining entries in wait queue */
     queue_entry_t *entry, *safe;

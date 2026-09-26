@@ -1148,14 +1148,47 @@ void inline_cache_clear_key(struct inline_cache *cache, uint64_t key)
     }
 }
 
-/* Dispose LLVM execution engine when a T2C-compiled block is freed.
- * The engine owns the memory where block->func points, so it must be
- * disposed before the block is freed to prevent dangling pointers.
+/* The engine of an evicted block. The emulator thread evicts blocks, but must
+ * not dispose their engines itself: the T2C thread optimizes and emits code
+ * without holding cache_lock, and LLVM state is not safe to touch from two
+ * threads at once.
  */
-void t2c_dispose_engine(void *engine)
+struct t2c_retired_engine {
+    struct t2c_retired_engine *next;
+    void *engine;
+};
+
+/* Hand an evicted block's engine to the T2C thread. The caller holds cache_lock
+ * and has already unpublished the block's code.
+ */
+void t2c_retire_engine(riscv_t *rv, void *engine)
 {
-    if (engine)
-        LLVMDisposeExecutionEngine((LLVMExecutionEngineRef) engine);
+    if (!engine)
+        return;
+    struct t2c_retired_engine *node = malloc(sizeof(*node));
+    if (unlikely(!node))
+        return; /* leaking the engine is safe; disposing it here is not */
+    node->engine = engine;
+    node->next = rv->retired_engines;
+    rv->retired_engines = node;
+}
+
+/* Dispose the retired engines. Called by the T2C thread between compilations
+ * and at shutdown, without cache_lock held.
+ */
+void t2c_reap_engines(riscv_t *rv)
+{
+    pthread_mutex_lock(&rv->cache_lock);
+    struct t2c_retired_engine *node = rv->retired_engines;
+    rv->retired_engines = NULL;
+    pthread_mutex_unlock(&rv->cache_lock);
+
+    while (node) {
+        struct t2c_retired_engine *next = node->next;
+        LLVMDisposeExecutionEngine((LLVMExecutionEngineRef) node->engine);
+        free(node);
+        node = next;
+    }
 }
 
 /* Wrapper for clear_cache_hot callback - disposes block's LLVM engine.

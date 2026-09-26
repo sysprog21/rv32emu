@@ -3138,10 +3138,11 @@ static block_t *block_find_or_translate(riscv_t *rv
         jit_cache_update(rv->jit_cache, key, NULL);
     }
     inline_cache_clear_key(rv->inline_cache, key);
-    /* Dispose LLVM execution engine before freeing the block.
-     * The engine owns the memory where block->func points.
+
+    /* The engine owns the memory where block->func points. Nothing can reach
+     * that code any more, so let the T2C thread dispose it.
      */
-    t2c_dispose_engine(replaced_blk->llvm_engine);
+    t2c_retire_engine(rv, replaced_blk->llvm_engine);
 #endif
 
     list_del_init(&replaced_blk->list);

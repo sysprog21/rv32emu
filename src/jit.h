@@ -65,19 +65,22 @@ struct host_reg {
                        block */
 };
 
+/* Flags passed from generated code to jit_misaligned_trap(). */
+#define JIT_MISALIGN_STORE 1U
+#define JIT_MISALIGN_COMPRESSED 2U
+
+/* Raise the exception the interpreter raises for a misaligned load or store.
+ * Both JIT tiers call this with rv->PC set to the faulting instruction and
+ * every guest register in rv->X, then leave the block: the trap handler has
+ * already set rv->PC to the trap vector, or, in user mode without one, emulated
+ * the access and advanced past it.
+ */
+void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags);
+
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);
 bool jit_translate(riscv_t *rv, block_t *block);
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
-
-/* JIT misaligned memory access handler.
- * Performs misaligned load/store operations using byte-level memory accesses.
- */
-void jit_misaligned_handler(riscv_t *rv,
-                            uint32_t addr,
-                            uint32_t vreg_idx,
-                            uint32_t type,
-                            bool is_store);
 
 #if RV32_HAS(T2C)
 void t2c_compile(riscv_t *, block_t *, pthread_mutex_t *);

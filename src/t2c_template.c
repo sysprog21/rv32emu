@@ -6,6 +6,14 @@
  * generated machine code.
  */
 
+/* Raise the misaligned-access exception for insn's rs1 + imm, as the
+ * interpreter does; see t2c_gen_misalign_guard().
+ */
+#define T2C_MISALIGN_GUARD(insn, size, flags, pc)                             \
+    t2c_gen_misalign_guard(builder, start, rv,                                \
+                           t2c_gen_vaddr(start, builder, (rv_insn_t *) insn), \
+                           size, flags, pc, insn_counter)
+
 T2C_OP(nop, { return; })
 
 T2C_OP(lui, {
@@ -869,6 +877,7 @@ T2C_OP(lb, {
 })
 
 T2C_OP(lh, {
+    T2C_MISALIGN_GUARD(ir, 2, 0, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lh)(builder, start, ir, rv); },
         {
@@ -884,6 +893,7 @@ T2C_OP(lh, {
 
 
 T2C_OP(lw, {
+    T2C_MISALIGN_GUARD(ir, 4, 0, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lw)(builder, start, ir, rv); },
         {
@@ -910,6 +920,7 @@ T2C_OP(lbu, {
 })
 
 T2C_OP(lhu, {
+    T2C_MISALIGN_GUARD(ir, 2, 0, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lhu)(builder, start, ir, rv); },
         {
@@ -936,6 +947,7 @@ T2C_OP(sb, {
 })
 
 T2C_OP(sh, {
+    T2C_MISALIGN_GUARD(ir, 2, JIT_MISALIGN_STORE, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(sh)(builder, start, ir, rv); },
         {
@@ -948,6 +960,7 @@ T2C_OP(sh, {
 })
 
 T2C_OP(sw, {
+    T2C_MISALIGN_GUARD(ir, 4, JIT_MISALIGN_STORE, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(sw)(builder, start, ir, rv); },
         {
@@ -1321,6 +1334,7 @@ T2C_OP(caddi4spn, {
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 T2C_OP(clw, {
+    T2C_MISALIGN_GUARD(ir, 4, JIT_MISALIGN_COMPRESSED, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lw)(builder, start, ir, rv); },
         {
@@ -1333,6 +1347,8 @@ T2C_OP(clw, {
 })
 
 T2C_OP(csw, {
+    T2C_MISALIGN_GUARD(ir, 4, JIT_MISALIGN_STORE | JIT_MISALIGN_COMPRESSED,
+                       ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(sw)(builder, start, ir, rv); },
         {
@@ -1515,6 +1531,8 @@ T2C_OP(cslli, {
 })
 
 T2C_OP(clwsp, {
+    /* The decoder sets rs1 to sp for the stack-pointer forms. */
+    T2C_MISALIGN_GUARD(ir, 4, JIT_MISALIGN_COMPRESSED, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper_clwsp(builder, start, ir, rv); },
         {
@@ -1576,6 +1594,9 @@ T2C_OP(cadd, {
 })
 
 T2C_OP(cswsp, {
+    /* The decoder sets rs1 to sp for the stack-pointer forms. */
+    T2C_MISALIGN_GUARD(ir, 4, JIT_MISALIGN_STORE | JIT_MISALIGN_COMPRESSED,
+                       ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper_cswsp(builder, start, ir, rv); },
         {
@@ -1706,6 +1727,7 @@ T2C_OP(fuse2, {
 T2C_OP(fuse3, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
+        T2C_MISALIGN_GUARD(&fuse[i], 4, JIT_MISALIGN_STORE, ir->pc + 4 * i);
         IIF(RV32_HAS(SYSTEM))(
             {
                 t2c_mmu_wrapper(sw)(builder, start, (rv_insn_t *) (&fuse[i]),
@@ -1725,6 +1747,7 @@ T2C_OP(fuse3, {
 T2C_OP(fuse4, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
+        T2C_MISALIGN_GUARD(&fuse[i], 4, 0, ir->pc + 4 * i);
         IIF(RV32_HAS(SYSTEM))(
             {
                 t2c_mmu_wrapper(lw)(builder, start, (rv_insn_t *) (&fuse[i]),
@@ -1852,6 +1875,9 @@ T2C_OP(fuse8, {
  * ir->rs2 = destination register for load
  */
 T2C_OP(fuse9, {
+    /* The interpreter and tier-1 write the LUI result as well. */
+    T2C_LLVM_GEN_STORE_IMM32(*builder, ir->imm,
+                             t2c_gen_rd_addr(start, builder, ir));
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper_fuse9(builder, start, ir, rv); },
         {
@@ -1871,6 +1897,9 @@ T2C_OP(fuse9, {
  * ir->rs1 = source register for store
  */
 T2C_OP(fuse10, {
+    /* The interpreter and tier-1 write the LUI result as well. */
+    T2C_LLVM_GEN_STORE_IMM32(*builder, ir->imm,
+                             t2c_gen_rd_addr(start, builder, ir));
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper_fuse10(builder, start, ir, rv); },
         {
@@ -1895,6 +1924,7 @@ T2C_OP(fuse10, {
  * safely use the original rs1 value for the post-increment.
  */
 T2C_OP(fuse11, {
+    T2C_MISALIGN_GUARD(ir, 4, 0, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper_fuse11(builder, start, ir, rv); },
         {
@@ -1931,6 +1961,7 @@ T2C_OP(fuse13, {
     IIF(RV32_HAS(SYSTEM))(
         { __UNREACHABLE; },
         {
+            T2C_MISALIGN_GUARD(ir, 4, JIT_MISALIGN_STORE, ir->pc);
             LLVMValueRef addr_rs1 = t2c_gen_rs1_addr(start, builder, ir);
             T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, addr_rs1);
             T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,

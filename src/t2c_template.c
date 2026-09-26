@@ -624,7 +624,7 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
             LLVMBuildLoad2(*builder, LLVMInt32Type(),                         \
                            t2c_gen_rs1_addr(start, builder, ir), "");         \
         LLVMValueRef vaddr = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);   \
-        LLVMBasicBlockRef _fp_end = NULL;                                     \
+        UNUSED LLVMBasicBlockRef _fp_end = NULL;                              \
         IIF(RV32_HAS(SYSTEM_MMIO))(                                           \
             _fp_end =                                                         \
                 t2c_emit_mmu_fastpath(builder, start, ir, access_size, false, \
@@ -675,7 +675,7 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
             LLVMBuildLoad2(*builder, LLVMInt32Type(),                          \
                            t2c_gen_rs1_addr(start, builder, ir), "");          \
         LLVMValueRef vaddr = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);    \
-        LLVMBasicBlockRef _fp_end = NULL;                                      \
+        UNUSED LLVMBasicBlockRef _fp_end = NULL;                               \
         IIF(RV32_HAS(SYSTEM_MMIO))(                                            \
             _fp_end =                                                          \
                 t2c_emit_mmu_fastpath(builder, start, ir, access_size, true,   \

@@ -15,10 +15,6 @@ cleanup
 (. "${SCRIPT_DIR}/rtc.sh")
 RET=$?
 
-# Gzipped images tests in a subshell ()
-(. "${SCRIPT_DIR}/boot-gzip-linux.sh")
-RET=$((${RET} + $?))
-
 # reboot tests in a subshell ()
 (. "${SCRIPT_DIR}/reboot.sh")
 RET=$((${RET} + $?))

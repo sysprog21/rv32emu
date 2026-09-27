@@ -279,7 +279,7 @@ jobs:
         artifacts: linux-image
         cache-suffix: boot-${{ matrix.compiler }}-${{ matrix.boot_type }}
 
-    - name: boot Linux kernel test (${{ matrix.boot_type }})
+    - name: boot Linux kernel test (ext4 rootfs) (${{ matrix.boot_type }})
       env:
         BOOT_TIMEOUT: ${{ matrix.timeout }}
       run: |
@@ -290,6 +290,17 @@ jobs:
               test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM $(cat .ci/llvm-version) detection failed"; exit 1; }
             fi
             .ci/boot-linux-test.sh
+    - name: boot Linux kernel test (initrd rootfs) (${{ matrix.boot_type }})
+      env:
+        BOOT_TIMEOUT: ${{ matrix.timeout }}
+      run: |
+            # A stale object would mask a failed LLVM detection below.
+            rm -f build/t2c.o
+            make distclean && make ${{ matrix.defconfig }} && make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ${{ matrix.make_flags }} $PARALLEL && make artifact $PARALLEL
+            if [ "${{ matrix.boot_type }}" = "t2c" ]; then
+              test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM $(cat .ci/llvm-version) detection failed"; exit 1; }
+            fi
+            .ci/boot-linux-test.sh "initrd"
 
   # A guest reboot abandons the hart coroutine stack and restarts it. Run the
   # reboot tests under AddressSanitizer, which checks the stack-switch
@@ -379,7 +390,7 @@ jobs:
               make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL
             done
 
-    - name: boot Linux kernel test (T2C)
+    - name: boot Linux kernel test (ext4 rootfs) (T2C)
       env:
         BOOT_TIMEOUT: 120  # T2C with O1 optimization (via defconfig) is faster than O3
       run: |
@@ -389,6 +400,17 @@ jobs:
             make distclean && make system_jit_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
             test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM ${{ steps.setup.outputs.llvm-version }} detection failed"; exit 1; }
             .ci/boot-linux-test.sh
+
+    - name: boot Linux kernel test (initrd rootfs) (T2C)
+      env:
+        BOOT_TIMEOUT: 120  # T2C with O1 optimization (via defconfig) is faster than O3
+      run: |
+            # A stale object would mask a failed LLVM detection below.
+            rm -f build/t2c.o
+            # system_jit_defconfig uses T2C_OPT_LEVEL=1 for ~50% faster LLVM compilation
+            make distclean && make system_jit_defconfig && make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
+            test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM ${{ steps.setup.outputs.llvm-version }} detection failed"; exit 1; }
+            .ci/boot-linux-test.sh "initrd"
 
   macOS-arm64:
     name: macOS ${{ matrix.compiler }}
@@ -446,18 +468,32 @@ jobs:
              make distclean && make interpreter_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
              make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
-     - name: boot Linux kernel test
+     - name: boot Linux kernel test (ext4 rootfs)
        run: |
              make distclean && make system_interpreter_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
              .ci/boot-linux-test.sh
              make clean
 
-     - name: boot Linux kernel test (JIT)
+     - name: boot Linux kernel test (initrd rootfs)
+       run: |
+             make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
+             .ci/boot-linux-test.sh "initrd"
+             make clean
+
+     - name: boot Linux kernel test (ext4 rootfs) (JIT)
        env:
          BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
        run: |
              make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
              .ci/boot-linux-test.sh
+             make clean
+
+     - name: boot Linux kernel test (initrd rootfs) (JIT)
+       env:
+         BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
+       run: |
+             make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
+             .ci/boot-linux-test.sh "initrd"
              make clean
 
   macOS-arm64-feature-disable:

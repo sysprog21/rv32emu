@@ -250,7 +250,10 @@ fetch_latest_release()
 {
     local artifact_type="$1"
     local max_retries="${2:-3}"
-    local api_url="https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases"
+    # The API lists 30 releases per page by default. ELF and Linux image
+    # releases are published far more often than sail, whose only release
+    # fell off the first page once enough of them had accumulated.
+    local api_url="https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases?per_page=100"
     local release_tag
     local api_response
     local download_status

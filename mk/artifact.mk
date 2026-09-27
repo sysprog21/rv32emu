@@ -274,12 +274,16 @@ ifeq ($(call has, SYSTEM), 1)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/Image.gz >> sha1sum-linux-image)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/rootfs.cpio >> sha1sum-linux-image)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/rootfs.cpio.gz >> sha1sum-linux-image)
+	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/rootfs.ext4 >> sha1sum-linux-image)
+	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/rootfs.ext4.gz >> sha1sum-linux-image)
 	$(Q)(cd $(BIN_DIR) && $(SHA1SUM) linux-image/simplefs.ko >> sha1sum-linux-image)
 	$(Q)(mv $(BIN_DIR)/sha1sum-linux-image /tmp)
 	$(Q)(mv $(BIN_DIR)/linux-image/Image /tmp/rv32emu-linux-image-prebuilt/linux-image)
 	$(Q)(mv $(BIN_DIR)/linux-image/Image.gz /tmp/rv32emu-linux-image-prebuilt/linux-image)
 	$(Q)(mv $(BIN_DIR)/linux-image/rootfs.cpio /tmp/rv32emu-linux-image-prebuilt/linux-image)
 	$(Q)(mv $(BIN_DIR)/linux-image/rootfs.cpio.gz /tmp/rv32emu-linux-image-prebuilt/linux-image)
+	$(Q)(mv $(BIN_DIR)/linux-image/rootfs.ext4 /tmp/rv32emu-linux-image-prebuilt/linux-image)
+	$(Q)(mv $(BIN_DIR)/linux-image/rootfs.ext4.gz /tmp/rv32emu-linux-image-prebuilt/linux-image)
 	$(Q)(mv $(BIN_DIR)/linux-image/simplefs.ko /tmp/rv32emu-linux-image-prebuilt/linux-image)
 else
 	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
@@ -332,6 +336,8 @@ ifeq ($(call has, PREBUILT), 1)
 $(OUT)/linux-image/Image \
 $(OUT)/linux-image/Image.gz \
 $(OUT)/linux-image/rootfs.cpio \
+$(OUT)/linux-image/rootfs.ext4 \
+$(OUT)/linux-image/rootfs.ext4.gz \
 $(OUT)/linux-image/simplefs.ko: artifact
 	$(Q)test -f $@
 endif

@@ -1043,7 +1043,7 @@ void rv_run(riscv_t *rv)
     vm_attr_t *attr = PRIV(rv);
     assert(attr &&
 #if RV32_HAS(SYSTEM_MMIO)
-           attr->data.system.kernel && attr->data.system.initrd
+           attr->data.system.kernel
 #else
            attr->data.user.elf_program
 #endif
@@ -1119,7 +1119,7 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 
 #if RV32_HAS(SYSTEM)
     /* Not being trap */
-    rv->is_trapped = false;
+    rv->trap_cnt = 0;
 
     /* reset the csrs (full system emulation) */
     rv->csr_cycle = 0;

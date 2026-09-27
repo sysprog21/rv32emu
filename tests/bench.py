@@ -468,8 +468,10 @@ def format_comparison(
     threshold: float,
     host: str,
     concurrent: bool,
+    names: Tuple[str, str] = ("Baseline", "Candidate"),
 ) -> str:
-    """Render comparison results as a Markdown table."""
+    """Render comparison results as a Markdown table, heading the columns of
+    the baseline and candidate medians with names."""
 
     def pct(x: float) -> str:
         return f"{x * 100:+.2f}%"
@@ -480,7 +482,7 @@ def format_comparison(
     lines = [
         f"### {title}",
         "",
-        "| Benchmark | Baseline (median) | Candidate (median) "
+        f"| Benchmark | {names[0]} (median) | {names[1]} (median) "
         "| Change | 95% CI | Pairs | Verdict |",
         "| --- | ---: | ---: | ---: | :---: | ---: | --- |",
     ]
@@ -495,7 +497,7 @@ def format_comparison(
         )
     lines += [
         "",
-        f"Baseline and candidate ran "
+        "Both builds ran "
         f"{'concurrently' if concurrent else 'alternately'} on {host}. "
         "Changes smaller "
         f"than {threshold * 100:g}% or whose interval spans zero are "
@@ -751,6 +753,7 @@ def compare_benchmarks(
     max_seconds: float,
     concurrent: bool,
     parallel: int = 0,
+    names: Tuple[str, str] = ("Baseline", "Candidate"),
 ) -> None:
     """Compare two emulator binaries on the selected benchmarks.
 
@@ -771,7 +774,7 @@ def compare_benchmarks(
         r["verdict"] = verdict(r, threshold)
 
     table = format_comparison(
-        results, label, threshold, host_description(), concurrent
+        results, label, threshold, host_description(), concurrent, names
     )
     print("\n" + table)
 
@@ -869,6 +872,17 @@ def main():
         "the other in alternating order (default: concurrent)",
     )
     parser.add_argument(
+        "--baseline-name",
+        default="Baseline",
+        help="With --baseline, heading for its column (default: Baseline)",
+    )
+    parser.add_argument(
+        "--candidate-name",
+        default="Candidate",
+        help="With --baseline, heading for the --emu column "
+        "(default: Candidate)",
+    )
+    parser.add_argument(
         "--markdown",
         metavar="FILE",
         help="With --baseline, also write the comparison table to FILE",
@@ -911,6 +925,7 @@ def main():
             max_seconds=args.max_seconds,
             concurrent=args.schedule == "concurrent",
             parallel=args.parallel or 0,
+            names=(args.baseline_name, args.candidate_name),
         )
     else:
         if args.markdown:

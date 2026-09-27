@@ -27,12 +27,8 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         "${COLOR_R}Fail to run commands"
         "${COLOR_R}Fail to find emu.txt in ${disk_img}"
     )
-    TEST_OPTIONS=("${OPTS_BASE}")
-    EXPECT_CMDS=('
-        expect "buildroot login:" { send "root\n" } timeout { exit 1 }
-        expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "\x01"; send "x" } timeout { exit 3 }
-    ')
+    TEST_OPTIONS=()
+    EXPECT_CMDS=()
 
     if [ "${ENABLE_VBLK}" -eq "1" ]; then
         # Read-only

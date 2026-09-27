@@ -6,6 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 check_platform
 
+# Overwrite the variable to use initrd rootfs for initrd.sh
+SPECIFY_ROOTFS=${1:-}
+if [[ -n "${SPECIFY_ROOTFS}" && "${SPECIFY_ROOTFS}" != "initrd" ]]; then
+    print_error "Unsupported rootfs for netdev test: ${SPECIFY_ROOTFS}"
+    exit 2
+fi
+if [[ "${SPECIFY_ROOTFS}" == "initrd" ]]; then
+    OPTS_BASE_ROOTFS_EXT4="${OPTS_BASE}"
+fi
+
 RET=0
 
 backend="${VNET_BACKEND:-tap}"

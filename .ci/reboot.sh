@@ -8,7 +8,7 @@ RET=0
 
 # Reboot Tests
 # cold reboot
-TEST_OPTIONS=("${OPTS_BASE}")
+TEST_OPTIONS+=("${OPTS_BASE_ROOTFS_EXT4}")
 EXPECT_CMDS=('
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
     expect "# " { send "uname -a\n" } timeout { exit 2 }
@@ -19,7 +19,7 @@ EXPECT_CMDS=('
     expect "riscv32 GNU/Linux" { send "\x01"; send "x" } timeout { exit 3 }
 ')
 # warm reboot
-TEST_OPTIONS+=("${OPTS_BASE}")
+TEST_OPTIONS+=("${OPTS_BASE_ROOTFS_EXT4}")
 EXPECT_CMDS+=('
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
     expect "# " { send "uname -a\n" } timeout { exit 2 }

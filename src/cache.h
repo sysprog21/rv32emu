@@ -109,4 +109,8 @@ uint32_t cache_invalidate_va(struct cache *cache, uint32_t va, uint32_t satp);
 #define PAGE_INDEX_SIZE (1 << PAGE_INDEX_BITS)
 #endif /* RV32_HAS(BLOCK_CHAINING) */
 
+/* Buckets of the address-space index, which cache_invalidate_satp() walks */
+#define SATP_INDEX_BITS 8
+#define SATP_INDEX_SIZE (1 << SATP_INDEX_BITS)
+
 #endif /* RV32_HAS(JIT) && RV32_HAS(SYSTEM) */

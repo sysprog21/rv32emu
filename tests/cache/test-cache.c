@@ -4,6 +4,19 @@
 #include <string.h>
 
 #include "cache.h"
+#include "riscv_private.h"
+
+/* In JIT builds cache.c reads the block fields of the values it holds, so
+ * each value is a zeroed block, and the integer under test lives in its first
+ * field, which cache.c never reads.
+ */
+static int *value_new(int v)
+{
+    int *val = calloc(1, sizeof(block_t));
+    assert(val);
+    *val = v;
+    return val;
+}
 
 static void print_value(int *val, int freq)
 {
@@ -57,8 +70,7 @@ int main(int argc, char *argv[])
             print_value(ans, freq);
         } else if (!strcmp(arr[0], "PUT")) {
             key = (int) strtol(arr[1], NULL, 10);
-            val = malloc(sizeof(int));
-            *val = (int) strtol(arr[2], NULL, 10);
+            val = value_new((int) strtol(arr[2], NULL, 10));
             val = cache_put(cache, key, val, &put_freq);
             if (val) {
                 printf("REPLACE %d\n", *val);

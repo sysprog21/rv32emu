@@ -25,6 +25,10 @@ $ make system_jit_defconfig
 $ make system
 ```
 
+`system_jit_defconfig` builds both JIT tiers. Adding `ENABLE_T2C=0` builds the
+tier-1 JIT alone, which boots about twice as fast as the interpreter; see
+[benchmark.md](benchmark.md#system-emulation) for measurements.
+
 Build and run using specified images (`readonly` option makes the virtual
 block device read-only):
 ```shell

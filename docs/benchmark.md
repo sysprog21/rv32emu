@@ -132,6 +132,41 @@ Two host effects are worth knowing when reading results:
 - An identical-binary (A/A) comparison is a quick check that a host is quiet
   enough: it should report no significant change.
 
+## System emulation
+
+In system mode the guest's clock derives from the emulated cycle count, so the
+scores a guest prints for itself (DMIPS, iterations per second) come out the
+same under every engine. `tests/system-bench.sh` instead boots the prebuilt
+Linux image and times, in host wall-clock milliseconds, the boot to the login
+prompt and four workloads in the guest: Dhrystone and CoreMark from the root
+file system, 300 runs of `/bin/true` from a shell loop, which exercises process
+creation and the page-table flushes that come with it, and a `dd | gzip |
+md5sum` pipeline:
+
+```sh
+make system_defconfig && make && make artifact
+tests/system-bench.sh build/rv32emu 3
+```
+
+Reference results on an AMD Threadripper 2990WX with GCC 14.2, pinned to two
+CPUs (mean of three runs; T1C of six):
+
+| Mode | Boot | Dhrystone | CoreMark | fork+exec | gzip |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Interpreter | 6,578 | 63,080 | 18,132 | 9,639 | 5,895 |
+| T1C | 3,221 | 18,092 | 4,795 | 9,531 | 1,727 |
+| T2C | 4,146 | 7,146 | 4,138 | 13,665 | 2,072 |
+
+Process creation is the hard case for a JIT under a guest OS. Compiled code
+belongs to one address space, and Linux issues a full `SFENCE.VMA` several
+times in the life of each process, so short-lived processes discard their
+blocks, kernel code included, before compiling pays off. T1C stays slightly
+ahead of the interpreter there by compiling a loop only after 64 dispatches in
+system builds (`LOOP_THRESHOLD`) and keeping 4096 blocks (`BLOCK_CACHE_CAPACITY_BITS`);
+T2C, whose compilation costs more, is still slower. Keying compiled code by
+physical page, so that a mapping flush keeps code whose page did not change,
+would remove this cost.
+
 ## Continuous benchmarking
 
 `.github/workflows/benchmark.yml` measures the interpreter, T1C, and T2C.

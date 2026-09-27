@@ -317,6 +317,20 @@ enum TRAP_CODE {
 
 #define BLOCK_MAP_CAPACITY_BITS 10
 
+/* The JIT's block cache holds more blocks under a guest OS, whose kernel and
+ * processes share it: at the default size, starting processes in a loop evicts
+ * and rebuilds blocks faster than the interpreter runs them. Twice this size
+ * starts processes slower on both x86-64 and Arm64 while executing the same
+ * instructions: the least recently used block it evicts is older and colder,
+ * so freeing its IR and unlinking its edges miss in the CPU caches, and the
+ * larger working set stalls the rest of the dispatcher too.
+ */
+#if RV32_HAS(SYSTEM)
+#define BLOCK_CACHE_CAPACITY_BITS 12
+#else
+#define BLOCK_CACHE_CAPACITY_BITS BLOCK_MAP_CAPACITY_BITS
+#endif
+
 /* forward declaration for internal structure */
 typedef struct riscv_internal riscv_t;
 typedef void *riscv_user_t;

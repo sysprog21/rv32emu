@@ -1461,7 +1461,7 @@ static bool rv_init_jit(riscv_t *rv)
         return false;
     }
 
-    rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
+    rv->block_cache = cache_create(BLOCK_CACHE_CAPACITY_BITS);
     if (!rv->block_cache) {
         rv_log_fatal("Failed to create block cache");
         goto fail_jit_state;

@@ -3188,6 +3188,19 @@ static block_t *block_find_or_translate(riscv_t *rv
  * JIT compiler in architecture test.
  */
 #if RV32_HAS(JIT) && !RV32_HAS(ARCH_TEST)
+/* A block that loops is compiled once it has been dispatched this many times.
+ * Compiled code belongs to one address space, and a guest OS discards its
+ * blocks at every full SFENCE.VMA, which Linux issues several times in the life
+ * of each process. Compiling a loop the second time it runs then costs more
+ * than it saves whenever many short processes run, as shell scripts start;
+ * waiting a little longer keeps the compiler for loops that last.
+ */
+#if RV32_HAS(SYSTEM)
+#define LOOP_THRESHOLD 64
+#else
+#define LOOP_THRESHOLD 2
+#endif
+
 static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
 {
 #if RV32_HAS(SYSTEM)
@@ -3196,7 +3209,7 @@ static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
 #endif
 
     /* To profile a block after chaining, it must first be executed. */
-    if (unlikely(freq >= 2 && block->has_loops))
+    if (unlikely(freq >= LOOP_THRESHOLD && block->has_loops))
         return true;
     /* using frequency exceeds predetermined threshold */
     if (unlikely(freq >= THRESHOLD))

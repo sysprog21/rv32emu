@@ -1,15 +1,21 @@
 name: Benchmark
 
-on: [push, pull_request_target, workflow_dispatch]
+# Only master is recorded. On pull_request_target, the checkout was master's
+# code, yet the result was stored and compared against the previous stored
+# run, usually an earlier push of the same pull request, and posted as that
+# pull request's comparison. Pushes to other branches were stored as well.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
-# github-action-benchmark authenticates with RV32EMU_BENCH_TOKEN for both the
-# gh-pages push and the PR comment, so GITHUB_TOKEN needs nothing beyond read.
-# This workflow runs on pull_request_target, where the default write-all token
-# would be in scope for fork-triggered runs.
+# github-action-benchmark authenticates with RV32EMU_BENCH_TOKEN for the
+# gh-pages push and the commit comment, so GITHUB_TOKEN needs nothing beyond
+# read.
 permissions:
   contents: read
 

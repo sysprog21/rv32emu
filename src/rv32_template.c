@@ -605,10 +605,18 @@ RVOP(sfencevma, {
         pthread_mutex_lock(&rv->cache_lock);
 #endif
         /* Invalidate JIT blocks with current SATP */
-        cache_invalidate_satp(rv->block_cache, rv->csr_satp);
+        uint32_t n_invalidated UNUSED =
+            cache_invalidate_satp(rv->block_cache, rv->csr_satp);
 #if RV32_HAS(T2C)
-        jit_cache_clear(rv->jit_cache);
-        inline_cache_clear(rv->inline_cache);
+        /* Only this address space's blocks were invalidated, so only its
+         * entries go: clearing every entry would also drop the compiled code of
+         * other processes, and Linux issues this flush several times in the
+         * life of each process.
+         */
+        if (n_invalidated) {
+            jit_cache_clear_satp(rv->jit_cache, rv->csr_satp);
+            inline_cache_clear_satp(rv->inline_cache, rv->csr_satp);
+        }
         pthread_mutex_unlock(&rv->cache_lock);
 #endif
 #endif
@@ -624,11 +632,18 @@ RVOP(sfencevma, {
         pthread_mutex_lock(&rv->cache_lock);
 #endif
         /* Invalidate JIT blocks in the target VA page */
-        cache_invalidate_va(rv->block_cache, va, rv->csr_satp);
+        uint32_t n_invalidated UNUSED =
+            cache_invalidate_va(rv->block_cache, va, rv->csr_satp);
 #if RV32_HAS(T2C)
-        /* Selectively clear only jit_cache entries matching the VA page */
-        jit_cache_clear_page(rv->jit_cache, va, rv->csr_satp);
-        inline_cache_clear_page(rv->inline_cache, va, rv->csr_satp);
+        /* Entries for the page belong to blocks still live and valid there, so
+         * there are none when no block was invalidated. That is the usual case,
+         * as Linux flushes data pages far more often than code, and each clear
+         * scans a whole table.
+         */
+        if (n_invalidated) {
+            jit_cache_clear_page(rv->jit_cache, va, rv->csr_satp);
+            inline_cache_clear_page(rv->inline_cache, va, rv->csr_satp);
+        }
         pthread_mutex_unlock(&rv->cache_lock);
 #endif
 #endif

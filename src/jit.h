@@ -127,7 +127,8 @@ static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
  *
  * Invalidation: Inline cache entries are cleared on:
  * - Block eviction (inline_cache_clear_key in emulate.c)
- * - SFENCE.VMA (inline_cache_clear_page in rv32_template.c)
+ * - SFENCE.VMA (inline_cache_clear_page, or inline_cache_clear_satp for a
+ *   full flush, in rv32_template.c)
  * - FENCE.I / code_cache_flush (inline_cache_clear in jit.c)
  *
  * On cache hit, ISB is skipped on ARM64 since we already executed this target
@@ -139,6 +140,16 @@ struct inline_cache {
     uint64_t key; /* target PC (+ satp<<32 in system mode), 0 = empty */
     void *entry;  /* cached function pointer */
 };
+
+/* Slot of the inline cache entry for pc in address space satp (0 outside system
+ * mode). The inline cache is direct-mapped, and generated code
+ * (t2c_jit_cache_helper) computes the same index, so a key can only ever live
+ * in this one slot.
+ */
+static inline uint32_t inline_cache_slot(uint32_t pc, uint32_t satp)
+{
+    return (pc ^ (pc >> 12) ^ satp) & (N_INLINE_CACHE_ENTRIES - 1);
+}
 
 /* Verify inline_cache struct layout for LLVM IR generation.
  * LLVM type: { i64 key, ptr entry }
@@ -163,6 +174,7 @@ void inline_cache_clear_key(struct inline_cache *cache, uint64_t key);
 void inline_cache_clear_page(struct inline_cache *cache,
                              uint32_t va,
                              uint32_t satp);
+void inline_cache_clear_satp(struct inline_cache *cache, uint32_t satp);
 
 /* jit_cache entry for T2C compiled code lookup.
  * Thread safety: Uses seqlock pattern for lock-free readers.
@@ -206,6 +218,7 @@ void jit_cache_exit(struct jit_cache *cache);
 void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
 void jit_cache_clear(struct jit_cache *cache);
 void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp);
+void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp);
 
 /* Hand an evicted block's LLVM engine to the T2C thread, which disposes it in
  * t2c_reap_engines().

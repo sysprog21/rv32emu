@@ -126,8 +126,8 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     LLVMValueRef ic_base = LLVMBuildLoad2(
         *builder, LLVMPointerType(t2c_inline_cache_struct_type, 0), ic_ptr, "");
 
-    /* Compute inline cache index: different hash from jit_cache to spread load.
-     * Use upper bits XOR lower bits for better distribution. */
+    /* Compute inline cache index; must match inline_cache_slot(), which
+     * evictions use to find the one slot a key can occupy. */
     LLVMValueRef ic_addr_high = LLVMBuildLShr(
         *builder, addr, LLVMConstInt(LLVMInt32Type(), 12, false), "");
     LLVMValueRef ic_addr_mixed = LLVMBuildXor(*builder, addr, ic_addr_high, "");

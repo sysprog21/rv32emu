@@ -1096,7 +1096,7 @@ void inline_cache_exit(struct inline_cache *cache)
 }
 
 /* Clear all inline cache entries.
- * Called on SFENCE.VMA with rs1=0 (flush all) or when resetting emulator.
+ * Called on FENCE.I, a code cache flush, or when resetting the emulator.
  * No seqlock needed - only main thread reads/writes inline cache.
  */
 void inline_cache_clear(struct inline_cache *cache)
@@ -1104,47 +1104,56 @@ void inline_cache_clear(struct inline_cache *cache)
     memset(cache, 0, N_INLINE_CACHE_ENTRIES * sizeof(struct inline_cache));
 }
 
-/* Clear inline cache entries for a specific VA page.
- * Called on SFENCE.VMA with specific address.
- * Only clears entries whose PC falls within the target page.
+/* Clear the inline cache entries of address space satp whose pc, masked by
+ * page_mask, equals page. No seqlock needed - only main thread reads/writes
+ * inline cache.
+ */
+static void inline_cache_clear_match(struct inline_cache *cache,
+                                     uint32_t satp,
+                                     uint32_t page,
+                                     uint32_t page_mask)
+{
+    for (uint32_t i = 0; i < N_INLINE_CACHE_ENTRIES; i++) {
+        uint64_t key = cache[i].key;
+        if (!key || (uint32_t) (key >> 32) != satp ||
+            ((uint32_t) key & page_mask) != page)
+            continue;
+        cache[i].key = 0;
+        cache[i].entry = NULL;
+    }
+}
+
+/* Clear inline cache entries for a specific VA page, on SFENCE.VMA with an
+ * address.
  */
 void inline_cache_clear_page(struct inline_cache *cache,
                              uint32_t va,
                              uint32_t satp)
 {
-    uint32_t va_page = va & ~(RV_PG_SIZE - 1);
-
-    for (uint32_t i = 0; i < N_INLINE_CACHE_ENTRIES; i++) {
-        uint64_t key = cache[i].key;
-        if (!key)
-            continue;
-
-        uint32_t entry_pc = (uint32_t) key;
-        uint32_t entry_satp = (uint32_t) (key >> 32);
-
-        if (entry_satp == satp) {
-            uint32_t entry_page = entry_pc & ~(RV_PG_SIZE - 1);
-            if (entry_page == va_page) {
-                cache[i].key = 0;
-                cache[i].entry = NULL;
-            }
-        }
-    }
+    inline_cache_clear_match(cache, satp, va & ~(RV_PG_SIZE - 1),
+                             ~(RV_PG_SIZE - 1));
 }
 
-/* Clear inline cache entries matching a specific key.
- * Used when evicting a compiled block to prevent stale entry pointers.
+/* Clear the inline cache entries of one address space */
+void inline_cache_clear_satp(struct inline_cache *cache, uint32_t satp)
+{
+    inline_cache_clear_match(cache, satp, 0, 0);
+}
+
+/* Clear the inline cache entry for a specific key, which can only be in its
+ * own slot. Used when evicting a block to prevent stale entry pointers; this
+ * runs for every evicted block, so it must not scan the table.
  */
 void inline_cache_clear_key(struct inline_cache *cache, uint64_t key)
 {
     if (!key)
         return;
 
-    for (uint32_t i = 0; i < N_INLINE_CACHE_ENTRIES; i++) {
-        if (cache[i].key == key) {
-            cache[i].key = 0;
-            cache[i].entry = NULL;
-        }
+    struct inline_cache *slot =
+        &cache[inline_cache_slot((uint32_t) key, (uint32_t) (key >> 32))];
+    if (slot->key == key) {
+        slot->key = 0;
+        slot->entry = NULL;
     }
 }
 
@@ -1260,31 +1269,40 @@ void jit_cache_clear(struct jit_cache *cache)
  * writers. The cache_lock provides that exclusion between the main thread
  * (SFENCE.VMA) and T2C thread (block compilation).
  */
-void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp)
+/* Clear the entries of address space satp whose pc, masked by page_mask,
+ * equals page: one page, or with a zero mask the whole address space.
+ */
+static void jit_cache_clear_match(struct jit_cache *cache,
+                                  uint32_t satp,
+                                  uint32_t page,
+                                  uint32_t page_mask)
 {
-    uint32_t va_page = va & ~(RV_PG_SIZE - 1);
-
     for (uint32_t i = 0; i < N_JIT_CACHE_ENTRIES; i++) {
         uint64_t key = ATOMIC_LOAD(&cache[i].key, ATOMIC_RELAXED);
-        if (!key)
+        if (!key || (uint32_t) (key >> 32) != satp ||
+            ((uint32_t) key & page_mask) != page)
             continue;
 
-        uint32_t entry_pc = (uint32_t) key;
-        uint32_t entry_satp = (uint32_t) (key >> 32);
-
-        /* Match entries with same SATP and PC in the target page */
-        if (entry_satp == satp) {
-            uint32_t entry_page = entry_pc & ~(RV_PG_SIZE - 1);
-            if (entry_page == va_page) {
-                /* Clear using seqlock pattern */
-                uint32_t seq = ATOMIC_LOAD(&cache[i].seq, ATOMIC_RELAXED);
-                ATOMIC_STORE(&cache[i].seq, seq + 1,
-                             ATOMIC_RELEASE); /* odd = writing */
-                ATOMIC_STORE(&cache[i].entry, NULL, ATOMIC_RELEASE);
-                ATOMIC_STORE(&cache[i].key, 0, ATOMIC_RELEASE);
-                ATOMIC_STORE(&cache[i].seq, seq + 2,
-                             ATOMIC_RELEASE); /* even = done */
-            }
-        }
+        /* Clear using seqlock pattern */
+        uint32_t seq = ATOMIC_LOAD(&cache[i].seq, ATOMIC_RELAXED);
+        ATOMIC_STORE(&cache[i].seq, seq + 1,
+                     ATOMIC_RELEASE); /* odd = writing */
+        ATOMIC_STORE(&cache[i].entry, NULL, ATOMIC_RELEASE);
+        ATOMIC_STORE(&cache[i].key, 0, ATOMIC_RELEASE);
+        ATOMIC_STORE(&cache[i].seq, seq + 2, ATOMIC_RELEASE); /* even = done */
     }
+}
+
+void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp)
+{
+    jit_cache_clear_match(cache, satp, va & ~(RV_PG_SIZE - 1),
+                          ~(RV_PG_SIZE - 1));
+}
+
+/* Clear the entries of one address space, for a full SFENCE.VMA: blocks of
+ * other address spaces stay valid, and so do their entries.
+ */
+void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp)
+{
+    jit_cache_clear_match(cache, satp, 0, 0);
 }

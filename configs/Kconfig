@@ -273,6 +273,19 @@ config SYSTEM
       When enabled, rv32emu can boot a complete Linux system.
       Requires additional kernel image and rootfs.
 
+config ROOTFS_EXT4
+    bool "Use ext4 rootfs (toggle off to use initrd)"
+    default y
+    depends on SYSTEM && !ELF_LOADER
+    help
+      Use ext4 rootfs disk via VirtIO block paravirtualization to
+      boot Linux guestOS.
+
+      The content is equivalent to the initrd but no
+      decompression during boot, result shorter boot time.
+
+      Pass the disk via -x vblk:<DISK_PATH>,rootfs
+
 config GOLDFISH_RTC
     bool "Enable Goldfish RTC"
     default y

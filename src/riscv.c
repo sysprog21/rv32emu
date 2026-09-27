@@ -558,6 +558,87 @@ static char *realloc_property(char *fdt,
         }                                               \
     } while (0)
 
+static bool vblk_option_is_valid(char **vblk_opts, int vblk_opt_cnt)
+{
+    for (int i = 0; i < vblk_opt_cnt; i++) {
+        if (strcmp(vblk_opts[i], "readonly") != 0 &&
+            strcmp(vblk_opts[i], "rootfs") != 0) {
+            rv_log_error("Unknown vblk option: %s", vblk_opts[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool vblk_is_readonly(char **vblk_opts, int vblk_opt_cnt)
+{
+    for (int i = 0; i < vblk_opt_cnt; i++) {
+        if (strcmp(vblk_opts[i], "readonly") == 0)
+            return true;
+    }
+    return false;
+}
+
+#define MAX_OPTS 3
+#if RV32_HAS(ROOTFS_EXT4)
+static bool vblk_is_rootfs(char **vblk_opts, int vblk_opt_cnt)
+{
+    for (int i = 0; i < vblk_opt_cnt; i++) {
+        if (strcmp(vblk_opts[i], "rootfs") == 0)
+            return true;
+    }
+    return false;
+}
+
+/*
+ * Find the first vblk rootfs disk
+ *
+ * If more than one rootfs disks are given, log error and exit
+ */
+static int find_vblk_rootfs_idx(char **vblk, int vblk_cnt)
+{
+    int ret = -1;
+    int vblk_rootfs_cnt = 0;
+
+    for (int i = 0; i < vblk_cnt; i++) {
+        if (vblk[i]) {
+            char *vblk_device_str = strdup(vblk[i]);
+            if (!vblk_device_str) {
+                rv_log_error("strdup fail");
+                exit(EXIT_FAILURE);
+            }
+
+            char *vblk_opts[MAX_OPTS] = {NULL};
+            int vblk_opt_idx = 0;
+            char *opt = strtok(vblk_device_str, ",");
+            while (opt) {
+                if (vblk_opt_idx == MAX_OPTS) {
+                    rv_log_warn("Too many arguments for vblk");
+                    break;
+                }
+                vblk_opts[vblk_opt_idx++] = opt;
+                opt = strtok(NULL, ",");
+            }
+
+            if (vblk_is_rootfs(vblk_opts, vblk_opt_idx)) {
+                if (++vblk_rootfs_cnt > 1) {
+                    rv_log_error("Only one ext4 vblk rootfs disk can be given");
+                    exit(EXIT_FAILURE);
+                }
+
+                /* match first one rootfs */
+                if (ret == -1)
+                    ret = i;
+            }
+
+            free(vblk_device_str);
+        }
+    }
+
+    return ret;
+}
+#endif
+
 static void load_dtb(char **ram_loc, vm_attr_t *attr)
 {
 #include "minimal_dtb.h"
@@ -591,6 +672,12 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
     }
 
     if (bootargs) {
+#if RV32_HAS(ROOTFS_EXT4)
+        if (!strstr(bootargs, "root=")) {
+            rv_log_error("Cannot find root= boot arguments in '%s'", bootargs);
+            exit(EXIT_FAILURE);
+        }
+#endif
         node = fdt_path_offset(dtb_buf, "/chosen");
         assert(node > 0);
 
@@ -607,6 +694,33 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         free(buf);
         assert(!err);
     }
+#if RV32_HAS(ROOTFS_EXT4)
+    else {
+        int vblk_rootfs_idx = find_vblk_rootfs_idx(vblk, attr->vblk_cnt);
+        if (vblk_rootfs_idx == -1) {
+            rv_log_error("Cannot find vblk rootfs index");
+            exit(EXIT_FAILURE);
+        }
+
+        char bootargs_buf[128] = {0};
+        char vblk_rootfs_id =
+            (int) 'a' + (attr->vblk_cnt - vblk_rootfs_idx - 1);
+        sprintf(bootargs_buf,
+                "earlycon console=ttyS0 root=/dev/vd%c rw rootfstype=ext4",
+                vblk_rootfs_id);
+
+        node = fdt_path_offset(dtb_buf, "/chosen");
+        assert(node > 0);
+
+        len = strlen(bootargs_buf);
+        err = fdt_setprop(dtb_buf, node, "bootargs", bootargs_buf, len + 1);
+        if (err == -FDT_ERR_NOSPACE) {
+            dtb_buf = realloc_property(dtb_buf, node, "bootargs", len);
+            err = fdt_setprop(dtb_buf, node, "bootargs", bootargs_buf, len + 1);
+        }
+        assert(!err);
+    }
+#endif
 
 /* Remove the rtc node if it is not enabled during compile time */
 #if !RV32_HAS(GOLDFISH_RTC)
@@ -1451,13 +1565,21 @@ void rv_delete(riscv_t *rv)
  */
 static void load_boot_images(vm_attr_t *attr)
 {
+#if RV32_HAS(ROOTFS_EXT4)
+    assert(attr->mem->mem_size >= DTB_SIZE);
+#else
     assert(attr->mem->mem_size >=
            (DTB_SIZE + (attr->data.system.initrd ? INITRD_SIZE : 0)));
+#endif
 
     /* Load kernel at the beginning of memory */
     char *ram_loc = (char *) attr->mem->mem_base;
+#if RV32_HAS(ROOTFS_EXT4)
+    off_t kernel_size = attr->mem->mem_size - DTB_SIZE;
+#else
     off_t kernel_size = attr->mem->mem_size - DTB_SIZE -
                         (attr->data.system.initrd ? INITRD_SIZE : 0);
+#endif
     off_t ret;
 
     ret = map_file(&ram_loc, attr->data.system.kernel, kernel_size);
@@ -1475,6 +1597,7 @@ static void load_boot_images(vm_attr_t *attr)
     load_dtb(&ram_loc, attr);
     rv_log_info("DTB loaded");
 
+#if !RV32_HAS(ROOTFS_EXT4)
     /* Load optional initrd image before DTB region */
     if (attr->data.system.initrd) {
         /* Ensure memory is large enough to hold initrd region */
@@ -1498,6 +1621,7 @@ static void load_boot_images(vm_attr_t *attr)
         }
         rv_log_info("Rootfs loaded (%ld bytes)", (long) ret);
     }
+#endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
@@ -1795,8 +1919,6 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
 
     if (attr->vblk_cnt) {
         for (int i = 0; i < attr->vblk_cnt; i++) {
-/* Currently, only used for block image path and permission */
-#define MAX_OPTS 2
             /*
              * Copy the disk file path to ensure the functionality of virtio-blk
              * when rebooting since strtok modifies the string
@@ -1820,7 +1942,6 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
             }
 
             char *vblk_device;
-            char *vblk_readonly = vblk_opts[1];
             bool readonly = false;
 
             if (vblk_opts[0][0] == '~') {
@@ -1854,13 +1975,23 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
                 vblk_device = vblk_opts[0];
             }
 
-            if (vblk_readonly) {
-                if (strcmp(vblk_readonly, "readonly") != 0) {
-                    rv_log_error("Unknown vblk option: %s", vblk_readonly);
-                    exit(EXIT_FAILURE);
-                }
-                readonly = true;
+            if (!vblk_option_is_valid(vblk_opts + 1, vblk_opt_idx - 1))
+                exit(EXIT_FAILURE);
+
+            readonly = vblk_is_readonly(vblk_opts, vblk_opt_idx);
+
+#if RV32_HAS(ROOTFS_EXT4)
+            /*
+             * ignore the readonly option if the vblk is the rootfs
+             * and warn the user
+             */
+            if (vblk_is_rootfs(vblk_opts, vblk_opt_idx) && readonly) {
+                readonly = false;
+                rv_log_warn(
+                    "Ignore the readonly option for %s because it is rootfs",
+                    vblk_device);
             }
+#endif
 
             if (attr->vblk[i]) { /* check for reboot */
                 /*

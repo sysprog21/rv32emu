@@ -11,10 +11,12 @@
     };
 
     chosen {
-        bootargs = "earlycon console=ttyS0";
         stdout-path = "serial0";
+        bootargs = "earlycon console=ttyS0";
+#if INITRD_START
         linux,initrd-start = <INITRD_START>;
         linux,initrd-end = <INITRD_END>;
+#endif
     };
 
     cpus {

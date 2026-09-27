@@ -141,11 +141,20 @@ static void print_usage(const char *filename)
 #endif
 #if RV32_HAS(SYSTEM_MMIO)
         "  -k <image> : use <image> as kernel image\n"
+#if RV32_HAS(ROOTFS_EXT4)
+        "  -x vblk:<image>[,readonly][,rootfs]: use "
+        "<image> as virtio-blk disk image (default to read-write).\n"
+        "The 'rootfs' attribute marks the image as the ext4 rootfs and can be "
+        "only be specified once\n"
+        "This option can be specified multiple times for multiple block "
+        "devices\n"
+#else /* initrd */
         "  -i <image> : use <image> as rootfs\n"
         "  -x vblk:<image>[,readonly]: use "
         "<image> as virtio-blk disk image "
         "(default read and write). This option may be specified "
         "multiple times for multiple block devices\n"
+#endif
         "  -x vrng : enable virtio-rng device\n"
 #if RV32_HAS(VIRTIO_NET)
         "  -x vnet:<backend>: use <backend> as virtio-net backend "
@@ -218,10 +227,12 @@ static bool parse_args(int argc, char **args)
             opt_kernel_img = optarg;
             emu_argc++;
             break;
+#if !RV32_HAS(ROOTFS_EXT4)
         case 'i':
             opt_rootfs_img = optarg;
             emu_argc++;
             break;
+#endif
         case 'b':
             opt_bootargs = optarg;
             emu_argc++;

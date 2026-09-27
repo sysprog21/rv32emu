@@ -246,7 +246,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
     for i in "${!TEST_OPTIONS[@]}"; do
         printf "${COLOR_Y}===== Test option: ${TEST_OPTIONS[$i]} =====${COLOR_N}\n"
 
-        OPTS="${OPTS_BASE}"
+        OPTS="${OPTS_BASE_ROOTFS_EXT4}"
         # No need to add option when running base test
         if [[ ! "${TEST_OPTIONS[$i]}" =~ "base" ]]; then
             OPTS+="${TEST_OPTIONS[$i]}"

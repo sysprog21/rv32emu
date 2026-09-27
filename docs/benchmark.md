@@ -144,9 +144,12 @@ creation and the page-table flushes that come with it, and a `dd | gzip |
 md5sum` pipeline:
 
 ```sh
-make system_defconfig && make && make artifact
+make system_defconfig && make && make artifact    # T1C
 tests/system-bench.sh build/rv32emu 3
 ```
+
+`system_interpreter_defconfig` and `system_jit_defconfig` build the other two
+modes.
 
 Reference results on an AMD Threadripper 2990WX with GCC 14.2, pinned to two
 CPUs (mean of three runs; T1C of six):

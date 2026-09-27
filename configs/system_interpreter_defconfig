@@ -1,0 +1,10 @@
+# System emulation for Linux kernel
+# The system_defconfig configuration with the JIT disabled
+CONFIG_SYSTEM=y
+CONFIG_INTERPRETER_ONLY=y
+# CONFIG_JIT is not set
+CONFIG_GOLDFISH_RTC=y
+CONFIG_VIRTIO_NET=y
+CONFIG_VIRTIO_NET_TAP=y
+CONFIG_VIRTIO_NET_USER=y
+CONFIG_VIRTIO_NET_VMNET=y

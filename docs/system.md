@@ -19,14 +19,16 @@ before proceeding.
 $ make ENABLE_SYSTEM=1 system
 ```
 
-For improved performance, JIT compilation can be enabled in system emulation mode:
+`system_defconfig` selects the tier-1 JIT, which boots Linux about twice as
+fast as the interpreter; hosts the JIT does not support fall back to the
+interpreter. Two other configurations cover the remaining modes:
 ```shell
-$ make system_jit_defconfig
+$ make system_interpreter_defconfig # without the JIT
+$ make system_jit_defconfig         # tier-1 JIT plus the LLVM-based T2C
 $ make system
 ```
 
-`system_jit_defconfig` builds both JIT tiers. Adding `ENABLE_T2C=0` builds the
-tier-1 JIT alone, which boots about twice as fast as the interpreter; see
+T2C runs compute-bound guests faster still; see
 [benchmark.md](benchmark.md#system-emulation) for measurements.
 
 Build and run using specified images (`readonly` option makes the virtual

@@ -1,5 +1,10 @@
 # System emulation for Linux kernel
+# Tier-1 JIT, like defconfig; system_interpreter_defconfig builds the
+# interpreter and system_jit_defconfig adds T2C. Hosts the JIT does not support
+# fall back to the interpreter.
 CONFIG_SYSTEM=y
+CONFIG_JIT=y
+# CONFIG_T2C is not set
 CONFIG_GOLDFISH_RTC=y
 CONFIG_VIRTIO_NET=y
 CONFIG_VIRTIO_NET_TAP=y

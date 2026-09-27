@@ -110,7 +110,9 @@ jobs:
             .ci/build-opt-levels.sh interpreter_defconfig
 
     - name: Build system emulation with various optimization levels
-      run: .ci/build-opt-levels.sh system_defconfig
+      run: |
+            .ci/build-opt-levels.sh system_defconfig
+            .ci/build-opt-levels.sh system_interpreter_defconfig
 
     - name: check + tests
       run: |
@@ -129,15 +131,15 @@ jobs:
     - name: misalignment test in block emulation
       run: |
             make -C tests/system/alignment/
-            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 misalign-in-blk-emu $PARALLEL
+            make distclean && make system_interpreter_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 misalign-in-blk-emu $PARALLEL
 
     - name: MMU test
       run: |
             make -C tests/system/mmu/
-            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test $PARALLEL
+            make distclean && make system_interpreter_defconfig && make ENABLE_ELF_LOADER=1 mmu-test $PARALLEL
             # Page faults a loaded program cannot handle: the emulator stops
             # at one on a fetch, and skips exactly the faulting access.
-            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_JIT=1 ENABLE_T2C=0 mmu-test check-insn-page-fault check-misalign-page-fault $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test check-insn-page-fault check-misalign-page-fault $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
@@ -237,23 +239,23 @@ jobs:
         include:
           - compiler: gcc
             boot_type: interpreter
-            defconfig: system_defconfig
+            defconfig: system_interpreter_defconfig
             make_flags: ""
             timeout: 60
           - compiler: gcc
             boot_type: jit
             defconfig: system_defconfig
-            make_flags: "ENABLE_JIT=1 ENABLE_MOP_FUSION=0"
+            make_flags: "ENABLE_MOP_FUSION=0"
             timeout: 120
           - compiler: clang
             boot_type: interpreter
-            defconfig: system_defconfig
+            defconfig: system_interpreter_defconfig
             make_flags: ""
             timeout: 60
           - compiler: clang
             boot_type: jit
             defconfig: system_defconfig
-            make_flags: "ENABLE_JIT=1 ENABLE_MOP_FUSION=0"
+            make_flags: "ENABLE_MOP_FUSION=0"
             timeout: 120
           - compiler: clang
             boot_type: t2c
@@ -400,7 +402,7 @@ jobs:
 
      - name: boot Linux kernel test
        run: |
-             make distclean && make system_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
+             make distclean && make system_interpreter_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
              .ci/boot-linux-test.sh
              make clean
 
@@ -408,7 +410,7 @@ jobs:
        env:
          BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
        run: |
-             make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
+             make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
              .ci/boot-linux-test.sh
              make clean
 

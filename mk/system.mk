@@ -149,7 +149,12 @@ endif
 # System Target
 
 LINUX_IMAGE_DIR := linux-image
+
+ifeq ($(CONFIG_ROOTFS_EXT4),y)
+system_action := ($(BIN) -k $(OUT)/$(LINUX_IMAGE_DIR)/Image -x vblk:$(OUT)/$(LINUX_IMAGE_DIR)/rootfs.ext4,rootfs)
+else
 system_action := ($(BIN) -k $(OUT)/$(LINUX_IMAGE_DIR)/Image -i $(OUT)/$(LINUX_IMAGE_DIR)/rootfs.cpio)
+endif
 system_deps += artifact $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
 
 system: $(system_deps)

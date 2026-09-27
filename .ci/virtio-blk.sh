@@ -41,9 +41,9 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
+        expect "riscv32 GNU/Linux" { send "mkdir -p simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
 		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
-        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect -ex "-sh: can'\''t create mnt/emu.txt: Read-only file system" {} timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
@@ -53,7 +53,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "riscv32 GNU/Linux" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect -ex "-sh: can'\''t create mnt/emu.txt: Read-only file system" {} timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
@@ -75,12 +75,12 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdc simplefs_ko_src && \
+        expect "riscv32 GNU/Linux" { send "mkdir -p simplefs_ko_src && mount /dev/vdc simplefs_ko_src && \
 		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
-        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect -ex "-sh: can'\''t create mnt/emu.txt: Read-only file system" {} timeout { exit 3 }
-        expect "# " { send "mkdir mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
+        expect "# " { send "mkdir -p mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
         expect -ex "-sh: can'\''t create mnt2/emu.txt: Read-only file system" {} timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
@@ -92,10 +92,10 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "riscv32 GNU/Linux" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect -ex "-sh: can'\''t create mnt/emu.txt: Read-only file system" {} timeout { exit 3 }
-        expect "# " { send "mkdir mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
+        expect "# " { send "mkdir -p mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
         expect -ex "-sh: can'\''t create mnt2/emu.txt: Read-only file system" {} timeout { exit 3 }
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
@@ -115,9 +115,9 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
+        expect "riscv32 GNU/Linux" { send "mkdir -p simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
 		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
-        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect "# " { send "sync\n" } timeout { exit 3 }
         expect "# " { send "cat mnt/emu.txt\n" } timeout { exit 3 }
@@ -129,7 +129,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "riscv32 GNU/Linux" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect "# " { send "sync\n" } timeout { exit 3 }
         expect "# " { send "umount mnt\n" } timeout { exit 3 }
@@ -147,9 +147,9 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             VBLK_EXPECT_CMDS='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
+        expect "riscv32 GNU/Linux" { send "mkdir -p simplefs_ko_src && mount /dev/vdb simplefs_ko_src && \
 		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
-        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect "# " { send "sync\n" } timeout { exit 3 }
         expect "# " { send "cat mnt/emu.txt\n" } timeout { exit 3 }
@@ -162,7 +162,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             VBLK_EXPECT_CMDS='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "riscv32 GNU/Linux" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect "# " { send "sync\n" } timeout { exit 3 }
         expect "# " { send "umount mnt\n" } timeout { exit 3 }
@@ -208,13 +208,13 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir simplefs_ko_src && mount /dev/vdc simplefs_ko_src && \
+        expect "riscv32 GNU/Linux" { send "mkdir -p simplefs_ko_src && mount /dev/vdc simplefs_ko_src && \
 		insmod simplefs_ko_src/simplefs.ko\n" } timeout { exit 3 }
-        expect "simplefs: module loaded" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "simplefs: module loaded" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect "# " { send "sync\n" } timeout { exit 3 }
         expect "# " { send "umount mnt\n" } timeout { exit 3 }
-        expect "# " { send "mkdir mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
+        expect "# " { send "mkdir -p mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
         expect "# " { send "sync\n" } timeout { exit 3 }
         expect "# " { send "cat mnt2/emu.txt\n" } timeout { exit 3 }
@@ -228,11 +228,11 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
         expect "# " { send "uname -a\n" } timeout { exit 2 }
-        expect "riscv32 GNU/Linux" { send "mkdir mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
+        expect "riscv32 GNU/Linux" { send "mkdir -p mnt && mount /dev/vda mnt\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt/emu.txt\n" } timeout { exit 3 }
         expect "# " { send "sync\n" } timeout { exit 3 }
         expect "# " { send "umount mnt\n" } timeout { exit 3 }
-        expect "# " { send "mkdir mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
+        expect "# " { send "mkdir -p mnt2 && mount /dev/vdb mnt2\n" } timeout { exit 3 }
         expect "# " { send "echo rv32emu > mnt2/emu.txt\n" } timeout { exit 3 }
         expect "# " { send "sync\n" } timeout { exit 3 }
         expect "# " { send "umount mnt2\n" } timeout { exit 3 }
@@ -246,7 +246,7 @@ for disk_img in "${VBLK_IMGS[@]}"; do
     for i in "${!TEST_OPTIONS[@]}"; do
         printf "${COLOR_Y}===== Test option: ${TEST_OPTIONS[$i]} =====${COLOR_N}\n"
 
-        OPTS="${OPTS_BASE}"
+        OPTS="${OPTS_BASE_ROOTFS_EXT4}"
         # No need to add option when running base test
         if [[ ! "${TEST_OPTIONS[$i]}" =~ "base" ]]; then
             OPTS+="${TEST_OPTIONS[$i]}"

@@ -2117,13 +2117,13 @@ static void jit_mmu_handler(riscv_t *rv,
     else
         addr = rv->io.mem_translate(rv, vaddr, W);
 
-    /* A page fault in mem_translate may leave a trap pending (is_trapped), or
+    /* A page fault in mem_translate may leave a trap pending (trap_cnt), or
      * its handler may have run already and resumed somewhere else
      * (need_handle_signal). Either way the access did not complete, and the
      * block stops here for the dispatcher to settle. Mark it as MMIO so that no
      * direct memory access follows, without performing an MMIO operation.
      */
-    rv->jit_mmu.abort = rv->is_trapped || need_handle_signal;
+    rv->jit_mmu.abort = rv->trap_cnt || need_handle_signal;
     if (rv->jit_mmu.abort) {
         rv->jit_mmu.is_mmio = 1;
         return;
@@ -4068,7 +4068,7 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 
     /* Check if trap occurred during MMU translation.
      * If trapped, skip the load and post-increment entirely.
-     * is_trapped is set by jit_mmu_handler when mem_translate faults.
+     * trap_cnt is set by jit_mmu_handler when mem_translate faults.
      */
     emit_load(state, S8, parameter_reg[0], temp_reg,
               offsetof(riscv_t, jit_mmu.abort));

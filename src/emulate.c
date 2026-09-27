@@ -3486,6 +3486,8 @@ void rv_step(void *arg)
 #endif
             ((exec_block_func_t) state->buf)(
                 rv, (uintptr_t) (state->buf + block->offset));
+            if (rv->jit_entry_cycles)
+                rv->csr_cycle += block->cycle_cost;
             settle_trap(rv);
             prev = NULL;
             continue;
@@ -3502,6 +3504,8 @@ void rv_step(void *arg)
 #endif
                 ((exec_block_func_t) state->buf)(
                     rv, (uintptr_t) (state->buf + block->offset));
+                if (rv->jit_entry_cycles)
+                    rv->csr_cycle += block->cycle_cost;
                 settle_trap(rv);
                 prev = NULL;
                 continue;

@@ -1100,3 +1100,39 @@ typedef struct rv_insn {
 
 /* decode the RISC-V instruction */
 bool rv_decode(rv_insn_t *ir, const uint32_t insn);
+
+/* Whether a 32-bit instruction is privileged or accesses a supervisor or
+ * machine CSR. A program without such an instruction can neither install a trap
+ * handler nor observe the state a trap leaves behind: the cause, value and
+ * exception PC registers, mstatus, or a privilege change through mret. Unlike
+ * rv_decode(), the answer does not depend on which extensions the emulator was
+ * built with.
+ */
+static inline bool insn_uses_privileged_state(uint32_t insn)
+{
+    if ((insn & 0x7f) != 0x73) /* SYSTEM opcode */
+        return false;
+
+    /* ECALL and EBREAK are unprivileged; any other instruction without a CSR,
+     * such as MRET, SRET or SFENCE.VMA, is not.
+     */
+    const uint32_t funct3 = (insn >> 12) & 7;
+    if (!funct3)
+        return insn != 0x00000073 && insn != 0x00100073;
+
+    /* Bits 9:8 of a CSR address hold the lowest privilege level that may access
+     * it, zero for user CSRs such as fcsr, cycle or jvt. Funct3 4 is not a CSR
+     * instruction.
+     */
+    return funct3 == 4 || ((insn >> 28) & 3);
+}
+
+/* Whether a 32-bit instruction accesses a user counter CSR: cycle, time,
+ * instret or a hardware performance counter, including the high halves.
+ */
+static inline bool insn_reads_counter(uint32_t insn)
+{
+    const uint32_t csr = insn >> 20;
+    return (insn & 0x7f) == 0x73 && ((insn >> 12) & 3) &&
+           ((csr & ~0x9f) == 0xc00); /* 0xc00-0xc1f and 0xc80-0xc9f */
+}

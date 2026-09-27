@@ -6,8 +6,8 @@
  * installed, the user-mode default handler emulates the access and resumes
  * after it; with one installed, the guest handler runs instead. Tier-1 code
  * used to perform such accesses directly, so a guest handler was never entered.
- * The program uses the machine-mode trap vector, so it runs only in user-mode
- * builds.
+ * The full program uses the machine-mode trap vector, so it runs only in
+ * user-mode builds.
  *
  * Each phase runs its loop long enough to be compiled. Phase 1 checks the
  * values produced by default emulation; phase 2 installs mtvec and counts the
@@ -15,7 +15,15 @@
  * post-increment, LUI with LW) and, when assembled for rv32ic, compressed
  * forms, which is why the misaligned bases live in s0 and s1. Phase 2 also
  * checks that a base proven aligned stops counting as aligned once written.
+ *
+ * Built with NO_CSR, the program is phase 1 alone and uses no privileged
+ * instruction or CSR, so JIT code leaves the accesses to the host, which must
+ * produce the same values. Built with NO_HANDLER, it is phase 1 and the check
+ * of the trap CSRs that follows it.
  */
+#if !defined(NO_CSR) && !defined(NO_HANDLER)
+#define WITH_HANDLER
+#endif
     .text
     .global _start
 
@@ -85,6 +93,20 @@ _start:
     addi s2, s2, -1
     bnez s2, 1b
 
+#ifndef NO_CSR
+    /* The default handler leaves the last exception in mcause and mtval: the
+     * halfword store to scratch + 9. Reading them is what keeps the checks in
+     * the NO_HANDLER build, so JIT code must still have raised the exception.
+     */
+    csrr t0, mcause
+    li   t1, 6                  /* store address misaligned */
+    bne  t0, t1, fail
+    csrr t0, mtval
+    la   t1, scratch + 9
+    bne  t0, t1, fail
+#endif
+
+#ifdef WITH_HANDLER
     /* Phase 2: a trap vector is installed, so each access must reach it. */
     la   t0, handler
     csrw mtvec, t0
@@ -130,6 +152,7 @@ _start:
     la   t3, scratch
     lw   t0, 0(t3)
     bnez t0, fail               /* a trapped store must not write memory */
+#endif
 
     li   a0, 1
     la   a1, passed
@@ -144,6 +167,7 @@ exit:
     li   a7, 93
     ecall
 
+#ifdef WITH_HANDLER
     /* Count the exception, record its cause, and skip the instruction. */
     .balign 4
 handler:
@@ -162,6 +186,7 @@ handler:
 3:
     csrw mepc, t5
     mret
+#endif
 
     .data
     .balign 4

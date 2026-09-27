@@ -541,6 +541,20 @@ struct riscv_internal {
 #endif
     void *jit_state;
     void *jit_cache;
+
+    /* JIT code leaves alignment to the host: misaligned accesses are allowed
+     * (-m), or the loaded program uses no privileged state, so it cannot tell a
+     * misaligned access the emulator's default handler performs from one the
+     * host performs directly.
+     */
+    bool jit_elide_align_checks;
+
+    /* The loaded program reads no counter CSR, so tier-1 code leaves cycle
+     * counting to the dispatcher, which charges only the block a chain of
+     * blocks was entered through. The count then only paces rv_step() and
+     * memory reclamation, which need no more.
+     */
+    bool jit_entry_cycles;
 #if RV32_HAS(T2C)
     void *inline_cache; /* Inline cache for fast indirect jump resolution */
 #endif

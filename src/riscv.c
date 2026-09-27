@@ -1573,6 +1573,11 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     rv_log_set_level(attr->log_level);
     rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
 
+#if RV32_HAS(JIT)
+    rv->jit_elide_align_checks = attr->allow_misalign;
+    rv->jit_entry_cycles = false;
+#endif
+
 #if !RV32_HAS(SYSTEM_MMIO)
     elf_t *elf = elf_new();
     assert(elf);
@@ -1597,6 +1602,12 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     const struct Elf32_Sym *exit_sym;
     if ((exit_sym = elf_get_symbol(elf, "exit")))
         attr->exit_addr = exit_sym->st_value;
+
+#if RV32_HAS(JIT)
+    rv->jit_elide_align_checks = rv->jit_elide_align_checks ||
+                                 !elf_has_insn(elf, insn_uses_privileged_state);
+    rv->jit_entry_cycles = !elf_has_insn(elf, insn_reads_counter);
+#endif
 #endif
 
     /* Load the program and set the entry pc. Neither is an assert: this is

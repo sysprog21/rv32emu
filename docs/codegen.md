@@ -232,5 +232,20 @@ register is tested directly. A passed check also proves the base aligned, so
 later accesses in the same block through the unmodified base register need no
 check; any write to that register discards the fact. Tier-2 emits the
 equivalent branch in LLVM IR, weighted as unlikely and followed by an
-`llvm.assume` of the alignment, which lets LLVM drop later checks it implies. `tests/jit-misalign.S` covers the plain,
-compressed, and fused forms with and without a guest trap vector.
+`llvm.assume` of the alignment, which lets LLVM drop later checks it implies.
+
+A trap taken without a handler still leaves state behind: the cause, value and
+exception PC registers, `mstatus`, and the privilege level that a later `mret`
+returns to. A user-mode program that runs no privileged instruction and
+accesses no supervisor or machine CSR can see none of it, nor install a
+handler, so it cannot tell the default handler's emulation from the host
+performing the access, and neither tier emits the checks for it. When the ELF
+is loaded, its executable sections are decoded instruction by instruction for
+anything other than `ecall`, `ebreak`, or a user-level CSR access such as
+`fcsr`, `cycle` or `jvt`. Code the program generates at run time is not
+scanned, just as user-mode JIT code is not invalidated when a program rewrites
+its own instructions. On Dhrystone, the checks otherwise add about 18% to
+the host instructions of tier-1 code. `tests/jit-misalign.S` covers the plain,
+compressed, and fused forms with and without a guest trap vector. Its
+`-nocsr` build uses no privileged state, and its `-nohandler` build only reads
+the trap CSRs, which must keep the checks in place.

@@ -405,6 +405,35 @@ bool elf_load(elf_t *e, memory_t *mem)
     return true;
 }
 
+/* Decode the executable sections one instruction at a time, looking for a
+ * 32-bit instruction that match() accepts. Sections are walked rather than
+ * segments because read-only data shares the executable segment, and whole
+ * instructions rather than every halfword because the middle of one instruction
+ * often looks like another. An ELF without section headers is assumed to
+ * contain one.
+ */
+bool elf_has_insn(elf_t *e, bool (*match)(uint32_t insn))
+{
+    if (!e->hdr->e_shnum)
+        return true;
+
+    for (int s = 0; s < e->hdr->e_shnum; ++s) {
+        const struct Elf32_Shdr *shdr = get_shdr(e, s);
+        if (shdr->sh_type != SHT_PROGBITS || !(shdr->sh_flags & SHF_EXECINSTR))
+            continue;
+
+        const uint8_t *text = e->raw_data + shdr->sh_offset;
+        for (uint32_t i = 0, len; i + 2 <= shdr->sh_size; i += len) {
+            len = (text[i] & 3) == 3 ? 4 : 2; /* 2 for compressed */
+            if (len == 4 && i + 4 <= shdr->sh_size &&
+                match(text[i] | text[i + 1] << 8 | text[i + 2] << 16 |
+                      (uint32_t) text[i + 3] << 24))
+                return true;
+        }
+    }
+    return false;
+}
+
 bool elf_open(elf_t *e, const char *input)
 {
     /* free previous memory */

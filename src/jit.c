@@ -1566,10 +1566,12 @@ static inline void emit_jmp(struct jit_state *state,
  *
  * Blocks jump to one another inside generated code, so the dispatcher sees only
  * the first block of a chain and cannot charge the rest. Instead, each block
- * adds its cost to cycle_reg on entry. While generated code runs, the register
- * stands in for rv->csr_cycle: it is loaded on entry, stored on exit, and
- * stored before and reloaded after any call, since a callee may read or advance
- * the counter. It is callee-saved, so it survives the calls themselves.
+ * adds its cost to cycle_reg on entry, unless the program reads no counter
+ * (jit_entry_cycles), in which case the dispatcher's charge is enough. While
+ * generated code runs, the register stands in for rv->csr_cycle: it is loaded
+ * on entry, stored on exit, and stored before and reloaded after any call,
+ * since a callee may read or advance the counter. It is callee-saved, so it
+ * survives the calls themselves.
  */
 #if defined(__x86_64__)
 static const int cycle_reg = RBP;
@@ -3569,8 +3571,9 @@ static void emit_misalign_stub(struct jit_state *state,
  * X[rs1] + offset. A misaligned access branches to a stub, emitted after the
  * block by emit_misalign_stubs(), that raises the exception. Nothing is emitted
  * for byte accesses, for an offset that keeps a base already proven aligned in
- * this block aligned, or when misaligned accesses are allowed (-m), in which
- * case the host performs them directly.
+ * this block aligned, or when misaligned accesses are allowed (-m) or the
+ * program uses no privileged state that could observe them, in which case the
+ * host performs them directly.
  */
 static void emit_misalign_guard(struct jit_state *state,
                                 riscv_t *rv,
@@ -3581,7 +3584,7 @@ static void emit_misalign_guard(struct jit_state *state,
                                 uint32_t pc)
 {
     const uint32_t mask = size == S32 ? 3 : size == S16 ? 1 : 0;
-    if (!mask || PRIV(rv)->allow_misalign)
+    if (!mask || rv->jit_elide_align_checks)
         return;
     const bool offset_aligned = !((uint32_t) offset & mask);
     if (offset_aligned && reg_align[rs1] > mask)
@@ -4109,7 +4112,8 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
     rv_insn_t *ir, *next;
     n_misalign_stubs = 0;
     reset_reg();
-    emit_cycle_count(state, block->cycle_cost);
+    if (!rv->jit_entry_cycles)
+        emit_cycle_count(state, block->cycle_cost);
     liveness_reset();
     liveness_calc(block);
     for (idx = 0, ir = block->ir_head; idx < block->n_insn && !should_flush;

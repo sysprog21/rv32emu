@@ -87,6 +87,7 @@ EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
+EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
@@ -165,11 +166,19 @@ ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_MC_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-interp-diff-rvc
 endif
 endif
-# check-jit-misalign installs a machine-mode trap vector, so it needs Zicsr,
-# and a user-mode emulator: system builds run the program in supervisor mode.
+# The jit-misalign programs need a user-mode emulator: system builds run them
+# in supervisor mode, and only user mode lets JIT code skip the alignment
+# checks, which the -nocsr variant, using no privileged state, exercises.
 ifneq ($(CONFIG_SYSTEM),y)
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-nocsr
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-nocsr-rvc
+endif
+# The full program installs a machine-mode trap vector and -nohandler reads the
+# trap CSRs, so both need Zicsr, as does jit-cycles to read the counters.
 ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-jit-misalign
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign check-jit-misalign-nohandler \
+	check-jit-cycles
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-misalign-rvc
 endif
@@ -197,14 +206,15 @@ endif
 
 # Build a freestanding guest program from tests/$(1).S for ISA $(2) and compare
 # its output, so these report like every other check instead of staying silent.
-# An optional suffix $(3) names a variant built for another ISA.
+# An optional suffix $(3) names a variant built for another ISA, or with the
+# extra assembler flags in $(4).
 guest-asm-build = $(CROSS_COMPILE)gcc -march=$(2) -mabi=ilp32 -nostdlib \
-	-static -Wl,-e,_start -o $(OUT)/$(1)$(3) tests/$(1).S
+	-static -Wl,-e,_start $(4) -o $(OUT)/$(1)$(3) tests/$(1).S
 
 define guest-asm-check-target
 .PHONY: check-$(1)$(3)
 check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
-	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3))
+	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3),$(4))
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
@@ -261,6 +271,10 @@ $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr))
 # misaligned bases in s0 and s1 turn the accesses through them into C.LW/C.SW.
 $(eval $(call guest-asm-check-target,jit-interp-diff,rv32imc,-rvc))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32ic_zicsr,-rvc))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32i,-nocsr,-DNO_CSR))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr,-nohandler,-DNO_HANDLER))
+$(eval $(call guest-asm-check-target,jit-cycles,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,jit-misalign,rv32ic,-nocsr-rvc,-DNO_CSR))
 
 # check-trace-match builds and runs a host program, so it is independent of
 # whether the emulator can load a user ELF. Everything else here is a guest

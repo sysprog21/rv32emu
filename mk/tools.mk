@@ -43,6 +43,9 @@ TOOLS_BIN += $(HIST_BIN)
 # Build Linux image
 LINUX_IMAGE_SRC = $(BUILDROOT_DATA) $(LINUX_DATA) $(SIMPLEFS_DATA)
 build-linux-image: $(LINUX_IMAGE_SRC)
+	$(Q)git submodule update --init \
+	    ./tests/system/br_pkgs/doom_riscv \
+	    ./tests/system/br_pkgs/quake
 	$(Q)./tools/build-linux-image.sh
 	$(Q)$(PRINTF) "Build done.\n"
 

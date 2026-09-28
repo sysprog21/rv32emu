@@ -538,6 +538,12 @@ struct riscv_internal {
      * cache_lock. See t2c_retire_engine().
      */
     struct t2c_retired_engine *retired_engines;
+
+    /* Blocks evicted while the T2C thread compiled them, which it hands back
+     * for this thread to free: the memory pools then have a single user and
+     * need no lock. Protected by cache_lock. See t2c_free_orphans().
+     */
+    struct list_head orphan_blocks;
 #endif
     void *jit_state;
     void *jit_cache;

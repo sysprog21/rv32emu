@@ -996,38 +996,22 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
      */
     if (!func) {
         /* Check if block was evicted - if so, free it and its IRs */
-        if (block->should_free) {
-            /* Free IRs that main thread skipped during deferred eviction */
-            for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
-                next_ir = ir->next;
-                free(ir->branch_table);
-                if (ir->fuse)
-                    mpool_free(rv->fuse_mp, ir->fuse);
-                mpool_free(rv->block_ir_mp, ir);
-            }
-            mpool_free(rv->block_mp, block);
-        }
+        if (block->should_free)
+            list_add(&block->list, &rv->orphan_blocks);
         LLVMDisposeExecutionEngine(engine);
         pthread_mutex_unlock(cache_lock);
         free(set);
         return;
     }
 
-    /* Check if block was evicted while we were compiling.
-     * If so, we are responsible for freeing it.
+    /* Check if block was evicted while we were compiling. If so, hand it back
+     * for the emulator thread to free, since only that thread uses the memory
+     * pools.
      */
     if (block->should_free) {
         /* Dispose engine (we own it) */
         LLVMDisposeExecutionEngine(engine);
-        /* Free IRs that main thread skipped during deferred eviction */
-        for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
-            next_ir = ir->next;
-            free(ir->branch_table);
-            if (ir->fuse)
-                mpool_free(rv->fuse_mp, ir->fuse);
-            mpool_free(rv->block_ir_mp, ir);
-        }
-        mpool_free(rv->block_mp, block);
+        list_add(&block->list, &rv->orphan_blocks);
         pthread_mutex_unlock(cache_lock);
         free(set);
         return;

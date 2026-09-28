@@ -2984,6 +2984,41 @@ static void free_linked_block(riscv_t *rv, block_t *block)
 }
 #endif
 
+#if RV32_HAS(JIT)
+/* Release the IRs of a block that is leaving the cache */
+static void block_free_irs(riscv_t *rv, block_t *block)
+{
+    for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
+        next_ir = ir->next;
+        free(ir->branch_table);
+        if (ir->fuse)
+            mpool_free(rv->fuse_mp, ir->fuse);
+        mpool_free(rv->block_ir_mp, ir);
+    }
+}
+#endif
+
+#if RV32_HAS(T2C)
+/* Free the blocks the T2C thread handed back after they were evicted during
+ * compilation. Only this thread allocates from or frees to the memory pools.
+ * The caller holds cache_lock, or the T2C thread has exited.
+ */
+void t2c_free_orphans(riscv_t *rv)
+{
+    block_t *block, *safe;
+#ifdef __HAVE_TYPEOF
+    list_for_each_entry_safe (block, safe, &rv->orphan_blocks, list)
+#else
+    list_for_each_entry_safe (block, safe, &rv->orphan_blocks, list, block_t)
+#endif
+    {
+        list_del(&block->list);
+        block_free_irs(rv, block);
+        mpool_free(rv->block_mp, block);
+    }
+}
+#endif
+
 static block_t *block_find_or_translate(riscv_t *rv
 #if RV32_HAS(JIT)
                                         ,
@@ -3071,6 +3106,7 @@ static block_t *block_find_or_translate(riscv_t *rv
 
 #if RV32_HAS(T2C)
     pthread_mutex_lock(&rv->cache_lock);
+    t2c_free_orphans(rv);
 #endif
 
     /* insert the block into block cache */
@@ -3098,7 +3134,7 @@ static block_t *block_find_or_translate(riscv_t *rv
 #if RV32_HAS(T2C)
     /* Check if T2C thread is currently using this block.
      * If so, mark for delayed freeing and skip immediate destruction.
-     * The T2C thread will free it upon completion.
+     * The T2C thread hands it back through orphan_blocks upon completion.
      */
     if (replaced_blk->is_compiling) {
         replaced_blk->should_free = true;
@@ -3115,7 +3151,8 @@ static block_t *block_find_or_translate(riscv_t *rv
 #endif
 
         /* Clear jit_cache to prevent new executions, but don't dispose engine
-         * or free memory yet. T2C thread owns the engine and block memory.
+         * or free memory yet. T2C thread owns the engine and the block until it
+         * hands the block back.
          */
 #if RV32_HAS(SYSTEM)
         uint64_t key = (uint64_t) replaced_blk->pc_start |
@@ -3140,16 +3177,7 @@ static block_t *block_find_or_translate(riscv_t *rv
     block_unlink_outgoing_edges(replaced_blk);
 #endif
 
-    /* free IRs in replaced block */
-    for (rv_insn_t *ir = replaced_blk->ir_head, *next_ir; ir != NULL;
-         ir = next_ir) {
-        next_ir = ir->next;
-        free(ir->branch_table);
-        if (ir->fuse)
-            mpool_free(rv->fuse_mp, ir->fuse);
-
-        mpool_free(rv->block_ir_mp, ir);
-    }
+    block_free_irs(rv, replaced_blk);
 
 #if RV32_HAS(T2C)
     /* Clear jit_cache entry before disposing LLVM engine to prevent stale

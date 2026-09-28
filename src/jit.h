@@ -224,6 +224,7 @@ void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp);
  * t2c_reap_engines().
  */
 void t2c_retire_engine(riscv_t *rv, void *engine);
+void t2c_free_orphans(riscv_t *rv);
 void t2c_reap_engines(riscv_t *rv);
 
 /* Wrapper for cache cleanup - disposes LLVM engine from a block */

@@ -309,6 +309,7 @@ static bool rv_spawn_t2c(riscv_t *rv)
     pthread_mutex_init(&rv->cache_lock, NULL);
     pthread_cond_init(&rv->wait_queue_cond, NULL);
     INIT_LIST_HEAD(&rv->wait_queue);
+    INIT_LIST_HEAD(&rv->orphan_blocks);
     /* Activate the background compilation thread.
      * Use larger stack (8MB) to handle deep recursion in t2c_trace_ebb
      * and LLVM's internal stack usage during compilation.
@@ -340,6 +341,7 @@ static void rv_destroy_t2c(riscv_t *rv)
 
     pthread_join(t2c_thread, NULL);
     t2c_reap_engines(rv);
+    t2c_free_orphans(rv);
 
     /* Clean up any remaining entries in wait queue */
     queue_entry_t *entry, *safe;

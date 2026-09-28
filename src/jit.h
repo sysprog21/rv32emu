@@ -33,16 +33,35 @@ struct jump {
 #endif
 };
 
+/* A translated block: where its code starts in the code cache. Entries are
+ * found through hash chains of indices into the offset map, -1 ending a chain:
+ * by pc and satp for lookups, and in system mode also by address space and by
+ * page, so that the entries of either can be retired when the guest flushes
+ * them. A retired entry is never found again; its code stays in the cache,
+ * unreachable, until the cache is flushed.
+ */
 struct offset_map {
     uint32_t pc;
     uint32_t offset;
+    int32_t next;
 #if RV32_HAS(SYSTEM)
     uint32_t satp;
+    int32_t next_in_space;
+    int32_t next_in_page;
+    bool retired;
 #endif
 };
 
+#define OFFSET_INDEX_BITS 14 /* at least twice MAX_BLOCKS entries */
+#define SPACE_INDEX_BITS 8
+#define PAGE_INDEX_BITS_JIT 12
+
 struct jit_state {
-    set_t set;
+    int32_t offset_index[1 << OFFSET_INDEX_BITS];
+#if RV32_HAS(SYSTEM)
+    int32_t space_index[1 << SPACE_INDEX_BITS];
+    int32_t page_index[1 << PAGE_INDEX_BITS_JIT];
+#endif
     uint8_t *buf;
     uint32_t offset;
     uint32_t stack_size;
@@ -80,6 +99,27 @@ void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags);
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);
 bool jit_translate(riscv_t *rv, block_t *block);
+
+#if RV32_HAS(SYSTEM)
+/* Stop reusing the code translated for address space satp. Called when the
+ * guest flushes it: a block rebuilt afterwards gets fresh code instead of what
+ * was translated from the old mappings.
+ */
+void jit_retire_space(struct jit_state *state, uint32_t satp);
+
+/* Whether any code translated for address space satp starts in the page of
+ * va. Such code may be the target of direct jumps from other pages, so a flush
+ * of the page has to retire the whole address space.
+ */
+bool jit_page_has_code(const struct jit_state *state,
+                       uint32_t va,
+                       uint32_t satp);
+
+/* Drop all translated code, for a FENCE.I, after which any page of any
+ * address space may hold new instructions.
+ */
+void jit_flush(riscv_t *rv);
+#endif
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 
 #if RV32_HAS(T2C)
@@ -127,8 +167,7 @@ static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
  *
  * Invalidation: Inline cache entries are cleared on:
  * - Block eviction (inline_cache_clear_key in emulate.c)
- * - SFENCE.VMA (inline_cache_clear_page, or inline_cache_clear_satp for a
- *   full flush, in rv32_template.c)
+ * - SFENCE.VMA (inline_cache_clear_satp in rv32_template.c)
  * - FENCE.I / code_cache_flush (inline_cache_clear in jit.c)
  *
  * On cache hit, ISB is skipped on ARM64 since we already executed this target
@@ -171,9 +210,6 @@ struct inline_cache *inline_cache_init(void);
 void inline_cache_exit(struct inline_cache *cache);
 void inline_cache_clear(struct inline_cache *cache);
 void inline_cache_clear_key(struct inline_cache *cache, uint64_t key);
-void inline_cache_clear_page(struct inline_cache *cache,
-                             uint32_t va,
-                             uint32_t satp);
 void inline_cache_clear_satp(struct inline_cache *cache, uint32_t satp);
 
 /* jit_cache entry for T2C compiled code lookup.
@@ -217,7 +253,6 @@ struct jit_cache *jit_cache_init(void);
 void jit_cache_exit(struct jit_cache *cache);
 void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
 void jit_cache_clear(struct jit_cache *cache);
-void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp);
 void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp);
 
 /* Hand an evicted block's LLVM engine to the T2C thread, which disposes it in

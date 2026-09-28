@@ -90,6 +90,7 @@ EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
+EXPECTED_jit-fencei = FENCE.I made the rewrite visible OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
 EXPECTED_trace_match = trace matcher corpus passed
@@ -136,6 +137,7 @@ GUEST_ASM_C_WORKS := $(call guest-asm-arch-works,rv32ic)
 GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
 GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
+GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
 
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
@@ -149,6 +151,11 @@ endif
 # A directly loaded system program has no handler for its own page faults.
 ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
 GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault
+endif
+# Only system JIT builds honor FENCE.I, and only a directly loaded program can
+# rewrite its own code without an operating system.
+ifeq ($(CONFIG_SYSTEM)$(CONFIG_JIT)$(CONFIG_ELF_LOADER)$(CONFIG_Zifencei)$(GUEST_ASM_FENCEI_WORKS),yyyyy)
+GUEST_ASM_CHECK_TARGETS += check-jit-fencei
 endif
 # The jit-* programs assert tier-1 code generation, so they prove nothing when
 # the emulator under test has no JIT. Report them as skipped rather than
@@ -244,6 +251,7 @@ $(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))
 
 $(eval $(call guest-asm-check-target,lrsc,rv32ia))
 $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
 
 # The program must stop at its first instruction page fault, reporting it and
 # failing, instead of retrying the fetch forever.

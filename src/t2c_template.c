@@ -36,7 +36,10 @@ static block_t *t2c_check_valid_blk(riscv_t *rv,
         return NULL;
 
 #if RV32_HAS(SYSTEM)
-    if (blk->satp != block->satp)
+    /* A block a flush invalidated may hold instructions that no longer
+     * exist, so it must not join the region.
+     */
+    if (blk->satp != block->satp || blk->invalidated)
         return NULL;
 #endif
 

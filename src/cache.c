@@ -558,6 +558,22 @@ static void page_index_insert(cache_t *cache, cache_entry_t *entry)
 
 HASH_FUNC_IMPL(satp_index_hash, SATP_INDEX_BITS, SATP_INDEX_SIZE)
 
+/* Mark a block invalidated, counting it in *compiled when T2C compiled code for
+ * it: only then can the T2C caches hold entries to clear.
+ */
+static inline void block_invalidate(block_t *block, uint32_t *compiled UNUSED)
+{
+    block->invalidated = true;
+#if RV32_HAS(T2C)
+    if (block->func)
+        (*compiled)++;
+    /* Reset hot2 to prevent T2C execution of invalidated blocks, so that
+     * rv_step() falls through to re-translation.
+     */
+    ATOMIC_STORE(&block->hot2, false, ATOMIC_RELEASE);
+#endif
+}
+
 /* Drop an entry whose block was just invalidated from both indexes, so that
  * later flushes, which Linux issues several times per process, visit only the
  * blocks built since. The entry stays in the cache until the block is rebuilt,
@@ -579,12 +595,16 @@ static void satp_index_insert(cache_t *cache, cache_entry_t *entry)
                    &cache->satp_index[satp_index_hash(block->satp)]);
 }
 
-uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
+uint32_t cache_invalidate_satp(cache_t *cache,
+                               uint32_t satp,
+                               uint32_t *n_compiled)
 {
+    if (n_compiled)
+        *n_compiled = 0;
     if (unlikely(!cache->capacity))
         return 0;
 
-    uint32_t count = 0;
+    uint32_t count = 0, compiled = 0;
     cache_entry_t *entry = NULL;
     struct hlist_node *next;
     struct hlist_head *head = &cache->satp_index[satp_index_hash(satp)];
@@ -596,28 +616,73 @@ uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
     {
         block_t *block = (block_t *) entry->value;
         if (block->satp == satp && !block->invalidated) {
-            block->invalidated = true;
+            block_invalidate(block, &compiled);
             entry_unindex(entry);
-#if RV32_HAS(T2C)
-            /* Reset hot2 to prevent T2C execution of invalidated blocks.
-             * This ensures the T2C execution path in rv_step() will skip this
-             * block and fall through to re-translation.
-             */
-            ATOMIC_STORE(&block->hot2, false, ATOMIC_RELEASE);
-#endif
             count++;
         }
+    }
+    if (n_compiled)
+        *n_compiled = compiled;
+    return count;
+}
+
+uint32_t cache_invalidate_all(cache_t *cache)
+{
+    uint32_t count = 0, compiled = 0;
+    cache_entry_t *entry = NULL;
+#ifdef __HAVE_TYPEOF
+    list_for_each_entry (entry, &cache->list, list)
+#else
+    list_for_each_entry (entry, &cache->list, list, cache_entry_t)
+#endif
+    {
+        block_t *block = (block_t *) entry->value;
+        if (!block || block->invalidated)
+            continue;
+        block_invalidate(block, &compiled);
+        entry_unindex(entry);
+        count++;
     }
     return count;
 }
 
-uint32_t cache_invalidate_va(cache_t *cache, uint32_t va, uint32_t satp)
+bool cache_has_va(const cache_t *cache, uint32_t va, uint32_t satp)
 {
+#if RV32_HAS(BLOCK_CHAINING)
+    const uint32_t va_page = va & ~(RV_PG_SIZE - 1);
+    const cache_entry_t *entry;
+    const struct hlist_head *head =
+        &cache->page_index[page_index_hash(va_page >> RV_PG_SHIFT)];
+#ifdef __HAVE_TYPEOF
+    hlist_for_each_entry (entry, head, page_node)
+#else
+    hlist_for_each_entry (entry, head, page_node, cache_entry_t)
+#endif
+    {
+        const block_t *block = entry->value;
+        if (block->satp == satp && !block->invalidated &&
+            (block->pc_start & ~(RV_PG_SIZE - 1)) == va_page)
+            return true;
+    }
+    return false;
+#else
+    (void) cache, (void) va, (void) satp;
+    return true;
+#endif
+}
+
+uint32_t cache_invalidate_va(cache_t *cache,
+                             uint32_t va,
+                             uint32_t satp,
+                             uint32_t *n_compiled)
+{
+    if (n_compiled)
+        *n_compiled = 0;
     if (unlikely(!cache->capacity))
         return 0;
 
     uint32_t va_page = va & ~(RV_PG_SIZE - 1);
-    uint32_t count = 0;
+    uint32_t count = 0, compiled = 0;
 
 #if RV32_HAS(BLOCK_CHAINING)
     /* With page-bounded blocks, each block fits entirely within one 4KB page,
@@ -638,12 +703,8 @@ uint32_t cache_invalidate_va(cache_t *cache, uint32_t va, uint32_t satp)
         if (block->satp != satp || block->invalidated ||
             (block->pc_start & ~(RV_PG_SIZE - 1)) != va_page)
             continue;
-        block->invalidated = true;
+        block_invalidate(block, &compiled);
         entry_unindex(pentry);
-#if RV32_HAS(T2C)
-        /* Reset hot2 to prevent T2C execution of invalidated blocks */
-        ATOMIC_STORE(&block->hot2, false, ATOMIC_RELEASE);
-#endif
         count++;
     }
 #else
@@ -675,17 +736,15 @@ uint32_t cache_invalidate_va(cache_t *cache, uint32_t va, uint32_t satp)
                                                              : block->pc_start;
         uint32_t block_end_page = last_byte & ~(RV_PG_SIZE - 1);
         if (va_page >= block_start_page && va_page <= block_end_page) {
-            block->invalidated = true;
+            block_invalidate(block, &compiled);
             entry_unindex(entry);
-#if RV32_HAS(T2C)
-            /* Reset hot2 to prevent T2C execution of invalidated blocks */
-            ATOMIC_STORE(&block->hot2, false, ATOMIC_RELEASE);
-#endif
             count++;
         }
     }
 #endif /* RV32_HAS(BLOCK_CHAINING) */
 
+    if (n_compiled)
+        *n_compiled = compiled;
     return count;
 }
 #endif /* RV32_HAS(JIT) && RV32_HAS(SYSTEM) */

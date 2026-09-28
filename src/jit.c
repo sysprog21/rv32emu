@@ -539,17 +539,136 @@ static inline bool host_reg_maps_x0(int reg_idx)
     return false;
 }
 
+#if RV32_HAS(SYSTEM)
+#define BLOCK_SATP(block) ((block)->satp)
+#else
+#define BLOCK_SATP(block) 0
+#endif
+
+static inline uint32_t index_hash(uint64_t key, unsigned bits)
+{
+    return (uint32_t) ((key * 0x61c8864680b583ebull) >> (64 - bits));
+}
+
+static inline uint32_t offset_hash(uint32_t pc, uint32_t satp)
+{
+    return index_hash(((uint64_t) satp << 32) | pc, OFFSET_INDEX_BITS);
+}
+
+#if RV32_HAS(SYSTEM)
+static inline uint32_t space_hash(uint32_t satp)
+{
+    return index_hash(satp, SPACE_INDEX_BITS);
+}
+
+static inline uint32_t page_hash(uint32_t va, uint32_t satp)
+{
+    return index_hash(((uint64_t) satp << 32) | (va >> RV_PG_SHIFT),
+                      PAGE_INDEX_BITS_JIT);
+}
+#endif
+
+/* Empty the offset map and every index over it */
+static void offset_map_reset(struct jit_state *state)
+{
+    state->n_blocks = 0;
+    memset(state->offset_index, -1, sizeof(state->offset_index));
+#if RV32_HAS(SYSTEM)
+    memset(state->space_index, -1, sizeof(state->space_index));
+    memset(state->page_index, -1, sizeof(state->page_index));
+#endif
+}
+
 static inline void offset_map_insert(struct jit_state *state, block_t *block)
 {
     assert(state->n_blocks < MAX_BLOCKS);
 
-    struct offset_map *map_entry = &state->offset_map[state->n_blocks++];
+    const int32_t idx = state->n_blocks++;
+    struct offset_map *map_entry = &state->offset_map[idx];
     map_entry->pc = block->pc_start;
     map_entry->offset = state->offset;
+
+    int32_t *head =
+        &state->offset_index[offset_hash(block->pc_start, BLOCK_SATP(block))];
+    map_entry->next = *head;
+    *head = idx;
 #if RV32_HAS(SYSTEM)
     map_entry->satp = block->satp;
+    map_entry->retired = false;
+    head = &state->space_index[space_hash(block->satp)];
+    map_entry->next_in_space = *head;
+    *head = idx;
+    head = &state->page_index[page_hash(block->pc_start, block->satp)];
+    map_entry->next_in_page = *head;
+    *head = idx;
 #endif
 }
+
+/* The live entry translated for pc in address space satp, if any */
+static struct offset_map *offset_map_find(struct jit_state *state,
+                                          uint32_t pc,
+                                          uint32_t satp UNUSED)
+{
+    for (int32_t i = state->offset_index[offset_hash(pc, satp)]; i >= 0;
+         i = state->offset_map[i].next) {
+        struct offset_map *entry = &state->offset_map[i];
+        if (entry->pc != pc)
+            continue;
+#if RV32_HAS(SYSTEM)
+        if (entry->satp != satp || entry->retired)
+            continue;
+#endif
+        return entry;
+    }
+    return NULL;
+}
+
+#if RV32_HAS(SYSTEM)
+void jit_retire_space(struct jit_state *state, uint32_t satp)
+{
+    /* Retired entries leave the chain, so each flush visits only the code
+     * translated since the previous one.
+     */
+    int32_t *link = &state->space_index[space_hash(satp)];
+    while (*link >= 0) {
+        struct offset_map *entry = &state->offset_map[*link];
+        if (entry->satp == satp) {
+            entry->retired = true;
+            *link = entry->next_in_space;
+        } else {
+            link = &entry->next_in_space;
+        }
+    }
+}
+
+bool jit_page_has_code(const struct jit_state *state,
+                       uint32_t va,
+                       uint32_t satp)
+{
+#if !RV32_HAS(BLOCK_CHAINING)
+    /* Blocks may then span pages, so any code of the address space may hold
+     * instructions of this page.
+     */
+    (void) va;
+    for (int32_t i = state->space_index[space_hash(satp)]; i >= 0;
+         i = state->offset_map[i].next_in_space) {
+        if (state->offset_map[i].satp == satp)
+            return true;
+    }
+    return false;
+#else
+    const uint32_t page = va & ~(RV_PG_SIZE - 1);
+    for (int32_t i = state->page_index[page_hash(va, satp)]; i >= 0;
+         i = state->offset_map[i].next_in_page) {
+        const struct offset_map *entry = &state->offset_map[i];
+        if (!entry->retired && entry->satp == satp &&
+            (entry->pc & ~(RV_PG_SIZE - 1)) == page)
+            return true;
+    }
+    return false;
+#endif
+}
+#endif
 
 #if !defined(__APPLE__)
 #define sys_icache_invalidate(addr, size) \
@@ -4092,8 +4211,7 @@ static void code_cache_flush(struct jit_state *state, riscv_t *rv)
 {
     should_flush = false;
     state->offset = state->org_size;
-    state->n_blocks = 0;
-    set_reset(&state->set);
+    offset_map_reset(state);
     clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
 #if RV32_HAS(T2C)
     jit_cache_clear(rv->jit_cache);
@@ -4101,6 +4219,14 @@ static void code_cache_flush(struct jit_state *state, riscv_t *rv)
 #endif
     return;
 }
+
+#if RV32_HAS(SYSTEM)
+/* The caller holds cache_lock when T2C is built */
+void jit_flush(riscv_t *rv)
+{
+    code_cache_flush(rv->jit_state, rv);
+}
+#endif
 
 typedef void (*codegen_block_func_t)(struct jit_state *,
                                      riscv_t *,
@@ -4171,16 +4297,11 @@ static void resolve_jumps(struct jit_state *state)
 #endif
         else {
             target_loc = jump.offset_loc + sizeof(uint32_t);
-            for (int j = 0; j < state->n_blocks; j++) {
-                if (jump.target_pc == state->offset_map[j].pc) {
-                    IIF(RV32_HAS(SYSTEM))(
-                        if (jump.target_satp == state->offset_map[j].satp), )
-                    {
-                        target_loc = state->offset_map[j].offset;
-                        break;
-                    }
-                }
-            }
+            const struct offset_map *target =
+                offset_map_find(state, jump.target_pc,
+                                IIF(RV32_HAS(SYSTEM))(jump.target_satp, 0));
+            if (target)
+                target_loc = target->offset;
         }
 #if defined(__x86_64__)
         /* Assumes jump offset is at end of instruction */
@@ -4220,18 +4341,21 @@ static void translate_chained_block(struct jit_state *state,
                                     riscv_t *rv,
                                     block_t *block)
 {
-    if (set_has(&state->set, RV_HASH_KEY(block)))
+    if (offset_map_find(state, block->pc_start, BLOCK_SATP(block)))
         return;
 
-    if (state->n_blocks == MAX_BLOCKS)
+    /* A full offset map, retired entries included, is a full cache: flush it,
+     * or no block could ever be translated again.
+     */
+    if (state->n_blocks == MAX_BLOCKS) {
+        should_flush = true;
         return;
+    }
 
     /* Check whether the remaining jump slots can accommodate this block. */
     if (state->n_jumps + block_jump_budget(block) >= MAX_JUMPS)
         return;
 
-    bool added UNUSED = set_add(&state->set, RV_HASH_KEY(block));
-    assert(added);
     offset_map_insert(state, block);
     translate(state, rv, block);
     if (unlikely(should_flush))
@@ -4254,21 +4378,13 @@ static void translate_chained_block(struct jit_state *state,
 bool jit_translate(riscv_t *rv, block_t *block)
 {
     struct jit_state *state = rv->jit_state;
-    if (set_has(&state->set, RV_HASH_KEY(block))) {
+    const struct offset_map *translated =
+        offset_map_find(state, block->pc_start, BLOCK_SATP(block));
+    if (translated) {
         /* Block already translated - skip */
-        for (int i = 0; i < state->n_blocks; i++) {
-            if (block->pc_start == state->offset_map[i].pc
-#if RV32_HAS(SYSTEM)
-                && block->satp == state->offset_map[i].satp
-#endif
-            ) {
-                block->offset = state->offset_map[i].offset;
-                block->hot = true;
-                return true;
-            }
-        }
-        assert(NULL);
-        __UNREACHABLE;
+        block->offset = translated->offset;
+        block->hot = true;
+        return true;
     }
 restart:
     /* Only clear the portion that was used in the previous translation.
@@ -4295,7 +4411,16 @@ restart:
 #if defined(__APPLE__) && defined(__aarch64__)
         jit_exit_write_mode();
 #endif
+#if RV32_HAS(T2C)
+        /* The flush empties the T2C caches, which the T2C thread writes under
+         * cache_lock; a seqlock only protects readers.
+         */
+        pthread_mutex_lock(&rv->cache_lock);
+#endif
         code_cache_flush(state, rv);
+#if RV32_HAS(T2C)
+        pthread_mutex_unlock(&rv->cache_lock);
+#endif
         goto restart;
     }
 
@@ -4304,7 +4429,7 @@ restart:
      * marking the block hot.  Otherwise resolve_jumps and cache maintenance
      * would operate on an empty / stale code region.
      */
-    if (!set_has(&state->set, RV_HASH_KEY(block))) {
+    if (!offset_map_find(state, block->pc_start, BLOCK_SATP(block))) {
 #if defined(__APPLE__) && defined(__aarch64__)
         jit_exit_write_mode();
 #endif
@@ -4342,8 +4467,6 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
         return NULL;
     assert(state);
 
-    set_init(&state->set);
-
     state->offset = 0;
     state->n_jumps = 0;
     state->size = size;
@@ -4360,8 +4483,7 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
     }
     assert(state->buf != MAP_FAILED);
 
-    state->n_blocks = 0;
-    set_reset(&state->set);
+    offset_map_reset(state);
     reset_reg();
     prepare_translate(state, mem_base);
 #if defined(__APPLE__) && defined(__aarch64__)

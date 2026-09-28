@@ -151,24 +151,29 @@ tests/system-bench.sh build/rv32emu 3
 `system_interpreter_defconfig` and `system_jit_defconfig` build the other two
 modes.
 
-Reference results on an AMD Threadripper 2990WX with GCC 14.2, pinned to two
-CPUs (mean of three runs; T1C of six):
+Reference results in milliseconds, pinned to two CPUs (mean of three runs,
+alternating between modes; the eMAG host has no T2C build):
 
-| Mode | Boot | Dhrystone | CoreMark | fork+exec | gzip |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Interpreter | 6,578 | 63,080 | 18,132 | 9,639 | 5,895 |
-| T1C | 3,221 | 18,092 | 4,795 | 9,531 | 1,727 |
-| T2C | 4,146 | 7,146 | 4,138 | 13,665 | 2,072 |
+| Host | Mode | Boot | Dhrystone | CoreMark | fork+exec | gzip |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| AMD Threadripper 2990WX, GCC 14.2 | Interpreter | 7,330 | 69,758 | 20,663 | 10,974 | 6,778 |
+| | T1C | 3,833 | 20,244 | 6,140 | 10,324 | 1,932 |
+| | T2C | 4,074 | 8,117 | 4,779 | 10,397 | 2,089 |
+| Ampere eMAG, Clang 18.1 | Interpreter | 15,141 | 110,976 | 37,339 | 20,628 | 11,828 |
+| | T1C | 9,179 | 49,101 | 10,513 | 20,402 | 4,154 |
 
 Process creation is the hard case for a JIT under a guest OS. Compiled code
 belongs to one address space, and Linux issues a full `SFENCE.VMA` several
 times in the life of each process, so short-lived processes discard their
-blocks, kernel code included, before compiling pays off. T1C stays slightly
-ahead of the interpreter there by compiling a loop only after 64 dispatches in
-system builds (`LOOP_THRESHOLD`) and keeping 4096 blocks (`BLOCK_CACHE_CAPACITY_BITS`);
-T2C, whose compilation costs more, is still slower. Keying compiled code by
-physical page, so that a mapping flush keeps code whose page did not change,
-would remove this cost.
+blocks, kernel code included, before compiling pays off, and much of the code
+runs interpreted. Both tiers still come out slightly ahead of the interpreter
+there: in system builds a looping block compiles after 64 dispatches
+(`LOOP_THRESHOLD`), the interpreter profiles one chained branch in 32
+(`PROBE_INTERVAL`), the cache keeps 4096 blocks (`BLOCK_CACHE_CAPACITY_BITS`),
+and neither evicting a block, flushing a page without compiled code, nor
+flushing an address space scans the whole cache or the JIT's tables. Keying
+compiled code by physical page, so that a mapping flush keeps code whose page
+did not change, would turn this case into a clear gain.
 
 ## Continuous benchmarking
 

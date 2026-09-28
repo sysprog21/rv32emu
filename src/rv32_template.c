@@ -42,21 +42,24 @@ RVOP(lui, { rv->X[ir->rd] = ir->imm; })
  * exactly as its uncompressed counterpart does. In user mode the loop tracker
  * is fed even on a cache miss, since a repeated program counter proves a cycle
  * whether or not the destination has been translated yet; system mode has to
- * confirm the address space first, so an untranslated target is skipped.
+ * confirm the address space first, so an untranslated target is skipped, and
+ * probes only one chained branch in PROBE_INTERVAL (see emulate.c).
  */
 /* A repeated program counter proves a control-flow cycle. Once one has been
  * found for this dispatch, further probes cannot change profiling.
  */
 #define RVOP_PROBE_TARGET(target_pc, hot_label)                                \
     do {                                                                       \
-        cache_lookup_t lookup =                                                \
-            cache_get_with_freq(rv->block_cache, (target_pc), true);           \
+        IIF(RV32_HAS(SYSTEM))(if (++probe_tick % PROBE_INTERVAL) break;, )     \
+            cache_lookup_t lookup =                                            \
+                cache_get_with_freq(rv->block_cache, (target_pc), true);       \
         IIF(RV32_HAS(SYSTEM))(                                                 \
             if (!block_matches_context(rv,                                     \
                                        (const block_t *) lookup.value)) break; \
             , ) if (!has_loops && set_probe(&pc_set, (target_pc))) has_loops = \
             true;                                                              \
-        if (lookup.freq >= THRESHOLD)                                          \
+        if (lookup.freq >=                                                     \
+            IIF(RV32_HAS(SYSTEM))(THRESHOLD / PROBE_INTERVAL, THRESHOLD))      \
             goto hot_label;                                                    \
     } while (0)
 

@@ -845,6 +845,20 @@ static set_t pc_set;
 static bool has_loops = false;
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+/* Under a guest OS, much of the code runs interpreted and briefly: a process
+ * lives a short while, and its blocks are discarded at each full SFENCE.VMA.
+ * Profiling every branch the interpreter chains through then costs more than
+ * the JIT recovers, so RVOP_PROBE_TARGET profiles one in PROBE_INTERVAL of them
+ * and scales the hotness threshold to match. Its threshold only ends the chain:
+ * runtime_profiler() still decides, with its own thresholds, whether the block
+ * is translated. Counting each sample as PROBE_INTERVAL uses instead, with one
+ * threshold for both, measured slower on Arm64.
+ */
+#define PROBE_INTERVAL 32
+static uint32_t probe_tick;
+#endif
+
 /* Declared in em_runtime.h behind the same guard, and only reached from the
  * Emscripten main-loop teardown below.
  */

@@ -1,0 +1,65 @@
+name: Benchmark comment
+
+# Posts the comparison from benchmark.yml for pull requests from forks. Their
+# runs of that workflow get a read-only token; this one runs master's code with
+# permission to comment, and treats the uploaded tables purely as text.
+on:
+  workflow_run:
+    workflows: [Benchmark]
+    types: [completed]
+
+permissions: {}
+
+# Two quick pushes finish in either order; posting one at a time keeps a
+# single comment instead of racing to create two.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  # A pull request from this repository gets a token that can comment, so
+  # benchmark.yml posts its own tables; this job serves forks, whose runs
+  # cannot.
+  comment:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      # The default branch, so the script that runs with write access is
+      # master's rather than the pull request's.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .ci
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: bench-compare-*
+          merge-multiple: true
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post comparison
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+            # Look the pull request up from the event rather than from the
+            # artifact, which the pull request's own code wrote. The event's
+            # pull_requests list is empty for forks, hence the search.
+            # Closed ones are included, so a pull request merged while the
+            # benchmark ran still gets its result.
+            PR=$(gh api -X GET "repos/${REPO}/pulls" -f state=all \
+                -f head="${HEAD_OWNER}:${HEAD_BRANCH}" \
+                --jq ".[] | select(.head.sha == \"${HEAD_SHA}\") | .number" | head -n 1)
+            [ -n "${PR}" ] || { echo "No pull request for ${HEAD_SHA}"; exit 0; }
+            PR="${PR}" .ci/benchmark-comment.sh

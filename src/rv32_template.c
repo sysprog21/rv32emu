@@ -42,21 +42,24 @@ RVOP(lui, { rv->X[ir->rd] = ir->imm; })
  * exactly as its uncompressed counterpart does. In user mode the loop tracker
  * is fed even on a cache miss, since a repeated program counter proves a cycle
  * whether or not the destination has been translated yet; system mode has to
- * confirm the address space first, so an untranslated target is skipped.
+ * confirm the address space first, so an untranslated target is skipped, and
+ * probes only one chained branch in PROBE_INTERVAL (see emulate.c).
  */
 /* A repeated program counter proves a control-flow cycle. Once one has been
  * found for this dispatch, further probes cannot change profiling.
  */
 #define RVOP_PROBE_TARGET(target_pc, hot_label)                                \
     do {                                                                       \
-        cache_lookup_t lookup =                                                \
-            cache_get_with_freq(rv->block_cache, (target_pc), true);           \
+        IIF(RV32_HAS(SYSTEM))(if (++probe_tick % PROBE_INTERVAL) break;, )     \
+            cache_lookup_t lookup =                                            \
+                cache_get_with_freq(rv->block_cache, (target_pc), true);       \
         IIF(RV32_HAS(SYSTEM))(                                                 \
             if (!block_matches_context(rv,                                     \
                                        (const block_t *) lookup.value)) break; \
             , ) if (!has_loops && set_probe(&pc_set, (target_pc))) has_loops = \
             true;                                                              \
-        if (lookup.freq >= THRESHOLD)                                          \
+        if (lookup.freq >=                                                     \
+            IIF(RV32_HAS(SYSTEM))(THRESHOLD / PROBE_INTERVAL, THRESHOLD))      \
             goto hot_label;                                                    \
     } while (0)
 
@@ -157,7 +160,10 @@ RVOP(jal, {
         cache_lookup_t lookup =                                              \
             cache_get_with_freq(rv->block_cache, PC, true);                  \
         block_t *block = (block_t *) lookup.value;                           \
-        if (block) {                                                         \
+        /* A block of another address space, or one a flush invalidated,     \
+         * must go back through the dispatcher to be rebuilt.                \
+         */                                                                  \
+        if (block_matches_context(rv, block)) {                              \
             bht_record_target(ir->branch_table, PC, rv->csr_satp);           \
             if (lookup.freq >= THRESHOLD)                                    \
                 goto end_op;                                                 \
@@ -604,11 +610,23 @@ RVOP(sfencevma, {
          */
         pthread_mutex_lock(&rv->cache_lock);
 #endif
-        /* Invalidate JIT blocks with current SATP */
-        cache_invalidate_satp(rv->block_cache, rv->csr_satp);
+        /* Invalidate JIT blocks with current SATP, and stop reusing the code
+         * translated for it: a block rebuilt from the new mappings must not
+         * pick up what was translated from the old ones.
+         */
+        uint32_t n_compiled UNUSED;
+        cache_invalidate_satp(rv->block_cache, rv->csr_satp, &n_compiled);
+        jit_retire_space(rv->jit_state, rv->csr_satp);
 #if RV32_HAS(T2C)
-        jit_cache_clear(rv->jit_cache);
-        inline_cache_clear(rv->inline_cache);
+        /* Only this address space's blocks were invalidated, so only its
+         * entries go, and only T2C-compiled blocks have any: clearing every
+         * entry would also drop the compiled code of other processes, and
+         * Linux issues this flush several times in the life of each process.
+         */
+        if (n_compiled) {
+            jit_cache_clear_satp(rv->jit_cache, rv->csr_satp);
+            inline_cache_clear_satp(rv->inline_cache, rv->csr_satp);
+        }
         pthread_mutex_unlock(&rv->cache_lock);
 #endif
 #endif
@@ -617,20 +635,39 @@ RVOP(sfencevma, {
         uint32_t va = rv->X[ir->rs1];
         mmu_tlb_flush(rv, va);
 #if RV32_HAS(JIT)
-#if RV32_HAS(T2C)
-        /* Hold cache_lock during invalidation to prevent race with T2C
-         * compilation thread.
+        /* Linux flushes data pages far more often than code, so first check,
+         * without cache_lock, whether the page holds any block or translated
+         * code: only this thread changes the indexes that answer that.
          */
-        pthread_mutex_lock(&rv->cache_lock);
-#endif
-        /* Invalidate JIT blocks in the target VA page */
-        cache_invalidate_va(rv->block_cache, va, rv->csr_satp);
+        const bool has_code =
+            jit_page_has_code(rv->jit_state, va, rv->csr_satp);
+        if (has_code || cache_has_va(rv->block_cache, va, rv->csr_satp)) {
 #if RV32_HAS(T2C)
-        /* Selectively clear only jit_cache entries matching the VA page */
-        jit_cache_clear_page(rv->jit_cache, va, rv->csr_satp);
-        inline_cache_clear_page(rv->inline_cache, va, rv->csr_satp);
-        pthread_mutex_unlock(&rv->cache_lock);
+            /* Hold cache_lock during invalidation to prevent race with T2C
+             * compilation thread.
+             */
+            pthread_mutex_lock(&rv->cache_lock);
 #endif
+            uint32_t n_invalidated =
+                cache_invalidate_va(rv->block_cache, va, rv->csr_satp, NULL);
+            /* Blocks of other pages may still reach this page's old
+             * instructions: translated code through direct jumps, a T2C
+             * region spanning pages, and the interpreter through its links
+             * to the blocks it chains to. So when the page held any block or
+             * code, the whole address space goes.
+             */
+            if (has_code || n_invalidated) {
+                cache_invalidate_satp(rv->block_cache, rv->csr_satp, NULL);
+                jit_retire_space(rv->jit_state, rv->csr_satp);
+#if RV32_HAS(T2C)
+                jit_cache_clear_satp(rv->jit_cache, rv->csr_satp);
+                inline_cache_clear_satp(rv->inline_cache, rv->csr_satp);
+#endif
+            }
+#if RV32_HAS(T2C)
+            pthread_mutex_unlock(&rv->cache_lock);
+#endif
+        }
 #endif
     }
 #endif
@@ -656,15 +693,14 @@ RVOP(fencei, {
      */
     pthread_mutex_lock(&rv->cache_lock);
 #endif
-    /* Invalidate all JIT blocks for current address space.
-     * FENCE.I is a global instruction cache barrier - must clear all cached
-     * code since we don't know which addresses were modified.
-     * Uses same invalidation as global SFENCE.VMA (rs1=0).
+    /* FENCE.I is a global instruction cache barrier: any page of any address
+     * space, kernel text included, may hold new instructions. Invalidate every
+     * block and drop all translated code, which also empties the T2C caches.
+     * The guest issues it rarely, when it loads or patches code.
      */
-    cache_invalidate_satp(rv->block_cache, rv->csr_satp);
+    cache_invalidate_all(rv->block_cache);
+    jit_flush(rv);
 #if RV32_HAS(T2C)
-    jit_cache_clear(rv->jit_cache);
-    inline_cache_clear(rv->inline_cache);
     pthread_mutex_unlock(&rv->cache_lock);
 #endif
 #endif

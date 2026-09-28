@@ -253,6 +253,9 @@ static void *t2c_runloop(void *arg)
         list_del_init(&entry->list);
         pthread_mutex_unlock(&rv->wait_queue_lock);
 
+        /* Only this thread runs LLVM, so evicted engines are disposed here */
+        t2c_reap_engines(rv);
+
         /* Perform compilation with minimal lock contention.
          *
          * Lock strategy: Hold cache_lock only when accessing shared data:
@@ -306,6 +309,7 @@ static bool rv_spawn_t2c(riscv_t *rv)
     pthread_mutex_init(&rv->cache_lock, NULL);
     pthread_cond_init(&rv->wait_queue_cond, NULL);
     INIT_LIST_HEAD(&rv->wait_queue);
+    INIT_LIST_HEAD(&rv->orphan_blocks);
     /* Activate the background compilation thread.
      * Use larger stack (8MB) to handle deep recursion in t2c_trace_ebb
      * and LLVM's internal stack usage during compilation.
@@ -336,6 +340,8 @@ static void rv_destroy_t2c(riscv_t *rv)
     pthread_mutex_unlock(&rv->wait_queue_lock);
 
     pthread_join(t2c_thread, NULL);
+    t2c_reap_engines(rv);
+    t2c_free_orphans(rv);
 
     /* Clean up any remaining entries in wait queue */
     queue_entry_t *entry, *safe;
@@ -1457,7 +1463,7 @@ static bool rv_init_jit(riscv_t *rv)
         return false;
     }
 
-    rv->block_cache = cache_create(BLOCK_MAP_CAPACITY_BITS);
+    rv->block_cache = cache_create(BLOCK_CACHE_CAPACITY_BITS);
     if (!rv->block_cache) {
         rv_log_fatal("Failed to create block cache");
         goto fail_jit_state;
@@ -1569,6 +1575,11 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     rv_log_set_level(attr->log_level);
     rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
 
+#if RV32_HAS(JIT)
+    rv->jit_elide_align_checks = attr->allow_misalign;
+    rv->jit_entry_cycles = false;
+#endif
+
 #if !RV32_HAS(SYSTEM_MMIO)
     elf_t *elf = elf_new();
     assert(elf);
@@ -1593,6 +1604,12 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     const struct Elf32_Sym *exit_sym;
     if ((exit_sym = elf_get_symbol(elf, "exit")))
         attr->exit_addr = exit_sym->st_value;
+
+#if RV32_HAS(JIT)
+    rv->jit_elide_align_checks = rv->jit_elide_align_checks ||
+                                 !elf_has_insn(elf, insn_uses_privileged_state);
+    rv->jit_entry_cycles = !elf_has_insn(elf, insn_reads_counter);
+#endif
 #endif
 
     /* Load the program and set the entry pc. Neither is an assert: this is

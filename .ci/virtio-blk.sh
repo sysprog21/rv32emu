@@ -104,8 +104,13 @@ for disk_img in "${VBLK_IMGS[@]}"; do
             EXPECT_CMDS+=("${EXPECT_CMD}")
         fi
 
-        # Read-write using disk image with ~ home directory symbol
-        if [[ ${disk_img} =~ simplefs ]]; then
+        # Read-write using disk image with ~ home directory symbol, which can
+        # only name this checkout when it lives under $HOME.
+        HOME_TEST=true
+        if [[ "$(pwd)" != "${HOME}"/* ]]; then
+            print_warning "Skipping the ~ path test: $(pwd) is outside ${HOME}"
+            HOME_TEST=false
+        elif [[ ${disk_img} =~ simplefs ]]; then
             TEST_OPTION=(" -x vblk:${SIMPLEFS_KO_SRC} -x vblk:~$(pwd | sed "s|$HOME||")/${disk_img}")
             EXPECT_CMD='
         expect "buildroot login:" { send "root\n" } timeout { exit 1 }
@@ -131,8 +136,10 @@ for disk_img in "${VBLK_IMGS[@]}"; do
         expect "# " { send "\x01"; send "x" } timeout { exit 3 }
     '
         fi
-        TEST_OPTIONS+=("${TEST_OPTION}")
-        EXPECT_CMDS+=("${EXPECT_CMD}")
+        if ${HOME_TEST}; then
+            TEST_OPTIONS+=("${TEST_OPTION}")
+            EXPECT_CMDS+=("${EXPECT_CMD}")
+        fi
 
         # Read-write using disk image
         if [[ ${disk_img} =~ simplefs ]]; then

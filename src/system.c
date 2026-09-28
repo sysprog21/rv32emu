@@ -391,11 +391,13 @@ static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t vaddr)
     pte_t *pte = mmu_walk(rv, vaddr, &level);
     bool ok = MMU_FAULT_CHECK(ifetch, rv, pte, vaddr, PTE_X);
     if (unlikely(!ok)) {
-#if RV32_HAS(SYSTEM_MMIO)
         CHECK_PENDING_SIGNAL(rv, need_handle_signal);
-        if (need_handle_signal)
+
+        /* Retry only if the handler returned to the access and let the hart run
+         * on; a halted hart would otherwise retry forever.
+         */
+        if (need_handle_signal || rv_has_halted(rv))
             return 0;
-#endif
         /* Retry walk after trap handler has set up the page */
         pte = mmu_walk(rv, vaddr, &level);
         /* Re-validate permissions after retry */
@@ -422,13 +424,8 @@ uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
-    if (need_retranslate)
-        return 0;
-#elif RV32_HAS(SYSTEM_MMIO)
     if (need_handle_signal)
         return 0;
-#endif
 
     if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 4))
         return memory_read_w(addr);
@@ -444,13 +441,8 @@ uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
-    if (need_retranslate)
-        return 0;
-#elif RV32_HAS(SYSTEM_MMIO)
     if (need_handle_signal)
         return 0;
-#endif
 
     if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 2))
         return memory_read_s(addr);
@@ -466,13 +458,8 @@ uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
-#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
-    if (need_retranslate)
-        return 0;
-#elif RV32_HAS(SYSTEM_MMIO)
     if (need_handle_signal)
         return 0;
-#endif
 
     if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 1))
         return memory_read_b(addr);
@@ -488,13 +475,8 @@ void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
-    if (need_retranslate)
-        return;
-#elif RV32_HAS(SYSTEM_MMIO)
     if (need_handle_signal)
         return;
-#endif
 
     if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 4)) {
         memory_write_w(addr, (uint8_t *) &val);
@@ -512,13 +494,8 @@ void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
-    if (need_retranslate)
-        return;
-#elif RV32_HAS(SYSTEM_MMIO)
     if (need_handle_signal)
         return;
-#endif
 
     if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 2)) {
         memory_write_s(addr, (uint8_t *) &val);
@@ -536,13 +513,8 @@ void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
 {
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
-#if RV32_HAS(SYSTEM) && RV32_HAS(ELF_LOADER)
-    if (need_retranslate)
-        return;
-#elif RV32_HAS(SYSTEM_MMIO)
     if (need_handle_signal)
         return;
-#endif
 
     if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 1)) {
         memory_write_b(addr, (uint8_t *) &val);
@@ -573,24 +545,20 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
     bool ok = rw ? MMU_FAULT_CHECK(read, rv, pte, vaddr, PTE_R)
                  : MMU_FAULT_CHECK(write, rv, pte, vaddr, PTE_W);
     if (unlikely(!ok)) {
-#if RV32_HAS(SYSTEM_MMIO)
         CHECK_PENDING_SIGNAL(rv, need_handle_signal);
-        if (need_handle_signal)
+
+        /* Retry only if the handler returned to the access and let the hart run
+         * on; a halted hart would otherwise retry forever.
+         */
+        if (need_handle_signal || rv_has_halted(rv))
             return 0;
-#endif
         /* Retry walk after trap handler has set up the page */
         pte = mmu_walk(rv, vaddr, &level);
         /* Re-validate permissions after retry */
         ok = rw ? MMU_FAULT_CHECK(read, rv, pte, vaddr, PTE_R)
                 : MMU_FAULT_CHECK(write, rv, pte, vaddr, PTE_W);
         if (!pte || !ok) {
-#if RV32_HAS(ELF_LOADER)
-            need_retranslate = true;
-            /* Also set need_handle_signal so RVOP macro returns for retry */
             need_handle_signal = true;
-#else
-            need_handle_signal = true;
-#endif
             return 0;
         }
     }

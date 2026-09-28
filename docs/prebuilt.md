@@ -74,7 +74,7 @@ There are still some prebuilt standalone RISC-V binaries under `build/` director
 ## Run benchmarks
 
 ```shell
-$ make defconfig          # Or: make jit_defconfig for JIT-enabled build
+$ make defconfig          # Tier-1 JIT; interpreter_defconfig or jit_defconfig for others
 $ make
 $ build/rv32emu <benchmark>
 ```

@@ -20,10 +20,12 @@ Options:
     --have-llvm18       Check if LLVM 18 is available (exit 0/1)
     --have-riscv-toolchain  Check if RISC-V toolchain exists (exit 0/1)
     --have-zlib         Check if zlib exists (exit 0/1)
+    --jit-capable-target  Check if the compiler targets a JIT host (exit 0/1)
     --summary           Print full environment summary
 """
 
 import os
+import platform
 import shlex
 import shutil
 import subprocess
@@ -194,6 +196,23 @@ def print_summary():
     print(f"ZLIB: {'yes' if have_zlib() else 'no'}")
 
 
+def jit_capable_target():
+    """Whether the compiler targets a CPU the JIT generates code for.
+
+    Ask the compiler rather than the kernel: a 32-bit userland on a 64-bit
+    kernel reports the kernel's machine, but builds 32-bit code. The
+    predefined macros also reflect flags such as -m32 in CC. Without a
+    working compiler, fall back to the host machine. This is the host
+    compiler: CROSS_COMPILE names the RISC-V toolchain for guest programs.
+    """
+    cmd = shlex.split(os.environ.get("CC") or "cc")
+    ret, stdout, _ = run_cmd(cmd + ["-dM", "-E", "-x", "c", os.devnull])
+    if ret == 0 and stdout:
+        macros = {line.split()[1] for line in stdout.splitlines() if line}
+        return bool(macros & {"__x86_64__", "_M_X64", "__aarch64__"})
+    return platform.machine() in ("x86_64", "AMD64", "aarch64", "arm64")
+
+
 def bool_exit(result):
     """Signal boolean result via exit code for $(python,...) integration.
 
@@ -240,6 +259,8 @@ def main():
         bool_exit(have_riscv_toolchain())
     elif arg == "--have-zlib":
         bool_exit(have_zlib())
+    elif arg == "--jit-capable-target":
+        bool_exit(jit_capable_target())
     elif arg == "--summary":
         print_summary()
     else:

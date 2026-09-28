@@ -450,7 +450,9 @@ struct riscv_internal {
      */
     struct {
         uint8_t is_mmio; /* whether is MMIO or not (0=RAM, 1=MMIO/trap) */
-        uint32_t type;   /* instruction type for MMIO handler */
+        /* the access did not complete: stop the block (see settle_trap) */
+        uint8_t abort;
+        uint32_t type; /* instruction type for MMIO handler */
         uint32_t vaddr;
         uint32_t paddr;
         uint32_t pc; /* PC of the instruction (for trap return address) */
@@ -532,9 +534,33 @@ struct riscv_internal {
     pthread_mutex_t wait_queue_lock, cache_lock;
     pthread_cond_t wait_queue_cond;
     bool quit; /**< termination flag, protected by wait_queue_lock */
+    /* Engines of evicted blocks, for the T2C thread to dispose; protected by
+     * cache_lock. See t2c_retire_engine().
+     */
+    struct t2c_retired_engine *retired_engines;
+
+    /* Blocks evicted while the T2C thread compiled them, which it hands back
+     * for this thread to free: the memory pools then have a single user and
+     * need no lock. Protected by cache_lock. See t2c_free_orphans().
+     */
+    struct list_head orphan_blocks;
 #endif
     void *jit_state;
     void *jit_cache;
+
+    /* JIT code leaves alignment to the host: misaligned accesses are allowed
+     * (-m), or the loaded program uses no privileged state, so it cannot tell a
+     * misaligned access the emulator's default handler performs from one the
+     * host performs directly.
+     */
+    bool jit_elide_align_checks;
+
+    /* The loaded program reads no counter CSR, so tier-1 code leaves cycle
+     * counting to the dispatcher, which charges only the block a chain of
+     * blocks was entered through. The count then only paces rv_step() and
+     * memory reclamation, which need no more.
+     */
+    bool jit_entry_cycles;
 #if RV32_HAS(T2C)
     void *inline_cache; /* Inline cache for fast indirect jump resolution */
 #endif

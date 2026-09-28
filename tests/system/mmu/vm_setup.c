@@ -123,6 +123,9 @@ typedef struct {
 #define FREE_FRAME_BASE 0x400000
 #define MAX_TEST_PG 32
 
+/* User page that stays unmapped; see handle_trap() and main.c */
+#define POISON_VA 0x3000
+
 /* Exception cause codes (scause register values per RISC-V privilege spec) */
 #define CAUSE_USER_ECALL 8
 #define CAUSE_SUPERVISOR_ECALL 9
@@ -444,9 +447,18 @@ void SECTION_TEXT_VMSETUP handle_fault(uint32_t addr, uint32_t cause)
  */
 void SECTION_TEXT_VMSETUP handle_trap(trapframe_t *tf)
 {
-    if (tf->cause == CAUSE_FETCH_PAGE_FAULT ||
-        tf->cause == CAUSE_LOAD_PAGE_FAULT ||
-        tf->cause == CAUSE_STORE_PAGE_FAULT) {
+    /* The poisoned page is never mapped. Skip a load from it, or return from a
+     * call into it, and count that in t6, the way a kernel's exception-table
+     * fixup or signal delivery resumes elsewhere instead of retrying.
+     */
+    if ((tf->cause == CAUSE_LOAD_PAGE_FAULT ||
+         tf->cause == CAUSE_FETCH_PAGE_FAULT) &&
+        tf->badvaddr >> PG_SHIFT == POISON_VA >> PG_SHIFT) {
+        tf->epc = tf->cause == CAUSE_LOAD_PAGE_FAULT ? tf->epc + 4 : tf->ra;
+        tf->t6++;
+    } else if (tf->cause == CAUSE_FETCH_PAGE_FAULT ||
+               tf->cause == CAUSE_LOAD_PAGE_FAULT ||
+               tf->cause == CAUSE_STORE_PAGE_FAULT) {
         handle_fault(tf->badvaddr, tf->cause);
     } else {
         assert(!"Unknown exception");

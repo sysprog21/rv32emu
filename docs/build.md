@@ -20,7 +20,9 @@ The Makefile auto-detects `llvm-config` in `$PATH` (preferring the newest
 supported version) and the matching Homebrew prefix; override with
 `make LLVM_CONFIG=/path/to/llvm-config` to pin a specific install.
 
-Build the emulator with JIT compiler using the predefined configuration:
+The default configuration uses the tier-1 JIT (T1C) on x86-64 and Arm64 hosts
+and the interpreter elsewhere; it needs no LLVM. To add the LLVM-based tier-2
+compiler (T2C), use the JIT configuration:
 ```shell
 $ make jit_defconfig
 $ make
@@ -31,9 +33,9 @@ Alternatively, use the legacy command-line option (for backward compatibility):
 $ make ENABLE_JIT=1
 ```
 
-If you don't want the JIT compilation feature, simply build with the following:
+If you don't want the JIT compilation feature, build the interpreter only:
 ```shell
-$ make defconfig
+$ make interpreter_defconfig
 $ make
 ```
 
@@ -45,11 +47,13 @@ There are three ways to customize the build.
 
 Use predefined configurations for common use cases:
 ```shell
-$ make defconfig            # Default: SDL enabled, all extensions
+$ make defconfig            # Default: tier-1 JIT, SDL enabled, all extensions
+$ make interpreter_defconfig # Default without the JIT
 $ make mini_defconfig       # Minimal: no SDL, basic extensions only
-$ make jit_defconfig        # JIT: enables tiered JIT compilation
-$ make system_defconfig     # System: enables Linux system emulation
-$ make system_jit_defconfig # System+JIT: enables Linux system emulation with JIT
+$ make jit_defconfig        # JIT: enables tiered JIT compilation (T1C + T2C)
+$ make system_defconfig     # System: Linux system emulation, tier-1 JIT
+$ make system_interpreter_defconfig # System emulation without the JIT
+$ make system_jit_defconfig # System emulation with tiered JIT (T1C + T2C)
 $ make wasm_defconfig       # WebAssembly: build for browser deployment
 ```
 

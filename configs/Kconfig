@@ -106,6 +106,10 @@ config HOST_LINUX
 config HOST_MACOS
     def_bool $(python,assert sys.platform == 'darwin')
 
+# Whether the compiler targets a CPU the JIT generates code for.
+config HOST_JIT_CAPABLE
+    def_bool $(python,assert run(sys.executable, 'tools/detect-env.py', '--jit-capable-target'))
+
 # RISC-V ISA Extensions
 
 menu "RISC-V ISA Configuration"
@@ -226,6 +230,8 @@ choice
     default INTERPRETER_ONLY
     help
       Select the execution engine for RISC-V instruction emulation.
+      configs/defconfig selects the JIT; on hosts it does not support, the
+      interpreter is used instead.
 
 config INTERPRETER_ONLY
     bool "Interpreter Only"
@@ -235,7 +241,7 @@ config INTERPRETER_ONLY
 
 config JIT
     bool "JIT Compilation (Hybrid)"
-    depends on !CC_IS_EMCC
+    depends on !CC_IS_EMCC && HOST_JIT_CAPABLE
     help
       Hybrid interpreter + Just-In-Time compilation.
       Tier-1 JIT uses template-based code generation for hot paths.

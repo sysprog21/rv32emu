@@ -33,16 +33,35 @@ struct jump {
 #endif
 };
 
+/* A translated block: where its code starts in the code cache. Entries are
+ * found through hash chains of indices into the offset map, -1 ending a chain:
+ * by pc and satp for lookups, and in system mode also by address space and by
+ * page, so that the entries of either can be retired when the guest flushes
+ * them. A retired entry is never found again; its code stays in the cache,
+ * unreachable, until the cache is flushed.
+ */
 struct offset_map {
     uint32_t pc;
     uint32_t offset;
+    int32_t next;
 #if RV32_HAS(SYSTEM)
     uint32_t satp;
+    int32_t next_in_space;
+    int32_t next_in_page;
+    bool retired;
 #endif
 };
 
+#define OFFSET_INDEX_BITS 14 /* at least twice MAX_BLOCKS entries */
+#define SPACE_INDEX_BITS 8
+#define PAGE_INDEX_BITS_JIT 12
+
 struct jit_state {
-    set_t set;
+    int32_t offset_index[1 << OFFSET_INDEX_BITS];
+#if RV32_HAS(SYSTEM)
+    int32_t space_index[1 << SPACE_INDEX_BITS];
+    int32_t page_index[1 << PAGE_INDEX_BITS_JIT];
+#endif
     uint8_t *buf;
     uint32_t offset;
     uint32_t stack_size;
@@ -65,19 +84,43 @@ struct host_reg {
                        block */
 };
 
+/* Flags passed from generated code to jit_misaligned_trap(). */
+#define JIT_MISALIGN_STORE 1U
+#define JIT_MISALIGN_COMPRESSED 2U
+
+/* Raise the exception the interpreter raises for a misaligned load or store.
+ * Both JIT tiers call this with rv->PC set to the faulting instruction and
+ * every guest register in rv->X, then leave the block: the trap handler has
+ * already set rv->PC to the trap vector, or, in user mode without one, emulated
+ * the access and advanced past it.
+ */
+void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags);
+
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);
 bool jit_translate(riscv_t *rv, block_t *block);
-typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 
-/* JIT misaligned memory access handler.
- * Performs misaligned load/store operations using byte-level memory accesses.
+#if RV32_HAS(SYSTEM)
+/* Stop reusing the code translated for address space satp. Called when the
+ * guest flushes it: a block rebuilt afterwards gets fresh code instead of what
+ * was translated from the old mappings.
  */
-void jit_misaligned_handler(riscv_t *rv,
-                            uint32_t addr,
-                            uint32_t vreg_idx,
-                            uint32_t type,
-                            bool is_store);
+void jit_retire_space(struct jit_state *state, uint32_t satp);
+
+/* Whether any code translated for address space satp starts in the page of
+ * va. Such code may be the target of direct jumps from other pages, so a flush
+ * of the page has to retire the whole address space.
+ */
+bool jit_page_has_code(const struct jit_state *state,
+                       uint32_t va,
+                       uint32_t satp);
+
+/* Drop all translated code, for a FENCE.I, after which any page of any
+ * address space may hold new instructions.
+ */
+void jit_flush(riscv_t *rv);
+#endif
+typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 
 #if RV32_HAS(T2C)
 void t2c_compile(riscv_t *, block_t *, pthread_mutex_t *);
@@ -92,6 +135,17 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
  * access the element by masking the program counter.
  */
 #define N_JIT_CACHE_ENTRIES (1 << 12)
+
+/* Slot of the jit-cache entry for pc in address space satp (0 outside system
+ * mode). t2c_jit_cache_helper() computes the same index in LLVM IR for the
+ * lookup in generated code, so the two must change together: an entry stored
+ * under any other index is never found, and every indirect jump falls back to
+ * the dispatcher.
+ */
+static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
+{
+    return (pc ^ (pc >> 12) ^ satp) & (N_JIT_CACHE_ENTRIES - 1);
+}
 
 /* Inline cache for fast-path indirect jump resolution.
  * Stores the most recently used (target, entry) pair per call site.
@@ -113,7 +167,7 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
  *
  * Invalidation: Inline cache entries are cleared on:
  * - Block eviction (inline_cache_clear_key in emulate.c)
- * - SFENCE.VMA (inline_cache_clear_page in rv32_template.c)
+ * - SFENCE.VMA (inline_cache_clear_satp in rv32_template.c)
  * - FENCE.I / code_cache_flush (inline_cache_clear in jit.c)
  *
  * On cache hit, ISB is skipped on ARM64 since we already executed this target
@@ -125,6 +179,16 @@ struct inline_cache {
     uint64_t key; /* target PC (+ satp<<32 in system mode), 0 = empty */
     void *entry;  /* cached function pointer */
 };
+
+/* Slot of the inline cache entry for pc in address space satp (0 outside system
+ * mode). The inline cache is direct-mapped, and generated code
+ * (t2c_jit_cache_helper) computes the same index, so a key can only ever live
+ * in this one slot.
+ */
+static inline uint32_t inline_cache_slot(uint32_t pc, uint32_t satp)
+{
+    return (pc ^ (pc >> 12) ^ satp) & (N_INLINE_CACHE_ENTRIES - 1);
+}
 
 /* Verify inline_cache struct layout for LLVM IR generation.
  * LLVM type: { i64 key, ptr entry }
@@ -146,9 +210,7 @@ struct inline_cache *inline_cache_init(void);
 void inline_cache_exit(struct inline_cache *cache);
 void inline_cache_clear(struct inline_cache *cache);
 void inline_cache_clear_key(struct inline_cache *cache, uint64_t key);
-void inline_cache_clear_page(struct inline_cache *cache,
-                             uint32_t va,
-                             uint32_t satp);
+void inline_cache_clear_satp(struct inline_cache *cache, uint32_t satp);
 
 /* jit_cache entry for T2C compiled code lookup.
  * Thread safety: Uses seqlock pattern for lock-free readers.
@@ -191,10 +253,14 @@ struct jit_cache *jit_cache_init(void);
 void jit_cache_exit(struct jit_cache *cache);
 void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
 void jit_cache_clear(struct jit_cache *cache);
-void jit_cache_clear_page(struct jit_cache *cache, uint32_t va, uint32_t satp);
+void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp);
 
-/* Dispose LLVM execution engine when a T2C-compiled block is freed */
-void t2c_dispose_engine(void *engine);
+/* Hand an evicted block's LLVM engine to the T2C thread, which disposes it in
+ * t2c_reap_engines().
+ */
+void t2c_retire_engine(riscv_t *rv, void *engine);
+void t2c_free_orphans(riscv_t *rv);
+void t2c_reap_engines(riscv_t *rv);
 
 /* Wrapper for cache cleanup - disposes LLVM engine from a block */
 void t2c_dispose_block_engine(void *block);

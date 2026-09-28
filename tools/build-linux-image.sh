@@ -266,21 +266,9 @@ function do_buildroot
     cp -f ${SRC_DIR}/buildroot/output/images/rootfs.cpio ${OUTPUT_DIR}
     cp -f ${SRC_DIR}/buildroot/output/images/rootfs.cpio.gz ${OUTPUT_DIR}
 
-    # Create a ext4 rootfs disk (60M)
-    # The size need to be adjusted once the rootfs.cpio becomes larger
-    # over the time
-    dd if=/dev/urandom of=${OUTPUT_DIR}/rootfs.ext4 bs=1M count=60
-    mkfs.ext4 ${OUTPUT_DIR}/rootfs.ext4
-    mkdir -p ${OUTPUT_DIR}/mnt
-    mount ${OUTPUT_DIR}/rootfs.ext4 ${OUTPUT_DIR}/mnt
-
-    cpio -idmv -D ${OUTPUT_DIR}/mnt < ${OUTPUT_DIR}/rootfs.cpio
-
-    sync
-    umount ${OUTPUT_DIR}/mnt
-
-    # gzip version of the rootfs.ext4
-    gzip -9 -c ${OUTPUT_DIR}/rootfs.ext4 > ${OUTPUT_DIR}/rootfs.ext4.gz
+    # Buildroot backward compatibility, rename ext2 to ext4 for clear
+    ASSERT cp -f ${SRC_DIR}/buildroot/output/images/rootfs.ext2 ${OUTPUT_DIR}/rootfs.ext4
+    ASSERT cp -f ${SRC_DIR}/buildroot/output/images/rootfs.ext2.gz ${OUTPUT_DIR}/rootfs.ext4.gz
 }
 
 function do_linux

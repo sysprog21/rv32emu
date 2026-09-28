@@ -130,8 +130,11 @@ CFLAGS_dt += -DMEM_START=0x$(MEM_START) \
              -DINITRD_END=0x$(shell echo "obase=16; ibase=16; \
                             $(REAL_MEM_SIZE) - $(call compute_size, $(DTB_SIZE)) - 1" | bc)
 else
+# Use dummy INITRD_START/END to fool the DTC, so libfdt can remove the linux,initrd_start/end dynamically
 CFLAGS_dt += -DMEM_START=0x$(MEM_START) \
-             -DMEM_END=0x$(shell echo "obase=16; ibase=16; $(MEM_START)+$(REAL_MEM_SIZE)" | bc)
+             -DMEM_END=0x$(shell echo "obase=16; ibase=16; $(MEM_START)+$(REAL_MEM_SIZE)" | bc) \
+             -DINITRD_START=0x0 \
+             -DINITRD_END=0x0
 endif
 
 ifeq ($(CONFIG_ROOTFS_EXT4),n)

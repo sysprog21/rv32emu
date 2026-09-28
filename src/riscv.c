@@ -719,6 +719,12 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             err = fdt_setprop(dtb_buf, node, "bootargs", bootargs_buf, len + 1);
         }
         assert(!err);
+
+        /* Remove the initrd-start/end */
+        err = fdt_delprop(dtb_buf, node, "linux,initrd-start");
+        assert(!err);
+        err = fdt_delprop(dtb_buf, node, "linux,initrd-end");
+        assert(!err);
     }
 #endif
 

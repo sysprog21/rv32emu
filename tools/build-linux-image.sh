@@ -263,8 +263,8 @@ function do_buildroot
     ASSERT make olddefconfig
     ASSERT make ${PARALLEL}
     popd
-    cp -f ${SRC_DIR}/buildroot/output/images/rootfs.cpio ${OUTPUT_DIR}
-    cp -f ${SRC_DIR}/buildroot/output/images/rootfs.cpio.gz ${OUTPUT_DIR}
+    ASSERT cp -f ${SRC_DIR}/buildroot/output/images/rootfs.cpio ${OUTPUT_DIR}
+    ASSERT cp -f ${SRC_DIR}/buildroot/output/images/rootfs.cpio.gz ${OUTPUT_DIR}
 
     # Buildroot backward compatibility, rename ext2 to ext4 for clear
     ASSERT cp -f ${SRC_DIR}/buildroot/output/images/rootfs.ext2 ${OUTPUT_DIR}/rootfs.ext4
@@ -281,8 +281,8 @@ function do_linux
     ASSERT make olddefconfig
     ASSERT make ${PARALLEL}
     popd
-    cp -f ${SRC_DIR}/linux/arch/riscv/boot/Image ${OUTPUT_DIR}
-    cp -f ${SRC_DIR}/linux/arch/riscv/boot/Image.gz ${OUTPUT_DIR}
+    ASSERT cp -f ${SRC_DIR}/linux/arch/riscv/boot/Image ${OUTPUT_DIR}
+    ASSERT cp -f ${SRC_DIR}/linux/arch/riscv/boot/Image.gz ${OUTPUT_DIR}
 }
 
 function do_simplefs
@@ -290,7 +290,7 @@ function do_simplefs
     pushd $SRC_DIR/simplefs
     ASSERT make KDIR=$SRC_DIR/linux $PARALLEL
     popd
-    cp -f $SRC_DIR/simplefs/simplefs.ko $OUTPUT_DIR
+    ASSERT cp -f $SRC_DIR/simplefs/simplefs.ko $OUTPUT_DIR
 }
 
 do_buildroot && OK

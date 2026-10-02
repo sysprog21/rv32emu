@@ -12,6 +12,9 @@
 
 #include "riscv.h"
 #include "riscv_private.h"
+#if RV32_HAS_HART_CORO
+#include "coro.h"
+#endif
 #include "syscall_sdl.h"
 #include "utils.h"
 
@@ -529,7 +532,24 @@ static const char *sbi_rst_reason_str(const riscv_word_t reason)
     return "unknown";
 }
 
-/* Does not return if it succeeds */
+/* Restart the hart after a guest reboot. On the coroutine path this abandons
+ * the whole host call stack below the coroutine entry, including any JIT or T2C
+ * frames. That is safe only because nothing on the path from guest execution to
+ * this ecall holds a lock or owns heap memory; keep it that way.
+ */
+static void syscall_restart_hart(riscv_t *rv)
+{
+    rv_reset_dispatcher_state();
+#if RV32_HAS_HART_CORO
+    if (coro_restart_current())
+        return;
+#endif
+    /* Direct stepping resumes at the outer cycle loop boundary. */
+    rv->reboot_requested = true;
+    rv->halt = true;
+}
+
+/* A native hart coroutine restarts without returning to this call path. */
 static void syscall_sbi_rst(riscv_t *rv)
 {
     const riscv_word_t fid = rv_get_reg(rv, rv_reg_a6);
@@ -545,25 +565,13 @@ static void syscall_sbi_rst(riscv_t *rv)
         } else if (a0 == SBI_RST_TYPE_COLD_REBOOT) { /* default reboot mode,
                                                         reset whole system */
             rv_cold_reboot(rv, 0U);
-            /* longjmp to return to the main loop to avoid the complex return
-             * path and access stale registers (e.g., sp) after rv_cold_reboot()
-             * has called.
-             *
-             * The setjmp point is in rv_step() in src/emulate.c.
-             */
-            longjmp(rv->reboot_jmp, 1);
+            syscall_restart_hart(rv);
         }
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
         /* reset halt only, echo "warm" > /sys/kernel/reboot/mode to set */
         else if (a0 == SBI_RST_TYPE_WARM_REBOOT) {
             rv_warm_reboot(rv, 0U);
-            /* longjmp to return to the main loop to avoid the complex return
-             * path and access stale registers (e.g., sp) after rv_warm_reboot()
-             * has called.
-             *
-             * The setjmp point is in rv_step() in src/emulate.c.
-             */
-            longjmp(rv->reboot_jmp, 1);
+            syscall_restart_hart(rv);
         }
 #endif
         break;

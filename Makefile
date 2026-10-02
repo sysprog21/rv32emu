@@ -257,6 +257,13 @@ ifeq ($(CC_IS_EMCC), 1)
 OBJS += em_runtime.o
 endif
 OBJS += emulate.o riscv.o log.o elf.o cache.o mpool.o $(OBJS_EXT) main.o
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(CC_IS_EMCC),1)
+OBJS += coro.o
+endif
+endif
+endif
 OBJS := $(addprefix $(OUT)/, $(OBJS))
 deps += $(OBJS:%.o=%.o.d)
 

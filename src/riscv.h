@@ -475,6 +475,13 @@ void rv_step(void *arg);
 /* step the RISC-V emulator for debug mode */
 void rv_step_debug(void *arg);
 
+#if RV32_HAS_HART_CORO
+bool rv_coroutine_start(riscv_t *rv);
+void rv_coroutine_step(riscv_t *rv);
+void rv_coroutine_stop(void);
+void rv_step_coroutine(void *arg);
+#endif
+
 #if RV32_HAS(VIRTIO_NET)
 /* Refresh the virtio-net backend periodically while the guest is running. */
 void rv_refresh_vnet(riscv_t *rv);

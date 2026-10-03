@@ -15,6 +15,9 @@
 #include "breakpoint.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#if RV32_HAS(SYSTEM)
+#include "system.h"
+#endif
 
 static size_t rv_get_reg_bytes(UNUSED int regno)
 {
@@ -50,28 +53,76 @@ static int rv_write_reg(void *args, int regno, void *data)
     return 0;
 }
 
+/* Find the guest RAM behind a debugger address. The hart's own accessors are
+ * not usable here: in system mode they raise page faults into the guest, which
+ * then runs its handler and may kill the current process, and they set A/D
+ * bits, fill the TLB and read device registers that change state when read.
+ * Translate without side effects instead, and reach RAM only.
+ *
+ * Returns how many of the @len bytes at @addr are contiguous in RAM from
+ * *@paddr, up to the end of the page, or 0 if @addr itself is not.
+ */
+static uint32_t rv_debug_ram_span(riscv_t *rv,
+                                  size_t addr,
+                                  size_t len,
+                                  uint32_t *paddr)
+{
+    *paddr = 0;
+    if (addr > UINT32_MAX)
+        return 0;
+    size_t span = RV_PG_SIZE - (addr & (RV_PG_SIZE - 1));
+    if (span > len)
+        span = len;
+#if RV32_HAS(SYSTEM)
+    if (!mmu_debug_translate(rv, (uint32_t) addr, paddr))
+        return 0;
+#else
+    *paddr = (uint32_t) addr;
+#endif
+    return GUEST_RAM_CONTAINS(PRIV(rv)->mem, *paddr, span) ? span : 0;
+}
+
 static int rv_read_mem(void *args, size_t addr, size_t len, void *val)
 {
     riscv_t *rv = (riscv_t *) args;
+    uint8_t *buf = val;
 
-    int err = 0;
-    for (size_t i = 0; i < len; i++) {
-        /* FIXME: This is implemented as a simple workaround for reading
-         * an invalid address. We may have to do error handling in the
-         * mem_read_* function directly.
-         */
-        *((uint8_t *) val + i) = rv->io.mem_read_b(rv, addr + i);
+    while (len) {
+        uint32_t paddr;
+        uint32_t span = rv_debug_ram_span(rv, addr, len, &paddr);
+        if (!span)
+            return EFAULT;
+        memory_read(PRIV(rv)->mem, buf, paddr, span);
+        addr += span;
+        buf += span;
+        len -= span;
     }
 
-    return err;
+    return 0;
 }
 
 static int rv_write_mem(void *args, size_t addr, size_t len, void *val)
 {
     riscv_t *rv = (riscv_t *) args;
+    const uint8_t *buf = val;
 
-    for (size_t i = 0; i < len; i++)
-        rv->io.mem_write_b(rv, addr + i, *((uint8_t *) val + i));
+    /* Check the whole range first, so a failed write changes nothing */
+    for (size_t done = 0; done < len;) {
+        uint32_t paddr;
+        uint32_t span = rv_debug_ram_span(rv, addr + done, len - done, &paddr);
+        if (!span)
+            return EFAULT;
+        done += span;
+    }
+
+    while (len) {
+        uint32_t paddr;
+        uint32_t span = rv_debug_ram_span(rv, addr, len, &paddr);
+        memory_write(PRIV(rv)->mem, paddr, buf, span);
+        addr += span;
+        buf += span;
+        len -= span;
+    }
 
     return 0;
 }

@@ -528,6 +528,37 @@ void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
     __UNREACHABLE;
 }
 
+/* Translate @vaddr for a debugger. It walks the page tables as a data access
+ * does, but never raises a fault, updates the A/D bits or fills a TLB, so the
+ * guest cannot tell it happened.
+ *
+ * Returns false when the address is unmapped.
+ */
+bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr)
+{
+    if (!rv->csr_satp) {
+        *paddr = vaddr;
+        return true;
+    }
+
+    uint32_t level;
+    pte_t *pte = mmu_walk(rv, vaddr, &level);
+    if (!pte)
+        return false;
+
+    /* A Sv32 PTE can map a physical address above 4 GiB, so compute it in 64
+     * bits rather than let it wrap onto unrelated low memory.
+     */
+    const uint64_t ppn = (uint64_t) (*pte >> (RV_PG_SHIFT - 2)) << RV_PG_SHIFT;
+    const uint32_t offset =
+        level == 1 ? vaddr & MASK(RV_PG_SHIFT + 10) : vaddr & MASK(RV_PG_SHIFT);
+    const uint64_t translated = ppn | offset;
+    if (translated > UINT32_MAX)
+        return false;
+    *paddr = (uint32_t) translated;
+    return true;
+}
+
 uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
 {
     if (!rv->csr_satp)

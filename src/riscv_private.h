@@ -527,6 +527,7 @@ struct riscv_internal {
 #if RV32_HAS(T2C)
     struct list_head wait_queue;
     pthread_mutex_t wait_queue_lock, cache_lock;
+    uint32_t hart_locks_held; /**< counted by hart_lock()/hart_unlock() */
     pthread_cond_t wait_queue_cond;
     bool quit; /**< termination flag, protected by wait_queue_lock */
     /* Engines of evicted blocks, for the T2C thread to dispose; protected by
@@ -567,6 +568,12 @@ struct riscv_internal {
     gdbstub_t gdbstub;
 
     bool debug_mode;
+
+    /* Set while a GDB "continue" runs, so rv_debug_run() keeps stepping until a
+     * breakpoint, an interrupt or a halt instead of returning after one
+     * instruction.
+     */
+    bool debug_continue;
 
     /* GDB instruction breakpoint */
     breakpoint_map_t breakpoint_map;
@@ -628,6 +635,26 @@ struct riscv_internal {
     uint32_t csr_vlenb;  /* VLEN/8 (vector register length in bytes) */
 #endif
 };
+
+#if RV32_HAS(T2C)
+/* Lock and unlock on the hart thread. A guest reboot abandons the hart stack
+ * (see syscall_restart_hart()), so the hart counts the locks it holds and a
+ * reboot refuses to go ahead while any is held. The T2C thread uses the plain
+ * pthread calls.
+ */
+static inline void hart_lock(riscv_t *rv, pthread_mutex_t *lock)
+{
+    pthread_mutex_lock(lock);
+    rv->hart_locks_held++;
+}
+
+static inline void hart_unlock(riscv_t *rv, pthread_mutex_t *lock)
+{
+    assert(rv->hart_locks_held);
+    rv->hart_locks_held--;
+    pthread_mutex_unlock(lock);
+}
+#endif
 
 #if RV32_HAS(SYSTEM_MMIO)
 /* Forget the dispatcher's cross-step state after a guest reboot. */

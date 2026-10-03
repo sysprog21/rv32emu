@@ -983,8 +983,9 @@ void rv_refresh_vnet(riscv_t *rv)
 /* The hart's whole run loop. In normal operation it only leaves the coroutine
  * when the hart halts or a guest reboot restarts it: per-slice host work such
  * as the virtio-net refresh runs here, so a stack switch after every slice
- * would add overhead for nothing. Under gdbstub it yields after every
- * instruction so the debugger can inspect state between steps.
+ * would add overhead for nothing. Under gdbstub it yields after each debugger
+ * request (one instruction, or a whole "continue") so the debugger can inspect
+ * state in between.
  */
 static void rv_hart_coroutine(void *arg)
 {
@@ -993,18 +994,21 @@ static void rv_hart_coroutine(void *arg)
     while (!rv_has_halted(rv)) {
 #if RV32_HAS(GDBSTUB)
         if (rv->debug_mode) {
-            rv_step_debug(rv);
+            rv_debug_run(rv);
             coro_yield();
             continue;
         }
 #endif
-        rv_step_coroutine(rv);
+        rv_step(rv);
 #if RV32_HAS(VIRTIO_NET)
         rv_refresh_vnet(rv);
 #endif
     }
 }
 
+/* The coroutine fault handler chains to the demand-paging handler, which
+ * memory_new() installs; the hart must be created before this is called.
+ */
 bool rv_coroutine_start(riscv_t *rv)
 {
     assert(rv);

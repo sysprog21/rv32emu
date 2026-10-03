@@ -243,10 +243,12 @@
 #endif
 
 /* Native system-mode harts run on a coroutine stack, so a guest reboot can
- * abandon the host call path and restart the hart from the top. The browser
- * build steps the hart from the Emscripten main loop instead.
+ * abandon the host call path and restart the hart from the top. User mode has
+ * no reboot and keeps the plain run loop. The browser build steps the hart from
+ * the Emscripten main loop, and coro.c supports neither Windows nor Cygwin.
  */
-#if RV32_HAS(SYSTEM_MMIO) && !defined(__EMSCRIPTEN__)
+#if RV32_HAS(SYSTEM_MMIO) && !defined(__EMSCRIPTEN__) && !defined(_WIN32) && \
+    !defined(__CYGWIN__)
 #define RV32_HAS_HART_CORO 1
 #else
 #define RV32_HAS_HART_CORO 0

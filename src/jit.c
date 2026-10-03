@@ -4415,11 +4415,11 @@ restart:
         /* The flush empties the T2C caches, which the T2C thread writes under
          * cache_lock; a seqlock only protects readers.
          */
-        pthread_mutex_lock(&rv->cache_lock);
+        hart_lock(rv, &rv->cache_lock);
 #endif
         code_cache_flush(state, rv);
 #if RV32_HAS(T2C)
-        pthread_mutex_unlock(&rv->cache_lock);
+        hart_unlock(rv, &rv->cache_lock);
 #endif
         goto restart;
     }

@@ -257,6 +257,7 @@ MMU_FAULT_CHECK_DECL(write);
  * Translate virtual address to physical address with TLB caching.
  */
 uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw);
+bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr);
 
 /*
  * TLB management functions for SFENCE.VMA and SATP changes.

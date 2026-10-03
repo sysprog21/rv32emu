@@ -73,7 +73,9 @@ RUN_LINUX="${run_prefix} build/rv32emu ${OPTS_BASE} -x vnet:${backend}"
 
 printf "${COLOR_Y}===== Test option: ${OPTS_BASE} -x vnet:${backend} =====${COLOR_N}\n"
 
-ASSERT expect <<- DONE
+run_netdev_case()
+{
+    expect <<- DONE
 	set timeout ${TIMEOUT}
 	set tap_if ""
 	set guest_ip "${guest_ip}"
@@ -196,10 +198,19 @@ ASSERT expect <<- DONE
 	    }
 	}
 DONE
+}
+
+BOOT_ATTEMPTS=$(
+    normalize_test_attempts "${BOOT_ATTEMPTS_DEFAULT:-1}" 1
+)
+
+run_test_with_retry \
+    "Virtio-net ${test_name} Test" \
+    "${BOOT_ATTEMPTS}" \
+    run_netdev_case
 
 ret=$?
 RET=$((${RET} + ${ret}))
-cleanup
 
 printf "\nVirtio-net ${test_name} Test: [ ${MESSAGES[$ret]}${COLOR_N} ]\n"
 

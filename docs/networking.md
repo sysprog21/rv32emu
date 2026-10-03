@@ -62,9 +62,23 @@ where `<backend>` is one of the supported backend names for the current host.
 
 ### Linux TAP mode
 
-TAP mode requires root privileges or `CAP_NET_ADMIN`.
+TAP mode requires network administration privileges, which can be provided either by running rv32emu with `sudo` or by granting the executable `CAP_NET_ADMIN`.
 
-Start rv32emu:
+When TAP networking is used together with virtio-snd, prefer `CAP_NET_ADMIN` instead of running the whole emulator with `sudo`. PortAudio normally connects to the audio session of the logged-in desktop user, such as PipeWire or PulseAudio. Running rv32emu as root may prevent PortAudio from accessing that user session.
+
+Grant the required capability to the rv32emu executable:
+
+```shell
+sudo setcap cap_net_admin+ep build/rv32emu
+getcap build/rv32emu
+
+build/rv32emu \
+  -k build/linux-image/Image \
+  -i build/linux-image/rootfs.cpio \
+  -x vnet:tap \
+  -x vsnd
+```
+If you just want to use virtio-net only (without virtio-snd), you can start rv32emu with `sudo -E`:
 
 ```shell
 sudo -E build/rv32emu \

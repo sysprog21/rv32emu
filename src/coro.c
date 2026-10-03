@@ -14,6 +14,29 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+/* Stack-switch annotations. AddressSanitizer must be told about every switch so
+ * it tracks the right stack and its fake frames, and valgrind must know the
+ * coroutine stack is a stack. Both compile away in normal builds.
+ */
+#if defined(__SANITIZE_ADDRESS__)
+#define CORO_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define CORO_ASAN 1
+#endif
+#endif
+#ifdef CORO_ASAN
+#include <sanitizer/asan_interface.h>
+#include <sanitizer/common_interface_defs.h>
+#endif
+
+#if defined(__has_include)
+#if __has_include(<valgrind/valgrind.h>)
+#include <valgrind/valgrind.h>
+#define CORO_VALGRIND 1
+#endif
+#endif
+
 /* Platform detection */
 
 #if !defined(CORO_USE_UCONTEXT) && !defined(CORO_USE_ASM)
@@ -214,6 +237,12 @@ typedef struct {
     void *map_base;         /* Mapping base, including the guard region */
     size_t map_size;        /* Mapping size, including the guard region */
     bool restart;
+#ifdef CORO_ASAN
+    void *asan_fake_stack; /* Fake stack while switched out */
+#endif
+#ifdef CORO_VALGRIND
+    unsigned valgrind_stack_id;
+#endif
 } coro_t;
 
 /* Global state */
@@ -254,6 +283,24 @@ static inline void coro_clear_running_state(void)
 
 static void jump_out(coro_t *co);
 static void coro_entry_wrapper(void *arg);
+
+#ifdef CORO_ASAN
+/* The scheduler's stack, which every coroutine switches back to */
+static void *asan_caller_fake;
+static const void *asan_caller_bottom;
+static size_t asan_caller_size;
+#endif
+
+/* Tell AddressSanitizer it now runs on the coroutine stack. Called right after
+ * every switch in, including the first one from the entry wrapper.
+ */
+static inline void coro_asan_entered(coro_t *co UNUSED)
+{
+#ifdef CORO_ASAN
+    __sanitizer_finish_switch_fiber(co->asan_fake_stack, &asan_caller_bottom,
+                                    &asan_caller_size);
+#endif
+}
 
 /* Context switch implementation */
 
@@ -297,21 +344,7 @@ static bool make_context(coro_t *co)
     return true;
 }
 
-/* Jump into a coroutine */
-static void jump_into(coro_t *co)
-{
-    coro_context_t *context = &co->context;
-    tls_running_coro = co;
-    _coro_switch(&context->back_ctx, &context->ctx);
-}
-
-/* Jump out of a coroutine */
-static void jump_out(coro_t *co)
-{
-    coro_context_t *context = &co->context;
-    coro_clear_running_state();
-    _coro_switch(&context->ctx, &context->back_ctx);
-}
+#define coro_swap(from, to) _coro_switch(from, to)
 
 #elif defined(CORO_USE_UCONTEXT)
 
@@ -351,23 +384,40 @@ static bool make_context(coro_t *co)
     return true;
 }
 
+#define coro_swap(from, to) swapcontext(from, to)
+
+#endif
+
 /* Jump into a coroutine */
 static void jump_into(coro_t *co)
 {
     coro_context_t *context = &co->context;
     tls_running_coro = co;
-    swapcontext(&context->back_ctx, &context->ctx);
+#ifdef CORO_ASAN
+    __sanitizer_start_switch_fiber(&asan_caller_fake, co->stack_base,
+                                   co->stack_size);
+#endif
+    coro_swap(&context->back_ctx, &context->ctx);
+#ifdef CORO_ASAN
+    __sanitizer_finish_switch_fiber(asan_caller_fake, NULL, NULL);
+#endif
 }
 
-/* Jump out of a coroutine */
+/* Jump out of a coroutine. One that is finishing or restarting never returns to
+ * its current frames, so AddressSanitizer may drop its fake stack.
+ */
 static void jump_out(coro_t *co)
 {
     coro_context_t *context = &co->context;
     coro_clear_running_state();
-    swapcontext(&context->ctx, &context->back_ctx);
-}
-
+#ifdef CORO_ASAN
+    bool abandon = co->state == CORO_STATE_DEAD || co->restart;
+    __sanitizer_start_switch_fiber(abandon ? NULL : &co->asan_fake_stack,
+                                   asan_caller_bottom, asan_caller_size);
 #endif
+    coro_swap(&context->ctx, &context->back_ctx);
+    coro_asan_entered(co);
+}
 
 /* Coroutine entry, reached from the _coro_wrap_main stub or the ucontext
  * wrapper. It must jump out rather than return: there is no caller frame on the
@@ -376,6 +426,7 @@ static void jump_out(coro_t *co)
 static void coro_entry_wrapper(void *arg)
 {
     coro_t *co = (coro_t *) arg;
+    coro_asan_entered(co);
     co->func(co->user_data);
     co->state = CORO_STATE_DEAD;
     jump_out(co);
@@ -404,13 +455,21 @@ static bool coro_alloc_stack(coro_t *co, size_t size)
     co->map_size = size + guard;
     co->stack_base = (uint8_t *) map + guard;
     co->stack_size = size;
+#ifdef CORO_VALGRIND
+    co->valgrind_stack_id = VALGRIND_STACK_REGISTER(
+        co->stack_base, (uint8_t *) co->stack_base + co->stack_size);
+#endif
     return true;
 }
 
 static void coro_free_stack(coro_t *co)
 {
-    if (co->map_base)
+    if (co->map_base) {
+#ifdef CORO_VALGRIND
+        VALGRIND_STACK_DEREGISTER(co->valgrind_stack_id);
+#endif
         munmap(co->map_base, co->map_size);
+    }
     co->map_base = NULL;
     co->stack_base = NULL;
 }
@@ -547,6 +606,10 @@ bool coro_init(uint32_t total_slots)
     return true;
 }
 
+/* A coroutine still suspended here (a debugger session ending before the hart
+ * halts) never switches out for good, so under AddressSanitizer its fake stack
+ * is not released; ASan reclaims it at process exit.
+ */
 void coro_cleanup(void)
 {
     if (!coro_state.initialized)
@@ -645,6 +708,11 @@ void coro_resume_hart(uint32_t slot_id)
 
     if (co->restart) {
         co->restart = false;
+#ifdef CORO_ASAN
+        /* Clear the redzones the abandoned frames left poisoned */
+        ASAN_UNPOISON_MEMORY_REGION(co->stack_base, co->stack_size);
+        co->asan_fake_stack = NULL;
+#endif
         if (!make_context(co))
             abort();
     }

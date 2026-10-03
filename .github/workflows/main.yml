@@ -291,6 +291,52 @@ jobs:
             fi
             .ci/boot-linux-test.sh
 
+  # A guest reboot abandons the hart coroutine stack and restarts it. Run the
+  # reboot tests under AddressSanitizer, which checks the stack-switch
+  # annotations, and on the ucontext backend, which x86-64 never selects.
+  coroutine-x64:
+    name: x64 hart coroutine (${{ matrix.variant }})
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: asan
+            compiler: clang
+            cflags: "-fsanitize=address -fno-omit-frame-pointer"
+          - variant: ucontext
+            compiler: gcc
+            cflags: "-DCORO_USE_UCONTEXT"
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: 'true'
+
+    - name: Set up build environment
+      uses: ./.github/actions/setup-build
+      with:
+        compiler: ${{ matrix.compiler }}
+        llvm: 'false'
+        artifacts: linux-image
+        cache-suffix: coroutine-${{ matrix.variant }}
+
+    - name: reboot test (${{ matrix.variant }})
+      env:
+        BOOT_TIMEOUT: 300
+        ASAN_OPTIONS: detect_leaks=0:detect_stack_use_after_return=1
+      run: |
+            # Every make call gets the same flags, so nothing is rebuilt
+            # without them.
+            flags=(CC="$CC ${{ matrix.cflags }}" INITRD_SIZE=32 ENABLE_MOP_FUSION=0)
+            make distclean && make system_defconfig
+            make "${flags[@]}" $PARALLEL && make "${flags[@]}" artifact $PARALLEL
+            .ci/reboot.sh
+
   # Native AArch64 on GitHub ARM runners - fast, no QEMU overhead
   # FIXME: gcc build fails on AArch64/Linux hosts, hence clang only
   host-arm64:

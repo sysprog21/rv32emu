@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -678,7 +679,19 @@ void rv_debug(riscv_t *rv)
     rv->breakpoint_map = breakpoint_map_new();
     rv->is_interrupted = false;
 
+#ifdef SIGPIPE
+    /* A GDB that hangs up without waiting for the reply (its "kill" command, or
+     * a dropped connection) must end the session, not the emulator: the stub's
+     * next write would otherwise raise SIGPIPE.
+     */
+    struct sigaction ignore_pipe = {.sa_handler = SIG_IGN}, prev_pipe;
+    sigemptyset(&ignore_pipe.sa_mask);
+    sigaction(SIGPIPE, &ignore_pipe, &prev_pipe);
+#endif
     gdbstub_run(&rv->gdbstub, (void *) rv);
+#ifdef SIGPIPE
+    sigaction(SIGPIPE, &prev_pipe, NULL);
+#endif
     breakpoint_map_destroy(rv->breakpoint_map);
     rv->breakpoint_map = NULL;
     gdbstub_close(&rv->gdbstub);

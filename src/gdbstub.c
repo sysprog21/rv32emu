@@ -90,7 +90,11 @@ static gdb_action_t rv_cont(void *args)
         if (breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv)))
             break;
 
+#if RV32_HAS_HART_CORO
+        rv_coroutine_step(rv);
+#else
         rv_step_debug(rv);
+#endif
 #if RV32_HAS(VIRTIO_NET)
         rv_refresh_vnet(rv);
 #endif
@@ -107,7 +111,11 @@ static gdb_action_t rv_stepi(void *args)
     riscv_t *rv = (riscv_t *) args;
     assert(rv);
 
+#if RV32_HAS_HART_CORO
+    rv_coroutine_step(rv);
+#else
     rv_step_debug(rv);
+#endif
 #if RV32_HAS(VIRTIO_NET)
     rv_refresh_vnet(rv);
 #endif

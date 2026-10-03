@@ -7,11 +7,6 @@
 
 #include <assert.h>
 
-/* for system-mode reboot */
-#if RV32_HAS(SYSTEM_MMIO)
-#include <setjmp.h>
-#endif
-
 #include <stdbool.h>
 #include <string.h>
 
@@ -610,8 +605,8 @@ struct riscv_internal {
     uint64_t timer_offset;
 
 #if RV32_HAS(SYSTEM_MMIO)
-    /* Jump buffer for restarting the main loop after a Linux guestOS reboot */
-    jmp_buf reboot_jmp;
+    /* Set when a reboot requests a fresh hart execution stack. */
+    bool reboot_requested;
 #endif
 #endif
 
@@ -633,6 +628,11 @@ struct riscv_internal {
     uint32_t csr_vlenb;  /* VLEN/8 (vector register length in bytes) */
 #endif
 };
+
+#if RV32_HAS(SYSTEM_MMIO)
+/* Forget the dispatcher's cross-step state after a guest reboot. */
+void rv_reset_dispatcher_state(void);
+#endif
 
 /* A cached block is usable from here only when it belongs to the address space
  * executing now. Address translation makes that a real question in system

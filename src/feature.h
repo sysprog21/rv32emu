@@ -241,3 +241,13 @@
 #else
 #define RV32_HAS_PACKED_TAIL 0
 #endif
+
+/* Native system-mode harts run on a coroutine stack, so a guest reboot can
+ * abandon the host call path and restart the hart from the top. The browser
+ * build steps the hart from the Emscripten main loop instead.
+ */
+#if RV32_HAS(SYSTEM_MMIO) && !defined(__EMSCRIPTEN__)
+#define RV32_HAS_HART_CORO 1
+#else
+#define RV32_HAS_HART_CORO 0
+#endif

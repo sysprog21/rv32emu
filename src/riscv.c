@@ -41,6 +41,9 @@
 #include "mpool.h"
 #include "riscv.h"
 #include "riscv_private.h"
+#if RV32_HAS_HART_CORO
+#include "coro.h"
+#endif
 #include "utils.h"
 #if RV32_HAS(JIT)
 #if RV32_HAS(T2C)
@@ -976,6 +979,59 @@ void rv_refresh_vnet(riscv_t *rv)
 }
 #endif
 
+#if RV32_HAS_HART_CORO
+/* The hart's whole run loop. In normal operation it only leaves the coroutine
+ * when the hart halts or a guest reboot restarts it: per-slice host work such
+ * as the virtio-net refresh runs here, so a stack switch after every slice
+ * would add overhead for nothing. Under gdbstub it yields after every
+ * instruction so the debugger can inspect state between steps.
+ */
+static void rv_hart_coroutine(void *arg)
+{
+    riscv_t *rv = arg;
+
+    while (!rv_has_halted(rv)) {
+#if RV32_HAS(GDBSTUB)
+        if (rv->debug_mode) {
+            rv_step_debug(rv);
+            coro_yield();
+            continue;
+        }
+#endif
+        rv_step_coroutine(rv);
+#if RV32_HAS(VIRTIO_NET)
+        rv_refresh_vnet(rv);
+#endif
+    }
+}
+
+bool rv_coroutine_start(riscv_t *rv)
+{
+    assert(rv);
+#if RV32_HAS(GDBSTUB)
+    rv->debug_mode = false;
+#endif
+    if (!coro_init(1))
+        return false;
+    if (!coro_create_hart(0, rv_hart_coroutine, rv)) {
+        coro_cleanup();
+        return false;
+    }
+    return true;
+}
+
+void rv_coroutine_step(riscv_t *rv UNUSED)
+{
+    assert(rv);
+    coro_resume_hart(0);
+}
+
+void rv_coroutine_stop(void)
+{
+    coro_cleanup();
+}
+#endif
+
 void rv_run(riscv_t *rv)
 {
     assert(rv);
@@ -992,14 +1048,22 @@ void rv_run(riscv_t *rv)
     if (!(attr->run_flag & (RV_RUN_TRACE | RV_RUN_GDBSTUB))) {
 #ifdef __EMSCRIPTEN__
         emscripten_set_main_loop_arg(rv_step, (void *) rv, 0, 1);
+#elif RV32_HAS_HART_CORO
+        if (!rv_coroutine_start(rv)) {
+            rv_log_fatal("Failed to initialize hart coroutine");
+            rv->halt = true;
+            return;
+        }
+        /* The coroutine returns only when the hart halts or a guest reboot
+         * restarts it; resume it until the hart is done.
+         */
+        for (; !rv_has_halted(rv);)
+            rv_coroutine_step(rv);
+        rv_coroutine_stop();
 #else
         /* default main loop */
         for (; !rv_has_halted(rv);) { /* run until the flag is done */
             rv_step(rv);              /* step instructions */
-
-#if RV32_HAS(VIRTIO_NET)
-            rv_refresh_vnet(rv);
-#endif
         }
 #endif
     }

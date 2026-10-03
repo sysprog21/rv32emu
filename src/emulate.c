@@ -659,24 +659,34 @@ static uint32_t csr_csrrc(riscv_t *rv,
 #if RV32_HAS(GDBSTUB)
 void rv_debug(riscv_t *rv)
 {
+#if RV32_HAS_HART_CORO
+    if (!rv_coroutine_start(rv)) {
+        rv_log_fatal("Failed to initialize hart coroutine");
+        return;
+    }
+#endif
     if (!gdbstub_init(&rv->gdbstub, &gdbstub_ops,
                       (arch_info_t) {
                           .reg_num = 33,
                           .target_desc = TARGET_RV32,
                       },
-                      GDBSTUB_COMM)) {
-        return;
-    }
+                      GDBSTUB_COMM))
+        goto out;
 
     rv->debug_mode = true;
     rv->breakpoint_map = breakpoint_map_new();
     rv->is_interrupted = false;
 
-    if (!gdbstub_run(&rv->gdbstub, (void *) rv))
-        return;
-
+    gdbstub_run(&rv->gdbstub, (void *) rv);
     breakpoint_map_destroy(rv->breakpoint_map);
+    rv->breakpoint_map = NULL;
     gdbstub_close(&rv->gdbstub);
+
+out:
+#if RV32_HAS_HART_CORO
+    rv_coroutine_stop();
+#endif
+    return;
 }
 #endif /* RV32_HAS(GDBSTUB) */
 
@@ -857,6 +867,26 @@ static bool has_loops = false;
  */
 #define PROBE_INTERVAL 32
 static uint32_t probe_tick;
+#endif
+
+#if RV32_HAS(SYSTEM_MMIO)
+void rv_reset_dispatcher_state(void)
+{
+#if !RV32_HAS(JIT)
+    need_clear_block_map = false;
+#endif
+    is_branch_taken = false;
+    reloc_enable_mmu_jalr_addr = 0;
+    reloc_enable_mmu = false;
+    need_retranslate = false;
+    need_handle_signal = false;
+    prev = NULL;
+    last_pc = 0;
+#if RV32_HAS(JIT)
+    set_reset(&pc_set);
+    has_loops = false;
+#endif
+}
 #endif
 
 /* Declared in em_runtime.h behind the same guard, and only reached from the
@@ -3349,7 +3379,7 @@ static inline bool settle_trap(riscv_t *rv UNUSED)
 }
 #endif
 
-void rv_step(void *arg)
+static void rv_step_internal(void *arg, bool direct_step UNUSED)
 {
     assert(arg);
     riscv_t *rv = arg;
@@ -3357,27 +3387,15 @@ void rv_step(void *arg)
     vm_attr_t *attr = PRIV(rv);
     uint32_t cycles = attr->cycle_per_step;
 
-    /* find or translate a block for starting PC */
+#if RV32_HAS(SYSTEM_MMIO)
+    if (direct_step)
+        rv->reboot_requested = false;
+#endif
+
+    /* A reboot starts rv_step again with the reset guest's cycle counter. */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 #if RV32_HAS_PACKED_TAIL
     rv->branch_chain_cycle_target = cycles_target;
-#endif
-
-#if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
-    /* Set up the jump point for handling reboots */
-    if (setjmp(rv->reboot_jmp) != 0) {
-        /* longjmp to here after a reboot happens */
-#if !RV32_HAS(JIT)
-        need_clear_block_map = false;
-#endif
-        is_branch_taken = false;
-        reloc_enable_mmu_jalr_addr = 0;
-        reloc_enable_mmu = false;
-        need_retranslate = false;
-        need_handle_signal = false;
-        prev = NULL;
-        last_pc = 0;
-    }
 #endif
 
     /* loop until hitting the cycle target or hart is halted */
@@ -3588,6 +3606,15 @@ void rv_step(void *arg)
         prev = block;
     }
 
+#if RV32_HAS(SYSTEM_MMIO)
+    if (direct_step && rv->reboot_requested) {
+        rv->reboot_requested = false;
+        rv->halt = false;
+        rv_reset_dispatcher_state();
+        return;
+    }
+#endif
+
 #if RV32_HAS_PACKED_TAIL
     rv->branch_chain_cycle_target = 0;
 
@@ -3622,6 +3649,18 @@ void rv_step(void *arg)
     }
 #endif
 }
+
+void rv_step(void *arg)
+{
+    rv_step_internal(arg, true);
+}
+
+#if RV32_HAS_HART_CORO
+void rv_step_coroutine(void *arg)
+{
+    rv_step_internal(arg, false);
+}
+#endif
 
 void rv_step_debug(void *arg)
 {

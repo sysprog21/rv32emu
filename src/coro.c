@@ -1,6 +1,12 @@
 /* Lightweight coroutine for multi-hart execution */
 
 #include "coro.h"
+
+/* Builds without hart coroutines still compile this file, so that the build
+ * does not have to repeat the platform condition from feature.h.
+ */
+#if RV32_HAS_HART_CORO
+
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -680,3 +686,5 @@ bool coro_restart_current(void)
     jump_out(co);
     return true;
 }
+
+#endif /* RV32_HAS_HART_CORO */

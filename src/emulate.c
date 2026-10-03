@@ -3379,18 +3379,13 @@ static inline bool settle_trap(riscv_t *rv UNUSED)
 }
 #endif
 
-static void rv_step_internal(void *arg, bool direct_step UNUSED)
+void rv_step(void *arg)
 {
     assert(arg);
     riscv_t *rv = arg;
 
     vm_attr_t *attr = PRIV(rv);
     uint32_t cycles = attr->cycle_per_step;
-
-#if RV32_HAS(SYSTEM_MMIO)
-    if (direct_step)
-        rv->reboot_requested = false;
-#endif
 
     /* A reboot starts rv_step again with the reset guest's cycle counter. */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
@@ -3607,7 +3602,8 @@ static void rv_step_internal(void *arg, bool direct_step UNUSED)
     }
 
 #if RV32_HAS(SYSTEM_MMIO)
-    if (direct_step && rv->reboot_requested) {
+    /* Direct callers only; see syscall_restart_hart() */
+    if (rv->reboot_requested) {
         rv->reboot_requested = false;
         rv->halt = false;
         rv_reset_dispatcher_state();
@@ -3649,18 +3645,6 @@ static void rv_step_internal(void *arg, bool direct_step UNUSED)
     }
 #endif
 }
-
-void rv_step(void *arg)
-{
-    rv_step_internal(arg, true);
-}
-
-#if RV32_HAS_HART_CORO
-void rv_step_coroutine(void *arg)
-{
-    rv_step_internal(arg, false);
-}
-#endif
 
 void rv_step_debug(void *arg)
 {

@@ -998,13 +998,16 @@ static void rv_hart_coroutine(void *arg)
             continue;
         }
 #endif
-        rv_step_coroutine(rv);
+        rv_step(rv);
 #if RV32_HAS(VIRTIO_NET)
         rv_refresh_vnet(rv);
 #endif
     }
 }
 
+/* The coroutine fault handler chains to the demand-paging handler, which
+ * memory_new() installs; the hart must be created before this is called.
+ */
 bool rv_coroutine_start(riscv_t *rv)
 {
     assert(rv);

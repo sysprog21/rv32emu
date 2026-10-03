@@ -479,7 +479,6 @@ void rv_step_debug(void *arg);
 bool rv_coroutine_start(riscv_t *rv);
 void rv_coroutine_step(riscv_t *rv);
 void rv_coroutine_stop(void);
-void rv_step_coroutine(void *arg);
 #endif
 
 #if RV32_HAS(VIRTIO_NET)

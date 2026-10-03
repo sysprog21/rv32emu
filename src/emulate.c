@@ -3150,7 +3150,7 @@ static block_t *block_find_or_translate(riscv_t *rv
     list_add(&next_blk->list, &rv->block_list);
 
 #if RV32_HAS(T2C)
-    pthread_mutex_lock(&rv->cache_lock);
+    hart_lock(rv, &rv->cache_lock);
     t2c_free_orphans(rv);
 #endif
 
@@ -3162,7 +3162,7 @@ static block_t *block_find_or_translate(riscv_t *rv
 
     if (!replaced_blk) {
 #if RV32_HAS(T2C)
-        pthread_mutex_unlock(&rv->cache_lock);
+        hart_unlock(rv, &rv->cache_lock);
 #endif
         return next_blk;
     }
@@ -3213,7 +3213,7 @@ static block_t *block_find_or_translate(riscv_t *rv
         /* Remove from global block list so it's not found/traversed */
         list_del_init(&replaced_blk->list);
 
-        pthread_mutex_unlock(&rv->cache_lock);
+        hart_unlock(rv, &rv->cache_lock);
         return next_blk;
     }
 #endif
@@ -3249,7 +3249,7 @@ static block_t *block_find_or_translate(riscv_t *rv
     list_del_init(&replaced_blk->list);
     mpool_free(rv->block_mp, replaced_blk);
 #if RV32_HAS(T2C)
-    pthread_mutex_unlock(&rv->cache_lock);
+    hart_unlock(rv, &rv->cache_lock);
 #endif
 #endif
 
@@ -3531,10 +3531,10 @@ void rv_step(void *arg)
 #else
             entry->key = (uint64_t) block->pc_start;
 #endif
-            pthread_mutex_lock(&rv->wait_queue_lock);
+            hart_lock(rv, &rv->wait_queue_lock);
             list_add(&entry->list, &rv->wait_queue);
             pthread_cond_signal(&rv->wait_queue_cond);
-            pthread_mutex_unlock(&rv->wait_queue_lock);
+            hart_unlock(rv, &rv->wait_queue_lock);
         }
 #endif
         /* executed through the tier-1 JIT compiler */

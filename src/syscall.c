@@ -532,10 +532,28 @@ static const char *sbi_rst_reason_str(const riscv_word_t reason)
     return "unknown";
 }
 
+/* A reboot must find the hart holding no lock: resetting the guest respawns the
+ * T2C thread, which takes those locks, and the restart then abandons the hart
+ * stack. Check before any of that, while the count from hart_lock() still
+ * describes this call path.
+ */
+static void syscall_check_hart_locks(riscv_t *rv UNUSED)
+{
+#if RV32_HAS_HART_CORO && RV32_HAS(T2C)
+    if (unlikely(rv->hart_locks_held)) {
+        rv_log_fatal("Guest reboot would abandon %u held hart lock(s)",
+                     rv->hart_locks_held);
+        abort();
+    }
+#endif
+}
+
 /* Restart the hart after a guest reboot. On the coroutine path this abandons
  * the whole host call stack below the coroutine entry, including any JIT or T2C
  * frames. That is safe only because nothing on the path from guest execution to
- * this ecall holds a lock or owns heap memory; keep it that way.
+ * this ecall holds a lock or owns heap memory; keep it that way. Held locks are
+ * caught by syscall_check_hart_locks(); heap ownership can only be kept by
+ * review.
  */
 static void syscall_restart_hart(riscv_t *rv)
 {
@@ -564,12 +582,14 @@ static void syscall_sbi_rst(riscv_t *rv)
             rv_halt(rv);
         } else if (a0 == SBI_RST_TYPE_COLD_REBOOT) { /* default reboot mode,
                                                         reset whole system */
+            syscall_check_hart_locks(rv);
             rv_cold_reboot(rv, 0U);
             syscall_restart_hart(rv);
         }
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)
         /* reset halt only, echo "warm" > /sys/kernel/reboot/mode to set */
         else if (a0 == SBI_RST_TYPE_WARM_REBOOT) {
+            syscall_check_hart_locks(rv);
             rv_warm_reboot(rv, 0U);
             syscall_restart_hart(rv);
         }

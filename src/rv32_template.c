@@ -608,7 +608,7 @@ RVOP(sfencevma, {
          * compilation thread. This ensures the invalidated flag and hot2 reset
          * are seen atomically by the T2C thread.
          */
-        pthread_mutex_lock(&rv->cache_lock);
+        hart_lock(rv, &rv->cache_lock);
 #endif
         /* Invalidate JIT blocks with current SATP, and stop reusing the code
          * translated for it: a block rebuilt from the new mappings must not
@@ -627,7 +627,7 @@ RVOP(sfencevma, {
             jit_cache_clear_satp(rv->jit_cache, rv->csr_satp);
             inline_cache_clear_satp(rv->inline_cache, rv->csr_satp);
         }
-        pthread_mutex_unlock(&rv->cache_lock);
+        hart_unlock(rv, &rv->cache_lock);
 #endif
 #endif
     } else {
@@ -646,7 +646,7 @@ RVOP(sfencevma, {
             /* Hold cache_lock during invalidation to prevent race with T2C
              * compilation thread.
              */
-            pthread_mutex_lock(&rv->cache_lock);
+            hart_lock(rv, &rv->cache_lock);
 #endif
             uint32_t n_invalidated =
                 cache_invalidate_va(rv->block_cache, va, rv->csr_satp, NULL);
@@ -665,7 +665,7 @@ RVOP(sfencevma, {
 #endif
             }
 #if RV32_HAS(T2C)
-            pthread_mutex_unlock(&rv->cache_lock);
+            hart_unlock(rv, &rv->cache_lock);
 #endif
         }
 #endif
@@ -691,7 +691,7 @@ RVOP(fencei, {
     /* Hold cache_lock during invalidation to prevent race with T2C
      * compilation thread. Same locking protocol as SFENCE.VMA.
      */
-    pthread_mutex_lock(&rv->cache_lock);
+    hart_lock(rv, &rv->cache_lock);
 #endif
     /* FENCE.I is a global instruction cache barrier: any page of any address
      * space, kernel text included, may hold new instructions. Invalidate every
@@ -701,7 +701,7 @@ RVOP(fencei, {
     cache_invalidate_all(rv->block_cache);
     jit_flush(rv);
 #if RV32_HAS(T2C)
-    pthread_mutex_unlock(&rv->cache_lock);
+    hart_unlock(rv, &rv->cache_lock);
 #endif
 #endif
     /* Note: In non-system JIT mode, self-modifying code is rare and blocks

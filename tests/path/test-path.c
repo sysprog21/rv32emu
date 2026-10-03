@@ -34,7 +34,13 @@ static void sanitize_path_test(void)
     compare(limit, limit);
     limit[MAX_PATH_LEN - 2] = '.';
     limit[MAX_PATH_LEN - 1] = '.';
-    assert(!sanitize_path(limit));
+    char *truncated = sanitize_path(limit);
+    if (truncated) {
+        printf(
+            "\n\nAn unterminated input of MAX_PATH_LEN bytes was accepted\n");
+        free(truncated);
+        exit(1);
+    }
 
     /* Already clean */
     compare("", ".");

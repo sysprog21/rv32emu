@@ -23,6 +23,19 @@ static void compare(char *input, char *expected_output)
 
 static void sanitize_path_test(void)
 {
+    /* The maximum accepted input keeps its terminator. A buffer with no
+     * terminator within the bound, ending in a partial .. element, must fail
+     * rather than silently select a truncated path. The buffer is exactly
+     * MAX_PATH_LEN bytes, so any read past the bound is an overflow.
+     */
+    char limit[MAX_PATH_LEN];
+    memset(limit, 'a', sizeof(limit));
+    limit[MAX_PATH_LEN - 1] = '\0';
+    compare(limit, limit);
+    limit[MAX_PATH_LEN - 2] = '.';
+    limit[MAX_PATH_LEN - 1] = '.';
+    assert(!sanitize_path(limit));
+
     /* Already clean */
     compare("", ".");
     compare("abc", "abc");

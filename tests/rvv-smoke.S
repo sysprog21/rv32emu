@@ -44,6 +44,9 @@ cmp_src:
 cmp_init:
     .byte 0x0a, 0x00, 0x00, 0x00
 
+widen_overlap_src:
+    .short 3, 4, 5, 6
+
 mask_prefix_src:
     .byte 0x14, 0x00, 0x00, 0x00
 
@@ -1813,6 +1816,30 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    /*
+     * Cross-EEW overlap, widening direction (V 1.0 5.2): a destination
+     * group whose EEW exceeds the source EEW may overlap the source when
+     * the source EMUL is at least 1 and the overlap sits in the HIGHEST-
+     * numbered part of the destination group. At SEW=16/LMUL=1 the dest
+     * group of vwadd.vv v0 is {v0,v1}, so a source of v1 is legal and must
+     * execute rather than trap. (The reserved cases - e.g. a source of v0,
+     * sharing the base register - raise an illegal instruction, which this
+     * harness cannot observe in user mode; see issue #735.)
+     */
+    li a0, 4
+    vsetvli t0, a0, e16, m1, tu, mu
+    la a1, widen_overlap_src
+    vle16.v v1, (a1)
+    vwadd.vv v0, v1, v1
+    li a0, 4
+    vsetvli t0, a0, e32, m2, tu, mu
+    la a1, fp32_out
+    vse32.v v0, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 6, fail_widen_overlap
+    lw t1, 12(a1)
+    assert_reg_imm t1, 12, fail_widen_overlap
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -2042,6 +2069,9 @@ fail_vfwredusumf:
     j write_and_exit_fail
 fail_fractional:
     li a3, 0xf0
+    j write_and_exit_fail
+fail_widen_overlap:
+    li a3, 0xf1
     j write_and_exit_fail
 
 write_and_exit_fail:

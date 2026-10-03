@@ -4,22 +4,13 @@
  */
 
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "elf.h"
 #include "io.h"
 #include "utils.h"
-
-#if HAVE_MMAP
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#else
-/* fallback to standard I/O text stream */
-#include <stdio.h>
-#endif
 
 enum {
     EM_RISCV = 243,
@@ -61,13 +52,6 @@ struct elf_internal {
     map_t symbols;
 };
 
-#ifndef max
-#define max(a, b) ((a) > (b) ? (a) : (b))
-#endif
-#ifndef min
-#define min(a, b) ((a) < (b) ? (a) : (b))
-#endif
-
 elf_t *elf_new(void)
 {
     elf_t *e = malloc(sizeof(elf_t));
@@ -79,40 +63,61 @@ elf_t *elf_new(void)
     return e;
 }
 
-void elf_delete(elf_t *e)
-{
-    if (!e)
-        return;
-
-    map_delete(e->symbols);
-#if HAVE_MMAP
-    if (e->raw_data)
-        munmap(e->raw_data, e->raw_size);
-#else
-    free(e->raw_data);
-#endif
-    free(e);
-}
-
-/* release a loaded ELF file */
+/* Release file storage and every cached pointer into it. */
 static void release(elf_t *e)
 {
-#if !HAVE_MMAP
+    map_clear(e->symbols);
     free(e->raw_data);
-#endif
-
     e->raw_data = NULL;
     e->raw_size = 0;
     e->hdr = NULL;
 }
 
-/* check if the ELF file header is valid */
-/* Does [offset, offset + size) fall inside the mapped file? Written so that
+void elf_delete(elf_t *e)
+{
+    if (!e)
+        return;
+
+    release(e);
+    map_delete(e->symbols);
+    free(e);
+}
+
+/* Table accessors: callers must first validate the table bounds. */
+static const struct Elf32_Shdr *get_shdr(const elf_t *e, int n)
+{
+    return (const struct Elf32_Shdr *) (e->raw_data + e->hdr->e_shoff +
+                                        (uint32_t) n * e->hdr->e_shentsize);
+}
+
+static const struct Elf32_Phdr *get_phdr(const elf_t *e, int n)
+{
+    return (const struct Elf32_Phdr *) (e->raw_data + e->hdr->e_phoff +
+                                        (uint32_t) n * e->hdr->e_phentsize);
+}
+
+/* Does [offset, offset + size) fall inside the loaded file? Written so that
  * neither operand can wrap: the sum is never formed.
  */
 static inline bool in_file(const elf_t *e, uint32_t offset, uint32_t size)
 {
     return offset <= e->raw_size && size <= e->raw_size - offset;
+}
+
+/* A header table of @num entries, @entsize bytes apart, lies inside the file.
+ * The offset and stride must both be 4-aligned: the entries are cast to structs
+ * holding uint32_t, so a misaligned table is undefined behavior, not merely
+ * slow. Every real toolchain emits aligned tables. Two 16-bit factors cannot
+ * overflow the 32-bit product.
+ */
+static inline bool table_in_file(const elf_t *e,
+                                 uint32_t offset,
+                                 uint16_t num,
+                                 uint16_t entsize,
+                                 size_t min_entsize)
+{
+    return entsize >= min_entsize && !(offset & 3) && !(entsize & 3) &&
+           in_file(e, offset, (uint32_t) num * entsize);
 }
 
 /* Section contents, bounds-checked. */
@@ -161,17 +166,10 @@ static bool is_valid(elf_t *e)
     if (e->hdr->e_machine != EM_RISCV)
         return false;
 
-    /* section header table, and the entries it claims to hold. The offset and
-     * stride must both be 4-aligned: the entries are cast to structs holding
-     * uint32_t, so a misaligned table is undefined behavior, not merely slow.
-     * Every real toolchain emits aligned tables.
-     */
+    /* section header table, and the entries it claims to hold */
     if (e->hdr->e_shnum) {
-        if (e->hdr->e_shentsize < sizeof(struct Elf32_Shdr) ||
-            (e->hdr->e_shoff & 3) || (e->hdr->e_shentsize & 3) ||
-            e->hdr->e_shnum > e->raw_size / e->hdr->e_shentsize ||
-            !in_file(e, e->hdr->e_shoff,
-                     (uint32_t) e->hdr->e_shnum * e->hdr->e_shentsize))
+        if (!table_in_file(e, e->hdr->e_shoff, e->hdr->e_shnum,
+                           e->hdr->e_shentsize, sizeof(struct Elf32_Shdr)))
             return false;
 
         /* the section name string table is indexed by e_shstrndx */
@@ -179,10 +177,7 @@ static bool is_valid(elf_t *e)
             return false;
 
         for (int i = 0; i < e->hdr->e_shnum; ++i) {
-            const struct Elf32_Shdr *shdr =
-                (const struct Elf32_Shdr *) (e->raw_data + e->hdr->e_shoff +
-                                             (uint32_t) i *
-                                                 e->hdr->e_shentsize);
+            const struct Elf32_Shdr *shdr = get_shdr(e, i);
             if (!section_in_file(e, shdr))
                 return false;
 
@@ -201,23 +196,17 @@ static bool is_valid(elf_t *e)
         }
     }
 
-    /* program header table, same alignment reasoning as above */
+    /* program header table */
     if (e->hdr->e_phnum) {
-        if (e->hdr->e_phentsize < sizeof(struct Elf32_Phdr) ||
-            (e->hdr->e_phoff & 3) || (e->hdr->e_phentsize & 3) ||
-            e->hdr->e_phnum > e->raw_size / e->hdr->e_phentsize ||
-            !in_file(e, e->hdr->e_phoff,
-                     (uint32_t) e->hdr->e_phnum * e->hdr->e_phentsize))
+        if (!table_in_file(e, e->hdr->e_phoff, e->hdr->e_phnum,
+                           e->hdr->e_phentsize, sizeof(struct Elf32_Phdr)))
             return false;
 
         for (int i = 0; i < e->hdr->e_phnum; ++i) {
-            const struct Elf32_Phdr *phdr =
-                (const struct Elf32_Phdr *) (e->raw_data + e->hdr->e_phoff +
-                                             (uint32_t) i *
-                                                 e->hdr->e_phentsize);
-            /* p_filesz must not exceed p_memsz. elf_load() derives its
-             * zero-fill length from max(p_memsz, p_filesz), so an inverted
-             * pair makes it clear bytes past the end of the segment.
+            const struct Elf32_Phdr *phdr = get_phdr(e, i);
+            /* File bytes must fit inside the segment's memory extent:
+             * elf_load() computes the zero-fill length as the unsigned
+             * p_memsz - p_filesz, which an inverted pair would wrap.
              */
             if (phdr->p_type == PT_LOAD &&
                 (phdr->p_filesz > phdr->p_memsz ||
@@ -227,13 +216,6 @@ static bool is_valid(elf_t *e)
     }
 
     return true;
-}
-
-/* get the nth section header; the table was validated by is_valid() */
-static const struct Elf32_Shdr *get_shdr(const elf_t *e, int n)
-{
-    return (const struct Elf32_Shdr *) (e->raw_data + e->hdr->e_shoff +
-                                        (uint32_t) n * e->hdr->e_shentsize);
 }
 
 /* get section header string table */
@@ -278,22 +260,31 @@ static inline uint32_t symbol_count(const struct Elf32_Shdr *shdr)
     return shdr->sh_size / sizeof(struct Elf32_Sym);
 }
 
-/* find a symbol entry */
-const struct Elf32_Sym *elf_get_symbol(elf_t *e, const char *name)
+/* Locate the symbol entries and the string table naming them. Returns NULL,
+ * with *n and *strtab untouched, when either table is absent.
+ */
+static const struct Elf32_Sym *get_symbols(elf_t *e,
+                                           const struct Elf32_Shdr **strtab,
+                                           uint32_t *n)
 {
-    const struct Elf32_Shdr *strtab = get_strtab(e); /* the string table */
-    if (!strtab)
-        return NULL;
-
-    /* get the symbol table */
-    const struct Elf32_Shdr *shdr = get_symtab(e);
+    const struct Elf32_Shdr *names = get_strtab(e);
+    const struct Elf32_Shdr *shdr = names ? get_symtab(e) : NULL;
     if (!shdr)
         return NULL;
 
-    /* find symbol table range */
-    const struct Elf32_Sym *syms =
-        (const struct Elf32_Sym *) (e->raw_data + shdr->sh_offset);
-    const uint32_t n = symbol_count(shdr);
+    *strtab = names;
+    *n = symbol_count(shdr);
+    return (const struct Elf32_Sym *) (e->raw_data + shdr->sh_offset);
+}
+
+/* find a symbol entry */
+const struct Elf32_Sym *elf_get_symbol(elf_t *e, const char *name)
+{
+    const struct Elf32_Shdr *strtab;
+    uint32_t n;
+    const struct Elf32_Sym *syms = get_symbols(e, &strtab, &n);
+    if (!syms)
+        return NULL;
 
     for (uint32_t i = 0; i < n; ++i) { /* try to find the symbol */
         const char *sym_name = str_in_section(e, strtab, syms[i].st_name);
@@ -307,24 +298,14 @@ const struct Elf32_Sym *elf_get_symbol(elf_t *e, const char *name)
 
 static void fill_symbols(elf_t *e)
 {
-    /* initialize the symbol table */
-    map_clear(e->symbols);
+    /* initialize the symbol table; release() emptied it */
     map_insert(e->symbols, &(uint32_t) {0}, &(char *) {NULL});
 
-    /* get the string table */
-    const struct Elf32_Shdr *strtab = get_strtab(e);
-    if (!strtab)
+    const struct Elf32_Shdr *strtab;
+    uint32_t n;
+    const struct Elf32_Sym *syms = get_symbols(e, &strtab, &n);
+    if (!syms)
         return;
-
-    /* get the symbol table */
-    const struct Elf32_Shdr *shdr = get_symtab(e);
-    if (!shdr)
-        return;
-
-    /* find symbol table range */
-    const struct Elf32_Sym *syms =
-        (const struct Elf32_Sym *) (e->raw_data + shdr->sh_offset);
-    const uint32_t n = symbol_count(shdr);
 
     for (uint32_t i = 0; i < n; ++i) { /* try to find the symbol */
         const char *sym_name = str_in_section(e, strtab, syms[i].st_name);
@@ -379,27 +360,29 @@ bool elf_get_data_section_range(elf_t *e, uint32_t *start, uint32_t *end)
  */
 bool elf_load(elf_t *e, memory_t *mem)
 {
-    /* loop over all of the program headers */
+    /* Validate every segment before modifying guest memory, so a rejected
+     * image leaves it untouched. memory_new() caps mem_size at 4 GiB, so a
+     * contained extent cannot wrap the RV32 address space.
+     */
     for (int p = 0; p < e->hdr->e_phnum; ++p) {
-        /* find next program header */
-        const struct Elf32_Phdr *phdr =
-            (const struct Elf32_Phdr *) (e->raw_data + e->hdr->e_phoff +
-                                         (uint32_t) p * e->hdr->e_phentsize);
+        const struct Elf32_Phdr *phdr = get_phdr(e, p);
+        if (phdr->p_type == PT_LOAD && phdr->p_memsz &&
+            !GUEST_RAM_CONTAINS(mem, phdr->p_vaddr, phdr->p_memsz))
+            return false;
+    }
+
+    for (int p = 0; p < e->hdr->e_phnum; ++p) {
+        const struct Elf32_Phdr *phdr = get_phdr(e, p);
 
         /* check this section should be loaded */
-        if (phdr->p_type != PT_LOAD)
+        if (phdr->p_type != PT_LOAD || !phdr->p_memsz)
             continue;
 
-        /* memcpy required range */
-        const int to_copy = min(phdr->p_memsz, phdr->p_filesz);
-        if (to_copy && !memory_write(mem, phdr->p_vaddr,
-                                     e->raw_data + phdr->p_offset, to_copy))
-            return false;
-
-        /* zero fill required range */
-        const int to_zero = max(phdr->p_memsz, phdr->p_filesz) - to_copy;
-        if (to_zero && !memory_fill(mem, phdr->p_vaddr + to_copy, to_zero, 0))
-            return false;
+        /* The pass above proved both ranges fit, so neither call can fail. */
+        memory_write(mem, phdr->p_vaddr, e->raw_data + phdr->p_offset,
+                     phdr->p_filesz);
+        memory_fill(mem, phdr->p_vaddr + phdr->p_filesz,
+                    phdr->p_memsz - phdr->p_filesz, 0);
     }
 
     return true;
@@ -437,77 +420,40 @@ bool elf_has_insn(elf_t *e, bool (*match)(uint32_t insn))
 bool elf_open(elf_t *e, const char *input)
 {
     /* free previous memory */
-    if (e->raw_data)
-        release(e);
+    release(e);
 
     char *path = sanitize_path(input);
     if (!path)
         return false;
 
-#if HAVE_MMAP
-    int fd = open(path, O_RDONLY);
-    if (fd < 0)
-        goto free_path;
-
-    /* get file size */
-    struct stat st;
-    fstat(fd, &st);
-    e->raw_size = st.st_size;
-
-    /* map or unmap files or devices into memory.
-     * The beginning of the file is ELF header.
+    /* Read the whole file rather than map it: validation must see the bytes
+     * every later access sees, and a mapped file truncated afterwards would
+     * raise SIGBUS on the next access.
      */
-    e->raw_data = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    if (e->raw_data == MAP_FAILED)
-        goto free_fd;
-    close(fd);
-
-#else  /* fallback to standard I/O text stream */
     FILE *f = fopen(path, "rb");
+    free(path);
     if (!f)
-        goto free_path;
+        return false;
 
-    /* get file size */
-    fseek(f, 0, SEEK_END);
-    e->raw_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (!e->raw_size)
-        goto free_fd;
-
-    /* allocate memory */
-    free(e->raw_data);
-    e->raw_data = malloc(e->raw_size);
-    assert(e->raw_data);
-
-    /* read data into memory */
-    const size_t r = fread(e->raw_data, 1, e->raw_size, f);
+    /* get file size, then read data into memory */
+    long file_size = 0;
+    bool ok = !fseek(f, 0, SEEK_END) && (file_size = ftell(f)) > 0 &&
+              (uint64_t) file_size <= UINT32_MAX && !fseek(f, 0, SEEK_SET);
+    if (ok) {
+        e->raw_size = (uint32_t) file_size;
+        e->raw_data = malloc(e->raw_size);
+        ok =
+            e->raw_data && fread(e->raw_data, 1, e->raw_size, f) == e->raw_size;
+    }
     fclose(f);
-    if (r != e->raw_size)
-        goto free_path;
-#endif /* HAVE_MMAP */
 
-    /* point to the header */
+    /* point to the header, and check it is a valid ELF file */
     e->hdr = (const struct Elf32_Ehdr *) e->raw_data;
-
-    /* check it is a valid ELF file */
-    if (!is_valid(e))
-        goto free_path;
-
-    free(path);
+    if (!ok || !is_valid(e)) {
+        release(e);
+        return false;
+    }
     return true;
-
-free_fd:
-#if HAVE_MMAP
-    close(fd);
-#else
-    fclose(f);
-#endif
-
-free_path:
-    free(path);
-
-    release(e);
-    return false;
 }
 
 struct Elf32_Ehdr *get_elf_header(elf_t *e)

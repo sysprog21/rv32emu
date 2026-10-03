@@ -128,7 +128,9 @@ typedef struct elf_internal elf_t;
 elf_t *elf_new(void);
 void elf_delete(elf_t *e);
 
-/* Open an ELF file from specified path */
+/* Open an ELF file from specified path. Any previously opened image is
+ * released first, even when this call fails.
+ */
 bool elf_open(elf_t *e, const char *path);
 
 /* Find a symbol entry */

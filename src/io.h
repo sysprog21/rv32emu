@@ -66,7 +66,7 @@ static inline bool memory_write(memory_t *m,
                                 uint32_t size)
 {
     /* Bounds checking to prevent buffer overflow */
-    if (addr >= m->mem_size || size > m->mem_size - addr)
+    if (!GUEST_RAM_CONTAINS(m, addr, size))
         return false;
     memcpy(m->mem_base + addr, src, size);
     return true;
@@ -88,7 +88,7 @@ static inline bool memory_fill(memory_t *m,
                                uint8_t val)
 {
     /* Bounds checking to prevent buffer overflow */
-    if (addr >= m->mem_size || size > m->mem_size - addr)
+    if (!GUEST_RAM_CONTAINS(m, addr, size))
         return false;
     memset(m->mem_base + addr, val, size);
     return true;

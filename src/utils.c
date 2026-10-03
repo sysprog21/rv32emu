@@ -25,8 +25,6 @@
 #endif
 #endif
 
-#define MAX_PATH_LEN 1024
-
 /* Calculate "x * n / d" without unnecessary overflow or loss of precision.
  *
  * Reference:
@@ -86,17 +84,16 @@ char *sanitize_path(const char *input)
 {
     size_t n = strnlen(input, MAX_PATH_LEN);
 
-    char *ret = calloc(n + 1, sizeof(char));
-    if (!ret)
+    /* Reject truncation: opening a prefix can select a different file. */
+    if (n == MAX_PATH_LEN)
         return NULL;
 
     /* After sanitization, the new path will only be shorter than the original
-     * one. Thus, we can reuse the space.
+     * one; the extra byte holds the "." an empty input becomes.
      */
-    if (n == 0) {
-        ret[0] = '.';
-        return ret;
-    }
+    char *ret = malloc(n + 2);
+    if (!ret)
+        return NULL;
 
     bool is_root = (input[0] == '/');
 
@@ -166,11 +163,7 @@ char *sanitize_path(const char *input)
         ret[w] = '.';
         w++;
     }
-
-    /* starting from w till the end, we should mark it as '\0' since that part
-     * of the buffer is not used.
-     */
-    memset(ret + w, '\0', n + 1 - w);
+    ret[w] = '\0';
 
     return ret;
 }

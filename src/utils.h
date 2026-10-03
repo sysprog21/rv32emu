@@ -40,6 +40,9 @@ typedef uint32_t rv_hash_key_t;
     }
 #endif
 
+/* Longest input sanitize_path() accepts, including the terminating NUL. */
+#define MAX_PATH_LEN 1024
+
 /* sanitize_path returns the shortest path name equivalent to path
  * by purely lexical processing. It applies the following rules
  * iteratively until no further processing can be done:
@@ -55,6 +58,8 @@ typedef uint32_t rv_hash_key_t;
  *
  * If the result of this process is an empty string, Clean
  * returns the string ".".
+ * Returns NULL on allocation failure or an input of MAX_PATH_LEN bytes or
+ * more.
  *
  * See also Rob Pike, “Lexical File Names in Plan 9 or
  * Getting Dot-Dot Right,”

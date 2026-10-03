@@ -81,24 +81,47 @@ static inline bool rv_is_interrupt(riscv_t *rv)
     return ATOMIC_LOAD(&rv->is_interrupted, ATOMIC_RELAXED);
 }
 
+static bool rv_debug_should_stop(riscv_t *rv)
+{
+    return rv_has_halted(rv) || rv_is_interrupt(rv) ||
+           breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv));
+}
+
+/* Run one debugger request: a single instruction, or for "continue" every
+ * instruction up to the next stop. With hart coroutines this runs on the hart
+ * stack, so a continue switches stacks once instead of twice per instruction.
+ */
+void rv_debug_run(riscv_t *rv)
+{
+    do {
+        rv_step_debug(rv);
+#if RV32_HAS(VIRTIO_NET)
+        rv_refresh_vnet(rv);
+#endif
+    } while (rv->debug_continue && !rv_debug_should_stop(rv));
+}
+
+static void rv_debug_resume(riscv_t *rv)
+{
+#if RV32_HAS_HART_CORO
+    rv_coroutine_step(rv);
+#else
+    rv_debug_run(rv);
+#endif
+}
+
 static gdb_action_t rv_cont(void *args)
 {
     riscv_t *rv = (riscv_t *) args;
     assert(rv);
 
-    for (; !rv_has_halted(rv) && !rv_is_interrupt(rv);) {
-        if (breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv)))
-            break;
-
-#if RV32_HAS_HART_CORO
-        rv_coroutine_step(rv);
-#else
-        rv_step_debug(rv);
-#endif
-#if RV32_HAS(VIRTIO_NET)
-        rv_refresh_vnet(rv);
-#endif
-    }
+    /* Loop, since a guest reboot restarts the hart coroutine and returns here
+     * before any stop condition holds.
+     */
+    rv->debug_continue = true;
+    while (!rv_debug_should_stop(rv))
+        rv_debug_resume(rv);
+    rv->debug_continue = false;
 
     /* Clear the interrupt if it's pending */
     ATOMIC_STORE(&rv->is_interrupted, false, ATOMIC_RELAXED);
@@ -111,14 +134,7 @@ static gdb_action_t rv_stepi(void *args)
     riscv_t *rv = (riscv_t *) args;
     assert(rv);
 
-#if RV32_HAS_HART_CORO
-    rv_coroutine_step(rv);
-#else
-    rv_step_debug(rv);
-#endif
-#if RV32_HAS(VIRTIO_NET)
-    rv_refresh_vnet(rv);
-#endif
+    rv_debug_resume(rv);
     return ACT_RESUME;
 }
 

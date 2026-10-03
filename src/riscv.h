@@ -467,6 +467,9 @@ void rv_warm_reboot(riscv_t *rv, riscv_word_t pc);
 #if RV32_HAS(GDBSTUB)
 /* Run the RISC-V emulator as gdbstub */
 void rv_debug(riscv_t *rv);
+
+/* Serve one GDB step or continue request on the hart */
+void rv_debug_run(riscv_t *rv);
 #endif
 
 /* step the RISC-V emulator */

@@ -568,6 +568,12 @@ struct riscv_internal {
 
     bool debug_mode;
 
+    /* Set while a GDB "continue" runs, so rv_debug_run() keeps stepping until a
+     * breakpoint, an interrupt or a halt instead of returning after one
+     * instruction.
+     */
+    bool debug_continue;
+
     /* GDB instruction breakpoint */
     breakpoint_map_t breakpoint_map;
 

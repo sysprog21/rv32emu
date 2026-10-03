@@ -674,6 +674,7 @@ void rv_debug(riscv_t *rv)
         goto out;
 
     rv->debug_mode = true;
+    rv->debug_continue = false;
     rv->breakpoint_map = breakpoint_map_new();
     rv->is_interrupted = false;
 

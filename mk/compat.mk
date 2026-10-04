@@ -72,6 +72,9 @@ $(eval $(call enable-to-config,MOP_FUSION))
 $(eval $(call enable-to-config,BLOCK_CHAINING))
 $(eval $(call enable-to-config,LTO))
 
+# Rootfs
+$(eval $(call enable-to-config,ROOTFS_EXT4))
+
 # Debugging
 $(eval $(call enable-to-config,GDBSTUB))
 $(eval $(call enable-to-config,UBSAN))

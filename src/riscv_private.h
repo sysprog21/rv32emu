@@ -426,8 +426,14 @@ struct riscv_internal {
 #endif
 
 #if RV32_HAS(SYSTEM)
-    /* is_trapped must be within 256-byte offset for ARM64 JIT access */
-    bool is_trapped;
+    /* Nesting depth of the traps being handled by __trap_handler(). Raising
+     * a trap increments it and sret decrements it, so the sret of a nested
+     * trap (e.g., an interrupt taken while handling a page fault) resumes the
+     * outer handler instead of ending trap handling. Non-zero means trapped.
+     *
+     * trap_cnt must be within 256-byte offset for ARM64 JIT access
+     */
+    uint32_t trap_cnt;
 #endif
 
 #if !RV32_HAS(JIT)

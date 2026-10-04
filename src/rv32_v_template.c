@@ -257,7 +257,7 @@ static inline bool rvv_read_mem_elem_ext(riscv_t *rv,
     default: {
         uint32_t lo = rv->io.mem_read_w(rv, addr);
 #if RV32_HAS(SYSTEM)
-        if (rv->is_trapped)
+        if (rv->trap_cnt)
             return false;
 #endif
         value = lo;
@@ -266,7 +266,7 @@ static inline bool rvv_read_mem_elem_ext(riscv_t *rv,
     }
     }
 #if RV32_HAS(SYSTEM)
-    if (rv->is_trapped)
+    if (rv->trap_cnt)
         return false;
 #endif
     *value_out = value;
@@ -291,14 +291,14 @@ static inline bool rvv_write_mem_elem_ext(riscv_t *rv,
     default:
         rv->io.mem_write_w(rv, addr, (uint32_t) value);
 #if RV32_HAS(SYSTEM)
-        if (rv->is_trapped)
+        if (rv->trap_cnt)
             return false;
 #endif
         rv->io.mem_write_w(rv, addr + 4, (uint32_t) (value >> 32));
         break;
     }
 #if RV32_HAS(SYSTEM)
-    if (rv->is_trapped)
+    if (rv->trap_cnt)
         return false;
 #endif
     return true;
@@ -701,7 +701,8 @@ static inline bool rvv_unit_stride_load_ff(riscv_t *rv,
 #if RV32_HAS(SYSTEM)
             if (!seen_active)
                 return false;
-            rv->is_trapped = false;
+            if (rv->trap_cnt)
+                rv->trap_cnt--;
             loaded_vl = elem;
             rv->csr_vl = loaded_vl;
             break;
@@ -809,7 +810,7 @@ static inline bool rvv_validate_segment_reg_group(uint32_t reg,
  *   2. Leave rv->csr_vstart at the segment that faulted so the trap
  *      handler can resume.
  *   3. Return false so the RVOP wrapper propagates return false to the
- *      block dispatcher (which honors rv->is_trapped via on_trap).
+ *      block dispatcher (which honors rv->trap_cnt via on_trap).
  *
  * The fault-only-first variant of unit-stride load is the only path that
  * may suppress the trap and truncate vl - and only when the fault hits
@@ -859,7 +860,8 @@ static inline bool rvv_segment_unit_stride_load(riscv_t *rv,
             if (!rvv_read_mem_elem_ext(rv, field_addr, eew, &staged[field])) {
 #if RV32_HAS(SYSTEM)
                 if (fault_only_first && seen_active) {
-                    rv->is_trapped = false;
+                    if (rv->trap_cnt)
+                        rv->trap_cnt--;
                     loaded_vl = elem;
                     rv->csr_vl = loaded_vl;
                     goto done;

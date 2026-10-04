@@ -100,6 +100,7 @@ MEM_START ?= 0
 MEM_SIZE ?= 512
 DTB_SIZE ?= 1
 
+ifeq ($(CONFIG_ROOTFS_EXT4),n)
 # Auto-detect INITRD_SIZE from actual rootfs.cpio if available
 INITRD_FILE := $(OUT)/linux-image/rootfs.cpio
 ifneq ($(wildcard $(INITRD_FILE)),)
@@ -112,19 +113,35 @@ ifneq ($(wildcard $(INITRD_FILE)),)
 else
     INITRD_SIZE ?= 32
 endif
+endif
+
 
 REAL_MEM_SIZE = $(call compute_size, $(MEM_SIZE))
 REAL_DTB_SIZE = $(call compute_size, $(DTB_SIZE))
+ifeq ($(CONFIG_ROOTFS_EXT4),n)
 REAL_INITRD_SIZE = $(call compute_size, $(INITRD_SIZE))
+endif
 
+ifeq ($(CONFIG_ROOTFS_EXT4),n)
 CFLAGS_dt += -DMEM_START=0x$(MEM_START) \
              -DMEM_END=0x$(shell echo "obase=16; ibase=16; $(MEM_START)+$(REAL_MEM_SIZE)" | bc) \
              -DINITRD_START=0x$(shell echo "obase=16; ibase=16; \
                               $(REAL_MEM_SIZE) - $(call compute_size, ($(INITRD_SIZE)+$(DTB_SIZE)))" | bc) \
              -DINITRD_END=0x$(shell echo "obase=16; ibase=16; \
                             $(REAL_MEM_SIZE) - $(call compute_size, $(DTB_SIZE)) - 1" | bc)
+else
+# Use dummy INITRD_START/END to fool the DTC, so libfdt can remove the linux,initrd_start/end dynamically
+CFLAGS_dt += -DMEM_START=0x$(MEM_START) \
+             -DMEM_END=0x$(shell echo "obase=16; ibase=16; $(MEM_START)+$(REAL_MEM_SIZE)" | bc) \
+             -DINITRD_START=0x0 \
+             -DINITRD_END=0x0
+endif
 
+ifeq ($(CONFIG_ROOTFS_EXT4),n)
 CFLAGS += -DMEM_SIZE=0x$(REAL_MEM_SIZE) -DDTB_SIZE=0x$(REAL_DTB_SIZE) -DINITRD_SIZE=0x$(REAL_INITRD_SIZE)
+else
+CFLAGS += -DMEM_SIZE=0x$(REAL_MEM_SIZE) -DDTB_SIZE=0x$(REAL_DTB_SIZE)
+endif
 
 else
 # ELF loader mode: 4GB virtual address space
@@ -135,7 +152,12 @@ endif
 # System Target
 
 LINUX_IMAGE_DIR := linux-image
+
+ifeq ($(CONFIG_ROOTFS_EXT4),y)
+system_action := ($(BIN) -k $(OUT)/$(LINUX_IMAGE_DIR)/Image -x vblk:$(OUT)/$(LINUX_IMAGE_DIR)/rootfs.ext4,rootfs)
+else
 system_action := ($(BIN) -k $(OUT)/$(LINUX_IMAGE_DIR)/Image -i $(OUT)/$(LINUX_IMAGE_DIR)/rootfs.cpio)
+endif
 system_deps += artifact $(BUILD_DTB) $(BUILD_DTB2C) $(BIN)
 
 system: $(system_deps)

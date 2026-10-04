@@ -283,6 +283,7 @@ ifeq ($(CONFIG_SYSTEM),y)
 start_web_deps += $(BUILD_DTB) $(BUILD_DTB2C) \
                   $(OUT)/linux-image/Image.gz \
                   $(OUT)/linux-image/rootfs.web.cpio \
+                  $(OUT)/linux-image/rootfs.ext4 \
                   $(OUT)/timidity.tar $(OUT)/timidity.tar.gz
 else
 # User mode also stages large game data alongside the WASM bundle so the
@@ -302,7 +303,26 @@ prepare-web: $(start_web_deps)
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(call cp-web-worker)
 ifeq ($(CONFIG_SYSTEM),y)
+# Substitute the <ROOTFS> and <ROOTFS_CLI>
+ifeq ($(CONFIG_ROOTFS_EXT4),y)
+ifeq ($(UNAME_S),Darwin) # macOS
+	$(Q)sed -i '' 's/<ROOTFS>/rootfs.ext4/g' $(DEMO_DIR)/system.html
+	$(Q)sed -i '' 's/<ROOTFS_CLI>/-x vblk:rootfs.ext4,rootfs/g' $(DEMO_DIR)/system.html
+else # Linux
+	$(Q)sed -i 's/<ROOTFS>/rootfs.ext4/g' $(DEMO_DIR)/system.html
+	$(Q)sed -i 's/<ROOTFS_CLI>/-x vblk:rootfs.ext4,rootfs/g' $(DEMO_DIR)/system.html
+endif
+else
+ifeq ($(UNAME_S),Darwin) # maxOS
+	$(Q)sed -i '' 's/<ROOTFS>/rootfs.ext4/g' $(DEMO_DIR)/system.html
+	$(Q)sed -i '' 's/<ROOTFS_CLI>/-x vblk:rootfs.ext4,rootfs/g' $(DEMO_DIR)/system.html
+else # Linux
+	$(Q)sed -i 's/<ROOTFS>/rootfs.cpio.gz/g' $(DEMO_DIR)/system.html
+	$(Q)sed -i 's/<ROOTFS_CLI>/-i rootfs.cpio.gz/g' $(DEMO_DIR)/system.html
+endif
+endif
 	$(Q)cp build/linux-image/Image.gz $(DEMO_DIR)/
+	$(Q)cp build/linux-image/rootfs.ext4 $(DEMO_DIR)/
 	$(Q)gzip -9 -c $(OUT)/linux-image/rootfs.web.cpio > $(DEMO_DIR)/rootfs.cpio.gz
 endif
 	$(Q)mv $(DEMO_DIR)/*.html $(DEMO_DIR)/index.html
@@ -324,6 +344,7 @@ compress-web: $(start_web_deps)
 	$(call cp-web-worker)
 ifeq ($(CONFIG_SYSTEM),y)
 	$(Q)cp build/linux-image/Image.gz $(DEMO_DIR)/
+	$(Q)cp build/linux-image/rootfs.ext4 $(DEMO_DIR)/
 	$(Q)gzip -9 -c $(OUT)/linux-image/rootfs.web.cpio > $(DEMO_DIR)/rootfs.cpio.gz
 endif
 	$(Q)mv $(DEMO_DIR)/*.html $(DEMO_DIR)/index.html

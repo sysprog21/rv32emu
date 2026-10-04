@@ -119,6 +119,11 @@
 #define RV32_FEATURE_SYSTEM 0
 #endif
 
+/* Rootfs type */
+#ifndef RV32_FEATURE_ROOTFS_EXT4
+#define RV32_FEATURE_ROOTFS_EXT4 1
+#endif
+
 /* Use ELF loader */
 #ifndef RV32_FEATURE_ELF_LOADER
 #define RV32_FEATURE_ELF_LOADER 0

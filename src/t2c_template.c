@@ -700,9 +700,10 @@ static LLVMValueRef t2c_gen_mmu_call(LLVMBuilderRef *builder,
         t2c_gen_call_io_func(start, builder, io_field, ret_type, args, n);
 
     LLVMTypeRef i8 = LLVMInt8Type();
-    LLVMValueRef trapped = LLVMBuildLoad2(
-        *builder, i8,
-        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, is_trapped), i8),
+    LLVMTypeRef i32 = LLVMInt32Type();
+    LLVMValueRef trap_cnt = LLVMBuildLoad2(
+        *builder, i32,
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, trap_cnt), i32),
         "");
     LLVMValueRef signal = LLVMBuildLoad2(
         *builder, i8,
@@ -710,9 +711,13 @@ static LLVMValueRef t2c_gen_mmu_call(LLVMBuilderRef *builder,
                                        (uintptr_t) &need_handle_signal, false),
                           LLVMPointerType(i8, 0)),
         "");
-    LLVMValueRef faulted = LLVMBuildICmp(
-        *builder, LLVMIntNE, LLVMBuildOr(*builder, trapped, signal, ""),
-        LLVMConstInt(i8, 0, false), "faulted");
+    LLVMValueRef faulted =
+        LLVMBuildOr(*builder,
+                    LLVMBuildICmp(*builder, LLVMIntNE, trap_cnt,
+                                  LLVMConstInt(i32, 0, false), ""),
+                    LLVMBuildICmp(*builder, LLVMIntNE, signal,
+                                  LLVMConstInt(i8, 0, false), ""),
+                    "faulted");
     LLVMBasicBlockRef fault = LLVMAppendBasicBlock(start, "mmu_fault");
     LLVMBasicBlockRef done = LLVMAppendBasicBlock(start, "mmu_done");
     t2c_gen_unlikely_br(*builder, faulted, fault, done);

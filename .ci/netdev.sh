@@ -6,6 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 check_platform
 
+# Overwrite the variable to use initrd rootfs for initrd.sh
+SPECIFY_ROOTFS=${1:-}
+if [[ "${SPECIFY_ROOTFS}" == "initrd" ]]; then
+    OPTS_BASE_ROOTFS_EXT4="${OPTS_BASE}"
+fi
+
 RET=0
 
 backend="${VNET_BACKEND:-tap}"
@@ -69,9 +75,9 @@ TIMEOUT=${NETDEV_BOOT_TIMEOUT:-${TIMEOUT}}
 MESSAGES[2]="${COLOR_R}Fail to bind virtio-net driver"
 MESSAGES+=("${COLOR_R}Fail to ping gateway")
 MESSAGES+=("${COLOR_R}Fail to identify backend interface")
-RUN_LINUX="${run_prefix} build/rv32emu ${OPTS_BASE} -x vnet:${backend}"
+RUN_LINUX="${run_prefix} build/rv32emu ${OPTS_BASE_ROOTFS_EXT4} -x vnet:${backend}"
 
-printf "${COLOR_Y}===== Test option: ${OPTS_BASE} -x vnet:${backend} =====${COLOR_N}\n"
+printf "${COLOR_Y}===== Test option: ${OPTS_BASE_ROOTFS_EXT4} -x vnet:${backend} =====${COLOR_N}\n"
 
 ASSERT expect <<- DONE
 	set timeout ${TIMEOUT}

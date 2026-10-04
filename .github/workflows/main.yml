@@ -390,6 +390,60 @@ jobs:
             test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM ${{ steps.setup.outputs.llvm-version }} detection failed"; exit 1; }
             .ci/boot-linux-test.sh
 
+
+  boot-tests-macos:
+    name: macOS ${{ matrix.compiler }} boot (${{ matrix.boot_type }})
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc-15
+            boot_type: interpreter
+            defconfig: system_interpreter_defconfig
+            make_flags: ""
+            timeout: 90
+          - compiler: gcc-15
+            boot_type: jit
+            defconfig: system_defconfig
+            make_flags: "ENABLE_MOP_FUSION=0"
+            timeout: 180
+          - compiler: clang
+            boot_type: interpreter
+            defconfig: system_interpreter_defconfig
+            make_flags: ""
+            timeout: 90
+          - compiler: clang
+            boot_type: jit
+            defconfig: system_defconfig
+            make_flags: "ENABLE_MOP_FUSION=0"
+            timeout: 180
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: 'true'
+
+    - name: Set up build environment
+      id: setup
+      uses: ./.github/actions/setup-build
+      with:
+        compiler: ${{ matrix.compiler }}
+        llvm: ${{ matrix.compiler == 'clang' }}
+        artifacts: linux-image
+        cache-suffix: boot-${{ matrix.compiler }}-${{ matrix.boot_type }}
+
+    - name: boot Linux kernel test (${{ matrix.boot_type }})
+      env:
+        BOOT_TIMEOUT: ${{ matrix.timeout }}
+      run: |
+            make distclean && make ${{ matrix.defconfig }} && make INITRD_SIZE=32 ${{ matrix.make_flags }} $PARALLEL && make artifact $PARALLEL
+            .ci/boot-linux-test.sh
+
   macOS-arm64:
     name: macOS ${{ matrix.compiler }}
     needs: [detect-code-related-file-changes]
@@ -446,19 +500,7 @@ jobs:
              make distclean && make interpreter_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
              make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
-     - name: boot Linux kernel test
-       run: |
-             make distclean && make system_interpreter_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh
-             make clean
 
-     - name: boot Linux kernel test (JIT)
-       env:
-         BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
-       run: |
-             make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh
-             make clean
 
   macOS-arm64-feature-disable:
     name: macOS ${{ matrix.compiler }} feature disable

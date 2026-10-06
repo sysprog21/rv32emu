@@ -446,17 +446,52 @@ jobs:
              make distclean && make interpreter_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
              make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
-     - name: boot Linux kernel test
-       run: |
-             make distclean && make system_interpreter_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh
-             make clean
+     - name: Feature disable tests (interpreter + JIT)
+       run: .ci/test-ext-disable.sh
 
-     - name: boot Linux kernel test (JIT)
+  macOS-boot-tests:
+    name: macOS ${{ matrix.compiler }} boot (${{ matrix.boot_type }})
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc-15
+            boot_type: interpreter
+            defconfig: system_interpreter_defconfig
+          - compiler: gcc-15
+            boot_type: jit
+            defconfig: system_defconfig
+          - compiler: clang
+            boot_type: interpreter
+            defconfig: system_interpreter_defconfig
+          - compiler: clang
+            boot_type: jit
+            defconfig: system_defconfig
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+     - uses: actions/checkout@v7
+       with:
+         submodules: 'true'
+
+     - name: Set up build environment
+       id: setup
+       uses: ./.github/actions/setup-build
+       with:
+         compiler: ${{ matrix.compiler }}
+         riscv-toolchain: 'true'
+         artifacts: linux-image
+         cache-suffix: boot-${{ matrix.compiler }}-${{ matrix.boot_type }}
+
+     - name: boot Linux kernel test (${{ matrix.boot_type }})
        env:
-         BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
+         BOOT_TIMEOUT: 180
        run: |
-             make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
+             make distclean && make ${{ matrix.defconfig }} && make INITRD_SIZE=32 ${{ matrix.boot_type == 'jit' && 'ENABLE_MOP_FUSION=0' || '' }} $PARALLEL && make artifact $PARALLEL
              .ci/boot-linux-test.sh
              make clean
 

@@ -147,6 +147,13 @@ ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes
+# Short loops reach T1 through loop detection only where T1 uses packed IR,
+# which T2C builds do not.
+ifeq ($(CONFIG_JIT),y)
+ifeq ($(CONFIG_T2C)$(CONFIG_ARCH_TEST),)
+GUEST_ASM_CHECK_TARGETS += check-jit-loop-profile
+endif
+endif
 ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-register-loop-cycles check-loop-shapes-csr
 endif
@@ -263,6 +270,11 @@ $(eval $(call guest-asm-check-target,register-loop,rv32i_zicsr,-cycles,-DCHECK_C
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i_zicsr,-csr,-DUSE_CSR))
+
+.PHONY: check-jit-loop-profile
+check-jit-loop-profile: $(BIN) tests/jit-loop-profile.S tests/test-jit-loop-profile.py | $(OUT)
+	$(Q)$(call guest-asm-build,jit-loop-profile,rv32i)
+	$(Q)python3 tests/test-jit-loop-profile.py $(BIN) $(OUT)/jit-loop-profile $(CROSS_COMPILE)nm
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))
 
 $(eval $(call guest-asm-check-target,lrsc,rv32ia))

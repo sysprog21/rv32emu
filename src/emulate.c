@@ -3621,6 +3621,9 @@ void rv_step(void *arg)
     const uint64_t cycles_target = rv->csr_cycle + cycles;
 #if RV32_HAS_PACKED_TAIL
     rv->branch_chain_cycle_target = cycles_target;
+#if RV32_HAS(JIT)
+    set_reset(&pc_set);
+#endif
 #endif
 
     /* loop until hitting the cycle target or hart is halted */
@@ -3774,6 +3777,9 @@ void rv_step(void *arg)
          *       entry in compiled binary buffer.
          */
         if (block->hot) {
+#if RV32_HAS_PACKED_TAIL
+            set_reset(&pc_set);
+#endif
             /* Only the emulator thread updates or reads n_invoke. T2C is
              * notified through compiled, so a locked increment here would
              * impose synchronization on every tier-1 block execution. */
@@ -3790,12 +3796,22 @@ void rv_step(void *arg)
             prev = NULL;
             continue;
         } /* check if the execution path is potential hotspot */
+#if RV32_HAS_PACKED_TAIL
+        /* Compilable packed blocks return to the dispatcher at each edge.
+         * Keep their interpreted path across dispatches to detect cycles.
+         */
+        if (set_probe(&pc_set, block->pc_start))
+            block->has_loops = true;
+#endif
         if (block->translatable
 #if !RV32_HAS(ARCH_TEST)
             && runtime_profiler(rv, block, freq)
 #endif
         ) {
             if (jit_translate(rv, block)) {
+#if RV32_HAS_PACKED_TAIL
+                set_reset(&pc_set);
+#endif
 #if defined(__aarch64__)
                 /* Ensure icache coherency before executing JIT */
                 __asm__ volatile("isb" ::: "memory");
@@ -3809,7 +3825,9 @@ void rv_step(void *arg)
                 continue;
             }
         }
+#if !RV32_HAS_PACKED_TAIL
         set_reset(&pc_set);
+#endif
         has_loops = false;
 #endif
         /* execute the block by interpreter.

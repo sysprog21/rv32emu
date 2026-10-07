@@ -57,6 +57,8 @@ RVOP(lui, { rv->X[ir->rd] = ir->imm; })
             cache_get_with_freq(rv->block_cache, (target_pc), true); \
             goto hot_label;                                          \
         }                                                            \
+        if (!has_loops && set_probe(&pc_set, (target_pc)))           \
+            has_loops = true;                                        \
     } while (0)
 #else
 #if RV32_HAS(SYSTEM)

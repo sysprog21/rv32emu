@@ -2125,8 +2125,10 @@ static const char *insn_name_table[] = {
 };
 
 #if RV32_HAS(JIT)
-static void profile(block_t *block, uint32_t freq, FILE *output_file)
+/* A prof_func_t, so that cache_profile() calls it through its own type. */
+static void profile(void *entry, uint32_t freq, FILE *output_file)
 {
+    block_t *block = entry;
     fprintf(output_file, "%#-9x|", block->pc_start);
     fprintf(output_file, "%#-8x|", block->pc_end);
     fprintf(output_file, " %-10u|", freq);
@@ -2206,7 +2208,7 @@ void rv_profile(riscv_t *rv, char *out_file_path)
      */
     pthread_mutex_lock(&rv->cache_lock);
 #endif
-    cache_profile(rv->block_cache, f, (prof_func_t) profile);
+    cache_profile(rv->block_cache, f, profile);
 #if RV32_HAS(T2C)
     pthread_mutex_unlock(&rv->cache_lock);
 #endif

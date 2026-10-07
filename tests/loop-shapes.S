@@ -46,8 +46,8 @@ iterations_\n:
 
 _start:
     li s11, 0
-    /* Interpreted block chaining keeps a running loop away from the
-     * dispatcher, so repeat every loop until T1 has compiled it.
+    /* T1 compiles a loop only once the dispatcher has seen it often enough,
+     * so repeat every loop until T1 has compiled it.
      */
 #ifdef USE_CSR
     /* Privileged state keeps alignment checks in generated code. */

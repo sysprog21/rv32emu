@@ -1021,6 +1021,13 @@ static inline void bht_record_target(branch_history_table_t *bt,
 
 #endif
 
+/* The handler that emulates one IR record, then tail-calls its successor. */
+struct rv_insn;
+typedef PRESERVE_NONE bool (*rv_insn_impl_t)(riscv_t *,
+                                             const struct rv_insn *,
+                                             uint64_t,
+                                             uint32_t);
+
 typedef struct rv_insn {
     union {
         int32_t imm;
@@ -1066,26 +1073,20 @@ typedef struct rv_insn {
      * function stack frame.
      *
      * The @next member indicates the next IR or is NULL if it is the final
-     * instruction in a basic block.  Native interpreter-only builds compact
-     * finalized blocks and reuse this slot for the successor implementation;
-     * those records are contiguous, so their successor IR is @ir + 1.  The
-     * @impl member facilitates the direct
-     * invocation of the next instruction emulation without the need to compute
-     * the jump address. By utilizing these two members, all instruction
-     * emulations can be rewritten into a self-recursive version, enabling the
-     * compiler to leverage TCO.
+     * instruction in a basic block.  Packed builds compact finalized blocks
+     * and reuse this slot for the successor implementation; those records are
+     * contiguous, so their successor IR is @ir + 1 (see block_next_ir()).
+     * The @impl member facilitates the direct invocation of the next
+     * instruction emulation without the need to compute the jump address. By
+     * utilizing these two members, all instruction emulations can be
+     * rewritten into a self-recursive version, enabling the compiler to
+     * leverage TCO.
      */
     union {
         struct rv_insn *next;
-        PRESERVE_NONE bool (*next_impl)(riscv_t *,
-                                        const struct rv_insn *,
-                                        uint64_t,
-                                        uint32_t);
+        rv_insn_impl_t next_impl;
     };
-    PRESERVE_NONE bool (*impl)(riscv_t *,
-                               const struct rv_insn *,
-                               uint64_t,
-                               uint32_t);
+    rv_insn_impl_t impl;
 
     /* Two pointers, 'branch_taken' and 'branch_untaken', are employed to
      * avoid the overhead associated with aggressive memory copying. Instead
@@ -1097,6 +1098,18 @@ typedef struct rv_insn {
     struct rv_insn *branch_taken, *branch_untaken;
     branch_history_table_t *branch_table;
 } rv_insn_t;
+
+/* The record after @ir in a finalized block, or NULL after the last one.
+ * Packed records are contiguous and keep only their successor's handler.
+ */
+static inline rv_insn_t *block_next_ir(const rv_insn_t *ir)
+{
+#if RV32_HAS_PACKED_TAIL
+    return ir->next_impl ? (rv_insn_t *) ir + 1 : NULL;
+#else
+    return ir->next;
+#endif
+}
 
 /* decode the RISC-V instruction */
 bool rv_decode(rv_insn_t *ir, const uint32_t insn);

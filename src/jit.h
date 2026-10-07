@@ -103,6 +103,8 @@ void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags);
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);
 bool jit_translate(riscv_t *rv, block_t *block);
+/* Release a block's IR records (defined in emulate.c). */
+void block_free_irs(riscv_t *rv, block_t *block);
 
 #if RV32_HAS(SYSTEM)
 /* Stop reusing the code translated for address space satp. Called when the

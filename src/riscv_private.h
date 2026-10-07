@@ -147,6 +147,13 @@ typedef struct block {
 #endif
 
 #if RV32_HAS(JIT)
+#if RV32_HAS_PACKED_TAIL
+    /* The interpreter handler of @ir_head, which rv_step() runs. In a block
+     * T1 can compile, do_enter_dispatch() takes the head's place so that
+     * chains return to rv_step().
+     */
+    rv_insn_impl_t head_impl;
+#endif
     bool hot;          /**< Determine the block is potential hotspot or not */
     bool hot2;         /**< Determine the block is strong hotspot or not */
     bool translatable; /**< Determine the block has RV32AF or not */

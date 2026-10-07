@@ -198,7 +198,7 @@ static uint32_t block_jump_budget(const block_t *block)
 {
     uint32_t n = 2;
     const rv_insn_t *ir = block->ir_head;
-    for (uint32_t i = 0; i < block->n_insn; i++, ir = ir->next) {
+    for (uint32_t i = 0; i < block->n_insn; i++, ir = block_next_ir(ir)) {
         n += JUMPS_PER_INSN;
         switch (ir->opcode) {
         case rv_insn_fuse3:
@@ -3170,7 +3170,7 @@ static inline void liveness_calc(block_t *block)
 
     /* follow the order of operator in "src/rc32_template.c" */
     for (idx = 0, ir = block->ir_head; idx < block->n_insn;
-         idx++, ir = ir->next) {
+         idx++, ir = block_next_ir(ir)) {
         switch (ir->opcode) {
         case rv_insn_nop:
         case rv_insn_lui:
@@ -4556,7 +4556,7 @@ static bool translate_register_loop(struct jit_state *state,
      * must be loaded on entry; the others are only mapped.
      */
     uint32_t regs = 0, live_in = 0, defined = 0, use, def;
-    for (const rv_insn_t *ir = block->ir_head;; ir = ir->next) {
+    for (const rv_insn_t *ir = block->ir_head;; ir = block_next_ir(ir)) {
         if (ir != tail) {
             if (!loop_body_regs(ir, &use, &def))
                 return false;
@@ -4610,7 +4610,7 @@ static bool translate_register_loop(struct jit_state *state,
      */
     if (!rv->jit_entry_cycles)
         emit_cycle_count(state, block->cycle_cost);
-    for (rv_insn_t *ir = block->ir_head; ir != tail; ir = ir->next)
+    for (rv_insn_t *ir = block->ir_head; ir != tail; ir = block_next_ir(ir))
         ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
 
     if (tail->opcode == rv_insn_fuse12) {
@@ -4682,7 +4682,7 @@ static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
     liveness_calc(block);
     for (idx = 0, ir = block->ir_head; idx < block->n_insn && !should_flush;
          idx++, ir = next) {
-        next = ir->next;
+        next = block_next_ir(ir);
         regs_refresh(idx);
         ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
     }

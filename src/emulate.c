@@ -870,7 +870,7 @@ static set_t pc_set;
 static bool has_loops = false;
 #endif
 
-#if RV32_HAS(JIT)
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
 /* Under a guest OS, much of the code runs interpreted and briefly: a process
  * lives a short while, and its blocks are discarded at each full SFENCE.VMA.
  * Profiling every branch the interpreter chains through then costs more than
@@ -878,8 +878,7 @@ static bool has_loops = false;
  * and scales the hotness threshold to match. Its threshold only ends the chain:
  * runtime_profiler() still decides, with its own thresholds, whether the block
  * is translated. Counting each sample as PROBE_INTERVAL uses instead, with one
- * threshold for both, measured slower on Arm64. In user mode, do_fuse12()
- * samples the countdown edges it chains through at the same rate.
+ * threshold for both, measured slower on Arm64.
  */
 #define PROBE_INTERVAL 32
 static uint32_t probe_tick;
@@ -1043,14 +1042,17 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     RVOP_TAIL_INTRA(rv, target, cycle, PC)
 #endif
 
-/* A conditional branch normally returns to rv_step() so that the JIT can
- * account for block hotness and SYSTEM builds can process trap state. The
- * native interpreter-only path has neither requirement, so once an edge has
- * been learned, keep executing it in the existing tail-call chain.
+/* A conditional branch normally returns to rv_step() so that SYSTEM builds
+ * can process trap state. Packed builds have no such state, so once an edge
+ * has been learned, keep executing it in the existing tail-call chain. In JIT
+ * builds the chain enters only blocks T1 cannot compile: any other block is
+ * headed by do_enter_dispatch(), which returns to rv_step() for profiling.
  *
  * The cycle budget still bounds the chain: without it a hot loop would never
  * return to rv_step(), which is where halt and interrupt state are observed.
- * WASM keeps its yield-aware dispatch path instead.
+ * WASM keeps its yield-aware dispatch path instead. RVOP_CHAIN_TAIL follows
+ * the learned edge of a jump or compressed branch the same way, and always
+ * follows it in builds without packing.
  */
 #if RV32_HAS_PACKED_TAIL
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
@@ -1060,9 +1062,16 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
             MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
         }                                                           \
     } while (0)
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC) \
+    RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)
 #else
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
     do {                                               \
+    } while (0)
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC)                  \
+    do {                                                        \
+        last_pc = (PC);                                         \
+        MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
     } while (0)
 #endif
 
@@ -1119,6 +1128,25 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
         return true;                                                      \
     }
 
+#if RV32_HAS(JIT) && RV32_HAS_PACKED_TAIL
+/* The head handler of a block T1 may compile. A chain reaching it returns to
+ * rv_step(), which profiles the block, compiles it once hot and then runs it
+ * natively; rv_step() itself interprets the block through @head_impl.
+ */
+static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
+                                            const rv_insn_t *ir UNUSED,
+                                            uint64_t cycle,
+                                            uint32_t PC)
+{
+    /* The chain set last_pc to this block, which has not run. Clear it so
+     * rv_step() links no edge: the one that led here already exists.
+     */
+    last_pc = 0;
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
+    return true;
+}
+#endif
 #include "rv32_template.c"
 #undef RVOP
 
@@ -1158,7 +1186,7 @@ end_op:
 
 #endif
 
-#if RV32_HAS_PACKED_TAIL && RV32_HAS(MOP_FUSION) && RV32_HAS(EXT_M) && \
+#if RV32_HAS_TRACE_FUSION && RV32_HAS(MOP_FUSION) && RV32_HAS(EXT_M) && \
     !RV32_HAS(RV32E)
 /* IDEA's multiply-mod-65537 round opens with this exact 16-instruction graph
  * (trace_idea_round_prefix).  The three LHU operations retain their original
@@ -1243,8 +1271,6 @@ static PRESERVE_NONE bool do_idea_alu_suffix_trace(riscv_t *rv,
 }
 
 #endif
-
-#undef RVOP_NATIVE_BRANCH_TAIL
 
 /* Helper for fused instruction tail: continue to next or stop.
  * Matches RVOP macro signal handling and block map clearing logic.
@@ -1366,7 +1392,7 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
-#if RV32_HAS_PACKED_TAIL && RV32_HAS(MOP_FUSION)
+#if RV32_HAS_TRACE_FUSION && RV32_HAS(MOP_FUSION)
 static PRESERVE_NONE bool do_fuse_lhu(riscv_t *rv,
                                       const rv_insn_t *ir,
                                       uint64_t cycle,
@@ -1616,33 +1642,7 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
  * ir->rs1 = source register for addi
  * ir->imm = addi immediate (usually -1 for countdown)
  * ir->imm2 = branch offset
- * ir->rs2 = nonzero when the branch closes a self-loop T1 cannot compile
  */
-#if RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
-/* The sampled edge of do_fuse12(), which has already resolved PC: record it
- * for loop detection, and return to rv_step() when the target block is
- * uncached or T1 can compile it. A separate tail-called handler keeps the
- * chained countdown path free of a call and its register saves.
- */
-static __attribute__((noinline, cold)) PRESERVE_NONE bool
-do_fuse12_probe(riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, uint32_t PC)
-{
-    cache_lookup_t lookup = cache_get_with_freq(rv->block_cache, PC, true);
-    if (!has_loops && set_probe(&pc_set, PC))
-        has_loops = true;
-    const block_t *next_block = lookup.value;
-    if (next_block && !next_block->translatable) {
-        struct rv_insn *target =
-            is_branch_taken ? ir->branch_taken : ir->branch_untaken;
-        last_pc = PC;
-        MUST_TAIL return target->impl(rv, target, cycle, PC);
-    }
-    rv->csr_cycle = cycle;
-    rv->PC = PC;
-    return true;
-}
-#endif
-
 static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
                                     const rv_insn_t *ir,
                                     uint64_t cycle,
@@ -1663,27 +1663,16 @@ static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
         target = ir->branch_untaken;
     }
     if (target) {
-#if RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
-        /* An unprobed chain kept countdown loops away from the dispatcher,
-         * so T1 never compiled them. Probe one edge in PROBE_INTERVAL, and
-         * otherwise keep chaining.
-         */
-        if (!ir->rs2 && unlikely(!(++probe_tick % PROBE_INTERVAL))) {
-            MUST_TAIL return do_fuse12_probe(rv, ir, cycle, PC);
-        }
-#else
 #if RV32_HAS(JIT)
-        RVOP_PROBE_TARGET(PC, fuse12_exit);
+        /* Probe as BRANCH_FUNC does, so T1 sees countdown loops. */
+        RVOP_PROBE_TARGET(target, PC, fuse12_exit);
 #endif
 #if RV32_HAS(SYSTEM)
-        if (rv->trap_cnt)
-            goto fuse12_exit;
+        if (!rv->trap_cnt)
 #endif
-#endif
-        last_pc = PC;
-        MUST_TAIL return target->impl(rv, target, cycle, PC);
+            RVOP_CHAIN_TAIL(rv, target, cycle, PC);
     }
-#if RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT)
 fuse12_exit:
 #endif
     rv->csr_cycle = cycle;
@@ -1719,7 +1708,7 @@ static PRESERVE_NONE bool do_fuse13(riscv_t *rv,
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
-#if RV32_HAS_PACKED_TAIL && RV32_HAS(MOP_FUSION)
+#if RV32_HAS_TRACE_FUSION && RV32_HAS(MOP_FUSION)
 /* lbu; addi; addi; sb; bne is the inner byte-copy loop used by libc and
  * String Sort.  Keep the original instruction records in fuse[] so every
  * register alias observes the same sequential behavior as the five handlers.
@@ -2604,7 +2593,27 @@ static bool lazy_fusion_safe_base_regs(uint32_t modified_regs_before,
  * Strategies are being devised to increase the number of instructions that
  * match the pattern, including possible instruction reordering.
  */
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_TRACE_FUSION
+/* Fuse @count records from @ir through the branch @terminal into one record
+ * run by @impl, which takes over the branch's learned edges.
+ */
+static bool fuse_with_terminal(riscv_t *rv,
+                               block_t *block,
+                               rv_insn_t *ir,
+                               int count,
+                               const rv_insn_t *terminal,
+                               rv_insn_impl_t impl)
+{
+    rv_insn_t *taken = terminal->branch_taken;
+    rv_insn_t *untaken = terminal->branch_untaken;
+    if (!try_fuse_sequence(rv, block, ir, count, rv_insn_fuse13))
+        return false;
+    ir->branch_taken = taken;
+    ir->branch_untaken = untaken;
+    ir->impl = impl;
+    return true;
+}
+
 /* Fuse the records of an exactly matched trace into one record run by impl.
  * When the terminal branch is fused too, the fused record takes over its
  * learned edges; otherwise the branch stays the next, generic record.
@@ -2614,30 +2623,22 @@ FORCE_INLINE bool fuse_trace(riscv_t *rv,
                              rv_insn_t *ir,
                              enum trace_match_id id,
                              bool fuse_terminal,
-                             PRESERVE_NONE bool (*impl)(riscv_t *,
-                                                        const rv_insn_t *,
-                                                        uint64_t,
-                                                        uint32_t))
+                             rv_insn_impl_t impl)
 {
     const trace_match_spec_t *spec = &trace_match_specs[id];
     const rv_insn_t *terminal;
     if (!trace_match(ir, spec, &terminal))
         return false;
-    rv_insn_t *taken = terminal->branch_taken;
-    rv_insn_t *untaken = terminal->branch_untaken;
-    if (!try_fuse_sequence(rv, block, ir, spec->count - !fuse_terminal,
-                           rv_insn_fuse13))
+    if (fuse_terminal)
+        return fuse_with_terminal(rv, block, ir, spec->count, terminal, impl);
+    if (!try_fuse_sequence(rv, block, ir, spec->count - 1, rv_insn_fuse13))
         return false;
-    if (fuse_terminal) {
-        ir->branch_taken = taken;
-        ir->branch_untaken = untaken;
-    }
     ir->impl = impl;
     return true;
 }
 #endif
 
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_TRACE_FUSION
 /* Decode a register copy, "addi rd, rs, 0" or "c.mv rd, rs". */
 static inline bool insn_is_copy(const rv_insn_t *ir, uint8_t *rd, uint8_t *rs)
 {
@@ -2656,7 +2657,6 @@ static inline bool insn_is_copy(const rv_insn_t *ir, uint8_t *rd, uint8_t *rs)
     return false;
 }
 
-/* Match do_pointer_reverse()'s five instructions, each in either width. */
 /* Either width of an instruction: OPCODE_IS(op, lw, clw). */
 #if RV32_HAS(EXT_C)
 #define OPCODE_IS(op, base, compressed) \
@@ -2665,6 +2665,7 @@ static inline bool insn_is_copy(const rv_insn_t *ir, uint8_t *rd, uint8_t *rs)
 #define OPCODE_IS(op, base, compressed) ((op) == rv_insn_##base)
 #endif
 
+/* Match do_pointer_reverse()'s five instructions, each in either width. */
 static bool fuse_pointer_reverse(riscv_t *rv, block_t *block, rv_insn_t *ir)
 {
     uint8_t node, list, prev, from;
@@ -2691,9 +2692,7 @@ static bool fuse_pointer_reverse(riscv_t *rv, block_t *block, rv_insn_t *ir)
     const uint32_t branch_len = branch->opcode == rv_insn_bne ? 4 : 2;
     const uint32_t load_compressed = store->pc - load->pc == 2;
     const int32_t link = load->imm;
-    rv_insn_t *taken = branch->branch_taken;
-    rv_insn_t *untaken = branch->branch_untaken;
-    if (!try_fuse_sequence(rv, block, ir, 5, rv_insn_fuse13))
+    if (!fuse_with_terminal(rv, block, ir, 5, branch, do_pointer_reverse))
         return false;
     ir->rd = node;
     ir->rs1 = list;
@@ -2701,9 +2700,6 @@ static bool fuse_pointer_reverse(riscv_t *rv, block_t *block, rv_insn_t *ir)
     ir->imm = link;
     ir->imm2 =
         load_off | branch_off << 8 | branch_len << 16 | load_compressed << 24;
-    ir->branch_taken = taken;
-    ir->branch_untaken = untaken;
-    ir->impl = do_pointer_reverse;
     return true;
 }
 #undef OPCODE_IS
@@ -2723,7 +2719,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
         rv_insn_t *next_ir = NULL;
         int32_t count = 0;
         switch (ir->opcode) {
-#if RV32_HAS_PACKED_TAIL && RV32_HAS(EXT_M) && !RV32_HAS(RV32E)
+#if RV32_HAS_TRACE_FUSION && RV32_HAS(EXT_M) && !RV32_HAS(RV32E)
         case rv_insn_mul:
             if (!fuse_trace(rv, block, ir, trace_idea_round_prefix, false,
                             do_idea_round_prefix_trace))
@@ -2732,14 +2728,14 @@ static void match_pattern(riscv_t *rv, block_t *block)
             break;
 #endif
         case rv_insn_sh:
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_TRACE_FUSION
             count = count_consecutive_insn(ir, rv_insn_sh);
             if (try_fuse_sequence(rv, block, ir, count, rv_insn_fuse3))
                 ir->impl = do_fuse_sh;
 #endif
             break;
         case rv_insn_lhu: {
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_TRACE_FUSION
             if (fuse_trace(rv, block, ir, trace_emfloat_halfword_shift, true,
                            do_emfloat_halfword_shift_trace))
                 break;
@@ -2750,7 +2746,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
             break;
         }
         case rv_insn_lbu: {
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_TRACE_FUSION
             /* libc byte-copy loop:
              * lbu rd, off(src); addi src, src, n; addi dst, dst, n;
              * sb rd, off(dst); bne src, limit, loop
@@ -2926,7 +2922,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
 #endif
             break;
         case rv_insn_lw: {
-#if RV32_HAS_PACKED_TAIL && !RV32_HAS(RV32E)
+#if RV32_HAS_TRACE_FUSION && !RV32_HAS(RV32E)
             if (fuse_trace(rv, block, ir, trace_strlen_word, true,
                            do_strlen_word_trace))
                 break;
@@ -2995,7 +2991,7 @@ static void match_pattern(riscv_t *rv, block_t *block)
         case rv_insn_slli:
         case rv_insn_srli:
         case rv_insn_srai: {
-#if RV32_HAS_PACKED_TAIL && !RV32_HAS(RV32E)
+#if RV32_HAS_TRACE_FUSION && !RV32_HAS(RV32E)
             if (fuse_trace(rv, block, ir, trace_primes_probe, true,
                            do_primes_probe_trace) ||
                 fuse_trace(rv, block, ir, trace_bitfield_set_bit, true,
@@ -3019,22 +3015,22 @@ static void match_pattern(riscv_t *rv, block_t *block)
             try_fuse_sequence(rv, block, ir, count, rv_insn_fuse5);
             break;
         }
-#if RV32_HAS_PACKED_TAIL && RV32_HAS(EXT_C)
+#if RV32_HAS_TRACE_FUSION && RV32_HAS(EXT_C)
         case rv_insn_cmv:
             fuse_pointer_reverse(rv, block, ir);
             break;
 #endif
         case rv_insn_addi:
             next_ir = ir->next;
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_TRACE_FUSION
             if (fuse_pointer_reverse(rv, block, ir))
                 break;
-#endif
-#if RV32_HAS_PACKED_TAIL && !RV32_HAS(RV32E)
+#if !RV32_HAS(RV32E)
             /* NumSift's fixed child-index dataflow graph. */
             if (fuse_trace(rv, block, ir, trace_numsift_index, true,
                            do_numsift_index_trace))
                 break;
+#endif
 #endif
 #if !RV32_HAS(RV32E)
             /* LI a7 + ECALL fusion (fuse6): li a7, imm; ecall */
@@ -3054,13 +3050,6 @@ static void match_pattern(riscv_t *rv, block_t *block)
             if (next_ir && IF_insn(next_ir, bne) && ir->rd != rv_reg_zero &&
                 ir->rd == next_ir->rs1 && next_ir->rs2 == rv_reg_zero) {
                 ir->imm2 = next_ir->imm; /* branch offset */
-#if RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
-                /* T1 can never compile a self-loop through an untranslatable
-                 * block, so do_fuse12() need not probe its backedge.
-                 */
-                ir->rs2 = !block->translatable &&
-                          ir->pc + 4 + ir->imm2 == block->pc_start;
-#endif
                 ir->opcode = rv_insn_fuse12;
                 ir->impl = dispatch_table[ir->opcode];
                 /* Copy branch targets for block chaining */
@@ -3262,15 +3251,20 @@ static void free_linked_block(riscv_t *rv, block_t *block)
 
 #if RV32_HAS(JIT)
 /* Release the IRs of a block that is leaving the cache */
-static void block_free_irs(riscv_t *rv, block_t *block)
+void block_free_irs(riscv_t *rv, block_t *block)
 {
     for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
-        next_ir = ir->next;
+        next_ir = block_next_ir(ir);
         free(ir->branch_table);
         if (ir->fuse)
             mpool_free(rv->fuse_mp, ir->fuse);
+#if !RV32_HAS_PACKED_TAIL
         mpool_free(rv->block_ir_mp, ir);
+#endif
     }
+#if RV32_HAS_PACKED_TAIL
+    free(block->ir_head);
+#endif
 }
 #endif
 
@@ -3367,6 +3361,15 @@ static block_t *block_find_or_translate(riscv_t *rv
         free_linked_block(rv, next_blk);
         return NULL;
     }
+#if RV32_HAS(JIT)
+    /* Chain only into blocks T1 can never compile. Every other block is
+     * entered through rv_step(), as without packing, so it is profiled and
+     * its compiled code runs once T1 has it.
+     */
+    next_blk->head_impl = next_blk->ir_head->impl;
+    if (next_blk->translatable)
+        next_blk->ir_head->impl = do_enter_dispatch;
+#endif
 #endif
 
 #if !RV32_HAS(JIT)
@@ -3646,7 +3649,7 @@ void rv_step(void *arg)
 #if !RV32_HAS(JIT)
             prev = block_lookup_or_find(rv, last_pc);
 #else
-            prev = cache_get(rv->block_cache, last_pc, false);
+            prev = last_pc ? cache_get(rv->block_cache, last_pc, false) : NULL;
 #endif
         }
         /* lookup the next block in block map or translate a new block,
@@ -3816,7 +3819,12 @@ void rv_step(void *arg)
          */
         const rv_insn_t *ir = block->ir_head;
         uint64_t cycle = rv->csr_cycle;
-        if (unlikely(!ir->impl(rv, ir, cycle, rv->PC))) {
+#if RV32_HAS(JIT) && RV32_HAS_PACKED_TAIL
+        const rv_insn_impl_t impl = block->head_impl;
+#else
+        const rv_insn_impl_t impl = ir->impl;
+#endif
+        if (unlikely(!impl(rv, ir, cycle, rv->PC))) {
             /* block should not be extended if exception handler invoked */
             prev = NULL;
             break;

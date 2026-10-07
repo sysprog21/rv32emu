@@ -234,16 +234,30 @@
 /* Feature test macro */
 #define RV32_HAS(x) RV32_FEATURE_##x
 
-/* Native interpreter-only builds: no JIT, system emulation, GDB stub or
- * browser event loop.  Only these lay decoded blocks out as packed IR, chain
- * learned branch edges and take longer step slices.  Packed IR keeps the full
- * rv_insn_t payload and the existing must-tail handler ABI.
+/* Native user-mode builds without a GDB stub or browser event loop lay decoded
+ * blocks out as packed IR, chain learned branch edges and take longer step
+ * slices. Packed IR keeps the full rv_insn_t payload and the existing
+ * must-tail handler ABI. JIT builds chain only into blocks T1 cannot compile.
+ * T2C builds keep the linked path: with packed IR, T1 compiled some blocks
+ * before their branch edges had been learned, which T2C regions then lacked,
+ * and miniz measured slower.
  */
-#if !RV32_HAS(JIT) && !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && \
+#if !RV32_HAS(SYSTEM) && !RV32_HAS(T2C) && !RV32_HAS(GDBSTUB) && \
     !defined(__EMSCRIPTEN__)
 #define RV32_HAS_PACKED_TAIL 1
 #else
 #define RV32_HAS_PACKED_TAIL 0
+#endif
+
+/* Trace fusion replaces an exactly matched instruction sequence with one
+ * record whose handler runs the whole sequence. T1 emits code from opcodes and
+ * cannot reproduce such a record, so JIT builds leave those sequences for T1
+ * to compile instead.
+ */
+#if RV32_HAS_PACKED_TAIL && !RV32_HAS(JIT)
+#define RV32_HAS_TRACE_FUSION 1
+#else
+#define RV32_HAS_TRACE_FUSION 0
 #endif
 
 /* Native system-mode harts run on a coroutine stack, so a guest reboot can

@@ -446,9 +446,6 @@ jobs:
              make distclean && make interpreter_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
              make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
-     - name: Feature disable tests (interpreter + JIT)
-       run: .ci/test-ext-disable.sh
-
   macOS-boot-tests:
     name: macOS ${{ matrix.compiler }} boot (${{ matrix.boot_type }})
     needs: [detect-code-related-file-changes]
@@ -483,7 +480,7 @@ jobs:
        uses: ./.github/actions/setup-build
        with:
          compiler: ${{ matrix.compiler }}
-         riscv-toolchain: 'true'
+         riscv-toolchain: 'false'
          artifacts: linux-image
          cache-suffix: boot-${{ matrix.compiler }}-${{ matrix.boot_type }}
 

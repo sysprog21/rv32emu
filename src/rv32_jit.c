@@ -80,15 +80,26 @@
     } while (0)
 
 /* Branch instruction handler macro - all branch instructions follow
- * the same pattern, differing only in the condition code.
+ * the same pattern, differing only in the condition code. A comparison
+ * with x0 on either side tests the other operand against zero.
  */
 #define GEN_BRANCH(inst, cond)                            \
     GEN(inst, {                                           \
-        ra_load2(state, ir->rs1, ir->rs2);                \
-        store_back(state);                                \
-        emit_cmp32(state, vm_reg[1], vm_reg[0]);          \
+        uint8_t lhs = ir->rs1;                            \
+        uint8_t rhs = ir->rs2;                            \
+        int jcc = cond;                                   \
+        branch_zero_rhs(&lhs, &rhs, &jcc);                \
+        if (rhs == rv_reg_zero) {                         \
+            vm_reg[0] = ra_load(state, lhs);              \
+            store_back(state);                            \
+            emit_cmp_imm32(state, vm_reg[0], 0);          \
+        } else {                                          \
+            ra_load2(state, lhs, rhs);                    \
+            store_back(state);                            \
+            emit_cmp32(state, vm_reg[1], vm_reg[0]);      \
+        }                                                 \
         uint32_t jump_loc_0 = state->offset;              \
-        emit_jcc_offset(state, cond);                     \
+        emit_jcc_offset(state, jcc);                      \
         EMIT_BRANCH_EPILOGUE(4); /* 4-byte instruction */ \
     })
 

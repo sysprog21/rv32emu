@@ -22,6 +22,10 @@
 #define JCC_JGE 0x8d /* Jump if Greater or Equal - signed (conditional) */
 #define JCC_JB 0x82  /* Jump if Below - unsigned (conditional) */
 #define JCC_JAE 0x83 /* Jump if Above or Equal - unsigned (conditional) */
+#define JCC_JBE 0x86 /* Jump if Below or Equal - unsigned (conditional) */
+#define JCC_JA 0x87  /* Jump if Above - unsigned (conditional) */
+#define JCC_JLE 0x8e /* Jump if Less or Equal - signed (conditional) */
+#define JCC_JG 0x8f  /* Jump if Greater - signed (conditional) */
 #define JCC_JMP 0xe9 /* Jump unconditional */
 
 struct jump {

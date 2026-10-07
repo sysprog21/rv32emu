@@ -377,6 +377,7 @@ enum a64_reg {
 typedef enum {
     /* AddSubOpcode */
     AS_ADD = 0,
+    AS_ADDS = 1,
     AS_SUB = 2,
     AS_SUBS = 3,
     /* LogicalOpcode */
@@ -427,8 +428,12 @@ enum condition {
     COND_NE,
     COND_HS,
     COND_LO,
+    COND_HI = 8,
+    COND_LS = 9,
     COND_GE = 10,
     COND_LT = 11,
+    COND_GT = 12,
+    COND_LE = 13,
     COND_AL = 14,
 };
 
@@ -833,6 +838,12 @@ static inline void emit_jump_target_address(struct jit_state *state,
 static inline void emit_load_imm(struct jit_state *state,
                                  int dst,
                                  uint32_t imm);
+static void emit_add_imm(struct jit_state *state,
+                         bool is64,
+                         bool set_flags,
+                         int dst,
+                         int src,
+                         int64_t imm);
 
 static void emit_a64(struct jit_state *state, uint32_t insn)
 {
@@ -1114,8 +1125,7 @@ static inline void emit_alu32_imm32(struct jit_state *state,
 #elif defined(__aarch64__)
     switch (src) {
     case 0:
-        emit_load_imm(state, R10, imm);
-        emit_addsub_register(state, false, AS_ADD, dst, dst, R10);
+        emit_add_imm(state, false, false, dst, dst, imm);
         break;
     case 1:
         emit_load_imm(state, R10, imm);
@@ -1148,18 +1158,22 @@ static inline void emit_alu32_imm8(struct jit_state *state,
     emit_alu32(state, op, src, dst);
     emit1(state, imm);
 #elif defined(__aarch64__)
+    /* Immediate shifts are aliases of the 32-bit bitfield moves:
+     * LSL #n = UBFM #(-n % 32), #(31 - n); LSR #n = UBFM #n, #31;
+     * ASR #n = SBFM #n, #31. Like the register forms, count modulo 32.
+     */
+    const uint32_t n = (uint8_t) imm & 31;
+    const uint32_t ubfm = 0x53000000U, sbfm = 0x13000000U;
     switch (src) {
     case 4:
-        emit_load_imm(state, R10, imm);
-        emit_dataproc_2source(state, false, DP2_LSLV, dst, dst, R10);
+        emit_a64(state, ubfm | ((-n & 31) << 16) | ((31 - n) << 10) |
+                            (dst << 5) | dst);
         break;
     case 5:
-        emit_load_imm(state, R10, imm);
-        emit_dataproc_2source(state, false, DP2_LSRV, dst, dst, R10);
+        emit_a64(state, ubfm | (n << 16) | (31 << 10) | (dst << 5) | dst);
         break;
     case 7:
-        emit_load_imm(state, R10, imm);
-        emit_dataproc_2source(state, false, DP2_ASRV, dst, dst, R10);
+        emit_a64(state, sbfm | (n << 16) | (31 << 10) | (dst << 5) | dst);
         break;
     default:
         __UNREACHABLE;
@@ -1258,9 +1272,18 @@ static inline void emit_alu64_imm32(struct jit_state *state,
 static inline void emit_cmp_imm32(struct jit_state *state, int dst, int32_t imm)
 {
 #if defined(__x86_64__)
+    if (!imm) {
+        /* TEST sets ZF and SF as CMP 0 does and clears CF and OF. */
+        emit_alu32_raw(state, 0x85, dst, dst);
+        return;
+    }
     emit_alu32_raw(state, 0x81, 7, dst); /* GRP1 /7 = CMP r/m32, imm32 */
     emit4(state, imm);
 #elif defined(__aarch64__)
+    if (!imm) {
+        emit_addsub_register(state, false, AS_SUBS, RZ, dst, RZ);
+        return;
+    }
     emit_load_imm(state, R10, imm);
     emit_addsub_register(state, false, AS_SUBS, RZ, dst, R10);
 #endif
@@ -1303,6 +1326,18 @@ static inline void emit_jcc_offset(struct jit_state *state, int code)
     case JCC_JAE: /* BGEU */
         code = COND_HS;
         break;
+    case JCC_JBE:
+        code = COND_LS;
+        break;
+    case JCC_JA:
+        code = COND_HI;
+        break;
+    case JCC_JLE:
+        code = COND_LE;
+        break;
+    case JCC_JG:
+        code = COND_GT;
+        break;
     case JCC_JMP: /* AL */
         code = COND_AL;
         break;
@@ -1312,6 +1347,33 @@ static inline void emit_jcc_offset(struct jit_state *state, int code)
     }
     emit_a64(state, BR_Bcond | (0 << 5) | code);
 #endif
+}
+
+/* Move a lone x0 operand of "lhs <jcc> rhs" to the right, swapping the
+ * condition, so the emitter tests the other register against zero.
+ */
+static inline void branch_zero_rhs(uint8_t *lhs, uint8_t *rhs, int *jcc)
+{
+    if (*lhs != rv_reg_zero || *rhs == rv_reg_zero)
+        return;
+    *lhs = *rhs;
+    *rhs = rv_reg_zero;
+    switch (*jcc) {
+    case JCC_JL:
+        *jcc = JCC_JG;
+        break;
+    case JCC_JGE:
+        *jcc = JCC_JLE;
+        break;
+    case JCC_JB:
+        *jcc = JCC_JA;
+        break;
+    case JCC_JAE:
+        *jcc = JCC_JBE;
+        break;
+    default:
+        break; /* equality is symmetric */
+    }
 }
 
 static inline void emit_load_imm(struct jit_state *state,
@@ -1494,6 +1556,31 @@ static inline void emit_load_imm_sext(struct jit_state *state,
 #endif
 }
 
+#if defined(__aarch64__)
+/* dst = src + imm, using a 12-bit ADD or SUB immediate when it fits and R10
+ * otherwise; set_flags selects ADDS/SUBS.
+ */
+static void emit_add_imm(struct jit_state *state,
+                         bool is64,
+                         bool set_flags,
+                         int dst,
+                         int src,
+                         int64_t imm)
+{
+    if (imm >= 0 && imm < 4096) {
+        emit_addsub_imm(state, is64, set_flags ? AS_ADDS : AS_ADD, dst, src,
+                        imm);
+    } else if (imm < 0 && imm > -4096) {
+        emit_addsub_imm(state, is64, set_flags ? AS_SUBS : AS_SUB, dst, src,
+                        -imm);
+    } else {
+        emit_load_imm_sext(state, R10, imm);
+        emit_addsub_register(state, is64, set_flags ? AS_ADDS : AS_ADD, dst,
+                             src, R10);
+    }
+}
+#endif
+
 /* Use integer arithmetic so negative offsets do not form a pointer before
  * the allocation on backends without indexed guest-memory accesses.
  * Return the displacement left for the memory instruction.
@@ -1507,14 +1594,7 @@ static inline int32_t UNUSED emit_guest_address(struct jit_state *state,
     emit_addsub_register(state, true, AS_ADD, temp_reg, R19, base);
     if (offset >= -256 && offset < 256)
         return offset;
-    if (offset > 0 && offset < 4096)
-        emit_addsub_imm(state, true, AS_ADD, temp_reg, temp_reg, offset);
-    else if (offset < 0 && offset > -4096)
-        emit_addsub_imm(state, true, AS_SUB, temp_reg, temp_reg, -offset);
-    else if (offset) {
-        emit_load_imm_sext(state, R10, offset);
-        emit_addsub_register(state, true, AS_ADD, temp_reg, temp_reg, R10);
-    }
+    emit_add_imm(state, true, false, temp_reg, temp_reg, offset);
 #else
     emit_load_imm_sext(state, temp_reg, (intptr_t) m->mem_base + offset);
     emit_alu64(state, 0x01, base, temp_reg);
@@ -4232,11 +4312,369 @@ typedef void (*codegen_block_func_t)(struct jit_state *,
                                      riscv_t *,
                                      rv_insn_t *);
 
+/* A local backedge can reuse one register map when every operand fits and
+ * the body calls no helper. External entries still load X[], and both exits
+ * spill before using the ordinary link ABI.
+ */
+#if !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && !defined(_WIN32)
+#define JIT_REGISTER_LOOP 1
+#else
+#define JIT_REGISTER_LOOP 0
+#endif
+
+#if JIT_REGISTER_LOOP
+#define LOOP_REG(r) (1U << (r))
+
+/* Store pc as the guest PC and leave generated code. */
+static void emit_set_pc_exit(struct jit_state *state, uint32_t pc)
+{
+    emit_load_imm(state, temp_reg, pc);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_exit(state);
+}
+
+/* Conditional codes form complementary pairs whose x86-64 encodings differ
+ * only in bit 0; emit_jcc_offset() maps either member on Arm64.
+ */
+static inline int jcc_invert(int code)
+{
+    assert(code != JCC_JMP);
+    return code ^ 1;
+}
+
+/* Report the guest registers that one body record reads (*use) and writes
+ * (*def). Accept only records whose user-mode emitters neither call helpers,
+ * spill, nor keep a fixed host register mapped, so the loop's register map
+ * stays intact. M-extension emitters borrow RAX and RDX on x86-64 but
+ * restore their mappings. Reject a write to x0: some emitters would clobber
+ * the host copy of x0 that a later read in the loop still relies on.
+ */
+static bool loop_body_regs(const rv_insn_t *ir,
+                           uint32_t *use_out,
+                           uint32_t *def_out)
+{
+    const opcode_fuse_t *fuse = ir->fuse;
+    uint32_t use = 0, def = 0;
+    /* The decoder fills in the implicit operands of the compressed forms:
+     * rs1 = rd for those updating rd in place, and rs1 = sp for the
+     * stack-relative ones, so they share the base groups.
+     */
+    switch (ir->opcode) {
+    case rv_insn_nop:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cnop:
+#endif
+        break;
+    case rv_insn_lui:
+    case rv_insn_auipc:
+    case rv_insn_fuse8: /* LUI + ADDI */
+#if RV32_HAS(EXT_C)
+    case rv_insn_cli:
+    case rv_insn_clui:
+#endif
+        def = LOOP_REG(ir->rd);
+        break;
+    case rv_insn_addi:
+    case rv_insn_slti:
+    case rv_insn_sltiu:
+    case rv_insn_xori:
+    case rv_insn_ori:
+    case rv_insn_andi:
+    case rv_insn_slli:
+    case rv_insn_srli:
+    case rv_insn_srai:
+    case rv_insn_lb:
+    case rv_insn_lh:
+    case rv_insn_lw:
+    case rv_insn_lbu:
+    case rv_insn_lhu:
+#if RV32_HAS(EXT_C)
+    case rv_insn_caddi4spn:
+    case rv_insn_caddi:
+    case rv_insn_caddi16sp:
+    case rv_insn_cslli:
+    case rv_insn_csrli:
+    case rv_insn_csrai:
+    case rv_insn_candi:
+    case rv_insn_clw:
+    case rv_insn_clwsp:
+#endif
+        use = LOOP_REG(ir->rs1);
+        def = LOOP_REG(ir->rd);
+        break;
+    case rv_insn_add:
+    case rv_insn_sub:
+    case rv_insn_sll:
+    case rv_insn_slt:
+    case rv_insn_sltu:
+    case rv_insn_xor:
+    case rv_insn_srl:
+    case rv_insn_sra:
+    case rv_insn_or:
+    case rv_insn_and:
+#if RV32_HAS(EXT_M)
+    case rv_insn_mul:
+    case rv_insn_mulh:
+    case rv_insn_mulhsu:
+    case rv_insn_mulhu:
+    case rv_insn_div:
+    case rv_insn_divu:
+    case rv_insn_rem:
+    case rv_insn_remu:
+#endif
+#if RV32_HAS(EXT_C)
+    case rv_insn_csub:
+    case rv_insn_cxor:
+    case rv_insn_cor:
+    case rv_insn_cand:
+    case rv_insn_cadd:
+#endif
+        use = LOOP_REG(ir->rs1) | LOOP_REG(ir->rs2);
+        def = LOOP_REG(ir->rd);
+        break;
+    case rv_insn_sb:
+    case rv_insn_sh:
+    case rv_insn_sw:
+#if RV32_HAS(EXT_C)
+    case rv_insn_csw:
+    case rv_insn_cswsp:
+#endif
+        use = LOOP_REG(ir->rs1) | LOOP_REG(ir->rs2);
+        break;
+#if RV32_HAS(EXT_C)
+    case rv_insn_cmv:
+        use = LOOP_REG(ir->rs2);
+        def = LOOP_REG(ir->rd);
+        break;
+#endif
+    /* Fused records, in their user-mode (non-MMIO) forms. */
+    case rv_insn_fuse1: /* LUI ... LUI */
+        for (int i = 0; i < ir->imm2; i++)
+            def |= LOOP_REG(fuse[i].rd);
+        break;
+    case rv_insn_fuse2: /* rd = imm; rs2 = rs1 + rd */
+        use = LOOP_REG(ir->rs1);
+        def = LOOP_REG(ir->rd) | LOOP_REG(ir->rs2);
+        break;
+    case rv_insn_fuse3: /* SW ... SW */
+        for (int i = 0; i < ir->imm2; i++)
+            use |= LOOP_REG(fuse[i].rs1) | LOOP_REG(fuse[i].rs2);
+        break;
+    case rv_insn_fuse4: /* LW ... LW */
+    case rv_insn_fuse5: /* shift-immediate ... */
+    case rv_insn_fuse7: /* ADDI ... ADDI */
+        for (int i = 0; i < ir->imm2; i++) {
+            use |= LOOP_REG(fuse[i].rs1);
+            def |= LOOP_REG(fuse[i].rd);
+        }
+        break;
+    case rv_insn_fuse9: /* LUI rd; LW rs2 */
+        def = LOOP_REG(ir->rd) | LOOP_REG(ir->rs2);
+        break;
+    case rv_insn_fuse10: /* LUI rd; SW rs1 */
+        use = LOOP_REG(ir->rs1);
+        def = LOOP_REG(ir->rd);
+        break;
+    case rv_insn_fuse11: /* LW rd, (rs1); ADDI rs1 */
+        use = LOOP_REG(ir->rs1);
+        def = LOOP_REG(ir->rd) | LOOP_REG(ir->rs1);
+        break;
+    case rv_insn_fuse13: /* SW rs2, (rs1); ADDI rs1 */
+        use = LOOP_REG(ir->rs1) | LOOP_REG(ir->rs2);
+        def = LOOP_REG(ir->rs1);
+        break;
+    default:
+        return false;
+    }
+    if (def & LOOP_REG(rv_reg_zero))
+        return false;
+    *use_out = use;
+    *def_out = def;
+    return true;
+}
+
+static bool translate_register_loop(struct jit_state *state,
+                                    riscv_t *rv,
+                                    block_t *block)
+{
+    /* Classify the tail: the loop continues while "lhs <jcc> rhs" holds. */
+    const rv_insn_t *tail = block->ir_tail;
+    uint8_t lhs = tail->rs1, rhs = tail->rs2;
+    uint32_t target = tail->pc + tail->imm, exit_pc = tail->pc + 4;
+    int jcc;
+    switch (tail->opcode) {
+    case rv_insn_beq:
+        jcc = JCC_JE;
+        break;
+    case rv_insn_bne:
+        jcc = JCC_JNE;
+        break;
+    case rv_insn_blt:
+        jcc = JCC_JL;
+        break;
+    case rv_insn_bge:
+        jcc = JCC_JGE;
+        break;
+    case rv_insn_bltu:
+        jcc = JCC_JB;
+        break;
+    case rv_insn_bgeu:
+        jcc = JCC_JAE;
+        break;
+#if RV32_HAS(EXT_C)
+    case rv_insn_cbeqz:
+        jcc = JCC_JE;
+        rhs = rv_reg_zero;
+        exit_pc = tail->pc + 2;
+        break;
+    case rv_insn_cbnez:
+        jcc = JCC_JNE;
+        rhs = rv_reg_zero;
+        exit_pc = tail->pc + 2;
+        break;
+#endif
+    case rv_insn_fuse12:
+        /* ADDI rd, rs1, imm; BNE rd, x0. The branch offset is relative to
+         * the BNE, the second instruction. The matcher excludes rd = x0.
+         */
+        jcc = JCC_JNE;
+        lhs = tail->rd;
+        rhs = rv_reg_zero;
+        target = tail->pc + 4 + tail->imm2;
+        exit_pc = tail->pc + 8;
+        break;
+    default:
+        return false;
+    }
+    if (!tail->branch_taken || target != block->pc_start)
+        return false;
+
+    /* Compare a lone nonzero operand with zero; x0 needs no host register. */
+    branch_zero_rhs(&lhs, &rhs, &jcc);
+
+    /* Registers read before any write in an iteration are loop inputs and
+     * must be loaded on entry; the others are only mapped.
+     */
+    uint32_t regs = 0, live_in = 0, defined = 0, use, def;
+    for (const rv_insn_t *ir = block->ir_head;; ir = ir->next) {
+        if (ir != tail) {
+            if (!loop_body_regs(ir, &use, &def))
+                return false;
+        } else if (tail->opcode == rv_insn_fuse12) {
+            /* The ADDI reads rs1 before writing rd, which the BNE tests. */
+            use = LOOP_REG(tail->rs1);
+            def = LOOP_REG(tail->rd);
+        } else {
+            use = LOOP_REG(lhs) | (rhs ? LOOP_REG(rhs) : 0);
+            def = 0;
+        }
+        live_in |= use & ~defined;
+        defined |= def;
+        regs |= use | def;
+        if (ir == tail)
+            break;
+    }
+    if (__builtin_popcount(regs) > n_host_regs)
+        return false;
+
+    /* A misalignment stub snapshots the register map and spills it, and may
+     * run in any iteration. Load every register and mark each one the body
+     * writes dirty from the start, so every snapshot holds correct values.
+     */
+    const bool guards = !rv->jit_elide_align_checks;
+    if (guards)
+        live_in = regs;
+
+    reset_reg();
+    for (int reg = 0; reg < N_RV_REGS; reg++) {
+        if (live_in & LOOP_REG(reg))
+            ra_load(state, reg);
+        else if (regs & LOOP_REG(reg))
+            map_vm_reg(state, reg);
+    }
+    if (guards) {
+        for (int i = 0; i < n_host_regs; i++) {
+            int reg = register_map[i].vm_reg_idx;
+            if (reg >= 0 && (defined & LOOP_REG(reg)))
+                register_map[i].dirty = true;
+        }
+    }
+    /* Every mapped register stays live through the backedge. The allocator
+     * therefore never replaces a mapping, even for a destination that is
+     * overwritten before it is read in the first iteration.
+     */
+    emit_load_imm(state, parameter_reg[1], 1024);
+    uint32_t loop_offset = state->offset;
+    /* A program that reads counters charges each block on entry, so charge
+     * every iteration; cycle_reg is outside the allocator.
+     */
+    if (!rv->jit_entry_cycles)
+        emit_cycle_count(state, block->cycle_cost);
+    for (rv_insn_t *ir = block->ir_head; ir != tail; ir = ir->next)
+        ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
+
+    if (tail->opcode == rv_insn_fuse12) {
+        /* The addition sets the zero flag that the BNE tests. */
+        vm_reg[0] = ra_load(state, tail->rs1);
+        vm_reg[1] = map_vm_reg_reserved(state, tail->rd, vm_reg[0]);
+        if (vm_reg[0] != vm_reg[1])
+            emit_mov(state, vm_reg[0], vm_reg[1]);
+#if defined(__x86_64__)
+        emit_alu32_imm32(state, 0x81, 0, vm_reg[1], tail->imm);
+#elif defined(__aarch64__)
+        emit_add_imm(state, false, true, vm_reg[1], vm_reg[1], tail->imm);
+#endif
+    } else if (rhs) {
+        ra_load2(state, lhs, rhs);
+        emit_cmp32(state, vm_reg[1], vm_reg[0]);
+    } else {
+        emit_cmp_imm32(state, ra_load(state, lhs), 0);
+    }
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, jcc_invert(jcc));
+    uint32_t exit_branch = JUMP_LOC_0;
+    /* Limit the local loop so halt and reclamation cannot be starved.
+     * RSI/R1 is outside the allocator, and a misalignment stub, the only
+     * code that writes it, never returns to the loop. The decrement itself
+     * sets the zero flag for the backedge.
+     */
+#if defined(__x86_64__)
+    emit_alu32_imm8(state, 0x83, 0, parameter_reg[1], -1);
+#elif defined(__aarch64__)
+    emit_addsub_imm(state, false, AS_SUBS, parameter_reg[1], parameter_reg[1],
+                    1);
+#endif
+    jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    emit_jump_target_offset(state, JUMP_LOC_0, loop_offset);
+
+    struct host_reg exit_map[ARRAY_SIZE(register_map)];
+    memcpy(exit_map, register_map, sizeof(exit_map));
+    store_back(state);
+    emit_set_pc_exit(state, block->pc_start);
+
+    emit_jump_target_offset(state, exit_branch, state->offset);
+    memcpy(register_map, exit_map, sizeof(register_map));
+    store_back(state);
+    if (tail->branch_untaken)
+        emit_jmp(state, exit_pc, rv->csr_satp);
+    emit_set_pc_exit(state, exit_pc);
+    if (guards)
+        emit_misalign_stubs(state);
+    return true;
+}
+#undef LOOP_REG
+#endif
+
 static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
 {
     uint32_t idx;
     rv_insn_t *ir, *next;
     n_misalign_stubs = 0;
+#if JIT_REGISTER_LOOP
+    if (translate_register_loop(state, rv, block))
+        return;
+#endif
     reset_reg();
     if (!rv->jit_entry_cycles)
         emit_cycle_count(state, block->cycle_cost);

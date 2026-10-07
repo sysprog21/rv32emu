@@ -870,7 +870,7 @@ static set_t pc_set;
 static bool has_loops = false;
 #endif
 
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#if RV32_HAS(JIT)
 /* Under a guest OS, much of the code runs interpreted and briefly: a process
  * lives a short while, and its blocks are discarded at each full SFENCE.VMA.
  * Profiling every branch the interpreter chains through then costs more than
@@ -878,7 +878,8 @@ static bool has_loops = false;
  * and scales the hotness threshold to match. Its threshold only ends the chain:
  * runtime_profiler() still decides, with its own thresholds, whether the block
  * is translated. Counting each sample as PROBE_INTERVAL uses instead, with one
- * threshold for both, measured slower on Arm64.
+ * threshold for both, measured slower on Arm64. In user mode, do_fuse12()
+ * samples the countdown edges it chains through at the same rate.
  */
 #define PROBE_INTERVAL 32
 static uint32_t probe_tick;
@@ -1615,7 +1616,33 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
  * ir->rs1 = source register for addi
  * ir->imm = addi immediate (usually -1 for countdown)
  * ir->imm2 = branch offset
+ * ir->rs2 = nonzero when the branch closes a self-loop T1 cannot compile
  */
+#if RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
+/* The sampled edge of do_fuse12(), which has already resolved PC: record it
+ * for loop detection, and return to rv_step() when the target block is
+ * uncached or T1 can compile it. A separate tail-called handler keeps the
+ * chained countdown path free of a call and its register saves.
+ */
+static __attribute__((noinline, cold)) PRESERVE_NONE bool
+do_fuse12_probe(riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, uint32_t PC)
+{
+    cache_lookup_t lookup = cache_get_with_freq(rv->block_cache, PC, true);
+    if (!has_loops && set_probe(&pc_set, PC))
+        has_loops = true;
+    const block_t *next_block = lookup.value;
+    if (next_block && !next_block->translatable) {
+        struct rv_insn *target =
+            is_branch_taken ? ir->branch_taken : ir->branch_untaken;
+        last_pc = PC;
+        MUST_TAIL return target->impl(rv, target, cycle, PC);
+    }
+    rv->csr_cycle = cycle;
+    rv->PC = PC;
+    return true;
+}
+#endif
+
 static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
                                     const rv_insn_t *ir,
                                     uint64_t cycle,
@@ -1625,40 +1652,40 @@ static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
     cycle += 2;
     rv->X[ir->rd] = rv->X[ir->rs1] + ir->imm;
 
+    struct rv_insn *target;
     if (rv->X[ir->rd] != 0) {
-        /* Branch taken */
         is_branch_taken = true;
         PC += 4 + ir->imm2; /* ADDI len + branch offset */
-        struct rv_insn *taken = ir->branch_taken;
-        if (taken) {
-#if RV32_HAS(SYSTEM)
-            if (!rv->trap_cnt) {
-                last_pc = PC;
-                MUST_TAIL return taken->impl(rv, taken, cycle, PC);
-            }
-#else
-            last_pc = PC;
-            MUST_TAIL return taken->impl(rv, taken, cycle, PC);
-#endif
-        }
+        target = ir->branch_taken;
     } else {
-        /* Branch not taken */
         is_branch_taken = false;
         PC += 8; /* Skip both ADDI and BNE */
-        struct rv_insn *untaken = ir->branch_untaken;
-        if (untaken) {
-#if RV32_HAS(SYSTEM)
-            if (!rv->trap_cnt) {
-                last_pc = PC;
-                MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
-            }
-#else
-            last_pc = PC;
-            MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
-#endif
-        }
+        target = ir->branch_untaken;
     }
-
+    if (target) {
+#if RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
+        /* An unprobed chain kept countdown loops away from the dispatcher,
+         * so T1 never compiled them. Probe one edge in PROBE_INTERVAL, and
+         * otherwise keep chaining.
+         */
+        if (!ir->rs2 && unlikely(!(++probe_tick % PROBE_INTERVAL))) {
+            MUST_TAIL return do_fuse12_probe(rv, ir, cycle, PC);
+        }
+#else
+#if RV32_HAS(JIT)
+        RVOP_PROBE_TARGET(PC, fuse12_exit);
+#endif
+#if RV32_HAS(SYSTEM)
+        if (rv->trap_cnt)
+            goto fuse12_exit;
+#endif
+#endif
+        last_pc = PC;
+        MUST_TAIL return target->impl(rv, target, cycle, PC);
+    }
+#if RV32_HAS(SYSTEM)
+fuse12_exit:
+#endif
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -1806,6 +1833,108 @@ static PRESERVE_NONE bool do_strlen_word_trace(riscv_t *rv,
         rv->PC = PC;                                                     \
         return true;                                                     \
     } while (0)
+
+/* Reverse a linked list in place, one node per iteration:
+ *   mv t, a; lw a, off(t); sw p, off(t); mv p, t; bnez a, loop
+ * Any of the five may be compressed. The matcher packs the byte offsets of
+ * the load and branch, the branch length and the load's compression into
+ * imm2; imm holds the link offset. Three distinct working registers let the
+ * loop keep the node and its predecessor in locals, publishing X[] only at a
+ * fault or exit. The store shares the load's address and alignment check,
+ * so only the load can raise a misaligned-access trap. Guest stores may
+ * alias any host memory, so everything the loop reads from rv or ir is
+ * loaded into locals first. On ELF hosts, a separate section keeps
+ * established hot handlers in place.
+ */
+#define PREV_LOAD_OFF(layout) ((layout) & 0xff)
+#define PREV_BRANCH_OFF(layout) (((layout) >> 8) & 0xff)
+#define PREV_BRANCH_LEN(layout) (((layout) >> 16) & 0xff)
+#define PREV_LOAD_COMPRESSED(layout) (((layout) >> 24) & 1)
+
+#if defined(__ELF__)
+__attribute__((section(".text.pointer_reverse")))
+#endif
+static PRESERVE_NONE bool
+do_pointer_reverse(riscv_t *rv,
+                   const rv_insn_t *ir,
+                   uint64_t cycle,
+                   uint32_t PC)
+{
+    RVOP_SYNC_PC(rv, PC);
+    const uint32_t layout = ir->imm2, link = ir->imm, start = PC;
+    const uint32_t branch_pc = start + PREV_BRANCH_OFF(layout);
+    const uint32_t taken_pc = branch_pc + ir->fuse[4].imm;
+    const uint8_t rd = ir->rd, rs1 = ir->rs1, rs2 = ir->rs2;
+    const bool check_align = !PRIV(rv)->allow_misalign;
+    struct rv_insn *const taken = ir->branch_taken;
+    /* Only a self-loop iterates here; any other target ends the first pass,
+     * and TRACE_BRANCH_EXIT() then follows it within the real budget.
+     */
+    const uint64_t budget = taken == ir ? rv->branch_chain_cycle_target : 0;
+#if HAVE_MMAP
+    uint8_t *const ram = PRIV(rv)->mem->mem_base;
+#endif
+#define PREV_PUBLISH(copy, list, prev) \
+    do {                               \
+        rv->X[rd] = (copy);            \
+        rv->X[rs1] = (list);           \
+        rv->X[rs2] = (prev);           \
+    } while (0)
+    uint32_t node = rv->X[rs1], previous = rv->X[rs2], next;
+    struct rv_insn *target;
+    bool looped = false;
+    for (;;) {
+        /* The copy retires, then the load either traps or completes. */
+        cycle += 2;
+        const uint32_t addr = node + link;
+        if (check_align && unlikely(addr & 3)) {
+            PREV_PUBLISH(node, node, previous);
+            PC = start + PREV_LOAD_OFF(layout);
+            RV_EXC_MISALIGN_HANDLER(3, LOAD, PREV_LOAD_COMPRESSED(layout), 1);
+        }
+#if HAVE_MMAP
+        memcpy(&next, ram + addr, sizeof(next));
+        memcpy(ram + addr, &previous, sizeof(previous));
+#else
+        next = MEM_READ_W(rv, addr);
+        MEM_WRITE_W(rv, addr, previous);
+#endif
+#if RV32_HAS(ARCH_TEST)
+        check_tohost_write(rv, addr, previous);
+#endif
+        /* The store, the second copy and the branch. */
+        cycle += 3;
+        previous = node;
+        if (!next) {
+            is_branch_taken = false;
+            PC = branch_pc + PREV_BRANCH_LEN(layout);
+            target = ir->branch_untaken;
+            break;
+        }
+#if !RV32_HAS(EXT_C)
+        if (unlikely(insn_is_misaligned(taken_pc))) {
+            PREV_PUBLISH(previous, next, previous);
+            is_branch_taken = true;
+            PC = taken_pc;
+            const uint32_t pc = branch_pc;
+            RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0);
+        }
+#endif
+        if (cycle >= budget) {
+            is_branch_taken = true;
+            PC = taken_pc;
+            target = taken;
+            break;
+        }
+        looped = true;
+        node = next;
+    }
+    if (looped)
+        last_pc = taken_pc;
+    PREV_PUBLISH(previous, next, previous);
+#undef PREV_PUBLISH
+    TRACE_BRANCH_EXIT(target);
+}
 
 /* GCC emits this exact register graph in NumSift's hot child-index path.
  * Restrict the matcher to every operand and immediate below, so the handler
@@ -2508,6 +2637,78 @@ FORCE_INLINE bool fuse_trace(riscv_t *rv,
 }
 #endif
 
+#if RV32_HAS_PACKED_TAIL
+/* Decode a register copy, "addi rd, rs, 0" or "c.mv rd, rs". */
+static inline bool insn_is_copy(const rv_insn_t *ir, uint8_t *rd, uint8_t *rs)
+{
+    if (ir->opcode == rv_insn_addi && !ir->imm) {
+        *rd = ir->rd;
+        *rs = ir->rs1;
+        return true;
+    }
+#if RV32_HAS(EXT_C)
+    if (ir->opcode == rv_insn_cmv) {
+        *rd = ir->rd;
+        *rs = ir->rs2;
+        return true;
+    }
+#endif
+    return false;
+}
+
+/* Match do_pointer_reverse()'s five instructions, each in either width. */
+/* Either width of an instruction: OPCODE_IS(op, lw, clw). */
+#if RV32_HAS(EXT_C)
+#define OPCODE_IS(op, base, compressed) \
+    ((op) == rv_insn_##base || (op) == rv_insn_##compressed)
+#else
+#define OPCODE_IS(op, base, compressed) ((op) == rv_insn_##base)
+#endif
+
+static bool fuse_pointer_reverse(riscv_t *rv, block_t *block, rv_insn_t *ir)
+{
+    uint8_t node, list, prev, from;
+    if (!insn_is_copy(ir, &node, &list))
+        return false;
+    rv_insn_t *load = ir->next;
+    rv_insn_t *store = load ? load->next : NULL;
+    rv_insn_t *copy = store ? store->next : NULL;
+    rv_insn_t *branch = copy ? copy->next : NULL;
+    if (!branch || !insn_is_copy(copy, &prev, &from) ||
+        !OPCODE_IS(load->opcode, lw, clw) ||
+        !OPCODE_IS(store->opcode, sw, csw) ||
+        !OPCODE_IS(branch->opcode, bne, cbnez) || branch->rs2 != rv_reg_zero)
+        return false;
+    if (!node || !list || !prev || node == list || prev == node ||
+        prev == list || load->rs1 != node || load->rd != list ||
+        store->rs1 != node || store->rs2 != prev || store->imm != load->imm ||
+        from != node || branch->rs1 != list)
+        return false;
+
+    /* The recorded PCs give each instruction's offset, whatever its width. */
+    const uint32_t load_off = load->pc - ir->pc;
+    const uint32_t branch_off = branch->pc - ir->pc;
+    const uint32_t branch_len = branch->opcode == rv_insn_bne ? 4 : 2;
+    const uint32_t load_compressed = store->pc - load->pc == 2;
+    const int32_t link = load->imm;
+    rv_insn_t *taken = branch->branch_taken;
+    rv_insn_t *untaken = branch->branch_untaken;
+    if (!try_fuse_sequence(rv, block, ir, 5, rv_insn_fuse13))
+        return false;
+    ir->rd = node;
+    ir->rs1 = list;
+    ir->rs2 = prev;
+    ir->imm = link;
+    ir->imm2 =
+        load_off | branch_off << 8 | branch_len << 16 | load_compressed << 24;
+    ir->branch_taken = taken;
+    ir->branch_untaken = untaken;
+    ir->impl = do_pointer_reverse;
+    return true;
+}
+#undef OPCODE_IS
+#endif
+
 static void match_pattern(riscv_t *rv, block_t *block)
 {
     uint32_t i;
@@ -2818,8 +3019,17 @@ static void match_pattern(riscv_t *rv, block_t *block)
             try_fuse_sequence(rv, block, ir, count, rv_insn_fuse5);
             break;
         }
+#if RV32_HAS_PACKED_TAIL && RV32_HAS(EXT_C)
+        case rv_insn_cmv:
+            fuse_pointer_reverse(rv, block, ir);
+            break;
+#endif
         case rv_insn_addi:
             next_ir = ir->next;
+#if RV32_HAS_PACKED_TAIL
+            if (fuse_pointer_reverse(rv, block, ir))
+                break;
+#endif
 #if RV32_HAS_PACKED_TAIL && !RV32_HAS(RV32E)
             /* NumSift's fixed child-index dataflow graph. */
             if (fuse_trace(rv, block, ir, trace_numsift_index, true,
@@ -2844,6 +3054,13 @@ static void match_pattern(riscv_t *rv, block_t *block)
             if (next_ir && IF_insn(next_ir, bne) && ir->rd != rv_reg_zero &&
                 ir->rd == next_ir->rs1 && next_ir->rs2 == rv_reg_zero) {
                 ir->imm2 = next_ir->imm; /* branch offset */
+#if RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
+                /* T1 can never compile a self-loop through an untranslatable
+                 * block, so do_fuse12() need not probe its backedge.
+                 */
+                ir->rs2 = !block->translatable &&
+                          ir->pc + 4 + ir->imm2 == block->pc_start;
+#endif
                 ir->opcode = rv_insn_fuse12;
                 ir->impl = dispatch_table[ir->opcode];
                 /* Copy branch targets for block chaining */

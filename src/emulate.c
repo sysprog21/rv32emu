@@ -3609,6 +3609,29 @@ static inline bool settle_trap(riscv_t *rv UNUSED)
 }
 #endif
 
+#if RV32_HAS(JIT)
+/* Enter generated code. Clang's -fsanitize=function checks the callee of an
+ * indirect call by reading a type signature from the eight bytes before it,
+ * which generated code does not carry. The T1 entry point is the first byte of
+ * its own mapping, so that read faults whenever the page below is unmapped, as
+ * address randomization sometimes leaves it. These calls skip the check.
+ */
+static DISABLE_UBSAN_FUNC void run_t1_block(riscv_t *rv,
+                                            struct jit_state *state,
+                                            const block_t *block)
+{
+    ((exec_block_func_t) state->buf)(rv,
+                                     (uintptr_t) (state->buf + block->offset));
+}
+
+#if RV32_HAS(T2C)
+static DISABLE_UBSAN_FUNC void run_t2c_block(riscv_t *rv, const block_t *block)
+{
+    ((exec_t2c_func_t) block->func)(rv);
+}
+#endif
+#endif
+
 void rv_step(void *arg)
 {
     assert(arg);
@@ -3742,7 +3765,7 @@ void rv_step(void *arg)
                 prev = NULL;
                 continue;
             }
-            ((exec_t2c_func_t) block->func)(rv);
+            run_t2c_block(rv, block);
             settle_trap(rv);
             prev = NULL;
             continue;
@@ -3788,8 +3811,7 @@ void rv_step(void *arg)
             /* Ensure instruction cache coherency before executing JIT code */
             __asm__ volatile("isb" ::: "memory");
 #endif
-            ((exec_block_func_t) state->buf)(
-                rv, (uintptr_t) (state->buf + block->offset));
+            run_t1_block(rv, state, block);
             if (rv->jit_entry_cycles)
                 rv->csr_cycle += block->cycle_cost;
             settle_trap(rv);
@@ -3816,8 +3838,7 @@ void rv_step(void *arg)
                 /* Ensure icache coherency before executing JIT */
                 __asm__ volatile("isb" ::: "memory");
 #endif
-                ((exec_block_func_t) state->buf)(
-                    rv, (uintptr_t) (state->buf + block->offset));
+                run_t1_block(rv, state, block);
                 if (rv->jit_entry_cycles)
                     rv->csr_cycle += block->cycle_cost;
                 settle_trap(rv);

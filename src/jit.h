@@ -60,6 +60,8 @@ struct offset_map {
 #define SPACE_INDEX_BITS 8
 #define PAGE_INDEX_BITS_JIT 12
 
+struct indirect_site;
+
 /* A jump to a target that had not been compiled when it was emitted. */
 struct pending_jump {
     uint32_t offset_loc;
@@ -90,6 +92,8 @@ struct jit_state {
     int32_t pending_index[1 << OFFSET_INDEX_BITS];
     struct pending_jump *pending;
     int n_pending;
+    /* Guard slots of each block's indirect jump, filled in at run time */
+    struct indirect_site *sites;
 #endif
 };
 

@@ -457,9 +457,7 @@ GEN(jalr, {
         emit_load_imm(state, vm_reg[1], ir->pc + 4);
     }
     store_back(state);
-    parse_branch_history_table(state, rv, ir);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_indirect_jump(state, rv, ir);
 })
 /* RV32I Branch Instructions */
 GEN_BRANCH(beq, JCC_JE)
@@ -712,9 +710,7 @@ GEN(cjr, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_mov(state, vm_reg[0], temp_reg);
     store_back(state);
-    parse_branch_history_table(state, rv, ir);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_indirect_jump(state, rv, ir);
 })
 GEN(cmv, {
     vm_reg[0] = ra_load(state, ir->rs2);
@@ -738,9 +734,7 @@ GEN(cjalr, {
     vm_reg[1] = map_vm_reg(state, rv_reg_ra);
     emit_load_imm(state, vm_reg[1], ir->pc + 2);
     store_back(state);
-    parse_branch_history_table(state, rv, ir);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_indirect_jump(state, rv, ir);
 })
 GEN(cadd, {
     ra_load2(state, ir->rs1, ir->rs2);

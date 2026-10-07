@@ -3701,15 +3701,150 @@ static void patch_jump(struct jit_state *state,
 #endif
 }
 
-static void parse_branch_history_table(struct jit_state *state,
-                                       riscv_t *rv UNUSED,
-                                       rv_insn_t *ir)
+/* User-mode T1 leaves an indirect jump through guard slots, each comparing the
+ * target with one PC and branching to its translation. Translation fills them
+ * with the targets the interpreter profiled; a slot left empty is filled by
+ * jit_indirect_target() with the first compiled target that misses the others.
+ * A block compiled before its indirect targets were profiled, or whose callee
+ * returns to sites compiled later, thus still chains natively. Direct chains
+ * skip the dispatcher already; system mode keeps returning there, where
+ * interrupts and address-space changes are checked, and keeps profiled guards
+ * only.
+ */
+#define JIT_INDIRECT_LOOKUP (JIT_INDIRECT_TARGETS && !RV32_HAS(SYSTEM))
+
+#if JIT_INDIRECT_LOOKUP
+/* A block ends in at most one indirect jump, whose site shares its index. */
+#define MAX_INDIRECT_SITES MAX_BLOCKS
+/* An empty slot compares with an odd PC, where no translated block starts. */
+#define EMPTY_SLOT_PC UINT32_MAX
+
+struct indirect_site {
+    uint32_t imm_loc[IN_JUMP_TARGETS];  /* the PC each slot compares with */
+    uint32_t jump_loc[IN_JUMP_TARGETS]; /* the branch to its translation */
+    int n_used;
+};
+
+#if defined(__aarch64__)
+/* MOVZ/MOVK pair that loads pc into R10 at fixed length. */
+static void encode_slot_pc(uint32_t mov[2], uint32_t pc)
+{
+    mov[0] = MW_MOVZ | ((pc & 0xffff) << 5) | R10;
+    mov[1] = MW_MOVK | (1 << 21) | ((pc >> 16) << 5) | R10;
+}
+#endif
+
+/* Emit a slot that branches to the translation of pc, or an empty one. */
+static void emit_indirect_slot(struct jit_state *state,
+                               struct indirect_site *site,
+                               int slot,
+                               uint32_t pc)
+{
+    const bool empty = pc == EMPTY_SLOT_PC;
+#if defined(__x86_64__)
+    /* cmp temp, imm32; je rel32, which falls through until patched */
+    emit_alu32_raw(state, 0x81, 7, temp_reg);
+    site->imm_loc[slot] = state->offset;
+    emit4(state, pc);
+    emit1(state, 0x0f);
+    emit1(state, JCC_JE);
+    site->jump_loc[slot] = state->offset;
+    if (empty)
+        emit4(state, 0);
+    else
+        emit_jump_target_address(state, pc, 0);
+#elif defined(__aarch64__)
+    /* movz/movk R10, pc; cmp temp, R10; b.ne +8; b target, at fixed length so
+     * that a slot can be filled in place.
+     */
+    uint32_t mov[2];
+    encode_slot_pc(mov, pc);
+    site->imm_loc[slot] = state->offset;
+    emit_a64(state, mov[0]);
+    emit_a64(state, mov[1]);
+    emit_addsub_register(state, false, AS_SUBS, RZ, temp_reg, R10);
+    emit_a64(state, 0x54000000U | (2 << 5) | COND_NE);
+    site->jump_loc[slot] = state->offset;
+    if (empty)
+        emit_a64(state, UBR_B | 1); /* falls through until patched */
+    else
+        emit_jmp(state, pc, 0);
+#endif
+}
+
+/* Fill the next empty slot of site with a branch from pc to target_loc. */
+static void indirect_site_fill(struct jit_state *state,
+                               struct indirect_site *site,
+                               uint32_t pc,
+                               uint32_t target_loc)
+{
+    if (site->n_used == IN_JUMP_TARGETS)
+        return;
+    const int slot = site->n_used++;
+    const uint32_t imm_loc = site->imm_loc[slot];
+    const uint32_t jump_loc = site->jump_loc[slot];
+#if defined(__APPLE__) && defined(__aarch64__)
+    jit_enter_write_mode();
+#endif
+    /* Branch first, so that the slot never matches before it leads there. */
+    patch_jump(state, jump_loc, target_loc);
+#if defined(__x86_64__)
+    memcpy(state->buf + imm_loc, &pc, sizeof(pc));
+#elif defined(__aarch64__)
+    uint32_t mov[2];
+    encode_slot_pc(mov, pc);
+    memcpy(state->buf + imm_loc, mov, sizeof(mov));
+#if defined(__APPLE__)
+    jit_exit_write_mode();
+#endif
+    sys_icache_invalidate(state->buf + imm_loc, sizeof(mov));
+    sys_icache_invalidate(state->buf + jump_loc, sizeof(uint32_t));
+#endif
+}
+
+/* Return where generated code continues at rv->PC: the translated block there,
+ * or the exit to the dispatcher. A compiled target fills an empty slot of the
+ * indirect jump that missed, so that it takes the slot from then on.
+ */
+static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
+{
+    struct jit_state *state = rv->jit_state;
+    const struct offset_map *target = offset_map_find(state, rv->PC, 0);
+    if (!target)
+        return (uintptr_t) state->buf + state->exit_loc;
+    indirect_site_fill(state, &state->sites[site], rv->PC, target->offset);
+    return (uintptr_t) state->buf + target->offset;
+}
+#endif
+
+/* Jump to the target in temp_reg, with every guest register written back. */
+static void emit_indirect_jump(struct jit_state *state,
+                               riscv_t *rv,
+                               rv_insn_t *ir)
 {
     branch_history_table_t *bt = ir->branch_table;
     int targets[IN_JUMP_TARGETS];
     int count = bht_select_targets(bt, rv, targets);
-    if (!count)
-        return;
+#if JIT_INDIRECT_LOOKUP
+    /* The block being translated is the last one in the offset map. */
+    const uint32_t site_index = state->n_blocks - 1;
+    struct indirect_site *site = &state->sites[site_index];
+    site->n_used = count;
+    for (int i = 0; i < IN_JUMP_TARGETS; i++)
+        emit_indirect_slot(state, site, i,
+                           i < count ? bt->PC[targets[i]] : EMPTY_SLOT_PC);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_load_imm(state, parameter_reg[1], site_index);
+    emit_call(state, (intptr_t) &jit_indirect_target);
+#if defined(__x86_64__)
+    /* jmp *%rax */
+    emit1(state, 0xff);
+    emit1(state, 0xe0);
+#elif defined(__aarch64__)
+    /* emit_call leaves the result in R5. */
+    emit_uncond_branch_reg(state, BR_BR, R5);
+#endif
+#else
     for (int i = 0; i < count; i++) {
         int idx = targets[i];
         emit_cmp_imm32(state, temp_reg, bt->PC[idx]);
@@ -3722,6 +3857,9 @@ static void parse_branch_history_table(struct jit_state *state,
 #endif
         emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
     }
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_exit(state);
+#endif
 }
 
 /* Set the zero flag from the low bits of dst that mask selects, leaving dst
@@ -5009,7 +5147,14 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
 
 #if JIT_LINK_ALL_EDGES
     state->pending = calloc(MAX_PENDING_JUMPS, sizeof(struct pending_jump));
-    if (!state->pending) {
+#if JIT_INDIRECT_LOOKUP
+    state->sites = calloc(MAX_INDIRECT_SITES, sizeof(struct indirect_site));
+#else
+    state->sites = NULL;
+#endif
+    if (!state->pending || (JIT_INDIRECT_LOOKUP && !state->sites)) {
+        free(state->sites);
+        free(state->pending);
         free(state->jumps);
         free(state->offset_map);
         munmap(state->buf, state->size);
@@ -5028,6 +5173,7 @@ void jit_state_exit(struct jit_state *state)
     free(state->jumps);
 #if JIT_LINK_ALL_EDGES
     free(state->pending);
+    free(state->sites);
 #endif
     free(state);
 }

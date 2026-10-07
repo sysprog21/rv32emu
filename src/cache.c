@@ -153,37 +153,22 @@ static inline void hlist_del_init(struct hlist_node *n)
 
 #define hlist_entry(ptr, type, member) container_of(ptr, type, member)
 
-#ifdef __HAVE_TYPEOF
 #define hlist_entry_safe(ptr, type, member)                  \
-    ({                                                       \
-        typeof(ptr) ____ptr = (ptr);                         \
+    __extension__({                                          \
+        __typeof__(ptr) ____ptr = (ptr);                     \
         ____ptr ? hlist_entry(____ptr, type, member) : NULL; \
     })
-#else
-#define hlist_entry_safe(ptr, type, member) \
-    (ptr) ? hlist_entry(ptr, type, member) : NULL
-#endif
 
 /* clang-format off */
-#ifdef __HAVE_TYPEOF
-#define hlist_for_each_entry(pos, head, member)                              \
-    for (pos = hlist_entry_safe((head)->first, typeof(*(pos)), member); pos; \
-         pos = hlist_entry_safe((pos)->member.next, typeof(*(pos)), member))
+#define hlist_for_each_entry(pos, head, member)                             \
+    for (pos = hlist_entry_safe((head)->first, __typeof__(*(pos)), member); \
+         pos;                                                               \
+         pos = hlist_entry_safe((pos)->member.next, __typeof__(*(pos)), member))
 
-#define hlist_for_each_entry_safe(pos, n, head, member)               \
-    for (pos = hlist_entry_safe((head)->first, typeof(*pos), member); \
-         pos && ({ n = pos->member.next; 1; });                       \
-         pos = hlist_entry_safe(n, typeof(*pos), member))
-#else
-#define hlist_for_each_entry(pos, head, member, type)              \
-    for (pos = hlist_entry_safe((head)->first, type, member); pos; \
-         pos = hlist_entry_safe((pos)->member.next, type, member))
-
-#define hlist_for_each_entry_safe(pos, n, head, member, type) \
-    for (pos = hlist_entry_safe((head)->first, type, member); \
-         pos && ({ n = pos->member.next; 1; });               \
-         pos = hlist_entry_safe(n, type, member))
-#endif
+#define hlist_for_each_entry_safe(pos, n, head, member)                     \
+    for (pos = hlist_entry_safe((head)->first, __typeof__(*(pos)), member); \
+         pos && ((n) = (pos)->member.next, 1);                              \
+         pos = hlist_entry_safe(n, __typeof__(*(pos)), member))
 /* clang-format on */
 
 cache_t *cache_create(uint32_t size_bits)
@@ -254,13 +239,7 @@ static cache_entry_t *cache_find(const cache_t *cache, uint32_t key)
         return NULL;
 
     cache_entry_t *entry = NULL;
-#ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[hash], ht_list)
-#else
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[hash], ht_list,
-                          cache_entry_t)
-#endif
-    {
+    hlist_for_each_entry (entry, &cache->map.ht_list_head[hash], ht_list) {
         if (entry->key == key)
             break;
     }
@@ -324,14 +303,8 @@ void *cache_put(cache_t *cache, uint32_t key, void *value, uint32_t *freq)
     assert(cache->size <= cache->capacity);
 
     cache_entry_t *replaced = NULL, *revived = NULL, *entry;
-#ifdef __HAVE_TYPEOF
     hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list)
-#else
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list, cache_entry_t)
-#endif
-    {
+                          ht_list) {
         if (entry->key != key)
             continue;
         if (!entry->alive) {
@@ -437,26 +410,12 @@ void cache_free(cache_t *cache)
 {
     /* Free all live cache entries */
     cache_entry_t *entry, *safe;
-#ifdef __HAVE_TYPEOF
     list_for_each_entry_safe (entry, safe, &cache->list, list)
-#else
-    list_for_each_entry_safe (entry, safe, &cache->list, list, cache_entry_t)
-#endif
         free(entry);
     /* Free all ghost (evicted history) cache entries */
-#ifdef __HAVE_TYPEOF
     list_for_each_entry_safe (entry, safe, &cache->ghost_list, list)
-#else
-    list_for_each_entry_safe (entry, safe, &cache->ghost_list, list,
-                              cache_entry_t)
-#endif
         free(entry);
-#ifdef __HAVE_TYPEOF
     list_for_each_entry_safe (entry, safe, &cache->free_list, list)
-#else
-    list_for_each_entry_safe (entry, safe, &cache->free_list, list,
-                              cache_entry_t)
-#endif
         free(entry);
     free(cache->map.ht_list_head);
     free(cache);
@@ -498,12 +457,7 @@ void cache_profile(const struct cache *cache,
     assert(output_file);
 
     cache_entry_t *entry;
-#ifdef __HAVE_TYPEOF
-    list_for_each_entry (entry, &cache->list, list)
-#else
-    list_for_each_entry (entry, &cache->list, list, cache_entry_t)
-#endif
-    {
+    list_for_each_entry (entry, &cache->list, list) {
         func(entry->value, entry->freq, output_file);
     }
 }
@@ -520,12 +474,7 @@ void clear_cache_hot(const struct cache *cache, clear_func_t func)
     assert(func);
 
     cache_entry_t *entry = NULL;
-#ifdef __HAVE_TYPEOF
-    list_for_each_entry (entry, &cache->list, list)
-#else
-    list_for_each_entry (entry, &cache->list, list, cache_entry_t)
-#endif
-    {
+    list_for_each_entry (entry, &cache->list, list) {
         func(entry->value);
     }
 }
@@ -608,12 +557,7 @@ uint32_t cache_invalidate_satp(cache_t *cache,
     cache_entry_t *entry = NULL;
     struct hlist_node *next;
     struct hlist_head *head = &cache->satp_index[satp_index_hash(satp)];
-#ifdef __HAVE_TYPEOF
-    hlist_for_each_entry_safe(entry, next, head, satp_node)
-#else
-    hlist_for_each_entry_safe(entry, next, head, satp_node, cache_entry_t)
-#endif
-    {
+    hlist_for_each_entry_safe (entry, next, head, satp_node) {
         block_t *block = (block_t *) entry->value;
         if (block->satp == satp && !block->invalidated) {
             block_invalidate(block, &compiled);
@@ -630,12 +574,7 @@ uint32_t cache_invalidate_all(cache_t *cache)
 {
     uint32_t count = 0, compiled = 0;
     cache_entry_t *entry = NULL;
-#ifdef __HAVE_TYPEOF
-    list_for_each_entry (entry, &cache->list, list)
-#else
-    list_for_each_entry (entry, &cache->list, list, cache_entry_t)
-#endif
-    {
+    list_for_each_entry (entry, &cache->list, list) {
         block_t *block = (block_t *) entry->value;
         if (!block || block->invalidated)
             continue;
@@ -653,12 +592,7 @@ bool cache_has_va(const cache_t *cache, uint32_t va, uint32_t satp)
     const cache_entry_t *entry;
     const struct hlist_head *head =
         &cache->page_index[page_index_hash(va_page >> RV_PG_SHIFT)];
-#ifdef __HAVE_TYPEOF
-    hlist_for_each_entry (entry, head, page_node)
-#else
-    hlist_for_each_entry (entry, head, page_node, cache_entry_t)
-#endif
-    {
+    hlist_for_each_entry (entry, head, page_node) {
         const block_t *block = entry->value;
         if (block->satp == satp && !block->invalidated &&
             (block->pc_start & ~(RV_PG_SIZE - 1)) == va_page)
@@ -692,12 +626,7 @@ uint32_t cache_invalidate_va(cache_t *cache,
     struct hlist_node *next;
     struct hlist_head *head =
         &cache->page_index[page_index_hash(va_page >> RV_PG_SHIFT)];
-#ifdef __HAVE_TYPEOF
-    hlist_for_each_entry_safe(pentry, next, head, page_node)
-#else
-    hlist_for_each_entry_safe(pentry, next, head, page_node, cache_entry_t)
-#endif
-    {
+    hlist_for_each_entry_safe (pentry, next, head, page_node) {
         block_t *block = (block_t *) pentry->value;
         /* Verify block belongs to this page (hash collision check) */
         if (block->satp != satp || block->invalidated ||
@@ -712,12 +641,7 @@ uint32_t cache_invalidate_va(cache_t *cache,
      * kept, so scan every block.
      */
     cache_entry_t *entry = NULL;
-#ifdef __HAVE_TYPEOF
-    list_for_each_entry (entry, &cache->list, list)
-#else
-    list_for_each_entry (entry, &cache->list, list, cache_entry_t)
-#endif
-    {
+    list_for_each_entry (entry, &cache->list, list) {
         block_t *block = (block_t *) entry->value;
         if (!block || block->satp != satp || block->invalidated)
             continue;

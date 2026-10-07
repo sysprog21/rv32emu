@@ -360,13 +360,6 @@ static inline uint8_t ilog2(uint32_t x)
  */
 #define COUNT_VARARGS(...) _GET_NTH_ARG("ignored", ##__VA_ARGS__, 4, 3, 2, 1, 0)
 
-/* As of C23, typeof is now included as part of the C standard. */
-#if defined(__GNUC__) || defined(__clang__) ||         \
-    (defined(__STDC__) && defined(__STDC_VERSION__) && \
-     (__STDC_VERSION__ >= 202000L)) /* C2x/C23 ?*/
-#define __HAVE_TYPEOF 1
-#endif
-
 /**
  * container_of() - Calculate address of object that contains address ptr
  * @ptr: pointer to member variable
@@ -376,14 +369,9 @@ static inline uint8_t ilog2(uint32_t x)
  * Return: @type pointer of object containing ptr
  */
 #ifndef container_of
-#ifdef __HAVE_TYPEOF
 #define container_of(ptr, type, member)                            \
     __extension__({                                                \
         const __typeof__(((type *) 0)->member) *__pmember = (ptr); \
         (type *) ((char *) __pmember - offsetof(type, member));    \
     })
-#else
-#define container_of(ptr, type, member) \
-    ((type *) ((char *) (ptr) - (offsetof(type, member))))
-#endif
 #endif

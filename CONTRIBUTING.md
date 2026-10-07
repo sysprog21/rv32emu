@@ -102,7 +102,7 @@ Python scripts must be clean, consistent, and adhere to modern Python best pract
 
 ## Coding Style for HTML/JS
 
-Prettier is an opinionated code formatter.
+Prettier is an opinionated code formatter. The formatting rules are defined in .prettierrc.
 
 ## Coding Style for Modern C
 

@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # fs.protected_regular, root may not write a user's file in sticky /tmp.
 TMP_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/rv32emu-boot.XXXXXX")
 TMP_FILE="${TMP_DIR}/devices"
+TEST_ROOTFS="${1:-"ext4"}"
 
 cleanup()
 {
@@ -35,4 +36,16 @@ trap cleanup EXIT
 
 sudo env TMP_FILE="${TMP_FILE}" "${SCRIPT_DIR}/boot-linux-prepare.sh" setup || exit 1
 . "${TMP_FILE}"
-"${SCRIPT_DIR}/boot-linux.sh"
+
+case "${TEST_ROOTFS}" in
+    ext4)
+        "${SCRIPT_DIR}/boot-linux.sh"
+        ;;
+    initrd)
+        "${SCRIPT_DIR}/initrd.sh"
+        ;;
+    *)
+        echo "Error: unknown rootfs type '${TEST_ROOTFS}'" >&2
+        exit 1
+        ;;
+esac

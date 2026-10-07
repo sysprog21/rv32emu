@@ -10,7 +10,7 @@ RET=0
 HOST_UTC_YEAR=$(LC_ALL=C date -u +%Y)
 
 # RTC alarm and settime tests
-TEST_OPTIONS=("${OPTS_BASE}")
+TEST_OPTIONS+=("${OPTS_BASE_ROOTFS_EXT4}")
 EXPECT_CMDS=('
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
     expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
@@ -27,7 +27,7 @@ EXPECT_CMDS=('
 ')
 YEAR1=1980
 YEAR2=2030
-TEST_OPTIONS+=("${OPTS_BASE}")
+TEST_OPTIONS+=("${OPTS_BASE_ROOTFS_EXT4}")
 EXPECT_CMDS+=('
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
     expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
@@ -40,7 +40,7 @@ EXPECT_CMDS+=('
     expect "rtc_date	: ${year1}-01-01" { } timeout { exit 3 }
     expect "# " { send "\x01"; send "x" } timeout { exit 3 }
 ')
-TEST_OPTIONS+=("${OPTS_BASE}")
+TEST_OPTIONS+=("${OPTS_BASE_ROOTFS_EXT4}")
 EXPECT_CMDS+=('
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
     expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
@@ -53,7 +53,7 @@ EXPECT_CMDS+=('
     expect "rtc_date	: ${year2}-01-01" { } timeout { exit 3 }
     expect "# " { send "\x01"; send "x" } timeout { exit 3 }
 ')
-TEST_OPTIONS+=("${OPTS_BASE}")
+TEST_OPTIONS+=("${OPTS_BASE_ROOTFS_EXT4}")
 EXPECT_CMDS+=('
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
     expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }
@@ -70,7 +70,7 @@ EXPECT_CMDS+=('
     expect "alarm_IRQ	: no" { } timeout { exit 3 }
     expect "# " { send "\x01"; send "x" } timeout { exit 3 }
 ')
-TEST_OPTIONS+=("${OPTS_BASE}")
+TEST_OPTIONS+=("${OPTS_BASE_ROOTFS_EXT4}")
 EXPECT_CMDS+=('
     expect "buildroot login:" { send "root\n" } timeout { exit 1 }
     expect "# " { send "dmesg | grep rtc\n" } timeout { exit 2 }

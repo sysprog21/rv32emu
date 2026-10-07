@@ -256,7 +256,7 @@ enum TRAP_CODE {
          *                                                                     \
          * FIXME: ECALL_U cannot be trap directly to __trap_handler            \
          */                                                                    \
-        IIF(RV32_HAS(SYSTEM))(if (cause != ECALL_U) rv->is_trapped = true;, ); \
+        IIF(RV32_HAS(SYSTEM))(if (cause != ECALL_U) rv->trap_cnt++;, );      \
         /* A trap may switch tasks, so no reservation may survive it. */       \
         RV_RESERVE_CLEAR(rv);                                                  \
         if (RV_PRIV_IS_U_OR_S_MODE()) {                                        \

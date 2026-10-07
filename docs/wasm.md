@@ -29,7 +29,7 @@ $ make CC=emcc start-web -j8
 - System emulation:
 ```shell
 $ make wasm_system_defconfig
-$ make CC=emcc start-web INITRD_SIZE=32 -j8
+$ make CC=emcc start-web -j8
 ```
 
 You would see the server's IP:PORT in your terminal. Copy and paste it to

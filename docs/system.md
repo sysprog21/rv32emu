@@ -2,8 +2,8 @@
 
 `rv32emu` provides experimental system emulation capable of booting an RV32
 Linux kernel and running user-space binaries. This document covers building
-and running system mode, attaching virtio block devices, customizing
-bootargs, and building a Linux image from source.
+and running system mode, choosing the rootfs, attaching virtio block devices,
+customizing bootargs, and building a Linux image from source.
 
 Device Tree compiler (dtc) is required:
 * Debian/Ubuntu Linux: `sudo apt install device-tree-compiler`
@@ -31,19 +31,49 @@ $ make system
 T2C runs compute-bound guests faster still; see
 [benchmark.md](benchmark.md#system-emulation) for measurements.
 
+## Rootfs: ext4 disk or initrd
+
+By default (`CONFIG_ROOTFS_EXT4=y`), the guestOS mounts its rootfs from an
+ext4 disk image attached as a virtio block device. Unlike an initrd, the
+rootfs is neither copied into guest memory nor decompressed during boot, so
+the guestOS boots several times faster. `make system` runs:
+```shell
+$ build/rv32emu -k build/linux-image/Image -x vblk:build/linux-image/rootfs.ext4,rootfs
+```
+
+The `rootfs` attribute marks the disk that holds the ext4 rootfs, and it can
+be given to only one `-x vblk` option. The emulator then sets the default
+bootargs to mount that disk as `/` (e.g.,
+`root=/dev/vda rw rootfstype=ext4`), and the DTB has no initrd. The disk is
+mounted read-write, so changes made in the guestOS persist in the image;
+copy `rootfs.ext4` first to keep the original intact.
+
+To boot with the initrd (`rootfs.cpio`) instead, disable the ext4 rootfs:
+```shell
+$ make ENABLE_SYSTEM=1 ENABLE_ROOTFS_EXT4=0 system
+```
+The two modes take different options: `-i <image>` exists only with the
+initrd, and the `rootfs` attribute of `-x vblk` takes effect only with the
+ext4 rootfs.
+
 Build and run using specified images (`readonly` option makes the virtual
 block device read-only):
 ```shell
 $ make ENABLE_SYSTEM=1
+# ext4 rootfs
+$ build/rv32emu -k <kernel_img_path> -x vblk:<rootfs_ext4_img_path>,rootfs [-x vblk:<virtio_blk_img_path>[,readonly]]
+# initrd (ENABLE_ROOTFS_EXT4=0)
 $ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> [-x vblk:<virtio_blk_img_path>[,readonly]]
 ```
+The examples below use the initrd form; with the ext4 rootfs, replace
+`-i <rootfs_img_path>` with `-x vblk:<rootfs_ext4_img_path>,rootfs`.
 
-`mk/system.mk` auto-sizes the initrd region from the on-disk `rootfs.cpio`
-when present (file size + 2 MiB), falling back to 32 MiB. Override
-`INITRD_SIZE` on the make line for SDL-oriented workloads that ship larger
-asset bundles:
+With the initrd, `mk/system.mk` auto-sizes the initrd region from the
+on-disk `rootfs.cpio` when present (file size + 2 MiB), falling back to
+32 MiB. Override `INITRD_SIZE` on the make line for SDL-oriented workloads
+that ship larger asset bundles:
 ```shell
-$ make system ENABLE_SYSTEM=1 ENABLE_SDL=1 INITRD_SIZE=64
+$ make system ENABLE_SYSTEM=1 ENABLE_ROOTFS_EXT4=0 ENABLE_SDL=1 INITRD_SIZE=64
 ```
 Once logged into the guestOS, run `doom-riscv` or `quake` or `smolnes`. To
 terminate SDL-oriented applications, use the built-in exit utility, ctrl-c
@@ -80,7 +110,9 @@ $ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> -x vblk:disk.img -x vb
 ```
 Note that the /dev/vdx device order in guestOS is assigned in reverse: the
 first `-x vblk` argument corresponds to the device with the highest letter,
-while subsequent arguments receive lower-lettered device names.
+while subsequent arguments receive lower-lettered device names. The ext4
+rootfs disk counts as one of them, so pass it first to keep the other disks
+starting from `/dev/vda`.
 
 ### Out-of-tree filesystems
 
@@ -114,6 +146,12 @@ Build and run with customized bootargs to boot the guestOS. Otherwise, the
 default bootargs defined in `src/devices/minimal.dts` will be used:
 ```shell
 $ build/rv32emu -k <kernel_img_path> -i <rootfs_img_path> [-b <bootargs>]
+```
+With the ext4 rootfs, the customized bootargs replace the generated ones, so
+they must include `root=` to point at the rootfs disk, for example:
+```shell
+$ build/rv32emu -k <kernel_img_path> -x vblk:<rootfs_ext4_img_path>,rootfs \
+      -b "earlycon console=ttyS0 root=/dev/vda rw rootfstype=ext4"
 ```
 
 ## Build Linux image from source

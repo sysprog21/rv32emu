@@ -371,7 +371,12 @@ COLOR_Y='\e[33;01m' # Yellow
 COLOR_N='\e[0m'     # No color
 
 # Base options for Linux boot tests
+# To remain the coverage of initrd, for each test in .ci/boot-linux.sh will have
+# at least one boot using the initrd
 OPTS_BASE=" -k build/linux-image/Image -i build/linux-image/rootfs.cpio"
+# Base options for Linux boot tests with ext4 rootfs
+# ext4 rootfs is much faster boot compared to the initrd, so use this by default
+OPTS_BASE_ROOTFS_EXT4=" -k build/linux-image/Image -x vblk:build/linux-image/rootfs.ext4,rootfs"
 
 # Common test result messages
 MESSAGES=("${COLOR_G}OK!"

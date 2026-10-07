@@ -31,6 +31,10 @@ case "${MODE}" in
 
         mkdir -p "${STAGE}"
         cp assets/wasm/html/system.html "${STAGE}/index.html"
+        # Replace the <ROOTFS> and <ROOTFS_CLI> markers in index.html
+        sed -i 's/<ROOTFS>/rootfs.ext4/g' "${STAGE}/index.html"
+        sed -i 's/<ROOTFS_CLI>/-x vblk:rootfs.ext4,rootfs/g' \
+            "${STAGE}/index.html"
         cp assets/wasm/js/coi-serviceworker.min.js "${STAGE}/"
         cp assets/wasm/js/common.js "${STAGE}/"
         cp assets/wasm/vendor/xterm.min.js "${STAGE}/"
@@ -40,6 +44,7 @@ case "${MODE}" in
         # Only emitted for pthread-enabled builds.
         cp build/rv32emu.worker.js "${STAGE}/" || true
         cp build/linux-image/Image.gz "${STAGE}/"
+        cp build/linux-image/rootfs.ext4 "${STAGE}/"
         gzip -9 -c build/linux-image/rootfs.web.cpio > "${STAGE}/rootfs.cpio.gz"
         cp build/timidity.tar "${STAGE}/"
         cp build/timidity.tar.gz "${STAGE}/"

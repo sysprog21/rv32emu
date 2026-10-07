@@ -851,9 +851,10 @@ enum {
 #define RVOP_NEXT_IMPL(ir) ((ir)->next->impl)
 #if RV32_HAS(GDBSTUB)
 #define RVOP_NO_NEXT(ir) \
-    (!ir->next | rv->debug_mode IIF(RV32_HAS(SYSTEM))(| rv->is_trapped, ))
+    (!ir->next | rv->debug_mode IIF(RV32_HAS(SYSTEM))(| (rv->trap_cnt != 0), ))
 #else
-#define RVOP_NO_NEXT(ir) (!ir->next IIF(RV32_HAS(SYSTEM))(| rv->is_trapped, ))
+#define RVOP_NO_NEXT(ir) \
+    (!ir->next IIF(RV32_HAS(SYSTEM))(| (rv->trap_cnt != 0), ))
 #endif
 #endif
 
@@ -1101,7 +1102,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
                     struct rv_insn *taken = ir->branch_taken;             \
                     if (taken) {                                          \
                         IIF(RV32_HAS(SYSTEM))(                            \
-                            if (!rv->is_trapped) {                        \
+                            if (!rv->trap_cnt) {                          \
                                 last_pc = PC;                             \
                                 RVOP_TAIL(rv, taken, cycle, PC);          \
                             },                                            \
@@ -1601,7 +1602,7 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
      * In non-SYSTEM mode, RAM access never faults so this always executes.
      */
 #if RV32_HAS(SYSTEM)
-    if (!rv->is_trapped)
+    if (!rv->trap_cnt)
 #endif
         rv->X[ir->rs1] = rv->X[ir->rs1] + ir->imm2;
     PC += 4;
@@ -1631,7 +1632,7 @@ static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
         struct rv_insn *taken = ir->branch_taken;
         if (taken) {
 #if RV32_HAS(SYSTEM)
-            if (!rv->is_trapped) {
+            if (!rv->trap_cnt) {
                 last_pc = PC;
                 MUST_TAIL return taken->impl(rv, taken, cycle, PC);
             }
@@ -1647,7 +1648,7 @@ static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
         struct rv_insn *untaken = ir->branch_untaken;
         if (untaken) {
 #if RV32_HAS(SYSTEM)
-            if (!rv->is_trapped) {
+            if (!rv->trap_cnt) {
                 last_pc = PC;
                 MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
             }
@@ -2213,7 +2214,7 @@ retranslate:
 #endif
 
         /* If instruction fetch failed due to trap (page fault, etc.), break.
-         * The caller checks rv->is_trapped and invokes trap handler.
+         * The caller checks rv->trap_cnt and invokes trap handler.
          * Note: insn==0 alone is ambiguous; we verify trap state explicitly.
          */
         if (!insn)
@@ -3377,7 +3378,7 @@ static inline bool settle_trap(riscv_t *rv UNUSED)
 #if RV32_HAS(SYSTEM)
     bool settled = need_handle_signal;
     need_handle_signal = false;
-    if (rv->is_trapped) {
+    if (rv->trap_cnt) {
         trap_handler(rv);
         return true;
     }
@@ -3689,7 +3690,7 @@ retranslate:
      */
     if (!insn) {
 #if RV32_HAS(SYSTEM)
-        assert(rv->is_trapped &&
+        assert(rv->trap_cnt &&
                "insn fetch returned 0 without setting trap state");
         trap_handler(rv);
 #endif
@@ -3711,13 +3712,27 @@ retranslate:
 }
 
 #if RV32_HAS(SYSTEM)
+
+/*
+ * Run the trap handler of the guest OS instruction by instruction until it
+ * returns via sret. A trap raised while running it, e.g., a page fault or an
+ * external interrupt, enters this function again and raises rv->trap_cnt, so
+ * each level runs until its own sret brings trap_cnt below the depth it was
+ * entered at, and then the outer level resumes.
+ */
 static void __trap_handler(riscv_t *rv)
 {
     rv_insn_t *ir = mpool_calloc(rv->block_ir_mp);
     assert(ir);
 
-    /* set to false by sret implementation */
-    while (rv->is_trapped && !rv_has_halted(rv)) {
+    const uint32_t depth = rv->trap_cnt;
+    /* A nested trap overwrites last_csr_sepc, so restore the one of this level
+     * for CHECK_PENDING_SIGNAL after this level returns.
+     */
+    const uint32_t last_csr_sepc = rv->last_csr_sepc;
+
+    /* decremented by sret implementation */
+    while (rv->trap_cnt >= depth && !rv_has_halted(rv)) {
         uint32_t insn;
     retry_fetch:
         insn = rv->io.mem_ifetch(rv, rv->PC);
@@ -3746,8 +3761,25 @@ static void __trap_handler(riscv_t *rv)
         ir->impl = dispatch_table[ir->opcode];
         rv->compressed = is_compressed(insn);
         ir->impl(rv, ir, rv->csr_cycle, rv->PC);
+
+#if RV32_HAS(SYSTEM_MMIO)
+        /*
+         * local_irq_enable() might happen during the trap handling, for
+         * example, userspace store page fault occurs when writing to the disk
+         * and need to wait for the disk interrupt.
+         *
+         * Thus, need to check if any interrupt occurs when SIE = 1 and take it
+         * as a nested trap before the sret instruction of this level. Its sret
+         * returns here and the handling of this level resumes.
+         */
+        if (rv->trap_cnt >= depth && rv_has_plic_trap(rv) &&
+            ilog2(rv->csr_sip & rv->csr_sie) ==
+                (SUPERVISOR_EXTERNAL_INTR & 0xf))
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
+#endif /* SYSTEM_MMIO */
     }
 
+    rv->last_csr_sepc = last_csr_sepc;
     mpool_free(rv->block_ir_mp, ir);
     prev = NULL;
 }
@@ -3801,7 +3833,8 @@ static void _trap_handler(riscv_t *rv)
 #if RV32_HAS(SYSTEM)
         rv->last_csr_sepc = rv->csr_sepc;
         if (!rv->csr_stvec) { /* in case CSR is not configured */
-            rv->is_trapped = false;
+            if (rv->trap_cnt)
+                rv->trap_cnt--;
 #if RV32_HAS(ELF_LOADER)
             /* A directly loaded program has no OS to handle its exceptions;
              * treat them as user mode does. Resuming at sepc would retry a
@@ -3814,7 +3847,7 @@ static void _trap_handler(riscv_t *rv)
             }
 #endif
             /* For system mode without trap vector, restore PC from sepc
-             * and clear is_trapped to continue execution. This handles
+             * and clear trap_cnt to continue execution. This handles
              * spurious interrupts during early boot before handlers are set.
              */
             rv->PC = rv->csr_sepc;
@@ -3835,11 +3868,12 @@ static void _trap_handler(riscv_t *rv)
         if (!rv->csr_mtvec) { /* in case CSR is not configured */
 #if RV32_HAS(SYSTEM)
             /* For system mode without trap vector, restore PC from mepc
-             * and clear is_trapped to continue execution. This handles
+             * and clear trap_cnt to continue execution. This handles
              * spurious interrupts during early boot before handlers are set.
              */
             rv->PC = rv->csr_mepc;
-            rv->is_trapped = false;
+            if (rv->trap_cnt)
+                rv->trap_cnt--;
 #else
             rv_trap_default_handler(rv, cause, rv->csr_mtval, &rv->csr_mepc);
 #endif
@@ -3858,7 +3892,7 @@ static void _trap_handler(riscv_t *rv)
         rv->PC = base + 4 * (cause & MASK(31));
         break;
     }
-    IIF(RV32_HAS(SYSTEM))(if (rv->is_trapped) __trap_handler(rv);, )
+    IIF(RV32_HAS(SYSTEM))(if (rv->trap_cnt) __trap_handler(rv);, )
 }
 
 void trap_handler(riscv_t *rv)

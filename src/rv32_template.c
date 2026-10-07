@@ -88,13 +88,13 @@ RVOP(jal, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        IIF(RV32_HAS(SYSTEM)(if (!rv->is_trapped && !reloc_enable_mmu), ))
+        IIF(RV32_HAS(SYSTEM)(if (!rv->trap_cnt && !reloc_enable_mmu), ))
         {
             RVOP_PROBE_TARGET(PC, end_op);
         }
 #endif
 #if RV32_HAS(SYSTEM)
-        if (!rv->is_trapped)
+        if (!rv->trap_cnt)
 #endif
         {
             /* The last_pc should only be updated when not in the trap path.
@@ -134,7 +134,7 @@ RVOP(jal, {
      */                                                                        \
     IIF(RV32_HAS(GDBSTUB)(if (!rv->debug_mode), ))                             \
     {                                                                          \
-        IIF(RV32_HAS(SYSTEM)(if (!rv->is_trapped && !reloc_enable_mmu), ))     \
+        IIF(RV32_HAS(SYSTEM)(if (!rv->trap_cnt && !reloc_enable_mmu), ))       \
         {                                                                      \
             /* Direct-mapped lookup: O(1) instead of O(n) linear search */     \
             const uint32_t bht_idx = (PC >> 2) & (HISTORY_SIZE - 1);           \
@@ -155,7 +155,7 @@ RVOP(jal, {
     }
 #else
 #define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                              \
-    IIF(RV32_HAS(SYSTEM))(if (!rv->is_trapped && !reloc_enable_mmu), )       \
+    IIF(RV32_HAS(SYSTEM))(if (!rv->trap_cnt && !reloc_enable_mmu), )         \
     {                                                                        \
         cache_lookup_t lookup =                                              \
             cache_get_with_freq(rv->block_cache, PC, true);                  \
@@ -210,7 +210,7 @@ RVOP(jalr, {
     if (!reloc_enable_mmu && reloc_enable_mmu_jalr_addr == 0xc00000b4) {
         reloc_enable_mmu = true;
         need_retranslate = true;
-        rv->is_trapped = false;
+        rv->trap_cnt = 0;
     }
 
 #endif /* RV32_HAS(SYSTEM) */
@@ -228,7 +228,7 @@ RVOP(jalr, {
     if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {          \
         IIF(RV32_HAS(SYSTEM))(                                              \
             {                                                               \
-                if (!rv->is_trapped) {                                      \
+                if (!rv->trap_cnt) {                                        \
                     is_branch_taken = false;                                \
                 }                                                           \
             },                                                              \
@@ -240,7 +240,7 @@ RVOP(jalr, {
         PC += 4;                                                            \
         IIF(RV32_HAS(SYSTEM))(                                              \
             {                                                               \
-                if (!rv->is_trapped) {                                      \
+                if (!rv->trap_cnt) {                                        \
                     last_pc = PC;                                           \
                     MUST_TAIL return untaken->impl(rv, untaken, cycle, PC); \
                 }                                                           \
@@ -250,7 +250,7 @@ RVOP(jalr, {
     }                                                                       \
     IIF(RV32_HAS(SYSTEM))(                                                  \
         {                                                                   \
-            if (!rv->is_trapped) {                                          \
+            if (!rv->trap_cnt) {                                            \
                 is_branch_taken = true;                                     \
             }                                                               \
         },                                                                  \
@@ -263,7 +263,7 @@ RVOP(jalr, {
         IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(PC, end_op);, );               \
         IIF(RV32_HAS(SYSTEM))(                                              \
             {                                                               \
-                if (!rv->is_trapped) {                                      \
+                if (!rv->trap_cnt) {                                        \
                     last_pc = PC;                                           \
                     MUST_TAIL return taken->impl(rv, taken, cycle, PC);     \
                 }                                                           \
@@ -546,8 +546,15 @@ RVOP(uret, {
 /* SRET: return from traps in S-mode */
 #if RV32_HAS(SYSTEM)
 RVOP(sret, {
-    rv->is_trapped = false;
     rv->priv_mode = (rv->csr_sstatus & SSTATUS_SPP) >> SSTATUS_SPP_SHIFT;
+    /* Returning to U-mode leaves every trap level, since the kernel may have
+     * switched tasks and not return to the outer handlers via sret. Otherwise,
+     * leave only the innermost one and resume the outer handler.
+     */
+    if (rv->priv_mode == RV_PRIV_U_MODE)
+        rv->trap_cnt = 0;
+    else if (rv->trap_cnt)
+        rv->trap_cnt--;
     rv->csr_sstatus &= ~(SSTATUS_SPP);
 
     const uint32_t sstatus_spie =
@@ -1364,7 +1371,7 @@ RVOP(cjal, {
 #endif
 
 #if RV32_HAS(SYSTEM)
-        if (!rv->is_trapped)
+        if (!rv->trap_cnt)
 #endif
         {
             last_pc = PC;
@@ -1442,7 +1449,7 @@ RVOP(cj, {
         RVOP_PROBE_TARGET(PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
-        if (!rv->is_trapped)
+        if (!rv->trap_cnt)
 #endif
         {
             last_pc = PC;
@@ -1468,7 +1475,7 @@ RVOP(cbeqz, {
 #endif
         PC += 2;
 #if RV32_HAS(SYSTEM)
-        if (!rv->is_trapped)
+        if (!rv->trap_cnt)
 #endif
         {
             last_pc = PC;
@@ -1485,7 +1492,7 @@ RVOP(cbeqz, {
         RVOP_PROBE_TARGET(PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
-        if (!rv->is_trapped)
+        if (!rv->trap_cnt)
 #endif
         {
             last_pc = PC;
@@ -1507,7 +1514,7 @@ RVOP(cbnez, {
 #endif
         PC += 2;
 #if RV32_HAS(SYSTEM)
-        if (!rv->is_trapped)
+        if (!rv->trap_cnt)
 #endif
         {
             last_pc = PC;
@@ -1524,7 +1531,7 @@ RVOP(cbnez, {
         RVOP_PROBE_TARGET(PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
-        if (!rv->is_trapped)
+        if (!rv->trap_cnt)
 #endif
         {
             last_pc = PC;

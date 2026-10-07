@@ -463,24 +463,71 @@ static inline bool rvv_reg_spans_overlap(uint32_t reg_a,
     return (reg_a < (reg_b + span_b)) && (reg_b < (reg_a + span_a));
 }
 
-/* Cross-EEW overlap rule per V 1.0 §11.2 (widening) and §11.3 (narrowing):
- * a wider register group may not overlap a narrower one EXCEPT when the
- * narrower group occupies the lower portion of the wider group - i.e.,
- * both groups share the same base register. Returns true when the overlap
- * is illegal (caller should raise illegal-instruction).
- *
- * Both widening and narrowing share this predicate because the spec rule
- * is symmetric: overlap is allowed only when the lower-numbered half of
- * the wider group is the narrower group itself (reg_a == reg_b).
+/* Cross-EEW overlap rules per V 1.0 §5.2: a destination vector register
+ * group may overlap a source group only if the destination EEW equals the
+ * source EEW, or one of the two asymmetric cases below holds. The narrowing
+ * and widening directions are NOT mirror images of each other, so they get
+ * separate predicates. Both return true when the overlap is illegal (caller
+ * should raise illegal-instruction).
  */
-static inline bool rvv_cross_eew_overlap_illegal(uint32_t reg_a,
-                                                 uint32_t span_a,
-                                                 uint32_t reg_b,
-                                                 uint32_t span_b)
+
+/* Narrowing (destination EEW < source EEW): the overlap must be in the
+ * lowest-numbered part of the source register group - e.g., at LMUL=1
+ * "vnsrl.wi v0, v0, 3" is legal but a destination of v1 is not. As the
+ * destination is the narrower group here, "lowest part of the source"
+ * reduces to the two groups sharing a base register.
+ */
+static inline bool rvv_narrow_overlap_illegal(uint32_t dest_reg,
+                                              uint32_t dest_span,
+                                              uint32_t src_reg,
+                                              uint32_t src_span)
 {
-    if (!rvv_reg_spans_overlap(reg_a, span_a, reg_b, span_b))
+    if (!rvv_reg_spans_overlap(dest_reg, dest_span, src_reg, src_span))
         return false;
-    return reg_a != reg_b;
+    return dest_reg != src_reg;
+}
+
+/* Widening (destination EEW > source EEW): the source EMUL must be at least
+ * 1 AND the overlap must be in the highest-numbered part of the destination
+ * register group - e.g., at LMUL=8 "vzext.vf4 v0, v6" is legal, but a source
+ * of v0, v2 or v4 is not. "Highest part of the destination" means the source
+ * group ends exactly where the destination group ends.
+ *
+ * src_emul_at_least_1 must be supplied by the caller rather than derived from
+ * src_span: rvv_eew_reg_span() clamps a fractional EMUL up to a span of 1, so
+ * a span of 1 alone cannot distinguish EMUL=1 from EMUL=1/2.
+ */
+static inline bool rvv_widen_overlap_illegal(uint32_t dest_reg,
+                                             uint32_t dest_span,
+                                             uint32_t src_reg,
+                                             uint32_t src_span,
+                                             bool src_emul_at_least_1)
+{
+    if (!rvv_reg_spans_overlap(dest_reg, dest_span, src_reg, src_span))
+        return false;
+    if (!src_emul_at_least_1)
+        return true;
+    return (src_reg + src_span) != (dest_reg + dest_span);
+}
+
+/* True when EMUL for an operand read at eew is at least 1, where
+ * EMUL = (eew / SEW) * LMUL per V 1.0 §7.6.1. The widening overlap rule
+ * needs this separately from rvv_eew_reg_span(), which clamps a fractional
+ * EMUL up to a span of 1 and so cannot express "EMUL < 1".
+ */
+static inline bool rvv_emul_at_least_1(riscv_t *rv, uint32_t eew)
+{
+    uint32_t lmul_num, lmul_den;
+
+    rvv_lmul_ratio(rv->csr_vtype, &lmul_num, &lmul_den);
+    return (uint64_t) lmul_num * eew >=
+           (uint64_t) lmul_den * rvv_sew_bits(rv->csr_vtype);
+}
+
+/* Widening ops read their narrow sources at SEW, for which EMUL == LMUL. */
+static inline bool rvv_sew_emul_at_least_1(riscv_t *rv)
+{
+    return rvv_emul_at_least_1(rv, rvv_sew_bits(rv->csr_vtype));
 }
 
 /* Compute the register-group span for an instruction whose effective
@@ -1169,28 +1216,39 @@ static inline bool rvv_segment_indexed_store(riscv_t *rv,
             return false;                                                   \
     })
 
-#define RVV_SEGMENT_INDEXED_LOAD_OP(name, nf_value)                          \
-    RVOP(name, {                                                             \
-        uint32_t data_span = rvv_group_regs(rv->csr_vtype);                  \
-        uint32_t index_span;                                                 \
-        uint32_t total_dest_span;                                            \
-        if (rvv_require_operable(rv))                                        \
-            return false;                                                    \
-        if (!rvv_validate_segment_reg_group(ir->vd, data_span, nf_value) ||  \
-            !rvv_index_group_span(rv, ir->eew, &index_span) ||               \
-            !rvv_validate_reg_span(ir->vs2, index_span))                     \
-            return rvv_trap_illegal_state(rv, 0);                            \
-        total_dest_span = data_span * (nf_value);                            \
-        if (!ir->vm && rvv_reg_spans_overlap(ir->vd, total_dest_span, 0, 1)) \
-            return rvv_trap_illegal_state(rv, 0);                            \
-        if (data_span != index_span                                          \
-                ? rvv_cross_eew_overlap_illegal(ir->vd, total_dest_span,     \
-                                                ir->vs2, index_span)         \
-                : rvv_reg_spans_overlap(ir->vd, total_dest_span, ir->vs2,    \
-                                        index_span))                         \
-            return rvv_trap_illegal_state(rv, 0);                            \
-        if (!rvv_segment_indexed_load(rv, ir, ir->vd, nf_value))             \
-            return false;                                                    \
+#define RVV_SEGMENT_INDEXED_LOAD_OP(name, nf_value)                            \
+    RVOP(name, {                                                               \
+        uint32_t data_span = rvv_group_regs(rv->csr_vtype);                    \
+        uint32_t index_span;                                                   \
+        uint32_t total_dest_span;                                              \
+        if (rvv_require_operable(rv))                                          \
+            return false;                                                      \
+        if (!rvv_validate_segment_reg_group(ir->vd, data_span, nf_value) ||    \
+            !rvv_index_group_span(rv, ir->eew, &index_span) ||                 \
+            !rvv_validate_reg_span(ir->vs2, index_span))                       \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        total_dest_span = data_span * (nf_value);                              \
+        if (!ir->vm && rvv_reg_spans_overlap(ir->vd, total_dest_span, 0, 1))   \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        /* Destination EEW is SEW; the index source EEW is ir->eew. Per        \
+         * V 1.0 §5.2 the legal-overlap rule differs by direction, so it is   \
+         * selected from the two EEWs themselves. The register spans cannot    \
+         * stand in for that comparison: rvv_eew_reg_span() clamps a           \
+         * fractional EMUL up to a span of one register, so two different      \
+         * EEWs can both arrive as a span of 1.                                \
+         */                                                                    \
+        if (ir->eew < rvv_sew_bits(rv->csr_vtype)                              \
+                ? rvv_widen_overlap_illegal(ir->vd, total_dest_span, ir->vs2,  \
+                                            index_span,                        \
+                                            rvv_emul_at_least_1(rv, ir->eew))  \
+            : ir->eew > rvv_sew_bits(rv->csr_vtype)                            \
+                ? rvv_narrow_overlap_illegal(ir->vd, total_dest_span, ir->vs2, \
+                                             index_span)                       \
+                : rvv_reg_spans_overlap(ir->vd, total_dest_span, ir->vs2,      \
+                                        index_span))                           \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        if (!rvv_segment_indexed_load(rv, ir, ir->vd, nf_value))               \
+            return false;                                                      \
     })
 
 #define RVV_SEGMENT_INDEXED_STORE_OP(name, nf_value)                         \
@@ -5233,7 +5291,7 @@ RVOP(vnsrl_wv, {
         !rvv_validate_wide_reg(rv, ir->vs2) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vv(rv, ir, ir->vd, rvv_nop_vnsrl);
 })
@@ -5247,7 +5305,7 @@ RVOP(vnsrl_wx, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vx(rv, ir, ir->vd, rvv_nop_vnsrl);
 })
@@ -5261,7 +5319,7 @@ RVOP(vnsrl_wi, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vi(rv, ir, ir->vd, rvv_nop_vnsrl);
 })
@@ -5276,7 +5334,7 @@ RVOP(vnsra_wv, {
         !rvv_validate_wide_reg(rv, ir->vs2) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vv(rv, ir, ir->vd, rvv_nop_vnsra);
 })
@@ -5290,7 +5348,7 @@ RVOP(vnsra_wx, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vx(rv, ir, ir->vd, rvv_nop_vnsra);
 })
@@ -5304,7 +5362,7 @@ RVOP(vnsra_wi, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vi(rv, ir, ir->vd, rvv_nop_vnsra);
 })
@@ -5319,7 +5377,7 @@ RVOP(vnclipu_wv, {
         !rvv_validate_wide_reg(rv, ir->vs2) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vv(rv, ir, ir->vd, rvv_nop_vnclipu);
 })
@@ -5333,7 +5391,7 @@ RVOP(vnclipu_wx, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vx(rv, ir, ir->vd, rvv_nop_vnclipu);
 })
@@ -5347,7 +5405,7 @@ RVOP(vnclipu_wi, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vi(rv, ir, ir->vd, rvv_nop_vnclipu);
 })
@@ -5362,7 +5420,7 @@ RVOP(vnclip_wv, {
         !rvv_validate_wide_reg(rv, ir->vs2) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vv(rv, ir, ir->vd, rvv_nop_vnclip);
 })
@@ -5376,7 +5434,7 @@ RVOP(vnclip_wx, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vx(rv, ir, ir->vd, rvv_nop_vnclip);
 })
@@ -5390,7 +5448,7 @@ RVOP(vnclip_wi, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
+    if (rvv_narrow_overlap_illegal(ir->vd, narrow_span, ir->vs2, wide_span))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_narrow_shift_vi(rv, ir, ir->vd, rvv_nop_vnclip);
 })
@@ -5925,9 +5983,10 @@ RVOP(vwaddu_vv, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs1,
-                                      narrow_span) ||
-        rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span))
+    if (rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs1, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)) ||
+        rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_wide_narrow_vv(rv, ir, ir->vd, rvv_wop_addu);
 })
@@ -5941,7 +6000,8 @@ RVOP(vwaddu_vx, {
         !rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span))
+    if (rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_wide_narrow_vx(rv, ir, ir->vd, rvv_wop_addu);
 })
@@ -5956,9 +6016,10 @@ RVOP(vwadd_vv, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs1,
-                                      narrow_span) ||
-        rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span))
+    if (rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs1, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)) ||
+        rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_wide_narrow_vv(rv, ir, ir->vd, rvv_wop_add);
 })
@@ -5974,8 +6035,9 @@ RVOP(vwadd_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vx(rv, ir, ir->vd, rvv_wop_add);
@@ -5991,9 +6053,10 @@ RVOP(vwsubu_vv, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs1,
-                                      narrow_span) ||
-        rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span))
+    if (rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs1, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)) ||
+        rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_wide_narrow_vv(rv, ir, ir->vd, rvv_wop_subu);
 })
@@ -6009,8 +6072,9 @@ RVOP(vwsubu_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vx(rv, ir, ir->vd, rvv_wop_subu);
@@ -6026,9 +6090,10 @@ RVOP(vwsub_vv, {
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
-    if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs1,
-                                      narrow_span) ||
-        rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span))
+    if (rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs1, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)) ||
+        rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span,
+                                  rvv_sew_emul_at_least_1(rv)))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_wide_narrow_vv(rv, ir, ir->vd, rvv_wop_sub);
 })
@@ -6044,8 +6109,9 @@ RVOP(vwsub_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vx(rv, ir, ir->vd, rvv_wop_sub);
@@ -6065,8 +6131,9 @@ RVOP(vwaddu_wv, {
             return rvv_trap_illegal_state(rv, 0);
         /* vs2 has the same EEW as vd (both 2*SEW); only vs1 (SEW) is a
          * cross-EEW source for the lower-half overlap rule. */
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mixed_vv(rv, ir, ir->vd, rvv_wop_addu_mixed);
@@ -6095,8 +6162,9 @@ RVOP(vwadd_wv, {
             return rvv_trap_illegal_state(rv, 0);
         /* vs2 has the same EEW as vd (both 2*SEW); only vs1 (SEW) is a
          * cross-EEW source for the lower-half overlap rule. */
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mixed_vv(rv, ir, ir->vd, rvv_wop_add_mixed);
@@ -6125,8 +6193,9 @@ RVOP(vwsubu_wv, {
             return rvv_trap_illegal_state(rv, 0);
         /* vs2 has the same EEW as vd (both 2*SEW); only vs1 (SEW) is a
          * cross-EEW source for the lower-half overlap rule. */
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mixed_vv(rv, ir, ir->vd, rvv_wop_subu_mixed);
@@ -6155,8 +6224,9 @@ RVOP(vwsub_wv, {
             return rvv_trap_illegal_state(rv, 0);
         /* vs2 has the same EEW as vd (both 2*SEW); only vs1 (SEW) is a
          * cross-EEW source for the lower-half overlap rule. */
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mixed_vv(rv, ir, ir->vd, rvv_wop_sub_mixed);
@@ -6183,10 +6253,12 @@ RVOP(vwmulu_vv, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx) ||
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)) ||
+            rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vv(rv, ir, ir->vd, rvv_wop_mulu);
@@ -6203,8 +6275,9 @@ RVOP(vwmulu_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vx(rv, ir, ir->vd, rvv_wop_mulu);
@@ -6222,10 +6295,12 @@ RVOP(vwmulsu_vv, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx) ||
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)) ||
+            rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vv(rv, ir, ir->vd, rvv_wop_mulsu);
@@ -6242,8 +6317,9 @@ RVOP(vwmulsu_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vx(rv, ir, ir->vd, rvv_wop_mulsu);
@@ -6261,10 +6337,12 @@ RVOP(vwmul_vv, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx) ||
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)) ||
+            rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vv(rv, ir, ir->vd, rvv_wop_mul);
@@ -6281,8 +6359,9 @@ RVOP(vwmul_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_narrow_vx(rv, ir, ir->vd, rvv_wop_mul);
@@ -6300,10 +6379,12 @@ RVOP(vwmaccu_vv, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx) ||
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)) ||
+            rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mac_vv(rv, ir, ir->vd, rvv_wop_mulu);
@@ -6320,8 +6401,9 @@ RVOP(vwmaccu_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mac_vx(rv, ir, ir->vd, rvv_wop_mulu);
@@ -6339,10 +6421,12 @@ RVOP(vwmacc_vv, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx) ||
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)) ||
+            rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mac_vv(rv, ir, ir->vd, rvv_wop_mul);
@@ -6359,8 +6443,9 @@ RVOP(vwmacc_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mac_vx(rv, ir, ir->vd, rvv_wop_mul);
@@ -6377,8 +6462,9 @@ RVOP(vwmaccus_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mac_vx(rv, ir, ir->vd, rvv_wop_mulus);
@@ -6396,10 +6482,12 @@ RVOP(vwmaccsu_vv, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
-                                          narrow_span_cx) ||
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs1,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)) ||
+            rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mac_vv(rv, ir, ir->vd, rvv_wop_mulsu);
@@ -6416,8 +6504,9 @@ RVOP(vwmaccsu_vx, {
         uint32_t narrow_span_cx = rvv_group_regs(rv->csr_vtype);
         if (!rvv_wide_group_span(rv, &wide_span_cx))
             return rvv_trap_illegal_state(rv, 0);
-        if (rvv_cross_eew_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
-                                          narrow_span_cx))
+        if (rvv_widen_overlap_illegal(ir->vd, wide_span_cx, ir->vs2,
+                                      narrow_span_cx,
+                                      rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
     rvv_exec_wide_mac_vx(rv, ir, ir->vd, rvv_wop_mulsu);
@@ -7326,43 +7415,43 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
         set_fflag(rv);                                       \
     })
 
-#define RVV_FP64_WIDEN_VV_OP(name, opfn)                              \
-    RVOP(name, {                                                      \
-        uint32_t wide_span;                                           \
-        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);         \
-        if (rvv_require_operable(rv))                                 \
-            return false;                                             \
-        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                    \
-            !rvv_validate_wide_reg(rv, ir->vd) ||                     \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||         \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||         \
-            !rvv_wide_group_span(rv, &wide_span) ||                   \
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs1, \
-                                          narrow_span) ||             \
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, \
-                                          narrow_span))               \
-            return rvv_trap_illegal_state(rv, 0);                     \
-        rvv_fp_begin_round(rv);                                       \
-        rvv_exec_fp64_widen_vv(rv, ir, ir->vd, opfn);                 \
-        set_fflag(rv);                                                \
+#define RVV_FP64_WIDEN_VV_OP(name, opfn)                                       \
+    RVOP(name, {                                                               \
+        uint32_t wide_span;                                                    \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
+        if (rvv_require_operable(rv))                                          \
+            return false;                                                      \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
+            !rvv_validate_wide_reg(rv, ir->vd) ||                              \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||                  \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||                  \
+            !rvv_wide_group_span(rv, &wide_span) ||                            \
+            rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs1, narrow_span, \
+                                      rvv_sew_emul_at_least_1(rv)) ||          \
+            rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span, \
+                                      rvv_sew_emul_at_least_1(rv)))            \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        rvv_fp_begin_round(rv);                                                \
+        rvv_exec_fp64_widen_vv(rv, ir, ir->vd, opfn);                          \
+        set_fflag(rv);                                                         \
     })
 
-#define RVV_FP64_WIDEN_VF_OP(name, opfn)                              \
-    RVOP(name, {                                                      \
-        uint32_t wide_span;                                           \
-        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);         \
-        if (rvv_require_operable(rv))                                 \
-            return false;                                             \
-        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                    \
-            !rvv_validate_wide_reg(rv, ir->vd) ||                     \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||         \
-            !rvv_wide_group_span(rv, &wide_span) ||                   \
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, \
-                                          narrow_span))               \
-            return rvv_trap_illegal_state(rv, 0);                     \
-        rvv_fp_begin_round(rv);                                       \
-        rvv_exec_fp64_widen_vf(rv, ir, ir->vd, opfn);                 \
-        set_fflag(rv);                                                \
+#define RVV_FP64_WIDEN_VF_OP(name, opfn)                                       \
+    RVOP(name, {                                                               \
+        uint32_t wide_span;                                                    \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
+        if (rvv_require_operable(rv))                                          \
+            return false;                                                      \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
+            !rvv_validate_wide_reg(rv, ir->vd) ||                              \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||                  \
+            !rvv_wide_group_span(rv, &wide_span) ||                            \
+            rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span, \
+                                      rvv_sew_emul_at_least_1(rv)))            \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        rvv_fp_begin_round(rv);                                                \
+        rvv_exec_fp64_widen_vf(rv, ir, ir->vd, opfn);                          \
+        set_fflag(rv);                                                         \
     })
 
 #define RVV_FP64_RED_OP(name, opfn)                         \
@@ -7379,23 +7468,23 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
         set_fflag(rv);                                      \
     })
 
-#define RVV_FP64_MIXED_VV_OP(name, opfn)                              \
-    RVOP(name, {                                                      \
-        uint32_t wide_span;                                           \
-        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);         \
-        if (rvv_require_operable(rv))                                 \
-            return false;                                             \
-        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                    \
-            !rvv_validate_wide_reg(rv, ir->vd) ||                     \
-            !rvv_validate_wide_reg(rv, ir->vs2) ||                    \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||         \
-            !rvv_wide_group_span(rv, &wide_span) ||                   \
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs1, \
-                                          narrow_span))               \
-            return rvv_trap_illegal_state(rv, 0);                     \
-        rvv_fp_begin_round(rv);                                       \
-        rvv_exec_fp64_mixed_vv(rv, ir, ir->vd, opfn);                 \
-        set_fflag(rv);                                                \
+#define RVV_FP64_MIXED_VV_OP(name, opfn)                                       \
+    RVOP(name, {                                                               \
+        uint32_t wide_span;                                                    \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
+        if (rvv_require_operable(rv))                                          \
+            return false;                                                      \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
+            !rvv_validate_wide_reg(rv, ir->vd) ||                              \
+            !rvv_validate_wide_reg(rv, ir->vs2) ||                             \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||                  \
+            !rvv_wide_group_span(rv, &wide_span) ||                            \
+            rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs1, narrow_span, \
+                                      rvv_sew_emul_at_least_1(rv)))            \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        rvv_fp_begin_round(rv);                                                \
+        rvv_exec_fp64_mixed_vv(rv, ir, ir->vd, opfn);                          \
+        set_fflag(rv);                                                         \
     })
 
 #define RVV_FP64_MIXED_VF_OP(name, opfn)              \
@@ -7411,43 +7500,43 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
         set_fflag(rv);                                \
     })
 
-#define RVV_FP64_MAC_VV_OP(name, opfn)                                \
-    RVOP(name, {                                                      \
-        uint32_t wide_span;                                           \
-        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);         \
-        if (rvv_require_operable(rv))                                 \
-            return false;                                             \
-        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                    \
-            !rvv_validate_wide_reg(rv, ir->vd) ||                     \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||         \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||         \
-            !rvv_wide_group_span(rv, &wide_span) ||                   \
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs1, \
-                                          narrow_span) ||             \
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, \
-                                          narrow_span))               \
-            return rvv_trap_illegal_state(rv, 0);                     \
-        rvv_fp_begin_round(rv);                                       \
-        rvv_exec_fp64_mac_vv(rv, ir, ir->vd, opfn);                   \
-        set_fflag(rv);                                                \
+#define RVV_FP64_MAC_VV_OP(name, opfn)                                         \
+    RVOP(name, {                                                               \
+        uint32_t wide_span;                                                    \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
+        if (rvv_require_operable(rv))                                          \
+            return false;                                                      \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
+            !rvv_validate_wide_reg(rv, ir->vd) ||                              \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||                  \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||                  \
+            !rvv_wide_group_span(rv, &wide_span) ||                            \
+            rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs1, narrow_span, \
+                                      rvv_sew_emul_at_least_1(rv)) ||          \
+            rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span, \
+                                      rvv_sew_emul_at_least_1(rv)))            \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        rvv_fp_begin_round(rv);                                                \
+        rvv_exec_fp64_mac_vv(rv, ir, ir->vd, opfn);                            \
+        set_fflag(rv);                                                         \
     })
 
-#define RVV_FP64_MAC_VF_OP(name, opfn)                                \
-    RVOP(name, {                                                      \
-        uint32_t wide_span;                                           \
-        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);         \
-        if (rvv_require_operable(rv))                                 \
-            return false;                                             \
-        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                    \
-            !rvv_validate_wide_reg(rv, ir->vd) ||                     \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||         \
-            !rvv_wide_group_span(rv, &wide_span) ||                   \
-            rvv_cross_eew_overlap_illegal(ir->vd, wide_span, ir->vs2, \
-                                          narrow_span))               \
-            return rvv_trap_illegal_state(rv, 0);                     \
-        rvv_fp_begin_round(rv);                                       \
-        rvv_exec_fp64_mac_vf(rv, ir, ir->vd, opfn);                   \
-        set_fflag(rv);                                                \
+#define RVV_FP64_MAC_VF_OP(name, opfn)                                         \
+    RVOP(name, {                                                               \
+        uint32_t wide_span;                                                    \
+        uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
+        if (rvv_require_operable(rv))                                          \
+            return false;                                                      \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
+            !rvv_validate_wide_reg(rv, ir->vd) ||                              \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2) ||                  \
+            !rvv_wide_group_span(rv, &wide_span) ||                            \
+            rvv_widen_overlap_illegal(ir->vd, wide_span, ir->vs2, narrow_span, \
+                                      rvv_sew_emul_at_least_1(rv)))            \
+            return rvv_trap_illegal_state(rv, 0);                              \
+        rvv_fp_begin_round(rv);                                                \
+        rvv_exec_fp64_mac_vf(rv, ir, ir->vd, opfn);                            \
+        set_fflag(rv);                                                         \
     })
 
 RVV_FP32_VV_OP(vfadd_vv, rvv_fp_add32, true);

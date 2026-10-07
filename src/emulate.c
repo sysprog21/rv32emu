@@ -3064,12 +3064,7 @@ static void block_free_irs(riscv_t *rv, block_t *block)
 void t2c_free_orphans(riscv_t *rv)
 {
     block_t *block, *safe;
-#ifdef __HAVE_TYPEOF
-    list_for_each_entry_safe (block, safe, &rv->orphan_blocks, list)
-#else
-    list_for_each_entry_safe (block, safe, &rv->orphan_blocks, list, block_t)
-#endif
-    {
+    list_for_each_entry_safe (block, safe, &rv->orphan_blocks, list) {
         list_del(&block->list);
         block_free_irs(rv, block);
         mpool_free(rv->block_mp, block);

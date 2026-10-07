@@ -17,6 +17,7 @@ ForEachMacros:
   - list_for_each_entry
   - list_for_each_entry_safe
   - hlist_for_each_entry
+  - hlist_for_each_entry_safe
 AttributeMacros:
   - UNUSED
   - __ALIGNED

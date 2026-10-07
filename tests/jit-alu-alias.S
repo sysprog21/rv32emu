@@ -77,6 +77,40 @@ loop:
     branch bltu, t0, t1, 0
     branch bgeu, t0, t1, 1
     branch bgeu, t1, t0, 0
+    /* Zero comparisons must keep signedness and spill dirty operands on
+     * both successors without allocating a host register for x0.
+     */
+    branch beq, t0, zero, 0
+    branch beq, zero, zero, 1
+    branch bne, t1, zero, 1
+    branch bne, zero, zero, 0
+    branch blt, t0, zero, 1
+    branch blt, t1, zero, 0
+    branch bge, t1, zero, 1
+    branch bge, t0, zero, 0
+    branch bltu, t0, zero, 0
+    branch bltu, zero, zero, 0
+    branch bgeu, t0, zero, 1
+    branch bgeu, zero, zero, 1
+    /* With x0 on the left, the other operand is tested against zero under
+     * the swapped condition: t0 is negative, t1 positive, s1 a runtime zero.
+     */
+    branch beq, zero, t0, 0
+    branch bne, zero, t1, 1
+    branch blt, zero, t1, 1
+    branch blt, zero, t0, 0
+    branch bge, zero, t0, 1
+    branch bge, zero, t1, 0
+    branch bltu, zero, t0, 1
+    branch bltu, zero, t1, 1
+    branch bgeu, zero, t0, 0
+    branch bgeu, zero, t1, 0
+    sub s1, s0, s0
+    branch beq, zero, s1, 1
+    branch blt, zero, s1, 0
+    branch bge, zero, s1, 1
+    branch bltu, zero, s1, 0
+    branch bgeu, zero, s1, 1
     addi s0, s0, -1
     bnez s0, loop
     li a0, 1

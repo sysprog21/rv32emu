@@ -43,25 +43,49 @@ RVOP(lui, { rv->X[ir->rd] = ir->imm; })
  * is fed even on a cache miss, since a repeated program counter proves a cycle
  * whether or not the destination has been translated yet; system mode has to
  * confirm the address space first, so an untranslated target is skipped, and
- * probes only one chained branch in PROBE_INTERVAL (see emulate.c).
+ * probes only one chained branch in PROBE_INTERVAL (see emulate.c). Once a
+ * cycle has been found for this dispatch, further probes cannot change
+ * profiling.
+ *
+ * A packed build chains only into blocks T1 cannot compile, so it leaves the
+ * chain at any other target, charging the access as rv_step() profiles it.
  */
-/* A repeated program counter proves a control-flow cycle. Once one has been
- * found for this dispatch, further probes cannot change profiling.
- */
-#define RVOP_PROBE_TARGET(target_pc, hot_label)                                \
-    do {                                                                       \
-        IIF(RV32_HAS(SYSTEM))(if (++probe_tick % PROBE_INTERVAL) break;, )     \
-            cache_lookup_t lookup =                                            \
-                cache_get_with_freq(rv->block_cache, (target_pc), true);       \
-        IIF(RV32_HAS(SYSTEM))(                                                 \
-            if (!block_matches_context(rv,                                     \
-                                       (const block_t *) lookup.value)) break; \
-            , ) if (!has_loops && set_probe(&pc_set, (target_pc))) has_loops = \
-            true;                                                              \
-        if (lookup.freq >=                                                     \
-            IIF(RV32_HAS(SYSTEM))(THRESHOLD / PROBE_INTERVAL, THRESHOLD))      \
-            goto hot_label;                                                    \
+#if RV32_HAS_PACKED_TAIL
+#define RVOP_PROBE_TARGET(target, target_pc, hot_label)              \
+    do {                                                             \
+        if ((target)->impl == do_enter_dispatch) {                   \
+            cache_get_with_freq(rv->block_cache, (target_pc), true); \
+            goto hot_label;                                          \
+        }                                                            \
+        if (!has_loops && set_probe(&pc_set, (target_pc)))           \
+            has_loops = true;                                        \
     } while (0)
+#else
+#if RV32_HAS(SYSTEM)
+#define RVOP_PROBE_SAMPLE              \
+    if (++probe_tick % PROBE_INTERVAL) \
+        break;
+#define RVOP_PROBE_HOT (THRESHOLD / PROBE_INTERVAL)
+#define RVOP_PROBE_CONTEXT(blk)            \
+    if (!block_matches_context(rv, (blk))) \
+        break;
+#else
+#define RVOP_PROBE_SAMPLE
+#define RVOP_PROBE_HOT THRESHOLD
+#define RVOP_PROBE_CONTEXT(blk)
+#endif
+#define RVOP_PROBE_TARGET(target, target_pc, hot_label)              \
+    do {                                                             \
+        RVOP_PROBE_SAMPLE                                            \
+        cache_lookup_t lookup =                                      \
+            cache_get_with_freq(rv->block_cache, (target_pc), true); \
+        RVOP_PROBE_CONTEXT((const block_t *) lookup.value)           \
+        if (!has_loops && set_probe(&pc_set, (target_pc)))           \
+            has_loops = true;                                        \
+        if (lookup.freq >= RVOP_PROBE_HOT)                           \
+            goto hot_label;                                          \
+    } while (0)
+#endif
 
 /* AUIPC is used to build pc-relative addresses and uses the U-type format.
  * AUIPC forms a 32-bit offset from the 20-bit U-immediate, filling in the
@@ -90,7 +114,7 @@ RVOP(jal, {
 #if RV32_HAS(JIT)
         IIF(RV32_HAS(SYSTEM)(if (!rv->trap_cnt && !reloc_enable_mmu), ))
         {
-            RVOP_PROBE_TARGET(PC, end_op);
+            RVOP_PROBE_TARGET(taken, PC, end_op);
         }
 #endif
 #if RV32_HAS(SYSTEM)
@@ -107,9 +131,7 @@ RVOP(jal, {
              * This rule also applies to same statements elsewhere in this
              * file.
              */
-            last_pc = PC;
-
-            MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+            RVOP_CHAIN_TAIL(rv, taken, cycle, PC);
         }
     }
     goto end_op;
@@ -236,7 +258,7 @@ RVOP(jalr, {
         struct rv_insn *untaken = ir->branch_untaken;                       \
         if (!untaken)                                                       \
             goto nextop;                                                    \
-        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(PC + 4, nextop);, );           \
+        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(untaken, PC + 4, nextop);, );  \
         PC += 4;                                                            \
         IIF(RV32_HAS(SYSTEM))(                                              \
             {                                                               \
@@ -260,7 +282,7 @@ RVOP(jalr, {
     IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););   \
     struct rv_insn *taken = ir->branch_taken;                               \
     if (taken) {                                                            \
-        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(PC, end_op);, );               \
+        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(taken, PC, end_op);, );        \
         IIF(RV32_HAS(SYSTEM))(                                              \
             {                                                               \
                 if (!rv->trap_cnt) {                                        \
@@ -1367,15 +1389,14 @@ RVOP(cjal, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        RVOP_PROBE_TARGET(PC, end_op);
+        RVOP_PROBE_TARGET(taken, PC, end_op);
 #endif
 
 #if RV32_HAS(SYSTEM)
         if (!rv->trap_cnt)
 #endif
         {
-            last_pc = PC;
-            MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+            RVOP_CHAIN_TAIL(rv, taken, cycle, PC);
         }
     }
     goto end_op;
@@ -1446,14 +1467,13 @@ RVOP(cj, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        RVOP_PROBE_TARGET(PC, end_op);
+        RVOP_PROBE_TARGET(taken, PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
         if (!rv->trap_cnt)
 #endif
         {
-            last_pc = PC;
-            MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+            RVOP_CHAIN_TAIL(rv, taken, cycle, PC);
         }
     }
     goto end_op;
@@ -1471,15 +1491,14 @@ RVOP(cbeqz, {
         if (!untaken)
             goto nextop;
 #if RV32_HAS(JIT)
-        RVOP_PROBE_TARGET(PC + 2, nextop);
+        RVOP_PROBE_TARGET(untaken, PC + 2, nextop);
 #endif
         PC += 2;
 #if RV32_HAS(SYSTEM)
         if (!rv->trap_cnt)
 #endif
         {
-            last_pc = PC;
-            MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
+            RVOP_CHAIN_TAIL(rv, untaken, cycle, PC);
         }
 
         goto end_op;
@@ -1489,14 +1508,13 @@ RVOP(cbeqz, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        RVOP_PROBE_TARGET(PC, end_op);
+        RVOP_PROBE_TARGET(taken, PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
         if (!rv->trap_cnt)
 #endif
         {
-            last_pc = PC;
-            MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+            RVOP_CHAIN_TAIL(rv, taken, cycle, PC);
         }
     }
     goto end_op;
@@ -1510,15 +1528,14 @@ RVOP(cbnez, {
         if (!untaken)
             goto nextop;
 #if RV32_HAS(JIT)
-        RVOP_PROBE_TARGET(PC + 2, nextop);
+        RVOP_PROBE_TARGET(untaken, PC + 2, nextop);
 #endif
         PC += 2;
 #if RV32_HAS(SYSTEM)
         if (!rv->trap_cnt)
 #endif
         {
-            last_pc = PC;
-            MUST_TAIL return untaken->impl(rv, untaken, cycle, PC);
+            RVOP_CHAIN_TAIL(rv, untaken, cycle, PC);
         }
 
         goto end_op;
@@ -1528,14 +1545,13 @@ RVOP(cbnez, {
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
-        RVOP_PROBE_TARGET(PC, end_op);
+        RVOP_PROBE_TARGET(taken, PC, end_op);
 #endif
 #if RV32_HAS(SYSTEM)
         if (!rv->trap_cnt)
 #endif
         {
-            last_pc = PC;
-            MUST_TAIL return taken->impl(rv, taken, cycle, PC);
+            RVOP_CHAIN_TAIL(rv, taken, cycle, PC);
         }
     }
     goto end_op;

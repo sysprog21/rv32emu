@@ -62,17 +62,15 @@
  */
 #define EMIT_BRANCH_EPILOGUE(inst_size)                            \
     do {                                                           \
-        if (ir->branch_untaken) {                                  \
+        if (JIT_LINK_ALL_EDGES || ir->branch_untaken)              \
             emit_jmp(state, ir->pc + (inst_size), rv->csr_satp);   \
-        }                                                          \
         emit_load_imm(state, temp_reg, ir->pc + (inst_size));      \
         emit_store(state, S32, temp_reg, parameter_reg[0],         \
                    offsetof(riscv_t, PC));                         \
         emit_exit(state);                                          \
         emit_jump_target_offset(state, JUMP_LOC_0, state->offset); \
-        if (ir->branch_taken) {                                    \
+        if (JIT_LINK_ALL_EDGES || ir->branch_taken)                \
             emit_jmp(state, ir->pc + ir->imm, rv->csr_satp);       \
-        }                                                          \
         emit_load_imm(state, temp_reg, ir->pc + ir->imm);          \
         emit_store(state, S32, temp_reg, parameter_reg[0],         \
                    offsetof(riscv_t, PC));                         \
@@ -80,15 +78,26 @@
     } while (0)
 
 /* Branch instruction handler macro - all branch instructions follow
- * the same pattern, differing only in the condition code.
+ * the same pattern, differing only in the condition code. A comparison
+ * with x0 on either side tests the other operand against zero.
  */
 #define GEN_BRANCH(inst, cond)                            \
     GEN(inst, {                                           \
-        ra_load2(state, ir->rs1, ir->rs2);                \
-        store_back(state);                                \
-        emit_cmp32(state, vm_reg[1], vm_reg[0]);          \
+        uint8_t lhs = ir->rs1;                            \
+        uint8_t rhs = ir->rs2;                            \
+        int jcc = cond;                                   \
+        branch_zero_rhs(&lhs, &rhs, &jcc);                \
+        if (rhs == rv_reg_zero) {                         \
+            vm_reg[0] = ra_load(state, lhs);              \
+            store_back(state);                            \
+            emit_cmp_imm32(state, vm_reg[0], 0);          \
+        } else {                                          \
+            ra_load2(state, lhs, rhs);                    \
+            store_back(state);                            \
+            emit_cmp32(state, vm_reg[1], vm_reg[0]);      \
+        }                                                 \
         uint32_t jump_loc_0 = state->offset;              \
-        emit_jcc_offset(state, cond);                     \
+        emit_jcc_offset(state, jcc);                      \
         EMIT_BRANCH_EPILOGUE(4); /* 4-byte instruction */ \
     })
 
@@ -448,9 +457,7 @@ GEN(jalr, {
         emit_load_imm(state, vm_reg[1], ir->pc + 4);
     }
     store_back(state);
-    parse_branch_history_table(state, rv, ir);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_indirect_jump(state, rv, ir);
 })
 /* RV32I Branch Instructions */
 GEN_BRANCH(beq, JCC_JE)
@@ -703,9 +710,7 @@ GEN(cjr, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_mov(state, vm_reg[0], temp_reg);
     store_back(state);
-    parse_branch_history_table(state, rv, ir);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_indirect_jump(state, rv, ir);
 })
 GEN(cmv, {
     vm_reg[0] = ra_load(state, ir->rs2);
@@ -729,9 +734,7 @@ GEN(cjalr, {
     vm_reg[1] = map_vm_reg(state, rv_reg_ra);
     emit_load_imm(state, vm_reg[1], ir->pc + 2);
     store_back(state);
-    parse_branch_history_table(state, rv, ir);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_indirect_jump(state, rv, ir);
 })
 GEN(cadd, {
     ra_load2(state, ir->rs1, ir->rs2);

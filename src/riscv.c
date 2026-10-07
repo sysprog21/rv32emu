@@ -1498,14 +1498,6 @@ void rv_set_fromhost_addr(riscv_t *rv, uint32_t addr)
 #endif
 
 #if RV32_HAS(JIT)
-static void free_block_branch_tables(void *block)
-{
-    assert(block);
-    block_t *blk = (block_t *) block;
-    for (rv_insn_t *ir = blk->ir_head; ir; ir = ir->next)
-        free(ir->branch_table);
-}
-
 static void block_list_clear(riscv_t *rv)
 {
     block_t *entry, *safe;
@@ -1514,17 +1506,7 @@ static void block_list_clear(riscv_t *rv)
         block_unlink_edges(entry);
 #endif
         list_del(&entry->list);
-        free_block_branch_tables(entry);
-
-        rv_insn_t *ir = entry->ir_head;
-        while (ir) {
-            rv_insn_t *next = ir->next;
-            if (ir->fuse) {
-                mpool_free(rv->fuse_mp, ir->fuse);
-            }
-            mpool_free(rv->block_ir_mp, ir);
-            ir = next;
-        }
+        block_free_irs(rv, entry);
         mpool_free(rv->block_mp, entry);
     }
     INIT_LIST_HEAD(&rv->block_list);
@@ -2143,8 +2125,10 @@ static const char *insn_name_table[] = {
 };
 
 #if RV32_HAS(JIT)
-static void profile(block_t *block, uint32_t freq, FILE *output_file)
+/* A prof_func_t, so that cache_profile() calls it through its own type. */
+static void profile(void *entry, uint32_t freq, FILE *output_file)
 {
+    block_t *block = entry;
     fprintf(output_file, "%#-9x|", block->pc_start);
     fprintf(output_file, "%#-8x|", block->pc_end);
     fprintf(output_file, " %-10u|", freq);
@@ -2164,14 +2148,10 @@ static void profile(block_t *block, uint32_t freq, FILE *output_file)
         fprintf(output_file, "%#-8x|", taken->pc);
     else
         fprintf(output_file, "%-8s|", "NULL");
-    rv_insn_t *ir = block->ir_head;
-    while (1) {
-        assert(ir);
+    for (const rv_insn_t *ir = block->ir_head; ir; ir = block_next_ir(ir)) {
         fprintf(output_file, "%s", insn_name_table[ir->opcode]);
-        if (!ir->next)
-            break;
-        ir = ir->next;
-        fprintf(output_file, " - ");
+        if (block_next_ir(ir))
+            fprintf(output_file, " - ");
     }
     fprintf(output_file, " | ");
     const branch_history_table_t *bt = block->ir_tail->branch_table;
@@ -2228,7 +2208,7 @@ void rv_profile(riscv_t *rv, char *out_file_path)
      */
     pthread_mutex_lock(&rv->cache_lock);
 #endif
-    cache_profile(rv->block_cache, f, (prof_func_t) profile);
+    cache_profile(rv->block_cache, f, profile);
 #if RV32_HAS(T2C)
     pthread_mutex_unlock(&rv->cache_lock);
 #endif

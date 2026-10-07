@@ -381,9 +381,10 @@ static bool dump_test_signature(const char UNUSED *prog_name)
 /* CYCLE_PER_STEP shall be defined on different runtime */
 #ifndef CYCLE_PER_STEP
 #if RV32_HAS_PACKED_TAIL
-/* Native user-mode has no interrupt, JIT-hotness, or browser-yield boundary.
- * A larger slice amortizes rv_step() and lets learned branch edges remain in
- * the tail-call chain longer without changing retired guest cycles. */
+/* Packed user mode has no interrupt or browser-yield boundary, and its JIT
+ * builds profile every block T1 can compile in rv_step(). A larger slice
+ * amortizes rv_step() and lets learned branch edges remain in the tail-call
+ * chain longer without changing retired guest cycles. */
 #define CYCLE_PER_STEP 1000
 #else
 #define CYCLE_PER_STEP 100

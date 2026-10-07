@@ -89,6 +89,8 @@ EXPECTED_jit-signed-div = JIT signed division OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
+EXPECTED_register-loop = register loop OK
+EXPECTED_loop-shapes = loop shapes OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
 EXPECTED_jit-fencei = FENCE.I made the rewrite visible OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
@@ -143,6 +145,22 @@ GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
+ifneq ($(CONFIG_SYSTEM),y)
+GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes
+# Short loops reach T1 through loop detection only where T1 uses packed IR,
+# which T2C builds do not.
+ifeq ($(CONFIG_JIT),y)
+ifeq ($(CONFIG_T2C)$(CONFIG_ARCH_TEST),)
+GUEST_ASM_CHECK_TARGETS += check-jit-loop-profile
+endif
+endif
+ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-register-loop-cycles check-loop-shapes-csr
+endif
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-loop-shapes-rvc
+endif
+endif
 # LR/SC runs in the interpreter under every configuration, since the pair is
 # marked untranslatable, so this needs only the A extension.
 ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),yy)
@@ -247,6 +265,16 @@ check-block-eviction: $(BIN) tests/block-eviction.c tests/block-eviction-start.S
 
 # Exercise base/destination aliases and signed offsets with and without RVC.
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32i))
+$(eval $(call guest-asm-check-target,register-loop,rv32i))
+$(eval $(call guest-asm-check-target,register-loop,rv32i_zicsr,-cycles,-DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,loop-shapes,rv32i))
+$(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
+$(eval $(call guest-asm-check-target,loop-shapes,rv32i_zicsr,-csr,-DUSE_CSR))
+
+.PHONY: check-jit-loop-profile
+check-jit-loop-profile: $(BIN) tests/jit-loop-profile.S tests/test-jit-loop-profile.py | $(OUT)
+	$(Q)$(call guest-asm-build,jit-loop-profile,rv32i)
+	$(Q)python3 tests/test-jit-loop-profile.py $(BIN) $(OUT)/jit-loop-profile $(CROSS_COMPILE)nm
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))
 
 $(eval $(call guest-asm-check-target,lrsc,rv32ia))

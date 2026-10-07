@@ -8517,7 +8517,7 @@ static inline bool op_rvc_q1(rv_insn_t *ir, const uint32_t insn)
         ir->rd = c_decode_rd(insn);
         ir->imm = ((insn >> 2) & 0x1f) | ((insn & 0x1000) >> 7);
         ir->imm |= -(ir->imm & 0x20);
-        ir->imm <<= 12;
+        ir->imm = (int32_t) ((uint32_t) ir->imm << 12);
         if (unlikely(ir->rd == rv_reg_zero)) {
             ir->opcode = rv_insn_cnop;
             return true;

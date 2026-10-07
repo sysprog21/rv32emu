@@ -22,6 +22,10 @@
 #define JCC_JGE 0x8d /* Jump if Greater or Equal - signed (conditional) */
 #define JCC_JB 0x82  /* Jump if Below - unsigned (conditional) */
 #define JCC_JAE 0x83 /* Jump if Above or Equal - unsigned (conditional) */
+#define JCC_JBE 0x86 /* Jump if Below or Equal - unsigned (conditional) */
+#define JCC_JA 0x87  /* Jump if Above - unsigned (conditional) */
+#define JCC_JLE 0x8e /* Jump if Less or Equal - signed (conditional) */
+#define JCC_JG 0x8f  /* Jump if Greater - signed (conditional) */
 #define JCC_JMP 0xe9 /* Jump unconditional */
 
 struct jump {
@@ -56,6 +60,15 @@ struct offset_map {
 #define SPACE_INDEX_BITS 8
 #define PAGE_INDEX_BITS_JIT 12
 
+struct indirect_site;
+
+/* A jump to a target that had not been compiled when it was emitted. */
+struct pending_jump {
+    uint32_t offset_loc;
+    uint32_t target_pc;
+    int32_t next;
+};
+
 struct jit_state {
     int32_t offset_index[1 << OFFSET_INDEX_BITS];
 #if RV32_HAS(SYSTEM)
@@ -74,6 +87,14 @@ struct jit_state {
     int n_blocks;
     struct jump *jumps;
     int n_jumps;
+#if !RV32_HAS(SYSTEM)
+    /* Pending jumps, chained by target as offset_index chains blocks */
+    int32_t pending_index[1 << OFFSET_INDEX_BITS];
+    struct pending_jump *pending;
+    int n_pending;
+    /* Guard slots of each block's indirect jump, filled in at run time */
+    struct indirect_site *sites;
+#endif
 };
 
 struct host_reg {
@@ -99,6 +120,8 @@ void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags);
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);
 bool jit_translate(riscv_t *rv, block_t *block);
+/* Release a block's IR records (defined in emulate.c). */
+void block_free_irs(riscv_t *rv, block_t *block);
 
 #if RV32_HAS(SYSTEM)
 /* Stop reusing the code translated for address space satp. Called when the

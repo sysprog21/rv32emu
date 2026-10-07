@@ -905,8 +905,9 @@ _RVC_INSN_IMPLICIT = {
     "cxor": ["ir->rd = ir->rs1;"],
     "cor": ["ir->rd = ir->rs1;"],
     "cand": ["ir->rd = ir->rs1;"],
-    # c.lui: imm is upper immediate (shifted left by 12)
-    "clui": ["ir->imm <<= 12;"],
+    # c.lui: imm is upper immediate (shifted left by 12). Shifting a negative
+    # signed value is undefined, so shift it as unsigned.
+    "clui": ["ir->imm = (int32_t) ((uint32_t) ir->imm << 12);"],
 }
 
 

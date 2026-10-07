@@ -62,17 +62,15 @@
  */
 #define EMIT_BRANCH_EPILOGUE(inst_size)                            \
     do {                                                           \
-        if (ir->branch_untaken) {                                  \
+        if (JIT_LINK_ALL_EDGES || ir->branch_untaken)              \
             emit_jmp(state, ir->pc + (inst_size), rv->csr_satp);   \
-        }                                                          \
         emit_load_imm(state, temp_reg, ir->pc + (inst_size));      \
         emit_store(state, S32, temp_reg, parameter_reg[0],         \
                    offsetof(riscv_t, PC));                         \
         emit_exit(state);                                          \
         emit_jump_target_offset(state, JUMP_LOC_0, state->offset); \
-        if (ir->branch_taken) {                                    \
+        if (JIT_LINK_ALL_EDGES || ir->branch_taken)                \
             emit_jmp(state, ir->pc + ir->imm, rv->csr_satp);       \
-        }                                                          \
         emit_load_imm(state, temp_reg, ir->pc + ir->imm);          \
         emit_store(state, S32, temp_reg, parameter_reg[0],         \
                    offsetof(riscv_t, PC));                         \

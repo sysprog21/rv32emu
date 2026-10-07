@@ -60,6 +60,13 @@ struct offset_map {
 #define SPACE_INDEX_BITS 8
 #define PAGE_INDEX_BITS_JIT 12
 
+/* A jump to a target that had not been compiled when it was emitted. */
+struct pending_jump {
+    uint32_t offset_loc;
+    uint32_t target_pc;
+    int32_t next;
+};
+
 struct jit_state {
     int32_t offset_index[1 << OFFSET_INDEX_BITS];
 #if RV32_HAS(SYSTEM)
@@ -78,6 +85,12 @@ struct jit_state {
     int n_blocks;
     struct jump *jumps;
     int n_jumps;
+#if !RV32_HAS(SYSTEM)
+    /* Pending jumps, chained by target as offset_index chains blocks */
+    int32_t pending_index[1 << OFFSET_INDEX_BITS];
+    struct pending_jump *pending;
+    int n_pending;
+#endif
 };
 
 struct host_reg {

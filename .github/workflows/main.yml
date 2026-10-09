@@ -468,32 +468,54 @@ jobs:
              make distclean && make interpreter_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
              make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
-     - name: boot Linux kernel test (ext4 rootfs)
-       run: |
-             make distclean && make system_interpreter_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh
-             make clean
+  boot-tests-macos-arm64:
+    name: macOS ${{ matrix.compiler }} boot (${{ matrix.boot_type }}, ${{ matrix.rootfs }})
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == "true"
+    timeout-minutes: 90
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc-15, clang]
+        boot_type: [interpreter, jit]
+        rootfs: [ext4, initrd]
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+     - uses: actions/checkout@v7
+       with:
+         submodules: "true"
 
-     - name: boot Linux kernel test (initrd rootfs)
-       run: |
-             make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh "initrd"
-             make clean
-
-     - name: boot Linux kernel test (ext4 rootfs) (JIT)
+     - name: Set up build environment
+       id: setup
+       uses: ./.github/actions/setup-build
+       with:
+         compiler: ${{ matrix.compiler }}
+         riscv-toolchain: "true"
+         artifacts: linux-image
+         cache-suffix: boot-macos-${{ matrix.compiler }}-${{ matrix.boot_type }}
+    
+     - name: Run boot test
        env:
-         BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
+         BOOT_TIMEOUT: 180
        run: |
-             make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh
-             make clean
-
-     - name: boot Linux kernel test (initrd rootfs) (JIT)
-       env:
-         BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
-       run: |
-             make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh "initrd"
+             DEFCONFIG="system_interpreter_defconfig"
+             MAKE_FLAGS="INITRD_SIZE=32"
+             if [ "${{ matrix.boot_type }}" = "jit" ]; then
+               DEFCONFIG="system_defconfig"
+               MAKE_FLAGS="$MAKE_FLAGS ENABLE_MOP_FUSION=0 ENABLE_JIT=1"
+             fi
+             if [ "${{ matrix.rootfs }}" = "initrd" ]; then
+               MAKE_FLAGS="$MAKE_FLAGS ENABLE_ROOTFS_EXT4=0"
+             fi
+             
+             make distclean && make $DEFCONFIG && make $MAKE_FLAGS $PARALLEL && make artifact $PARALLEL
+             if [ "${{ matrix.rootfs }}" = "initrd" ]; then
+               .ci/boot-linux-test.sh "initrd"
+             else
+               .ci/boot-linux-test.sh
+             fi
              make clean
 
   macOS-arm64-feature-disable:

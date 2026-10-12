@@ -321,20 +321,25 @@ fetch_latest_release()
 #   make_options: Additional options to pass to make (e.g., ENABLE_SYSTEM=1)
 # Environment:
 #   GH_TOKEN: GitHub token for authenticated API access (optional but recommended)
-#   FETCH_ARTIFACT_RETRIES: Max retries for make artifact (default: 2, must be >= 1)
+#   FETCH_ARTIFACT_RETRIES: Max retries for make artifact (default: 3, must be >= 1)
 fetch_artifact()
 {
     local artifact_type="$1"
     shift
     local make_opts=("$@")
     local release_tag
-    local max_retries="${FETCH_ARTIFACT_RETRIES:-2}"
+    local max_retries="${FETCH_ARTIFACT_RETRIES:-3}"
     local attempt
+
+    # curl already retries each file for about 10s. A GitHub Releases 5xx burst
+    # can outlast that and a short pause alike, so back off 30s, then 60s, to
+    # cover a couple of minutes before giving up.
+    local delay=30
 
     # Validate max_retries is a positive integer
     if ! [[ "$max_retries" =~ ^[1-9][0-9]*$ ]]; then
-        print_warning "Invalid FETCH_ARTIFACT_RETRIES '$max_retries', using default (2)" >&2
-        max_retries=2
+        print_warning "Invalid FETCH_ARTIFACT_RETRIES '$max_retries', using default (3)" >&2
+        max_retries=3
     fi
 
     release_tag=$(fetch_latest_release "$artifact_type") || return 1
@@ -351,8 +356,9 @@ fetch_artifact()
         fi
 
         if [ "$attempt" -lt "$max_retries" ]; then
-            print_warning "make artifact failed for $artifact_type, retrying in 10s..." >&2
-            sleep 10
+            print_warning "make artifact failed for $artifact_type, retrying in ${delay}s..." >&2
+            sleep "$delay"
+            delay=$((delay * 2))
         fi
     done
 

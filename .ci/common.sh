@@ -333,7 +333,8 @@ fetch_artifact()
 
     # curl already retries each file for about 10s. A GitHub Releases 5xx burst
     # can outlast that and a short pause alike, so back off 30s, then 60s, to
-    # cover a couple of minutes before giving up.
+    # cover a couple of minutes before giving up. Later retries stay at 60s, so
+    # raising FETCH_ARTIFACT_RETRIES adds a minute each, not a doubling stall.
     local delay=30
 
     # Validate max_retries is a positive integer
@@ -358,7 +359,7 @@ fetch_artifact()
         if [ "$attempt" -lt "$max_retries" ]; then
             print_warning "make artifact failed for $artifact_type, retrying in ${delay}s..." >&2
             sleep "$delay"
-            delay=$((delay * 2))
+            delay=$((delay < 60 ? delay * 2 : 60))
         fi
     done
 

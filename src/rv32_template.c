@@ -160,18 +160,15 @@ RVOP(jal, {
         {                                                                      \
             /* Direct-mapped lookup: O(1) instead of O(n) linear search */     \
             const uint32_t bht_idx = (PC >> 2) & (HISTORY_SIZE - 1);           \
-            if (ir->branch_table->PC[bht_idx] == PC &&                         \
-                ir->branch_table->target[bht_idx]) {                           \
-                MUST_TAIL return ir->branch_table->target[bht_idx]->impl(      \
-                    rv, ir->branch_table->target[bht_idx], cycle, PC);         \
-            }                                                                  \
+            struct rv_insn *target = ir->branch_table->target[bht_idx];        \
+            if (ir->branch_table->PC[bht_idx] == PC && target)                 \
+                RVOP_CHAIN_TAIL(rv, target, cycle, PC);                        \
             block_t *block = block_find(&rv->block_map, PC);                   \
             if (block) {                                                       \
                 /* Direct replacement at computed index */                     \
                 ir->branch_table->PC[bht_idx] = PC;                            \
                 ir->branch_table->target[bht_idx] = block->ir_head;            \
-                MUST_TAIL return block->ir_head->impl(rv, block->ir_head,      \
-                                                      cycle, PC);              \
+                RVOP_CHAIN_TAIL(rv, block->ir_head, cycle, PC);                \
             }                                                                  \
         }                                                                      \
     }
@@ -261,12 +258,7 @@ RVOP(jalr, {
         IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(untaken, PC + 4, nextop);, );  \
         PC += 4;                                                            \
         IIF(RV32_HAS(SYSTEM))(                                              \
-            {                                                               \
-                if (!rv->trap_cnt) {                                        \
-                    last_pc = PC;                                           \
-                    MUST_TAIL return untaken->impl(rv, untaken, cycle, PC); \
-                }                                                           \
-            }, );                                                           \
+            if (!rv->trap_cnt) RVOP_CHAIN_TAIL(rv, untaken, cycle, PC);, ); \
         RVOP_NATIVE_BRANCH_TAIL(rv, untaken, cycle, PC);                    \
         goto end_op;                                                        \
     }                                                                       \
@@ -284,12 +276,7 @@ RVOP(jalr, {
     if (taken) {                                                            \
         IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(taken, PC, end_op);, );        \
         IIF(RV32_HAS(SYSTEM))(                                              \
-            {                                                               \
-                if (!rv->trap_cnt) {                                        \
-                    last_pc = PC;                                           \
-                    MUST_TAIL return taken->impl(rv, taken, cycle, PC);     \
-                }                                                           \
-            }, );                                                           \
+            if (!rv->trap_cnt) RVOP_CHAIN_TAIL(rv, taken, cycle, PC);, );   \
         RVOP_NATIVE_BRANCH_TAIL(rv, taken, cycle, PC);                      \
     }                                                                       \
     goto end_op;

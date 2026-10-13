@@ -23,6 +23,7 @@ jobs:
         with:
           files: |
               .ci/**
+              assets/wasm/**
               .github/actions/**
               .github/workflows/**
               build/**
@@ -64,6 +65,12 @@ jobs:
           version: 3.1.51
           actions-cache-folder: 'emsdk-cache'
 
+      - name: Install browser smoke test dependencies
+        run: |
+              .ci/apt-install.sh cpio
+              python3 -m pip install --break-system-packages playwright==1.63.0
+              python3 -m playwright install --with-deps chromium
+
       # Note: wasm_defconfig sets CONFIG_BUILD_WASM=y which auto-selects CC=emcc
       - name: Build user emulation
         run: |
@@ -71,12 +78,16 @@ jobs:
               make wasm_defconfig
               .ci/emsdk-warm-cache.sh
               make $PARALLEL
+              make prepare-web
+              python3 tests/test-wasm-demo.py --mode user
 
       - name: Build system emulation
         run: |
               make distclean
               make wasm_system_defconfig
               make $PARALLEL
+              make prepare-web
+              python3 tests/test-wasm-demo.py --mode system
 
   host-x64:
     name: x64 ${{ matrix.compiler }}

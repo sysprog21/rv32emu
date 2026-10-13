@@ -1822,9 +1822,8 @@
         };
       };
     </script>
-    <!-- Load main WASM JS with defer for non-blocking -->
-    <script defer type="text/javascript" src="rv32emu.js"></script>
-    <!-- Service worker for caching (loads last) -->
+    <!-- Establish cross-origin isolation before loading the pthread runtime. -->
     <script defer src="coi-serviceworker.min.js"></script>
+    <script defer src="wasm-loader.js"></script>
   </body>
 </html>

@@ -39,6 +39,9 @@ jobs:
           files: |
               assets/wasm/html/system.html
               assets/wasm/js/system-pre.js
+              assets/wasm/js/common.js
+              assets/wasm/js/wasm-loader.js
+              assets/wasm/js/coi-serviceworker.min.js
               src/em_runtime.c
               # Build system configuration
               mk/kconfig.mk
@@ -71,6 +74,9 @@ jobs:
               # Landing page is committed at the repo root by the user job
               assets/wasm/html/demo-index.html
               assets/wasm/js/user-pre.js
+              assets/wasm/js/common.js
+              assets/wasm/js/wasm-loader.js
+              assets/wasm/js/coi-serviceworker.min.js
               build/*.elf
               tools/gen-elf-list-js.py
               src/em_runtime.c

@@ -731,9 +731,27 @@ RVOP(fencei, {
 #endif
 
 #if RV32_HAS(Zicsr) /* RV32 Zicsr Standard Extension */
+/*
+ * Raise an illegal-instruction exception and stop RVOP dispatch, like
+ * rvv_trap_illegal_state(). The trap callback returning does not stop the
+ * instruction: false must reach rv_step() before rd writeback/fallthrough.
+ * Callers save their live PC/cycle first; RVOP_SYNC_PC is a no-op in user
+ * mode, so rv->PC may still point to an earlier instruction in the block.
+ */
+static inline bool csr_trap_illegal_state(riscv_t *rv, uint32_t tval)
+{
+    SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, tval);
+    return false;
+}
+
 /* CSRRW: Atomic Read/Write CSR */
 RVOP(csrrw, {
-    uint32_t tmp = csr_csrrw(rv, ir->imm, rv->X[ir->rs1], cycle);
+    uint32_t tmp;
+    if (unlikely(!csr_csrrw(rv, ir->imm, rv->X[ir->rs1], cycle, &tmp))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return csr_trap_illegal_state(rv, 0);
+    }
     rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
 })
 
@@ -747,33 +765,60 @@ RVOP(csrrw, {
  * See Page 56 of the RISC-V Unprivileged Specification.
  */
 RVOP(csrrs, {
-    uint32_t tmp = csr_csrrs(
-        rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1], cycle);
+    uint32_t tmp;
+    if (unlikely(!csr_csrrs(rv, ir->imm,
+                            (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1],
+                            cycle, &tmp))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return csr_trap_illegal_state(rv, 0);
+    }
     rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
 })
 
 /* CSRRC: Atomic Read and Clear Bits in CSR */
 RVOP(csrrc, {
-    uint32_t tmp = csr_csrrc(
-        rv, ir->imm, (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1], cycle);
+    uint32_t tmp;
+    if (unlikely(!csr_csrrc(rv, ir->imm,
+                            (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1],
+                            cycle, &tmp))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return csr_trap_illegal_state(rv, 0);
+    }
     rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
 })
 
 /* CSRRWI */
 RVOP(csrrwi, {
-    uint32_t tmp = csr_csrrw(rv, ir->imm, ir->rs1, cycle);
+    uint32_t tmp;
+    if (unlikely(!csr_csrrw(rv, ir->imm, ir->rs1, cycle, &tmp))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return csr_trap_illegal_state(rv, 0);
+    }
     rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
 })
 
 /* CSRRSI */
 RVOP(csrrsi, {
-    uint32_t tmp = csr_csrrs(rv, ir->imm, ir->rs1, cycle);
+    uint32_t tmp;
+    if (unlikely(!csr_csrrs(rv, ir->imm, ir->rs1, cycle, &tmp))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return csr_trap_illegal_state(rv, 0);
+    }
     rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
 })
 
 /* CSRRCI */
 RVOP(csrrci, {
-    uint32_t tmp = csr_csrrc(rv, ir->imm, ir->rs1, cycle);
+    uint32_t tmp;
+    if (unlikely(!csr_csrrc(rv, ir->imm, ir->rs1, cycle, &tmp))) {
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return csr_trap_illegal_state(rv, 0);
+    }
     rv->X[ir->rd] = ir->rd ? tmp : rv->X[ir->rd];
 })
 #endif

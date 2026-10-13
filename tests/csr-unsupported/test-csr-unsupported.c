@@ -1,0 +1,330 @@
+/*
+ * rv32emu is freely redistributable under the MIT License. See the file
+ * "LICENSE" for information on usage and redistribution of this file.
+ */
+
+/*
+ * Generate CSR instruction words in guest RAM and execute them through the
+ * production decoder, rv_step(), and trap_handler(). The 88-byte bootstrap
+ * ELF only initializes rv_create(); no assembler or cross compiler is needed.
+ * Native observation is necessary: a guest-only test cannot tell whether
+ * rv_step() returned immediately after the trap, before guest resumption.
+ *
+ * Run with make run-test-csr-unsupported (also in make check and make tests).
+ * See README.md for configurations, test layout, and the separate RVV probe.
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "riscv_private.h"
+
+#if (RV32_HAS(Zicsr)) && (!RV32_HAS(SYSTEM_MMIO)) && (!RV32_HAS(RV32E))
+
+#if RV32_HAS(SYSTEM)
+#define CSR_STATE(cpu, field) (cpu)->csr_s##field
+#define CSR_NUMBER(field) CSR_S##field
+#define CSR_MODE RV_PRIV_S_MODE
+/* sret */
+#define CSR_RETURN 0x10200073
+#else
+#define CSR_STATE(cpu, field) (cpu)->csr_m##field
+#define CSR_NUMBER(field) CSR_M##field
+#define CSR_MODE RV_PRIV_M_MODE
+/* mret */
+#define CSR_RETURN 0x30200073
+#endif
+
+#define SENTINEL 0x13579bdfU
+#define HANDLER_PC 0x80000U
+
+static unsigned trap_count;
+static uint32_t trap_pc, trap_cause, trap_rd;
+static unsigned destination;
+static unsigned case_count, failure_count;
+static uint32_t next_pc = 0x1000;
+
+static void put32(uint8_t *p, uint32_t value)
+{
+    for (unsigned i = 0; i < 4; i++)
+        p[i] = value >> (8 * i);
+}
+
+/*
+ * Encode csr[31:20], rs1/zimm[19:15], funct3[14:12], rd[11:7], SYSTEM.
+ * op 1/2/3 selects CSRRW/CSRRS/CSRRC; 5/6/7 selects immediate forms.
+ * Keep source (the encoded field) distinct from the register's value:
+ * rs1=x0 and rs1=x5 with x5=0 exercise different decoder/write rules.
+ */
+static uint32_t csr_insn(unsigned csr,
+                         unsigned op,
+                         unsigned source,
+                         unsigned rd)
+{
+    return (csr << 20) | (source << 15) | (op << 12) | (rd << 7) | 0x73;
+}
+
+/*
+ * rv_create loads an ELF. This minimal little-endian RV32 executable has
+ * one PT_LOAD segment containing EBREAK; cases replace guest RAM afterward.
+ */
+static bool write_boot_image(int fd)
+{
+    uint8_t image[88] = {0};
+    memcpy(image, "\177ELF\1\1\1", 7);
+    /* ET_EXEC */
+    image[16] = 2;
+    /* EM_RISCV */
+    image[18] = 243;
+    /* e_version */
+    put32(image + 20, 1);
+    /* e_entry */
+    put32(image + 24, 0x1000);
+    /* e_phoff */
+    put32(image + 28, 52);
+    /* e_ehsize */
+    image[40] = 52;
+    /* e_phentsize */
+    image[42] = 32;
+    /* e_phnum */
+    image[44] = 1;
+    /* e_shentsize */
+    image[46] = 40;
+    /* PT_LOAD */
+    put32(image + 52, 1);
+    /* p_offset */
+    put32(image + 56, 84);
+    /* p_vaddr */
+    put32(image + 60, 0x1000);
+    /* p_paddr */
+    put32(image + 64, 0x1000);
+    /* p_filesz */
+    put32(image + 68, 4);
+    /* p_memsz */
+    put32(image + 72, 4);
+    /* PF_R | PF_X */
+    put32(image + 76, 5);
+    /* p_align */
+    put32(image + 80, 4);
+    /* ebreak */
+    put32(image + 84, 0x00100073);
+    return write(fd, image, sizeof(image)) == sizeof(image);
+}
+
+static void record_trap(riscv_t *cpu)
+{
+    trap_count++;
+    trap_pc = rv_get_pc(cpu);
+    trap_rd = rv_get_reg(cpu, destination);
+    trap_cause = CSR_STATE(cpu, cause);
+    /* Observe the exception, then delegate to the production trap handler. */
+    trap_handler(cpu);
+}
+
+static void stop_guest(riscv_t *cpu)
+{
+    rv_halt(cpu);
+}
+
+static void install_handler(riscv_t *cpu)
+{
+    const uint32_t code[] = {
+        /* addi x28, x28, 1: handler count */
+        0x001e0e13,
+        /* csrrs x27, epc, x0: retain fault EPC */
+        csr_insn(CSR_NUMBER(EPC), 2, 0, 27),
+        /* addi x29, x27, 4 */
+        0x004d8e93,
+        /* csrrw x0, epc, x29 */
+        csr_insn(CSR_NUMBER(EPC), 1, 29, 0),
+        CSR_RETURN,
+    };
+    for (unsigned i = 0; i < sizeof(code) / sizeof(code[0]); i++)
+        put32(PRIV(cpu)->mem->mem_base + HANDLER_PC + 4 * i, code[i]);
+}
+
+static void run_case(riscv_t *cpu,
+                     unsigned csr,
+                     unsigned op,
+                     unsigned source,
+                     uint32_t source_value,
+                     unsigned rd,
+                     bool supported,
+                     bool default_handler,
+                     uint32_t initial_value)
+{
+    const uint32_t pc = next_pc;
+    /* Never reuse translated code after changing guest RAM. */
+    next_pc += 32;
+    const uint32_t insn = csr_insn(csr, op, source, rd);
+    rv_insn_t decoded = {0};
+    const bool accepted = rv_decode(&decoded, insn);
+    const uint32_t code[] = {
+        /* addi x31, x0, 85: fault is not at the block start */
+        0x05500f93,
+        insn,
+        /* addi x30, x30, 1: exactly one continuation */
+        0x001f0f13,
+        /* ebreak: test completion */
+        0x00100073,
+    };
+    for (unsigned i = 0; i < sizeof(code) / sizeof(code[0]); i++)
+        put32(PRIV(cpu)->mem->mem_base + pc + 4 * i, code[i]);
+
+    memset(cpu->X, 0, sizeof(cpu->X));
+    if ((source != 0) && (op < 5))
+        rv_set_reg(cpu, source, source_value);
+    if (rd != 0)
+        rv_set_reg(cpu, rd, SENTINEL);
+    cpu->priv_mode = CSR_MODE;
+    CSR_STATE(cpu, scratch) = initial_value;
+    CSR_STATE(cpu, tvec) = default_handler ? 0 : HANDLER_PC;
+    CSR_STATE(cpu, cause) = SENTINEL;
+    cpu->halt = false;
+    destination = rd;
+    trap_count = 0;
+    trap_pc = trap_cause = trap_rd = SENTINEL;
+    if (!rv_set_pc(cpu, pc)) {
+        fprintf(stderr, "cannot set test PC\n");
+        exit(1);
+    }
+    /* A trap must return control to the dispatcher before fallthrough. */
+    rv_step(cpu);
+    const bool stopped_on_trap =
+        supported || ((trap_count == 1) && (!rv_has_halted(cpu)) &&
+                      (rv_get_reg(cpu, 30) == 0));
+    /* Bound the driver as well as each rv_step cycle budget. */
+    for (unsigned i = 1; (i < 16) && (!rv_has_halted(cpu)); i++)
+        rv_step(cpu);
+
+    const uint32_t actual_rd = rv_get_reg(cpu, rd);
+    const uint32_t value =
+        (op >= 5) ? source : ((source != 0) ? source_value : 0);
+    const unsigned operation = op & 3;
+    const uint32_t expected_csr = operation == 1   ? value
+                                  : operation == 2 ? (initial_value | value)
+                                                   : (initial_value & ~value);
+    const uint32_t actual_csr = CSR_STATE(cpu, scratch);
+    const uint32_t epc = CSR_STATE(cpu, epc);
+    bool ok = stopped_on_trap && accepted && (rv_has_halted(cpu)) &&
+              (rv_get_reg(cpu, 0) == 0) && (rv_get_reg(cpu, 31) == 85) &&
+              (rv_get_reg(cpu, 30) == 1);
+    if (supported) {
+        ok = ok && (trap_count == 0) &&
+             (actual_rd == ((rd != 0) ? initial_value : 0)) &&
+             (actual_csr == expected_csr);
+    } else {
+        ok = ok && (trap_count == 1) && (trap_cause == ILLEGAL_INSN) &&
+             (trap_pc == pc + 4) && (trap_rd == ((rd != 0) ? SENTINEL : 0)) &&
+             (actual_rd == ((rd != 0) ? SENTINEL : 0)) && (epc == pc + 8);
+        if (!default_handler)
+            ok = ok && (rv_get_reg(cpu, 28) == 1) &&
+                 (rv_get_reg(cpu, 27) == pc + 4);
+    }
+    case_count++;
+    if (!ok) {
+        failure_count++;
+        fprintf(stderr,
+                "FAIL csr=%03x op=%u source=%u value=%08x rd=%u default=%u\n",
+                csr, op, source, source_value, rd, default_handler);
+    }
+}
+
+int main(void)
+{
+    char path[MAX_PATH_LEN] = "/tmp/rv32emu-csr-XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0)
+        return 1;
+    bool written = write_boot_image(fd);
+    close(fd);
+    if (!written) {
+        unlink(path);
+        return 1;
+    }
+    vm_attr_t attr = {
+        .mem_size = 4 * 1024 * 1024,
+        .stack_size = 4096,
+        .args_offset_size = 4096,
+        .log_level = LOG_FATAL,
+        .cycle_per_step = 32,
+    };
+    attr.data.user.elf_program = path;
+    riscv_t *cpu = rv_create(&attr);
+    unlink(path);
+    if (!cpu)
+        return 1;
+    cpu->io.on_trap = record_trap;
+    cpu->io.on_ebreak = stop_guest;
+    install_handler(cpu);
+    const unsigned scratch = CSR_NUMBER(SCRATCH);
+    /*
+     * Generate the matrix rather than maintaining hundreds of guest files:
+     * six forms x two source fields x two destinations = 24 scratch cases.
+     * Three register-zero-value and six zero-result controls bring it to 33.
+     * Eight missing CSRs x 24, minus 12 forbidden FFF writes, times two
+     * handlers = 360; three register-zero cases and the review word add four.
+     * Thus 397 execution cases are separate from six decoder checks below.
+     * To extend coverage, add an address to missing[] only while lookup is
+     * absent. When machine counters are implemented, replace their negative
+     * cases with counter-specific positive controls, keeping missing cases.
+     */
+    const unsigned operations[] = {1, 2, 3, 5, 6, 7};
+    const unsigned missing[] = {0x7ff, 0x800, 0xb00, 0xb02,
+                                0xb80, 0xb82, 0xbff, 0xfff};
+    for (unsigned i = 0; i < 6; i++) {
+        for (unsigned source = 0; source <= 5; source += 5) {
+            for (unsigned rd = 0; rd <= 10; rd += 10) {
+                run_case(cpu, scratch, operations[i], source, 8, rd, true,
+                         false, 0xa5);
+                for (unsigned j = 0; j < sizeof(missing) / sizeof(missing[0]);
+                     j++) {
+                    /*
+                     * Nonzero-source FFF is forbidden at decode, not a
+                     * missing-CSR execution path; check its rejection
+                     * separately below, without claiming trap delivery.
+                     */
+                    if ((missing[j] == 0xfff) && (source != 0))
+                        continue;
+                    run_case(cpu, missing[j], operations[i], source, 8, rd,
+                             false, false, 0xa5);
+                    run_case(cpu, missing[j], operations[i], source, 8, rd,
+                             false, true, 0xa5);
+                }
+            }
+        }
+        /* A nonzero register field holding zero still performs an access. */
+        if (operations[i] < 5) {
+            run_case(cpu, scratch, operations[i], 5, 0, 10, true, false, 0xa5);
+            run_case(cpu, 0xb00, operations[i], 5, 0, 10, false, false, 0xa5);
+        }
+    }
+    /* csrrw x1, mcycle, x2: exact 0xb00110f3 */
+    run_case(cpu, 0xb00, 1, 2, 8, 1, false, false, 0xa5);
+    /* A valid zero-valued read must not be mistaken for a missing CSR. */
+    for (unsigned i = 0; i < 6; i++)
+        run_case(cpu, scratch, operations[i], 0, 0, 10, true, false, 0);
+    /*
+     * TODO: RVV read-only helpers trap but return success with zero, so rd
+     * is clobbered and trap PC may precede the instruction.
+     * See README.md for the separate 12-case probe.
+     */
+    unsigned decoder_failures = 0;
+    for (unsigned i = 0; i < 6; i++) {
+        rv_insn_t decoded = {0};
+        decoder_failures +=
+            rv_decode(&decoded, csr_insn(0xfff, operations[i], 5, 10));
+    }
+    printf("CSR decoder: 6 forbidden cases, %u failures\n", decoder_failures);
+    rv_delete(cpu);
+    printf("CSR execution: %u cases, %u failures\n", case_count, failure_count);
+    return ((failure_count != 0) || (decoder_failures != 0)) ? 1 : 0;
+}
+#else
+int main(void)
+{
+    puts("SKIP CSR execution: requires Zicsr, RV32I, and user ELF loading");
+    return 0;
+}
+#endif

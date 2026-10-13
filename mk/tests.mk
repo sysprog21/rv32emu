@@ -150,6 +150,15 @@ else ifeq ($(CONFIG_ELF_LOADER),y)
 RUN_USER_ELF := y
 endif
 
+# Native CSR execution tests use the emulator objects, without the CLI main.
+ifeq ($(CONFIG_Zicsr)$(RUN_USER_ELF),yy)
+ifeq ($(filter y,$(CONFIG_BUILD_WASM) $(CONFIG_RV32E)),)
+$(eval $(call test-framework,csr-unsupported,test-csr-unsupported.o,$(filter-out $(OUT)/main.o,$(OBJS)) $(DEV_OBJS),))
+$(eval $(call run-test-simple,csr-unsupported))
+tests check: run-test-csr-unsupported
+endif
+endif
+
 ifneq ($(CROSS_COMPILE),)
 ifneq ($(CONFIG_RV32E),y)
 ifneq ($(filter check,$(MAKECMDGOALS)),)

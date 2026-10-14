@@ -4363,6 +4363,13 @@ static void _trap_handler(riscv_t *rv)
                                         &rv->csr_sepc);
                 return;
             }
+#else
+            if ((cause & (1U << 31)) == 0) {
+                rv_log_fatal("Exception %u at 0x%08x without a trap vector",
+                             cause, rv->PC);
+                rv->halt = true;
+                return;
+            }
 #endif
             /* For system mode without trap vector, restore PC from sepc
              * and clear trap_cnt to continue execution. This handles
@@ -4386,13 +4393,22 @@ static void _trap_handler(riscv_t *rv)
         rv->csr_mepc = rv->PC;
         if (!rv->csr_mtvec) { /* in case CSR is not configured */
 #if RV32_HAS(SYSTEM)
-            /* For system mode without trap vector, restore PC from mepc
-             * and clear trap_cnt to continue execution. This handles
-             * spurious interrupts during early boot before handlers are set.
+            /*
+             * For interrupts in system mode without a trap vector, restore
+             * PC from mepc and decrement trap_cnt to continue execution.
+             * This handles spurious interrupts during early boot before
+             * handlers are set.
              */
             rv->PC = rv->csr_mepc;
             if (rv->trap_cnt)
                 rv->trap_cnt--;
+#if !RV32_HAS(ELF_LOADER)
+            if ((cause & (1U << 31)) == 0) {
+                rv_log_fatal("Exception %u at 0x%08x without a trap vector",
+                             cause, rv->PC);
+                rv->halt = true;
+            }
+#endif
 #else
             rv_trap_default_handler(rv, cause, rv->csr_mtval, &rv->csr_mepc);
 #endif
@@ -4406,9 +4422,8 @@ static void _trap_handler(riscv_t *rv)
         break;
     /* VECTORED: Asynchronous traps set PC to base + 4 * code */
     case 1:
-        /* MSB of code is used to indicate whether the trap is interrupt
-         * or exception, so it is not considered as the 'real' code */
-        rv->PC = base + 4 * (cause & MASK(31));
+        /* Synchronous exceptions enter BASE in either mode. */
+        rv->PC = base + ((cause >> 31) ? 4 * (cause & MASK(31)) : 0);
         break;
     }
     IIF(RV32_HAS(SYSTEM))(if (rv->trap_cnt) __trap_handler(rv);, )

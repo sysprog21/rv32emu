@@ -267,10 +267,9 @@ static inline void check_tohost_write(riscv_t *rv,
  * @compress: compressed instruction or not
  * @IO: whether the misaligned handler is for load/store or insn.
  */
-/* LR.W and SC.W have no misaligned form: the A extension requires a
- * naturally aligned address, and the option that relaxes ordinary loads and
- * stores must not relax them, or a reservation could be armed on an address
- * that spans two words.
+/* Atomic instructions require natural alignment here. The option that
+ * relaxes ordinary loads and stores must not permit atomic accesses that
+ * span two words; misaligned atomicity granules are not implemented.
  */
 #define RV_EXC_ALIGNED_ONLY_HANDLER(mask, type)                    \
     if (unlikely(addr & (mask))) {                                 \

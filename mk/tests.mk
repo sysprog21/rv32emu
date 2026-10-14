@@ -86,6 +86,7 @@ EXPECTED_jit-alu-alias = JIT ALU aliases OK
 EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
+EXPECTED_amo-align = AMO alignment OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
@@ -138,6 +139,7 @@ GUEST_ASM_M_WORKS := $(call guest-asm-arch-works,rv32im)
 GUEST_ASM_C_WORKS := $(call guest-asm-arch-works,rv32ic)
 GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
 GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
+GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
@@ -165,6 +167,9 @@ endif
 # marked untranslatable, so this needs only the A extension.
 ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-lrsc
+endif
+ifeq ($(CONFIG_EXT_A)$(CONFIG_Zicsr)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
+GUEST_ASM_CHECK_TARGETS += check-amo-align
 endif
 # A directly loaded system program has no handler for its own page faults.
 ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
@@ -278,6 +283,11 @@ check-jit-loop-profile: $(BIN) tests/jit-loop-profile.S tests/test-jit-loop-prof
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))
 
 $(eval $(call guest-asm-check-target,lrsc,rv32ia))
+.PHONY: check-amo-align
+check-amo-align: $(BIN) tests/amo-align.S | $(OUT)
+	$(Q)$(call guest-asm-build,amo-align,rv32ia_zicsr,,$(if $(filter y,$(CONFIG_SYSTEM)),-DSYSTEM_MODE))
+	$(call check-test, , $(OUT)/amo-align, amo-align, tail -n 1,$(EXPECTED_amo-align))
+	$(call check-test, -m, $(OUT)/amo-align, amo-align-relaxed, tail -n 1,$(EXPECTED_amo-align))
 $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
 

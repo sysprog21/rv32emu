@@ -41,6 +41,7 @@ build/jit-indirect-targets
 build/jit-memory-address*
 build/jit-signed-div
 build/amo-align
+build/lrsc
 build/jit-interp-diff*
 build/*/test-*
 *.a

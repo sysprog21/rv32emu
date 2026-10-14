@@ -1,3 +1,12 @@
+/*
+ * Known register values while walking a block. The includer defines CONSTOPT
+ * and dispatch_table before including this file.
+ */
+typedef struct {
+    bool is_constant[N_RV_REGS];
+    uint32_t const_val[N_RV_REGS];
+} constopt_info_t;
+
 /* RV32I Base Instruction Set */
 
 /* Internal */
@@ -395,23 +404,43 @@ CONSTOPT(fencei, {})
 #endif
 
 #if RV32_HAS(Zicsr) /* RV32 Zicsr Standard Extension */
+/* A CSR write with rd = x0 must not forget that x0 reads zero. */
+
 /* CSRRW: Atomic Read/Write CSR */
-CONSTOPT(csrrw, { info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* CSRRS: Atomic Read and Set Bits in CSR */
-CONSTOPT(csrrs, { info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrs, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* CSRRC: Atomic Read and Clear Bits in CSR */
-CONSTOPT(csrrc, { info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrc, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* CSRRWI */
-CONSTOPT(csrrwi, { info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrwi, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* CSRRSI */
-CONSTOPT(csrrsi, { info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrsi, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* CSRRCI */
-CONSTOPT(csrrci, { info->is_constant[ir->rd] = false; })
+CONSTOPT(csrrci, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 #endif
 
 /* RV32M Standard Extension */
@@ -463,8 +492,8 @@ CONSTOPT(mulhsu, {
 CONSTOPT(mulhu, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        ir->imm = ((int64_t) info->const_val[ir->rs1] *
-                   (int64_t) info->const_val[ir->rs2]) >>
+        ir->imm = ((uint64_t) info->const_val[ir->rs1] *
+                   (uint64_t) info->const_val[ir->rs2]) >>
                   32;
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
@@ -573,7 +602,10 @@ CONSTOPT(lrw, {
 })
 
 /* SC.W: Store Conditional */
-CONSTOPT(scw, {})
+CONSTOPT(scw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* AMOSWAP.W: Atomic Swap */
 CONSTOPT(amoswapw, {

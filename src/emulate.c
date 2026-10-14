@@ -3163,11 +3163,6 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 #endif /* RV32_HAS(MOP_FUSION) */
 
-typedef struct {
-    bool is_constant[N_RV_REGS];
-    uint32_t const_val[N_RV_REGS];
-} constopt_info_t;
-
 #define CONSTOPT(inst, code)                                  \
     static void constopt_##inst(rv_insn_t *ir UNUSED,         \
                                 constopt_info_t *info UNUSED) \

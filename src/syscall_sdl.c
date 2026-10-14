@@ -94,13 +94,16 @@ typedef struct sound {
     int volume;
 } sound_t;
 
+#if RV32_HAS(SDL_MIXER)
 /* SDL-mixer-related and music-related variables */
 static uint8_t *music_midi_data;
-#if RV32_HAS(SDL_MIXER)
 static Mix_Music *mid;
 
 /* SDL-mixer-related and sfx-related variables */
 static Mix_Chunk *sfx_chunk;
+static uint8_t *sfx_samples;
+static uint32_t nr_sfx_samples;
+static int chan;
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -108,9 +111,6 @@ static Mix_Chunk *sfx_chunk;
 static pthread_t music_thread;
 static pthread_t sfx_thread;
 #endif
-static uint8_t *sfx_samples;
-static uint32_t nr_sfx_samples;
-static int chan;
 
 /* Used to properly destroy audio, compatible to process VM emulation */
 static bool audio_init = false;
@@ -463,6 +463,8 @@ void syscall_submit_queue(riscv_t *rv)
     }
 }
 
+/* The MUS to MIDI converter feeds only SDL_mixer music playback. */
+#if RV32_HAS(SDL_MIXER)
 /* Portions Copyright (C) 2021-2022 Steve Clark
  *
  * This software is provided 'as-is', without any express or implied
@@ -726,7 +728,6 @@ static uint8_t *mus2midi(uint8_t *data, int *length)
     return midi_data;
 }
 
-#if RV32_HAS(SDL_MIXER)
 static void *sfx_handler(void *arg)
 {
     sound_t *sfx = (sound_t *) arg;
@@ -1017,6 +1018,7 @@ static void init_audio(void)
         }
     }
 
+#if RV32_HAS(SDL_MIXER)
     /* sfx samples buffer */
     sfx_samples = malloc(SFX_SAMPLE_SIZE);
     if (unlikely(!sfx_samples)) {
@@ -1024,7 +1026,6 @@ static void init_audio(void)
         exit(EXIT_FAILURE);
     }
 
-#if RV32_HAS(SDL_MIXER)
     /* Initialize SDL2 Mixer */
     if (Mix_Init(MIX_INIT_MID) != MIX_INIT_MID) {
         rv_log_fatal("Mix_Init failed: %s", Mix_GetError());
@@ -1073,12 +1074,10 @@ static void shutdown_audio(void)
 
     Mix_CloseAudio();
     Mix_Quit();
-#endif
 
-    if (sfx_samples) {
-        free(sfx_samples);
-        sfx_samples = NULL;
-    }
+    free(sfx_samples);
+    sfx_samples = NULL;
+#endif
 
     audio_init = sfx_thread_init = music_thread_init = false;
 }

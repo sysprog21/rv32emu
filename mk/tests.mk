@@ -55,6 +55,12 @@ $(eval $(call run-test-simple,constopt))
 
 tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
 
+ifneq ($(CONFIG_BUILD_WASM),y)
+$(eval $(call test-framework,trap,test-trap.o,$(filter-out $(OUT)/main.o,$(OBJS)) $(DEV_OBJS),))
+$(eval $(call run-test-simple,trap))
+tests check: run-test-trap
+endif
+
 # Integration Tests (run emulator with test programs)
 
 LOG_FILTER := sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'

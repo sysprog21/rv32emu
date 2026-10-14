@@ -1318,6 +1318,13 @@ static inline void emit_cmp_imm32(struct jit_state *state, int dst, int32_t imm)
         emit_addsub_register(state, false, AS_SUBS, RZ, dst, RZ);
         return;
     }
+    /* CMP #imm12, or CMN #imm12 for a small negative value: both leave the
+     * flags CMP with a register would, without materializing the constant.
+     */
+    if (imm > -4096 && imm < 4096) {
+        emit_add_imm(state, false, true, RZ, dst, -(int64_t) imm);
+        return;
+    }
     emit_load_imm(state, R10, imm);
     emit_addsub_register(state, false, AS_SUBS, RZ, dst, R10);
 #endif

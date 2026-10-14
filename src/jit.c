@@ -1269,6 +1269,27 @@ static inline void emit_mov32(struct jit_state *state, int src, int dst)
 #endif
 }
 
+#if RV32_HAS(EXT_M)
+static void emit_mul32(struct jit_state *state, int lhs, int rhs, int dst)
+{
+#if defined(__x86_64__)
+    if (dst == rhs) {
+        rhs = lhs;
+    } else if (dst != lhs) {
+        emit_mov32(state, lhs, dst);
+    }
+    /* Signed and unsigned multiplication have identical low 32 bits. */
+    emit_basic_rex(state, 0, dst, rhs);
+    emit1(state, 0x0f);
+    emit1(state, 0xaf);
+    emit_modrm_reg2reg(state, dst, rhs);
+    set_dirty(dst, true);
+#elif defined(__aarch64__)
+    emit_dataproc_3source(state, false, DP3_MADD, dst, lhs, rhs, RZ);
+#endif
+}
+#endif
+
 #if defined(__x86_64__)
 /* REX.W prefix, ModRM byte, and 32-bit immediate */
 static inline void emit_alu64_imm32(struct jit_state *state,
@@ -2119,9 +2140,6 @@ static void muldivmod(struct jit_state *state,
         emit_mov32(state, dst, dst);
 #elif defined(__aarch64__)
     switch (opcode) {
-    case 0x28:
-        emit_dataproc_3source(state, false, DP3_MADD, dst, dst, src, RZ);
-        break;
     case 0x2f:
         emit_dataproc_3source(state, true, DP3_MADD, dst, dst, src, RZ);
         break;

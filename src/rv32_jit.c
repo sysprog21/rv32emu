@@ -535,8 +535,11 @@ GEN(csrrci, { assert(NULL); })
 #endif
 #if RV32_HAS(EXT_M)
 GEN(mul, {
-    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, false, false);
-    muldivmod(state, 0x28, temp_reg, vm_reg[2], 0);
+    if (ir->rd == rv_reg_zero)
+        return;
+    ra_load2(state, ir->rs1, ir->rs2);
+    vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
+    emit_mul32(state, vm_reg[0], vm_reg[1], vm_reg[2]);
 })
 GEN(mulh, {
     ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, true);

@@ -90,6 +90,7 @@ EXPECTED_jit-alu-alias = JIT ALU aliases OK
 EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
+EXPECTED_jit-mul = JIT multiply OK
 EXPECTED_amo-align = AMO alignment OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
@@ -195,7 +196,7 @@ GUEST_ASM_CHECK_TARGETS += check-jit-memory-address-rvc
 endif
 ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-identity-normalize check-jit-signed-div \
-	check-jit-interp-diff
+	check-jit-interp-diff check-jit-mul
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_MC_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-interp-diff-rvc
 endif
@@ -313,6 +314,7 @@ $(eval $(call guest-asm-check-target,jit-alu-alias,rv32i))
 $(eval $(call guest-asm-check-target,jit-indirect-targets,rv32i))
 $(eval $(call guest-asm-check-target,jit-identity-normalize,rv32im))
 $(eval $(call guest-asm-check-target,jit-signed-div,rv32im))
+$(eval $(call guest-asm-check-target,jit-mul,rv32im))
 $(eval $(call guest-asm-check-target,jit-interp-diff,rv32im))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr))
 

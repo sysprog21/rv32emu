@@ -66,6 +66,19 @@ int main(void)
         return 1;
     }
 #endif
+    /* Ordinary I-type immediates must remain signed, including bit 11. */
+    const uint32_t addi_insns[] = {0x7ff10093, 0x80010093, 0xfff10093};
+    const int32_t addi_imms[] = {2047, -2048, -1};
+    for (unsigned i = 0; i < sizeof(addi_insns) / sizeof(addi_insns[0]); i++) {
+        rv_insn_t ir = {0};
+        if (expect_decode(addi_insns[i], true, rv_insn_addi))
+            return 1;
+        if (!rv_decode(&ir, addi_insns[i]) || ir.imm != addi_imms[i]) {
+            fprintf(stderr, "unexpected ADDI immediate for 0x%08x\n",
+                    addi_insns[i]);
+            return 1;
+        }
+    }
     /* SLLI accepts funct7=0 only.  Test both a normal destination and x0,
      * which must not bypass encoding validation as a NOP. */
     if (expect_decode(0x00109093, true, rv_insn_slli) ||
@@ -125,6 +138,25 @@ int main(void)
         return 1;
 
 #if RV32_HAS(Zicsr)
+    /* Only csr[11:10] == 0b11 encodes read-only.  These tests check decoder
+     * acceptance, not CSR implementation or privilege-level access.  All
+     * writes use rs1=x2 and rd=x1; the CSR address shares the signed I-type
+     * immediate field, so include both sides of its sign-bit boundary. */
+    const uint32_t csrs[] = {0x7ff, 0x800, 0xbff, 0xc00, 0xfff};
+    const uint16_t csr_ops[] = {rv_insn_csrrw, rv_insn_csrrs, rv_insn_csrrc};
+    int csr_failed = 0;
+    for (unsigned i = 0; i < sizeof(csrs) / sizeof(csrs[0]); i++) {
+        for (unsigned j = 0; j < sizeof(csr_ops) / sizeof(csr_ops[0]); j++) {
+            const uint32_t insn = (csrs[i] << 20) | (2u << 15) |
+                                  ((j + 1) << 12) | (1u << 7) | 0x73;
+            csr_failed |= expect_decode(insn, i < 3, csr_ops[j]);
+        }
+    }
+    /* CSRRS with rs1=x0 reads a read-only CSR without writing it. */
+    csr_failed |= expect_decode(0xc00020f3, true, rv_insn_csrrs);
+    if (csr_failed)
+        return 1;
+
     /* A CSR instruction naming a read-only CSR (csr >= 0xc00) is illegal
      * unless rs1 is x0.  That exemption is exact for CSRRS/CSRRC, which
      * skip the write when the source is x0; CSRRW always writes, so

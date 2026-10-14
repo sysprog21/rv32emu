@@ -156,7 +156,8 @@ static inline void decode_r4type(rv_insn_t *ir, const uint32_t insn)
 #if RV32_HAS(Zicsr)
 FORCE_INLINE bool csr_is_writable(const uint32_t csr)
 {
-    return csr < 0xc00;
+    /* Only csr[11:10] encode read-only; ignore I-type sign extension. */
+    return (csr & 0xc00) != 0xc00;
 }
 #endif
 

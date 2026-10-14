@@ -973,7 +973,7 @@ RVOP(scw, {
 /* AMOSWAP.W: Atomic Swap */
 RVOP(amoswapw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)
@@ -987,7 +987,7 @@ RVOP(amoswapw, {
 /* AMOADD.W: Atomic ADD */
 RVOP(amoaddw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)
@@ -1002,7 +1002,7 @@ RVOP(amoaddw, {
 /* AMOXOR.W: Atomic XOR */
 RVOP(amoxorw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)
@@ -1017,7 +1017,7 @@ RVOP(amoxorw, {
 /* AMOAND.W: Atomic AND */
 RVOP(amoandw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)
@@ -1032,7 +1032,7 @@ RVOP(amoandw, {
 /* AMOOR.W: Atomic OR */
 RVOP(amoorw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)
@@ -1047,7 +1047,7 @@ RVOP(amoorw, {
 /* AMOMIN.W: Atomic MIN */
 RVOP(amominw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)
@@ -1064,7 +1064,7 @@ RVOP(amominw, {
 /* AMOMAX.W: Atomic MAX */
 RVOP(amomaxw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)
@@ -1081,7 +1081,7 @@ RVOP(amomaxw, {
 /* AMOMINU.W */
 RVOP(amominuw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)
@@ -1096,7 +1096,7 @@ RVOP(amominuw, {
 /* AMOMAXU.W */
 RVOP(amomaxuw, {
     const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
     const uint32_t value1 = MEM_READ_W(rv, addr);
     const uint32_t value2 = rv->X[ir->rs2];
     if (ir->rd)

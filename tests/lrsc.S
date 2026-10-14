@@ -19,8 +19,14 @@ _start:
 
     /* An SC.W with no reservation fails and leaves memory alone. */
     li   t1, 0xaaaaaaaa
+    /* Seed t0 with the opposite result, then test it through an ALU instruction
+     * in the same block: a constant pass that keeps the seed across SC.W folds
+     * the test into the wrong answer.
+     */
+    li   t0, 0
     sc.w t0, t1, (s0)
-    beqz t0, fail
+    snez t3, t0
+    beqz t3, fail
     lw   t2, 0(s0)
     bnez t2, fail
 
@@ -29,8 +35,10 @@ _start:
      */
     lr.w t2, (s0)
     li   t1, 0x11112222
+    li   t0, 1
     sc.w t0, t1, (s0)
-    bnez t0, fail
+    seqz t3, t0
+    beqz t3, fail
     lw   t2, 0(s0)
     li   t3, 0x11112222
     bne  t2, t3, fail

@@ -1269,6 +1269,27 @@ static inline void emit_mov32(struct jit_state *state, int src, int dst)
 #endif
 }
 
+#if RV32_HAS(EXT_M)
+static void emit_mul32(struct jit_state *state, int lhs, int rhs, int dst)
+{
+#if defined(__x86_64__)
+    if (dst == rhs) {
+        rhs = lhs;
+    } else if (dst != lhs) {
+        emit_mov32(state, lhs, dst);
+    }
+    /* Signed and unsigned multiplication have identical low 32 bits. */
+    emit_basic_rex(state, 0, dst, rhs);
+    emit1(state, 0x0f);
+    emit1(state, 0xaf);
+    emit_modrm_reg2reg(state, dst, rhs);
+    set_dirty(dst, true);
+#elif defined(__aarch64__)
+    emit_dataproc_3source(state, false, DP3_MADD, dst, lhs, rhs, RZ);
+#endif
+}
+#endif
+
 #if defined(__x86_64__)
 /* REX.W prefix, ModRM byte, and 32-bit immediate */
 static inline void emit_alu64_imm32(struct jit_state *state,
@@ -1295,6 +1316,13 @@ static inline void emit_cmp_imm32(struct jit_state *state, int dst, int32_t imm)
 #elif defined(__aarch64__)
     if (!imm) {
         emit_addsub_register(state, false, AS_SUBS, RZ, dst, RZ);
+        return;
+    }
+    /* CMP #imm12, or CMN #imm12 for a small negative value: both leave the
+     * flags CMP with a register would, without materializing the constant.
+     */
+    if (imm > -4096 && imm < 4096) {
+        emit_add_imm(state, false, true, RZ, dst, -(int64_t) imm);
         return;
     }
     emit_load_imm(state, R10, imm);
@@ -2119,9 +2147,6 @@ static void muldivmod(struct jit_state *state,
         emit_mov32(state, dst, dst);
 #elif defined(__aarch64__)
     switch (opcode) {
-    case 0x28:
-        emit_dataproc_3source(state, false, DP3_MADD, dst, dst, src, RZ);
-        break;
     case 0x2f:
         emit_dataproc_3source(state, true, DP3_MADD, dst, dst, src, RZ);
         break;
@@ -4023,11 +4048,11 @@ static void do_fuse2(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
     vm_reg[0] = map_vm_reg(state, ir->rd);
     emit_load_imm(state, vm_reg[0], ir->imm);
-    emit_mov(state, vm_reg[0], temp_reg);
+    /* rs2 = rs1 + rd, and rd holds the immediate: add it directly. */
     vm_reg[1] = ra_load(state, ir->rs1);
     vm_reg[2] = map_vm_reg_reserved(state, ir->rs2, vm_reg[1]);
     emit_mov(state, vm_reg[1], vm_reg[2]);
-    emit_alu32(state, 0x01, temp_reg, vm_reg[2]);
+    emit_alu32_imm32(state, 0x81, 0, vm_reg[2], ir->imm);
 }
 
 static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)

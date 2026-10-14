@@ -267,10 +267,9 @@ static inline void check_tohost_write(riscv_t *rv,
  * @compress: compressed instruction or not
  * @IO: whether the misaligned handler is for load/store or insn.
  */
-/* LR.W and SC.W have no misaligned form: the A extension requires a
- * naturally aligned address, and the option that relaxes ordinary loads and
- * stores must not relax them, or a reservation could be armed on an address
- * that spans two words.
+/* Atomic instructions require natural alignment here. The option that
+ * relaxes ordinary loads and stores must not permit atomic accesses that
+ * span two words; misaligned atomicity granules are not implemented.
  */
 #define RV_EXC_ALIGNED_ONLY_HANDLER(mask, type)                    \
     if (unlikely(addr & (mask))) {                                 \
@@ -2774,24 +2773,6 @@ static void match_pattern(riscv_t *rv, block_t *block)
             if (!next_ir)
                 break;
             switch (next_ir->opcode) {
-            case rv_insn_add:
-                /* LUI + ADD fusion (fuse2) */
-                if (ir->rd == next_ir->rs2 || ir->rd == next_ir->rs1) {
-#if RV32_HAS(SYSTEM_MMIO)
-                    /* Track both LUI's rd and ADD's rd before fusion */
-                    if (ir->rd != 0)
-                        modified_regs |= (1u << ir->rd);
-                    if (next_ir->rd != 0)
-                        modified_regs |= (1u << next_ir->rd);
-#endif
-                    ir->opcode = rv_insn_fuse2;
-                    ir->rs2 = next_ir->rd;
-                    ir->rs1 =
-                        (ir->rd == next_ir->rs2) ? next_ir->rs1 : next_ir->rs2;
-                    ir->impl = dispatch_table[ir->opcode];
-                    remove_next_nth_ir(rv, ir, block, 1);
-                }
-                break;
             case rv_insn_addi:
                 /* LUI + ADDI fusion (fuse8): lui rd, imm; addi rd, rd, imm
                  * This is the standard 32-bit constant load (li pseudo-op).
@@ -2804,6 +2785,26 @@ static void match_pattern(riscv_t *rv, block_t *block)
                      */
                     ir->imm2 = next_ir->imm;
                     ir->opcode = rv_insn_fuse8;
+                    ir->impl = dispatch_table[ir->opcode];
+                    remove_next_nth_ir(rv, ir, block, 1);
+                } else if (ir->rd != rv_reg_zero && ir->rd != next_ir->rs1 &&
+                           next_ir->imm == ir->imm &&
+                           (next_ir->imm < -2048 || next_ir->imm > 2047)) {
+                    /* LUI + ADD fusion (fuse2). Constant propagation always
+                     * turns "lui r, K; add d, s, r" into "lui r, K; addi d, s,
+                     * K", so the ADD form never reaches this pass. Only an
+                     * immediate wider than 12 bits marks such a rewrite, so a
+                     * decoded ADDI after a folded small constant stays free for
+                     * its own fusions.
+                     */
+#if RV32_HAS(SYSTEM_MMIO)
+                    modified_regs |= (1u << ir->rd);
+                    if (next_ir->rd != 0)
+                        modified_regs |= (1u << next_ir->rd);
+#endif
+                    ir->opcode = rv_insn_fuse2;
+                    ir->rs1 = next_ir->rs1;
+                    ir->rs2 = next_ir->rd;
                     ir->impl = dispatch_table[ir->opcode];
                     remove_next_nth_ir(rv, ir, block, 1);
                 }
@@ -3163,11 +3164,6 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 #endif /* RV32_HAS(MOP_FUSION) */
-
-typedef struct {
-    bool is_constant[N_RV_REGS];
-    uint32_t const_val[N_RV_REGS];
-} constopt_info_t;
 
 #define CONSTOPT(inst, code)                                  \
     static void constopt_##inst(rv_insn_t *ir UNUSED,         \

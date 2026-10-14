@@ -29,6 +29,10 @@ $(eval $(call test-framework,io,test-io.o,$(OUT)/io.o $(OUT)/log.o,))
 # Decode test: reserved encodings and JIT indirect-target history updates
 $(eval $(call test-framework,decode,test-decode.o,$(OUT)/decode.o,))
 
+# Constant propagation test: folded and strength-reduced operations keep their
+# results
+$(eval $(call test-framework,constopt,test-constopt.o,,))
+
 # ELF test: rejects malformed ELF input without reading outside the file
 $(eval $(call test-framework,elf,test-elf.o,$(OUT)/elf.o $(OUT)/io.o $(OUT)/map.o $(OUT)/utils.o $(OUT)/log.o,))
 
@@ -45,10 +49,11 @@ $(eval $(call run-test-simple,set))
 $(eval $(call run-test-simple,elf))
 $(eval $(call run-test-simple,io))
 $(eval $(call run-test-simple,decode))
+$(eval $(call run-test-simple,constopt))
 
 # Main Test Target
 
-tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-set
+tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
 
 # Integration Tests (run emulator with test programs)
 
@@ -86,6 +91,12 @@ EXPECTED_jit-alu-alias = JIT ALU aliases OK
 EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
+EXPECTED_jit-mul = JIT multiply OK
+EXPECTED_const-arith = constant arithmetic OK
+EXPECTED_const-shift = constant shifts OK
+EXPECTED_const-operand = constant operands OK
+EXPECTED_const-coperand = compressed constant operands OK
+EXPECTED_amo-align = AMO alignment OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
@@ -138,6 +149,7 @@ GUEST_ASM_M_WORKS := $(call guest-asm-arch-works,rv32im)
 GUEST_ASM_C_WORKS := $(call guest-asm-arch-works,rv32ic)
 GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
 GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
+GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
@@ -145,6 +157,7 @@ GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
+GUEST_ASM_CHECK_TARGETS += check-const-shift
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes
 # Short loops reach T1 through loop detection only where T1 uses packed IR,
@@ -166,6 +179,15 @@ endif
 ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-lrsc
 endif
+ifeq ($(CONFIG_EXT_A)$(CONFIG_Zicsr)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
+GUEST_ASM_CHECK_TARGETS += check-amo-align
+endif
+ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-const-arith check-const-operand
+endif
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-const-coperand
+endif
 # A directly loaded system program has no handler for its own page faults.
 ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
 GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault
@@ -186,7 +208,7 @@ GUEST_ASM_CHECK_TARGETS += check-jit-memory-address-rvc
 endif
 ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-identity-normalize check-jit-signed-div \
-	check-jit-interp-diff
+	check-jit-interp-diff check-jit-mul
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_MC_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-interp-diff-rvc
 endif
@@ -278,6 +300,11 @@ check-jit-loop-profile: $(BIN) tests/jit-loop-profile.S tests/test-jit-loop-prof
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))
 
 $(eval $(call guest-asm-check-target,lrsc,rv32ia))
+.PHONY: check-amo-align
+check-amo-align: $(BIN) tests/amo-align.S | $(OUT)
+	$(Q)$(call guest-asm-build,amo-align,rv32ia_zicsr,,$(if $(filter y,$(CONFIG_SYSTEM)),-DSYSTEM_MODE))
+	$(call check-test, , $(OUT)/amo-align, amo-align, tail -n 1,$(EXPECTED_amo-align))
+	$(call check-test, -m, $(OUT)/amo-align, amo-align-relaxed, tail -n 1,$(EXPECTED_amo-align))
 $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
 
@@ -299,6 +326,11 @@ $(eval $(call guest-asm-check-target,jit-alu-alias,rv32i))
 $(eval $(call guest-asm-check-target,jit-indirect-targets,rv32i))
 $(eval $(call guest-asm-check-target,jit-identity-normalize,rv32im))
 $(eval $(call guest-asm-check-target,jit-signed-div,rv32im))
+$(eval $(call guest-asm-check-target,jit-mul,rv32im))
+$(eval $(call guest-asm-check-target,const-arith,rv32im))
+$(eval $(call guest-asm-check-target,const-operand,rv32im))
+$(eval $(call guest-asm-check-target,const-coperand,rv32ic))
+$(eval $(call guest-asm-check-target,const-shift,rv32i))
 $(eval $(call guest-asm-check-target,jit-interp-diff,rv32im))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr))
 
@@ -345,7 +377,7 @@ mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
-	run-test-elf run-test-io run-test-decode run-test-set
+	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
 .PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
 
 endif # _MK_TESTS_INCLUDED

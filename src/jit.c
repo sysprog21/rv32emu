@@ -4048,11 +4048,11 @@ static void do_fuse2(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {
     vm_reg[0] = map_vm_reg(state, ir->rd);
     emit_load_imm(state, vm_reg[0], ir->imm);
-    emit_mov(state, vm_reg[0], temp_reg);
+    /* rs2 = rs1 + rd, and rd holds the immediate: add it directly. */
     vm_reg[1] = ra_load(state, ir->rs1);
     vm_reg[2] = map_vm_reg_reserved(state, ir->rs2, vm_reg[1]);
     emit_mov(state, vm_reg[1], vm_reg[2]);
-    emit_alu32(state, 0x01, temp_reg, vm_reg[2]);
+    emit_alu32_imm32(state, 0x81, 0, vm_reg[2], ir->imm);
 }
 
 static void do_fuse3(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)

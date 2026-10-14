@@ -41,6 +41,10 @@ build/jit-indirect-targets
 build/jit-memory-address*
 build/jit-signed-div
 build/jit-mul
+build/const-arith
+build/const-shift
+build/const-operand
+build/const-coperand
 build/amo-align
 build/lrsc
 build/jit-interp-diff*

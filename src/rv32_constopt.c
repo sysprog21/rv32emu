@@ -71,6 +71,30 @@ CONSTOPT(jalr, {
     }
 /* clang-format on */
 
+/* Rewrite a register-register operation whose other operand holds a known value
+ * into its immediate form, as polkavm's linker does: the handler then reads one
+ * guest register instead of two, and the JIT keeps one fewer host register
+ * live. The value is computed before rs1 is replaced, and rs2 is cleared as
+ * decode leaves it for immediate forms, so trace patterns still match.
+ */
+#define OPT_REG_TO_IMM(op, src, value)          \
+    do {                                        \
+        const int32_t imm_ = (int32_t) (value); \
+        ir->rs1 = (src);                        \
+        ir->rs2 = rv_reg_zero;                  \
+        ir->imm = imm_;                         \
+        info->is_constant[ir->rd] = false;      \
+        ir->opcode = rv_insn_##op;              \
+        ir->impl = dispatch_table[ir->opcode];  \
+    } while (0)
+
+#if RV32_HAS(EXT_M)
+static inline bool is_power_of_two(uint32_t value)
+{
+    return value && !(value & (value - 1));
+}
+#endif
+
 /* BEQ: Branch if Equal */
 CONSTOPT(beq, { OPT_BRANCH_FUNC(uint32_t, !=); })
 
@@ -246,7 +270,11 @@ CONSTOPT(add, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(addi, ir->rs1, info->const_val[ir->rs2]);
+    else if (info->is_constant[ir->rs1])
+        OPT_REG_TO_IMM(addi, ir->rs2, info->const_val[ir->rs1]);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -258,7 +286,9 @@ CONSTOPT(sub, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(addi, ir->rs1, -info->const_val[ir->rs2]);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -270,7 +300,9 @@ CONSTOPT(sll, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(slli, ir->rs1, (info->const_val[ir->rs2] & 0x1f));
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -285,7 +317,9 @@ CONSTOPT(slt, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(slti, ir->rs1, info->const_val[ir->rs2]);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -297,7 +331,9 @@ CONSTOPT(sltu, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(sltiu, ir->rs1, info->const_val[ir->rs2]);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -310,7 +346,11 @@ CONSTOPT(xor, {
       info->const_val[ir->rd] = ir->imm;
       ir->opcode = rv_insn_lui;
       ir->impl = dispatch_table[ir->opcode];
-  } else
+  } else if (info->is_constant[ir->rs2])
+      OPT_REG_TO_IMM(xori, ir->rs1, info->const_val[ir->rs2]);
+  else if (info->is_constant[ir->rs1])
+      OPT_REG_TO_IMM(xori, ir->rs2, info->const_val[ir->rs1]);
+  else
       info->is_constant[ir->rd] = false;
 })
 
@@ -322,7 +362,9 @@ CONSTOPT(srl, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(srli, ir->rs1, (info->const_val[ir->rs2] & 0x1f));
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -335,7 +377,10 @@ CONSTOPT(sra, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(srai, ir->rs1,
+                       (info->const_val[ir->rs2] & 0x1f) | 0x400);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -348,7 +393,11 @@ CONSTOPT(or, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(ori, ir->rs1, info->const_val[ir->rs2]);
+    else if (info->is_constant[ir->rs1])
+        OPT_REG_TO_IMM(ori, ir->rs2, info->const_val[ir->rs1]);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -361,7 +410,11 @@ CONSTOPT(and, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(andi, ir->rs1, info->const_val[ir->rs2]);
+    else if (info->is_constant[ir->rs1])
+        OPT_REG_TO_IMM(andi, ir->rs2, info->const_val[ir->rs1]);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -456,6 +509,23 @@ CONSTOPT(mul, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
+    } else if (info->is_constant[ir->rs1] || info->is_constant[ir->rs2]) {
+        /* A known factor of zero or a power of two leaves a constant or a shift
+         * of the other operand.
+         */
+        const bool rhs_known = info->is_constant[ir->rs2];
+        const uint32_t factor = info->const_val[rhs_known ? ir->rs2 : ir->rs1];
+        const uint8_t src = rhs_known ? ir->rs1 : ir->rs2;
+        if (!factor) {
+            ir->imm = 0;
+            info->is_constant[ir->rd] = true;
+            info->const_val[ir->rd] = 0;
+            ir->opcode = rv_insn_lui;
+            ir->impl = dispatch_table[ir->opcode];
+        } else if (is_power_of_two(factor))
+            OPT_REG_TO_IMM(slli, src, rv_ctz(factor));
+        else
+            info->is_constant[ir->rd] = false;
     } else
         info->is_constant[ir->rd] = false;
 })
@@ -542,7 +612,10 @@ CONSTOPT(divu, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2] &&
+               is_power_of_two(info->const_val[ir->rs2]))
+        OPT_REG_TO_IMM(srli, ir->rs1, rv_ctz(info->const_val[ir->rs2]));
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -586,7 +659,10 @@ CONSTOPT(remu, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2] &&
+               is_power_of_two(info->const_val[ir->rs2]))
+        OPT_REG_TO_IMM(andi, ir->rs1, info->const_val[ir->rs2] - 1);
+    else
         info->is_constant[ir->rd] = false;
 })
 #endif
@@ -916,6 +992,13 @@ CONSTOPT(candi, {
     }
 })
 
+/* C.SUB, C.AND and C.ADD write rd in place (rd = rs1). With rs2 known, their
+ * immediate forms must stay 2 bytes long, since each handler advances the PC by
+ * its opcode's length: C.ADDI16SP adds a full-width immediate to any rd, and
+ * C.ANDI ands one into rs1. C.OR and C.XOR have no such form, and a known rs1
+ * alone would need a separate destination.
+ */
+
 /* C.SUB */
 CONSTOPT(csub, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
@@ -924,7 +1007,9 @@ CONSTOPT(csub, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(caddi16sp, ir->rs1, -info->const_val[ir->rs2]);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -958,7 +1043,9 @@ CONSTOPT(cand, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(candi, ir->rs1, info->const_val[ir->rs2]);
+    else
         info->is_constant[ir->rd] = false;
 })
 
@@ -1048,7 +1135,9 @@ CONSTOPT(cadd, {
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_clui;
         ir->impl = dispatch_table[ir->opcode];
-    } else
+    } else if (info->is_constant[ir->rs2])
+        OPT_REG_TO_IMM(caddi16sp, ir->rs1, info->const_val[ir->rs2]);
+    else
         info->is_constant[ir->rd] = false;
 })
 

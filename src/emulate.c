@@ -2773,24 +2773,6 @@ static void match_pattern(riscv_t *rv, block_t *block)
             if (!next_ir)
                 break;
             switch (next_ir->opcode) {
-            case rv_insn_add:
-                /* LUI + ADD fusion (fuse2) */
-                if (ir->rd == next_ir->rs2 || ir->rd == next_ir->rs1) {
-#if RV32_HAS(SYSTEM_MMIO)
-                    /* Track both LUI's rd and ADD's rd before fusion */
-                    if (ir->rd != 0)
-                        modified_regs |= (1u << ir->rd);
-                    if (next_ir->rd != 0)
-                        modified_regs |= (1u << next_ir->rd);
-#endif
-                    ir->opcode = rv_insn_fuse2;
-                    ir->rs2 = next_ir->rd;
-                    ir->rs1 =
-                        (ir->rd == next_ir->rs2) ? next_ir->rs1 : next_ir->rs2;
-                    ir->impl = dispatch_table[ir->opcode];
-                    remove_next_nth_ir(rv, ir, block, 1);
-                }
-                break;
             case rv_insn_addi:
                 /* LUI + ADDI fusion (fuse8): lui rd, imm; addi rd, rd, imm
                  * This is the standard 32-bit constant load (li pseudo-op).
@@ -2803,6 +2785,26 @@ static void match_pattern(riscv_t *rv, block_t *block)
                      */
                     ir->imm2 = next_ir->imm;
                     ir->opcode = rv_insn_fuse8;
+                    ir->impl = dispatch_table[ir->opcode];
+                    remove_next_nth_ir(rv, ir, block, 1);
+                } else if (ir->rd != rv_reg_zero && ir->rd != next_ir->rs1 &&
+                           next_ir->imm == ir->imm &&
+                           (next_ir->imm < -2048 || next_ir->imm > 2047)) {
+                    /* LUI + ADD fusion (fuse2). Constant propagation always
+                     * turns "lui r, K; add d, s, r" into "lui r, K; addi d, s,
+                     * K", so the ADD form never reaches this pass. Only an
+                     * immediate wider than 12 bits marks such a rewrite, so a
+                     * decoded ADDI after a folded small constant stays free for
+                     * its own fusions.
+                     */
+#if RV32_HAS(SYSTEM_MMIO)
+                    modified_regs |= (1u << ir->rd);
+                    if (next_ir->rd != 0)
+                        modified_regs |= (1u << next_ir->rd);
+#endif
+                    ir->opcode = rv_insn_fuse2;
+                    ir->rs1 = next_ir->rs1;
+                    ir->rs2 = next_ir->rd;
                     ir->impl = dispatch_table[ir->opcode];
                     remove_next_nth_ir(rv, ir, block, 1);
                 }

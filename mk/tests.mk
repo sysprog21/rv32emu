@@ -29,7 +29,8 @@ $(eval $(call test-framework,io,test-io.o,$(OUT)/io.o $(OUT)/log.o,))
 # Decode test: reserved encodings and JIT indirect-target history updates
 $(eval $(call test-framework,decode,test-decode.o,$(OUT)/decode.o,))
 
-# Constant propagation test: folded operations keep their results
+# Constant propagation test: folded and strength-reduced operations keep their
+# results
 $(eval $(call test-framework,constopt,test-constopt.o,,))
 
 # ELF test: rejects malformed ELF input without reading outside the file
@@ -91,6 +92,10 @@ EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
 EXPECTED_jit-mul = JIT multiply OK
+EXPECTED_const-arith = constant arithmetic OK
+EXPECTED_const-shift = constant shifts OK
+EXPECTED_const-operand = constant operands OK
+EXPECTED_const-coperand = compressed constant operands OK
 EXPECTED_amo-align = AMO alignment OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
@@ -152,6 +157,7 @@ GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
+GUEST_ASM_CHECK_TARGETS += check-const-shift
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes
 # Short loops reach T1 through loop detection only where T1 uses packed IR,
@@ -175,6 +181,12 @@ GUEST_ASM_CHECK_TARGETS += check-lrsc
 endif
 ifeq ($(CONFIG_EXT_A)$(CONFIG_Zicsr)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
 GUEST_ASM_CHECK_TARGETS += check-amo-align
+endif
+ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-const-arith check-const-operand
+endif
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-const-coperand
 endif
 # A directly loaded system program has no handler for its own page faults.
 ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
@@ -315,6 +327,10 @@ $(eval $(call guest-asm-check-target,jit-indirect-targets,rv32i))
 $(eval $(call guest-asm-check-target,jit-identity-normalize,rv32im))
 $(eval $(call guest-asm-check-target,jit-signed-div,rv32im))
 $(eval $(call guest-asm-check-target,jit-mul,rv32im))
+$(eval $(call guest-asm-check-target,const-arith,rv32im))
+$(eval $(call guest-asm-check-target,const-operand,rv32im))
+$(eval $(call guest-asm-check-target,const-coperand,rv32ic))
+$(eval $(call guest-asm-check-target,const-shift,rv32i))
 $(eval $(call guest-asm-check-target,jit-interp-diff,rv32im))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr))
 

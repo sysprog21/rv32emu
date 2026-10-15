@@ -13,7 +13,7 @@ import http.server
 import struct
 import threading
 
-from playwright.async_api import async_playwright
+from playwright.async_api import Error, async_playwright
 
 
 def loop_elf(instructions):
@@ -46,14 +46,53 @@ def loop_elf(instructions):
 async def check_demo(browser, url, mode):
     # A fresh context ensures the COI service worker has not been installed.
     context = await browser.new_context()
+    try:
+        await run_demo(context, url, mode)
+    finally:
+        await context.close()
+    print(f"{mode}: browser smoke test passed", flush=True)
+
+
+async def run_demo(context, url, mode):
+    # A slow font provider must not block the deferred runtime scripts or
+    # service-worker bootstrap. Release an empty stylesheet once WASM starts.
+    runtime_ready = asyncio.Event()
+    # Keyed by whether the service worker issued the held request.
+    font_held = {True: asyncio.Event(), False: asyncio.Event()}
+
+    async def delayed_font(route):
+        await runtime_ready.wait()
+        # The COI reload aborts the first document's requests, and a failed
+        # check closes the context while handlers still wait.
+        try:
+            await route.fulfill(body="", content_type="text/css")
+        except Error:
+            return
+        font_held[route.request.service_worker is not None].set()
+
+    await context.route("https://fonts.googleapis.com/**", delayed_font)
+    await context.route("https://fonts.gstatic.com/**", delayed_font)
     page = await context.new_page()
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
-    await page.goto(f"{url.rstrip('/')}/{mode}/")
-    await page.wait_for_function(
-        "() => crossOriginIsolated && typeof Module !== 'undefined' && "
-        "typeof Module._indirect_rv_halt === 'function'"
-    )
+
+    def log_console(message):
+        if message.type in ("error", "warning"):
+            print(f"{mode}: {message.type}: {message.text}", flush=True)
+
+    page.on("console", log_console)
+    try:
+        # The held stylesheet delays the load event until the runtime is
+        # ready, so waiting for "load" here would never return.
+        await page.goto(
+            f"{url.rstrip('/')}/{mode}/", wait_until="domcontentloaded"
+        )
+        await page.wait_for_function(
+            "() => crossOriginIsolated && typeof Module !== 'undefined' && "
+            "typeof Module._indirect_rv_halt === 'function'"
+        )
+    finally:
+        runtime_ready.set()
     if mode == "user":
         await page.locator("select").select_option("hello.elf")
         await page.locator("#runButton").click()
@@ -92,18 +131,43 @@ async def check_demo(browser, url, mode):
             await page.evaluate("Module._indirect_rv_halt()")
             await page.wait_for_function("() => !Module._indirect_rv_alive()")
     else:
+        # A page isolated by the COI service worker fetches the stylesheet
+        # through it; one served with isolation headers (--url) fetches it
+        # directly. Prove that request was routed and held, not served by
+        # the real CDN.
+        via_worker = await page.evaluate(
+            "!!(navigator.serviceWorker && navigator.serviceWorker.controller)"
+        )
+        try:
+            await asyncio.wait_for(font_held[via_worker].wait(), 30)
+        except asyncio.TimeoutError:
+            raise AssertionError(
+                "the font stylesheet request was not intercepted; the "
+                "deferred-font check did not run"
+            ) from None
+        # xterm keeps bounded scrollback, so record every write: an early
+        # boot fault must not scroll away before the login prompt. The page
+        # creates the terminal only after the runtime is ready.
+        await page.wait_for_function("() => term !== null")
+        await page.evaluate(
+            """() => {
+            window.terminalLog = '';
+            const write = term.write.bind(term);
+            term.write = (data, callback) => {
+                window.terminalLog += data;
+                return write(data, callback);
+            };
+        }"""
+        )
         await page.locator("#runSysButton").click()
         await page.wait_for_function(
-            "() => document.getElementById('terminal').textContent "
-            ".includes('buildroot login:')",
+            "() => terminalLog.includes('buildroot login:')",
             timeout=120000,
         )
-        output = await page.locator("#terminal").inner_text()
+        output = await page.evaluate("terminalLog")
         assert "Segmentation fault" not in output, output
         assert "Kernel panic" not in output, output
     assert not errors, errors
-    await context.close()
-    print(f"{mode}: browser smoke test passed", flush=True)
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):

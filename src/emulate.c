@@ -3523,9 +3523,11 @@ static bool rv_has_plic_trap(riscv_t *rv)
             (rv->csr_sip & rv->csr_sie));
 }
 
-static void rv_check_interrupt(riscv_t *rv)
+/* Return whether an interrupt trap was taken. */
+static bool rv_check_interrupt(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
+    bool trapped = false;
     if (peripheral_update_ctr-- == 0) {
         peripheral_update_ctr = 64;
 #if defined(__EMSCRIPTEN__)
@@ -3562,12 +3564,15 @@ static void rv_check_interrupt(riscv_t *rv)
         switch (intr_idx) {
         case (SUPERVISOR_SW_INTR & 0xf):
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_SW_INTR, 0);
+            trapped = true;
             break;
         case (SUPERVISOR_TIMER_INTR & 0xf):
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_TIMER_INTR, 0);
+            trapped = true;
             break;
         case (SUPERVISOR_EXTERNAL_INTR & 0xf):
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
+            trapped = true;
 #if defined(__EMSCRIPTEN__)
             /* escape sequence has more than 1 byte */
             if (input_buf_size)
@@ -3578,6 +3583,7 @@ static void rv_check_interrupt(riscv_t *rv)
             break;
         }
     }
+    return trapped;
 }
 #endif
 
@@ -3649,7 +3655,18 @@ void rv_step(void *arg)
     while (rv->csr_cycle < cycles_target && !rv->halt) {
 #if RV32_HAS(SYSTEM_MMIO)
         /* check for any interrupt after every block emulation */
+#ifdef __EMSCRIPTEN__
+        /* A trap moves rv->PC to the trap vector, but a saved continuation
+         * still belongs to the interrupted code. Discard it and redispatch from
+         * rv->PC instead.
+         */
+        if (rv_check_interrupt(rv) && rv->next_insn) {
+            rv->next_insn = NULL;
+            prev = NULL;
+        }
+#else
         rv_check_interrupt(rv);
+#endif
 #endif
 
 #ifdef __EMSCRIPTEN__

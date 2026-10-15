@@ -22,10 +22,20 @@
       type="application/wasm"
       crossorigin
     />
+    <!-- Loaded as print media so a slow font CDN never blocks rendering; the
+       inline script below applies it once it arrives. -->
     <link
+      id="web-fonts"
       href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
+      media="print"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=VT323&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
     <!-- xterm.js for terminal rendering with ANSI support (local bundle) -->
     <link rel="stylesheet" href="xterm.min.css" />
     <script defer src="xterm.min.js"></script>
@@ -626,6 +636,12 @@
        inline script below, hence no defer. -->
     <script src="common.js"></script>
     <script>
+      // Apply the deferred font stylesheet. A listener here instead of an
+      // inline onload handler keeps the page compatible with a strict CSP.
+      const webFonts = document.getElementById("web-fonts");
+      if (webFonts.sheet) webFonts.media = "all";
+      else webFonts.addEventListener("load", () => (webFonts.media = "all"));
+
       // Progressive loading controller
       const ProgressiveLoader = {
         overlay: null,
@@ -672,6 +688,7 @@
       );
 
       // Terminal will be initialized on runtime ready to avoid conflict with system-pre.js
+      // tests/test-wasm-demo.py reaches this global lexical binding by name.
       let term = null;
       let termInitialized = false;
 
@@ -700,6 +717,18 @@
           cols: 100,
         });
         term.open(document.getElementById("terminal"));
+        // The font stylesheet loads asynchronously, so xterm may have measured
+        // a fallback font. xterm remeasures only when fontFamily changes, so
+        // toggle it once the terminal font itself has loaded.
+        document.fonts.addEventListener("loadingdone", (event) => {
+          if (
+            !event.fontfaces.some((face) => face.family.includes("JetBrains"))
+          )
+            return;
+          const fontFamily = term.options.fontFamily;
+          term.options.fontFamily = "monospace";
+          term.options.fontFamily = fontFamily;
+        });
         term.write("\x1b[32mrv32emu\x1b[0m - RISC-V System Emulator\r\n");
         term.write('Click "Boot Linux" to start...\r\n\r\n');
 

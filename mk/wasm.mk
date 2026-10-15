@@ -265,6 +265,7 @@ endef
 
 STATIC_WEB_FILES := $(WEB_JS_RESOURCES)/coi-serviceworker.min.js \
                     $(WEB_JS_RESOURCES)/common.js \
+                    $(WEB_JS_RESOURCES)/wasm-loader.js \
                     $(XTERM_JS) $(XTERM_CSS)
 ifeq ($(CONFIG_SYSTEM),y)
 STATIC_WEB_FILES += $(WEB_HTML_RESOURCES)/system.html

@@ -1049,9 +1049,9 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
  *
  * The cycle budget still bounds the chain: without it a hot loop would never
  * return to rv_step(), which is where halt and interrupt state are observed.
- * WASM keeps its yield-aware dispatch path instead. RVOP_CHAIN_TAIL follows
- * the learned edge of a jump or compressed branch the same way, and always
- * follows it in builds without packing.
+ * RVOP_CHAIN_TAIL follows the learned edge of a jump or compressed branch the
+ * same way. Builds without packing always follow it through RVOP_TAIL_INTER,
+ * which in WASM yields to the browser once the block depth runs out.
  */
 #if RV32_HAS_PACKED_TAIL
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
@@ -1067,10 +1067,10 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
     do {                                               \
     } while (0)
-#define RVOP_CHAIN_TAIL(rv, target, cycle, PC)                  \
-    do {                                                        \
-        last_pc = (PC);                                         \
-        MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC)  \
+    do {                                        \
+        last_pc = (PC);                         \
+        RVOP_TAIL_INTER(rv, target, cycle, PC); \
     } while (0)
 #endif
 

@@ -50,3 +50,22 @@ links to both modes:
 
 Each mode page has a navigation button that switches directly to the
 other.
+
+## Browser regression checks
+
+After `make prepare-web`, the browser test serves `demo/` without isolation
+headers to exercise the service-worker bootstrap used by the hosted demo:
+
+```shell
+python3 -m venv build/venv
+. build/venv/bin/activate
+python3 -m pip install playwright
+python3 -m playwright install chromium
+python3 tests/test-wasm-demo.py --mode user
+```
+
+Use `--mode system` for a system build. User checks run `hello.elf` and verify
+that jump, countdown (full-size and compressed branch), and indirect-jump
+loops yield and stop. System checks boot Linux to its login prompt and check
+for startup crashes. Use `--mode both` when both modes have been staged. CI
+runs these checks with Chromium.

@@ -4,6 +4,17 @@
  * so the definitions below are visible to it.
  */
 
+/* coi-serviceworker reloads on "updatefound", while the new worker may still
+ * be installing. A reload that lands before the worker activates is not
+ * controlled, so the page stays without cross-origin isolation, and
+ * coi-serviceworker does not retry. Reload only once a worker is active. This
+ * runs before the deferred coi-serviceworker.min.js, which reads window.coi.
+ */
+window.coi = {
+  doReload: () =>
+    navigator.serviceWorker.ready.then(() => window.location.reload()),
+};
+
 /* Minimal ustar parser. Handles regular files and directory entries; tar
  * produced via `tar -czf x.tar.gz -C dir .` prefixes names with "./" which
  * is stripped before extraction. Returns the number of files written. */

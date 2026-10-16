@@ -1833,5 +1833,16 @@ RVOP(bseti, {
 #endif
 
 #if RV32_HAS(EXT_V)
+/* Vector helpers raise traps several calls deep, where the instruction's PC
+ * is out of scope, and RVOP_SYNC_PC is a no-op in user mode. Sync PC on entry
+ * to every vector op so mepc names the trapping instruction, not its block.
+ */
+#pragma push_macro("RVOP_SYNC_PC")
+#undef RVOP_SYNC_PC
+#define RVOP_SYNC_PC(rv, PC) \
+    do {                     \
+        (rv)->PC = (PC);     \
+    } while (0)
 #include "rv32_v_template.c"
+#pragma pop_macro("RVOP_SYNC_PC")
 #endif

@@ -169,6 +169,7 @@ GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
+GUEST_ASM_V_ZICSR_WORKS := $(call guest-asm-arch-works,rv32imv_zicsr)
 
 # A flat supervisor kernel exercises MMIO-mode TLBs without a guest libc.
 ifeq ($(CONFIG_SYSTEM),y)
@@ -460,6 +461,17 @@ check-rvv-smoke: $(BIN)
 	$(Q)$(CROSS_COMPILE)gcc -march=rv32imfv_zicsr -mabi=ilp32f -nostdlib -static \
 	    tests/rvv-smoke.S -o $(OUT)/rvv-smoke.elf
 	$(call check-test, , $(OUT)/rvv-smoke.elf, rvv-smoke.elf, tail -n 1,$(EXPECTED_rvv_smoke))
+
+# Like jit-misalign, rvv-trap installs a machine-mode trap vector, so it needs
+# a user-mode emulator with Zicsr. The probe is empty for RV32E, whose missing
+# s8-s11 the test uses, and when no cross toolchain is configured.
+EXPECTED_rvv-trap = RVV trap OK
+$(eval $(call guest-asm-check-target,rvv-trap,rv32imv_zicsr))
+ifneq ($(CONFIG_SYSTEM),y)
+ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_V_ZICSR_WORKS),yy)
+CHECK_TARGETS += check-rvv-trap
+endif
+endif
 endif
 
 # Host-side check of tools/deploy-webui.sh. It runs no emulator code, so it is

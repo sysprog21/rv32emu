@@ -190,10 +190,11 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
  * inline dTLB fast path enabled, a single load/store can record:
  *   - 6 fast-path gating branches (align, vpn, valid, perm, dirty for stores,
  *     range) patched to the slow-path label
+ *   - 2 branches selecting bare or paged address translation
  *   - 1 unconditional B at the end of the fast path patched to the merge label
  *   - 4 slow-path branches (LOC_0, LOC_1, TRAP, NORMAL)
  *   - 1 implicit jump inside emit_exit
- * Total: 12.  Branch epilogues are still 5 (2x emit_jmp + 2x emit_exit +
+ * Total: 14.  Branch epilogues are still 5 (2x emit_jmp + 2x emit_exit +
  * 1x emit_jump_target_offset).  We round up to 16 for headroom.
  *
  * Each load or store also has a misaligned-access guard: the branch to its
@@ -2544,9 +2545,9 @@ static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
  * path) whenever any of the following are not met, so each one keeps the
  * slow path's behavior intact:
  *   - vaddr aligned to access_size
- *   - dTLB[idx] is valid and its VPN matches
- *   - entry.perm has PTE_R (load) or PTE_W (store)
- *   - For stores: entry.dirty == 1 (so PTE_D update stays in C)
+ *   - With nonzero SATP: dTLB[idx] is valid and its VPN matches
+ *   - With nonzero SATP: entry.perm has PTE_R (load) or PTE_W (store)
+ *   - For paged stores: entry.dirty == 1 (so PTE_D update stays in C)
  *   - paddr + access_size <= mem_size (MMIO and bound-violators take slow path)
  *
  * Both ordinary pages and superpages are handled inline. Every exact VPN
@@ -2633,6 +2634,17 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         slow_branches[n_slow++] = emit_a64_cbnz(state, R10);
     }
 
+    /* Bare addresses share the range check without probing the dTLB. */
+    emit_load_imm_sext(state, R24,
+                       (int64_t) (uintptr_t) offsetof(riscv_t, csr_satp));
+    emit_addsub_register(state, true, AS_ADD, R24, R0, R24);
+    emit_loadstore_imm(state, LS_LDRW, R24, R24, 0);
+    uint32_t paged_branch = emit_a64_cbnz(state, R24);
+    emit_logical_register(state, false, LOG_ORR, R24, RZ, R8);
+    uint32_t bare_branch = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    emit_jump_target_offset(state, paged_branch, state->offset);
+
     /* vpn = vaddr >> 12
      * LSR Wd, Wn, #12 = UBFM Wd, Wn, #12, #31
      * sf=0, opc=10, N=0: 0x53000000 | (immr<<16) | (imms<<10) | (Rn<<5) | Rd
@@ -2691,6 +2703,8 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     /* UBFX w10, w8, #0, #12 = UBFM w10, w8, #0, #11 */
     emit_a64(state, 0x53000000U | (11 << 10) | (R8 << 5) | R10);
     emit_logical_register(state, false, LOG_ORR, R24, R24, R10); /* paddr */
+
+    emit_jump_target_offset(state, bare_branch, state->offset);
 
     /* Range check: paddr <= mem_size - access_size
      * Branch to slow path if paddr > max_paddr (unsigned).
@@ -2802,6 +2816,21 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         emit4(state, 0);
     }
 
+    /* Bare addresses share the range check without probing the dTLB. */
+    /* mov eax, [rdi + csr_satp] */
+    emit1(state, 0x8b);
+    emit_modrm_and_displacement(state, RAX, RDI, offsetof(riscv_t, csr_satp));
+    emit_cmp_imm32(state, RAX, 0);
+    /* jne */
+    uint32_t paged_branch = emit_x64_jcc32(state, 0x85);
+    /* mov eax, ecx */
+    emit1(state, 0x89);
+    emit_modrm_reg2reg(state, RCX, RAX);
+    emit1(state, 0xe9);
+    uint32_t bare_branch = state->offset;
+    emit4(state, 0);
+    emit_jump_target_offset(state, paged_branch, state->offset);
+
     /* vpn = vaddr >> 12 into EAX (kept around for the CMP) */
     /* mov eax, ecx */
     emit1(state, 0x89);
@@ -2869,6 +2898,8 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     /* or eax, esi — 09 /r */
     emit1(state, 0x09);
     emit_modrm_reg2reg(state, RSI, RAX);
+
+    emit_jump_target_offset(state, bare_branch, state->offset);
 
     /* range: cmp eax, max_paddr; ja slow */
     uint32_t max_paddr = (uint32_t) (mem->mem_size - access_size);

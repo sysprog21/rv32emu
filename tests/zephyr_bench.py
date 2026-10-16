@@ -17,6 +17,19 @@ saved in out-dir. CPU affinity applies equally to both emulator processes.
   "source_evidence":"separate profile measurement and scope",
   "hypothetical_speedup":2,"attribution":"non-overlapping-subset"}]
 Predictions remain conditional and do not change the measured score.
+
+Optional profiles run after all scoring. --profile-case computation
+--profile-backend cpu-sampler --profile-runs 50 compiles a local preload probe
+with --profile-cc (default CC or cc); it requires Linux x86_64, a direct dynamic
+ELF binary, and single-threaded execution with T2C disabled. Reuse a debug-symbol
+build with normal optimization for host symbol names. No privileges change.
+The signal-controlled window follows observed START/END; marker/signal latency,
+handler overhead, user+system CPU charging and periodic sampling alias/coalescing
+limit attribution. Boundary thread checks cannot exclude transient threads.
+Library, JIT and unknown PCs stay in the denominator. These are symbol-only
+interrupted-PC CPU fractions, not exclusive function time, host-wall fractions,
+or causal evidence. See cpu-profiles.json for full scope and per-run validation.
+Use a fresh output directory to preserve each CPU profiling experiment.
 """
 import argparse
 import errno
@@ -132,7 +145,9 @@ def stop_group(process):
     process.wait()
 
 
-def observe(command, case, timeout, cpu, log_path):
+def observe(
+    command, case, timeout, cpu, log_path, *, environment=None, observer=None
+):
     protocol = ConsoleProtocol(case)
     begin = time.perf_counter()
     master, slave = pty.openpty()
@@ -145,6 +160,7 @@ def observe(command, case, timeout, cpu, log_path):
             stdout=slave,
             stderr=slave,
             start_new_session=True,
+            env=environment,
         )
     except BaseException:
         os.close(master)
@@ -154,6 +170,8 @@ def observe(command, case, timeout, cpu, log_path):
         os.sched_setaffinity(0, original_affinity)
     pending = b""
     try:
+        if observer is not None:
+            observer.launched(process)
         with Path(log_path).open("wb") as log:
             while True:
                 remaining = timeout - (time.perf_counter() - begin)
@@ -182,9 +200,19 @@ def observe(command, case, timeout, cpu, log_path):
                     raise BenchError("console line exceeds one MiB")
                 while b"\n" in pending:
                     line, pending = pending.split(b"\n", 1)
-                    if protocol.feed(
+                    previous_stage = protocol.stage
+                    done = protocol.feed(
                         line.decode("utf-8", errors="replace"), observed
+                    )
+                    if (
+                        observer is not None
+                        and previous_stage == 2
+                        and protocol.stage == 3
                     ):
+                        observer.start(process)
+                    if done:
+                        if observer is not None:
+                            observer.finish(process)
                         return {
                             "boot_seconds": protocol.booted - begin,
                             "work_seconds": protocol.ended - protocol.started,
@@ -368,7 +396,21 @@ def main(argv=None):
         action="append",
         default=[],
         metavar="ID",
-        help="after scoring, run separate candidate perf record -g for this case",
+        help="after scoring, profile this candidate case separately (repeatable)",
+    )
+    parser.add_argument(
+        "--profile-backend", choices=("perf", "cpu-sampler"), default="perf"
+    )
+    parser.add_argument(
+        "--profile-runs",
+        type=int,
+        default=1,
+        help="separate profile runs per selected case (default: 1)",
+    )
+    parser.add_argument(
+        "--profile-cc",
+        default=os.environ.get("CC", "cc"),
+        help="host C compiler for optional cpu-sampler (default: CC or cc)",
     )
     parser.add_argument(
         "--tls",
@@ -396,8 +438,18 @@ def main(argv=None):
         "--mode", choices=("primary", "interpreter", "t2c"), default="primary"
     )
     args = parser.parse_args(argv)
-    if args.runs < 2 or args.warmups < 0 or args.timeout <= 0 or args.jobs < 1:
-        parser.error("runs must be >=2, warmups >=0, and timeout/jobs positive")
+    if (
+        args.runs < 2
+        or args.warmups < 0
+        or args.timeout <= 0
+        or args.jobs < 1
+        or args.profile_runs < 1
+    ):
+        parser.error(
+            "runs must be >=2, warmups >=0, and timeout/jobs/profile-runs positive"
+        )
+    if len(set(args.profile_case)) != len(args.profile_case):
+        parser.error("profile cases must be unique")
     if args.cpu not in os.sched_getaffinity(0):
         parser.error("CPU is outside the current affinity set")
     args.rv32emu = args.rv32emu.resolve()
@@ -436,6 +488,10 @@ def main(argv=None):
     if manifest.get("schema_version") != 1:
         raise BenchError("unsupported manifest schema")
     require_inventory(manifest)
+    known_cases = {case["id"]: case for case in manifest["cases"]}
+    unknown_profiles = set(args.profile_case) - set(known_cases)
+    if unknown_profiles:
+        raise BenchError(f"unknown profile cases: {sorted(unknown_profiles)}")
     provenance = manifest.setdefault("provenance", {})
     provenance["candidate"] = verify_engine(args)
     qemu_path = shutil.which(args.qemu)
@@ -545,45 +601,85 @@ def main(argv=None):
                 records.append(record)
             if record["correctness"] != "passed":
                 break
-    known_cases = {case["id"]: case for case in manifest["cases"]}
-    for case_id in args.profile_case:
-        if case_id not in known_cases:
-            raise BenchError(f"unknown profile case: {case_id}")
-        case = known_cases[case_id]
-        profile = {
-            "case_id": case_id,
-            "phase": "profile",
-            "correctness": "untested",
-        }
-        if case.get("status") != "ready":
-            profile["reason"] = "guest not ready"
-        else:
-            command = [
-                "perf",
-                "record",
-                "-g",
-                "-o",
-                str((args.out_dir / f"{case_id}.perf.data").resolve()),
-                "--",
-            ]
-            command += command_for(
-                "rv32emu", case, args, args.manifest.parent, dummy
+    cpu_profiles = []
+    sampler = None
+    sampler_error = None
+    if args.profile_case and args.profile_backend == "cpu-sampler":
+        from zephyr_cpu_profile import CpuSampler, SCOPE, aggregate_profiles
+
+        try:
+            sampler = CpuSampler(
+                args.rv32emu,
+                args.rv32emu_config,
+                args.out_dir / "cpu-sampler",
+                args.profile_cc,
             )
-            profile["command"] = command
-            try:
-                observe(
-                    command,
-                    case,
-                    args.timeout,
-                    args.cpu,
-                    args.out_dir / f"{case_id}-profile.log",
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            sampler_error = f"CPU profiling unavailable: {error}"
+    for case_id in args.profile_case:
+        case = known_cases[case_id]
+        case_profiles = []
+        for index in range(args.profile_runs):
+            profile = {
+                "case_id": case_id,
+                "phase": "profile",
+                "correctness": "untested",
+                "backend": args.profile_backend,
+                "profile_run": index,
+            }
+            if case.get("status") != "ready":
+                profile["reason"] = "guest not ready"
+            elif args.profile_backend == "cpu-sampler":
+                if sampler is None:
+                    profile["reason"] = sampler_error
+                else:
+                    profile = sampler.run(
+                        command_for(
+                            "rv32emu", case, args, args.manifest.parent, dummy
+                        ),
+                        case,
+                        args.timeout,
+                        args.cpu,
+                        index,
+                        observe,
+                    )
+            else:
+                suffix = "" if args.profile_runs == 1 else f"-{index:04d}"
+                command = [
+                    "perf",
+                    "record",
+                    "-g",
+                    "-o",
+                    str(
+                        (
+                            args.out_dir / f"{case_id}{suffix}.perf.data"
+                        ).resolve()
+                    ),
+                    "--",
+                ]
+                command += command_for(
+                    "rv32emu", case, args, args.manifest.parent, dummy
                 )
-                profile["correctness"] = "passed"
-            except (BenchError, OSError) as error:
-                profile["reason"] = (
-                    f"profiling unavailable: {error}; inspect profile log"
-                )
-        records.append(profile)
+                profile["command"] = command
+                try:
+                    observe(
+                        command,
+                        case,
+                        args.timeout,
+                        args.cpu,
+                        args.out_dir / f"{case_id}{suffix}-profile.log",
+                    )
+                    profile["correctness"] = "passed"
+                except (BenchError, OSError) as error:
+                    profile["reason"] = (
+                        f"profiling unavailable: {error}; inspect profile log"
+                    )
+            records.append(profile)
+            case_profiles.append(profile)
+        if args.profile_backend == "cpu-sampler":
+            summary = aggregate_profiles(case_profiles, args.profile_runs)
+            summary["case_id"] = case_id
+            cpu_profiles.append(summary)
     from system_bench import attach_diagnostics, summarize, write_report
 
     (args.out_dir / "manifest.json").write_text(
@@ -593,6 +689,14 @@ def main(argv=None):
         json.dumps(records, indent=2) + "\n"
     )
     report = qualify_mode(summarize(manifest, records), args.mode)
+    if cpu_profiles:
+        report["cpu_profiles"] = cpu_profiles
+        report["limitations"] += (
+            " Optional CPU profiles are separate diagnostics. " + SCOPE
+        )
+        (args.out_dir / "cpu-profiles.json").write_text(
+            json.dumps(cpu_profiles, indent=2) + "\n"
+        )
     if diagnostics is not None:
         report = attach_diagnostics(report, diagnostics)
     write_report(report, args.out_dir)

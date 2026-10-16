@@ -1,0 +1,2 @@
+config BOARD_RV32_COMPARE
+    select SOC_QEMU_VIRT_RISCV32

@@ -1,0 +1,2 @@
+&ram0 { reg = <0x80400000 0x0fc00000>; };
+&plic { context-offset = <1>; riscv,ndev = <31>; };

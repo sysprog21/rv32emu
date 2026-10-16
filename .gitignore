@@ -8,6 +8,9 @@ build/id1/
 build/gfx.wad
 build/doomrc
 toolchain/
+build/zephyr/
+build/zephyr-venv/
+build/zephyr-workspace/
 
 # profiling output
 perf.data

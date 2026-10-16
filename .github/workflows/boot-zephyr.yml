@@ -1,0 +1,113 @@
+name: Boot Zephyr
+
+on:
+  push:
+    paths:
+      - '.ci/**'
+      - '.github/actions/**'
+      - '.github/workflows/boot-zephyr.yml'
+      - 'configs/**'
+      - 'mk/**'
+      - 'src/**'
+      - 'Makefile'
+  pull_request:
+    paths:
+      - '.ci/**'
+      - '.github/actions/**'
+      - '.github/workflows/boot-zephyr.yml'
+      - 'configs/**'
+      - 'mk/**'
+      - 'src/**'
+      - 'Makefile'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  boot-zephyr:
+    name: S-mode interpreter (${{ matrix.toolchain }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain: xpack
+            install-xpack: 'true'
+            prefix: toolchain/bin/riscv-none-elf-
+            tls: 'n'
+          - toolchain: gcc
+            install-xpack: 'false'
+            prefix: /usr/bin/riscv64-unknown-elf-
+            tls: 'y'
+    env:
+      ZEPHYR_BASE: ${{ github.workspace }}/build/zephyr-workspace/zephyr
+      PICOLIBC_DIR: ${{ github.workspace }}/build/zephyr-workspace/picolibc
+      ZEPHYR_TLS: ${{ matrix.tls }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v7
+        with:
+          submodules: 'true'
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-build
+        with:
+          llvm: 'false'
+          riscv-toolchain: ${{ matrix.install-xpack }}
+
+      - name: Install Zephyr build dependencies
+        run: .ci/apt-install.sh cmake ninja-build python3-venv gcc-riscv64-unknown-elf
+
+      - name: Check out Zephyr
+        uses: actions/checkout@v7
+        with:
+          repository: zephyrproject-rtos/zephyr
+          ref: bbc6385f0a2c6476b5f191b3101d902303a34f50
+          path: build/zephyr-workspace/zephyr
+
+      - name: Check out picolibc
+        uses: actions/checkout@v7
+        with:
+          repository: picolibc/picolibc
+          ref: ad4203cecf0fd65f653835fe65c20f1b7924e0ca
+          path: build/zephyr-workspace/picolibc
+
+      - name: Set up Zephyr Python environment
+        run: |
+          python3 -m venv build/zephyr-venv
+          build/zephyr-venv/bin/pip install -r "$ZEPHYR_BASE/scripts/requirements-base.txt"
+          echo "$PWD/build/zephyr-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Build system interpreter
+        run: |
+          unset CROSS_COMPILE
+          make system_interpreter_defconfig
+          make CONFIG_VIRTIO_NET=n "$PARALLEL"
+
+      - name: Build Zephyr samples
+        run: |
+          export CROSS_COMPILE="${{ matrix.prefix }}"
+          if [[ "$CROSS_COMPILE" != /* ]]; then
+            export CROSS_COMPILE="$PWD/$CROSS_COMPILE"
+          fi
+          .ci/build-zephyr.sh
+
+      - name: Boot hello_world and synchronization
+        run: .ci/boot-zephyr.sh
+
+      - name: Upload guest logs and configurations
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: zephyr-${{ matrix.toolchain }}
+          path: |
+            build/zephyr/logs/
+            build/zephyr/*/zephyr/.config
+            build/zephyr/*/zephyr/zephyr.dts
+          include-hidden-files: true

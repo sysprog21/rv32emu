@@ -65,3 +65,4 @@ src/rv32emu_config.h
 
 build/system-bench/
 build/linux-bench/
+build/zephyr-bench-results/

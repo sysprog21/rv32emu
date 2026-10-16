@@ -459,6 +459,23 @@ check-rvv-smoke: $(BIN)
 	    tests/rvv-smoke.S -o $(OUT)/rvv-smoke.elf
 	$(call check-test, , $(OUT)/rvv-smoke.elf, rvv-smoke.elf, tail -n 1,$(EXPECTED_rvv_smoke))
 endif
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(CONFIG_RV32E),y)
+ifeq ($(CONFIG_Zicsr),y)
+ifeq ($(GUEST_ASM_ZICSR_WORKS),y)
+WFI_OBJCOPY_WORKS := $(shell $(CROSS_COMPILE)objcopy --version \
+	>/dev/null 2>&1 && echo y)
+ifeq ($(WFI_OBJCOPY_WORKS),y)
+ifneq ($(CONFIG_ROOTFS_EXT4),y)
+CHECK_TARGETS += check-wfi-pending
+endif
+endif
+endif
+endif
+endif
+endif
+endif
 check: $(CHECK_TARGETS)
 
 # System tests
@@ -474,8 +491,22 @@ EXPECTED_mmu = Redirected page fault test passed!
 mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
+# A locally enabled pending interrupt must resume WFI when global SIE is clear.
+# With no pending interrupt, WFI still advances to the timer compare.
+EXPECTED_wfi_pending = WFI pending interrupt wakeup OK
+WFI_BIN = $(OUT)/wfi-pending.bin
+# This raw guest needs the system emulator without its ext4 rootfs device.
+check-wfi-pending: $(BIN) tests/wfi-pending.S | $(OUT)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32i_zicsr -mabi=ilp32 -nostdlib -static \
+	    -Wl,-e,_start -Wl,-Ttext=0x0 -o $(OUT)/wfi-pending.elf \
+	    tests/wfi-pending.S
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/wfi-pending.elf \
+	    $(WFI_BIN)
+	$(call check-test, -k, $(WFI_BIN), wfi, tail -n 1,$(EXPECTED_wfi_pending))
+
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
 	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
-.PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
+.PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test \
+	check-wfi-pending
 
 endif # _MK_TESTS_INCLUDED

@@ -1029,8 +1029,21 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
 #define RVOP_TAIL_INTER(rv, target, cycle, PC) \
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
+#if RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
+/* System-mode chains return to rv_step at the slice boundary, where pending
+ * interrupts and traps are checked.
+ */
+#define RVOP_TAIL(rv, target, cycle, PC)                            \
+    do {                                                            \
+        if (likely((cycle) < (rv)->branch_chain_cycle_target)) {    \
+            last_pc = (PC);                                         \
+            MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+        }                                                           \
+    } while (0)
+#else
 #define RVOP_TAIL(rv, target, cycle, PC) \
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
+#endif
 #endif
 
 #if RV32_HAS_PACKED_TAIL
@@ -1041,19 +1054,31 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     RVOP_TAIL_INTRA(rv, target, cycle, PC)
 #endif
 
-/* A conditional branch normally returns to rv_step() so that SYSTEM builds
- * can process trap state. Packed builds have no such state, so once an edge
- * has been learned, keep executing it in the existing tail-call chain. In JIT
- * builds the chain enters only blocks T1 cannot compile: any other block is
- * headed by do_enter_dispatch(), which returns to rv_step() for profiling.
- *
- * The cycle budget still bounds the chain: without it a hot loop would never
- * return to rv_step(), which is where halt and interrupt state are observed.
- * RVOP_CHAIN_TAIL follows the learned edge of a jump or compressed branch the
- * same way. Builds without packing always follow it through RVOP_TAIL_INTER,
- * which in WASM yields to the browser once the block depth runs out.
- */
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
+/* Learned branch edges stop while a trap is pending. */
+#define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)                  \
+    do {                                                                \
+        if (!(rv)->trap_cnt) {                                          \
+            if (likely((cycle) < (rv)->branch_chain_cycle_target)) {    \
+                last_pc = (PC);                                         \
+                MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+            }                                                           \
+        }                                                               \
+    } while (0)
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC) \
+    RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)
+#elif RV32_HAS(SYSTEM)
+#define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
+    do {                                                            \
+        if (!(rv)->trap_cnt) {                                      \
+            last_pc = (PC);                                         \
+            MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+        }                                                           \
+    } while (0)
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC) \
+    RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)
+#elif RV32_HAS_PACKED_TAIL
+/* Keep packed native edges within the cycle slice. */
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
     do {                                                            \
         if (likely((cycle) < (rv)->branch_chain_cycle_target)) {    \
@@ -1067,6 +1092,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
     do {                                               \
     } while (0)
+/* Use the inter-block path so WASM can yield at its depth limit. */
 #define RVOP_CHAIN_TAIL(rv, target, cycle, PC)  \
     do {                                        \
         last_pc = (PC);                         \
@@ -3644,8 +3670,10 @@ void rv_step(void *arg)
 
     /* A reboot starts rv_step again with the reset guest's cycle counter. */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(BLOCK_CHAINING)
     rv->branch_chain_cycle_target = cycles_target;
+#endif
+#if RV32_HAS_PACKED_TAIL
 #if RV32_HAS(JIT)
     set_reset(&pc_set);
 #endif
@@ -3716,7 +3744,7 @@ void rv_step(void *arg)
             rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
                          rv->PC);
             rv->halt = true;
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(BLOCK_CHAINING)
             rv->branch_chain_cycle_target = 0;
 #endif
             return;
@@ -3885,7 +3913,11 @@ void rv_step(void *arg)
         if (has_loops && !block->has_loops)
             block->has_loops = true;
 #endif
-        prev = block;
+        /* A cycle-budget exit may have skipped a tail-chain after its edge
+         * was not entered. Do not carry an unmatched predecessor into the
+         * next rv_step slice; its last_pc can name an older edge.
+         */
+        prev = rv->csr_cycle >= cycles_target ? NULL : block;
     }
 
 #if RV32_HAS(SYSTEM_MMIO)
@@ -3898,9 +3930,10 @@ void rv_step(void *arg)
     }
 #endif
 
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(BLOCK_CHAINING)
     rv->branch_chain_cycle_target = 0;
-
+#endif
+#if RV32_HAS_PACKED_TAIL
     /* Incremental memory maintenance: reclaim unused pages periodically.
      * Native user mode takes longer step slices, so count retired cycles and
      * keep the cadence of 65536 calls with the default 100-cycle slice.

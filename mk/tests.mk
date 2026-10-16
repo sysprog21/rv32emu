@@ -103,6 +103,7 @@ EXPECTED_jit-memory-address = JIT memory address OK
 EXPECTED_register-loop = register loop OK
 EXPECTED_loop-shapes = loop shapes OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
+EXPECTED_load-page-fault = canceled loads preserve registers OK
 EXPECTED_jit-fencei = FENCE.I made the rewrite visible OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
@@ -153,6 +154,7 @@ GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
+GUEST_ASM_F_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ifc_zicsr)
 
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
@@ -191,6 +193,13 @@ endif
 # A directly loaded system program has no handler for its own page faults.
 ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
 GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault
+GUEST_ASM_CHECK_TARGETS += check-load-page-fault
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-load-page-fault-rvc
+endif
+ifeq ($(CONFIG_EXT_F)$(CONFIG_EXT_C)$(GUEST_ASM_F_C_ZICSR_WORKS),yyy)
+GUEST_ASM_CHECK_TARGETS += check-load-page-fault-fp
+endif
 endif
 # Only system JIT builds honor FENCE.I, and only a directly loaded program can
 # rewrite its own code without an operating system.
@@ -306,6 +315,9 @@ check-amo-align: $(BIN) tests/amo-align.S | $(OUT)
 	$(call check-test, , $(OUT)/amo-align, amo-align, tail -n 1,$(EXPECTED_amo-align))
 	$(call check-test, -m, $(OUT)/amo-align, amo-align-relaxed, tail -n 1,$(EXPECTED_amo-align))
 $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,load-page-fault,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,load-page-fault,rv32ic_zicsr,-rvc))
+$(eval $(call guest-asm-check-target,load-page-fault,rv32ifc_zicsr,-fp))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
 
 # The program must stop at its first instruction page fault, reporting it and

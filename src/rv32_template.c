@@ -352,37 +352,52 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 #define MEM_ACCESS_FAULTED() false
 #endif
 
+/* Inline fault handling may switch tasks or deliver a signal. Commit a load
+ * only when it resumed the access; its placeholder must not overwrite the
+ * register state restored by the handler.
+ */
+
 /* LB: Load Byte */
 RVOP(lb, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    rv->X[ir->rd] = sign_extend_b(MEM_READ_B(rv, addr));
+    const uint32_t value = sign_extend_b(MEM_READ_B(rv, addr));
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* LH: Load Halfword */
 RVOP(lh, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-    rv->X[ir->rd] = sign_extend_h(MEM_READ_S(rv, addr));
+    const uint32_t value = sign_extend_h(MEM_READ_S(rv, addr));
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* LW: Load Word */
 RVOP(lw, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* LBU: Load Byte Unsigned */
 RVOP(lbu, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    rv->X[ir->rd] = MEM_READ_B(rv, addr);
+    const uint32_t value = MEM_READ_B(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* LHU: Load Halfword Unsigned */
 RVOP(lhu, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-    rv->X[ir->rd] = MEM_READ_S(rv, addr);
+    const uint32_t value = MEM_READ_S(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* There are 3 types of stores: byte, halfword, and word-sized. Unlike loads,
@@ -1112,7 +1127,9 @@ RVOP(flw, {
     /* copy into the float register */
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->F[ir->rd].v = value;
 })
 
 /* FSW */
@@ -1348,7 +1365,9 @@ RVOP(caddi4spn, { rv->X[ir->rd] = rv->X[rv_reg_sp] + (uint16_t) ir->imm; })
 RVOP(clw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* C.SW stores a 32-bit value in register rs2' to memory. It computes an
@@ -1562,7 +1581,9 @@ RVOP(cslli, { rv->X[ir->rd] <<= (uint8_t) ir->imm; })
 RVOP(clwsp, {
     const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* C.JR */
@@ -1620,7 +1641,9 @@ RVOP(cswsp, {
 RVOP(cflwsp, {
     const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->F[ir->rd].v = value;
 })
 
 /* C.FSWSP */
@@ -1638,7 +1661,9 @@ RVOP(cfswsp, {
 RVOP(cflw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->F[ir->rd].v = value;
 })
 
 /* C.FSW */

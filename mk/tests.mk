@@ -190,9 +190,10 @@ endif
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-const-coperand
 endif
-# A directly loaded system program has no handler for its own page faults.
+# Exercise fault delivery in directly loaded system programs.
 ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
 GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault
+GUEST_ASM_CHECK_TARGETS += check-fetch-page-boundary
 GUEST_ASM_CHECK_TARGETS += check-load-page-fault
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-load-page-fault-rvc
@@ -319,6 +320,10 @@ $(eval $(call guest-asm-check-target,load-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,load-page-fault,rv32ic_zicsr,-rvc))
 $(eval $(call guest-asm-check-target,load-page-fault,rv32ifc_zicsr,-fp))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
+
+EXPECTED_fetch-page-boundary = fetch fault ordering OK
+FETCH_PAGE_LDFLAGS = -Xlinker --section-start -Xlinker .faultpage=0x3ffff8
+$(eval $(call guest-asm-check-target,fetch-page-boundary,rv32i_zicsr,,$(FETCH_PAGE_LDFLAGS)))
 
 # The program must stop at its first instruction page fault, reporting it and
 # failing, instead of retrying the fetch forever.

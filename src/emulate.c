@@ -2411,18 +2411,30 @@ retranslate:
             break;
         }
 
-#if RV32_HAS(BLOCK_CHAINING)
-        /* Terminate block at page boundary to enable O(1) cache invalidation.
-         * Each block fits entirely within one 4KB page, so SFENCE.VMA can
-         * invalidate blocks by page address without scanning entire cache.
+#if RV32_HAS(BLOCK_CHAINING) || RV32_HAS(SYSTEM)
+        /* Terminate blocks at page boundaries for O(1) cache invalidation with
+         * block chaining.
+         * SYSTEM builds also do this without chaining so a next-page fetch
+         * fault cannot precede retirement of instructions already decoded.
          */
         {
+#if RV32_HAS(BLOCK_CHAINING)
             const uint32_t page_end =
                 (block->pc_start & ~(RV_PG_SIZE - 1)) + RV_PG_SIZE;
             if (block->pc_end >= page_end) {
                 block->page_terminated = true;
                 break;
             }
+#else
+            const uint32_t page_mask = ~(RV_PG_SIZE - 1);
+            if ((block->pc_start & page_mask) != (block->pc_end & page_mask)) {
+#if RV32_HAS(JIT)
+                /* T1 has no generic tail for this non-branch boundary. */
+                block->translatable = false;
+#endif
+                break;
+            }
+#endif
         }
 #endif
 

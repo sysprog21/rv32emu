@@ -157,6 +157,9 @@ jobs:
             # traps, interpreted and T1.
             make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles $PARALLEL
             make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles $PARALLEL
+            # Without block chaining, a later fetch fault must not overtake
+            # instructions already decoded from the preceding page.
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_BLOCK_CHAINING=0 check-fetch-page-boundary $PARALLEL
             # WFI must notice a locally enabled pending interrupt even when
             # global SIE is clear.
             make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-wfi-pending $PARALLEL

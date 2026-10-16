@@ -392,7 +392,8 @@ mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
-	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
+	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt \
+	run-test-trap run-test-csr-unsupported
 .PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
 
 endif # _MK_TESTS_INCLUDED

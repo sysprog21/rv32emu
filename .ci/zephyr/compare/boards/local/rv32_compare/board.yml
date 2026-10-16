@@ -1,0 +1,6 @@
+board:
+  name: rv32_compare
+  full_name: GCC single-core RV32 S-mode comparison
+  vendor: others
+  socs:
+    - name: qemu_virt_riscv32

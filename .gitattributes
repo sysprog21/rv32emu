@@ -6,3 +6,6 @@ map.h	text diff=c
 
 # Executables
 *.elf	binary
+
+# Unified-diff context preserves blank lines and tab-indented source.
+.ci/zephyr/compare/zephyr.patch -whitespace

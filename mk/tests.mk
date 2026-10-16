@@ -396,6 +396,19 @@ endif
 endif
 endif
 endif
+ifeq ($(CONFIG_SYSTEM)$(CONFIG_JIT)$(CONFIG_Zicsr),yyy)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(CONFIG_T2C),y)
+ifneq ($(CONFIG_RV32E),y)
+ifeq ($(MEM_START),0)
+ifeq ($(GUEST_ASM_ZICSR_WORKS)$(WFI_OBJCOPY_WORKS),yy)
+CHECK_TARGETS += check-t1-bare-mmu
+endif
+endif
+endif
+endif
+endif
+endif
 check: $(CHECK_TARGETS)
 
 # System tests
@@ -453,9 +466,48 @@ $(eval $(call load-x0-system-target,mmio,2))
 .PHONY: check-load-x0-system
 check-load-x0-system: check-load-x0-cold check-load-x0-ram check-load-x0-mmio
 
+# Exercise SYSTEM_MMIO T1 memory access from a raw image. The guest assumes
+# RAM starts at zero and tests the configured final valid word.
+EXPECTED_t1_bare_mmu = !T1 bare MMU path OK
+T1_BARE_MMU_BIN = $(OUT)/t1-bare-mmu.bin
+T1_BARE_MMU_DUMMY_ROOTFS = $(OUT)/t1-bare-mmu-rootfs.img
+T1_BARE_MMU_ROOTFS_FLAGS = -x vblk:$(T1_BARE_MMU_DUMMY_ROOTFS),rootfs
+T1_BARE_MMU_RUN_FLAGS = -k
+ifeq ($(CONFIG_ROOTFS_EXT4),y)
+T1_BARE_MMU_RUN_FLAGS = $(T1_BARE_MMU_ROOTFS_FLAGS) -k
+T1_BARE_MMU_ROOTFS_DEP = $(T1_BARE_MMU_DUMMY_ROOTFS)
+endif
+$(T1_BARE_MMU_DUMMY_ROOTFS): | $(OUT)
+	$(Q)truncate -s 1048576 $@
+ifneq ($(filter check-t1-bare-mmu,$(MAKECMDGOALS)),)
+ifneq ($(CONFIG_SYSTEM)$(CONFIG_JIT)$(CONFIG_Zicsr),yyy)
+$(error check-t1-bare-mmu requires SYSTEM, JIT, and Zicsr)
+endif
+ifneq ($(CONFIG_ELF_LOADER),)
+$(error check-t1-bare-mmu requires ELF_LOADER=n)
+endif
+ifeq ($(CONFIG_T2C),y)
+$(error check-t1-bare-mmu requires T2C=n)
+endif
+ifeq ($(CONFIG_RV32E),y)
+$(error check-t1-bare-mmu requires RV32E=n)
+endif
+ifneq ($(MEM_START),0)
+$(error check-t1-bare-mmu requires MEM_START=0)
+endif
+endif
+check-t1-bare-mmu: $(BIN) tests/t1-bare-mmu.S $(T1_BARE_MMU_ROOTFS_DEP) | $(OUT)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32i_zicsr -mabi=ilp32 -nostdlib -static \
+	    -DTEST_RAM_END=0x$(REAL_MEM_SIZE) -Wl,-e,_start -Wl,-Ttext=0x0 \
+	    -o $(OUT)/t1-bare-mmu.elf \
+	    tests/t1-bare-mmu.S
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/t1-bare-mmu.elf \
+	    $(T1_BARE_MMU_BIN)
+	$(call check-test, $(T1_BARE_MMU_RUN_FLAGS), $(T1_BARE_MMU_BIN), t1-bare-mmu, tail -n 1,$(EXPECTED_t1_bare_mmu))
+
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
 	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
 .PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test \
-	check-wfi-pending
+	check-wfi-pending check-t1-bare-mmu
 
 endif # _MK_TESTS_INCLUDED

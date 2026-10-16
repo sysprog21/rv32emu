@@ -3579,7 +3579,7 @@ static bool rv_check_interrupt(riscv_t *rv)
      * Timer is no longer incremented per-instruction; instead computed here.
      */
     uint64_t current_timer = rv->csr_cycle + rv->timer_offset;
-    if (current_timer > attr->timer)
+    if (current_timer >= attr->timer)
         rv->csr_sip |= RV_INT_STI;
     else
         rv->csr_sip &= ~RV_INT_STI;
@@ -4082,10 +4082,8 @@ static void __trap_handler(riscv_t *rv)
          * as a nested trap before the sret instruction of this level. Its sret
          * returns here and the handling of this level resumes.
          */
-        if (rv->trap_cnt >= depth && rv_has_plic_trap(rv) &&
-            ilog2(rv->csr_sip & rv->csr_sie) ==
-                (SUPERVISOR_EXTERNAL_INTR & 0xf))
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
+        if (rv->trap_cnt >= depth)
+            rv_check_interrupt(rv);
 #endif /* SYSTEM_MMIO */
     }
 

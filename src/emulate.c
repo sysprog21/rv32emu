@@ -2452,17 +2452,37 @@ retranslate:
         }
 #endif
 
-        /* If instruction fetch failed due to trap (page fault, etc.), break.
-         * The caller checks rv->trap_cnt and invokes trap handler.
-         * Note: insn==0 alone is ambiguous; we verify trap state explicitly.
+        /* If instruction fetch failed due to a trap, do not decode the zero
+         * placeholder. An inline handler may already have redirected SEPC,
+         * clearing trap_cnt; need_handle_signal still marks this fetch as
+         * abandoned. Zero alone is ambiguous because it can be a real
+         * instruction encoding, so check both signals.
          */
-        if (!insn)
+        if (!insn) {
+#if RV32_HAS(SYSTEM)
+            if (rv->trap_cnt || need_handle_signal)
+                break;
+            /* Zero is a valid fetched bit pattern and decodes as an illegal
+             * compressed instruction.  Only treat it as an ifetch failure
+             * when the memory interface raised a trap.
+             */
+#else
             break;
+#endif
+        }
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
-            rv->compressed = is_compressed(insn);
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
+            /* Do not raise a trap for a later instruction while translating
+             * the current block: preceding instructions still need to run.
+             * Leave the bad instruction at pc_end so it is retried as the
+             * first instruction of the next block, where its PC is current.
+             */
+            if (!prev_ir) {
+                rv->compressed = is_compressed(insn);
+                rv->PC = block->pc_end;
+                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
+            }
             break;
         }
         ir->impl = insn_handler(ir);
@@ -3445,8 +3465,14 @@ static block_t *block_find_or_translate(riscv_t *rv
     if (unlikely(!next_blk))
         return NULL;
 
-    if (unlikely(!block_translate(rv, next_blk)))
+    if (unlikely(!block_translate(rv, next_blk))) {
+        /* Translation can stop before producing a cacheable block, for
+         * example when the first instruction traps.  Release its slot rather
+         * than leaking one block per such event.
+         */
+        mpool_free(rv->block_mp, next_blk);
         return NULL;
+    }
 #if RV32_HAS(SYSTEM)
     mmu_note_code(rv, next_blk->pc_start, next_blk->pc_end);
 #endif
@@ -3825,6 +3851,9 @@ void rv_step(void *arg)
         /* lookup the next block in block map or translate a new block,
          * and move onto the next block.
          */
+#if RV32_HAS(SYSTEM)
+        const uint32_t translate_pc = rv->PC;
+#endif
 #if RV32_HAS(JIT)
         uint32_t freq;
         block_t *block = block_find_or_translate(rv, &freq);
@@ -3840,6 +3869,14 @@ void rv_step(void *arg)
              * continue instead of halting.
              */
             if (settle_trap(rv)) {
+                prev = NULL;
+                continue;
+            }
+            /* A synchronous trap may already have run its handler during
+             * translation and switched the guest PC. Resume at that target
+             * even though no block was produced for the faulting address.
+             */
+            if (rv->PC != translate_pc) {
                 prev = NULL;
                 continue;
             }

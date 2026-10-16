@@ -149,6 +149,9 @@ void rv_debug_run(riscv_t *rv)
 #if RV32_HAS(VIRTIO_NET)
         rv_refresh_vnet(rv);
 #endif
+#if RV32_HAS(VIRTIO_SND)
+        rv_refresh_vsnd(rv);
+#endif
     } while (rv->debug_continue && !rv_debug_should_stop(rv));
 }
 

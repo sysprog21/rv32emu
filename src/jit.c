@@ -2274,19 +2274,29 @@ static void jit_mmu_handler(riscv_t *rv,
         MMIO_WRITE();
         break;
     case rv_insn_lb:
-        rv->X[vreg_idx] = (int8_t) jit_mmio_read_wrapper(rv, addr);
+        val = jit_mmio_read_wrapper(rv, addr);
+        if (vreg_idx)
+            rv->X[vreg_idx] = (int8_t) val;
         break;
     case rv_insn_lh:
-        rv->X[vreg_idx] = (int16_t) jit_mmio_read_wrapper(rv, addr);
+        val = jit_mmio_read_wrapper(rv, addr);
+        if (vreg_idx)
+            rv->X[vreg_idx] = (int16_t) val;
         break;
     case rv_insn_lw:
-        rv->X[vreg_idx] = jit_mmio_read_wrapper(rv, addr);
+        val = jit_mmio_read_wrapper(rv, addr);
+        if (vreg_idx)
+            rv->X[vreg_idx] = val;
         break;
     case rv_insn_lbu:
-        rv->X[vreg_idx] = (uint8_t) jit_mmio_read_wrapper(rv, addr);
+        val = jit_mmio_read_wrapper(rv, addr);
+        if (vreg_idx)
+            rv->X[vreg_idx] = (uint8_t) val;
         break;
     case rv_insn_lhu:
-        rv->X[vreg_idx] = (uint16_t) jit_mmio_read_wrapper(rv, addr);
+        val = jit_mmio_read_wrapper(rv, addr);
+        if (vreg_idx)
+            rv->X[vreg_idx] = (uint16_t) val;
         break;
     default:
         assert(NULL);

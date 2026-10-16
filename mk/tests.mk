@@ -386,6 +386,7 @@ ifeq ($(GUEST_ASM_ZICSR_WORKS),y)
 WFI_OBJCOPY_WORKS := $(shell $(CROSS_COMPILE)objcopy --version \
 	>/dev/null 2>&1 && echo y)
 ifeq ($(WFI_OBJCOPY_WORKS),y)
+CHECK_TARGETS += check-load-x0-system
 ifneq ($(CONFIG_ROOTFS_EXT4),y)
 CHECK_TARGETS += check-wfi-pending
 endif
@@ -422,6 +423,35 @@ check-wfi-pending: $(BIN) tests/wfi-pending.S | $(OUT)
 	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/wfi-pending.elf \
 	    $(WFI_BIN)
 	$(call check-test, -k, $(WFI_BIN), wfi, tail -n 1,$(EXPECTED_wfi_pending))
+
+# Raw system guests exercise cold loads and native MMIO helpers in JIT builds.
+EXPECTED_load_x0_system = system loads preserve x0 OK
+LOAD_X0_INPUT = $(OUT)/load-x0-system.in
+LOAD_X0_FLAGS = -k
+ifeq ($(CONFIG_ROOTFS_EXT4),y)
+LOAD_X0_ROOTFS = $(OUT)/load-x0-system.img
+LOAD_X0_FLAGS = -x vblk:$(LOAD_X0_ROOTFS),rootfs -k
+$(LOAD_X0_ROOTFS): | $(OUT)
+	$(Q)truncate -s 1M $@
+endif
+$(LOAD_X0_INPUT): | $(OUT)
+	$(Q)printf 'ABCDEFGHIJ' > $@
+
+define load-x0-system-target
+check-load-x0-$(1): $(BIN) tests/load-x0-system.S $(LOAD_X0_INPUT) $(LOAD_X0_ROOTFS) | $(OUT)
+	$$(Q)$$(CROSS_COMPILE)gcc -march=rv32i -mabi=ilp32 -nostdlib -static \
+	    -DLOAD_X0_MODE=$(2) -Wl,-e,_start -Wl,-Ttext=0x0 \
+	    -o $$(OUT)/load-x0-$(1).elf tests/load-x0-system.S
+	$$(Q)$$(CROSS_COMPILE)objcopy -O binary $$(OUT)/load-x0-$(1).elf \
+	    $$(OUT)/load-x0-$(1).bin
+	$$(call check-test, $$(LOAD_X0_FLAGS), $$(OUT)/load-x0-$(1).bin < $$(LOAD_X0_INPUT), load-x0-$(1), tail -n 1,$$(EXPECTED_load_x0_system))
+.PHONY: check-load-x0-$(1)
+endef
+$(eval $(call load-x0-system-target,cold,0))
+$(eval $(call load-x0-system-target,ram,1))
+$(eval $(call load-x0-system-target,mmio,2))
+.PHONY: check-load-x0-system
+check-load-x0-system: check-load-x0-cold check-load-x0-ram check-load-x0-mmio
 
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
 	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt

@@ -157,6 +157,8 @@ jobs:
             # WFI must notice a locally enabled pending interrupt even when
             # global SIE is clear.
             make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-wfi-pending $PARALLEL
+            # Preserve x0 through cold loads and native MMIO reads.
+            make distclean && make system_defconfig && make check-load-x0-system $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL

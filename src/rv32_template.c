@@ -354,14 +354,15 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 
 /* Inline fault handling may switch tasks or deliver a signal. Commit a load
  * only when it resumed the access; its placeholder must not overwrite the
- * register state restored by the handler.
+ * register state restored by the handler. Loads to x0 still perform the access
+ * but discard its result.
  */
 
 /* LB: Load Byte */
 RVOP(lb, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
     const uint32_t value = sign_extend_b(MEM_READ_B(rv, addr));
-    if (!MEM_ACCESS_FAULTED())
+    if (ir->rd && !MEM_ACCESS_FAULTED())
         rv->X[ir->rd] = value;
 })
 
@@ -370,7 +371,7 @@ RVOP(lh, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
     const uint32_t value = sign_extend_h(MEM_READ_S(rv, addr));
-    if (!MEM_ACCESS_FAULTED())
+    if (ir->rd && !MEM_ACCESS_FAULTED())
         rv->X[ir->rd] = value;
 })
 
@@ -379,7 +380,7 @@ RVOP(lw, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
     const uint32_t value = MEM_READ_W(rv, addr);
-    if (!MEM_ACCESS_FAULTED())
+    if (ir->rd && !MEM_ACCESS_FAULTED())
         rv->X[ir->rd] = value;
 })
 
@@ -387,7 +388,7 @@ RVOP(lw, {
 RVOP(lbu, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
     const uint32_t value = MEM_READ_B(rv, addr);
-    if (!MEM_ACCESS_FAULTED())
+    if (ir->rd && !MEM_ACCESS_FAULTED())
         rv->X[ir->rd] = value;
 })
 
@@ -396,7 +397,7 @@ RVOP(lhu, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
     const uint32_t value = MEM_READ_S(rv, addr);
-    if (!MEM_ACCESS_FAULTED())
+    if (ir->rd && !MEM_ACCESS_FAULTED())
         rv->X[ir->rd] = value;
 })
 

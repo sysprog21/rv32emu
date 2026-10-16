@@ -115,6 +115,9 @@ jobs:
         artifacts: elf linux-image doom
         cache-suffix: host-${{ matrix.compiler }}
 
+    - name: Check system benchmark runners
+      run: python3 -m unittest discover -s tests -p 'test_*bench*.py'
+
     - name: Build with various optimization levels
       run: |
             .ci/build-opt-levels.sh defconfig

@@ -3574,7 +3574,11 @@ static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
     if (unlikely(freq >= LOOP_THRESHOLD && block->has_loops))
         return true;
     /* using frequency exceeds predetermined threshold */
+#if RV32_HAS(SYSTEM_MMIO) && !RV32_HAS(T2C)
+    if (unlikely(freq >= 1024))
+#else
     if (unlikely(freq >= THRESHOLD))
+#endif
         return true;
     return false;
 }

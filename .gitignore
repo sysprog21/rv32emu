@@ -62,3 +62,6 @@ tests/scimark2/
 __pycache__/
 src/minimal_dtb.h
 src/rv32emu_config.h
+
+build/system-bench/
+build/linux-bench/

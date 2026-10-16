@@ -360,6 +360,16 @@ check-rvv-smoke: $(BIN)
 	$(Q)$(CROSS_COMPILE)gcc -march=rv32imfv_zicsr -mabi=ilp32f -nostdlib -static \
 	    tests/rvv-smoke.S -o $(OUT)/rvv-smoke.elf
 	$(call check-test, , $(OUT)/rvv-smoke.elf, rvv-smoke.elf, tail -n 1,$(EXPECTED_rvv_smoke))
+
+# Like jit-misalign, rvv-trap installs a machine-mode trap vector, so it needs
+# a user-mode emulator with Zicsr.
+ifneq ($(CONFIG_SYSTEM),y)
+ifeq ($(CONFIG_Zicsr),y)
+EXPECTED_rvv-trap = RVV trap OK
+CHECK_TARGETS += check-rvv-trap
+$(eval $(call guest-asm-check-target,rvv-trap,rv32imv_zicsr))
+endif
+endif
 endif
 check: $(CHECK_TARGETS)
 

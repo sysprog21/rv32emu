@@ -494,17 +494,23 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
     }
 }
 
-/* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
+/*
+ * CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
  * zero-extends the value to XLEN bits, and then writes it to register rd.
  * The initial value in rs1 is written to the CSR.
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
+ *
+ * CSR helpers return false for missing entries, leaving result unchanged.
+ * Callers save PC/cycle and raise ILLEGAL_INSN before rd writeback.
+ * TODO: RVV read-only traps still return success and allow rd writeback.
  */
-static uint32_t csr_csrrw(riscv_t *rv,
-                          uint32_t csr,
-                          uint32_t val,
-                          uint64_t cycle)
+static inline bool csr_csrrw(riscv_t *rv,
+                             uint32_t csr,
+                             uint32_t val,
+                             uint64_t cycle,
+                             uint32_t *result)
 {
     csr_sync_cycle(rv, csr, cycle);
 #if RV32_HAS(EXT_V)
@@ -514,15 +520,17 @@ static uint32_t csr_csrrw(riscv_t *rv,
          * target is a read-only V CSR. */
         if (rvv_csr_is_read_only(csr)) {
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-            return 0;
+            *result = 0;
+            return true;
         }
         rvv_csr_write(rv, csr, val);
-        return rvv_out;
+        *result = rvv_out;
+        return true;
     }
 #endif
     uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
+    if (unlikely(!c))
+        return false;
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
@@ -554,14 +562,16 @@ static uint32_t csr_csrrw(riscv_t *rv,
 #endif
 #endif
 
-    return out;
+    *result = out;
+    return true;
 }
 
 /* perform csrrs (atomic read and set) */
-static uint32_t csr_csrrs(riscv_t *rv,
-                          uint32_t csr,
-                          uint32_t val,
-                          uint64_t cycle)
+static inline bool csr_csrrs(riscv_t *rv,
+                             uint32_t csr,
+                             uint32_t val,
+                             uint64_t cycle,
+                             uint32_t *result)
 {
     csr_sync_cycle(rv, csr, cycle);
 #if RV32_HAS(EXT_V)
@@ -576,16 +586,18 @@ static uint32_t csr_csrrs(riscv_t *rv,
         if (val) {
             if (rvv_csr_is_read_only(csr)) {
                 SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-                return 0;
+                *result = 0;
+                return true;
             }
             rvv_csr_write(rv, csr, rvv_out | val);
         }
-        return rvv_out;
+        *result = rvv_out;
+        return true;
     }
 #endif
     uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
+    if (unlikely(!c))
+        return false;
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
@@ -604,17 +616,19 @@ static uint32_t csr_csrrs(riscv_t *rv,
         mmu_tlb_flush_all(rv);
 #endif
 
-    return out;
+    *result = out;
+    return true;
 }
 
 /* perform csrrc (atomic read and clear)
  * Read old value of CSR, zero-extend to XLEN bits, write to rd.
  * Read value from rs1, use as bit mask to clear bits in CSR.
  */
-static uint32_t csr_csrrc(riscv_t *rv,
-                          uint32_t csr,
-                          uint32_t val,
-                          uint64_t cycle)
+static inline bool csr_csrrc(riscv_t *rv,
+                             uint32_t csr,
+                             uint32_t val,
+                             uint64_t cycle,
+                             uint32_t *result)
 {
     csr_sync_cycle(rv, csr, cycle);
 #if RV32_HAS(EXT_V)
@@ -624,16 +638,18 @@ static uint32_t csr_csrrc(riscv_t *rv,
         if (val) {
             if (rvv_csr_is_read_only(csr)) {
                 SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-                return 0;
+                *result = 0;
+                return true;
             }
             rvv_csr_write(rv, csr, rvv_out & ~val);
         }
-        return rvv_out;
+        *result = rvv_out;
+        return true;
     }
 #endif
     uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
+    if (unlikely(!c))
+        return false;
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
@@ -652,8 +668,10 @@ static uint32_t csr_csrrc(riscv_t *rv,
         mmu_tlb_flush_all(rv);
 #endif
 
-    return out;
+    *result = out;
+    return true;
 }
+
 #endif
 
 #if RV32_HAS(GDBSTUB)
@@ -4122,6 +4140,14 @@ static void _trap_handler(riscv_t *rv)
                                         &rv->csr_sepc);
                 return;
             }
+#else
+            if ((cause & (1U << 31)) == 0) {
+                rv_log_fatal("Exception %u at 0x%08x without a trap vector",
+                             cause, rv->PC);
+                PRIV(rv)->exit_code = EXIT_FAILURE;
+                rv->halt = true;
+                return;
+            }
 #endif
             /* For system mode without trap vector, restore PC from sepc
              * and clear trap_cnt to continue execution. This handles
@@ -4144,13 +4170,23 @@ static void _trap_handler(riscv_t *rv)
         rv->csr_mepc = rv->PC;
         if (!rv->csr_mtvec) { /* in case CSR is not configured */
 #if RV32_HAS(SYSTEM)
-            /* For system mode without trap vector, restore PC from mepc
-             * and clear trap_cnt to continue execution. This handles
-             * spurious interrupts during early boot before handlers are set.
+            /*
+             * For interrupts in system mode without a trap vector, restore
+             * PC from mepc and decrement trap_cnt to continue execution.
+             * This handles spurious interrupts during early boot before
+             * handlers are set.
              */
             rv->PC = rv->csr_mepc;
             if (rv->trap_cnt)
                 rv->trap_cnt--;
+#if !RV32_HAS(ELF_LOADER)
+            if ((cause & (1U << 31)) == 0) {
+                rv_log_fatal("Exception %u at 0x%08x without a trap vector",
+                             cause, rv->PC);
+                PRIV(rv)->exit_code = EXIT_FAILURE;
+                rv->halt = true;
+            }
+#endif
 #else
             rv_trap_default_handler(rv, cause, rv->csr_mtval, &rv->csr_mepc);
 #endif
@@ -4164,9 +4200,8 @@ static void _trap_handler(riscv_t *rv)
         break;
     /* VECTORED: Asynchronous traps set PC to base + 4 * code */
     case 1:
-        /* MSB of code is used to indicate whether the trap is interrupt
-         * or exception, so it is not considered as the 'real' code */
-        rv->PC = base + 4 * (cause & MASK(31));
+        /* Synchronous exceptions enter BASE in either mode. */
+        rv->PC = base + ((cause >> 31) ? 4 * (cause & MASK(31)) : 0);
         break;
     }
     IIF(RV32_HAS(SYSTEM))(if (rv->trap_cnt) __trap_handler(rv);, )

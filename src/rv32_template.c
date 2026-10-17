@@ -242,43 +242,39 @@ RVOP(jalr, {
     (type) x cond (type) y
 /* clang-format on */
 
-#define BRANCH_FUNC(type, cond)                                             \
-    IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                        \
-    if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {          \
-        IIF(RV32_HAS(SYSTEM))(                                              \
-            {                                                               \
-                if (!rv->trap_cnt) {                                        \
-                    is_branch_taken = false;                                \
-                }                                                           \
-            },                                                              \
-            is_branch_taken = false;);                                      \
-        struct rv_insn *untaken = ir->branch_untaken;                       \
-        if (!untaken)                                                       \
-            goto nextop;                                                    \
-        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(untaken, PC + 4, nextop);, );  \
-        PC += 4;                                                            \
-        IIF(RV32_HAS(SYSTEM))(                                              \
-            if (!rv->trap_cnt) RVOP_CHAIN_TAIL(rv, untaken, cycle, PC);, ); \
-        RVOP_NATIVE_BRANCH_TAIL(rv, untaken, cycle, PC);                    \
-        goto end_op;                                                        \
-    }                                                                       \
-    IIF(RV32_HAS(SYSTEM))(                                                  \
-        {                                                                   \
-            if (!rv->trap_cnt) {                                            \
-                is_branch_taken = true;                                     \
-            }                                                               \
-        },                                                                  \
-        is_branch_taken = true;);                                           \
-    PC += ir->imm;                                                          \
-    /* check instruction misaligned */                                      \
-    IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););   \
-    struct rv_insn *taken = ir->branch_taken;                               \
-    if (taken) {                                                            \
-        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(taken, PC, end_op);, );        \
-        IIF(RV32_HAS(SYSTEM))(                                              \
-            if (!rv->trap_cnt) RVOP_CHAIN_TAIL(rv, taken, cycle, PC);, );   \
-        RVOP_NATIVE_BRANCH_TAIL(rv, taken, cycle, PC);                      \
-    }                                                                       \
+#define BRANCH_FUNC(type, cond)                                            \
+    IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                       \
+    if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {         \
+        IIF(RV32_HAS(SYSTEM))(                                             \
+            {                                                              \
+                if (!rv->trap_cnt) {                                       \
+                    is_branch_taken = false;                               \
+                }                                                          \
+            },                                                             \
+            is_branch_taken = false;);                                     \
+        struct rv_insn *untaken = ir->branch_untaken;                      \
+        if (!untaken)                                                      \
+            goto nextop;                                                   \
+        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(untaken, PC + 4, nextop);, ); \
+        PC += 4;                                                           \
+        RVOP_NATIVE_BRANCH_TAIL(rv, untaken, cycle, PC);                   \
+        goto end_op;                                                       \
+    }                                                                      \
+    IIF(RV32_HAS(SYSTEM))(                                                 \
+        {                                                                  \
+            if (!rv->trap_cnt) {                                           \
+                is_branch_taken = true;                                    \
+            }                                                              \
+        },                                                                 \
+        is_branch_taken = true;);                                          \
+    PC += ir->imm;                                                         \
+    /* check instruction misaligned */                                     \
+    IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););  \
+    struct rv_insn *taken = ir->branch_taken;                              \
+    if (taken) {                                                           \
+        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(taken, PC, end_op);, );       \
+        RVOP_NATIVE_BRANCH_TAIL(rv, taken, cycle, PC);                     \
+    }                                                                      \
     goto end_op;
 
 /* In RV32I and RV64I, if the branch is taken, set pc = pc + offset, where
@@ -356,37 +352,53 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 #define MEM_ACCESS_FAULTED() false
 #endif
 
+/* Inline fault handling may switch tasks or deliver a signal. Commit a load
+ * only when it resumed the access; its placeholder must not overwrite the
+ * register state restored by the handler. Loads to x0 still perform the access
+ * but discard its result.
+ */
+
 /* LB: Load Byte */
 RVOP(lb, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    rv->X[ir->rd] = sign_extend_b(MEM_READ_B(rv, addr));
+    const uint32_t value = sign_extend_b(MEM_READ_B(rv, addr));
+    if (ir->rd && !MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* LH: Load Halfword */
 RVOP(lh, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-    rv->X[ir->rd] = sign_extend_h(MEM_READ_S(rv, addr));
+    const uint32_t value = sign_extend_h(MEM_READ_S(rv, addr));
+    if (ir->rd && !MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* LW: Load Word */
 RVOP(lw, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (ir->rd && !MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* LBU: Load Byte Unsigned */
 RVOP(lbu, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    rv->X[ir->rd] = MEM_READ_B(rv, addr);
+    const uint32_t value = MEM_READ_B(rv, addr);
+    if (ir->rd && !MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* LHU: Load Halfword Unsigned */
 RVOP(lhu, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-    rv->X[ir->rd] = MEM_READ_S(rv, addr);
+    const uint32_t value = MEM_READ_S(rv, addr);
+    if (ir->rd && !MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* There are 3 types of stores: byte, halfword, and word-sized. Unlike loads,
@@ -542,7 +554,19 @@ RVOP(ebreak, {
 /* WFI: Wait for Interrupt */
 RVOP(wfi, {
     PC += 4;
-    /* FIXME: Implement */
+#if RV32_HAS(SYSTEM_MMIO)
+    /* Fast-forward idle guests to the enabled timer compare. A locally enabled
+     * pending interrupt must resume WFI regardless of the global SIE bit.
+     */
+    vm_attr_t *attr = PRIV(rv);
+    if (!(rv->csr_sip & rv->csr_sie) && (rv->csr_sie & RV_INT_STI) &&
+        attr->timer > rv->csr_cycle + rv->timer_offset) {
+        cycle = attr->timer - rv->timer_offset;
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return true;
+    }
+#endif
     goto end_op;
 })
 
@@ -1104,7 +1128,9 @@ RVOP(flw, {
     /* copy into the float register */
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->F[ir->rd].v = value;
 })
 
 /* FSW */
@@ -1340,7 +1366,9 @@ RVOP(caddi4spn, { rv->X[ir->rd] = rv->X[rv_reg_sp] + (uint16_t) ir->imm; })
 RVOP(clw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* C.SW stores a 32-bit value in register rs2' to memory. It computes an
@@ -1554,7 +1582,9 @@ RVOP(cslli, { rv->X[ir->rd] <<= (uint8_t) ir->imm; })
 RVOP(clwsp, {
     const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->X[ir->rd] = value;
 })
 
 /* C.JR */
@@ -1612,7 +1642,9 @@ RVOP(cswsp, {
 RVOP(cflwsp, {
     const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->F[ir->rd].v = value;
 })
 
 /* C.FSWSP */
@@ -1630,7 +1662,9 @@ RVOP(cfswsp, {
 RVOP(cflw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
+    if (!MEM_ACCESS_FAULTED())
+        rv->F[ir->rd].v = value;
 })
 
 /* C.FSW */

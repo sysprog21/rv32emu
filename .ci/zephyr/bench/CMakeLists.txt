@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+cmake_minimum_required(VERSION 3.28.0)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(zephyr_fixed_work)
+if(NOT BENCH_CASE MATCHES "^(boot|scheduling|allocation|serialization|computation)$")
+  message(FATAL_ERROR "Unknown BENCH_CASE")
+endif()
+target_compile_definitions(app PRIVATE BENCH_CASE="${BENCH_CASE}")
+target_sources(app PRIVATE src/main.c src/${BENCH_CASE}.c)
+if(BENCH_CASE STREQUAL "serialization")
+  list(APPEND CMAKE_MODULE_PATH ${ZEPHYR_BASE}/modules/nanopb)
+  include(nanopb)
+  zephyr_nanopb_sources(app proto/simple.proto)
+endif()
+
+if(BENCH_CASE STREQUAL "computation")
+  target_include_directories(app PRIVATE coremark ${COREMARK_DIR})
+  foreach(source core_list_join core_matrix core_state core_util core_main)
+    target_sources(app PRIVATE ${COREMARK_DIR}/${source}.c)
+  endforeach()
+  set_source_files_properties(${COREMARK_DIR}/core_main.c PROPERTIES
+    COMPILE_DEFINITIONS "main=unused_coremark_main")
+endif()

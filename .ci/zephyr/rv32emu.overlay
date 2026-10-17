@@ -1,0 +1,24 @@
+/* Retarget qemu_riscv32 for rv32emu's S-mode and built-in SBI. */
+/delete-node/ &ram0;
+/ {
+    chosen { zephyr,sram = &sram; };
+    cpus {
+        riscv,privilege-modes = "m", "s", "u";
+        riscv,isa-extensions = "i", "m", "a", "c", "zicsr", "zifencei";
+        timebase-frequency = <65000000>;
+    };
+    sram: memory@0 {
+        device_type = "memory";
+        reg = <0x0 0x10000000>;
+    };
+};
+&uart0 {
+    reg = <0xF4000000 0x100>;
+    clock-frequency = <5000000>;
+    interrupts = <1 1>;
+};
+&plic {
+    reg = <0xF0000000 0x04000000>;
+    riscv,ndev = <31>;
+    interrupts-extended = <&hlic0 9>;
+};

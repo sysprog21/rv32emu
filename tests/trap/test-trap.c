@@ -9,6 +9,7 @@
  * fetch so handler code cannot hide an incorrect entry address.
  */
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "mpool.h"
 #include "riscv_private.h"
@@ -75,7 +76,9 @@ static void check_route(unsigned privilege,
 static void check_unconfigured(unsigned privilege, uint32_t cause, bool halt)
 {
     riscv_t cpu = {0};
+    vm_attr_t attr = {.exit_code = EXIT_SUCCESS};
     riscv_t *rv = &cpu;
+    rv->data = &attr;
     rv->priv_mode = privilege;
     rv->PC = FAULT_PC;
     rv->io.mem_ifetch = stop_at_handler;
@@ -92,6 +95,28 @@ static void check_unconfigured(unsigned privilege, uint32_t cause, bool halt)
         failures++;
         fprintf(stderr, "FAIL unset vector privilege=%u cause=%08x halt=%u\n",
                 privilege, cause, rv_has_halted(rv));
+    }
+}
+
+/* No-vector halts and early-boot interrupts are emulator policies. */
+static void check_exit_status(unsigned privilege, uint32_t cause, bool fatal)
+{
+    riscv_t cpu = {0};
+    vm_attr_t attr = {.exit_code = EXIT_SUCCESS};
+    riscv_t *rv = &cpu;
+    rv->data = &attr;
+    rv->priv_mode = privilege;
+    rv->PC = FAULT_PC;
+    rv->io.on_trap = trap_handler;
+    rv->csr_medeleg = 1U << BREAKPOINT;
+    rv->csr_mideleg = 1U << 5;
+    SET_CAUSE_AND_TVAL_THEN_TRAP(rv, cause, 0);
+    cases++;
+    if (rv_has_halted(rv) != fatal ||
+        attr.exit_code != (fatal ? EXIT_FAILURE : EXIT_SUCCESS)) {
+        failures++;
+        fprintf(stderr, "FAIL exit status privilege=%u cause=%08x status=%d\n",
+                privilege, cause, attr.exit_code);
     }
 }
 #endif
@@ -119,6 +144,17 @@ int main(void)
         for (unsigned c = 0; c < 5; c++)
             check_unconfigured(privileges[p], inputs[c].cause,
                                inputs[c].halt_without_vector);
+    for (unsigned p = 1; p < 3; p++) {
+        check_exit_status(privileges[p], BREAKPOINT, true);
+        check_exit_status(privileges[p], 0x80000005U, false);
+    }
+    riscv_t cpu = {0};
+    vm_attr_t attr = {.exit_code = EXIT_SUCCESS};
+    cpu.data = &attr;
+    rv_halt(&cpu);
+    cases++;
+    if (!rv_has_halted(&cpu) || attr.exit_code != EXIT_SUCCESS)
+        failures++;
 #endif
     printf("Trap routing: %u cases, %u failures\n", cases, failures);
     return (failures != 0) ? 1 : 0;

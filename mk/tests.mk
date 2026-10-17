@@ -61,6 +61,17 @@ $(eval $(call run-test-simple,trap))
 tests check: run-test-trap
 endif
 
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(CONFIG_BUILD_WASM),y)
+.PHONY: check-unhandled-exit
+check-unhandled-exit: $(BIN) tests/test-unhandled-exit.py
+	$(Q)python3 tests/test-unhandled-exit.py $(BIN)
+tests check: check-unhandled-exit
+endif
+endif
+endif
+
 # Integration Tests (run emulator with test programs)
 
 LOG_FILTER := sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'

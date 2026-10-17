@@ -4367,6 +4367,7 @@ static void _trap_handler(riscv_t *rv)
             if ((cause & (1U << 31)) == 0) {
                 rv_log_fatal("Exception %u at 0x%08x without a trap vector",
                              cause, rv->PC);
+                PRIV(rv)->exit_code = EXIT_FAILURE;
                 rv->halt = true;
                 return;
             }
@@ -4406,6 +4407,7 @@ static void _trap_handler(riscv_t *rv)
             if ((cause & (1U << 31)) == 0) {
                 rv_log_fatal("Exception %u at 0x%08x without a trap vector",
                              cause, rv->PC);
+                PRIV(rv)->exit_code = EXIT_FAILURE;
                 rv->halt = true;
             }
 #endif

@@ -316,6 +316,11 @@ jobs:
         llvm: ${{ matrix.compiler == 'clang' }}
         cache-suffix: boot-${{ matrix.compiler }}-${{ matrix.boot_type }}
 
+    - name: No-ELF exit-status regressions (${{ matrix.boot_type }})
+      run: |
+            make distclean && make ${{ matrix.defconfig }}
+            make ${{ matrix.make_flags }} run-test-trap check-unhandled-exit $PARALLEL
+
     - name: boot Linux kernel test (ext4 rootfs) (${{ matrix.boot_type }})
       env:
         BOOT_TIMEOUT: ${{ matrix.timeout }}

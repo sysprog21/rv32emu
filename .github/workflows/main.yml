@@ -287,7 +287,6 @@ jobs:
       with:
         compiler: ${{ matrix.compiler }}
         llvm: ${{ matrix.compiler == 'clang' }}
-        artifacts: linux-image
         cache-suffix: boot-${{ matrix.compiler }}-${{ matrix.boot_type }}
 
     - name: boot Linux kernel test (ext4 rootfs) (${{ matrix.boot_type }})
@@ -302,6 +301,8 @@ jobs:
             fi
             .ci/boot-linux-test.sh
     - name: boot Linux kernel test (initrd rootfs) (${{ matrix.boot_type }})
+      # Run even when the ext4 boot failed, so one rootfs does not hide the other.
+      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
       env:
         BOOT_TIMEOUT: ${{ matrix.timeout }}
       run: |
@@ -427,7 +428,7 @@ jobs:
     name: macOS ${{ matrix.compiler }}
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -446,7 +447,7 @@ jobs:
        with:
          compiler: ${{ matrix.compiler }}
          riscv-toolchain: 'true'
-         artifacts: elf linux-image doom
+         artifacts: elf doom
          cache-suffix: host-${{ matrix.compiler }}
 
      - name: check + tests
@@ -479,33 +480,54 @@ jobs:
              make distclean && make interpreter_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
              make distclean && make jit_defconfig && make ENABLE_UBSAN=1 check $PARALLEL
 
-     - name: boot Linux kernel test (ext4 rootfs)
-       run: |
-             make distclean && make system_interpreter_defconfig && make INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh
-             make clean
+  boot-tests-macos-arm64:
+    name: macOS ${{ matrix.compiler }} boot (${{ matrix.boot_type }})
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 45
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc-15, clang]
+        boot_type: [interpreter, jit]
+        include:
+          - boot_type: interpreter
+            defconfig: system_interpreter_defconfig
+            timeout: 50
+          - boot_type: jit
+            defconfig: system_defconfig
+            make_flags: ENABLE_MOP_FUSION=0
+            timeout: 180  # JIT under macOS load has flaked at 90s
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+     - uses: actions/checkout@v7
+       with:
+         submodules: "true"
 
-     - name: boot Linux kernel test (initrd rootfs)
-       run: |
-             make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 $PARALLEL && make artifact $PARALLEL
-             .ci/boot-linux-test.sh "initrd"
-             make clean
+     - name: Set up build environment
+       id: setup
+       uses: ./.github/actions/setup-build
+       with:
+         compiler: ${{ matrix.compiler }}
+         cache-suffix: boot-macos-${{ matrix.compiler }}-${{ matrix.boot_type }}
 
-     - name: boot Linux kernel test (ext4 rootfs) (JIT)
+     - name: boot Linux kernel test (ext4 rootfs) (${{ matrix.boot_type }})
        env:
-         BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
+         BOOT_TIMEOUT: ${{ matrix.timeout }}
        run: |
-             make distclean && make system_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
+             make distclean && make ${{ matrix.defconfig }} && make INITRD_SIZE=32 ${{ matrix.make_flags }} $PARALLEL && make artifact $PARALLEL
              .ci/boot-linux-test.sh
-             make clean
 
-     - name: boot Linux kernel test (initrd rootfs) (JIT)
+     - name: boot Linux kernel test (initrd rootfs) (${{ matrix.boot_type }})
+       # Run even when the ext4 boot failed, so one rootfs does not hide the other.
+       if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
        env:
-         BOOT_TIMEOUT: 180  # JIT under macOS load has flaked at 90s
+         BOOT_TIMEOUT: ${{ matrix.timeout }}
        run: |
-             make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ENABLE_JIT=1 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
+             make distclean && make ${{ matrix.defconfig }} && make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ${{ matrix.make_flags }} $PARALLEL && make artifact $PARALLEL
              .ci/boot-linux-test.sh "initrd"
-             make clean
 
   macOS-arm64-feature-disable:
     name: macOS ${{ matrix.compiler }} feature disable

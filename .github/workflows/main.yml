@@ -287,7 +287,6 @@ jobs:
       with:
         compiler: ${{ matrix.compiler }}
         llvm: ${{ matrix.compiler == 'clang' }}
-        artifacts: linux-image
         cache-suffix: boot-${{ matrix.compiler }}-${{ matrix.boot_type }}
 
     - name: boot Linux kernel test (ext4 rootfs) (${{ matrix.boot_type }})
@@ -512,7 +511,6 @@ jobs:
        uses: ./.github/actions/setup-build
        with:
          compiler: ${{ matrix.compiler }}
-         artifacts: linux-image
          cache-suffix: boot-macos-${{ matrix.compiler }}-${{ matrix.boot_type }}
 
      - name: boot Linux kernel test (ext4 rootfs) (${{ matrix.boot_type }})

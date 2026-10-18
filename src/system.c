@@ -113,6 +113,30 @@ void mmu_tlb_flush_all(riscv_t *rv)
 {
     memset(rv->dtlb, 0, sizeof(rv->dtlb));
     memset(rv->itlb, 0, sizeof(rv->itlb));
+    memset(rv->tlb_super_slices, 0, sizeof(rv->tlb_super_slices));
+}
+
+/* The VPN of a TLB entry; iTLB tags carry ITLB_EXEC_TAG. */
+static inline uint32_t tlb_entry_vpn(const tlb_entry_t *entry)
+{
+    return entry->vpn & ~ITLB_EXEC_TAG;
+}
+
+/* The 4 MiB region of a TLB entry. */
+static inline uint32_t tlb_entry_region(const tlb_entry_t *entry)
+{
+    return tlb_entry_vpn(entry) >> 10;
+}
+
+/* Invalidate a valid entry. An iTLB hit compares the tagged VPN alone, so the
+ * tag goes with valid; dTLB VPNs never carry it.
+ */
+static inline void tlb_invalidate(riscv_t *rv, tlb_entry_t *entry)
+{
+    if (entry->level == TLB_PAGE_LEVEL_SUPER)
+        rv->tlb_super_slices[tlb_entry_region(entry)]--;
+    entry->valid = 0;
+    entry->vpn &= ~ITLB_EXEC_TAG;
 }
 
 void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr)
@@ -121,11 +145,93 @@ void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr)
     uint32_t idx = vpn & TLB_MASK;
 
     if (rv->dtlb[idx].valid && rv->dtlb[idx].vpn == vpn)
-        rv->dtlb[idx].valid = 0;
+        tlb_invalidate(rv, &rv->dtlb[idx]);
 
-    if (rv->itlb[idx].valid && rv->itlb[idx].vpn == vpn)
-        rv->itlb[idx].valid = 0;
+    if (rv->itlb[idx].valid && tlb_entry_vpn(&rv->itlb[idx]) == vpn)
+        tlb_invalidate(rv, &rv->itlb[idx]);
+
+    /* The leaf PTE for vaddr may be a 4 MiB superpage, which both TLBs cache
+     * as separate 4 KiB slices. Flushing vaddr orders updates to that leaf,
+     * so drop every cached slice of the superpage that contains it.
+     */
+    const uint32_t vpn1 = vpn >> 10;
+    for (int i = 0; i < TLB_SIZE && rv->tlb_super_slices[vpn1]; i++) {
+        tlb_entry_t *entries[] = {&rv->dtlb[i], &rv->itlb[i]};
+        for (int t = 0; t < 2; t++) {
+            if (entries[t]->valid &&
+                entries[t]->level == TLB_PAGE_LEVEL_SUPER &&
+                tlb_entry_region(entries[t]) == vpn1)
+                tlb_invalidate(rv, entries[t]);
+        }
+    }
 }
+
+static inline void bit_set(uint32_t *map, uint32_t i)
+{
+    map[i / 32] |= UINT32_C(1) << (i % 32);
+}
+
+static inline bool bit_test(const uint32_t *map, uint32_t i)
+{
+    return map[i / 32] & (UINT32_C(1) << (i % 32));
+}
+
+#if !RV32_HAS(JIT)
+static inline uint32_t code_page_slot(uint32_t vpn)
+{
+    return (vpn ^ (vpn >> 13)) & (CODE_PAGE_FILTER_BITS - 1);
+}
+#endif
+
+static void note_code_page(riscv_t *rv, uint32_t vpn)
+{
+#if !RV32_HAS(JIT)
+    bit_set(rv->code_pages, code_page_slot(vpn));
+#endif
+    if (!rv->csr_satp)
+        return;
+    /* The fetch just filled the iTLB. Without an exact 4 KiB entry for this
+     * page, assume the code came through a superpage.
+     */
+    const tlb_entry_t *entry = &rv->itlb[vpn & TLB_MASK];
+    if (entry->valid && tlb_entry_vpn(entry) == vpn &&
+        entry->level == TLB_PAGE_LEVEL_4K)
+        return;
+    bit_set(rv->code_superpages, vpn >> 10);
+}
+
+void mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end)
+{
+    /* Visit each page of [start, end), which may wrap past the top of memory:
+     * stop at the page of its last byte rather than compare page numbers.
+     */
+    const uint32_t last = (end - 1) >> RV_PG_SHIFT;
+    for (uint32_t vpn = start >> RV_PG_SHIFT;;
+         vpn = (vpn + 1) & MASK(32 - RV_PG_SHIFT)) {
+        note_code_page(rv, vpn);
+        if (vpn == last)
+            break;
+    }
+}
+
+bool mmu_code_superpage(const riscv_t *rv, uint32_t vaddr)
+{
+    return bit_test(rv->code_superpages, vaddr >> (RV_PG_SHIFT + 10));
+}
+
+#if !RV32_HAS(JIT)
+bool mmu_may_hold_code(const riscv_t *rv, uint32_t vaddr)
+{
+    return bit_test(rv->code_pages, code_page_slot(vaddr >> RV_PG_SHIFT)) ||
+           mmu_code_superpage(rv, vaddr);
+}
+
+void mmu_forget_code(riscv_t *rv)
+{
+    memset(rv->code_pages, 0, sizeof(rv->code_pages));
+    memset(rv->code_superpages, 0, sizeof(rv->code_superpages));
+}
+#endif
 
 /* TLB lookup for data accesses (read/write).
  * Returns physical address if TLB hit, 0 if miss.
@@ -158,87 +264,59 @@ static inline uint32_t dtlb_lookup(riscv_t *rv,
         }
 
         *hit = true;
-        /* ppn stores the page-aligned physical address base */
-        uint32_t offset = (entry->level == TLB_PAGE_LEVEL_SUPER)
-                              ? (vaddr & MASK(RV_PG_SHIFT + 10))
-                              : (vaddr & MASK(RV_PG_SHIFT));
-        return entry->ppn | offset;
+        /* Tags distinguish individual 4 KiB VPNs even for superpages. */
+        return entry->ppn | (vaddr & MASK(RV_PG_SHIFT));
     }
 
     *hit = false;
     return 0;
 }
 
-/* TLB lookup for instruction fetches.
- * Returns physical address if TLB hit, 0 if miss.
- */
-static inline uint32_t itlb_lookup(riscv_t *rv, uint32_t vaddr, bool *hit)
+/* Fill a TLB entry after a successful page walk. */
+static inline void tlb_fill(riscv_t *rv,
+                            tlb_entry_t *entry,
+                            uint32_t vaddr,
+                            pte_t *pte,
+                            uint32_t level)
 {
-    uint32_t vpn = vaddr >> RV_PG_SHIFT;
-    uint32_t idx = vpn & TLB_MASK;
-    tlb_entry_t *entry = &rv->itlb[idx];
-
-    if (entry->valid && entry->vpn == vpn) {
-        /* Check execute permission */
-        if (!(entry->perm & PTE_X)) {
-            *hit = false;
-            return 0;
-        }
-
-        *hit = true;
-        /* ppn stores the page-aligned physical address base */
-        uint32_t offset = (entry->level == TLB_PAGE_LEVEL_SUPER)
-                              ? (vaddr & MASK(RV_PG_SHIFT + 10))
-                              : (vaddr & MASK(RV_PG_SHIFT));
-        return entry->ppn | offset;
+    if (entry->valid)
+        tlb_invalidate(rv, entry);
+    entry->vpn = vaddr >> RV_PG_SHIFT;
+    /* Store page-aligned physical address base (PPN extracted from PTE bits
+     * [31:10], shifted left by 12) */
+    entry->ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;
+    /* Cache the translated 4 KiB slice of a superpage. A hit still requires
+     * its exact VPN, so the remaining address offset is always 12 bits.
+     */
+    if (level == TLB_PAGE_LEVEL_SUPER) {
+        entry->ppn |= vaddr & (MASK(RV_PG_SHIFT + 10) & ~MASK(RV_PG_SHIFT));
+        rv->tlb_super_slices[vaddr >> (RV_PG_SHIFT + 10)]++;
     }
-
-    *hit = false;
-    return 0;
+    entry->pte_addr = (uint8_t *) pte - PRIV(rv)->mem->mem_base;
+    entry->perm = *pte & (PTE_R | PTE_W | PTE_X | PTE_U);
+    entry->dirty = (*pte & PTE_D) ? 1 : 0;
+    entry->level = level;
+    entry->valid = 1;
 }
 
-/* Populate dTLB entry after successful page walk */
 static inline void dtlb_populate(riscv_t *rv,
                                  uint32_t vaddr,
                                  pte_t *pte,
                                  uint32_t level)
 {
-    vm_attr_t *attr = PRIV(rv);
-    uint32_t vpn = vaddr >> RV_PG_SHIFT;
-    uint32_t idx = vpn & TLB_MASK;
-    tlb_entry_t *entry = &rv->dtlb[idx];
-
-    entry->vpn = vpn;
-    /* Store page-aligned physical address base (PPN extracted from PTE bits
-     * [31:10], shifted left by 12) */
-    entry->ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;
-    entry->pte_addr = (uint8_t *) pte - attr->mem->mem_base;
-    entry->perm = *pte & (PTE_R | PTE_W | PTE_X | PTE_U);
-    entry->dirty = (*pte & PTE_D) ? 1 : 0;
-    entry->level = level;
-    entry->valid = 1;
+    tlb_fill(rv, &rv->dtlb[(vaddr >> RV_PG_SHIFT) & TLB_MASK], vaddr, pte,
+             level);
 }
 
-/* Populate iTLB entry after successful page walk */
 static inline void itlb_populate(riscv_t *rv,
                                  uint32_t vaddr,
                                  pte_t *pte,
                                  uint32_t level)
 {
-    vm_attr_t *attr = PRIV(rv);
-    uint32_t vpn = vaddr >> RV_PG_SHIFT;
-    uint32_t idx = vpn & TLB_MASK;
-    tlb_entry_t *entry = &rv->itlb[idx];
-
-    entry->vpn = vpn;
-    /* Store page-aligned physical address base (PPN extracted from PTE bits
-     * [31:10], shifted left by 12) */
-    entry->ppn = *pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;
-    entry->pte_addr = (uint8_t *) pte - attr->mem->mem_base;
-    entry->perm = *pte & (PTE_R | PTE_W | PTE_X | PTE_U);
-    entry->dirty = (*pte & PTE_D) ? 1 : 0;
-    entry->level = level;
-    entry->valid = 1;
+    tlb_entry_t *entry = &rv->itlb[(vaddr >> RV_PG_SHIFT) & TLB_MASK];
+    tlb_fill(rv, entry, vaddr, pte, level);
+    if (entry->perm & PTE_X)
+        entry->vpn |= ITLB_EXEC_TAG;
 }
 
 #define PAGE_TABLE(ppn)                                               \
@@ -389,27 +467,8 @@ MMU_FAULT_CHECK_IMPL(write, pagefault_store)
  * - mmu_write_s
  * - mmu_write_b
  */
-extern bool need_retranslate;
-static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t vaddr)
+uint32_t __attribute__((noinline)) mmu_ifetch_miss(riscv_t *rv, uint32_t vaddr)
 {
-    /*
-     * Do not call rv->io.mem_translate() because the basic block might be
-     * retranslated and the corresponding PTE is NULL, get_ppn_and_offset()
-     * cannot work on a NULL PTE.
-     */
-
-    if (!rv->csr_satp)
-        return memory_ifetch(vaddr);
-
-    if (need_retranslate)
-        return 0;
-
-    /* Try iTLB first for fast path */
-    bool hit;
-    uint32_t paddr = itlb_lookup(rv, vaddr, &hit);
-    if (hit)
-        return memory_ifetch(paddr);
-
     /* TLB miss - do full page walk */
     uint32_t level;
     pte_t *pte = mmu_walk(rv, vaddr, &level);
@@ -442,6 +501,11 @@ static uint32_t mmu_ifetch(riscv_t *rv, const uint32_t vaddr)
 
     get_ppn_and_offset();
     return memory_ifetch(ppn | offset);
+}
+
+uint32_t rv_mmu_ifetch(riscv_t *rv, uint32_t vaddr)
+{
+    return mmu_ifetch(rv, vaddr);
 }
 
 uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
@@ -633,7 +697,7 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
 
 riscv_io_t mmu_io = {
     /* memory read interface */
-    .mem_ifetch = mmu_ifetch,
+    .mem_ifetch = rv_mmu_ifetch,
     .mem_read_w = mmu_read_w,
     .mem_read_s = mmu_read_s,
     .mem_read_b = mmu_read_b,

@@ -404,6 +404,50 @@ static int check_unsigned_division(void)
 }
 #endif
 
+#if RV32_HAS(EXT_M)
+/* A wider signed oracle also represents INT32_MIN / -1. */
+static int check_signed_division(void)
+{
+    const uint32_t values[] = {0,          1,          2,          3,
+                               0x7fffffff, 0x80000000, 0x80000001, 0xfffffffd,
+                               0xfffffffe, 0xffffffff};
+    for (unsigned a = 0; a < ARRAY_SIZE(values); a++) {
+        for (unsigned b = 0; b < ARRAY_SIZE(values); b++) {
+            const int64_t dividend = (int32_t) values[a];
+            const int64_t divisor = (int32_t) values[b];
+            const uint32_t quotient = divisor ? dividend / divisor : UINT32_MAX;
+            const uint32_t remainder = divisor ? dividend % divisor : values[a];
+            if (rv_div(dividend, values[b]) != quotient ||
+                rv_rem(dividend, values[b]) != remainder)
+                return 1;
+            for (unsigned rd = 1; rd <= 3; rd++) {
+                for (unsigned rem = 0; rem < 2; rem++) {
+                    constopt_info_t info = {0};
+                    info.is_constant[1] = info.is_constant[2] = true;
+                    info.const_val[1] = values[a];
+                    info.const_val[2] = values[b];
+                    rv_insn_t ir = {.rs1 = 1, .rs2 = 2, .rd = rd};
+                    if (rem)
+                        constopt_rem(&ir, &info);
+                    else
+                        constopt_div(&ir, &info);
+                    const uint32_t expected = rem ? remainder : quotient;
+                    if (ir.opcode != rv_insn_lui ||
+                        ir.impl != dispatch_table[rv_insn_lui] ||
+                        !info.is_constant[rd] ||
+                        info.const_val[rd] != expected ||
+                        (uint32_t) ir.imm != expected) {
+                        fprintf(stderr, "signed division folding failed\n");
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+#endif
+
 int main(void)
 {
     if (check_shifts() || check_known_operand())
@@ -417,7 +461,8 @@ int main(void)
         return 1;
 #endif
 #if RV32_HAS(EXT_M)
-    return check_mulhu() || check_unsigned_division();
+    return check_mulhu() || check_unsigned_division() ||
+           check_signed_division();
 #else
     return 0;
 #endif

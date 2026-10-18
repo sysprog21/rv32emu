@@ -331,8 +331,16 @@ typedef struct {
 #define TLB_PAGE_LEVEL_SUPER 1
 #define TLB_PAGE_LEVEL_4K 2
 
+/* VPNs occupy twenty bits; iTLB hits fold validity and execute permission
+ * into the comparison key. Invalidation must clear this tag as well.
+ */
+#define ITLB_EXEC_TAG (UINT32_C(1) << (32 - RV_PG_SHIFT))
+
+#define CODE_PAGE_FILTER_BITS 8192
+
 typedef struct {
-    uint32_t vpn, ppn; /* Virtual/Physical page number (upper 20 bits of VA) */
+    uint32_t vpn;      /* Virtual address >> 12; iTLB includes ITLB_EXEC_TAG */
+    uint32_t ppn;      /* Translated 4 KiB physical page base */
     uint32_t pte_addr; /* Physical address of PTE for A/D bit updates */
     uint8_t perm;      /* Permission bits: R(1), W(2), X(4), U(16) */
     uint8_t valid;     /* Entry validity flag */
@@ -425,6 +433,16 @@ struct riscv_internal {
      */
     riscv_word_t X[N_RV_REGS];
     riscv_word_t PC;
+
+    /* Copies of PRIV(rv)->allow_misalign and, in user mode, of the guest RAM
+     * base, set by rv_cold_reboot(). Keeping them next to the registers saves
+     * the interpreter the dependent loads through PRIV(rv)->mem on every
+     * load and store.
+     */
+    bool allow_misalign;
+#if !RV32_HAS(SYSTEM)
+    uint8_t *ram_base;
+#endif
 
     uint64_t timer; /**< strictly increment timer */
 
@@ -651,6 +669,27 @@ struct riscv_internal {
     uint32_t csr_vtype;  /* Vector data type register */
     uint32_t csr_vlenb;  /* VLEN/8 (vector register length in bytes) */
 #endif
+
+#if RV32_HAS(SYSTEM)
+    /* Cached slices of each 4 MiB superpage region in both TLBs, so a
+     * selective SFENCE.VMA scans the TLBs only when its region has any.
+     */
+    uint8_t tlb_super_slices[1U << 10];
+
+    /* 4 MiB regions holding blocks whose code may have been fetched through
+     * a superpage leaf. Flushing any address there may remap that code, so it
+     * retires the address space's blocks. JIT builds never clear these bits:
+     * blocks of other address spaces may still hold such code.
+     */
+    uint32_t code_superpages[(1U << 10) / 32];
+
+#if !RV32_HAS(JIT)
+    /* Hashed filter of pages holding interpreter blocks. A false positive only
+     * costs an unneeded block map clear.
+     */
+    uint32_t code_pages[CODE_PAGE_FILTER_BITS / 32];
+#endif
+#endif
 };
 
 #if RV32_HAS(T2C)
@@ -738,65 +777,65 @@ FORCE_INLINE bool is_compressed(uint32_t insn)
 #if !RV32_HAS(SYSTEM)
 FORCE_INLINE uint32_t ram_read_w(const riscv_t *rv, uint32_t addr)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr + sizeof(uint32_t) > attr->mem->mem_size))
         return 0;
 #endif
     uint32_t val;
-    memcpy(&val, attr->mem->mem_base + addr, sizeof(val));
+    memcpy(&val, rv->ram_base + addr, sizeof(val));
     return val;
 }
 
 FORCE_INLINE uint16_t ram_read_s(const riscv_t *rv, uint32_t addr)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr + sizeof(uint16_t) > attr->mem->mem_size))
         return 0;
 #endif
     uint16_t val;
-    memcpy(&val, attr->mem->mem_base + addr, sizeof(val));
+    memcpy(&val, rv->ram_base + addr, sizeof(val));
     return val;
 }
 
 FORCE_INLINE uint8_t ram_read_b(const riscv_t *rv, uint32_t addr)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr >= attr->mem->mem_size))
         return 0;
 #endif
-    return attr->mem->mem_base[addr];
+    return rv->ram_base[addr];
 }
 
 FORCE_INLINE void ram_write_w(const riscv_t *rv, uint32_t addr, uint32_t val)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr + sizeof(uint32_t) > attr->mem->mem_size))
         return;
 #endif
-    memcpy(attr->mem->mem_base + addr, &val, sizeof(val));
+    memcpy(rv->ram_base + addr, &val, sizeof(val));
 }
 
 FORCE_INLINE void ram_write_s(const riscv_t *rv, uint32_t addr, uint16_t val)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr + sizeof(uint16_t) > attr->mem->mem_size))
         return;
 #endif
-    memcpy(attr->mem->mem_base + addr, &val, sizeof(val));
+    memcpy(rv->ram_base + addr, &val, sizeof(val));
 }
 
 FORCE_INLINE void ram_write_b(const riscv_t *rv, uint32_t addr, uint8_t val)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr >= attr->mem->mem_size))
         return;
 #endif
-    attr->mem->mem_base[addr] = val;
+    rv->ram_base[addr] = val;
 }
 #endif /* !RV32_HAS(SYSTEM) */

@@ -11,8 +11,9 @@ _start:
     li s1, 20000
 loop:
     li t1, 0x89abcdef
-    /* AArch64 unscaled displacement limits and their fallback neighbors. */
-    .irp offset, -257, -256, -255, 254, 255, 256
+    /* AArch64 unscaled and x86 disp8 boundaries, including zero. */
+    .irp offset, -257, -256, -255, -129, -128, -127, -1, 0, 1, \
+                 126, 127, 128, 254, 255, 256
     sb t1, \offset(s0)
     lbu t2, \offset(s0)
     li t3, 0xef
@@ -20,6 +21,24 @@ loop:
     lb t2, \offset(s0)
     li t3, -17
     bne t2, t3, fail
+    .endr
+    /* Immediate zero stores must place their data after the selected
+     * displacement, including disp0 and either side of the disp8 boundary.
+     */
+    .irp offset, -129, -128, 0, 127, 128
+    sb zero, \offset(s0)
+    lbu t2, \offset(s0)
+    bnez t2, fail
+    .endr
+    .irp offset, -130, -128, 0, 126, 128
+    sh zero, \offset(s0)
+    lhu t2, \offset(s0)
+    bnez t2, fail
+    .endr
+    .irp offset, -132, -128, 0, 124, 128
+    sw zero, \offset(s0)
+    lw t2, \offset(s0)
+    bnez t2, fail
     .endr
     sw t1, -2048(s0)
     lw t2, -2048(s0)

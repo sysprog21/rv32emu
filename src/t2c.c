@@ -774,9 +774,10 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
      *   5. riscv_user_t data (pointer, 8 bytes)
      *   6. riscv_io_t io (function pointers)
      *
-     * Fields beyond this prefix (for example csr_cycle, csr_satp, jit_cache,
-     * inline_cache, and dtlb) are accessed via byte offsets from the real rv
-     * base pointer, not via typed inbounds GEPs on this truncated struct.
+     * This prefix is nominal: riscv_internal has more fields between them
+     * (allow_misalign and ram_base follow PC, for example). Every access,
+     * X[] and PC included, uses offsetof() from the real rv base pointer,
+     * not typed inbounds GEPs on this truncated struct.
      */
     LLVMTypeRef io_members[] = {
         LLVMPointerType(LLVMVoidType(), 0), LLVMPointerType(LLVMVoidType(), 0),

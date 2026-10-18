@@ -31,6 +31,9 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#include <cpuid.h>
+#endif
 #if defined(__APPLE__)
 #include <libkern/OSCacheControl.h>
 #if defined(__aarch64__)
@@ -60,11 +63,11 @@
  *
  * The fast path also assumes:
  *   - TLB_SIZE is a power of two so VPN -> index is a simple AND.
- *   - T1 handles both TLB_PAGE_LEVEL_4K and TLB_PAGE_LEVEL_SUPER inline:
- *     the offset mask is chosen by CSEL (aarch64) / CMOVcc (x86-64) based on
- *     the level byte (12 bits for 4 KiB, 22 bits for 4 MiB).  T2C still
- *     bails to C on superpage entries — an LLVM-IR select variant showed
- *     intermittent crashes after T2C compilation, root cause not isolated.
+ *   - Each VPN tag identifies an exact 4 KiB slice. Its ppn includes the
+ *     superpage offset's bits 21:12, so both hosts use a 12-bit offset.
+ *     T2C still bails to C on superpage entries: an LLVM-IR select
+ *     variant showed intermittent crashes after T2C compilation, root cause
+ *     not isolated.
  *   - dirty == 1 on writes; clean PTE writes fall back to C so PTE_D update
  *     stays in dtlb_lookup() / mmu_translate().
  *   - paddr range is checked against memory_t mem_size to keep MMIO mappings
@@ -185,12 +188,12 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 
 /* Worst-case jump targets per instruction.  Under SYSTEM_MMIO with the
  * inline dTLB fast path enabled, a single load/store can record:
- *   - 7 fast-path gating branches (align, vpn, valid, perm, dirty for stores,
- *     level, range) patched to the slow-path label
+ *   - 6 fast-path gating branches (align, vpn, valid, perm, dirty for stores,
+ *     range) patched to the slow-path label
  *   - 1 unconditional B at the end of the fast path patched to the merge label
  *   - 4 slow-path branches (LOC_0, LOC_1, TRAP, NORMAL)
  *   - 1 implicit jump inside emit_exit
- * Total: 13.  Branch epilogues are still 5 (2x emit_jmp + 2x emit_exit +
+ * Total: 12.  Branch epilogues are still 5 (2x emit_jmp + 2x emit_exit +
  * 1x emit_jump_target_offset).  We round up to 16 for headroom.
  *
  * Each load or store also has a misaligned-access guard: the branch to its
@@ -200,6 +203,32 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 #define JUMPS_PER_INSN 16
 #define JUMPS_PER_GUARD 3
 
+/* The number of accesses in a record that may carry an alignment guard. */
+static uint32_t guarded_accesses(const rv_insn_t *ir)
+{
+    switch (ir->opcode) {
+    case rv_insn_fuse3:
+    case rv_insn_fuse4:
+        return ir->imm2;
+    case rv_insn_lh:
+    case rv_insn_lhu:
+    case rv_insn_lw:
+    case rv_insn_sh:
+    case rv_insn_sw:
+    case rv_insn_fuse11:
+    case rv_insn_fuse13:
+#if RV32_HAS(EXT_C)
+    case rv_insn_clw:
+    case rv_insn_csw:
+    case rv_insn_clwsp:
+    case rv_insn_cswsp:
+#endif
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /* Worst-case jump targets a block records, including 2 for a page-terminated
  * epilogue (emit_jmp + emit_exit).
  */
@@ -207,32 +236,8 @@ static uint32_t block_jump_budget(const block_t *block)
 {
     uint32_t n = 2;
     const rv_insn_t *ir = block->ir_head;
-    for (uint32_t i = 0; i < block->n_insn; i++, ir = block_next_ir(ir)) {
-        n += JUMPS_PER_INSN;
-        switch (ir->opcode) {
-        case rv_insn_fuse3:
-        case rv_insn_fuse4:
-            n += ir->imm2 * JUMPS_PER_GUARD;
-            break;
-        case rv_insn_lh:
-        case rv_insn_lhu:
-        case rv_insn_lw:
-        case rv_insn_sh:
-        case rv_insn_sw:
-        case rv_insn_fuse11:
-        case rv_insn_fuse13:
-#if RV32_HAS(EXT_C)
-        case rv_insn_clw:
-        case rv_insn_csw:
-        case rv_insn_clwsp:
-        case rv_insn_cswsp:
-#endif
-            n += JUMPS_PER_GUARD;
-            break;
-        default:
-            break;
-        }
-    }
+    for (uint32_t i = 0; i < block->n_insn; i++, ir = block_next_ir(ir))
+        n += JUMPS_PER_INSN + guarded_accesses(ir) * JUMPS_PER_GUARD;
     return n;
 }
 
@@ -529,6 +534,48 @@ static const int n_host_regs =
  */
 static uint8_t reg_align[N_RV_REGS];
 
+/* Group 1 ALU opcodes (x86-64 encoding): 0x81 takes an imm32, 0x83 a
+ * sign-extended imm8. On Arm64 the opcode is ignored and the ALU_* selector
+ * picks the operation.
+ */
+#define ALU_GRP1_OPCODE 0x81
+#define ALU_GRP1_IMM8_OPCODE 0x83
+
+/* ALU operation selectors for group 1 operations.
+ * On x86-64: ModR/M reg field values. On Arm64: switch case selectors
+ * in emit_alu32_imm32() that map to native instructions.
+ */
+#define ALU_ADD 0
+#define ALU_OR 1
+#define ALU_AND 4
+#define ALU_XOR 6
+
+/* Shift and rotate operation identifiers: x86-64 ModR/M reg field values,
+ * which the Arm64 emitters also accept for the shifts.
+ */
+#define SHIFT_ROL 0
+#define SHIFT_ROR 1
+#define SHIFT_SHL 4
+#define SHIFT_SHR 5
+#define SHIFT_SAR 7
+
+/* Shift opcodes (x86-64 encoding). On Arm64, emit_alu32_imm8() and
+ * emit_alu32() map SHIFT_* values to native instructions.
+ */
+#define SHIFT_IMM_OPCODE 0xc1 /* Shift by immediate */
+#define SHIFT_REG_OPCODE 0xd3 /* Shift by CL */
+
+/* Group 3 unary opcode (x86-64): NEG is /3, DIV /6, IDIV /7. */
+#define UNARY_GRP3_OPCODE 0xf7
+#define UNARY_NEG 3
+#define UNARY_DIV 6
+#define UNARY_IDIV 7
+
+/* Regions can omit an eviction store only when every path overwrites that
+ * value before a read, trap, helper, or leaf. Other translations keep all bits.
+ */
+static uint32_t spill_live_regs = UINT32_MAX;
+
 static inline void set_dirty(int reg_idx, bool is_dirty)
 {
     for (int i = 0; i < n_host_regs; i++) {
@@ -782,20 +829,46 @@ static inline void emit_modrm_reg2reg(struct jit_state *state, int r, int m)
     emit_modrm(state, 0xc0, r, m);
 }
 
+/* The ModRM mod for a memory operand: no displacement, disp8, or disp32. A
+ * base of RBP or R13 has no form without a displacement.
+ */
+static inline int x64_disp_mod(int base, int32_t d)
+{
+    if (d == 0 && (base & 7) != RBP)
+        return 0x00;
+    return (int8_t) d == d ? 0x40 : 0x80;
+}
+
+static inline void emit_disp(struct jit_state *state, int mod, int32_t d)
+{
+    if (mod == 0x40)
+        emit1(state, d);
+    else if (mod == 0x80)
+        emit4(state, d);
+}
+
 static inline void emit_modrm_and_displacement(struct jit_state *state,
                                                int r,
                                                int m,
                                                int32_t d)
 {
-    if (d == 0 && (m & 7) != RBP) {
-        emit_modrm(state, 0x00, r, m);
-    } else if ((int8_t) d == d) {
-        emit_modrm(state, 0x40, r, m);
-        emit1(state, d);
-    } else {
-        emit_modrm(state, 0x80, r, m);
-        emit4(state, d);
-    }
+    const int mod = x64_disp_mod(m, d);
+    emit_modrm(state, mod, r, m);
+    emit_disp(state, mod, d);
+}
+
+/* ModRM, SIB, and displacement for [base + index * (1 << scale) + d]. */
+static inline void emit_sib_operand(struct jit_state *state,
+                                    int r,
+                                    int base,
+                                    int index,
+                                    int scale,
+                                    int32_t d)
+{
+    const int mod = x64_disp_mod(base, d);
+    emit_modrm(state, mod, r, 4);
+    emit1(state, (scale << 6) | ((index & 7) << 3) | (base & 7));
+    emit_disp(state, mod, d);
 }
 
 static inline void emit_rex(struct jit_state *state, int w, int r, int x, int b)
@@ -1270,6 +1343,18 @@ static inline void emit_mov32(struct jit_state *state, int src, int dst)
 }
 
 #if RV32_HAS(EXT_M)
+#if defined(__x86_64__)
+/* IMUL dst, src: two-operand multiply, 32- or 64-bit. */
+static void emit_imul(struct jit_state *state, bool is64, int dst, int src)
+{
+    emit_basic_rex(state, is64, dst, src);
+    emit1(state, 0x0f);
+    emit1(state, 0xaf);
+    emit_modrm_reg2reg(state, dst, src);
+    set_dirty(dst, true);
+}
+#endif
+
 static void emit_mul32(struct jit_state *state, int lhs, int rhs, int dst)
 {
 #if defined(__x86_64__)
@@ -1279,16 +1364,58 @@ static void emit_mul32(struct jit_state *state, int lhs, int rhs, int dst)
         emit_mov32(state, lhs, dst);
     }
     /* Signed and unsigned multiplication have identical low 32 bits. */
-    emit_basic_rex(state, 0, dst, rhs);
-    emit1(state, 0x0f);
-    emit1(state, 0xaf);
-    emit_modrm_reg2reg(state, dst, rhs);
-    set_dirty(dst, true);
+    emit_imul(state, false, dst, rhs);
 #elif defined(__aarch64__)
     emit_dataproc_3source(state, false, DP3_MADD, dst, lhs, rhs, RZ);
 #endif
 }
 #endif
+
+/* Like libriscv 3f06e04e's shift_rr, keep all three operands explicit.
+ * The CPU masks 32-bit register shift counts to five bits on both hosts.
+ */
+static void emit_shift32(struct jit_state *state,
+                         int kind,
+                         int lhs,
+                         int count,
+                         int dst)
+{
+    assert(kind == SHIFT_SHL || kind == SHIFT_SHR || kind == SHIFT_SAR);
+#if defined(__x86_64__)
+    if (state->has_bmi2) {
+        /* VEX.NDS.LZ.66/F2/F3.0F38.W0 F7 /r: SHLX/SHRX/SARX.
+         * ModRM.reg is dst, ModRM.r/m is lhs, VEX.vvvv is count.
+         * BMI2 uses only GPRs, so no AVX OS state is required.
+         */
+        emit1(state, 0xc4);
+        emit1(state, (!(dst & 8) << 7) | 0x40 | (!(lhs & 8) << 5) | 2);
+        emit1(state, ((~count & 15) << 3) | (kind == SHIFT_SHL   ? 1
+                                             : kind == SHIFT_SHR ? 3
+                                                                 : 2));
+        emit1(state, 0xf7);
+        emit_modrm_reg2reg(state, dst, lhs);
+    } else {
+#if defined(_WIN32)
+        /* RCX holds rv on Windows and is outside the register allocator. */
+        emit_push(state, RCX);
+#endif
+        emit_mov(state, count, RCX);
+        if (lhs != dst)
+            emit_mov(state, lhs, dst);
+        emit_alu32(state, SHIFT_REG_OPCODE, kind, dst);
+#if defined(_WIN32)
+        emit_pop(state, RCX);
+#endif
+    }
+#elif defined(__aarch64__)
+    emit_dataproc_2source(state, false,
+                          kind == SHIFT_SHL   ? DP2_LSLV
+                          : kind == SHIFT_SHR ? DP2_LSRV
+                                              : DP2_ASRV,
+                          dst, lhs, count);
+#endif
+    set_dirty(dst, true);
+}
 
 #if defined(__x86_64__)
 /* REX.W prefix, ModRM byte, and 32-bit immediate */
@@ -1455,6 +1582,21 @@ static inline void emit_store_opcode(struct jit_state *state,
     assert(size == S8 || size == S16 || size == S32);
     emit1(state, size == S8 ? 0x88 : 0x89);
 }
+
+#if JIT_INDEXED_GUEST_MEM
+/* R12 is the pinned RAM base, so even offset zero needs no displacement.
+ * Retain the same SIB address and select its shortest signed displacement.
+ * Inspired by libriscv 7c6c877e's direct arena load/store lowering.
+ */
+static void emit_guest_indexed_operand(struct jit_state *state,
+                                       int reg,
+                                       int index,
+                                       int32_t offset)
+{
+    emit_sib_operand(state, reg, R12, index, 0, offset);
+}
+#endif
+
 #endif
 
 static inline void emit_load(struct jit_state *state,
@@ -1660,9 +1802,7 @@ static inline void emit_guest_load(struct jit_state *state,
     assert((base & 7) != RSP);
     emit_rex(state, 0, !!(dst & 8), !!(base & 8), 1);
     emit_load_opcode(state, size, sign);
-    emit_modrm(state, 0x80, dst, 4);
-    emit1(state, ((base & 7) << 3) | (R12 & 7));
-    emit4(state, offset);
+    emit_guest_indexed_operand(state, dst, base, offset);
     set_dirty(dst, true);
 #else
     int32_t displacement = emit_guest_address(state, m, base, offset);
@@ -1819,6 +1959,31 @@ static const int cycle_reg = RBP;
 static const int cycle_reg = R20;
 #endif
 
+/* The block whose records are being emitted, for unretired_after(). */
+static const block_t *cur_block;
+
+/* A block charges all its instructions on entry. A trap at pc ends it early,
+ * so the instructions after pc, which never retire, are refunded. Fused
+ * records span several 4-byte instructions, and their members trap at their
+ * own pc. Programs that read no counter are charged per chain instead.
+ */
+static uint32_t unretired_after(const riscv_t *rv, uint32_t pc)
+{
+    if (rv->jit_entry_cycles || !cur_block)
+        return 0;
+    uint32_t n = 0;
+    for (const rv_insn_t *ir = cur_block->ir_head, *next; ir; ir = next) {
+        next = ir == cur_block->ir_tail ? NULL : block_next_ir(ir);
+        const uint32_t end = next ? next->pc : cur_block->pc_end;
+        const uint32_t count = end - ir->pc > 4 ? (end - ir->pc) / 4 : 1;
+        if (pc < ir->pc)
+            n += count;
+        else if (pc < end && count > 1)
+            n += count - 1 - (pc - ir->pc) / 4;
+    }
+    return n;
+}
+
 static void emit_cycle_count(struct jit_state *state, uint32_t n)
 {
 #if defined(__x86_64__)
@@ -1835,6 +2000,27 @@ static void emit_cycle_count(struct jit_state *state, uint32_t n)
     } else {
         emit_load_imm(state, temp_imm_reg, n);
         emit_addsub_register(state, true, AS_ADD, cycle_reg, cycle_reg,
+                             temp_imm_reg);
+    }
+#endif
+}
+
+/* Subtract n from cycle_reg. */
+static void emit_cycle_refund(struct jit_state *state, uint32_t n)
+{
+#if defined(__x86_64__)
+    if (n < 0x80) {
+        emit_alu64(state, 0x83, 5, cycle_reg);
+        emit1(state, n);
+    } else {
+        emit_alu64_imm32(state, 0x81, 5, cycle_reg, n);
+    }
+#elif defined(__aarch64__)
+    if (n < 0x1000) {
+        emit_addsub_imm(state, true, AS_SUB, cycle_reg, cycle_reg, n);
+    } else {
+        emit_load_imm(state, temp_imm_reg, n);
+        emit_addsub_register(state, true, AS_SUB, cycle_reg, cycle_reg,
                              temp_imm_reg);
     }
 #endif
@@ -1930,18 +2116,34 @@ static inline void emit_exit(struct jit_state *state)
 #endif
 }
 
-#if RV32_HAS(EXT_M)
-#if defined(__x86_64__)
-static inline void emit_conditional_move(struct jit_state *state,
-                                         int src,
-                                         int dst)
+/* Materialize a comparison without a data-dependent branch on x86.
+ * Inspired by libriscv 3f06e04e's direct boolean-result lowering.
+ */
+static void emit_set_less_than(struct jit_state *state, int cond, int dst)
 {
-    emit1(state, 0x48);
+    assert(cond == JCC_JL || cond == JCC_JB);
+#if defined(__x86_64__)
+    /* REX is mandatory for SIL/DIL and the low bytes of extended registers. */
+    emit_rex(state, 0, 0, 0, !!(dst & 8));
     emit1(state, 0x0f);
-    emit1(state, 0x44);
-    emit_modrm_reg2reg(state, dst, src);
-}
+    emit1(state, 0x90 | (cond & 0xf)); /* SETL/SETB dst8 */
+    emit_modrm_reg2reg(state, 0, dst);
+    emit_rex(state, 0, !!(dst & 8), 0, !!(dst & 8));
+    emit1(state, 0x0f);
+    emit1(state, 0xb6); /* MOVZX dst32, dst8 also clears the upper 32 bits */
+    emit_modrm_reg2reg(state, dst, dst);
+    set_dirty(dst, true);
 #elif defined(__aarch64__)
+    /* CSET Wd, cond is CSINC Wd, WZR, WZR with the condition inverted. */
+    const uint32_t a64_cond = cond == JCC_JL ? COND_LT : COND_LO;
+    emit_a64(state, 0x1a800400 | (RZ << 16) | ((a64_cond ^ 1) << 12) |
+                        (RZ << 5) | dst);
+    set_dirty(dst, true);
+#endif
+}
+
+#if RV32_HAS(EXT_M)
+#if defined(__aarch64__)
 static inline void emit_conditional_move(struct jit_state *state,
                                          int rd,
                                          int rn,
@@ -2001,150 +2203,98 @@ static void muldivmod(struct jit_state *state,
 {
 #if defined(__x86_64__)
     bool mul = (opcode & JIT_ALU_OP_MASK) == (JIT_OP_MUL_IMM & JIT_ALU_OP_MASK);
-    bool div = (opcode & JIT_ALU_OP_MASK) == (JIT_OP_DIV_IMM & JIT_ALU_OP_MASK);
     bool mod = (opcode & JIT_ALU_OP_MASK) == (JIT_OP_MOD_IMM & JIT_ALU_OP_MASK);
-    bool is64 = (opcode & JIT_CLS_MASK) == JIT_CLS_ALU64;
 
-    /* Record the mapping status before the registers are used for other
-     * purposes, and restore the status after popping the registers.
+    if (mul) {
+        /* The operands are extended RV32 words, so their full product fits
+         * in 64 bits. Two-operand IMUL gives the same low 64 bits for every
+         * signedness combination without touching RAX or RDX.
+         */
+        emit_imul(state, true, dst, src);
+        return;
+    }
+
+    /* IDIV/DIV require EDX:EAX. Preserve unrelated cached guest registers;
+     * src is the reserved temporary and cannot alias either fixed register.
      */
     int d1 = register_map[0].dirty, d2 = register_map[2].dirty;
     int r1 = register_map[0].vm_reg_idx, r2 = register_map[2].vm_reg_idx;
-
     if (dst != RAX) {
-        unmap_vm_reg(0); /* RAX */
+        unmap_vm_reg(0);
         emit_push(state, RAX);
     }
-
     if (dst != RDX) {
-        unmap_vm_reg(2); /* RDX */
+        unmap_vm_reg(2);
         emit_push(state, RDX);
     }
+    emit_mov32(state, dst, RAX);
 
-    /*  Load the divisor into RCX */
-    emit_mov(state, src, RCX);
-
-    /* Load the dividend into RAX */
-    emit_mov(state, dst, RAX);
-
-    /* The JIT employs two different semantics for division and modulus
-     * operations. In the case of division, if the divisor is zero, the result
-     * is set to -1. For modulus operations, if the divisor is zero, the
-     * result becomes the dividend. To manage this, we first set the divisor to
-     * 1 if it is initially zero. Then, we adjust the result accordingly: for
-     * division, we set it to -1 if the original divisor was zero; for
-     * modulus, we set it to the dividend under the same condition.
+    /* Inspired by libriscv ec321244: keep zero and -1 off the native signed
+     * divide path. One unsigned comparison excludes both, including the
+     * INT32_MIN / -1 overflow. All results below are 32-bit writes, preserving
+     * the allocator's zero-extended RV32 register invariant.
      */
-
-    if (div || mod) {
-        if (sign) {
-            emit_load_imm_sext(state, RDX, -1);
-            /* compare divisor with -1 for overflow checking */
-            emit_cmp32(state, RDX, RCX);
-            /* Save the result of the comparision */
-            emit1(state, 0x9c); /* pushfq */
-        }
-        if (mod || (div && sign))
-            emit_push(state, RAX); /* Save dividend */
-
-        emit_alu32(state, 0x85, RCX, RCX);
-        /* Save the result of the test */
-        emit1(state, 0x9c); /* pushfq */
-
-        /* Set the divisor to 1 if it is zero */
-        emit_load_imm(state, RDX, 1);
-        emit_conditional_move(state, RDX, RCX);
-        if (sign) {
-            /* CQO sign-extends RAX through RDX, so IDIV sees a 128-bit
-             * dividend holding the 64-bit sign-extended operand.
-             */
-            emit_rex(state, 1, 0, 0, 0);
-            emit1(state, 0x99);
-        } else {
-            /* xor %edx,%edx */
-            emit_alu32(state, 0x31, RDX, RDX);
-        }
+    if (sign) {
+        /* LEA EDX, [src + 1]; CMP EDX, 1: divisors 0 and -1 compare below or
+         * equal.
+         */
+        emit_basic_rex(state, 0, RDX, src);
+        emit1(state, 0x8d);
+        emit_modrm_and_displacement(state, RDX, src, 1);
+        emit_cmp_imm32(state, RDX, 1);
+        emit_jcc_offset(state, JCC_JBE);
+    } else {
+        emit_cmp_imm32(state, src, 0);
+        emit_jcc_offset(state, JCC_JE);
     }
+    uint32_t exceptional = state->offset - 4;
 
-    /* A signed divide runs 64-bit over the sign-extended operands. That keeps
-     * INT_MIN / -1 representable, so the instruction cannot raise #DE, and its
-     * low half is the result RV32 defines. The overflow fixup below then
-     * agrees with it rather than correcting it.
-     */
-    if (is64 || sign)
-        emit_rex(state, 1, 0, 0, 0);
-    /* Multiply or divide */
-    emit_alu32(state, 0xf7, mul ? 4 : sign ? 7 : 6, RCX);
+    if (sign)
+        emit1(state, 0x99); /* CDQ: sign-extend EAX into EDX:EAX */
+    else
+        emit_alu32(state, 0x31, RDX, RDX);
+    emit_alu32_raw(state, UNARY_GRP3_OPCODE, sign ? UNARY_IDIV : UNARY_DIV,
+                   src);
+    emit_jcc_offset(state, JCC_JMP);
+    uint32_t done = state->offset - 4;
 
-    /* The division operation stores the remainder in RDX and the quotient
-     * in RAX.
-     */
-    if (div || mod) {
-        /* Restore the result of the test */
-        emit1(state, 0x9d); /* popfq */
-
-        /* If zero flag is set, then the divisor was zero. */
-
-        if (div) {
-            /* Set the dividend to zero if the divisor was zero. */
-            emit_load_imm_sext(state, RCX, -1);
-
-            /* Store 0 in RAX if the divisor was zero. */
-            /* Use conditional move to avoid a branch. */
-            emit_conditional_move(state, RCX, RAX);
-            if (sign) {
-                emit_pop(state, RCX);
-                /* handle DIV overflow */
-                emit1(state, 0x9d); /* popfq */
-                uint32_t jump_loc_0 = state->offset;
-                emit_jcc_offset(state, JCC_JNE);
-                emit_cmp_imm32(state, RCX, 0x80000000);
-                emit_conditional_move(state, RCX, RAX);
-                emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
-            }
-        } else {
-            /* Restore dividend to RCX */
-            emit_pop(state, RCX);
-            /* Store the dividend in RAX if the divisor was zero. */
-            /* Use conditional move to avoid a branch. */
-            emit_conditional_move(state, RCX, RDX);
-            if (sign) {
-                /* handle REM overflow */
-                emit1(state, 0x9d); /* popfq */
-                uint32_t jump_loc_0 = state->offset;
-                emit_jcc_offset(state, JCC_JNE);
-                emit_cmp_imm32(state, RCX, 0x80000000);
-                emit_load_imm(state, RCX, 0);
-                emit_conditional_move(state, RCX, RDX);
-                emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
-            }
-        }
+    emit_jump_target_offset(state, exceptional, state->offset);
+    uint32_t minus_one_done = 0;
+    if (sign) {
+        emit_cmp_imm32(state, src, 0);
+        emit_jcc_offset(state, JCC_JE);
+        uint32_t zero = state->offset - 4;
+        if (mod)
+            emit_load_imm(state, RDX, 0);
+        else
+            emit_alu32(state, UNARY_GRP3_OPCODE, UNARY_NEG,
+                       RAX); /* NEG EAX wraps INT32_MIN */
+        emit_jcc_offset(state, JCC_JMP);
+        minus_one_done = state->offset - 4;
+        emit_jump_target_offset(state, zero, state->offset);
     }
+    if (mod)
+        emit_mov32(state, RAX, RDX); /* x % 0 = x */
+    else
+        emit_load_imm(state, RAX, UINT32_MAX); /* x / 0 = -1 */
+    emit_jump_target_offset(state, done, state->offset);
+    if (sign)
+        emit_jump_target_offset(state, minus_one_done, state->offset);
 
     if (dst != RDX) {
         if (mod)
-            emit_mov(state, RDX, dst);
+            emit_mov32(state, RDX, dst);
         emit_pop(state, RDX);
         register_map[2].vm_reg_idx = r2;
         register_map[2].dirty = d2;
     }
     if (dst != RAX) {
-        if (div || mul)
-            emit_mov(state, RAX, dst);
+        if (!mod)
+            emit_mov32(state, RAX, dst);
         emit_pop(state, RAX);
         register_map[0].vm_reg_idx = r1;
         register_map[0].dirty = d1;
     }
-
-    /* The signed divide runs 64-bit, so a negative quotient or remainder
-     * arrives sign-extended, and the writeback above is a 64-bit move. A
-     * mapped guest register must hold the zero-extended 32-bit word, or a
-     * later use of it as a memory-address base adds the sign bits and lands
-     * outside the guest mapping. Narrow it here, including when the result
-     * was already in dst and no move happened.
-     */
-    if (sign && (div || mod))
-        emit_mov32(state, dst, dst);
 #elif defined(__aarch64__)
     switch (opcode) {
     case 0x2f:
@@ -2180,6 +2330,9 @@ static uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
     __UNREACHABLE;
 }
 
+/* jit_mmu_handler()'s type argument carries the refund in its upper half. */
+#define MMU_TYPE_MASK UINT32_C(0xffff)
+
 /* Slow-path entry from the JIT.
  *
  * vaddr / type / pc / vreg_idx arrive as call arguments rather than via the
@@ -2195,6 +2348,11 @@ static void jit_mmu_handler(riscv_t *rv,
                             uint32_t pc)
 {
     assert(vreg_idx < 32);
+    /* The block charged its later instructions on entry; a fault means they
+     * never retire. Refund them before the guest handler can read a counter.
+     */
+    const uint32_t refund = type >> 16;
+    type &= MMU_TYPE_MASK;
 
     uint32_t addr;
     uint32_t access_size;
@@ -2229,6 +2387,7 @@ static void jit_mmu_handler(riscv_t *rv,
      */
     rv->PC = pc;
 
+    rv->csr_cycle -= refund;
     if (type == rv_insn_lb || type == rv_insn_lh || type == rv_insn_lbu ||
         type == rv_insn_lhu || type == rv_insn_lw)
         addr = rv->io.mem_translate(rv, vaddr, R);
@@ -2246,6 +2405,7 @@ static void jit_mmu_handler(riscv_t *rv,
         rv->jit_mmu.is_mmio = 1;
         return;
     }
+    rv->csr_cycle += refund;
 
     /* Only treat as RAM if entire access range [addr, addr+size) is within
      * valid guest memory bounds. This prevents buffer overflow on multi-byte
@@ -2273,25 +2433,29 @@ static void jit_mmu_handler(riscv_t *rv,
         val = rv->X[vreg_idx];
         MMIO_WRITE();
         break;
+    /* A load into x0 still reads the device, but x0 stays zero. */
     case rv_insn_lb:
-        rv->X[vreg_idx] = (int8_t) jit_mmio_read_wrapper(rv, addr);
+        val = (int8_t) jit_mmio_read_wrapper(rv, addr);
         break;
     case rv_insn_lh:
-        rv->X[vreg_idx] = (int16_t) jit_mmio_read_wrapper(rv, addr);
+        val = (int16_t) jit_mmio_read_wrapper(rv, addr);
         break;
     case rv_insn_lw:
-        rv->X[vreg_idx] = jit_mmio_read_wrapper(rv, addr);
+        val = jit_mmio_read_wrapper(rv, addr);
         break;
     case rv_insn_lbu:
-        rv->X[vreg_idx] = (uint8_t) jit_mmio_read_wrapper(rv, addr);
+        val = (uint8_t) jit_mmio_read_wrapper(rv, addr);
         break;
     case rv_insn_lhu:
-        rv->X[vreg_idx] = (uint16_t) jit_mmio_read_wrapper(rv, addr);
+        val = (uint16_t) jit_mmio_read_wrapper(rv, addr);
         break;
     default:
         assert(NULL);
         __UNREACHABLE;
     }
+    if (type != rv_insn_sb && type != rv_insn_sh && type != rv_insn_sw &&
+        vreg_idx)
+        rv->X[vreg_idx] = val;
 }
 
 #if RV32_HAS(SYSTEM_MMIO)
@@ -2322,22 +2486,6 @@ static uint32_t emit_a64_bcond(struct jit_state *state, int cond)
     return loc;
 }
 
-/* CSEL Wd, Wn, Wm, cond — conditional select (32-bit form).
- * Wd = (cond_holds) ? Wn : Wm.  Used by the superpage path to pick the
- * offset mask without branching.  Encoding:
- *   31 30 29 28..21       20..16 15..12 11..10 9..5 4..0
- *   sf  0  0  1101_0100   Rm     cond   00      Rn   Rd    (sf=0 for 32-bit)
- */
-static void emit_a64_csel(struct jit_state *state,
-                          int cond,
-                          int rd,
-                          int rn,
-                          int rm)
-{
-    emit_a64(state, UINT32_C(0x1A800000) | ((uint32_t) rm << 16) |
-                        ((uint32_t) cond << 12) | ((uint32_t) rn << 5) |
-                        (uint32_t) rd);
-}
 #endif
 
 #if defined(__x86_64__) && !defined(_WIN32)
@@ -2379,18 +2527,6 @@ static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
     return loc;
 }
 
-/* CMOVcc r32, r/m32 — conditional move based on flags.
- *   dst = (cond_holds) ? src : dst
- * Encoded as 0F 4x /r where 4x = 0x40 + cc.  REX.R/REX.B as needed.
- */
-static void emit_x64_cmov(struct jit_state *state, uint8_t cc, int dst, int src)
-{
-    if ((dst & 8) || (src & 8))
-        emit_basic_rex(state, 0, dst, src);
-    emit1(state, 0x0f);
-    emit1(state, 0x40 | cc);
-    emit_modrm_reg2reg(state, dst, src);
-}
 #endif
 
 /* Inline dTLB fast path for a load or store.
@@ -2413,9 +2549,8 @@ static void emit_x64_cmov(struct jit_state *state, uint8_t cc, int dst, int src)
  *   - For stores: entry.dirty == 1 (so PTE_D update stays in C)
  *   - paddr + access_size <= mem_size (MMIO and bound-violators take slow path)
  *
- * Both TLB_PAGE_LEVEL_4K and TLB_PAGE_LEVEL_SUPER (4 MiB) are handled
- * inline: the offset mask is selected via CSEL/CMOVcc based on the level
- * byte, so superpage entries no longer bail to the slow path.
+ * Both ordinary pages and superpages are handled inline. Every exact VPN
+ * caches a translated 4 KiB slice, so both hosts use a twelve-bit offset.
  *
  * Aligned + same page implies no page crossing, so we do not check that.
  *
@@ -2484,8 +2619,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
      * path so we can patch them once we know the slow-path label.
      *
      * Maximum count:
-     *   1 align + 1 vpn + 1 valid + 1 perm + 1 dirty (store) + 1 level + 1
-     * range
+     *   1 align + 1 vpn + 1 valid + 1 perm + 1 dirty (store) + 1 range
      */
     uint32_t slow_branches[8];
     int n_slow = 0;
@@ -2549,29 +2683,14 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         slow_branches[n_slow++] = emit_a64_cbz(state, R24);
     }
 
-    /* Level-aware paddr compute.  level is 1 (4MB superpage) or 2 (4KB).
-     *
-     * Compute both candidate offsets (4K = vaddr & 0xFFF, super = vaddr &
-     * 0x3FFFFF) into separate registers, then CSEL based on level == 4K.
-     * Branchless to keep the hot 4K path free of an extra conditional, and
-     * dropping the previous `level != 4K → slow` bail lets superpages stay
-     * inline too.
-     *
-     * w10 = 4K offset = vaddr & 0xFFF
-     * w11 = super offset = vaddr & 0x3FFFFF
-     * w24 = ppn from TLB entry
-     * Then SUBS xzr, level, #4K and CSEL between w10/w11 based on EQ.
+    /* The exact VPN tag identifies a translated 4 KiB slice, including
+     * superpage entries, so the offset always has twelve bits.
+     * paddr = ppn | (vaddr & 0xFFF)
      */
-    emit_loadstore_imm(state, LS_LDRB, R12, R25, 15); /* w12 = level */
-    emit_loadstore_imm(state, LS_LDRW, R24, R25, 4);  /* w24 = ppn */
-    emit_load_imm(state, R10, 0xFFF);
-    emit_logical_register(state, false, LOG_AND, R10, R8, R10); /* 4K offset */
-    emit_load_imm(state, R11, 0x3FFFFF);
-    emit_logical_register(state, false, LOG_AND, R11, R8, R11); /* super off */
-    emit_load_imm(state, R25, TLB_PAGE_LEVEL_4K);
-    emit_addsub_register(state, false, AS_SUBS, RZ, R12, R25); /* CMP level,2 */
-    emit_a64_csel(state, COND_EQ, R25, R10, R11);              /* offset */
-    emit_logical_register(state, false, LOG_ORR, R24, R24, R25); /* paddr */
+    emit_loadstore_imm(state, LS_LDRW, R24, R25, 4); /* w24 = ppn */
+    /* UBFX w10, w8, #0, #12 = UBFM w10, w8, #0, #11 */
+    emit_a64(state, 0x53000000U | (11 << 10) | (R8 << 5) | R10);
+    emit_logical_register(state, false, LOG_ORR, R24, R24, R10); /* paddr */
 
     /* Range check: paddr <= mem_size - access_size
      * Branch to slow path if paddr > max_paddr (unsigned).
@@ -2708,14 +2827,10 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
 
     /* r12 = rdi + offsetof(dtlb) + rsi (idx*16 already in rsi)
      * LEA r12, [rdi + rsi*1 + dtlb_offset]
-     * REX.WRB = 0x4c, opcode 8d, ModRM = 84 (mod=10 disp32, reg=R12 low3=4,
-     *   r/m=100 SIB), SIB = 37 (scale=00, index=110=RSI, base=111=RDI).
      */
-    emit1(state, 0x4c);
+    emit_rex(state, 1, 1, 0, 0);
     emit1(state, 0x8d);
-    emit1(state, 0xa4);
-    emit1(state, 0x37);
-    emit4(state, (uint32_t) offsetof(riscv_t, dtlb));
+    emit_sib_operand(state, R12, RDI, RSI, 0, offsetof(riscv_t, dtlb));
 
     /* VPN match: cmp eax, [r12]; jne slow
      * REX.B for r12 base, opcode 3b, mod=00 r/m=100 SIB, SIB.base=R12.
@@ -2740,36 +2855,11 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         slow_branches[n_slow++] = emit_x64_jcc32(state, 0x84); /* je */
     }
 
-    /* Level-aware paddr compute.  level (byte at +15) is 1 (4MB superpage)
-     * or 2 (4KB).  Drop the previous `level != 4K → slow` bail so superpage
-     * entries also stay inline.  Pick the offset mask via CMOVcc, mirroring
-     * the aarch64 CSEL-based design.
-     *
-     *   ESI = vaddr & 0xFFF           (4K offset, in RCX = vaddr originally)
-     *   EBX = vaddr & 0x3FFFFF        (super offset)
-     *   cmp byte [r12+15], 2
-     *   cmovne esi, ebx               ; if not 4K, use super offset
-     *   mov eax, [r12+4]              ; ppn
-     *   or eax, esi                   ; paddr
+    /* The exact VPN tag identifies a translated 4 KiB slice, including
+     * superpage entries. The offset therefore always has twelve bits.
      */
-    /* mov esi, ecx  -- ESI = vaddr */
-    emit1(state, 0x89);
-    emit_modrm_reg2reg(state, RCX, RSI);
-    /* and esi, 0xFFF -- 4K offset */
-    emit1(state, 0x81);
-    emit_modrm(state, 0xc0, 4, RSI);
-    emit4(state, 0xFFF);
-    /* mov ebx, ecx  -- EBX = vaddr */
-    emit1(state, 0x89);
-    emit_modrm_reg2reg(state, RCX, RBX);
-    /* and ebx, 0x3FFFFF -- super offset */
-    emit1(state, 0x81);
-    emit_modrm(state, 0xc0, 4, RBX);
-    emit4(state, 0x3FFFFF);
-    /* cmp byte ptr [r12+15], 2 */
-    emit_x64_cmp_byte_r12_disp_imm8(state, 15, TLB_PAGE_LEVEL_4K);
-    /* cmovne esi, ebx -- if level != 4K (i.e., superpage), use super offset */
-    emit_x64_cmov(state, 0x5 /* NE */, RSI, RBX);
+    emit_mov32(state, RCX, RSI);
+    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, RSI, 0xFFF);
     /* mov eax, [r12+4]  (4-byte ppn) */
     emit1(state, 0x41);
     emit1(state, 0x8b);
@@ -2908,9 +2998,13 @@ static void emit_jit_mmu_handler(struct jit_state *state,
                                  uint8_t vreg_idx,
                                  int vaddr_reg,
                                  uint32_t insn_type,
-                                 uint32_t insn_pc)
+                                 uint32_t insn_pc,
+                                 uint32_t refund)
 {
     assert(vreg_idx < 32);
+    /* The handler refunds unretired instructions if the access faults. */
+    assert(insn_type <= MMU_TYPE_MASK && refund <= UINT16_MAX);
+    insn_type |= refund << 16;
 
     emit_cycle_move(state, false);
 #if defined(__x86_64__) && defined(_WIN32)
@@ -3126,9 +3220,19 @@ static int liveness[N_RV_REGS];
  */
 static uint8_t candidate_queue[N_RV_REGS];
 static int vm_reg[3]; /* enum x64_reg/a64_reg */
+/* Guest values kept in fixed host registers across a local loop backedge. */
+static uint32_t loop_pinned_regs;
+
+static bool reg_is_pinned(int idx)
+{
+    int reg = register_map[idx].vm_reg_idx;
+    return reg >= 0 && (loop_pinned_regs & (UINT32_C(1) << reg));
+}
 
 static void reset_reg(void)
 {
+    loop_pinned_regs = 0;
+    spill_live_regs = UINT32_MAX;
     memset(reg_align, 0, sizeof(reg_align));
     for (int i = 0; i < n_host_regs; i++) {
         register_map[i].vm_reg_idx = -1;
@@ -3142,20 +3246,15 @@ static inline void save_reg(struct jit_state *state, int idx)
 {
     assert(idx > -1 && idx < n_host_regs);
 
-    if (!register_map[idx].dirty)
-        return;
-
-    /* Never save x0 - it's hardwired to zero. This allows using rv_reg_zero
-     * as a scratch register for temporary calculations without corrupting
-     * the zero register.
+    /* Unmapped temporaries and x0 have no register backing store. This also
+     * permits using x0's host register as scratch without changing X[0].
+     * Registers outside spill_live_regs are overwritten before any read.
      */
-    if (register_map[idx].vm_reg_idx == 0) {
-        register_map[idx].dirty = 0;
-        return;
-    }
-
-    emit_store(state, S32, register_map[idx].reg_idx, parameter_reg[0],
-               offsetof(riscv_t, X) + 4 * register_map[idx].vm_reg_idx);
+    const int vm_reg_idx = register_map[idx].vm_reg_idx;
+    if (register_map[idx].dirty && vm_reg_idx > 0 &&
+        (spill_live_regs & (1U << vm_reg_idx)))
+        emit_store(state, S32, register_map[idx].reg_idx, parameter_reg[0],
+                   offsetof(riscv_t, X) + 4 * vm_reg_idx);
     register_map[idx].dirty = 0;
 }
 
@@ -3166,6 +3265,17 @@ static void store_back(struct jit_state *state)
             continue;
         save_reg(state, i);
     }
+}
+
+/* Write back every dirty register, live or not: for exits whose target may
+ * read the whole register file.
+ */
+static void store_back_all(struct jit_state *state)
+{
+    const uint32_t saved_live = spill_live_regs;
+    spill_live_regs = UINT32_MAX;
+    store_back(state);
+    spill_live_regs = saved_live;
 }
 
 static inline void liveness_reset(void)
@@ -3418,55 +3528,45 @@ static inline void regs_refresh(int idx)
     }
 }
 
-/* return the index in the register_map */
-static inline int reg_pick(int reserved)
+/* Pick a free host register: an unmapped one first, then one whose value is
+ * dead in this block, clean before dirty. "Dead" uses block-local liveness,
+ * so a successor in a chained region may still read that value. Taking the
+ * first dead register would spill and reload it there even while other host
+ * registers sit empty; libriscv's region register caching relies on values
+ * staying resident. Returns -1 when every candidate is alive.
+ */
+static inline int reg_pick_free(int reserved1, int reserved2)
 {
-    /* pick an available register */
+    int dead_clean = -1, dead_dirty = -1;
     for (int i = 0; i < n_host_regs; i++) {
-        if (register_map[i].reg_idx == reserved)
+        if (reg_is_pinned(i) || register_map[i].reg_idx == reserved1 ||
+            register_map[i].reg_idx == reserved2 || register_map[i].alive)
             continue;
-        if (!register_map[i].alive)
+        if (register_map[i].vm_reg_idx == -1)
             return i;
-    }
-
-    /* If registers are exhausted, pick the one which has farthest liveness. */
-    int idx = -1;
-    for (int i = 0; i < N_RV_REGS; i++) {
-        uint8_t candidate = candidate_queue[i];
-        for (int j = 0; j < n_host_regs; j++) {
-            if (register_map[j].reg_idx == reserved)
-                continue;
-            if (register_map[j].vm_reg_idx == candidate) {
-                idx = j;
-                goto end_pick_reg;
-            }
+        if (!register_map[i].dirty) {
+            if (dead_clean < 0)
+                dead_clean = i;
+        } else if (dead_dirty < 0) {
+            dead_dirty = i;
         }
     }
-    __UNREACHABLE;
-
-end_pick_reg:
-    assert(idx > -1 && idx < n_host_regs);
-    return idx;
+    return dead_clean >= 0 ? dead_clean : dead_dirty;
 }
 
 /* return the index in the register_map, avoiding two reserved registers */
 static inline int reg_pick2(int reserved1, int reserved2)
 {
-    /* pick an available register */
-    for (int i = 0; i < n_host_regs; i++) {
-        if (register_map[i].reg_idx == reserved1 ||
-            register_map[i].reg_idx == reserved2)
-            continue;
-        if (!register_map[i].alive)
-            return i;
-    }
+    int free_idx = reg_pick_free(reserved1, reserved2);
+    if (free_idx >= 0)
+        return free_idx;
 
     /* If registers are exhausted, pick the one which has farthest liveness. */
     int idx = -1;
     for (int i = 0; i < N_RV_REGS; i++) {
         uint8_t candidate = candidate_queue[i];
         for (int j = 0; j < n_host_regs; j++) {
-            if (register_map[j].reg_idx == reserved1 ||
+            if (reg_is_pinned(j) || register_map[j].reg_idx == reserved1 ||
                 register_map[j].reg_idx == reserved2)
                 continue;
             if (register_map[j].vm_reg_idx == candidate) {
@@ -3480,6 +3580,12 @@ static inline int reg_pick2(int reserved1, int reserved2)
 end_pick_reg2:
     assert(idx > -1 && idx < n_host_regs);
     return idx;
+}
+
+/* return the index in the register_map */
+static inline int reg_pick(int reserved)
+{
+    return reg_pick2(reserved, reserved);
 }
 
 /* Unmap the vm register to the host register. */
@@ -3655,13 +3761,10 @@ static void ra_store_guest(struct jit_state *state,
     emit_rex(state, 0, rs2 ? !!(src & 8) : 0, !!(base & 8), 1);
     if (rs2) {
         emit_store_opcode(state, size);
-        emit_modrm(state, 0x80, src, 4);
     } else {
         emit1(state, size == S8 ? 0xc6 : 0xc7);
-        emit_modrm(state, 0x80, 0, 4);
     }
-    emit1(state, ((base & 7) << 3) | (R12 & 7));
-    emit4(state, offset);
+    emit_guest_indexed_operand(state, rs2 ? src : 0, base, offset);
     if (!rs2) {
         for (int i = 0; i < (size == S8 ? 1 : size == S16 ? 2 : 4); i++)
             emit1(state, 0);
@@ -3919,6 +4022,7 @@ static inline void emit_test_low_bits(struct jit_state *state,
 struct misalign_stub {
     uint32_t jump_loc; /* where to patch the branch that enters the stub */
     uint32_t pc;
+    uint32_t refund; /* unretired_after(pc) */
     uint32_t flags;
     int base;
     int32_t offset;
@@ -3947,9 +4051,11 @@ static void emit_misalign_stub(struct jit_state *state,
     emit_jump_target_offset(state, stub->jump_loc, state->offset);
     emit_misalign_address(state, stub->base, stub->offset);
     memcpy(register_map, stub->map, sizeof(register_map));
-    store_back(state);
+    store_back_all(state);
     emit_mov(state, temp_reg, parameter_reg[1]);
     emit_load_imm(state, parameter_reg[2], stub->flags);
+    if (stub->refund)
+        emit_cycle_refund(state, stub->refund);
     emit_load_imm(state, temp_reg, stub->pc);
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_call(state, (intptr_t) &jit_misaligned_trap);
@@ -3979,7 +4085,12 @@ static void emit_misalign_guard(struct jit_state *state,
     if (offset_aligned && reg_align[rs1] > mask)
         return;
 
-    struct misalign_stub stub = {.pc = pc, .flags = flags, .offset = offset};
+    struct misalign_stub stub = {
+        .pc = pc,
+        .refund = unretired_after(rv, pc),
+        .flags = flags,
+        .offset = offset,
+    };
     stub.base = ra_load(state, rs1);
     memcpy(stub.map, register_map, sizeof(stub.map));
 
@@ -4192,7 +4303,8 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
      */
     emit_load_imm(state, temp_reg, addr);
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rs2, temp_reg, rv_insn_lw, ir->pc);
+    emit_jit_mmu_handler(state, ir->rs2, temp_reg, rv_insn_lw, ir->pc + 4,
+                         unretired_after(rv, ir->pc + 4));
     reset_reg();
 
     /* Check if trap occurred during MMU translation.
@@ -4266,7 +4378,8 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     /* Constant vaddr -> temp_reg, passed as call arg (see do_fuse9). */
     emit_load_imm(state, temp_reg, addr);
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rs1, temp_reg, rv_insn_sw, ir->pc);
+    emit_jit_mmu_handler(state, ir->rs1, temp_reg, rv_insn_sw, ir->pc + 4,
+                         unretired_after(rv, ir->pc + 4));
     reset_reg();
 
     /* Check if trap occurred - skip store if trapped */
@@ -4333,7 +4446,8 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);
 
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rd, temp_reg, rv_insn_lw, ir->pc);
+    emit_jit_mmu_handler(state, ir->rd, temp_reg, rv_insn_lw, ir->pc,
+                         unretired_after(rv, ir->pc));
     reset_reg();
 
     /* Check if trap occurred during MMU translation.
@@ -4500,6 +4614,113 @@ typedef void (*codegen_block_func_t)(struct jit_state *,
                                      riscv_t *,
                                      rv_insn_t *);
 
+#if defined(__x86_64__)
+struct shift_add {
+    uint8_t source, base, result, scale;
+};
+
+/* Combine a scaled value with its following addition when the intermediate
+ * is overwritten. Include the last member of a fused shift sequence.
+ */
+static bool shift_add_pair(const rv_insn_t *shift,
+                           const rv_insn_t *add,
+                           struct shift_add *plan)
+{
+    if (!add || add->opcode != rv_insn_add)
+        return false;
+    opcode_fuse_t op;
+    if (shift->opcode == rv_insn_slli) {
+        op = (opcode_fuse_t) {
+            .opcode = shift->opcode,
+            .rd = shift->rd,
+            .rs1 = shift->rs1,
+            .imm = shift->imm,
+        };
+    } else if (shift->opcode == rv_insn_fuse5 && shift->imm2 > 0) {
+        op = shift->fuse[shift->imm2 - 1];
+    } else {
+        return false;
+    }
+    if (op.opcode != rv_insn_slli || !op.rd || add->rd != op.rd ||
+        (op.imm & 31) < 1 || (op.imm & 31) > 3)
+        return false;
+    uint8_t base;
+    if (add->rs1 == op.rd)
+        base = add->rs2;
+    else if (add->rs2 == op.rd)
+        base = add->rs1;
+    else
+        return false;
+    if (base == op.rd)
+        return false;
+    /* LEA leaves flags untouched. Retain ADD where the next record could
+     * forward its carry into SLTU.
+     */
+    const rv_insn_t *next = block_next_ir(add);
+    if (next && next->opcode == rv_insn_sltu)
+        return false;
+    *plan = (struct shift_add) {
+        .source = op.rs1,
+        .base = base,
+        .result = op.rd,
+        .scale = op.imm & 31,
+    };
+    return true;
+}
+
+static void emit_shift_add(struct jit_state *state,
+                           const struct shift_add *plan)
+{
+    ra_load2(state, plan->source, plan->base);
+    int index = vm_reg[0], base = vm_reg[1];
+    int result = map_vm_reg_reserved2(state, plan->result, index, base);
+    if ((result | index | base) & 8)
+        emit_rex(state, 0, !!(result & 8), !!(index & 8), !!(base & 8));
+    emit1(state, 0x8d); /* LEA r32, [base + index * scale] */
+    emit_sib_operand(state, result, base, index, plan->scale, 0);
+    set_dirty(result, true);
+}
+#endif
+
+/* Translate one record, with two x86 peepholes across adjacent records: a
+ * small left shift and the ADD consuming it become one LEA, emitted with the
+ * shift, and an ADD forwards its carry to a following unsigned carry test.
+ * Allocation emits only register moves and X[] spills between them, which
+ * preserve x86 flags. Keep the comparison when its operand was overwritten by
+ * the addition.
+ */
+static void translate_record(struct jit_state *state,
+                             riscv_t *rv,
+                             rv_insn_t *ir,
+                             const rv_insn_t *previous)
+{
+#if defined(__x86_64__)
+    struct shift_add scaled;
+    if (previous && shift_add_pair(previous, ir, &scaled))
+        return; /* Its result was emitted with the preceding shift. */
+    if (shift_add_pair(ir, block_next_ir(ir), &scaled)) {
+        if (ir->opcode == rv_insn_fuse5 && ir->imm2 > 1) {
+            rv_insn_t prefix = *ir;
+            prefix.imm2--;
+            do_fuse5(state, rv, &prefix);
+        }
+        emit_shift_add(state, &scaled);
+        return;
+    }
+    if (previous && previous->opcode == rv_insn_add && previous->rd &&
+        ir->opcode == rv_insn_sltu && ir->rs1 == previous->rd &&
+        ir->rs2 != previous->rd &&
+        (ir->rs2 == previous->rs1 || ir->rs2 == previous->rs2)) {
+        if (ir->rd)
+            emit_set_less_than(state, JCC_JB, map_vm_reg(state, ir->rd));
+        return;
+    }
+#else
+    (void) previous;
+#endif
+    ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
+}
+
 /* A local backedge can reuse one register map when every operand fits and
  * the body calls no helper. External entries still load X[], and both exits
  * spill before using the ordinary link ABI.
@@ -4531,9 +4752,8 @@ static inline int jcc_invert(int code)
 }
 
 /* Report the guest registers that one body record reads (*use) and writes
- * (*def). Accept only records whose user-mode emitters neither call helpers,
- * spill, nor keep a fixed host register mapped, so the loop's register map
- * stays intact. M-extension emitters borrow RAX and RDX on x86-64 but
+ * (*def). Accept only records whose user-mode emitters do not call helpers
+ * or reset the allocator. M-extension emitters borrow RAX/RDX on x86-64 but
  * restore their mappings. Reject a write to x0: some emitters would clobber
  * the host copy of x0 that a later read in the loop still relies on.
  */
@@ -4641,7 +4861,7 @@ static bool loop_body_regs(const rv_insn_t *ir,
             def |= LOOP_REG(fuse[i].rd);
         break;
     case rv_insn_fuse2: /* rd = imm; rs2 = rs1 + rd */
-        use = LOOP_REG(ir->rs1);
+        use = LOOP_REG(ir->rs1) & ~LOOP_REG(ir->rd);
         def = LOOP_REG(ir->rd) | LOOP_REG(ir->rs2);
         break;
     case rv_insn_fuse3: /* SW ... SW */
@@ -4652,7 +4872,10 @@ static bool loop_body_regs(const rv_insn_t *ir,
     case rv_insn_fuse5: /* shift-immediate ... */
     case rv_insn_fuse7: /* ADDI ... ADDI */
         for (int i = 0; i < ir->imm2; i++) {
-            use |= LOOP_REG(fuse[i].rs1);
+            /* Fusion preserves instruction order. A value defined by an
+             * earlier member is a temporary, not another loop input.
+             */
+            use |= LOOP_REG(fuse[i].rs1) & ~def;
             def |= LOOP_REG(fuse[i].rd);
         }
         break;
@@ -4681,61 +4904,197 @@ static bool loop_body_regs(const rv_insn_t *ir,
     return true;
 }
 
-static bool translate_register_loop(struct jit_state *state,
-                                    riscv_t *rv,
-                                    block_t *block)
+#if defined(__x86_64__)
+struct loop_rotate {
+    const rv_insn_t *shift, *invert;
+    uint8_t mask, value, count;
+};
+
+/* A one-bit mask shifted by a count advancing once per iteration can rotate
+ * instead. Guard the invariant source at entry; another source value uses an
+ * ordinary copy of the loop. Keep the architectural mask current at exits.
+ */
+static bool loop_rotate_plan(const block_t *block,
+                             uint32_t defined,
+                             uint8_t lhs,
+                             uint8_t rhs,
+                             struct loop_rotate *plan)
 {
-    /* Classify the tail: the loop continues while "lhs <jcc> rhs" holds. */
     const rv_insn_t *tail = block->ir_tail;
-    uint8_t lhs = tail->rs1, rhs = tail->rs2;
-    uint32_t target = tail->pc + tail->imm, exit_pc = tail->pc + 4;
+    for (const rv_insn_t *shift = block->ir_head; shift != tail;
+         shift = block_next_ir(shift)) {
+        if (shift->opcode != rv_insn_sll || !shift->rd ||
+            shift->rd == shift->rs1 || shift->rd == shift->rs2 ||
+            shift->rs1 == shift->rs2 || (defined & LOOP_REG(shift->rs1)) ||
+            lhs == shift->rd || rhs == shift->rd)
+            continue;
+        const rv_insn_t *invert = NULL;
+        bool after_shift = false, increment = false, consumer = false;
+        bool valid = true;
+        for (const rv_insn_t *ir = block->ir_head; ir != tail;
+             ir = block_next_ir(ir)) {
+            uint32_t use, def;
+            if (!loop_body_regs(ir, &use, &def)) {
+                valid = false;
+                break;
+            }
+            if (ir == shift) {
+                after_shift = true;
+                continue;
+            }
+            if (def & LOOP_REG(shift->rs2)) {
+                if (!after_shift || increment || ir->opcode != rv_insn_addi ||
+                    ir->rd != shift->rs2 || ir->rs1 != shift->rs2 ||
+                    ir->imm != 1) {
+                    valid = false;
+                    break;
+                }
+                increment = true;
+            }
+            if ((use | def) & LOOP_REG(shift->rd)) {
+                if (!after_shift) {
+                    valid = false;
+                    break;
+                }
+                if (ir->opcode == rv_insn_xori && ir->rd == shift->rd &&
+                    ir->rs1 == shift->rd && ir->imm == -1 && !invert &&
+                    !consumer) {
+                    invert = ir;
+                } else if (!(def & LOOP_REG(shift->rd)) &&
+                           (ir->opcode == rv_insn_or ||
+                            ir->opcode == rv_insn_xor ||
+                            ir->opcode == rv_insn_and)) {
+                    consumer = true;
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+        if (tail->opcode == rv_insn_fuse12 && tail->rd == shift->rs2) {
+            if (increment || tail->rs1 != shift->rs2 || tail->imm != 1)
+                valid = false;
+            increment = true;
+        }
+        if (valid && increment && consumer) {
+            *plan = (struct loop_rotate) {
+                .shift = shift,
+                .invert = invert,
+                .mask = shift->rd,
+                .value = shift->rs1,
+                .count = shift->rs2,
+            };
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
+/* A conditional block tail continues at target while "lhs <jcc> rhs" holds and
+ * at other_pc otherwise. Returns false for any other tail, after filling lhs,
+ * rhs, target, and other_pc from its operands.
+ */
+struct tail_branch {
+    uint8_t lhs, rhs;
     int jcc;
+    uint32_t target, other_pc;
+    bool add_before_branch; /* fuse12: ADDI rd, rs1, imm; BNE rd, x0 */
+};
+
+static bool tail_branch(const rv_insn_t *tail, struct tail_branch *branch)
+{
+    *branch = (struct tail_branch) {
+        .lhs = tail->rs1,
+        .rhs = tail->rs2,
+        .target = tail->pc + tail->imm,
+        .other_pc = tail->pc + 4,
+    };
     switch (tail->opcode) {
     case rv_insn_beq:
-        jcc = JCC_JE;
-        break;
+        branch->jcc = JCC_JE;
+        return true;
     case rv_insn_bne:
-        jcc = JCC_JNE;
-        break;
+        branch->jcc = JCC_JNE;
+        return true;
     case rv_insn_blt:
-        jcc = JCC_JL;
-        break;
+        branch->jcc = JCC_JL;
+        return true;
     case rv_insn_bge:
-        jcc = JCC_JGE;
-        break;
+        branch->jcc = JCC_JGE;
+        return true;
     case rv_insn_bltu:
-        jcc = JCC_JB;
-        break;
+        branch->jcc = JCC_JB;
+        return true;
     case rv_insn_bgeu:
-        jcc = JCC_JAE;
-        break;
+        branch->jcc = JCC_JAE;
+        return true;
 #if RV32_HAS(EXT_C)
     case rv_insn_cbeqz:
-        jcc = JCC_JE;
-        rhs = rv_reg_zero;
-        exit_pc = tail->pc + 2;
-        break;
     case rv_insn_cbnez:
-        jcc = JCC_JNE;
-        rhs = rv_reg_zero;
-        exit_pc = tail->pc + 2;
-        break;
+        branch->jcc = tail->opcode == rv_insn_cbeqz ? JCC_JE : JCC_JNE;
+        branch->rhs = rv_reg_zero;
+        branch->other_pc = tail->pc + 2;
+        return true;
 #endif
     case rv_insn_fuse12:
-        /* ADDI rd, rs1, imm; BNE rd, x0. The branch offset is relative to
-         * the BNE, the second instruction. The matcher excludes rd = x0.
+        /* The branch offset is relative to the BNE, the second instruction.
+         * The matcher excludes rd = x0.
          */
-        jcc = JCC_JNE;
-        lhs = tail->rd;
-        rhs = rv_reg_zero;
-        target = tail->pc + 4 + tail->imm2;
-        exit_pc = tail->pc + 8;
-        break;
+        branch->jcc = JCC_JNE;
+        branch->lhs = tail->rd;
+        branch->rhs = rv_reg_zero;
+        branch->target = tail->pc + 4 + tail->imm2;
+        branch->other_pc = tail->pc + 8;
+        branch->add_before_branch = true;
+        return true;
     default:
         return false;
     }
-    if (!tail->branch_taken || target != block->pc_start)
+}
+
+/* Set the flags a conditional tail branches on, with lhs and rhs already
+ * normalized by branch_zero_rhs(). A fused ADDI; BNE sets them by its addition.
+ */
+static void emit_tail_compare(struct jit_state *state,
+                              const rv_insn_t *tail,
+                              bool add_before_branch,
+                              uint8_t lhs,
+                              uint8_t rhs)
+{
+    if (add_before_branch) {
+        vm_reg[0] = ra_load(state, tail->rs1);
+        vm_reg[1] = map_vm_reg_reserved(state, tail->rd, vm_reg[0]);
+        if (vm_reg[0] != vm_reg[1])
+            emit_mov(state, vm_reg[0], vm_reg[1]);
+#if defined(__x86_64__)
+        emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_ADD, vm_reg[1], tail->imm);
+#elif defined(__aarch64__)
+        emit_add_imm(state, false, true, vm_reg[1], vm_reg[1], tail->imm);
+#endif
+    } else if (rhs) {
+        ra_load2(state, lhs, rhs);
+        emit_cmp32(state, vm_reg[1], vm_reg[0]);
+    } else {
+        emit_cmp_imm32(state, ra_load(state, lhs), 0);
+    }
+}
+
+static bool translate_register_loop(struct jit_state *state,
+                                    riscv_t *rv,
+                                    block_t *block,
+                                    bool allow_rotate UNUSED)
+{
+    cur_block = block;
+    /* Classify the tail: the loop continues while "lhs <jcc> rhs" holds. */
+    const rv_insn_t *tail = block->ir_tail;
+    struct tail_branch branch;
+    if (!tail_branch(tail, &branch) || !tail->branch_taken ||
+        branch.target != block->pc_start)
         return false;
+    uint8_t lhs = branch.lhs, rhs = branch.rhs;
+    uint32_t exit_pc = branch.other_pc;
+    int jcc = branch.jcc;
 
     /* Compare a lone nonzero operand with zero; x0 needs no host register. */
     branch_zero_rhs(&lhs, &rhs, &jcc);
@@ -4762,24 +5121,43 @@ static bool translate_register_loop(struct jit_state *state,
         if (ir == tail)
             break;
     }
-    if (__builtin_popcount(regs) > n_host_regs)
+    const bool spilling = __builtin_popcount(regs) > n_host_regs;
+    /* Like libriscv 075154d6's region register caching, keep values resident
+     * across the backedge. Leave room for two temporary operands and a
+     * distinct destination. Temporaries are defined before their first use.
+     */
+    if (spilling && __builtin_popcount(live_in) > n_host_regs - 3)
         return false;
 
-    /* A misalignment stub snapshots the register map and spills it, and may
-     * run in any iteration. Load every register and mark each one the body
-     * writes dirty from the start, so every snapshot holds correct values.
+    /* A guard can exit before an iteration's first write to a register.
+     * Full-register loops load every value up front. Spilling loops instead
+     * commit temporaries at each backedge, so X[] supplies their previous
+     * iteration values until this iteration defines them.
      */
     const bool guards = !rv->jit_elide_align_checks;
-    if (guards)
+#if defined(__x86_64__)
+    struct loop_rotate rotate = {0};
+    bool rotating =
+        allow_rotate && !guards && !spilling &&
+        state->n_jumps + 2 * block_jump_budget(block) + 8 < MAX_JUMPS &&
+        loop_rotate_plan(block, defined, lhs, rhs, &rotate);
+#endif
+    if (guards && !spilling)
         live_in = regs;
 
     reset_reg();
+    if (spilling) {
+        liveness_reset();
+        liveness_calc(block);
+    }
     for (int reg = 0; reg < N_RV_REGS; reg++) {
         if (live_in & LOOP_REG(reg))
             ra_load(state, reg);
-        else if (regs & LOOP_REG(reg))
+        else if (!spilling && (regs & LOOP_REG(reg)))
             map_vm_reg(state, reg);
     }
+    if (spilling)
+        loop_pinned_regs = live_in;
     if (guards) {
         for (int i = 0; i < n_host_regs; i++) {
             int reg = register_map[i].vm_reg_idx;
@@ -4787,9 +5165,24 @@ static bool translate_register_loop(struct jit_state *state,
                 register_map[i].dirty = true;
         }
     }
-    /* Every mapped register stays live through the backedge. The allocator
-     * therefore never replaces a mapping, even for a destination that is
-     * overwritten before it is read in the first iteration.
+#if defined(__x86_64__)
+    uint32_t rotate_guard = 0;
+    if (rotating) {
+        emit_cmp_imm32(state, ra_load(state, rotate.value), 1);
+        uint32_t jump_loc_0 = state->offset;
+        emit_jcc_offset(state, JCC_JNE);
+        rotate_guard = JUMP_LOC_0;
+        int mask = map_vm_reg(state, rotate.mask);
+        int count = ra_load(state, rotate.count);
+        emit_load_imm(state, mask, 1);
+        emit_shift32(state, SHIFT_SHL, mask, count, mask);
+        if (rotate.invert)
+            emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_XOR, mask, -1);
+    }
+#endif
+    /* Full-register loops keep every mapping through the backedge. Spilling
+     * loops pin only live-in values and commit/discard temporary mappings
+     * before repeating, so the next iteration starts with the same map.
      */
     emit_load_imm(state, parameter_reg[1], 1024);
     uint32_t loop_offset = state->offset;
@@ -4798,36 +5191,55 @@ static bool translate_register_loop(struct jit_state *state,
      */
     if (!rv->jit_entry_cycles)
         emit_cycle_count(state, block->cycle_cost);
-    for (rv_insn_t *ir = block->ir_head; ir != tail; ir = block_next_ir(ir))
-        ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
-
-    if (tail->opcode == rv_insn_fuse12) {
-        /* The addition sets the zero flag that the BNE tests. */
-        vm_reg[0] = ra_load(state, tail->rs1);
-        vm_reg[1] = map_vm_reg_reserved(state, tail->rd, vm_reg[0]);
-        if (vm_reg[0] != vm_reg[1])
-            emit_mov(state, vm_reg[0], vm_reg[1]);
+    uint32_t idx = 0;
+    rv_insn_t *previous = NULL;
+    for (rv_insn_t *ir = block->ir_head; ir != tail;
+         previous = ir, ir = block_next_ir(ir), idx++) {
+        if (spilling)
+            regs_refresh(idx);
 #if defined(__x86_64__)
-        emit_alu32_imm32(state, 0x81, 0, vm_reg[1], tail->imm);
-#elif defined(__aarch64__)
-        emit_add_imm(state, false, true, vm_reg[1], vm_reg[1], tail->imm);
+        if (rotating && (ir == rotate.shift || ir == rotate.invert))
+            continue;
 #endif
-    } else if (rhs) {
-        ra_load2(state, lhs, rhs);
-        emit_cmp32(state, vm_reg[1], vm_reg[0]);
-    } else {
-        emit_cmp_imm32(state, ra_load(state, lhs), 0);
+        translate_record(state, rv, ir, previous);
+    }
+
+    emit_tail_compare(state, tail, branch.add_before_branch, lhs, rhs);
+    /* Spilling loops repeat with only the pinned values mapped. With guards,
+     * whose stubs read X[] mid-iteration, temporaries are stored here. Without
+     * them, nothing reads X[] inside the loop, so the backedge drops their
+     * mappings and only the exits store them, from iter_map: the registers
+     * still hold the last iteration's values on both exit paths.
+     */
+    struct host_reg iter_map[ARRAY_SIZE(register_map)];
+    const bool defer_spill = spilling && !guards;
+    if (spilling) {
+        memcpy(iter_map, register_map, sizeof(iter_map));
+        for (int i = 0; i < n_host_regs; i++) {
+            if (register_map[i].vm_reg_idx < 0 || reg_is_pinned(i))
+                continue;
+            if (!defer_spill)
+                save_reg(state, i);
+            register_map[i].vm_reg_idx = -1;
+            register_map[i].alive = false;
+            register_map[i].dirty = false;
+        }
     }
     uint32_t jump_loc_0 = state->offset;
     emit_jcc_offset(state, jcc_invert(jcc));
     uint32_t exit_branch = JUMP_LOC_0;
+#if defined(__x86_64__)
+    if (rotating)
+        emit_alu32_imm8(state, SHIFT_IMM_OPCODE, SHIFT_ROL,
+                        ra_load(state, rotate.mask), 1);
+#endif
     /* Limit the local loop so halt and reclamation cannot be starved.
      * RSI/R1 is outside the allocator, and a misalignment stub, the only
      * code that writes it, never returns to the loop. The decrement itself
      * sets the zero flag for the backedge.
      */
 #if defined(__x86_64__)
-    emit_alu32_imm8(state, 0x83, 0, parameter_reg[1], -1);
+    emit_alu32_imm8(state, ALU_GRP1_IMM8_OPCODE, ALU_ADD, parameter_reg[1], -1);
 #elif defined(__aarch64__)
     emit_addsub_imm(state, false, AS_SUBS, parameter_reg[1], parameter_reg[1],
                     1);
@@ -4837,7 +5249,15 @@ static bool translate_register_loop(struct jit_state *state,
     emit_jump_target_offset(state, JUMP_LOC_0, loop_offset);
 
     struct host_reg exit_map[ARRAY_SIZE(register_map)];
+    if (defer_spill)
+        memcpy(register_map, iter_map, sizeof(register_map));
     memcpy(exit_map, register_map, sizeof(exit_map));
+#if defined(__x86_64__)
+    /* The budget exit follows rotation to the next iteration's mask. */
+    if (rotating)
+        emit_alu32_imm8(state, SHIFT_IMM_OPCODE, SHIFT_ROR,
+                        ra_load(state, rotate.mask), 1);
+#endif
     store_back(state);
     emit_set_pc_exit(state, block->pc_start);
 
@@ -4849,30 +5269,378 @@ static bool translate_register_loop(struct jit_state *state,
     emit_set_pc_exit(state, exit_pc);
     if (guards)
         emit_misalign_stubs(state);
+#if defined(__x86_64__)
+    if (rotating && !should_flush) {
+        emit_jump_target_offset(state, rotate_guard, state->offset);
+        if (!translate_register_loop(state, rv, block, false))
+            __UNREACHABLE;
+    }
+#endif
     return true;
 }
+#endif
+
+/* Tier-2 promotion counts dispatcher entries. Cloning would absorb those
+ * entries before promotion, so keep its existing block boundaries intact.
+ */
+#define JIT_REGISTER_REGION (JIT_REGISTER_LOOP && !RV32_HAS(T2C))
+
+#if JIT_REGISTER_REGION
+/* External entries retain the ordinary memory-backed register ABI. Inside a
+ * bounded tree, both outcomes can reuse the current map. Every leaf spills;
+ * fault snapshots still describe the state at the individual instruction.
+ */
+#define REGION_MAX_BLOCKS 16
+#define REGION_MAX_RECORDS 128
+#define REGION_MAX_INSTRUCTIONS 256
+#define REGION_MAX_DEPTH 6
+
+struct region_flow {
+    struct tail_branch br; /* jcc is JCC_JMP for an unconditional tail */
+    uint8_t link;
+    uint32_t return_pc;
+};
+
+struct region_node {
+    block_t *block;
+    struct region_flow flow;
+    int child[2]; /* taken/unconditional, untaken */
+    uint32_t live_offset;
+    uint8_t known_link;
+    uint32_t known_return;
+};
+
+struct region_plan {
+    struct region_node node[REGION_MAX_BLOCKS];
+    uint32_t records, instructions, jumps;
+    uint32_t live[REGION_MAX_RECORDS];
+    int count;
+};
+
+static bool region_flow(const block_t *block, struct region_flow *flow)
+{
+    const rv_insn_t *tail = block->ir_tail;
+    if (tail_branch(tail, &flow->br))
+        return true;
+    flow->br.jcc = JCC_JMP;
+    switch (tail->opcode) {
+    case rv_insn_jal:
+        flow->link = tail->rd;
+        flow->return_pc = tail->pc + 4;
+        return flow->br.target != block->pc_start;
+#if RV32_HAS(EXT_C)
+    case rv_insn_cj:
+        return flow->br.target != block->pc_start;
+    case rv_insn_cjal:
+        flow->link = rv_reg_ra;
+        flow->return_pc = tail->pc + 2;
+        return flow->br.target != block->pc_start;
+#endif
+    default:
+        return false;
+    }
+}
+
+static bool region_returns(const rv_insn_t *tail, uint8_t link)
+{
+    if (!link)
+        return false;
+    if (tail->opcode == rv_insn_jalr)
+        return !tail->rd && tail->rs1 == link && !tail->imm;
+#if RV32_HAS(EXT_C)
+    if (tail->opcode == rv_insn_cjr)
+        return tail->rs1 == link;
+#endif
+    return false;
+}
+
+static bool region_body(const block_t *block, uint8_t *known_link)
+{
+    uint32_t use, def;
+    for (const rv_insn_t *ir = block->ir_head; ir != block->ir_tail;
+         ir = block_next_ir(ir)) {
+        if (!loop_body_regs(ir, &use, &def))
+            return false;
+        if (*known_link && (def & LOOP_REG(*known_link)))
+            *known_link = 0;
+    }
+    /* An ordinary indirect exit owns one live-patch site per standalone
+     * block. Do not duplicate such sites within a region. Known returns use
+     * direct edges, so several leaves can specialize them independently.
+     */
+    switch (block->ir_tail->opcode) {
+    case rv_insn_jalr:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cjr:
+    case rv_insn_cjalr:
+#endif
+        return region_returns(block->ir_tail, *known_link);
+    default:
+        return true;
+    }
+}
+
+static block_t *region_target(riscv_t *rv, uint32_t pc)
+{
+    block_t *block = cache_get(rv->block_cache, pc, false);
+    if (!block || !block->translatable || !block_matches_context(rv, block))
+        return NULL;
+#if RV32_HAS(BLOCK_CHAINING)
+    if (block->page_terminated)
+        return NULL;
+#endif
+    return block;
+}
+
+static void plan_region(struct jit_state *state,
+                        riscv_t *rv,
+                        struct region_plan *plan,
+                        int index,
+                        int depth)
+{
+    struct region_node *node = &plan->node[index];
+    node->child[0] = node->child[1] = -1;
+    if (depth == REGION_MAX_DEPTH || !region_flow(node->block, &node->flow))
+        return;
+    struct region_flow *flow = &node->flow;
+    uint8_t link = flow->link ? flow->link : node->known_link;
+    uint32_t return_pc = flow->link ? flow->return_pc : node->known_return;
+    if (flow->br.add_before_branch && node->block->ir_tail->rd == link)
+        link = 0;
+    block_t *target[2] = {
+        region_target(rv, flow->br.target),
+        flow->br.jcc == JCC_JMP ? NULL : region_target(rv, flow->br.other_pc),
+    };
+    /* Spend the bounded budget on shorter paths first, leaving space to
+     * follow several small blocks around a loop before copying cold work.
+     */
+    int first =
+        target[1] && (!target[0] || target[1]->n_insn < target[0]->n_insn);
+    for (int edge = 0; edge < 2; edge++) {
+        int side = first ^ edge;
+        block_t *block = target[side];
+        if (!block || plan->count == REGION_MAX_BLOCKS ||
+            plan->records + block->n_insn > REGION_MAX_RECORDS ||
+            plan->instructions + block->cycle_cost > REGION_MAX_INSTRUCTIONS)
+            continue;
+        uint32_t budget = block_jump_budget(block);
+        if (state->n_jumps + plan->jumps + budget >= MAX_JUMPS)
+            continue;
+        uint8_t child_link = return_pc ? link : 0;
+        if (!region_body(block, &child_link))
+            continue;
+        int child = plan->count++;
+        node->child[side] = child;
+        uint32_t live_offset = plan->records;
+        plan->records += block->n_insn;
+        plan->instructions += block->cycle_cost;
+        plan->jumps += budget;
+        plan->node[child] = (struct region_node) {
+            .block = block,
+            .live_offset = live_offset,
+            .known_link = child_link,
+            .known_return = return_pc,
+        };
+        plan_region(state, rv, plan, child, depth + 1);
+    }
+}
+
+/* A guard observes all registers before its instruction, and so does a
+ * helper: LUI+LW/SW (fuse9/fuse10) may call one. Byte accesses never carry a
+ * guard; treating them as barriers too only keeps a few stores.
+ */
+static bool region_memory(const rv_insn_t *ir)
+{
+    if (guarded_accesses(ir))
+        return true;
+    switch (ir->opcode) {
+    case rv_insn_lb:
+    case rv_insn_lbu:
+    case rv_insn_sb:
+    case rv_insn_fuse9:
+    case rv_insn_fuse10:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static uint32_t region_liveness(struct region_plan *plan,
+                                int index,
+                                bool guards)
+{
+    struct region_node *node = &plan->node[index];
+    block_t *block = node->block;
+    uint32_t live = UINT32_MAX;
+    if (node->child[0] >= 0 || node->child[1] >= 0) {
+        uint32_t taken = node->child[0] < 0
+                             ? UINT32_MAX
+                             : region_liveness(plan, node->child[0], guards);
+        if (node->flow.br.jcc == JCC_JMP) {
+            live = taken & ~LOOP_REG(node->flow.link);
+        } else {
+            uint32_t untaken =
+                node->child[1] < 0
+                    ? UINT32_MAX
+                    : region_liveness(plan, node->child[1], guards);
+            live = taken | untaken;
+            if (node->flow.br.add_before_branch) {
+                live &= ~LOOP_REG(block->ir_tail->rd);
+                live |= LOOP_REG(block->ir_tail->rs1);
+            } else {
+                live |=
+                    LOOP_REG(node->flow.br.lhs) | LOOP_REG(node->flow.br.rhs);
+            }
+        }
+    }
+    /* Leaves expose the entire architectural register file, even when their
+     * target is compiled. Never rely on execution beyond this region.
+     */
+    const rv_insn_t *record[REGION_MAX_RECORDS];
+    uint32_t count = 0;
+    for (const rv_insn_t *ir = block->ir_head; ir != block->ir_tail;
+         ir = block_next_ir(ir))
+        record[count++] = ir;
+    assert(count + 1 == block->n_insn);
+    plan->live[node->live_offset + count] = live;
+    while (count) {
+        const rv_insn_t *ir = record[--count];
+        uint32_t use, def;
+        if ((guards && region_memory(ir)) || !loop_body_regs(ir, &use, &def)) {
+            live = UINT32_MAX;
+            plan->live[node->live_offset + count] = live;
+            continue;
+        }
+        live = (live & ~def) | use;
+        /* Fused emitters may allocate more than once while defining their
+         * intermediate results. Keep all of those definitions live through
+         * the record, even when its final outputs will be overwritten.
+         */
+        plan->live[node->live_offset + count] = live | def;
+    }
+    return live;
+}
+
+static void emit_region_edge(struct jit_state *state, riscv_t *rv, uint32_t pc)
+{
+    store_back_all(state);
+    emit_jmp(state, pc, rv->csr_satp);
+    emit_set_pc_exit(state, pc);
+}
+
+static void translate_region(struct jit_state *state,
+                             riscv_t *rv,
+                             const struct region_plan *plan,
+                             int index)
+{
+    const struct region_node *node = &plan->node[index];
+    block_t *block = node->block;
+    rv_insn_t *tail = block->ir_tail, *previous = NULL;
+    cur_block = block;
+    if (!rv->jit_entry_cycles)
+        emit_cycle_count(state, block->cycle_cost);
+    liveness_reset();
+    liveness_calc(block);
+    uint32_t idx = 0;
+    for (rv_insn_t *ir = block->ir_head; ir != tail && !should_flush;
+         previous = ir, ir = block_next_ir(ir), idx++) {
+        regs_refresh(idx);
+        spill_live_regs = plan->live[node->live_offset + idx];
+        translate_record(state, rv, ir, previous);
+    }
+    if (should_flush)
+        return;
+    regs_refresh(idx);
+    spill_live_regs = plan->live[node->live_offset + idx];
+    if (node->known_return && region_returns(tail, node->known_link)) {
+        emit_region_edge(state, rv, node->known_return);
+        return;
+    }
+    if (node->child[0] < 0 && node->child[1] < 0) {
+        translate_record(state, rv, tail, previous);
+        return;
+    }
+    struct region_flow flow = node->flow;
+    if (flow.link)
+        emit_load_imm(state, map_vm_reg(state, flow.link), flow.return_pc);
+    if (flow.br.jcc == JCC_JMP) {
+        translate_region(state, rv, plan, node->child[0]);
+        return;
+    }
+    branch_zero_rhs(&flow.br.lhs, &flow.br.rhs, &flow.br.jcc);
+    emit_tail_compare(state, tail, flow.br.add_before_branch, flow.br.lhs,
+                      flow.br.rhs);
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, flow.br.jcc);
+    if (should_flush)
+        return;
+    struct host_reg taken_map[ARRAY_SIZE(register_map)];
+    uint8_t taken_align[ARRAY_SIZE(reg_align)];
+    memcpy(taken_map, register_map, sizeof(taken_map));
+    memcpy(taken_align, reg_align, sizeof(taken_align));
+    if (node->child[1] >= 0)
+        translate_region(state, rv, plan, node->child[1]);
+    else
+        emit_region_edge(state, rv, flow.br.other_pc);
+    if (should_flush)
+        return;
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+    memcpy(register_map, taken_map, sizeof(register_map));
+    memcpy(reg_align, taken_align, sizeof(reg_align));
+    if (node->child[0] >= 0)
+        translate_region(state, rv, plan, node->child[0]);
+    else
+        emit_region_edge(state, rv, flow.br.target);
+}
+#endif
+
+#if JIT_REGISTER_LOOP
 #undef LOOP_REG
 #endif
 
-static void translate(struct jit_state *state, riscv_t *rv, block_t *block)
+/* Successor translation recurses. Keep this frame, including its bounded
+ * region plan, out of that recursion even when LTO would otherwise inline it.
+ */
+static void __attribute__((noinline)) translate(struct jit_state *state,
+                                                riscv_t *rv,
+                                                block_t *block)
 {
     uint32_t idx;
-    rv_insn_t *ir, *next;
+    rv_insn_t *ir, *next, *previous = NULL;
     n_misalign_stubs = 0;
+    cur_block = block;
 #if JIT_REGISTER_LOOP
-    if (translate_register_loop(state, rv, block))
+    if (translate_register_loop(state, rv, block, true))
         return;
 #endif
     reset_reg();
+#if JIT_REGISTER_REGION
+    struct region_plan plan = {
+        .node[0] = {.block = block},
+        .records = block->n_insn,
+        .instructions = block->cycle_cost,
+        .jumps = block_jump_budget(block),
+        .count = 1,
+    };
+    plan_region(state, rv, &plan, 0, 0);
+    if (plan.count > 1) {
+        region_liveness(&plan, 0, !rv->jit_elide_align_checks);
+        translate_region(state, rv, &plan, 0);
+        spill_live_regs = UINT32_MAX;
+        if (!should_flush)
+            emit_misalign_stubs(state);
+        return;
+    }
+#endif
     if (!rv->jit_entry_cycles)
         emit_cycle_count(state, block->cycle_cost);
     liveness_reset();
     liveness_calc(block);
     for (idx = 0, ir = block->ir_head; idx < block->n_insn && !should_flush;
-         idx++, ir = next) {
+         idx++, previous = ir, ir = next) {
         next = block_next_ir(ir);
         regs_refresh(idx);
-        ((codegen_block_func_t) dispatch_table[ir->opcode])(state, rv, ir);
+        translate_record(state, rv, ir, previous);
     }
 
 #if RV32_HAS(BLOCK_CHAINING)
@@ -5126,6 +5894,15 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
     if (!state)
         return NULL;
     assert(state);
+
+#if defined(__x86_64__)
+    state->has_bmi2 = false;
+#if (defined(__GNUC__) || defined(__clang__)) && !defined(JIT_DISABLE_BMI2)
+    unsigned eax, ebx, ecx, edx;
+    state->has_bmi2 =
+        __get_cpuid_count(7, 0, &eax, &ebx, &ecx, &edx) && (ebx & bit_BMI2);
+#endif
+#endif
 
     state->offset = 0;
     state->n_jumps = 0;

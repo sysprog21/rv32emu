@@ -12,10 +12,13 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 
+#if RV32_HAS(SYSTEM)
+#include "system.h"
+#endif
+
 #if RV32_HAS(SYSTEM_MMIO)
 #include <termios.h>
 #include "dtc/libfdt/libfdt.h"
-#include "system.h"
 
 #if RV32_HAS(LINK_ZLIB)
 #include <zlib.h>
@@ -116,6 +119,9 @@ void block_map_clear(riscv_t *rv)
         map->map[i] = NULL;
     }
     map->size = 0;
+#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
+    mmu_forget_code(rv);
+#endif
 
     /* clear L1 direct-mapped block cache - use invalid tags to avoid
      * false hits on PC=0 edge case. Separated arrays: tags first for
@@ -1356,8 +1362,7 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
      * stale translations from previous execution.
      */
     rv->csr_satp = 0;
-    memset(rv->dtlb, 0, sizeof(rv->dtlb));
-    memset(rv->itlb, 0, sizeof(rv->itlb));
+    mmu_tlb_flush_all(rv);
 #else
     /* reset the csrs (baremetal) */
     rv->csr_mtvec = 0;
@@ -1889,6 +1894,10 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         assert(attr->mem);
         assert(!(((uintptr_t) attr->mem) & 0b11));
     }
+    rv->allow_misalign = attr->allow_misalign;
+#if !RV32_HAS(SYSTEM)
+    rv->ram_base = attr->mem->mem_base;
+#endif
 
     /* Reset hart state (general purpose registers, CSRs, PC, argc/argv, etc.)
      */

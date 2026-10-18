@@ -33,6 +33,9 @@ extern struct target_ops gdbstub_ops;
 #include "syscall_sdl.h"
 #include "trace_match.h"
 #include "utils.h"
+#if RV32_HAS(SYSTEM)
+#include "system.h"
+#endif
 
 #if RV32_HAS(JIT)
 #include "cache.h"
@@ -54,6 +57,47 @@ static uint32_t reloc_enable_mmu_jalr_addr;
 static bool reloc_enable_mmu = false;
 bool need_retranslate = false;
 bool need_handle_signal = false;
+#endif
+
+/* Call the usual instruction-fetch target directly while keeping replacement
+ * I/O callbacks observable. The iTLB hit path inlines from system.h; the page
+ * walker stays out of line.
+ */
+static inline uint32_t fetch_instruction(riscv_t *rv, uint32_t pc)
+{
+#if RV32_HAS(SYSTEM)
+    if (likely(rv->io.mem_ifetch == rv_mmu_ifetch))
+        return mmu_ifetch(rv, pc);
+#endif
+    return rv->io.mem_ifetch(rv, pc);
+}
+
+#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
+/* Retire the blocks an SFENCE.VMA left pending, once no trap handler is still
+ * running one of their instructions. Returns true if it cleared the map.
+ */
+static inline bool retire_pending_blocks(riscv_t *rv)
+{
+    if (likely(!need_clear_block_map) || rv->trap_cnt)
+        return false;
+    block_map_clear(rv);
+    need_clear_block_map = false;
+    return true;
+}
+
+/* The deferred clear that ends a handler: resume at the next instruction. */
+#define RVOP_RETIRE_PENDING()                      \
+    do {                                           \
+        if (unlikely(retire_pending_blocks(rv))) { \
+            rv->csr_cycle = cycle;                 \
+            rv->PC = PC;                           \
+            return false;                          \
+        }                                          \
+    } while (0)
+#else
+#define RVOP_RETIRE_PENDING() \
+    do {                      \
+    } while (0)
 #endif
 
 /* Emulate misaligned load/store operations.
@@ -198,7 +242,7 @@ static void rv_trap_default_handler(riscv_t *rv,
     /* Take the length from the instruction itself: rv->compressed describes the
      * last instruction to set it, which need not be this one.
      */
-    uint32_t insn = rv->io.mem_ifetch(rv, *epc);
+    uint32_t insn = fetch_instruction(rv, *epc);
     const uint32_t len = (insn ? is_compressed(insn) : rv->compressed) ? 2 : 4;
 
     /* Handle misaligned load/store by emulating with byte operations */
@@ -280,16 +324,16 @@ static inline void check_tohost_write(riscv_t *rv,
         return false;                                              \
     }
 
-#define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)              \
-    IIF(IO)(if (!PRIV(rv)->allow_misalign && unlikely(addr & (mask_or_pc))), \
-            if (unlikely(insn_is_misaligned(PC))))                           \
-    {                                                                        \
-        rv->compressed = compress;                                           \
-        rv->csr_cycle = cycle;                                               \
-        rv->PC = PC;                                                         \
-        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, type##_MISALIGNED,                  \
-                                     IIF(IO)(addr, mask_or_pc));             \
-        return false;                                                        \
+#define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)        \
+    IIF(IO)(if (!rv->allow_misalign && unlikely(addr & (mask_or_pc))), \
+            if (unlikely(insn_is_misaligned(PC))))                     \
+    {                                                                  \
+        rv->compressed = compress;                                     \
+        rv->csr_cycle = cycle;                                         \
+        rv->PC = PC;                                                   \
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, type##_MISALIGNED,            \
+                                     IIF(IO)(addr, mask_or_pc));       \
+        return false;                                                  \
     }
 
 /* FIXME: use more precise methods for updating time, e.g., RTC */
@@ -599,9 +643,15 @@ static uint32_t csr_csrrs(riscv_t *rv,
     *c |= val;
 
 #if RV32_HAS(SYSTEM)
-    /* Flush TLB when SATP actually changes */
-    if (c == &rv->csr_satp && *c != old_satp)
+    /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB
+     * and, in the interpreter, the blocks decoded under the old mappings.
+     */
+    if (c == &rv->csr_satp && *c != old_satp) {
         mmu_tlb_flush_all(rv);
+#if !RV32_HAS(JIT)
+        need_clear_block_map = true;
+#endif
+    }
 #endif
 
     return out;
@@ -647,9 +697,15 @@ static uint32_t csr_csrrc(riscv_t *rv,
     *c &= ~val;
 
 #if RV32_HAS(SYSTEM)
-    /* Flush TLB when SATP actually changes */
-    if (c == &rv->csr_satp && *c != old_satp)
+    /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB
+     * and, in the interpreter, the blocks decoded under the old mappings.
+     */
+    if (c == &rv->csr_satp && *c != old_satp) {
         mmu_tlb_flush_all(rv);
+#if !RV32_HAS(JIT)
+        need_clear_block_map = true;
+#endif
+    }
 #endif
 
     return out;
@@ -930,9 +986,11 @@ static uint32_t peripheral_update_ctr = 64;
 #endif
 
 /* Interpreter-based execution path.
- * Block-level cycle counting: cycle is pre-incremented at block entry,
- * so per-instruction cycle++ is removed. Timer is derived from cycle at
- * interrupt check points (rv_check_interrupt) rather than per-instruction.
+ * Each handler increments the cycle count it carries in a register, so a
+ * trap or counter read anywhere in a block sees an exact value. Counting per
+ * block instead, as libriscv does, measured no faster. The timer is derived
+ * from the cycle count at interrupt check points (rv_check_interrupt) rather
+ * than per instruction.
  */
 #if RV32_HAS(SYSTEM)
 #define RVOP_SYNC_PC(rv, PC) \
@@ -1086,14 +1144,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
                 need_handle_signal = false;                               \
                 return true;                                              \
             }, ) nextop : PC += __rv_insn_##inst##_len;                   \
-        IIF(RV32_HAS(SYSTEM))(IIF(RV32_HAS(JIT))(                         \
-                                  , if (unlikely(need_clear_block_map)) { \
-                                      block_map_clear(rv);                \
-                                      need_clear_block_map = false;       \
-                                      rv->csr_cycle = cycle;              \
-                                      rv->PC = PC;                        \
-                                      return false;                       \
-                                  }), );                                  \
+        RVOP_RETIRE_PENDING();                                            \
         if (unlikely(RVOP_NO_NEXT(ir)))                                   \
             goto end_op;                                                  \
         const rv_insn_t *next = RVOP_NEXT_IR(ir);                         \
@@ -1147,6 +1198,29 @@ static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
 }
 #endif
 #include "rv32_template.c"
+
+/* An integer load into x0, which insn_handler() routes here: perform the
+ * access, for its trap and any device side effect, and discard the value. The
+ * ordinary load handlers thus write rd without testing it.
+ */
+enum { __rv_insn_load_x0_len = 4 };
+RVOP(load_x0, {
+    const uint32_t addr = rv->X[ir->rs1] + ir->imm;
+    switch (ir->opcode) {
+    case rv_insn_lw:
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        (void) MEM_READ_W(rv, addr);
+        break;
+    case rv_insn_lh:
+    case rv_insn_lhu:
+        RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+        (void) MEM_READ_S(rv, addr);
+        break;
+    default:
+        (void) MEM_READ_B(rv, addr);
+        break;
+    }
+})
 #undef RVOP
 
 #if RV32_HAS_PACKED_TAIL
@@ -1292,16 +1366,8 @@ static PRESERVE_NONE bool fuse_next_or_stop(riscv_t *rv,
          */
         return true;
     }
-#if !RV32_HAS(JIT)
-    if (unlikely(need_clear_block_map)) {
-        block_map_clear(rv);
-        need_clear_block_map = false;
-        rv->csr_cycle = cycle;
-        rv->PC = PC;
-        return false;
-    }
 #endif
-#endif
+    RVOP_RETIRE_PENDING();
     if (unlikely(RVOP_NO_NEXT(ir))) {
         rv->csr_cycle = cycle;
         rv->PC = PC;
@@ -1364,6 +1430,11 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         uint32_t value = rv->X[fuse[i].rs2];
         MEM_WRITE_W(rv, addr, value);
+        /* A fault whose handler resumed elsewhere ends the group here, as it
+         * would end an unfused sequence; fuse_next_or_stop() returns.
+         */
+        if (MEM_ACCESS_FAULTED())
+            break;
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -1385,7 +1456,14 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RVOP_SYNC_PC(rv, PC); /* a page fault names this access */
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        rv->X[fuse[i].rd] = MEM_READ_W(rv, addr);
+        const uint32_t value = MEM_READ_W(rv, addr);
+        /* Commit nothing past a faulting member: later members may overwrite
+         * registers that the redirected handler or a retry still reads.
+         */
+        if (MEM_ACCESS_FAULTED())
+            break;
+        if (fuse[i].rd)
+            rv->X[fuse[i].rd] = value;
         PC += 4;
     }
     return fuse_next_or_stop(rv, ir, cycle, PC);
@@ -1403,7 +1481,9 @@ static PRESERVE_NONE bool do_fuse_lhu(riscv_t *rv,
         cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-        rv->X[fuse[i].rd] = MEM_READ_S(rv, addr);
+        const uint32_t value = MEM_READ_S(rv, addr);
+        if (fuse[i].rd)
+            rv->X[fuse[i].rd] = value;
         PC += 4;
     }
     return fuse_next_or_stop(rv, ir, cycle, PC);
@@ -1566,7 +1646,7 @@ static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->X[ir->rs2] = MEM_READ_W(rv, addr);
+    MEM_LOAD_X(ir->rs2, MEM_READ_W(rv, addr));
     PC += 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
@@ -1621,16 +1701,19 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
     cycle++;
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
     PC += 4;
     cycle++;
-    /* Only increment rs1 if load succeeded (no trap in SYSTEM mode).
-     * In non-SYSTEM mode, RAM access never faults so this always executes.
+    /* Commit the load and the increment only if the load completed. The
+     * guest handler runs inside the access, so trap_cnt is back to its
+     * previous value by now; a handler that resumed elsewhere is signaled
+     * through MEM_ACCESS_FAULTED(). User-mode RAM accesses never fault.
      */
-#if RV32_HAS(SYSTEM)
-    if (!rv->trap_cnt)
-#endif
+    if (!MEM_ACCESS_FAULTED()) {
+        if (ir->rd)
+            rv->X[ir->rd] = value;
         rv->X[ir->rs1] = rv->X[ir->rs1] + ir->imm2;
+    }
     PC += 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
@@ -1853,7 +1936,7 @@ do_pointer_reverse(riscv_t *rv,
     const uint32_t branch_pc = start + PREV_BRANCH_OFF(layout);
     const uint32_t taken_pc = branch_pc + ir->fuse[4].imm;
     const uint8_t rd = ir->rd, rs1 = ir->rs1, rs2 = ir->rs2;
-    const bool check_align = !PRIV(rv)->allow_misalign;
+    const bool check_align = !rv->allow_misalign;
     struct rv_insn *const taken = ir->branch_taken;
     /* Only a self-loop iterates here; any other target ends the first pass,
      * and TRACE_BRANCH_EXIT() then follows it within the real budget.
@@ -2226,6 +2309,19 @@ static const void *dispatch_table[] = {
 };
 /* clang-format on */
 
+/* The handler for a decoded instruction. An integer load into x0 runs
+ * do_load_x0(), so the ordinary load handlers can write rd unconditionally.
+ */
+static inline rv_insn_impl_t insn_handler(const rv_insn_t *ir)
+{
+    if (unlikely(ir->rd == rv_reg_zero) &&
+        (ir->opcode == rv_insn_lb || ir->opcode == rv_insn_lh ||
+         ir->opcode == rv_insn_lw || ir->opcode == rv_insn_lbu ||
+         ir->opcode == rv_insn_lhu))
+        return do_load_x0;
+    return dispatch_table[ir->opcode];
+}
+
 #if RV32_HAS(JIT)
 FORCE_INLINE bool insn_is_translatable(uint16_t opcode)
 {
@@ -2317,7 +2413,7 @@ retranslate:
             prev_ir->next = ir;
 
         /* fetch the next instruction */
-        uint32_t insn = rv->io.mem_ifetch(rv, block->pc_end);
+        uint32_t insn = fetch_instruction(rv, block->pc_end);
 
 #if RV32_HAS(SYSTEM)
         if (!insn && need_retranslate) {
@@ -2343,7 +2439,7 @@ retranslate:
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
             break;
         }
-        ir->impl = dispatch_table[ir->opcode];
+        ir->impl = insn_handler(ir);
         ir->pc = block->pc_end; /* compute the end of pc */
         block->pc_end += is_compressed(insn) ? 2 : 4;
         block->n_insn++;
@@ -3325,6 +3421,9 @@ static block_t *block_find_or_translate(riscv_t *rv
 
     if (unlikely(!block_translate(rv, next_blk)))
         return NULL;
+#if RV32_HAS(SYSTEM)
+    mmu_note_code(rv, next_blk->pc_start, next_blk->pc_end);
+#endif
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
     /*
@@ -3670,6 +3769,10 @@ void rv_step(void *arg)
 #endif
 
 #ifdef __EMSCRIPTEN__
+#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
+        if (need_clear_block_map)
+            rv->next_insn = NULL;
+#endif
         // Resume from saved instruction after stack unwind
         if (rv->next_insn) {
             const rv_insn_t *ir = rv->next_insn;
@@ -3722,6 +3825,17 @@ void rv_step(void *arg)
             return;
         }
         assert(block);
+
+#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
+        /* An inline trap can skip the interrupted instruction, returning
+         * before its nextop consumes the deferred clear. Retire old mappings
+         * before executing any block, including one just fetched by a trap.
+         */
+        if (unlikely(retire_pending_blocks(rv))) {
+            prev = NULL;
+            continue;
+        }
+#endif
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
         assert(block->satp == rv->csr_satp && !block->invalidated);
@@ -3954,7 +4068,7 @@ retranslate:
     memset(&ir, 0, sizeof(rv_insn_t));
 
     /* fetch the next instruction */
-    uint32_t insn = rv->io.mem_ifetch(rv, rv->PC);
+    uint32_t insn = fetch_instruction(rv, rv->PC);
 #if RV32_HAS(SYSTEM)
     if (!insn && need_retranslate) {
         need_retranslate = false;
@@ -3981,7 +4095,7 @@ retranslate:
         return;
     }
 
-    ir.impl = dispatch_table[ir.opcode];
+    ir.impl = insn_handler(&ir);
     ir.pc = rv->PC;
     ir.next = NULL;
     ir.impl(rv, &ir, rv->csr_cycle, rv->PC);
@@ -4012,7 +4126,7 @@ static void __trap_handler(riscv_t *rv)
     while (rv->trap_cnt >= depth && !rv_has_halted(rv)) {
         uint32_t insn;
     retry_fetch:
-        insn = rv->io.mem_ifetch(rv, rv->PC);
+        insn = fetch_instruction(rv, rv->PC);
 
         /* If instruction fetch returned 0 and need_retranslate is set, this
          * indicates MMU was enabled during execution. Clear flag and retry
@@ -4035,7 +4149,7 @@ static void __trap_handler(riscv_t *rv)
         rv_decode(ir, insn);
         reloc_enable_mmu_jalr_addr = rv->PC;
 
-        ir->impl = dispatch_table[ir->opcode];
+        ir->impl = insn_handler(ir);
         rv->compressed = is_compressed(insn);
         ir->impl(rv, ir, rv->csr_cycle, rv->PC);
 

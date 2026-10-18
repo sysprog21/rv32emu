@@ -133,6 +133,7 @@ jobs:
             make tests $PARALLEL
             make misalign $PARALLEL
             make tool $PARALLEL
+            make -C tests/sound check-mixer
 
     - name: SDL disable test
       run: |
@@ -150,7 +151,12 @@ jobs:
             make distclean && make system_interpreter_defconfig && make ENABLE_ELF_LOADER=1 mmu-test $PARALLEL
             # Page faults a loaded program cannot handle: the emulator stops
             # at one on a fetch, and skips exactly the faulting access.
-            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test check-insn-page-fault check-misalign-page-fault $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test check-insn-page-fault check-misalign-page-fault check-fused-page-fault check-amo-page-fault $PARALLEL
+            # Flat supervisor kernels: TLB caching, superpage flushes, address
+            # space switches, retiring decoded code, and counters across
+            # traps, interpreted and T1.
+            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
@@ -159,6 +165,8 @@ jobs:
       run: |
             # defconfig is the tier-1 JIT alone; jit_defconfig adds T2C.
             make distclean && make defconfig && make check $PARALLEL
+            # Register shifts without BMI2, as on older x86-64 CPUs.
+            make JIT_DISABLE_BMI2=1 check $PARALLEL
             make cleanconfig && make jit_defconfig && make check $PARALLEL
 
     - name: undefined behavior test

@@ -336,12 +336,33 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 #define MEM_WRITE_S(rv, addr, val) ram_write_s(rv, addr, val)
 #define MEM_WRITE_B(rv, addr, val) ram_write_b(rv, addr, val)
 #else
-#define MEM_READ_W(rv, addr) (rv)->io.mem_read_w(rv, addr)
-#define MEM_READ_S(rv, addr) (rv)->io.mem_read_s(rv, addr)
-#define MEM_READ_B(rv, addr) (rv)->io.mem_read_b(rv, addr)
-#define MEM_WRITE_W(rv, addr, val) (rv)->io.mem_write_w(rv, addr, val)
-#define MEM_WRITE_S(rv, addr, val) (rv)->io.mem_write_s(rv, addr, val)
-#define MEM_WRITE_B(rv, addr, val) (rv)->io.mem_write_b(rv, addr, val)
+/* A page fault runs the guest's trap handler inside the access. Store the
+ * handler's running cycle count first, so that the trap handler counts on from
+ * it, and continue from what that handler leaves: counters then include both
+ * the instructions before the fault and those of the trap handler.
+ */
+#define MEM_READ_CYCLES(access)           \
+    __extension__({                       \
+        rv->csr_cycle = cycle;            \
+        const uint32_t value_ = (access); \
+        cycle = rv->csr_cycle;            \
+        value_;                           \
+    })
+#define MEM_WRITE_CYCLES(access) \
+    do {                         \
+        rv->csr_cycle = cycle;   \
+        (access);                \
+        cycle = rv->csr_cycle;   \
+    } while (0)
+#define MEM_READ_W(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_w(rv, addr))
+#define MEM_READ_S(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_s(rv, addr))
+#define MEM_READ_B(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_b(rv, addr))
+#define MEM_WRITE_W(rv, addr, val) \
+    MEM_WRITE_CYCLES((rv)->io.mem_write_w(rv, addr, val))
+#define MEM_WRITE_S(rv, addr, val) \
+    MEM_WRITE_CYCLES((rv)->io.mem_write_s(rv, addr, val))
+#define MEM_WRITE_B(rv, addr, val) \
+    MEM_WRITE_CYCLES((rv)->io.mem_write_b(rv, addr, val))
 #endif
 
 /* True when the access just performed raised a trap.
@@ -356,37 +377,58 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 #define MEM_ACCESS_FAULTED() false
 #endif
 
+/* Write a load's result only if the access completed: a faulting load leaves
+ * its destination unchanged.
+ */
+#define MEM_LOAD(dst, read)              \
+    do {                                 \
+        const uint32_t loaded_ = (read); \
+        if (!MEM_ACCESS_FAULTED())       \
+            (dst) = loaded_;             \
+    } while (0)
+
+/* A fused integer load into x0 still performs its access, for the fault and
+ * any side effect, but discards the result so that x0 stays zero. Unfused
+ * loads into x0 run do_load_x0() instead.
+ */
+#define MEM_LOAD_X(rd, read)               \
+    do {                                   \
+        const uint32_t loaded_ = (read);   \
+        if (!MEM_ACCESS_FAULTED() && (rd)) \
+            rv->X[rd] = loaded_;           \
+    } while (0)
+
 /* LB: Load Byte */
 RVOP(lb, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    rv->X[ir->rd] = sign_extend_b(MEM_READ_B(rv, addr));
+    MEM_LOAD(rv->X[ir->rd], sign_extend_b(MEM_READ_B(rv, addr)));
 })
 
 /* LH: Load Halfword */
 RVOP(lh, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-    rv->X[ir->rd] = sign_extend_h(MEM_READ_S(rv, addr));
+    MEM_LOAD(rv->X[ir->rd], sign_extend_h(MEM_READ_S(rv, addr)));
 })
 
 /* LW: Load Word */
 RVOP(lw, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    MEM_LOAD(rv->X[ir->rd], MEM_READ_W(rv, addr));
 })
 
 /* LBU: Load Byte Unsigned */
 RVOP(lbu, {
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
-    rv->X[ir->rd] = MEM_READ_B(rv, addr);
+    MEM_LOAD(rv->X[ir->rd], MEM_READ_B(rv, addr));
 })
 
 /* LHU: Load Halfword Unsigned */
 RVOP(lhu, {
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-    rv->X[ir->rd] = MEM_READ_S(rv, addr);
+    MEM_LOAD(rv->X[ir->rd], MEM_READ_S(rv, addr));
 })
 
 /* There are 3 types of stores: byte, halfword, and word-sized. Unlike loads,
@@ -609,7 +651,6 @@ RVOP(mret, {
  * SATP (e.g., munmap + mmap to different PA, or mprotect changes).
  */
 RVOP(sfencevma, {
-    PC += 4;
     /* The reservation records a virtual address, so a mapping change could
      * otherwise leave it pointing at a different physical word.
      */
@@ -656,7 +697,8 @@ RVOP(sfencevma, {
          * code: only this thread changes the indexes that answer that.
          */
         const bool has_code =
-            jit_page_has_code(rv->jit_state, va, rv->csr_satp);
+            jit_page_has_code(rv->jit_state, va, rv->csr_satp) ||
+            mmu_code_superpage(rv, va);
         if (has_code || cache_has_va(rv->block_cache, va, rv->csr_satp)) {
 #if RV32_HAS(T2C)
             /* Hold cache_lock during invalidation to prevent race with T2C
@@ -670,7 +712,9 @@ RVOP(sfencevma, {
              * instructions: translated code through direct jumps, a T2C
              * region spanning pages, and the interpreter through its links
              * to the blocks it chains to. So when the page held any block or
-             * code, the whole address space goes.
+             * code, the whole address space goes. So does a flush in a 4 MiB
+             * region whose code came through a superpage: its leaf also maps
+             * the other pages.
              */
             if (has_code || n_invalidated) {
                 cache_invalidate_satp(rv->block_cache, rv->csr_satp, NULL);
@@ -687,7 +731,20 @@ RVOP(sfencevma, {
 #endif
     }
 #endif
+#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
+    /* Cached instructions and their links may still name the old mapping.
+     * Retire them through the normal deferred clear, after the instruction
+     * handler (and any enclosing synchronous trap) has finished using its IR.
+     * Linux flushes single data pages far more often than code, so a
+     * selective flush clears only when its page may hold a block.
+     */
+    if (!ir->rs1 || mmu_may_hold_code(rv, rv->X[ir->rs1]))
+        need_clear_block_map = true;
+    goto nextop;
+#else
+    PC += 4;
     goto end_op;
+#endif
 })
 
 #if RV32_HAS(Zifencei) /* RV32 Zifencei Standard Extension */
@@ -824,14 +881,7 @@ RVOP(mulhu, {
  * | Overflow (signed only) |  −2^{L−1} |  −1      |  −2^{L−1} |
  * +------------------------+-----------+----------+-----------+
  */
-RVOP(div, {
-    const int32_t dividend = (int32_t) rv->X[ir->rs1];
-    const int32_t divisor = (int32_t) rv->X[ir->rs2];
-    rv->X[ir->rd] = !divisor ? ~0U
-                    : (divisor == -1 && rv->X[ir->rs1] == 0x80000000U)
-                        ? rv->X[ir->rs1] /* overflow */
-                        : (unsigned int) (dividend / divisor);
-})
+RVOP(div, { rv->X[ir->rd] = rv_div((int32_t) rv->X[ir->rs1], rv->X[ir->rs2]); })
 
 /* DIVU: Divide Unsigned */
 /* +------------------------+-----------+----------+----------+
@@ -856,12 +906,7 @@ RVOP(divu, {
  * +------------------------+-----------+----------+---------+
  */
 RVOP(rem, {
-    const int32_t dividend = rv->X[ir->rs1];
-    const int32_t divisor = rv->X[ir->rs2];
-    rv->X[ir->rd] = !divisor ? dividend
-                    : (divisor == -1 && rv->X[ir->rs1] == 0x80000000U)
-                        ? 0  : (dividend
-                        % divisor);
+    rv->X[ir->rd] = rv_rem((int32_t) rv->X[ir->rs1], rv->X[ir->rs2]);
 })
 
 /* REMU: Remainder Unsigned */
@@ -957,143 +1002,66 @@ RVOP(scw, {
     }
 })
 
-/* AMOSWAP.W: Atomic Swap */
-RVOP(amoswapw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    MEM_WRITE_W(rv, addr, value2);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, value2);
+/* An AMO reads, combines, and writes one word. It commits nothing unless both
+ * accesses complete: a faulting write, such as one to a copy-on-write page,
+ * retries the instruction, which must still see its original rd and rs2.
+ * In system mode, translate for writing first: any page fault an AMO takes is
+ * a store/AMO page fault, never the load fault its read would raise.
+ */
+#if RV32_HAS(SYSTEM)
+#define AMO_WRITE_FAULTED(addr)                                 \
+    ((void) MEM_READ_CYCLES(rv->io.mem_translate(rv, addr, W)), \
+     MEM_ACCESS_FAULTED())
+#else
+#define AMO_WRITE_FAULTED(addr) false
 #endif
-})
+#define AMO_OP(res_expr)                                                       \
+    const uint32_t addr = rv->X[ir->rs1];                                      \
+    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);                                     \
+    if (!AMO_WRITE_FAULTED(addr)) {                                            \
+        const uint32_t value1 = MEM_READ_W(rv, addr);                          \
+        if (!MEM_ACCESS_FAULTED()) {                                           \
+            const uint32_t value2 = rv->X[ir->rs2];                            \
+            const uint32_t res = (res_expr);                                   \
+            MEM_WRITE_W(rv, addr, res);                                        \
+            if (!MEM_ACCESS_FAULTED()) {                                       \
+                if (ir->rd)                                                    \
+                    rv->X[ir->rd] = value1;                                    \
+                IIF(RV32_HAS(ARCH_TEST))(check_tohost_write(rv, addr, res);, ) \
+            }                                                                  \
+        }                                                                      \
+    }
+
+/* AMOSWAP.W: Atomic Swap */
+RVOP(amoswapw, { AMO_OP(value2); })
 
 /* AMOADD.W: Atomic ADD */
-RVOP(amoaddw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    const uint32_t res = value1 + value2;
-    MEM_WRITE_W(rv, addr, res);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, res);
-#endif
-})
+RVOP(amoaddw, { AMO_OP(value1 + value2); })
 
 /* AMOXOR.W: Atomic XOR */
-RVOP(amoxorw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    const uint32_t res = value1 ^ value2;
-    MEM_WRITE_W(rv, addr, res);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, res);
-#endif
-})
+RVOP(amoxorw, { AMO_OP(value1 ^ value2); })
 
 /* AMOAND.W: Atomic AND */
-RVOP(amoandw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    const uint32_t res = value1 & value2;
-    MEM_WRITE_W(rv, addr, res);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, res);
-#endif
-})
+RVOP(amoandw, { AMO_OP(value1 & value2); })
 
 /* AMOOR.W: Atomic OR */
-RVOP(amoorw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    const uint32_t res = value1 | value2;
-    MEM_WRITE_W(rv, addr, res);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, res);
-#endif
-})
+RVOP(amoorw, { AMO_OP(value1 | value2); })
 
 /* AMOMIN.W: Atomic MIN */
-RVOP(amominw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    const int32_t a = value1;
-    const int32_t b = value2;
-    const uint32_t res = a < b ? value1 : value2;
-    MEM_WRITE_W(rv, addr, res);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, res);
-#endif
-})
+RVOP(amominw,
+     { AMO_OP((int32_t) value1 < (int32_t) value2 ? value1 : value2); })
 
 /* AMOMAX.W: Atomic MAX */
-RVOP(amomaxw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    const int32_t a = value1;
-    const int32_t b = value2;
-    const uint32_t res = a > b ? value1 : value2;
-    MEM_WRITE_W(rv, addr, res);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, res);
-#endif
-})
+RVOP(amomaxw,
+     { AMO_OP((int32_t) value1 > (int32_t) value2 ? value1 : value2); })
 
 /* AMOMINU.W */
-RVOP(amominuw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    const uint32_t ures = value1 < value2 ? value1 : value2;
-    MEM_WRITE_W(rv, addr, ures);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, ures);
-#endif
-})
+RVOP(amominuw, { AMO_OP(value1 < value2 ? value1 : value2); })
 
 /* AMOMAXU.W */
-RVOP(amomaxuw, {
-    const uint32_t addr = rv->X[ir->rs1];
-    RV_EXC_ALIGNED_ONLY_HANDLER(3, STORE);
-    const uint32_t value1 = MEM_READ_W(rv, addr);
-    const uint32_t value2 = rv->X[ir->rs2];
-    if (ir->rd)
-        rv->X[ir->rd] = value1;
-    const uint32_t ures = value1 > value2 ? value1 : value2;
-    MEM_WRITE_W(rv, addr, ures);
-#if RV32_HAS(ARCH_TEST)
-    check_tohost_write(rv, addr, ures);
-#endif
-})
+RVOP(amomaxuw, { AMO_OP(value1 > value2 ? value1 : value2); })
+#undef AMO_OP
+#undef AMO_WRITE_FAULTED
 #endif /* RV32_HAS(EXT_A) */
 
 /* RV32F Standard Extension */
@@ -1104,7 +1072,7 @@ RVOP(flw, {
     /* copy into the float register */
     const uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    MEM_LOAD(rv->F[ir->rd].v, MEM_READ_W(rv, addr));
 })
 
 /* FSW */
@@ -1340,7 +1308,7 @@ RVOP(caddi4spn, { rv->X[ir->rd] = rv->X[rv_reg_sp] + (uint16_t) ir->imm; })
 RVOP(clw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    MEM_LOAD(rv->X[ir->rd], MEM_READ_W(rv, addr));
 })
 
 /* C.SW stores a 32-bit value in register rs2' to memory. It computes an
@@ -1554,7 +1522,7 @@ RVOP(cslli, { rv->X[ir->rd] <<= (uint8_t) ir->imm; })
 RVOP(clwsp, {
     const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, true, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    MEM_LOAD(rv->X[ir->rd], MEM_READ_W(rv, addr));
 })
 
 /* C.JR */
@@ -1612,7 +1580,7 @@ RVOP(cswsp, {
 RVOP(cflwsp, {
     const uint32_t addr = rv->X[rv_reg_sp] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    MEM_LOAD(rv->F[ir->rd].v, MEM_READ_W(rv, addr));
 })
 
 /* C.FSWSP */
@@ -1630,7 +1598,7 @@ RVOP(cfswsp, {
 RVOP(cflw, {
     const uint32_t addr = rv->X[ir->rs1] + (uint32_t) ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->F[ir->rd].v = MEM_READ_W(rv, addr);
+    MEM_LOAD(rv->F[ir->rd].v, MEM_READ_W(rv, addr));
 })
 
 /* C.FSW */

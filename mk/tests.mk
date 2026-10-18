@@ -91,6 +91,16 @@ EXPECTED_jit-alu-alias = JIT ALU aliases OK
 EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
+EXPECTED_jit-muldiv = JIT multiply/divide OK
+EXPECTED_jit-compare = JIT compare OK
+EXPECTED_jit-shift = JIT register shifts OK
+EXPECTED_jit-spill-loop = JIT spill loop OK
+EXPECTED_jit-direct-successor = JIT direct successor OK
+EXPECTED_jit-carry = JIT carry OK
+EXPECTED_jit-branch-successor = JIT branch successor OK
+EXPECTED_jit-region-traps = JIT region traps OK
+EXPECTED_jit-bit-loop = JIT bit loop OK
+EXPECTED_jit-scaled-add = JIT scaled add OK
 EXPECTED_jit-mul = JIT multiply OK
 EXPECTED_const-arith = constant arithmetic OK
 EXPECTED_const-shift = constant shifts OK
@@ -101,8 +111,11 @@ EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
 EXPECTED_register-loop = register loop OK
+EXPECTED_load-x0 = load into x0 OK
 EXPECTED_loop-shapes = loop shapes OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
+EXPECTED_fused-page-fault = fused page fault OK
+EXPECTED_amo-page-fault = AMO page fault OK
 EXPECTED_jit-fencei = FENCE.I made the rewrite visible OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
@@ -125,6 +138,7 @@ GUEST_CFLAGS := -march=rv32i -mabi=ilp32
 GUEST_CHECKS := fused-misalign syscall-zero-write
 GUEST_CHECK_TARGETS :=
 GUEST_ASM_CHECK_TARGETS :=
+SYSTEM_ASM_CHECK_TARGETS :=
 # Every check below runs a user-mode guest ELF, which a system-mode emulator
 # can only load with the ELF loader selected; otherwise it expects a kernel
 # image and the program never runs.
@@ -151,13 +165,27 @@ GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
 GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
 GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
+GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
+
+# A flat supervisor kernel exercises MMIO-mode TLBs without a guest libc.
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifeq ($(CONFIG_Zicsr)$(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
+ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
+SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles
+else
+$(info Skipping system MMU regression: $(CROSS_COMPILE)objcopy is unavailable)
+endif
+endif
+endif
+endif
 
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
-GUEST_ASM_CHECK_TARGETS += check-const-shift
+GUEST_ASM_CHECK_TARGETS += check-const-shift check-load-x0
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes
 # Short loops reach T1 through loop detection only where T1 uses packed IR,
@@ -189,8 +217,14 @@ ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-const-coperand
 endif
 # A directly loaded system program has no handler for its own page faults.
-ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
-GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault
+# fused-page-fault also passes unfused; it exercises fused records only with
+# CONFIG_MOP_FUSION.
+ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yyyy)
+GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault \
+	check-fused-page-fault
+ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-amo-page-fault
+endif
 endif
 # Only system JIT builds honor FENCE.I, and only a directly loaded program can
 # rewrite its own code without an operating system.
@@ -202,13 +236,19 @@ endif
 # passing them through the interpreter and reporting green.
 ifeq ($(CONFIG_JIT),y)
 GUEST_ASM_CHECK_TARGETS += check-jit-alu-alias check-jit-indirect-targets
-GUEST_ASM_CHECK_TARGETS += check-jit-memory-address
+GUEST_ASM_CHECK_TARGETS += check-jit-memory-address check-jit-compare \
+	check-jit-shift check-jit-spill-loop check-jit-direct-successor check-jit-carry \
+	check-jit-branch-successor check-jit-spill-loop-region \
+	check-jit-bit-loop check-jit-bit-loop-xor check-jit-bit-loop-clear \
+	check-jit-scaled-add
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-jit-memory-address-rvc
+GUEST_ASM_CHECK_TARGETS += check-jit-memory-address-rvc \
+	check-jit-direct-successor-rvc check-jit-branch-successor-rvc
 endif
 ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-identity-normalize check-jit-signed-div \
-	check-jit-interp-diff check-jit-mul
+	check-jit-interp-diff check-jit-mul check-jit-muldiv \
+	check-jit-spill-loop-m check-jit-spill-loop-region-m
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_MC_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-interp-diff-rvc
 endif
@@ -225,9 +265,18 @@ endif
 # trap CSRs, so both need Zicsr, as does jit-cycles to read the counters.
 ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-misalign check-jit-misalign-nohandler \
-	check-jit-cycles
+	check-jit-cycles check-jit-spill-loop-csr check-jit-direct-successor-csr \
+	check-jit-direct-successor-cycles check-jit-branch-successor-cycles \
+	check-jit-region-traps check-jit-spill-loop-region-csr \
+	check-jit-bit-loop-cycles check-jit-bit-loop-clear-cycles
+ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-spill-loop-m-csr \
+	check-jit-spill-loop-region-m-csr
+endif
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-jit-misalign-rvc
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-rvc \
+	check-jit-direct-successor-rvc-csr check-jit-direct-successor-rvc-cycles \
+	check-jit-branch-successor-rvc-cycles check-jit-region-traps-rvc
 endif
 endif
 endif
@@ -256,7 +305,7 @@ endif
 # An optional suffix $(3) names a variant built for another ISA, or with the
 # extra assembler flags in $(4).
 guest-asm-build = $(CROSS_COMPILE)gcc -march=$(2) -mabi=ilp32 -nostdlib \
-	-static -Wl,-e,_start $(4) -o $(OUT)/$(1)$(3) tests/$(1).S
+	-static -fno-pie -no-pie -Wl,-e,_start $(4) -o $(OUT)/$(1)$(3) tests/$(1).S
 
 define guest-asm-check-target
 .PHONY: check-$(1)$(3)
@@ -264,6 +313,24 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3),$(4))
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
+
+EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
+.PHONY: check-system-mmu-cache
+check-system-mmu-cache: $(BIN) tests/system-mmu-cache.S | $(OUT)
+	$(Q)$(call guest-asm-build,system-mmu-cache,rv32ia_zicsr,, \
+	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-mmu-cache \
+	    $(OUT)/system-mmu-cache.bin
+	$(call check-test,-k,$(OUT)/system-mmu-cache.bin,system-mmu-cache,tail -n 1,$(EXPECTED_system-mmu-cache))
+
+EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
+.PHONY: check-system-trap-cycles
+check-system-trap-cycles: $(BIN) tests/system-trap-cycles.S | $(OUT)
+	$(Q)$(call guest-asm-build,system-trap-cycles,rv32ia_zicsr,, \
+	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-trap-cycles \
+	    $(OUT)/system-trap-cycles.bin
+	$(call check-test,-k,$(OUT)/system-trap-cycles.bin,system-trap-cycles,tail -n 1,$(EXPECTED_system-trap-cycles))
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c
@@ -287,7 +354,37 @@ check-block-eviction: $(BIN) tests/block-eviction.c tests/block-eviction-start.S
 
 # Exercise base/destination aliases and signed offsets with and without RVC.
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32i))
+$(eval $(call guest-asm-check-target,jit-compare,rv32i))
+$(eval $(call guest-asm-check-target,jit-shift,rv32i))
+$(eval $(call guest-asm-check-target,jit-scaled-add,rv32i))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i_zicsr,-cycles,-DUSE_CYCLES))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i_zicsr,-clear-cycles,-DUSE_CYCLES -DBIT_OP=2))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i,-xor,-DBIT_OP=1))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i,-clear,-DBIT_OP=2))
+$(eval $(call guest-asm-check-target,jit-region-traps,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,jit-region-traps,rv32ic_zicsr,-rvc,-DUSE_RVC))
+$(eval $(call guest-asm-check-target,jit-branch-successor,rv32i))
+$(eval $(call guest-asm-check-target,jit-branch-successor,rv32i_zicsr,-cycles,-DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,jit-branch-successor,rv32ic_zicsr,-rvc-cycles,-DUSE_RVC -DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,jit-branch-successor,rv32ic,-rvc,-DUSE_RVC))
+$(eval $(call guest-asm-check-target,jit-carry,rv32i))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32i))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32i_zicsr,-cycles,-DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32ic_zicsr,-rvc-cycles,-DUSE_RVC -DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32ic,-rvc,-DUSE_RVC))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32i_zicsr,-csr,-DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32ic_zicsr,-rvc-csr,-DUSE_RVC -DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32i,-region,-DREGION_BRANCH))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32im,-region-m,-DREGION_BRANCH -DUSE_MULDIV))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32i_zicsr,-region-csr,-DREGION_BRANCH -DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32im_zicsr,-region-m-csr,-DREGION_BRANCH -DUSE_MULDIV -DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32i))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32im,-m,-DUSE_MULDIV))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32i_zicsr,-csr,-DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32im_zicsr,-m-csr,-DUSE_MULDIV -DUSE_CSR))
 $(eval $(call guest-asm-check-target,register-loop,rv32i))
+$(eval $(call guest-asm-check-target,load-x0,rv32i))
 $(eval $(call guest-asm-check-target,register-loop,rv32i_zicsr,-cycles,-DCHECK_CYCLES))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
@@ -306,6 +403,8 @@ check-amo-align: $(BIN) tests/amo-align.S | $(OUT)
 	$(call check-test, , $(OUT)/amo-align, amo-align, tail -n 1,$(EXPECTED_amo-align))
 	$(call check-test, -m, $(OUT)/amo-align, amo-align-relaxed, tail -n 1,$(EXPECTED_amo-align))
 $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,fused-page-fault,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,amo-page-fault,rv32ia_zicsr))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
 
 # The program must stop at its first instruction page fault, reporting it and
@@ -327,6 +426,7 @@ $(eval $(call guest-asm-check-target,jit-indirect-targets,rv32i))
 $(eval $(call guest-asm-check-target,jit-identity-normalize,rv32im))
 $(eval $(call guest-asm-check-target,jit-signed-div,rv32im))
 $(eval $(call guest-asm-check-target,jit-mul,rv32im))
+$(eval $(call guest-asm-check-target,jit-muldiv,rv32im))
 $(eval $(call guest-asm-check-target,const-arith,rv32im))
 $(eval $(call guest-asm-check-target,const-operand,rv32im))
 $(eval $(call guest-asm-check-target,const-coperand,rv32ic))
@@ -344,10 +444,8 @@ $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr,-nohandler,-DNO_HA
 $(eval $(call guest-asm-check-target,jit-cycles,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32ic,-nocsr-rvc,-DNO_CSR))
 
-# check-trace-match builds and runs a host program, so it is independent of
-# whether the emulator can load a user ELF. Everything else here is a guest
-# ELF and belongs behind the same gate as the regressions above.
-CHECK_TARGETS := check-trace-match
+# Host checks and flat supervisor kernels do not require a user ELF loader.
+CHECK_TARGETS := check-trace-match $(SYSTEM_ASM_CHECK_TARGETS)
 ifeq ($(RUN_USER_ELF),y)
 CHECK_TARGETS += check-hello $(GUEST_CHECK_TARGETS) \
 	$(GUEST_ASM_CHECK_TARGETS) $(addprefix check-,$(CHECK_ELF_FILES))

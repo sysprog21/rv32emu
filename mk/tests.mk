@@ -219,7 +219,7 @@ endif
 # A directly loaded system program has no handler for its own page faults.
 # fused-page-fault also passes unfused; it exercises fused records only with
 # CONFIG_MOP_FUSION.
-ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
+ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yyyy)
 GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault \
 	check-fused-page-fault
 ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yy)

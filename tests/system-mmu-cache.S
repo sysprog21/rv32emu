@@ -14,9 +14,10 @@
  * fetches to a new physical page, and flushing one address of a superpage must
  * drop its other cached slices and any code decoded through it. Switching satp
  * with CSRS and CSRC must not reuse code decoded under the old address space,
- * a faulting AMO takes a store/AMO page fault, and a device load into x0 keeps
- * x0 zero, also in a trap handler that runs inside a faulting access. UART
- * output and SBI shutdown exercise MMIO/helper exits as well.
+ * a faulting AMO takes a store/AMO page fault, a load into x0 from an unmapped
+ * page faults, and a device load into x0 keeps x0 zero, also in a trap handler
+ * that runs inside a faulting access. UART output and SBI shutdown exercise
+ * MMIO/helper exits as well.
  */
 
 .option norvc
@@ -253,11 +254,11 @@ next_iteration:
     la t0, root
     sw zero, 4(t0)
     sfence.vma s3, zero
-    la t0, super_request
+    la t0, load_request
     li t1, 1
     sw t1, 0(t0)
     lw t1, 0(s4)
-    la t0, super_request
+    la t0, load_request
     lw t0, 0(t0)
     bnez t0, fail
     # Code fetched through a superpage: flushing another page of the same
@@ -338,6 +339,20 @@ next_iteration:
     la t0, amo_request
     lw t0, 0(t0)
     bnez t0, fail
+    # A load into x0 still performs its access, so an unmapped address takes
+    # a load page fault, interpreted and under T1.
+    li s4, 0x40002000
+    li s6, 3000
+1:
+    la t0, load_request
+    li t1, 1
+    sw t1, 0(t0)
+    lw zero, 0(s4)
+    la t0, load_request
+    lw t0, 0(t0)
+    bnez t0, fail
+    addi s6, s6, -1
+    bnez s6, 1b
     # A device load into x0 still leaves x0 zero, interpreted and under T1.
     li s3, 0xf4000005
     li s6, 3000
@@ -353,9 +368,9 @@ trap:
     la t0, amo_request
     lw t0, 0(t0)
     bnez t0, amo_trap
-    la t0, super_request
+    la t0, load_request
     lw t0, 0(t0)
-    bnez t0, super_trap
+    bnez t0, load_trap
     la t0, remap_request
     lw t0, 0(t0)
     bnez t0, remap_trap
@@ -435,13 +450,13 @@ amo_trap:
     addi t0, t0, 4
     csrw sepc, t0
     sret
-super_trap:
+load_trap:
     csrr t0, scause
     li t1, 13
     bne t0, t1, fail
     csrr t0, stval
     bne t0, s4, fail
-    la t0, super_request
+    la t0, load_request
     sw zero, 0(t0)
     csrr t0, sepc
     addi t0, t0, 4
@@ -469,7 +484,7 @@ failure: .asciz "SYSTEM MMU cache FAIL\n"
 .balign 4
 faults: .word 0
 remap_request: .word 0
-super_request: .word 0
+load_request: .word 0
 amo_request: .word 0
 # Keep page tables in the zero-filled gap, independent of code placement.
 .set root, 0x4000

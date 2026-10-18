@@ -584,9 +584,14 @@ RVOP(wfi, {
     /*
      * Fast-forward idle guests to the enabled timer compare. A locally enabled
      * pending interrupt must resume WFI regardless of the global SIE bit.
+     * Active audio streams retain normal virtual-time progress.
      */
     vm_attr_t *attr = PRIV(rv);
-    if ((!(rv->csr_sip & rv->csr_sie)) && (rv->csr_sie & RV_INT_STI) &&
+    if (
+#if RV32_HAS(VIRTIO_SND)
+        (!virtio_snd_active_epoch(attr->vsnd)) &&
+#endif
+        (!(rv->csr_sip & rv->csr_sie)) && (rv->csr_sie & RV_INT_STI) &&
         (attr->timer > rv->csr_cycle + rv->timer_offset)) {
         cycle = attr->timer - rv->timer_offset;
         rv->csr_cycle = cycle;

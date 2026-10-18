@@ -452,6 +452,7 @@ struct riscv_internal {
 
 #if RV32_HAS(VIRTIO_SND)
     uint64_t last_vsnd_refresh;
+    uint64_t audio_epoch, audio_anchor_cycle, audio_anchor_ns;
 #endif
 
 #if RV32_HAS(SYSTEM)

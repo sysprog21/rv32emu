@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #if RV32_HAS(EXT_F)
@@ -3710,6 +3711,56 @@ static bool rv_has_plic_trap(riscv_t *rv)
             (rv->csr_sip & rv->csr_sie));
 }
 
+#if RV32_HAS(VIRTIO_SND)
+/*
+ * Keep guest audio deadlines in step with host playback while a stream runs.
+ * Discard host-time credit after a stall, but retain any guest-time debt.
+ */
+static void rv_pace_audio(riscv_t *rv)
+{
+    vm_attr_t *attr = PRIV(rv);
+    uint64_t epoch = virtio_snd_active_epoch(attr->vsnd);
+    if ((!epoch) || (!attr->audio_timebase_hz)) {
+        rv->audio_epoch = 0;
+        return;
+    }
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+        rv_log_error("Failed to read the audio pacing clock");
+        rv_halt(rv);
+        return;
+    }
+    uint64_t ns = (uint64_t) now.tv_sec * 1000000000ULL + now.tv_nsec;
+    if ((rv->audio_epoch != epoch) ||
+        (rv->csr_cycle < rv->audio_anchor_cycle)) {
+        rv->audio_epoch = epoch;
+        rv->audio_anchor_cycle = rv->csr_cycle;
+        rv->audio_anchor_ns = ns;
+        return;
+    }
+    uint64_t delta = rv->csr_cycle - rv->audio_anchor_cycle;
+    uint64_t hz = attr->audio_timebase_hz;
+    uint64_t target = rv->audio_anchor_ns + (delta / hz) * 1000000000ULL +
+                      (delta % hz) * 1000000000ULL / hz;
+    if (target < ns) {
+        rv->audio_anchor_cycle = rv->csr_cycle;
+        rv->audio_anchor_ns = ns;
+        return;
+    }
+    if (target > ns + 1000000ULL) {
+        /*
+         * Allow poll jitter and keep each sleep bounded for host input.
+         */
+        uint64_t wait = target - ns;
+        if (wait > 10000000ULL)
+            wait = 10000000ULL;
+        struct timespec delay = {.tv_sec = wait / 1000000000ULL,
+                                 .tv_nsec = wait % 1000000000ULL};
+        nanosleep(&delay, NULL);
+    }
+}
+#endif
+
 /* Return whether an interrupt trap was taken. */
 static bool rv_check_interrupt(riscv_t *rv)
 {
@@ -3717,6 +3768,9 @@ static bool rv_check_interrupt(riscv_t *rv)
     bool trapped = false;
     if (peripheral_update_ctr-- == 0) {
         peripheral_update_ctr = 64;
+#if RV32_HAS(VIRTIO_SND)
+        rv_pace_audio(rv);
+#endif
 #if defined(__EMSCRIPTEN__)
     escape_seq:
 #endif

@@ -227,6 +227,11 @@ uint32_t virtio_snd_read(virtio_snd_state_t *vsnd, uint32_t addr);
 void virtio_snd_write(virtio_snd_state_t *vsnd, uint32_t addr, uint32_t value);
 
 void virtio_snd_refresh_queue(virtio_snd_state_t *vsnd);
+
+/*
+ * Emulator-thread-only playback generation; zero means no started stream.
+ */
+uint64_t virtio_snd_active_epoch(virtio_snd_state_t *vsnd);
 #endif /* RV32_HAS(VIRTIO_SND) */
 
 #if RV32_HAS(VIRTIO_NET)

@@ -583,12 +583,8 @@ CONSTOPT(mulhu, {
 CONSTOPT(div, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        const int32_t dividend = (int32_t) info->const_val[ir->rs1];
-        const int32_t divisor = (int32_t) info->const_val[ir->rs2];
-        ir->imm = !divisor ? ~0U
-                  : (divisor == -1 && info->const_val[ir->rs1] == 0x80000000U)
-                      ? info->const_val[ir->rs1] /* overflow */
-                      : (unsigned int) (dividend / divisor);
+        ir->imm = rv_div((int32_t) info->const_val[ir->rs1],
+                         info->const_val[ir->rs2]);
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];
@@ -630,12 +626,8 @@ CONSTOPT(divu, {
 CONSTOPT(rem, {
     if (info->is_constant[ir->rs1] && info->is_constant[ir->rs2]) {
         info->is_constant[ir->rd] = true;
-        const int32_t dividend = info->const_val[ir->rs1];
-        const int32_t divisor = info->const_val[ir->rs2];
-        ir->imm = !divisor ? dividend
-                  : (divisor == -1 && info->const_val[ir->rs1] == 0x80000000U)
-                      ? 0 /* overflow */
-                      : (dividend % divisor);
+        ir->imm = rv_rem((int32_t) info->const_val[ir->rs1],
+                         info->const_val[ir->rs2]);
         info->const_val[ir->rd] = ir->imm;
         ir->opcode = rv_insn_lui;
         ir->impl = dispatch_table[ir->opcode];

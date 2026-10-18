@@ -27,6 +27,24 @@
 #endif
 #endif
 
+/* RISC-V signed division: fold zero and -1 into one cold-path test.
+ * Inspired by libriscv commit bca81e2c2806887f2e9e29d1e3a303c798d2dae1.
+ * Unsigned negation handles INT32_MIN / -1 without signed overflow.
+ */
+static inline uint32_t rv_div(int32_t dividend, uint32_t divisor)
+{
+    if (likely((uint32_t) (divisor + 1U) > 1U))
+        return dividend / (int32_t) divisor;
+    return divisor ? 0U - (uint32_t) dividend : UINT32_MAX;
+}
+
+static inline uint32_t rv_rem(int32_t dividend, uint32_t divisor)
+{
+    if (likely((uint32_t) (divisor + 1U) > 1U))
+        return dividend % (int32_t) divisor;
+    return divisor ? 0U : (uint32_t) dividend;
+}
+
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
 #define MASK(n) ((n) >= 64 ? ~0ULL : ~(~0ULL << (n)))

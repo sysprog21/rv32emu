@@ -824,14 +824,7 @@ RVOP(mulhu, {
  * | Overflow (signed only) |  −2^{L−1} |  −1      |  −2^{L−1} |
  * +------------------------+-----------+----------+-----------+
  */
-RVOP(div, {
-    const int32_t dividend = (int32_t) rv->X[ir->rs1];
-    const int32_t divisor = (int32_t) rv->X[ir->rs2];
-    rv->X[ir->rd] = !divisor ? ~0U
-                    : (divisor == -1 && rv->X[ir->rs1] == 0x80000000U)
-                        ? rv->X[ir->rs1] /* overflow */
-                        : (unsigned int) (dividend / divisor);
-})
+RVOP(div, { rv->X[ir->rd] = rv_div((int32_t) rv->X[ir->rs1], rv->X[ir->rs2]); })
 
 /* DIVU: Divide Unsigned */
 /* +------------------------+-----------+----------+----------+
@@ -856,12 +849,7 @@ RVOP(divu, {
  * +------------------------+-----------+----------+---------+
  */
 RVOP(rem, {
-    const int32_t dividend = rv->X[ir->rs1];
-    const int32_t divisor = rv->X[ir->rs2];
-    rv->X[ir->rd] = !divisor ? dividend
-                    : (divisor == -1 && rv->X[ir->rs1] == 0x80000000U)
-                        ? 0  : (dividend
-                        % divisor);
+    rv->X[ir->rd] = rv_rem((int32_t) rv->X[ir->rs1], rv->X[ir->rs2]);
 })
 
 /* REMU: Remainder Unsigned */

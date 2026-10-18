@@ -1112,7 +1112,17 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     RVOP_TAIL_INTRA(rv, target, cycle, PC)
 #endif
 
-#if RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
+#if defined(__EMSCRIPTEN__) && RV32_HAS(SYSTEM)
+#define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
+    do {                                               \
+        if (!(rv)->trap_cnt) {                         \
+            last_pc = (PC);                            \
+            RVOP_TAIL_INTER(rv, target, cycle, PC);    \
+        }                                              \
+    } while (0)
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC) \
+    RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)
+#elif RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
 /* Learned branch edges stop while a trap is pending. */
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)                  \
     do {                                                                \

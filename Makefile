@@ -156,7 +156,30 @@ ifneq ("$(CC_IS_EMCC)", "1")
         LDFLAGS += $(SDL2_LIBS) -pthread
         ifeq ($(CONFIG_SDL_MIXER),y)
             ifneq ($(HAVE_SDL2_MIXER),)
-                LDFLAGS += $(SDL2_MIXER_LIBS)
+                # Defer the mixer and its codecs until the first audio request.
+                # Keep the direct link for static builds, other platforms, and
+                # nonstandard installations without the normal ELF soname.
+                SDL2_MIXER_DYNAMIC ?= y
+                SDL2_MIXER_USE_DYNAMIC := n
+                SDL2_MIXER_LINK_FLAGS := $(CC) $(CFLAGS) $(LDFLAGS)
+                ifeq ($(CONFIG_HOST_LINUX)$(SDL2_MIXER_DYNAMIC),yy)
+                ifneq ($(filter -lSDL2_mixer,$(SDL2_MIXER_LIBS)),)
+                ifeq ($(findstring -static,$(SDL2_MIXER_LINK_FLAGS))$(findstring -Bstatic,$(SDL2_MIXER_LINK_FLAGS)),)
+                    SDL2_MIXER_SHARED := $(shell $(CC) \
+                        $(filter -L% --sysroot=%,$(CFLAGS) $(LDFLAGS) $(SDL2_MIXER_LIBS)) \
+                        -print-file-name=libSDL2_mixer-2.0.so.0 2>/dev/null)
+                    ifneq ($(wildcard $(SDL2_MIXER_SHARED)),)
+                        SDL2_MIXER_USE_DYNAMIC := y
+                    endif
+                endif
+                endif
+                endif
+                ifeq ($(SDL2_MIXER_USE_DYNAMIC),y)
+                    $(OUT)/syscall_sdl.o: CFLAGS += -DRV32_SDL_MIXER_DYNAMIC
+                    LDFLAGS += $(filter-out -lSDL2_mixer,$(SDL2_MIXER_LIBS)) -ldl
+                else
+                    LDFLAGS += $(SDL2_MIXER_LIBS)
+                endif
             else ifeq ($(SKIP_DEPS_CHECK),)
                 $(warning SDL2_mixer not found. Audio disabled.)
             endif
@@ -278,7 +301,7 @@ EFFECTIVE_CONFIG_VARS := \
 	CONFIG_ROOTFS_EXT4 \
 	MEM_START MEM_SIZE DTB_SIZE INITRD_SIZE USER_MEM_SIZE \
 	INITRD_ACTUAL_BYTES REAL_MEM_SIZE REAL_DTB_SIZE REAL_INITRD_SIZE \
-	VLEN
+	VLEN SDL2_MIXER_USE_DYNAMIC
 
 ifeq ($(CONFIG_EXT_F),y)
 $(OBJS): $(SOFTFLOAT_LIB)

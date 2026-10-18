@@ -22,6 +22,9 @@
 #include "riscv.h"
 #include "riscv_private.h"
 #include "syscall_sdl.h"
+#ifdef RV32_SDL_MIXER_DYNAMIC
+#include "sdl_mixer_dynamic.h"
+#endif
 
 /* The DSITMBK sound effect in DOOM1.WAD uses a sample rate of 22050, but since
  * the game is played in single-player mode, it is acceptable to stick with
@@ -1011,6 +1014,9 @@ static void set_music_volume(riscv_t *rv)
 
 static void init_audio(void)
 {
+#ifdef RV32_SDL_MIXER_DYNAMIC
+    load_mixer();
+#endif
     if (!(SDL_WasInit(-1) & SDL_INIT_AUDIO)) {
         if (SDL_Init(SDL_INIT_AUDIO) != 0) {
             rv_log_fatal("Failed to call SDL_Init()");
@@ -1042,6 +1048,13 @@ static void init_audio(void)
 
 static void shutdown_audio(void)
 {
+#ifdef RV32_SDL_MIXER_DYNAMIC
+    /* Never load the mixer, and possibly fail, only to shut it down. */
+    if (!mixer_is_loaded()) {
+        audio_init = sfx_thread_init = music_thread_init = false;
+        return;
+    }
+#endif
 #if RV32_HAS(SDL_MIXER)
     /* Stop all playback first */
     Mix_HaltMusic();
@@ -1119,6 +1132,9 @@ void syscall_setup_audio(riscv_t *rv)
 
 void syscall_control_audio(riscv_t *rv)
 {
+#ifdef RV32_SDL_MIXER_DYNAMIC
+    load_mixer();
+#endif
     /* control_audio(request) */
     const int request = rv_get_reg(rv, rv_reg_a0);
 

@@ -138,6 +138,7 @@ GUEST_CFLAGS := -march=rv32i -mabi=ilp32
 GUEST_CHECKS := fused-misalign syscall-zero-write
 GUEST_CHECK_TARGETS :=
 GUEST_ASM_CHECK_TARGETS :=
+SYSTEM_ASM_CHECK_TARGETS :=
 # Every check below runs a user-mode guest ELF, which a system-mode emulator
 # can only load with the ELF loader selected; otherwise it expects a kernel
 # image and the program never runs.
@@ -167,6 +168,19 @@ GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
+
+# A flat supervisor kernel exercises MMIO-mode TLBs without a guest libc.
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifeq ($(CONFIG_Zicsr)$(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
+ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
+SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache
+else
+$(info Skipping system MMU regression: $(CROSS_COMPILE)objcopy is unavailable)
+endif
+endif
+endif
+endif
 
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
@@ -300,6 +314,16 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
+EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
+.PHONY: check-system-mmu-cache
+check-system-mmu-cache: $(BIN) tests/system-mmu-cache.S | $(OUT)
+	$(Q)$(call guest-asm-build,system-mmu-cache,rv32ia_zicsr,, \
+	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-mmu-cache \
+	    $(OUT)/system-mmu-cache.bin
+	$(call check-test,-k,$(OUT)/system-mmu-cache.bin,system-mmu-cache,tail -n 1,$(EXPECTED_system-mmu-cache))
+
+
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c
 	$$(Q)$$(CROSS_COMPILE)gcc $$(GUEST_CFLAGS) -o $$(OUT)/$(1) tests/$(1).c
@@ -412,10 +436,8 @@ $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr,-nohandler,-DNO_HA
 $(eval $(call guest-asm-check-target,jit-cycles,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32ic,-nocsr-rvc,-DNO_CSR))
 
-# check-trace-match builds and runs a host program, so it is independent of
-# whether the emulator can load a user ELF. Everything else here is a guest
-# ELF and belongs behind the same gate as the regressions above.
-CHECK_TARGETS := check-trace-match
+# Host checks and flat supervisor kernels do not require a user ELF loader.
+CHECK_TARGETS := check-trace-match $(SYSTEM_ASM_CHECK_TARGETS)
 ifeq ($(RUN_USER_ELF),y)
 CHECK_TARGETS += check-hello $(GUEST_CHECK_TARGETS) \
 	$(GUEST_ASM_CHECK_TARGETS) $(addprefix check-,$(CHECK_ELF_FILES))

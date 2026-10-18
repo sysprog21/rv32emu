@@ -287,6 +287,30 @@ MMU_FAULT_CHECK_DECL(write);
  * Translate virtual address to physical address with TLB caching.
  */
 uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw);
+uint32_t rv_mmu_ifetch(riscv_t *rv, uint32_t vaddr);
+uint32_t mmu_ifetch_miss(riscv_t *rv, uint32_t vaddr);
+extern bool need_retranslate;
+
+/* Instruction fetch through the iTLB, the body of rv_mmu_ifetch(). It is
+ * inline here so the interpreter's fetches skip the call on an iTLB hit in
+ * every build, not only with LTO; a miss walks the page table out of line.
+ *
+ * Do not call rv->io.mem_translate(): the basic block might be retranslated
+ * while the corresponding PTE is NULL.
+ */
+static inline uint32_t mmu_ifetch(riscv_t *rv, uint32_t vaddr)
+{
+    if (!rv->csr_satp)
+        return memory_ifetch(vaddr);
+    if (need_retranslate)
+        return 0;
+    const uint32_t vpn = (vaddr >> RV_PG_SHIFT) | ITLB_EXEC_TAG;
+    const tlb_entry_t *entry = &rv->itlb[vpn & TLB_MASK];
+    /* Tags distinguish individual 4 KiB VPNs even for superpages. */
+    if (entry->vpn == vpn)
+        return memory_ifetch(entry->ppn | (vaddr & MASK(RV_PG_SHIFT)));
+    return mmu_ifetch_miss(rv, vaddr);
+}
 bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr);
 
 /*
@@ -294,6 +318,19 @@ bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr);
  */
 void mmu_tlb_flush_all(riscv_t *rv);
 void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr);
+
+/* Record that a block was decoded from [start, end). */
+void mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end);
+/* Whether vaddr lies in a 4 MiB region holding code fetched through a
+ * superpage, where flushing one address may remap code on another page.
+ */
+bool mmu_code_superpage(const riscv_t *rv, uint32_t vaddr);
+#if !RV32_HAS(JIT)
+/* Whether flushing vaddr may remap code of an interpreter block. */
+bool mmu_may_hold_code(const riscv_t *rv, uint32_t vaddr);
+/* Forget all recorded code, once the interpreter dropped its blocks. */
+void mmu_forget_code(riscv_t *rv);
+#endif
 
 #define get_ppn_and_offset()                                   \
     uint32_t ppn;                                              \

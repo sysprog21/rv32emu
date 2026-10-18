@@ -331,8 +331,16 @@ typedef struct {
 #define TLB_PAGE_LEVEL_SUPER 1
 #define TLB_PAGE_LEVEL_4K 2
 
+/* VPNs occupy twenty bits; iTLB hits fold validity and execute permission
+ * into the comparison key. Invalidation must clear this tag as well.
+ */
+#define ITLB_EXEC_TAG (UINT32_C(1) << (32 - RV_PG_SHIFT))
+
+#define CODE_PAGE_FILTER_BITS 8192
+
 typedef struct {
-    uint32_t vpn, ppn; /* Virtual/Physical page number (upper 20 bits of VA) */
+    uint32_t vpn;      /* Virtual address >> 12; iTLB includes ITLB_EXEC_TAG */
+    uint32_t ppn;      /* Translated 4 KiB physical page base */
     uint32_t pte_addr; /* Physical address of PTE for A/D bit updates */
     uint8_t perm;      /* Permission bits: R(1), W(2), X(4), U(16) */
     uint8_t valid;     /* Entry validity flag */
@@ -660,6 +668,27 @@ struct riscv_internal {
     uint32_t csr_vl;     /* Vector length */
     uint32_t csr_vtype;  /* Vector data type register */
     uint32_t csr_vlenb;  /* VLEN/8 (vector register length in bytes) */
+#endif
+
+#if RV32_HAS(SYSTEM)
+    /* Cached slices of each 4 MiB superpage region in both TLBs, so a
+     * selective SFENCE.VMA scans the TLBs only when its region has any.
+     */
+    uint8_t tlb_super_slices[1U << 10];
+
+    /* 4 MiB regions holding blocks whose code may have been fetched through
+     * a superpage leaf. Flushing any address there may remap that code, so it
+     * retires the address space's blocks. JIT builds never clear these bits:
+     * blocks of other address spaces may still hold such code.
+     */
+    uint32_t code_superpages[(1U << 10) / 32];
+
+#if !RV32_HAS(JIT)
+    /* Hashed filter of pages holding interpreter blocks. A false positive only
+     * costs an unneeded block map clear.
+     */
+    uint32_t code_pages[CODE_PAGE_FILTER_BITS / 32];
+#endif
 #endif
 };
 

@@ -630,7 +630,6 @@ RVOP(mret, {
  * SATP (e.g., munmap + mmap to different PA, or mprotect changes).
  */
 RVOP(sfencevma, {
-    PC += 4;
     /* The reservation records a virtual address, so a mapping change could
      * otherwise leave it pointing at a different physical word.
      */
@@ -677,7 +676,8 @@ RVOP(sfencevma, {
          * code: only this thread changes the indexes that answer that.
          */
         const bool has_code =
-            jit_page_has_code(rv->jit_state, va, rv->csr_satp);
+            jit_page_has_code(rv->jit_state, va, rv->csr_satp) ||
+            mmu_code_superpage(rv, va);
         if (has_code || cache_has_va(rv->block_cache, va, rv->csr_satp)) {
 #if RV32_HAS(T2C)
             /* Hold cache_lock during invalidation to prevent race with T2C
@@ -691,7 +691,9 @@ RVOP(sfencevma, {
              * instructions: translated code through direct jumps, a T2C
              * region spanning pages, and the interpreter through its links
              * to the blocks it chains to. So when the page held any block or
-             * code, the whole address space goes.
+             * code, the whole address space goes. So does a flush in a 4 MiB
+             * region whose code came through a superpage: its leaf also maps
+             * the other pages.
              */
             if (has_code || n_invalidated) {
                 cache_invalidate_satp(rv->block_cache, rv->csr_satp, NULL);
@@ -708,7 +710,20 @@ RVOP(sfencevma, {
 #endif
     }
 #endif
+#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
+    /* Cached instructions and their links may still name the old mapping.
+     * Retire them through the normal deferred clear, after the instruction
+     * handler (and any enclosing synchronous trap) has finished using its IR.
+     * Linux flushes single data pages far more often than code, so a
+     * selective flush clears only when its page may hold a block.
+     */
+    if (!ir->rs1 || mmu_may_hold_code(rv, rv->X[ir->rs1]))
+        need_clear_block_map = true;
+    goto nextop;
+#else
+    PC += 4;
     goto end_op;
+#endif
 })
 
 #if RV32_HAS(Zifencei) /* RV32 Zifencei Standard Extension */

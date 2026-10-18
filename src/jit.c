@@ -63,11 +63,11 @@
  *
  * The fast path also assumes:
  *   - TLB_SIZE is a power of two so VPN -> index is a simple AND.
- *   - T1 handles both TLB_PAGE_LEVEL_4K and TLB_PAGE_LEVEL_SUPER inline:
- *     the offset mask is chosen by CSEL (aarch64) / CMOVcc (x86-64) based on
- *     the level byte (12 bits for 4 KiB, 22 bits for 4 MiB).  T2C still
- *     bails to C on superpage entries — an LLVM-IR select variant showed
- *     intermittent crashes after T2C compilation, root cause not isolated.
+ *   - Each VPN tag identifies an exact 4 KiB slice. Its ppn includes the
+ *     superpage offset's bits 21:12, so both hosts use a 12-bit offset.
+ *     T2C still bails to C on superpage entries: an LLVM-IR select
+ *     variant showed intermittent crashes after T2C compilation, root cause
+ *     not isolated.
  *   - dirty == 1 on writes; clean PTE writes fall back to C so PTE_D update
  *     stays in dtlb_lookup() / mmu_translate().
  *   - paddr range is checked against memory_t mem_size to keep MMIO mappings
@@ -188,12 +188,12 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 
 /* Worst-case jump targets per instruction.  Under SYSTEM_MMIO with the
  * inline dTLB fast path enabled, a single load/store can record:
- *   - 7 fast-path gating branches (align, vpn, valid, perm, dirty for stores,
- *     level, range) patched to the slow-path label
+ *   - 6 fast-path gating branches (align, vpn, valid, perm, dirty for stores,
+ *     range) patched to the slow-path label
  *   - 1 unconditional B at the end of the fast path patched to the merge label
  *   - 4 slow-path branches (LOC_0, LOC_1, TRAP, NORMAL)
  *   - 1 implicit jump inside emit_exit
- * Total: 13.  Branch epilogues are still 5 (2x emit_jmp + 2x emit_exit +
+ * Total: 12.  Branch epilogues are still 5 (2x emit_jmp + 2x emit_exit +
  * 1x emit_jump_target_offset).  We round up to 16 for headroom.
  *
  * Each load or store also has a misaligned-access guard: the branch to its
@@ -2430,22 +2430,6 @@ static uint32_t emit_a64_bcond(struct jit_state *state, int cond)
     return loc;
 }
 
-/* CSEL Wd, Wn, Wm, cond — conditional select (32-bit form).
- * Wd = (cond_holds) ? Wn : Wm.  Used by the superpage path to pick the
- * offset mask without branching.  Encoding:
- *   31 30 29 28..21       20..16 15..12 11..10 9..5 4..0
- *   sf  0  0  1101_0100   Rm     cond   00      Rn   Rd    (sf=0 for 32-bit)
- */
-static void emit_a64_csel(struct jit_state *state,
-                          int cond,
-                          int rd,
-                          int rn,
-                          int rm)
-{
-    emit_a64(state, UINT32_C(0x1A800000) | ((uint32_t) rm << 16) |
-                        ((uint32_t) cond << 12) | ((uint32_t) rn << 5) |
-                        (uint32_t) rd);
-}
 #endif
 
 #if defined(__x86_64__) && !defined(_WIN32)
@@ -2487,18 +2471,6 @@ static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
     return loc;
 }
 
-/* CMOVcc r32, r/m32 — conditional move based on flags.
- *   dst = (cond_holds) ? src : dst
- * Encoded as 0F 4x /r where 4x = 0x40 + cc.  REX.R/REX.B as needed.
- */
-static void emit_x64_cmov(struct jit_state *state, uint8_t cc, int dst, int src)
-{
-    if ((dst & 8) || (src & 8))
-        emit_basic_rex(state, 0, dst, src);
-    emit1(state, 0x0f);
-    emit1(state, 0x40 | cc);
-    emit_modrm_reg2reg(state, dst, src);
-}
 #endif
 
 /* Inline dTLB fast path for a load or store.
@@ -2521,9 +2493,8 @@ static void emit_x64_cmov(struct jit_state *state, uint8_t cc, int dst, int src)
  *   - For stores: entry.dirty == 1 (so PTE_D update stays in C)
  *   - paddr + access_size <= mem_size (MMIO and bound-violators take slow path)
  *
- * Both TLB_PAGE_LEVEL_4K and TLB_PAGE_LEVEL_SUPER (4 MiB) are handled
- * inline: the offset mask is selected via CSEL/CMOVcc based on the level
- * byte, so superpage entries no longer bail to the slow path.
+ * Both ordinary pages and superpages are handled inline. Every exact VPN
+ * caches a translated 4 KiB slice, so both hosts use a twelve-bit offset.
  *
  * Aligned + same page implies no page crossing, so we do not check that.
  *
@@ -2592,8 +2563,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
      * path so we can patch them once we know the slow-path label.
      *
      * Maximum count:
-     *   1 align + 1 vpn + 1 valid + 1 perm + 1 dirty (store) + 1 level + 1
-     * range
+     *   1 align + 1 vpn + 1 valid + 1 perm + 1 dirty (store) + 1 range
      */
     uint32_t slow_branches[8];
     int n_slow = 0;
@@ -2657,29 +2627,14 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         slow_branches[n_slow++] = emit_a64_cbz(state, R24);
     }
 
-    /* Level-aware paddr compute.  level is 1 (4MB superpage) or 2 (4KB).
-     *
-     * Compute both candidate offsets (4K = vaddr & 0xFFF, super = vaddr &
-     * 0x3FFFFF) into separate registers, then CSEL based on level == 4K.
-     * Branchless to keep the hot 4K path free of an extra conditional, and
-     * dropping the previous `level != 4K → slow` bail lets superpages stay
-     * inline too.
-     *
-     * w10 = 4K offset = vaddr & 0xFFF
-     * w11 = super offset = vaddr & 0x3FFFFF
-     * w24 = ppn from TLB entry
-     * Then SUBS xzr, level, #4K and CSEL between w10/w11 based on EQ.
+    /* The exact VPN tag identifies a translated 4 KiB slice, including
+     * superpage entries, so the offset always has twelve bits.
+     * paddr = ppn | (vaddr & 0xFFF)
      */
-    emit_loadstore_imm(state, LS_LDRB, R12, R25, 15); /* w12 = level */
-    emit_loadstore_imm(state, LS_LDRW, R24, R25, 4);  /* w24 = ppn */
-    emit_load_imm(state, R10, 0xFFF);
-    emit_logical_register(state, false, LOG_AND, R10, R8, R10); /* 4K offset */
-    emit_load_imm(state, R11, 0x3FFFFF);
-    emit_logical_register(state, false, LOG_AND, R11, R8, R11); /* super off */
-    emit_load_imm(state, R25, TLB_PAGE_LEVEL_4K);
-    emit_addsub_register(state, false, AS_SUBS, RZ, R12, R25); /* CMP level,2 */
-    emit_a64_csel(state, COND_EQ, R25, R10, R11);              /* offset */
-    emit_logical_register(state, false, LOG_ORR, R24, R24, R25); /* paddr */
+    emit_loadstore_imm(state, LS_LDRW, R24, R25, 4); /* w24 = ppn */
+    /* UBFX w10, w8, #0, #12 = UBFM w10, w8, #0, #11 */
+    emit_a64(state, 0x53000000U | (11 << 10) | (R8 << 5) | R10);
+    emit_logical_register(state, false, LOG_ORR, R24, R24, R10); /* paddr */
 
     /* Range check: paddr <= mem_size - access_size
      * Branch to slow path if paddr > max_paddr (unsigned).
@@ -2816,14 +2771,10 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
 
     /* r12 = rdi + offsetof(dtlb) + rsi (idx*16 already in rsi)
      * LEA r12, [rdi + rsi*1 + dtlb_offset]
-     * REX.WRB = 0x4c, opcode 8d, ModRM = 84 (mod=10 disp32, reg=R12 low3=4,
-     *   r/m=100 SIB), SIB = 37 (scale=00, index=110=RSI, base=111=RDI).
      */
-    emit1(state, 0x4c);
+    emit_rex(state, 1, 1, 0, 0);
     emit1(state, 0x8d);
-    emit1(state, 0xa4);
-    emit1(state, 0x37);
-    emit4(state, (uint32_t) offsetof(riscv_t, dtlb));
+    emit_sib_operand(state, R12, RDI, RSI, 0, offsetof(riscv_t, dtlb));
 
     /* VPN match: cmp eax, [r12]; jne slow
      * REX.B for r12 base, opcode 3b, mod=00 r/m=100 SIB, SIB.base=R12.
@@ -2848,36 +2799,11 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         slow_branches[n_slow++] = emit_x64_jcc32(state, 0x84); /* je */
     }
 
-    /* Level-aware paddr compute.  level (byte at +15) is 1 (4MB superpage)
-     * or 2 (4KB).  Drop the previous `level != 4K → slow` bail so superpage
-     * entries also stay inline.  Pick the offset mask via CMOVcc, mirroring
-     * the aarch64 CSEL-based design.
-     *
-     *   ESI = vaddr & 0xFFF           (4K offset, in RCX = vaddr originally)
-     *   EBX = vaddr & 0x3FFFFF        (super offset)
-     *   cmp byte [r12+15], 2
-     *   cmovne esi, ebx               ; if not 4K, use super offset
-     *   mov eax, [r12+4]              ; ppn
-     *   or eax, esi                   ; paddr
+    /* The exact VPN tag identifies a translated 4 KiB slice, including
+     * superpage entries. The offset therefore always has twelve bits.
      */
-    /* mov esi, ecx  -- ESI = vaddr */
-    emit1(state, 0x89);
-    emit_modrm_reg2reg(state, RCX, RSI);
-    /* and esi, 0xFFF -- 4K offset */
-    emit1(state, 0x81);
-    emit_modrm(state, 0xc0, 4, RSI);
-    emit4(state, 0xFFF);
-    /* mov ebx, ecx  -- EBX = vaddr */
-    emit1(state, 0x89);
-    emit_modrm_reg2reg(state, RCX, RBX);
-    /* and ebx, 0x3FFFFF -- super offset */
-    emit1(state, 0x81);
-    emit_modrm(state, 0xc0, 4, RBX);
-    emit4(state, 0x3FFFFF);
-    /* cmp byte ptr [r12+15], 2 */
-    emit_x64_cmp_byte_r12_disp_imm8(state, 15, TLB_PAGE_LEVEL_4K);
-    /* cmovne esi, ebx -- if level != 4K (i.e., superpage), use super offset */
-    emit_x64_cmov(state, 0x5 /* NE */, RSI, RBX);
+    emit_mov32(state, RCX, RSI);
+    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, RSI, 0xFFF);
     /* mov eax, [r12+4]  (4-byte ppn) */
     emit1(state, 0x41);
     emit1(state, 0x8b);

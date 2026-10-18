@@ -2,9 +2,9 @@
  *
  * The x86-64 emitter selects the divide instruction from the opcode class and
  * used to pick the unsigned form for every caller, so DIV and REM returned the
- * unsigned quotient whenever an operand was negative. The operands arrive
- * sign-extended to 64 bits, which is what lets the signed divide run at that
- * width: INT_MIN / -1 stays representable there and cannot raise #DE.
+ * unsigned quotient whenever an operand was negative. The emitter now runs a
+ * 32-bit IDIV and diverts divisors 0 and -1 to an exceptional path first, so
+ * INT_MIN / -1 never reaches the native divide and cannot raise #DE.
  *
  * Load the operands from memory so constant folding cannot answer for the
  * generated code, and run the loop long enough to be compiled.
@@ -39,6 +39,27 @@ loop:
     chk rem, 2, -1
     chk rem, 3, 0               /* INT_MIN % -1 is 0 */
     chk rem, 4, -1              /* x % 0 is x */
+
+    /* The combined exceptional-divisor path must handle every dividend. */
+    chk div, 7, -7
+    chk rem, 7, 0
+    chk div, 8, 7
+    chk rem, 8, 0
+    chk div, 9, 0
+    chk rem, 9, 0
+    chk div, 10, -2147483647
+    chk rem, 10, 0
+    chk div, 11, -1
+    chk rem, 11, -2147483648
+
+    /* Destination/source aliases must read both operands before writing. */
+    li t0, -2147483648
+    li t1, -1
+    div t0, t0, t1
+    li t3, -2147483648
+    bne t0, t3, fail
+    rem t1, t0, t1
+    bnez t1, fail
 
     /* Unsigned forms must keep treating the same bits as unsigned. */
     chk divu, 0, 2147483644
@@ -88,3 +109,8 @@ operands:
     .word -1, 0
     .word -65536, 65536
     .word -1, 2
+    .word 7, -1
+    .word -7, -1
+    .word 0, -1
+    .word 2147483647, -1
+    .word -2147483648, 0

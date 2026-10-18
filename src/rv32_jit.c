@@ -114,20 +114,6 @@
         EMIT_BRANCH_EPILOGUE(2); /* 2-byte instruction */ \
     })
 
-/* Group 1 ALU opcode for immediate operand (x86-64 encoding).
- * On Arm64, this opcode is ignored; ALU_* selectors determine the operation.
- */
-#define ALU_GRP1_OPCODE 0x81
-
-/* ALU operation selectors for group 1 operations.
- * On x86-64: ModR/M reg field values. On Arm64: switch case selectors
- * in emit_alu32_imm32() that map to native instructions.
- */
-#define ALU_ADD 0
-#define ALU_OR 1
-#define ALU_AND 4
-#define ALU_XOR 6
-
 /* ALU immediate instruction handler macro. Identity operations are resolved
  * while translating, retaining a 32-bit move to normalize the result.
  */
@@ -147,20 +133,6 @@
             emit_alu32_imm32(state, ALU_GRP1_OPCODE, op, vm_reg[1], ir->imm); \
         }                                                                     \
     })
-
-/* Shift operation identifiers.
- * Values match x86-64 ModR/M reg field; used on both architectures.
- */
-#define SHIFT_SHL 4
-#define SHIFT_SHR 5
-#define SHIFT_SAR 7
-
-/* Shift opcodes (x86-64 encoding).
- * On Arm64, emit_alu32_imm8() and emit_alu32() map SHIFT_* values to native
- * instructions.
- */
-#define SHIFT_IMM_OPCODE 0xc1 /* Shift by immediate */
-#define SHIFT_REG_OPCODE 0xd3 /* Shift by register */
 
 /* RV32 shift amount mask - only lower 5 bits used */
 #define RV32_SHIFT_MASK 0x1f
@@ -218,25 +190,16 @@
     GEN(inst, {                                                                \
         ra_load2(state, ir->rs1, ir->rs2);                                     \
         vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]); \
-        emit_mov(state, vm_reg[1], temp_reg);                                  \
-        if (vm_reg[0] != vm_reg[2])                                            \
-            emit_mov(state, vm_reg[0], vm_reg[2]);                             \
-        /* Both x86-64 and AArch64 mask 32-bit variable shift counts to the    \
-         * low five bits, exactly matching RV32. */                            \
-        emit_alu32(state, SHIFT_REG_OPCODE, op, vm_reg[2]);                    \
+        emit_shift32(state, op, vm_reg[0], vm_reg[1], vm_reg[2]);              \
     })
 
 /* Set-less-than immediate instruction handler macro (slti/sltiu) */
 #define GEN_SLT_IMM(inst, cond)                                    \
     GEN(inst, {                                                    \
         vm_reg[0] = ra_load(state, ir->rs1);                       \
-        emit_cmp_imm32(state, vm_reg[0], ir->imm);                 \
         vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]); \
-        emit_load_imm(state, vm_reg[1], 1);                        \
-        uint32_t jump_loc_0 = state->offset;                       \
-        emit_jcc_offset(state, cond);                              \
-        emit_load_imm(state, vm_reg[1], 0);                        \
-        emit_jump_target_offset(state, JUMP_LOC_0, state->offset); \
+        emit_cmp_imm32(state, vm_reg[0], ir->imm);                 \
+        emit_set_less_than(state, cond, vm_reg[1]);                \
     })
 
 /* Set-less-than register instruction handler macro (slt/sltu) */
@@ -245,11 +208,7 @@
         ra_load2(state, ir->rs1, ir->rs2);                                     \
         vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]); \
         emit_cmp32(state, vm_reg[1], vm_reg[0]);                               \
-        emit_load_imm(state, vm_reg[2], 1);                                    \
-        uint32_t jump_loc_0 = state->offset;                                   \
-        emit_jcc_offset(state, cond);                                          \
-        emit_load_imm(state, vm_reg[2], 0);                                    \
-        emit_jump_target_offset(state, JUMP_LOC_0, state->offset);             \
+        emit_set_less_than(state, cond, vm_reg[2]);                            \
     })
 
 /* Load instruction handler macro - handles MMIO path when SYSTEM_MMIO enabled.
@@ -541,37 +500,29 @@ GEN(mul, {
     vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]);
     emit_mul32(state, vm_reg[0], vm_reg[1], vm_reg[2]);
 })
-GEN(mulh, {
-    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, true);
-    muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
-    emit_alu64_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHR, vm_reg[2], 32);
-})
-GEN(mulhsu, {
-    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, false);
-    muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
-    emit_alu64_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHR, vm_reg[2], 32);
-})
-GEN(mulhu, {
-    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, false, false);
-    muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);
-    emit_alu64_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHR, vm_reg[2], 32);
-})
-GEN(div, {
-    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, true);
-    muldivmod(state, 0x38, temp_reg, vm_reg[2], 1);
-})
-GEN(divu, {
-    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, false, false);
-    muldivmod(state, 0x38, temp_reg, vm_reg[2], 0);
-})
-GEN(rem, {
-    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, true, true);
-    muldivmod(state, 0x98, temp_reg, vm_reg[2], 1);
-})
-GEN(remu, {
-    ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, false, false);
-    muldivmod(state, 0x98, temp_reg, vm_reg[2], 0);
-})
+/* High multiply: the full product of the operands, each extended as signed
+ * or unsigned, shifted down by 32.
+ */
+#define GEN_MULH(inst, sign1, sign2)                                        \
+    GEN(inst, {                                                             \
+        ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, sign1, sign2);     \
+        muldivmod(state, 0x2f, temp_reg, vm_reg[2], 0);                     \
+        emit_alu64_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHR, vm_reg[2], 32); \
+    })
+GEN_MULH(mulh, true, true)
+GEN_MULH(mulhsu, true, false)
+GEN_MULH(mulhu, false, false)
+
+/* Division (0x38) and remainder (0x98), signed or unsigned. */
+#define GEN_DIVREM(inst, opcode, sign)                                \
+    GEN(inst, {                                                       \
+        ra_load2_muldiv(state, ir->rs1, ir->rs2, ir->rd, sign, sign); \
+        muldivmod(state, opcode, temp_reg, vm_reg[2], sign);          \
+    })
+GEN_DIVREM(div, 0x38, true)
+GEN_DIVREM(divu, 0x38, false)
+GEN_DIVREM(rem, 0x98, true)
+GEN_DIVREM(remu, 0x98, false)
 #endif
 #if RV32_HAS(EXT_A)
 GEN(lrw, { assert(NULL); })

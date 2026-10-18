@@ -159,6 +159,8 @@ jobs:
       run: |
             # defconfig is the tier-1 JIT alone; jit_defconfig adds T2C.
             make distclean && make defconfig && make check $PARALLEL
+            # Register shifts without BMI2, as on older x86-64 CPUs.
+            make JIT_DISABLE_BMI2=1 check $PARALLEL
             make cleanconfig && make jit_defconfig && make check $PARALLEL
 
     - name: undefined behavior test

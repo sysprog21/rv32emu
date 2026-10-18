@@ -70,6 +70,9 @@ struct pending_jump {
 };
 
 struct jit_state {
+#if defined(__x86_64__)
+    bool has_bmi2; /* detected once; never emit unsupported host instructions */
+#endif
     int32_t offset_index[1 << OFFSET_INDEX_BITS];
 #if RV32_HAS(SYSTEM)
     int32_t space_index[1 << SPACE_INDEX_BITS];

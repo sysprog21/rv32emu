@@ -91,6 +91,16 @@ EXPECTED_jit-alu-alias = JIT ALU aliases OK
 EXPECTED_jit-indirect-targets = JIT indirect targets OK
 EXPECTED_jit-identity-normalize = JIT identity normalize OK
 EXPECTED_jit-signed-div = JIT signed division OK
+EXPECTED_jit-muldiv = JIT multiply/divide OK
+EXPECTED_jit-compare = JIT compare OK
+EXPECTED_jit-shift = JIT register shifts OK
+EXPECTED_jit-spill-loop = JIT spill loop OK
+EXPECTED_jit-direct-successor = JIT direct successor OK
+EXPECTED_jit-carry = JIT carry OK
+EXPECTED_jit-branch-successor = JIT branch successor OK
+EXPECTED_jit-region-traps = JIT region traps OK
+EXPECTED_jit-bit-loop = JIT bit loop OK
+EXPECTED_jit-scaled-add = JIT scaled add OK
 EXPECTED_jit-mul = JIT multiply OK
 EXPECTED_const-arith = constant arithmetic OK
 EXPECTED_const-shift = constant shifts OK
@@ -151,6 +161,7 @@ GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
 GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
 GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
+GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
 
@@ -202,13 +213,19 @@ endif
 # passing them through the interpreter and reporting green.
 ifeq ($(CONFIG_JIT),y)
 GUEST_ASM_CHECK_TARGETS += check-jit-alu-alias check-jit-indirect-targets
-GUEST_ASM_CHECK_TARGETS += check-jit-memory-address
+GUEST_ASM_CHECK_TARGETS += check-jit-memory-address check-jit-compare \
+	check-jit-shift check-jit-spill-loop check-jit-direct-successor check-jit-carry \
+	check-jit-branch-successor check-jit-spill-loop-region \
+	check-jit-bit-loop check-jit-bit-loop-xor check-jit-bit-loop-clear \
+	check-jit-scaled-add
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-jit-memory-address-rvc
+GUEST_ASM_CHECK_TARGETS += check-jit-memory-address-rvc \
+	check-jit-direct-successor-rvc check-jit-branch-successor-rvc
 endif
 ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-identity-normalize check-jit-signed-div \
-	check-jit-interp-diff check-jit-mul
+	check-jit-interp-diff check-jit-mul check-jit-muldiv \
+	check-jit-spill-loop-m check-jit-spill-loop-region-m
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_MC_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-interp-diff-rvc
 endif
@@ -225,9 +242,18 @@ endif
 # trap CSRs, so both need Zicsr, as does jit-cycles to read the counters.
 ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-misalign check-jit-misalign-nohandler \
-	check-jit-cycles
+	check-jit-cycles check-jit-spill-loop-csr check-jit-direct-successor-csr \
+	check-jit-direct-successor-cycles check-jit-branch-successor-cycles \
+	check-jit-region-traps check-jit-spill-loop-region-csr \
+	check-jit-bit-loop-cycles check-jit-bit-loop-clear-cycles
+ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-spill-loop-m-csr \
+	check-jit-spill-loop-region-m-csr
+endif
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-jit-misalign-rvc
+GUEST_ASM_CHECK_TARGETS += check-jit-misalign-rvc \
+	check-jit-direct-successor-rvc-csr check-jit-direct-successor-rvc-cycles \
+	check-jit-branch-successor-rvc-cycles check-jit-region-traps-rvc
 endif
 endif
 endif
@@ -256,7 +282,7 @@ endif
 # An optional suffix $(3) names a variant built for another ISA, or with the
 # extra assembler flags in $(4).
 guest-asm-build = $(CROSS_COMPILE)gcc -march=$(2) -mabi=ilp32 -nostdlib \
-	-static -Wl,-e,_start $(4) -o $(OUT)/$(1)$(3) tests/$(1).S
+	-static -fno-pie -no-pie -Wl,-e,_start $(4) -o $(OUT)/$(1)$(3) tests/$(1).S
 
 define guest-asm-check-target
 .PHONY: check-$(1)$(3)
@@ -287,6 +313,35 @@ check-block-eviction: $(BIN) tests/block-eviction.c tests/block-eviction-start.S
 
 # Exercise base/destination aliases and signed offsets with and without RVC.
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32i))
+$(eval $(call guest-asm-check-target,jit-compare,rv32i))
+$(eval $(call guest-asm-check-target,jit-shift,rv32i))
+$(eval $(call guest-asm-check-target,jit-scaled-add,rv32i))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i_zicsr,-cycles,-DUSE_CYCLES))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i_zicsr,-clear-cycles,-DUSE_CYCLES -DBIT_OP=2))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i,-xor,-DBIT_OP=1))
+$(eval $(call guest-asm-check-target,jit-bit-loop,rv32i,-clear,-DBIT_OP=2))
+$(eval $(call guest-asm-check-target,jit-region-traps,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,jit-region-traps,rv32ic_zicsr,-rvc,-DUSE_RVC))
+$(eval $(call guest-asm-check-target,jit-branch-successor,rv32i))
+$(eval $(call guest-asm-check-target,jit-branch-successor,rv32i_zicsr,-cycles,-DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,jit-branch-successor,rv32ic_zicsr,-rvc-cycles,-DUSE_RVC -DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,jit-branch-successor,rv32ic,-rvc,-DUSE_RVC))
+$(eval $(call guest-asm-check-target,jit-carry,rv32i))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32i))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32i_zicsr,-cycles,-DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32ic_zicsr,-rvc-cycles,-DUSE_RVC -DCHECK_CYCLES))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32ic,-rvc,-DUSE_RVC))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32i_zicsr,-csr,-DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-direct-successor,rv32ic_zicsr,-rvc-csr,-DUSE_RVC -DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32i,-region,-DREGION_BRANCH))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32im,-region-m,-DREGION_BRANCH -DUSE_MULDIV))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32i_zicsr,-region-csr,-DREGION_BRANCH -DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32im_zicsr,-region-m-csr,-DREGION_BRANCH -DUSE_MULDIV -DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32i))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32im,-m,-DUSE_MULDIV))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32i_zicsr,-csr,-DUSE_CSR))
+$(eval $(call guest-asm-check-target,jit-spill-loop,rv32im_zicsr,-m-csr,-DUSE_MULDIV -DUSE_CSR))
 $(eval $(call guest-asm-check-target,register-loop,rv32i))
 $(eval $(call guest-asm-check-target,register-loop,rv32i_zicsr,-cycles,-DCHECK_CYCLES))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
@@ -327,6 +382,7 @@ $(eval $(call guest-asm-check-target,jit-indirect-targets,rv32i))
 $(eval $(call guest-asm-check-target,jit-identity-normalize,rv32im))
 $(eval $(call guest-asm-check-target,jit-signed-div,rv32im))
 $(eval $(call guest-asm-check-target,jit-mul,rv32im))
+$(eval $(call guest-asm-check-target,jit-muldiv,rv32im))
 $(eval $(call guest-asm-check-target,const-arith,rv32im))
 $(eval $(call guest-asm-check-target,const-operand,rv32im))
 $(eval $(call guest-asm-check-target,const-coperand,rv32ic))

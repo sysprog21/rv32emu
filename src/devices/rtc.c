@@ -29,6 +29,15 @@ uint64_t rtc_get_now_nsec(rtc_t *rtc)
     return (uint64_t) (ts.tv_sec * 1e9) + ts.tv_nsec + rtc->clock_offset;
 }
 
+void rtc_update(rtc_t *rtc, uint64_t now_nsec)
+{
+    const uint64_t alarm = ((uint64_t) rtc->alarm_high << 32) | rtc->alarm_low;
+    if ((rtc->alarm_status) && (now_nsec >= alarm)) {
+        rtc->alarm_status = 0;
+        rtc->interrupt_status = 1;
+    }
+}
+
 uint32_t rtc_read(rtc_t *rtc, uint32_t addr)
 {
     uint32_t rtc_read_val = 0;
@@ -84,12 +93,15 @@ void rtc_write(rtc_t *rtc, uint32_t addr, uint32_t value)
         break;
     case RTC_ALARM_LOW:
         rtc->alarm_low = value;
+        /* Writing the low half arms a one-shot alarm. */
+        rtc->alarm_status = 1;
+        rtc_update(rtc, rtc_get_now_nsec(rtc));
         break;
     case RTC_ALARM_HIGH:
         rtc->alarm_high = value;
         break;
     case RTC_IRQ_ENABLED:
-        rtc->irq_enabled = value;
+        rtc->irq_enabled = value & 1;
         break;
     case RTC_CLEAR_ALARM:
         rtc->alarm_status = 0;

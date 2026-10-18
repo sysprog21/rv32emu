@@ -42,10 +42,7 @@ typedef struct {
 #define IRQ_RTC_SHIFT 2
 #define IRQ_RTC_BIT (1 << IRQ_RTC_SHIFT)
 
-#define rtc_alarm_fire(rtc, now_nsec) \
-    ((rtc)->irq_enabled &&            \
-     ((now_nsec) >=                   \
-      ((((uint64_t) (rtc)->alarm_high) << 32) | (rtc)->alarm_low)))
+void rtc_update(rtc_t *rtc, uint64_t now_nsec);
 
 uint64_t rtc_get_now_nsec(rtc_t *rtc);
 

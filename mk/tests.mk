@@ -36,6 +36,12 @@ $(eval $(call test-framework,constopt,test-constopt.o,,))
 # ELF test: rejects malformed ELF input without reading outside the file
 $(eval $(call test-framework,elf,test-elf.o,$(OUT)/elf.o $(OUT)/io.o $(OUT)/map.o $(OUT)/utils.o $(OUT)/log.o,))
 
+ifeq ($(CONFIG_GOLDFISH_RTC),y)
+$(eval $(call test-framework,rtc,test-rtc.o,$(OUT)/devices/rtc.o $(OUT)/log.o,))
+$(eval $(call run-test-simple,rtc))
+tests: run-test-rtc
+endif
+
 # Test Runners
 
 # Cache test uses file comparison (input -> output -> compare with expected)

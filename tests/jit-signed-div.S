@@ -23,6 +23,19 @@
     bne  t2, t3, fail
     .endm
 
+    /* As chk, with the destination aliasing rs1 and then rs2. */
+    .macro chk_alias op, idx, want
+    la   t4, operands
+    li   t3, \want
+    lw   t0, (\idx * 8)(t4)
+    lw   t1, (\idx * 8 + 4)(t4)
+    \op  t0, t0, t1
+    bne  t0, t3, fail
+    lw   t0, (\idx * 8)(t4)
+    \op  t1, t0, t1
+    bne  t1, t3, fail
+    .endm
+
 _start:
     li s1, 0x5a5a1234
     sw s1, 0(sp)
@@ -52,14 +65,14 @@ loop:
     chk div, 11, -1
     chk rem, 11, -2147483648
 
-    /* Destination/source aliases must read both operands before writing. */
-    li t0, -2147483648
-    li t1, -1
-    div t0, t0, t1
-    li t3, -2147483648
-    bne t0, t3, fail
-    rem t1, t0, t1
-    bnez t1, fail
+    /* Destination/source aliases must read both operands before writing.
+     * Each result differs from both operands, except INT_MIN / -1 aliasing
+     * rs1, whose rs2 alias still checks the exceptional path.
+     */
+    chk_alias div, 1, -3        /*  7 / -2 */
+    chk_alias rem, 1, 1
+    chk_alias div, 3, -2147483648
+    chk_alias rem, 3, 0
 
     /* Unsigned forms must keep treating the same bits as unsigned. */
     chk divu, 0, 2147483644

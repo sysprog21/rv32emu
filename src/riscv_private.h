@@ -426,6 +426,16 @@ struct riscv_internal {
     riscv_word_t X[N_RV_REGS];
     riscv_word_t PC;
 
+    /* Copies of PRIV(rv)->allow_misalign and, in user mode, of the guest RAM
+     * base, set by rv_cold_reboot(). Keeping them next to the registers saves
+     * the interpreter the dependent loads through PRIV(rv)->mem on every
+     * load and store.
+     */
+    bool allow_misalign;
+#if !RV32_HAS(SYSTEM)
+    uint8_t *ram_base;
+#endif
+
     uint64_t timer; /**< strictly increment timer */
 
 #if RV32_HAS(VIRTIO_NET)
@@ -738,65 +748,65 @@ FORCE_INLINE bool is_compressed(uint32_t insn)
 #if !RV32_HAS(SYSTEM)
 FORCE_INLINE uint32_t ram_read_w(const riscv_t *rv, uint32_t addr)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr + sizeof(uint32_t) > attr->mem->mem_size))
         return 0;
 #endif
     uint32_t val;
-    memcpy(&val, attr->mem->mem_base + addr, sizeof(val));
+    memcpy(&val, rv->ram_base + addr, sizeof(val));
     return val;
 }
 
 FORCE_INLINE uint16_t ram_read_s(const riscv_t *rv, uint32_t addr)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr + sizeof(uint16_t) > attr->mem->mem_size))
         return 0;
 #endif
     uint16_t val;
-    memcpy(&val, attr->mem->mem_base + addr, sizeof(val));
+    memcpy(&val, rv->ram_base + addr, sizeof(val));
     return val;
 }
 
 FORCE_INLINE uint8_t ram_read_b(const riscv_t *rv, uint32_t addr)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr >= attr->mem->mem_size))
         return 0;
 #endif
-    return attr->mem->mem_base[addr];
+    return rv->ram_base[addr];
 }
 
 FORCE_INLINE void ram_write_w(const riscv_t *rv, uint32_t addr, uint32_t val)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr + sizeof(uint32_t) > attr->mem->mem_size))
         return;
 #endif
-    memcpy(attr->mem->mem_base + addr, &val, sizeof(val));
+    memcpy(rv->ram_base + addr, &val, sizeof(val));
 }
 
 FORCE_INLINE void ram_write_s(const riscv_t *rv, uint32_t addr, uint16_t val)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr + sizeof(uint16_t) > attr->mem->mem_size))
         return;
 #endif
-    memcpy(attr->mem->mem_base + addr, &val, sizeof(val));
+    memcpy(rv->ram_base + addr, &val, sizeof(val));
 }
 
 FORCE_INLINE void ram_write_b(const riscv_t *rv, uint32_t addr, uint8_t val)
 {
-    vm_attr_t *attr = PRIV(rv);
 #if !HAVE_MMAP
+    const vm_attr_t *attr = PRIV(rv);
     if (unlikely((uint64_t) addr >= attr->mem->mem_size))
         return;
 #endif
-    attr->mem->mem_base[addr] = val;
+    rv->ram_base[addr] = val;
 }
 #endif /* !RV32_HAS(SYSTEM) */

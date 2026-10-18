@@ -1889,6 +1889,10 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         assert(attr->mem);
         assert(!(((uintptr_t) attr->mem) & 0b11));
     }
+    rv->allow_misalign = attr->allow_misalign;
+#if !RV32_HAS(SYSTEM)
+    rv->ram_base = attr->mem->mem_base;
+#endif
 
     /* Reset hart state (general purpose registers, CSRs, PC, argc/argv, etc.)
      */

@@ -280,16 +280,16 @@ static inline void check_tohost_write(riscv_t *rv,
         return false;                                              \
     }
 
-#define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)              \
-    IIF(IO)(if (!PRIV(rv)->allow_misalign && unlikely(addr & (mask_or_pc))), \
-            if (unlikely(insn_is_misaligned(PC))))                           \
-    {                                                                        \
-        rv->compressed = compress;                                           \
-        rv->csr_cycle = cycle;                                               \
-        rv->PC = PC;                                                         \
-        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, type##_MISALIGNED,                  \
-                                     IIF(IO)(addr, mask_or_pc));             \
-        return false;                                                        \
+#define RV_EXC_MISALIGN_HANDLER(mask_or_pc, type, compress, IO)        \
+    IIF(IO)(if (!rv->allow_misalign && unlikely(addr & (mask_or_pc))), \
+            if (unlikely(insn_is_misaligned(PC))))                     \
+    {                                                                  \
+        rv->compressed = compress;                                     \
+        rv->csr_cycle = cycle;                                         \
+        rv->PC = PC;                                                   \
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, type##_MISALIGNED,            \
+                                     IIF(IO)(addr, mask_or_pc));       \
+        return false;                                                  \
     }
 
 /* FIXME: use more precise methods for updating time, e.g., RTC */
@@ -1853,7 +1853,7 @@ do_pointer_reverse(riscv_t *rv,
     const uint32_t branch_pc = start + PREV_BRANCH_OFF(layout);
     const uint32_t taken_pc = branch_pc + ir->fuse[4].imm;
     const uint8_t rd = ir->rd, rs1 = ir->rs1, rs2 = ir->rs2;
-    const bool check_align = !PRIV(rv)->allow_misalign;
+    const bool check_align = !rv->allow_misalign;
     struct rv_insn *const taken = ir->branch_taken;
     /* Only a self-loop iterates here; any other target ends the first pass,
      * and TRACE_BRANCH_EXIT() then follows it within the real budget.

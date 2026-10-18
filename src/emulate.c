@@ -2483,6 +2483,10 @@ retranslate:
                 rv->PC = block->pc_end;
                 SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
             }
+#if RV32_HAS(JIT)
+            /* A truncated prefix has no native branch or page epilogue. */
+            block->translatable = false;
+#endif
             break;
         }
         ir->impl = insn_handler(ir);

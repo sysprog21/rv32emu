@@ -33,6 +33,9 @@ extern struct target_ops gdbstub_ops;
 #include "syscall_sdl.h"
 #include "trace_match.h"
 #include "utils.h"
+#if RV32_HAS(SYSTEM)
+#include "system.h"
+#endif
 
 #if RV32_HAS(JIT)
 #include "cache.h"
@@ -1147,6 +1150,29 @@ static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
 }
 #endif
 #include "rv32_template.c"
+
+/* An integer load into x0, which insn_handler() routes here: perform the
+ * access, for its trap and any device side effect, and discard the value. The
+ * ordinary load handlers thus write rd without testing it.
+ */
+enum { __rv_insn_load_x0_len = 4 };
+RVOP(load_x0, {
+    const uint32_t addr = rv->X[ir->rs1] + ir->imm;
+    switch (ir->opcode) {
+    case rv_insn_lw:
+        RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
+        (void) MEM_READ_W(rv, addr);
+        break;
+    case rv_insn_lh:
+    case rv_insn_lhu:
+        RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
+        (void) MEM_READ_S(rv, addr);
+        break;
+    default:
+        (void) MEM_READ_B(rv, addr);
+        break;
+    }
+})
 #undef RVOP
 
 #if RV32_HAS_PACKED_TAIL
@@ -1364,6 +1390,11 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         uint32_t value = rv->X[fuse[i].rs2];
         MEM_WRITE_W(rv, addr, value);
+        /* A fault whose handler resumed elsewhere ends the group here, as it
+         * would end an unfused sequence; fuse_next_or_stop() returns.
+         */
+        if (MEM_ACCESS_FAULTED())
+            break;
 #if RV32_HAS(ARCH_TEST)
         check_tohost_write(rv, addr, value);
 #endif
@@ -1385,7 +1416,14 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RVOP_SYNC_PC(rv, PC); /* a page fault names this access */
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-        rv->X[fuse[i].rd] = MEM_READ_W(rv, addr);
+        const uint32_t value = MEM_READ_W(rv, addr);
+        /* Commit nothing past a faulting member: later members may overwrite
+         * registers that the redirected handler or a retry still reads.
+         */
+        if (MEM_ACCESS_FAULTED())
+            break;
+        if (fuse[i].rd)
+            rv->X[fuse[i].rd] = value;
         PC += 4;
     }
     return fuse_next_or_stop(rv, ir, cycle, PC);
@@ -1403,7 +1441,9 @@ static PRESERVE_NONE bool do_fuse_lhu(riscv_t *rv,
         cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
         RV_EXC_MISALIGN_HANDLER(1, LOAD, false, 1);
-        rv->X[fuse[i].rd] = MEM_READ_S(rv, addr);
+        const uint32_t value = MEM_READ_S(rv, addr);
+        if (fuse[i].rd)
+            rv->X[fuse[i].rd] = value;
         PC += 4;
     }
     return fuse_next_or_stop(rv, ir, cycle, PC);
@@ -1566,7 +1606,7 @@ static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->X[ir->rs2] = MEM_READ_W(rv, addr);
+    MEM_LOAD_X(ir->rs2, MEM_READ_W(rv, addr));
     PC += 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
@@ -1621,16 +1661,19 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
     cycle++;
     uint32_t addr = rv->X[ir->rs1] + ir->imm;
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
-    rv->X[ir->rd] = MEM_READ_W(rv, addr);
+    const uint32_t value = MEM_READ_W(rv, addr);
     PC += 4;
     cycle++;
-    /* Only increment rs1 if load succeeded (no trap in SYSTEM mode).
-     * In non-SYSTEM mode, RAM access never faults so this always executes.
+    /* Commit the load and the increment only if the load completed. The
+     * guest handler runs inside the access, so trap_cnt is back to its
+     * previous value by now; a handler that resumed elsewhere is signaled
+     * through MEM_ACCESS_FAULTED(). User-mode RAM accesses never fault.
      */
-#if RV32_HAS(SYSTEM)
-    if (!rv->trap_cnt)
-#endif
+    if (!MEM_ACCESS_FAULTED()) {
+        if (ir->rd)
+            rv->X[ir->rd] = value;
         rv->X[ir->rs1] = rv->X[ir->rs1] + ir->imm2;
+    }
     PC += 4;
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
@@ -2226,6 +2269,19 @@ static const void *dispatch_table[] = {
 };
 /* clang-format on */
 
+/* The handler for a decoded instruction. An integer load into x0 runs
+ * do_load_x0(), so the ordinary load handlers can write rd unconditionally.
+ */
+static inline rv_insn_impl_t insn_handler(const rv_insn_t *ir)
+{
+    if (unlikely(ir->rd == rv_reg_zero) &&
+        (ir->opcode == rv_insn_lb || ir->opcode == rv_insn_lh ||
+         ir->opcode == rv_insn_lw || ir->opcode == rv_insn_lbu ||
+         ir->opcode == rv_insn_lhu))
+        return do_load_x0;
+    return dispatch_table[ir->opcode];
+}
+
 #if RV32_HAS(JIT)
 FORCE_INLINE bool insn_is_translatable(uint16_t opcode)
 {
@@ -2343,7 +2399,7 @@ retranslate:
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
             break;
         }
-        ir->impl = dispatch_table[ir->opcode];
+        ir->impl = insn_handler(ir);
         ir->pc = block->pc_end; /* compute the end of pc */
         block->pc_end += is_compressed(insn) ? 2 : 4;
         block->n_insn++;
@@ -3981,7 +4037,7 @@ retranslate:
         return;
     }
 
-    ir.impl = dispatch_table[ir.opcode];
+    ir.impl = insn_handler(&ir);
     ir.pc = rv->PC;
     ir.next = NULL;
     ir.impl(rv, &ir, rv->csr_cycle, rv->PC);
@@ -4035,7 +4091,7 @@ static void __trap_handler(riscv_t *rv)
         rv_decode(ir, insn);
         reloc_enable_mmu_jalr_addr = rv->PC;
 
-        ir->impl = dispatch_table[ir->opcode];
+        ir->impl = insn_handler(ir);
         rv->compressed = is_compressed(insn);
         ir->impl(rv, ir, rv->csr_cycle, rv->PC);
 

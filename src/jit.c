@@ -2377,25 +2377,29 @@ static void jit_mmu_handler(riscv_t *rv,
         val = rv->X[vreg_idx];
         MMIO_WRITE();
         break;
+    /* A load into x0 still reads the device, but x0 stays zero. */
     case rv_insn_lb:
-        rv->X[vreg_idx] = (int8_t) jit_mmio_read_wrapper(rv, addr);
+        val = (int8_t) jit_mmio_read_wrapper(rv, addr);
         break;
     case rv_insn_lh:
-        rv->X[vreg_idx] = (int16_t) jit_mmio_read_wrapper(rv, addr);
+        val = (int16_t) jit_mmio_read_wrapper(rv, addr);
         break;
     case rv_insn_lw:
-        rv->X[vreg_idx] = jit_mmio_read_wrapper(rv, addr);
+        val = jit_mmio_read_wrapper(rv, addr);
         break;
     case rv_insn_lbu:
-        rv->X[vreg_idx] = (uint8_t) jit_mmio_read_wrapper(rv, addr);
+        val = (uint8_t) jit_mmio_read_wrapper(rv, addr);
         break;
     case rv_insn_lhu:
-        rv->X[vreg_idx] = (uint16_t) jit_mmio_read_wrapper(rv, addr);
+        val = (uint16_t) jit_mmio_read_wrapper(rv, addr);
         break;
     default:
         assert(NULL);
         __UNREACHABLE;
     }
+    if (type != rv_insn_sb && type != rv_insn_sh && type != rv_insn_sw &&
+        vreg_idx)
+        rv->X[vreg_idx] = val;
 }
 
 #if RV32_HAS(SYSTEM_MMIO)

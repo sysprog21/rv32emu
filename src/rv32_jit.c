@@ -295,6 +295,9 @@
                 emit_jump_target_offset(state, JUMP_NORMAL, state->offset);    \
                 if (fp_end_loc)                                                \
                     emit_jump_target_offset(state, fp_end_loc, state->offset); \
+                /* The fast path loads into x0's host register as well. */     \
+                if (ir->rd == rv_reg_zero)                                     \
+                    emit_load_imm(state, vm_reg[1], 0);                        \
             },                                                                 \
             {                                                                  \
                 vm_reg[1] = map_vm_reg(state, ir->rd);                         \

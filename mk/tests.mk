@@ -111,8 +111,11 @@ EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
 EXPECTED_register-loop = register loop OK
+EXPECTED_load-x0 = load into x0 OK
 EXPECTED_loop-shapes = loop shapes OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
+EXPECTED_fused-page-fault = fused page fault OK
+EXPECTED_amo-page-fault = AMO page fault OK
 EXPECTED_jit-fencei = FENCE.I made the rewrite visible OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
@@ -168,7 +171,7 @@ GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
 ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
-GUEST_ASM_CHECK_TARGETS += check-const-shift
+GUEST_ASM_CHECK_TARGETS += check-const-shift check-load-x0
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes
 # Short loops reach T1 through loop detection only where T1 uses packed IR,
@@ -200,8 +203,14 @@ ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-const-coperand
 endif
 # A directly loaded system program has no handler for its own page faults.
+# fused-page-fault also passes unfused; it exercises fused records only with
+# CONFIG_MOP_FUSION.
 ifeq ($(CONFIG_SYSTEM)$(CONFIG_ELF_LOADER)$(GUEST_ASM_ZICSR_WORKS),yyy)
-GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault
+GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault \
+	check-fused-page-fault
+ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-amo-page-fault
+endif
 endif
 # Only system JIT builds honor FENCE.I, and only a directly loaded program can
 # rewrite its own code without an operating system.
@@ -343,6 +352,7 @@ $(eval $(call guest-asm-check-target,jit-spill-loop,rv32im,-m,-DUSE_MULDIV))
 $(eval $(call guest-asm-check-target,jit-spill-loop,rv32i_zicsr,-csr,-DUSE_CSR))
 $(eval $(call guest-asm-check-target,jit-spill-loop,rv32im_zicsr,-m-csr,-DUSE_MULDIV -DUSE_CSR))
 $(eval $(call guest-asm-check-target,register-loop,rv32i))
+$(eval $(call guest-asm-check-target,load-x0,rv32i))
 $(eval $(call guest-asm-check-target,register-loop,rv32i_zicsr,-cycles,-DCHECK_CYCLES))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
@@ -361,6 +371,8 @@ check-amo-align: $(BIN) tests/amo-align.S | $(OUT)
 	$(call check-test, , $(OUT)/amo-align, amo-align, tail -n 1,$(EXPECTED_amo-align))
 	$(call check-test, -m, $(OUT)/amo-align, amo-align-relaxed, tail -n 1,$(EXPECTED_amo-align))
 $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,fused-page-fault,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,amo-page-fault,rv32ia_zicsr))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
 
 # The program must stop at its first instruction page fault, reporting it and

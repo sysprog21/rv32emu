@@ -255,7 +255,7 @@
                  * pc} first; the C handler reads them directly.               \
                  */                                                            \
                 emit_jit_mmu_handler(state, ir->rd, temp_reg, insn_type,       \
-                                     ir->pc);                                  \
+                                     ir->pc, unretired_after(rv, ir->pc));     \
                 reset_reg();                                                   \
                                                                                \
                 /* Check if trap occurred - skip load if trapped */            \
@@ -343,7 +343,7 @@
                  * instead of from rv->jit_mmu staging fields.                 \
                  */                                                            \
                 emit_jit_mmu_handler(state, ir->rs2, temp_reg, insn_type,      \
-                                     ir->pc);                                  \
+                                     ir->pc, unretired_after(rv, ir->pc));     \
                 reset_reg();                                                   \
                                                                                \
                 /* Check if trap occurred - skip store if trapped */           \

@@ -152,9 +152,10 @@ jobs:
             # at one on a fetch, and skips exactly the faulting access.
             make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test check-insn-page-fault check-misalign-page-fault check-fused-page-fault check-amo-page-fault $PARALLEL
             # Flat supervisor kernels: TLB caching, superpage flushes, address
-            # space switches, and retiring decoded code, interpreted and T1.
-            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache $PARALLEL
-            make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache $PARALLEL
+            # space switches, retiring decoded code, and counters across
+            # traps, interpreted and T1.
+            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL

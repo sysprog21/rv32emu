@@ -986,9 +986,11 @@ static uint32_t peripheral_update_ctr = 64;
 #endif
 
 /* Interpreter-based execution path.
- * Block-level cycle counting: cycle is pre-incremented at block entry,
- * so per-instruction cycle++ is removed. Timer is derived from cycle at
- * interrupt check points (rv_check_interrupt) rather than per-instruction.
+ * Each handler increments the cycle count it carries in a register, so a
+ * trap or counter read anywhere in a block sees an exact value. Counting per
+ * block instead, as libriscv does, measured no faster. The timer is derived
+ * from the cycle count at interrupt check points (rv_check_interrupt) rather
+ * than per instruction.
  */
 #if RV32_HAS(SYSTEM)
 #define RVOP_SYNC_PC(rv, PC) \

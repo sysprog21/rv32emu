@@ -174,7 +174,7 @@ ifeq ($(CONFIG_SYSTEM),y)
 ifneq ($(CONFIG_ELF_LOADER),y)
 ifeq ($(CONFIG_Zicsr)$(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
 ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
-SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache
+SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles
 else
 $(info Skipping system MMU regression: $(CROSS_COMPILE)objcopy is unavailable)
 endif
@@ -323,6 +323,14 @@ check-system-mmu-cache: $(BIN) tests/system-mmu-cache.S | $(OUT)
 	    $(OUT)/system-mmu-cache.bin
 	$(call check-test,-k,$(OUT)/system-mmu-cache.bin,system-mmu-cache,tail -n 1,$(EXPECTED_system-mmu-cache))
 
+EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
+.PHONY: check-system-trap-cycles
+check-system-trap-cycles: $(BIN) tests/system-trap-cycles.S | $(OUT)
+	$(Q)$(call guest-asm-build,system-trap-cycles,rv32ia_zicsr,, \
+	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-trap-cycles \
+	    $(OUT)/system-trap-cycles.bin
+	$(call check-test,-k,$(OUT)/system-trap-cycles.bin,system-trap-cycles,tail -n 1,$(EXPECTED_system-trap-cycles))
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c

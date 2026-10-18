@@ -1959,6 +1959,31 @@ static const int cycle_reg = RBP;
 static const int cycle_reg = R20;
 #endif
 
+/* The block whose records are being emitted, for unretired_after(). */
+static const block_t *cur_block;
+
+/* A block charges all its instructions on entry. A trap at pc ends it early,
+ * so the instructions after pc, which never retire, are refunded. Fused
+ * records span several 4-byte instructions, and their members trap at their
+ * own pc. Programs that read no counter are charged per chain instead.
+ */
+static uint32_t unretired_after(const riscv_t *rv, uint32_t pc)
+{
+    if (rv->jit_entry_cycles || !cur_block)
+        return 0;
+    uint32_t n = 0;
+    for (const rv_insn_t *ir = cur_block->ir_head, *next; ir; ir = next) {
+        next = ir == cur_block->ir_tail ? NULL : block_next_ir(ir);
+        const uint32_t end = next ? next->pc : cur_block->pc_end;
+        const uint32_t count = end - ir->pc > 4 ? (end - ir->pc) / 4 : 1;
+        if (pc < ir->pc)
+            n += count;
+        else if (pc < end && count > 1)
+            n += count - 1 - (pc - ir->pc) / 4;
+    }
+    return n;
+}
+
 static void emit_cycle_count(struct jit_state *state, uint32_t n)
 {
 #if defined(__x86_64__)
@@ -1975,6 +2000,27 @@ static void emit_cycle_count(struct jit_state *state, uint32_t n)
     } else {
         emit_load_imm(state, temp_imm_reg, n);
         emit_addsub_register(state, true, AS_ADD, cycle_reg, cycle_reg,
+                             temp_imm_reg);
+    }
+#endif
+}
+
+/* Subtract n from cycle_reg. */
+static void emit_cycle_refund(struct jit_state *state, uint32_t n)
+{
+#if defined(__x86_64__)
+    if (n < 0x80) {
+        emit_alu64(state, 0x83, 5, cycle_reg);
+        emit1(state, n);
+    } else {
+        emit_alu64_imm32(state, 0x81, 5, cycle_reg, n);
+    }
+#elif defined(__aarch64__)
+    if (n < 0x1000) {
+        emit_addsub_imm(state, true, AS_SUB, cycle_reg, cycle_reg, n);
+    } else {
+        emit_load_imm(state, temp_imm_reg, n);
+        emit_addsub_register(state, true, AS_SUB, cycle_reg, cycle_reg,
                              temp_imm_reg);
     }
 #endif
@@ -2284,6 +2330,9 @@ static uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
     __UNREACHABLE;
 }
 
+/* jit_mmu_handler()'s type argument carries the refund in its upper half. */
+#define MMU_TYPE_MASK UINT32_C(0xffff)
+
 /* Slow-path entry from the JIT.
  *
  * vaddr / type / pc / vreg_idx arrive as call arguments rather than via the
@@ -2299,6 +2348,11 @@ static void jit_mmu_handler(riscv_t *rv,
                             uint32_t pc)
 {
     assert(vreg_idx < 32);
+    /* The block charged its later instructions on entry; a fault means they
+     * never retire. Refund them before the guest handler can read a counter.
+     */
+    const uint32_t refund = type >> 16;
+    type &= MMU_TYPE_MASK;
 
     uint32_t addr;
     uint32_t access_size;
@@ -2333,6 +2387,7 @@ static void jit_mmu_handler(riscv_t *rv,
      */
     rv->PC = pc;
 
+    rv->csr_cycle -= refund;
     if (type == rv_insn_lb || type == rv_insn_lh || type == rv_insn_lbu ||
         type == rv_insn_lhu || type == rv_insn_lw)
         addr = rv->io.mem_translate(rv, vaddr, R);
@@ -2350,6 +2405,7 @@ static void jit_mmu_handler(riscv_t *rv,
         rv->jit_mmu.is_mmio = 1;
         return;
     }
+    rv->csr_cycle += refund;
 
     /* Only treat as RAM if entire access range [addr, addr+size) is within
      * valid guest memory bounds. This prevents buffer overflow on multi-byte
@@ -2942,9 +2998,13 @@ static void emit_jit_mmu_handler(struct jit_state *state,
                                  uint8_t vreg_idx,
                                  int vaddr_reg,
                                  uint32_t insn_type,
-                                 uint32_t insn_pc)
+                                 uint32_t insn_pc,
+                                 uint32_t refund)
 {
     assert(vreg_idx < 32);
+    /* The handler refunds unretired instructions if the access faults. */
+    assert(insn_type <= MMU_TYPE_MASK && refund <= UINT16_MAX);
+    insn_type |= refund << 16;
 
     emit_cycle_move(state, false);
 #if defined(__x86_64__) && defined(_WIN32)
@@ -3962,6 +4022,7 @@ static inline void emit_test_low_bits(struct jit_state *state,
 struct misalign_stub {
     uint32_t jump_loc; /* where to patch the branch that enters the stub */
     uint32_t pc;
+    uint32_t refund; /* unretired_after(pc) */
     uint32_t flags;
     int base;
     int32_t offset;
@@ -3993,6 +4054,8 @@ static void emit_misalign_stub(struct jit_state *state,
     store_back_all(state);
     emit_mov(state, temp_reg, parameter_reg[1]);
     emit_load_imm(state, parameter_reg[2], stub->flags);
+    if (stub->refund)
+        emit_cycle_refund(state, stub->refund);
     emit_load_imm(state, temp_reg, stub->pc);
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_call(state, (intptr_t) &jit_misaligned_trap);
@@ -4022,7 +4085,12 @@ static void emit_misalign_guard(struct jit_state *state,
     if (offset_aligned && reg_align[rs1] > mask)
         return;
 
-    struct misalign_stub stub = {.pc = pc, .flags = flags, .offset = offset};
+    struct misalign_stub stub = {
+        .pc = pc,
+        .refund = unretired_after(rv, pc),
+        .flags = flags,
+        .offset = offset,
+    };
     stub.base = ra_load(state, rs1);
     memcpy(stub.map, register_map, sizeof(stub.map));
 
@@ -4235,7 +4303,8 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
      */
     emit_load_imm(state, temp_reg, addr);
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rs2, temp_reg, rv_insn_lw, ir->pc);
+    emit_jit_mmu_handler(state, ir->rs2, temp_reg, rv_insn_lw, ir->pc + 4,
+                         unretired_after(rv, ir->pc + 4));
     reset_reg();
 
     /* Check if trap occurred during MMU translation.
@@ -4309,7 +4378,8 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     /* Constant vaddr -> temp_reg, passed as call arg (see do_fuse9). */
     emit_load_imm(state, temp_reg, addr);
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rs1, temp_reg, rv_insn_sw, ir->pc);
+    emit_jit_mmu_handler(state, ir->rs1, temp_reg, rv_insn_sw, ir->pc + 4,
+                         unretired_after(rv, ir->pc + 4));
     reset_reg();
 
     /* Check if trap occurred - skip store if trapped */
@@ -4376,7 +4446,8 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);
 
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rd, temp_reg, rv_insn_lw, ir->pc);
+    emit_jit_mmu_handler(state, ir->rd, temp_reg, rv_insn_lw, ir->pc,
+                         unretired_after(rv, ir->pc));
     reset_reg();
 
     /* Check if trap occurred during MMU translation.
@@ -5014,6 +5085,7 @@ static bool translate_register_loop(struct jit_state *state,
                                     block_t *block,
                                     bool allow_rotate UNUSED)
 {
+    cur_block = block;
     /* Classify the tail: the loop continues while "lhs <jcc> rhs" holds. */
     const rv_insn_t *tail = block->ir_tail;
     struct tail_branch branch;
@@ -5464,6 +5536,7 @@ static void translate_region(struct jit_state *state,
     const struct region_node *node = &plan->node[index];
     block_t *block = node->block;
     rv_insn_t *tail = block->ir_tail, *previous = NULL;
+    cur_block = block;
     if (!rv->jit_entry_cycles)
         emit_cycle_count(state, block->cycle_cost);
     liveness_reset();
@@ -5535,6 +5608,7 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
     uint32_t idx;
     rv_insn_t *ir, *next, *previous = NULL;
     n_misalign_stubs = 0;
+    cur_block = block;
 #if JIT_REGISTER_LOOP
     if (translate_register_loop(state, rv, block, true))
         return;

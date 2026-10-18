@@ -336,12 +336,33 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 #define MEM_WRITE_S(rv, addr, val) ram_write_s(rv, addr, val)
 #define MEM_WRITE_B(rv, addr, val) ram_write_b(rv, addr, val)
 #else
-#define MEM_READ_W(rv, addr) (rv)->io.mem_read_w(rv, addr)
-#define MEM_READ_S(rv, addr) (rv)->io.mem_read_s(rv, addr)
-#define MEM_READ_B(rv, addr) (rv)->io.mem_read_b(rv, addr)
-#define MEM_WRITE_W(rv, addr, val) (rv)->io.mem_write_w(rv, addr, val)
-#define MEM_WRITE_S(rv, addr, val) (rv)->io.mem_write_s(rv, addr, val)
-#define MEM_WRITE_B(rv, addr, val) (rv)->io.mem_write_b(rv, addr, val)
+/* A page fault runs the guest's trap handler inside the access. Store the
+ * handler's running cycle count first, so that the trap handler counts on from
+ * it, and continue from what that handler leaves: counters then include both
+ * the instructions before the fault and those of the trap handler.
+ */
+#define MEM_READ_CYCLES(access)           \
+    __extension__({                       \
+        rv->csr_cycle = cycle;            \
+        const uint32_t value_ = (access); \
+        cycle = rv->csr_cycle;            \
+        value_;                           \
+    })
+#define MEM_WRITE_CYCLES(access) \
+    do {                         \
+        rv->csr_cycle = cycle;   \
+        (access);                \
+        cycle = rv->csr_cycle;   \
+    } while (0)
+#define MEM_READ_W(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_w(rv, addr))
+#define MEM_READ_S(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_s(rv, addr))
+#define MEM_READ_B(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_b(rv, addr))
+#define MEM_WRITE_W(rv, addr, val) \
+    MEM_WRITE_CYCLES((rv)->io.mem_write_w(rv, addr, val))
+#define MEM_WRITE_S(rv, addr, val) \
+    MEM_WRITE_CYCLES((rv)->io.mem_write_s(rv, addr, val))
+#define MEM_WRITE_B(rv, addr, val) \
+    MEM_WRITE_CYCLES((rv)->io.mem_write_b(rv, addr, val))
 #endif
 
 /* True when the access just performed raised a trap.
@@ -988,8 +1009,9 @@ RVOP(scw, {
  * a store/AMO page fault, never the load fault its read would raise.
  */
 #if RV32_HAS(SYSTEM)
-#define AMO_WRITE_FAULTED(addr) \
-    (rv->io.mem_translate(rv, addr, W), MEM_ACCESS_FAULTED())
+#define AMO_WRITE_FAULTED(addr)                                 \
+    ((void) MEM_READ_CYCLES(rv->io.mem_translate(rv, addr, W)), \
+     MEM_ACCESS_FAULTED())
 #else
 #define AMO_WRITE_FAULTED(addr) false
 #endif

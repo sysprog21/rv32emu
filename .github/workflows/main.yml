@@ -133,6 +133,7 @@ jobs:
             make tests $PARALLEL
             make misalign $PARALLEL
             make tool $PARALLEL
+            make -C tests/sound check-mixer
 
     - name: SDL disable test
       run: |

@@ -13,6 +13,7 @@ all: sound.c
 
 clean:
 	rm -f $(OUTPUT) $(OBJS)
+	rm -rf $(HOST_OUT)
 
 .PHONY: all
 

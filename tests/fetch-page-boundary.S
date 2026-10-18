@@ -1,4 +1,5 @@
-/* A fault on the following page must not run before this page's instructions
+/*
+ * A fault on the following page must not run before this page's instructions
  * retire. Otherwise a handler can observe stale register state and the
  * translated instructions can run after the handler returns.
  */
@@ -35,7 +36,8 @@ trap_handler:
     sret
 
 recover:
-    /* A partial translated block may return here after an inline page fault.
+    /*
+     * A partial translated block may return here after an inline page fault.
      * Keep this target distinct from the checks so any resumed block is seen.
      */
     nop
@@ -71,7 +73,8 @@ success:
     .ascii "fetch fault ordering OK\n"
 success_end:
 
-    /* The test target places this section at the last eight bytes of the
+    /*
+     * The test target places this section at the last eight bytes of the
      * 4 MiB mapping with --section-start.
      */
     .section .faultpage,"ax"

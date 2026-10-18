@@ -581,12 +581,13 @@ RVOP(ebreak, {
 RVOP(wfi, {
     PC += 4;
 #if RV32_HAS(SYSTEM_MMIO)
-    /* Fast-forward idle guests to the enabled timer compare. A locally enabled
+    /*
+     * Fast-forward idle guests to the enabled timer compare. A locally enabled
      * pending interrupt must resume WFI regardless of the global SIE bit.
      */
     vm_attr_t *attr = PRIV(rv);
-    if (!(rv->csr_sip & rv->csr_sie) && (rv->csr_sie & RV_INT_STI) &&
-        attr->timer > rv->csr_cycle + rv->timer_offset) {
+    if ((!(rv->csr_sip & rv->csr_sie)) && (rv->csr_sie & RV_INT_STI) &&
+        (attr->timer > rv->csr_cycle + rv->timer_offset)) {
         cycle = attr->timer - rv->timer_offset;
         rv->csr_cycle = cycle;
         rv->PC = PC;

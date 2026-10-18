@@ -1088,7 +1088,8 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #define RVOP_TAIL_INTER(rv, target, cycle, PC) \
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
 #if RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
-/* System-mode chains return to rv_step at the slice boundary, where pending
+/*
+ * System-mode chains return to rv_step at the slice boundary, where pending
  * interrupts and traps are checked.
  */
 #define RVOP_TAIL(rv, target, cycle, PC)                            \
@@ -2462,7 +2463,8 @@ retranslate:
         }
 #endif
 
-        /* If instruction fetch failed due to a trap, do not decode the zero
+        /*
+         * If instruction fetch failed due to a trap, do not decode the zero
          * placeholder. An inline handler may already have redirected SEPC,
          * clearing trap_cnt; need_handle_signal still marks this fetch as
          * abandoned. Zero alone is ambiguous because it can be a real
@@ -2470,9 +2472,10 @@ retranslate:
          */
         if (!insn) {
 #if RV32_HAS(SYSTEM)
-            if (rv->trap_cnt || need_handle_signal)
+            if ((rv->trap_cnt) || need_handle_signal)
                 break;
-            /* Zero is a valid fetched bit pattern and decodes as an illegal
+            /*
+             * Zero is a valid fetched bit pattern and decodes as an illegal
              * compressed instruction.  Only treat it as an ifetch failure
              * when the memory interface raised a trap.
              */
@@ -2483,7 +2486,8 @@ retranslate:
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
-            /* Do not raise a trap for a later instruction while translating
+            /*
+             * Do not raise a trap for a later instruction while translating
              * the current block: preceding instructions still need to run.
              * Leave the bad instruction at pc_end so it is retried as the
              * first instruction of the next block, where its PC is current.
@@ -2522,7 +2526,8 @@ retranslate:
         }
 
 #if RV32_HAS(BLOCK_CHAINING) || RV32_HAS(SYSTEM)
-        /* Terminate blocks at page boundaries for O(1) cache invalidation with
+        /*
+         * Terminate blocks at page boundaries for O(1) cache invalidation with
          * block chaining.
          * SYSTEM builds also do this without chaining so a next-page fetch
          * fault cannot precede retirement of instructions already decoded.
@@ -3492,7 +3497,8 @@ static block_t *block_find_or_translate(riscv_t *rv
         return NULL;
 
     if (unlikely(!block_translate(rv, next_blk))) {
-        /* Translation can stop before producing a cacheable block, for
+        /*
+         * Translation can stop before producing a cacheable block, for
          * example when the first instruction traps.  Release its slot rather
          * than leaking one block per such event.
          */
@@ -3896,7 +3902,8 @@ void rv_step(void *arg)
                 prev = NULL;
                 continue;
             }
-            /* A synchronous trap may already have run its handler during
+            /*
+             * A synchronous trap may already have run its handler during
              * translation and switched the guest PC. Resume at that target
              * even though no block was produced for the faulting address.
              */
@@ -4088,7 +4095,8 @@ void rv_step(void *arg)
         if (has_loops && !block->has_loops)
             block->has_loops = true;
 #endif
-        /* A cycle-budget exit may have skipped a tail-chain after its edge
+        /*
+         * A cycle-budget exit may have skipped a tail-chain after its edge
          * was not entered. Do not carry an unmatched predecessor into the
          * next rv_step slice; its last_pc can name an older edge.
          */

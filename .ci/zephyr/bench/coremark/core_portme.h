@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Zephyr single-context port for EEMBC CoreMark 1f483d5b8316.
+/*
+ * Zephyr single-context port for EEMBC CoreMark 1f483d5b8316.
  * Fixed-work host timings are not reportable CoreMark scores.
  */
 #ifndef CORE_PORTME_H

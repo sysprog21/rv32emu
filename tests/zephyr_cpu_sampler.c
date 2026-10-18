@@ -65,7 +65,7 @@ static void write_all(const void *ptr, size_t size)
     const char *p = ptr;
     while (size) {
         ssize_t n = write(output, p, size);
-        if (n < 0 && errno == EINTR)
+        if ((n < 0) && (errno == EINTR))
             continue;
         if (n <= 0)
             break;
@@ -125,7 +125,7 @@ __attribute__((constructor)) static void install_sampler(void)
     sigset_t blocked;
     if (sigprocmask(SIG_SETMASK, NULL, &blocked) != 0)
         setup_failure("query signal mask");
-    if (sigismember(&blocked, SIGPROF) || sigismember(&blocked, SIGUSR2)) {
+    if ((sigismember(&blocked, SIGPROF)) || (sigismember(&blocked, SIGUSR2))) {
         errno = EBUSY;
         setup_failure("blocked signal collision");
     }
@@ -139,9 +139,9 @@ __attribute__((constructor)) static void install_sampler(void)
     }
     if (getitimer(ITIMER_PROF, &previous_timer) != 0)
         setup_failure("query ITIMER_PROF");
-    if (previous_timer.it_value.tv_sec || previous_timer.it_value.tv_usec ||
-        previous_timer.it_interval.tv_sec ||
-        previous_timer.it_interval.tv_usec) {
+    if ((previous_timer.it_value.tv_sec) || (previous_timer.it_value.tv_usec) ||
+        (previous_timer.it_interval.tv_sec) ||
+        (previous_timer.it_interval.tv_usec)) {
         errno = EBUSY;
         setup_failure("ITIMER_PROF collision");
     }

@@ -3,7 +3,8 @@
  * Copyright (c) 2020,2023 Intel Corporation.
  * SPDX-License-Identifier: Apache-2.0
  */
-/* Adapted from Zephyr bbc6385f0a2 tests/benchmarks/latency_measure/src/
+/*
+ * Adapted from Zephyr bbc6385f0a2 tests/benchmarks/latency_measure/src/
  * thread_switch_yield.c, sema_test_signal_release.c, mutex_lock_unlock.c.
  * Fixed work replaces cycle sampling; recursive mutex depth is retained.
  */
@@ -61,9 +62,9 @@ bool bench_run(uint32_t *checksum)
     k_thread_start(&yield_a);
     k_thread_start(&yield_b);
     k_sched_unlock();
-    if (k_thread_join(&yield_a, K_FOREVER) != 0 ||
-        k_thread_join(&yield_b, K_FOREVER) != 0 || !yield_valid ||
-        yield_count != WORK_ITERATIONS * 2) {
+    if ((k_thread_join(&yield_a, K_FOREVER) != 0) ||
+        (k_thread_join(&yield_b, K_FOREVER) != 0) || (!yield_valid) ||
+        (yield_count != WORK_ITERATIONS * 2)) {
         return false;
     }
     *checksum += yield_count;
@@ -72,7 +73,7 @@ bool bench_run(uint32_t *checksum)
                     NULL, NULL, K_PRIO_PREEMPT(1), 0, K_NO_WAIT);
     for (unsigned i = 0; i < WORK_ITERATIONS; ++i) {
         k_sem_give(&request);
-        if (k_sem_take(&reply, K_FOREVER) != 0 || received != i + 1) {
+        if ((k_sem_take(&reply, K_FOREVER) != 0) || (received != i + 1)) {
             return false;
         }
         ++*checksum;
@@ -92,6 +93,6 @@ bool bench_run(uint32_t *checksum)
         }
         ++*checksum;
     }
-    return received == WORK_ITERATIONS && k_sem_count_get(&request) == 0 &&
-           k_sem_count_get(&reply) == 0;
+    return (received == WORK_ITERATIONS) && (k_sem_count_get(&request) == 0) &&
+           (k_sem_count_get(&reply) == 0);
 }

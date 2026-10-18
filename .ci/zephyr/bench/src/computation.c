@@ -2,7 +2,8 @@
  * Copyright 2018 Embedded Microprocessor Benchmark Consortium (EEMBC)
  * SPDX-License-Identifier: Apache-2.0
  */
-/* Initialization follows core_main.c at 1f483d5b8316; all three original
+/*
+ * Initialization follows core_main.c at 1f483d5b8316; all three original
  * algorithms run through iterate(), with the upstream 2K CRC checks.
  * Host fixed-work timing does not produce a reportable CoreMark score.
  */
@@ -10,11 +11,11 @@
 #include "bench.h"
 #include "coremark.h"
 static uint8_t memory[TOTAL_DATA_SIZE] __aligned(8);
-volatile ee_s32 seed1_volatile = 0;
-volatile ee_s32 seed2_volatile = 0;
+volatile ee_s32 seed1_volatile;
+volatile ee_s32 seed2_volatile;
 volatile ee_s32 seed3_volatile = 0x66;
 volatile ee_s32 seed4_volatile = ITERATIONS;
-volatile ee_s32 seed5_volatile = 0;
+volatile ee_s32 seed5_volatile;
 ee_u32 default_num_contexts = 1;
 const uint32_t bench_iterations = ITERATIONS;
 const uint32_t bench_expected = 0xe714U + 0x1fd7U + 0x8e3aU + 0x988cU;
@@ -41,7 +42,7 @@ bool bench_run(uint32_t *checksum)
     iterate(&result);
     *checksum =
         result.crclist + result.crcmatrix + result.crcstate + result.crc;
-    return result.crclist == 0xe714 && result.crcmatrix == 0x1fd7 &&
-           result.crcstate == 0x8e3a && result.crc == 0x988c &&
-           check_data_types() == 0;
+    return (result.crclist == 0xe714) && (result.crcmatrix == 0x1fd7) &&
+           (result.crcstate == 0x8e3a) && (result.crc == 0x988c) &&
+           (check_data_types() == 0);
 }

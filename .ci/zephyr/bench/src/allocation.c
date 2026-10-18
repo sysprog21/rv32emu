@@ -2,7 +2,8 @@
  * Copyright (c) 2026 Måns Ansgariusson <mansgariusson@gmail.com>
  * SPDX-License-Identifier: Apache-2.0
  */
-/* Adapted from tests/benchmarks/memory_allocators/src/k_heap.c at
+/*
+ * Adapted from tests/benchmarks/memory_allocators/src/k_heap.c at
  * Zephyr bbc6385f0a2: fixed alloc/realloc/free with payload checks.
  */
 #include <string.h>

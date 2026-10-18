@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-/* Keep tests/lib/heap/src/main.c at Zephyr bbc6385f0a2 unchanged, including
+/*
+ * Keep tests/lib/heap/src/main.c at Zephyr bbc6385f0a2 unchanged, including
  * its stress and fragmentation cases. One work unit is the whole suite.
  */
 #include <zephyr/ztest.h>
@@ -10,7 +11,7 @@ static unsigned passed(void)
 
     for (test = _ztest_unit_test_list_start; test < _ztest_unit_test_list_end;
          ++test) {
-        if (test->stats->fail_count || test->stats->skip_count) {
+        if ((test->stats->fail_count) || (test->stats->skip_count)) {
             return 0;
         }
         count += test->stats->pass_count;

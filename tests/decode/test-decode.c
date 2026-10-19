@@ -171,19 +171,43 @@ int main(void)
         return 1;
 #endif
 
-    /* ALU operations with an x0 destination decode to NOP (rs1 = rs2 = t0). */
-    if (expect_decode(0x00528033, true, rv_insn_nop) || /* add */
-        expect_decode(0x40528033, true, rv_insn_nop) || /* sub */
-        expect_decode(0x0052a033, true, rv_insn_nop) || /* slt */
-        expect_decode(0x0052b033, true, rv_insn_nop) || /* sltu */
-        expect_decode(0x0052c033, true, rv_insn_nop) || /* xor */
-        expect_decode(0x0052e033, true, rv_insn_nop) || /* or */
-        expect_decode(0x0052f033, true, rv_insn_nop) || /* and */
-        expect_decode(0x7ff28013, true, rv_insn_nop) || /* addi 2047 */
-        expect_decode(0x0002b013, true, rv_insn_nop) || /* sltiu 0 */
-        expect_decode(0xfff2e013, true, rv_insn_nop) || /* ori -1 */
-        expect_decode(0x0002f013, true, rv_insn_nop))   /* andi 0 */
-        return 1;
+    /* ALU operations with an x0 destination decode to NOP (rs1 = rs2 = t0),
+     * since constant propagation may write a folded result to any rd. */
+    const uint32_t x0_alu[] = {
+        0x00528033, /* add */
+        0x40528033, /* sub */
+        0x00529033, /* sll */
+        0x0052a033, /* slt */
+        0x0052b033, /* sltu */
+        0x0052c033, /* xor */
+        0x0052d033, /* srl */
+        0x4052d033, /* sra */
+        0x0052e033, /* or */
+        0x0052f033, /* and */
+        0x7ff28013, /* addi 2047 */
+        0x00129013, /* slli 1 */
+        0x0012a013, /* slti 1 */
+        0x0002b013, /* sltiu 0 */
+        0x0012c013, /* xori 1 */
+        0x0012d013, /* srli 1 */
+        0x4012d013, /* srai 1 */
+        0xfff2e013, /* ori -1 */
+        0x0002f013, /* andi 0 */
+#if RV32_HAS(EXT_M)
+        0x02528033, /* mul */
+        0x02529033, /* mulh */
+        0x0252a033, /* mulhsu */
+        0x0252b033, /* mulhu */
+        0x0252c033, /* div */
+        0x0252d033, /* divu */
+        0x0252e033, /* rem */
+        0x0252f033, /* remu */
+#endif
+    };
+    for (unsigned i = 0; i < sizeof(x0_alu) / sizeof(x0_alu[0]); i++) {
+        if (expect_decode(x0_alu[i], true, rv_insn_nop))
+            return 1;
+    }
 
     /* FENCE has no register fields: bits 24..20 are pred/succ, not rs2, so
      * the RV32E register-range check must not reject a full-barrier fence. */

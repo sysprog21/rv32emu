@@ -16,6 +16,7 @@ import os
 import signal
 import statistics
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -275,14 +276,20 @@ def attach_diagnostics(report, diagnostics):
 def validate_output_dir(out_dir):
     """Check the output location before launch without creating files."""
     out = Path(out_dir).resolve()
-    roots = (Path("build").resolve(), Path("/tmp").resolve())
+    roots = (
+        Path("build").resolve(),
+        Path("/tmp").resolve(),
+        Path(tempfile.gettempdir()).resolve(),
+    )
     if not any(out == root or root in out.parents for root in roots):
-        raise ValueError("output directory must be under build/ or /tmp/")
+        raise ValueError(
+            "output directory must be under build/ or a system temporary directory"
+        )
     return out
 
 
 def write_report(report, out_dir):
-    """Write JSON and Markdown only under build/ or /tmp/."""
+    """Write JSON and Markdown only under build/ or system temporary storage."""
     out = validate_output_dir(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     json_path = out / "system-bench.json"
@@ -558,7 +565,7 @@ def main(argv=None):
         "--out-dir",
         required=True,
         type=Path,
-        help="report directory under build/ or /tmp/",
+        help="report directory under build/ or system temporary storage",
     )
     args = parser.parse_args(argv)
     try:

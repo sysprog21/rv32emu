@@ -261,7 +261,7 @@ class GateTests(unittest.TestCase):
             source = Path(directory)
             self.assertEqual(
                 validate_output_dir(source / "not-created"),
-                source / "not-created",
+                (source / "not-created").resolve(),
             )
             self.assertFalse((source / "not-created").exists())
             (source / "manifest.json").write_text(

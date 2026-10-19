@@ -1,7 +1,7 @@
 # Zephyr boot checks
 
 `boot-zephyr.yml` builds `hello_world` and `synchronization` for
-`qemu_riscv32`, then runs them on the system interpreter in S-mode using
+`qemu_riscv32`, then runs them on the system interpreter and tier-1 JIT in S-mode using
 rv32emu's built-in SBI. The overlay supplies the UART/PLIC addresses,
 RAM at zero, a 65 MHz timer, and RV32IMAC without the D extension.
 No Zephyr source changes or OpenSBI image are required.
@@ -73,5 +73,6 @@ and reaps only its spawned guests. `BOOT_TIMEOUT`, `SYNC_LINES` (minimum 2),
 Logs are retained under `$ZEPHYR_OUT/logs` and uploaded by Actions, including
 on failure.
 
-The workflow covers the system interpreter. JIT, Twister, and isolated
-busy-loop timer delivery are outside these checks.
+The workflow covers the system interpreter and tier-1 JIT with both
+toolchains. T2C, Twister, and isolated busy-loop timer delivery are outside
+these checks.

@@ -433,7 +433,12 @@ def main(argv=None):
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=120)
-    parser.add_argument("--cpu", type=int, default=min(os.sched_getaffinity(0)))
+    affinity = (
+        os.sched_getaffinity(0) if hasattr(os, "sched_getaffinity") else set()
+    )
+    parser.add_argument(
+        "--cpu", type=int, default=min(affinity) if affinity else 0
+    )
     parser.add_argument(
         "--mode", choices=("primary", "interpreter", "t2c"), default="primary"
     )
@@ -450,7 +455,9 @@ def main(argv=None):
         )
     if len(set(args.profile_case)) != len(args.profile_case):
         parser.error("profile cases must be unique")
-    if args.cpu not in os.sched_getaffinity(0):
+    if not affinity:
+        parser.error("Zephyr benchmark measurements require Linux CPU affinity")
+    if args.cpu not in affinity:
         parser.error("CPU is outside the current affinity set")
     args.rv32emu = args.rv32emu.resolve()
     if args.rv32emu_config is None:

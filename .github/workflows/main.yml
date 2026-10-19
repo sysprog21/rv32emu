@@ -469,6 +469,9 @@ jobs:
          artifacts: elf doom
          cache-suffix: host-${{ matrix.compiler }}
 
+     - name: Check system benchmark runners
+       run: python3 -m unittest discover -s tests -p 'test_*bench*.py'
+
      - name: check + tests
        run: |
              make cleanconfig

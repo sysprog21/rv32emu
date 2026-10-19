@@ -30,12 +30,14 @@ permissions:
 
 jobs:
   boot-zephyr:
-    name: S-mode interpreter (${{ matrix.toolchain }})
+    name: S-mode ${{ matrix.engine }} (${{ matrix.toolchain }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        engine: [interpreter, t1]
+        toolchain: [xpack, gcc]
         include:
           - toolchain: xpack
             install-xpack: 'true'
@@ -84,10 +86,14 @@ jobs:
           build/zephyr-venv/bin/pip install -r "$ZEPHYR_BASE/scripts/requirements-base.txt"
           echo "$PWD/build/zephyr-venv/bin" >> "$GITHUB_PATH"
 
-      - name: Build system interpreter
+      - name: Build system emulator
         run: |
           unset CROSS_COMPILE
-          make system_interpreter_defconfig
+          if [ "${{ matrix.engine }}" = t1 ]; then
+            make system_defconfig
+          else
+            make system_interpreter_defconfig
+          fi
           make CONFIG_VIRTIO_NET=n "$PARALLEL"
 
       - name: Build Zephyr samples
@@ -105,7 +111,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: zephyr-${{ matrix.toolchain }}
+          name: zephyr-${{ matrix.toolchain }}-${{ matrix.engine }}
           path: |
             build/zephyr/logs/
             build/zephyr/*/zephyr/.config

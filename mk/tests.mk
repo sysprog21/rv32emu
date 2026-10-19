@@ -535,6 +535,7 @@ mmu-test: $(BIN)
 EXPECTED_wfi_pending = WFI pending interrupt wakeup OK
 WFI_BIN = $(OUT)/wfi-pending.bin
 # This raw guest needs the system emulator without its ext4 rootfs device.
+.PHONY: check-wfi-pending
 check-wfi-pending: $(BIN) tests/wfi-pending.S | $(OUT)
 	$(Q)$(CROSS_COMPILE)gcc -march=rv32i_zicsr -mabi=ilp32 -nostdlib -static \
 	    -Wl,-e,_start -Wl,-Ttext=0x0 -o $(OUT)/wfi-pending.elf \
@@ -602,6 +603,7 @@ ifneq ($(MEM_START),0)
 $(error check-t1-bare-mmu requires MEM_START=0)
 endif
 endif
+.PHONY: check-t1-bare-mmu
 check-t1-bare-mmu: $(BIN) tests/t1-bare-mmu.S $(T1_BARE_MMU_ROOTFS_DEP) | $(OUT)
 	$(Q)$(CROSS_COMPILE)gcc -march=rv32i_zicsr -mabi=ilp32 -nostdlib -static \
 	    -DTEST_RAM_END=0x$(REAL_MEM_SIZE) -Wl,-e,_start -Wl,-Ttext=0x0 \
@@ -613,7 +615,6 @@ check-t1-bare-mmu: $(BIN) tests/t1-bare-mmu.S $(T1_BARE_MMU_ROOTFS_DEP) | $(OUT)
 
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
 	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
-.PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test \
-	check-wfi-pending check-t1-bare-mmu
+.PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
 
 endif # _MK_TESTS_INCLUDED

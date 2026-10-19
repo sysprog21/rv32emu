@@ -1,5 +1,6 @@
 """Exercise real console pipes, protocol failures and process-group cleanup."""
 
+import io
 import os
 from pathlib import Path
 import signal
@@ -15,6 +16,7 @@ from zephyr_bench import (
     BenchError,
     ConsoleProtocol,
     MANDATORY_CASES,
+    main,
     observe,
     require_inventory,
     verify_engine,
@@ -29,6 +31,18 @@ LINES = [
     "RV32EMU_BENCH_START case=allocation iterations=20",
     "RV32EMU_BENCH_END case=allocation iterations=20 checksum=42 status=PASS",
 ]
+
+
+class HostSupportTest(unittest.TestCase):
+    def test_cli_rejects_missing_affinity_with_actionable_error(self):
+        with (
+            patch("zephyr_bench.os", SimpleNamespace(environ={})),
+            patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            with self.assertRaises(SystemExit) as error:
+                main(["--opensbi", "/unused"])
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("require Linux CPU affinity", stderr.getvalue())
 
 
 class ProtocolTest(unittest.TestCase):
@@ -279,6 +293,10 @@ class InformationalModeTest(unittest.TestCase):
         )
 
 
+@unittest.skipUnless(
+    hasattr(os, "sched_getaffinity"),
+    "process measurements require Linux CPU affinity",
+)
 class ProcessTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

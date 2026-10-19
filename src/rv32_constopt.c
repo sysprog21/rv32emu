@@ -114,19 +114,34 @@ CONSTOPT(bltu, { OPT_BRANCH_FUNC(uint32_t, >=); })
 CONSTOPT(bgeu, { OPT_BRANCH_FUNC(uint32_t, <); })
 
 /* LB: Load Byte */
-CONSTOPT(lb, { info->is_constant[ir->rd] = false; })
+CONSTOPT(lb, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* LH: Load Halfword */
-CONSTOPT(lh, { info->is_constant[ir->rd] = false; })
+CONSTOPT(lh, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* LW: Load Word */
-CONSTOPT(lw, { info->is_constant[ir->rd] = false; })
+CONSTOPT(lw, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* LBU: Load Byte Unsigned */
-CONSTOPT(lbu, { info->is_constant[ir->rd] = false; })
+CONSTOPT(lbu, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* LHU: Load Halfword Unsigned */
-CONSTOPT(lhu, { info->is_constant[ir->rd] = false; })
+CONSTOPT(lhu, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
 
 /* SB: Store Byte */
 CONSTOPT(sb, {})

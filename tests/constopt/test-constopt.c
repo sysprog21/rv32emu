@@ -292,22 +292,57 @@ static int check_compressed_known_operand(void)
 }
 #endif
 
+/* Run a handler that writes rd without folding it. rd must become unknown,
+ * while x0, written or not, stays known zero.
+ */
+static bool forgets_rd(void (*optimize)(rv_insn_t *, constopt_info_t *),
+                       unsigned opcode,
+                       unsigned rd,
+                       constopt_info_t *info)
+{
+    *info = (constopt_info_t) {.is_constant[0] = true};
+    info->is_constant[rd] = true;
+    info->const_val[rd] = rd ? 42 : 0;
+    rv_insn_t ir = {.opcode = opcode, .rs1 = 1, .rs2 = 2, .rd = rd};
+    optimize(&ir, info);
+    return ir.opcode == opcode && info->is_constant[rd] == (rd == 0) &&
+           info->is_constant[0] && !info->const_val[0];
+}
+
+/* A load into x0 still executes, since it can fault. */
+static int check_loads(void)
+{
+    const struct {
+        unsigned opcode;
+        void (*optimize)(rv_insn_t *, constopt_info_t *);
+    } loads[] = {{rv_insn_lb, constopt_lb},
+                 {rv_insn_lh, constopt_lh},
+                 {rv_insn_lw, constopt_lw},
+                 {rv_insn_lbu, constopt_lbu},
+                 {rv_insn_lhu, constopt_lhu}};
+    for (unsigned op = 0; op < ARRAY_SIZE(loads); op++) {
+        for (unsigned rd = 0; rd <= 3; rd++) {
+            constopt_info_t info;
+            if (!forgets_rd(loads[op].optimize, loads[op].opcode, rd, &info)) {
+                fprintf(stderr, "load left a wrong destination constant\n");
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 #if RV32_HAS(EXT_A)
 static int check_scw(void)
 {
     for (unsigned rd = 0; rd <= 3; rd++) {
-        constopt_info_t info = {0};
-        info.is_constant[0] = info.is_constant[rd] = true;
-        info.const_val[rd] = rd ? 42 : 0;
-        rv_insn_t ir = {.opcode = rv_insn_scw, .rs1 = 1, .rs2 = 2, .rd = rd};
-        constopt_scw(&ir, &info);
-        if (info.is_constant[rd] != (rd == 0) || !info.is_constant[0] ||
-            info.const_val[0] != 0 || ir.opcode != rv_insn_scw) {
+        constopt_info_t info;
+        if (!forgets_rd(constopt_scw, rv_insn_scw, rd, &info)) {
             fprintf(stderr, "SC.W retained a stale destination constant\n");
             return 1;
         }
         if (rd) {
-            ir = (rv_insn_t) {
+            rv_insn_t ir = {
                 .opcode = rv_insn_addi, .rs1 = rd, .rd = 4, .imm = 1};
             constopt_addi(&ir, &info);
             if (ir.opcode != rv_insn_addi || info.is_constant[4])
@@ -450,7 +485,7 @@ static int check_signed_division(void)
 
 int main(void)
 {
-    if (check_shifts() || check_known_operand())
+    if (check_shifts() || check_known_operand() || check_loads())
         return 1;
 #if RV32_HAS(EXT_C)
     if (check_compressed_known_operand())

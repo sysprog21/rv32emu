@@ -2320,6 +2320,10 @@ static void profile(void *entry, uint32_t freq, FILE *output_file)
     fprintf(output_file, " %-10u|", freq);
     fprintf(output_file, " %-5s |", block->hot ? "true" : "false");
     fprintf(output_file, " %-6s |", block->has_loops ? "true" : "false");
+#if RV32_HAS(T2C)
+    fprintf(output_file, " %-5s |",
+            ATOMIC_LOAD(&block->hot2, ATOMIC_ACQUIRE) ? "true" : "false");
+#endif
     fprintf(output_file, " %-12u|", block->n_invoke);
 #if RV32_HAS(BLOCK_CHAINING)
     fprintf(output_file, " %-12u|", block_incoming_edge_count(block));
@@ -2380,10 +2384,13 @@ void rv_profile(riscv_t *rv, char *out_file_path)
     fprintf(f,
             "# T1 indirect guards are disabled in tiered builds, so "
             "indirect_history feeds no compiled guard.\n");
+    fprintf(f, "# t2c marks blocks whose T2C code was published by exit.\n");
 #endif
-    fprintf(f,
-            "PC start |PC end  | frequency |  hot  | loop  | "
-            "t1_reentries | ");
+    fprintf(f, "PC start |PC end  | frequency |  hot  | loop  | ");
+#if RV32_HAS(T2C)
+    fprintf(f, "t2c   | ");
+#endif
+    fprintf(f, "t1_reentries | ");
 #if RV32_HAS(BLOCK_CHAINING)
     fprintf(f, "predecessors | ");
 #endif

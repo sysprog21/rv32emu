@@ -171,6 +171,20 @@ int main(void)
         return 1;
 #endif
 
+    /* ALU operations with an x0 destination decode to NOP (rs1 = rs2 = t0). */
+    if (expect_decode(0x00528033, true, rv_insn_nop) || /* add */
+        expect_decode(0x40528033, true, rv_insn_nop) || /* sub */
+        expect_decode(0x0052a033, true, rv_insn_nop) || /* slt */
+        expect_decode(0x0052b033, true, rv_insn_nop) || /* sltu */
+        expect_decode(0x0052c033, true, rv_insn_nop) || /* xor */
+        expect_decode(0x0052e033, true, rv_insn_nop) || /* or */
+        expect_decode(0x0052f033, true, rv_insn_nop) || /* and */
+        expect_decode(0x7ff28013, true, rv_insn_nop) || /* addi 2047 */
+        expect_decode(0x0002b013, true, rv_insn_nop) || /* sltiu 0 */
+        expect_decode(0xfff2e013, true, rv_insn_nop) || /* ori -1 */
+        expect_decode(0x0002f013, true, rv_insn_nop))   /* andi 0 */
+        return 1;
+
     /* FENCE has no register fields: bits 24..20 are pred/succ, not rs2, so
      * the RV32E register-range check must not reject a full-barrier fence. */
     if (expect_decode(0x0ff0000f, true, rv_insn_fence) ||

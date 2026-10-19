@@ -3285,8 +3285,13 @@ static void optimize_constant(riscv_t *rv UNUSED, block_t *block)
 
     uint32_t i;
     rv_insn_t *ir;
-    for (i = 0, ir = block->ir_head; i < block->n_insn; i++, ir = ir->next)
+    for (i = 0, ir = block->ir_head; i < block->n_insn; i++, ir = ir->next) {
         ((constopt_func_t) constopt_table[ir->opcode])(ir, &info);
+        /* Folds may write any rd: decode turns x0 ALU destinations into NOP,
+         * and handlers that keep an x0 write leave x0 known zero.
+         */
+        assert(!info.is_constant[0] || !info.const_val[0]);
+    }
 }
 
 #if RV32_HAS_PACKED_TAIL

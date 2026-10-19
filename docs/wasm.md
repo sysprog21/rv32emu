@@ -69,9 +69,16 @@ not keep a core busy.
 
 Generated functions occupy a bounded cache. Cache flushes and VM cleanup
 release their function-table slots; system-mode address-space invalidation
-retires the corresponding modules. Runtime compilation blocked by browser
-policy falls back to interpretation. LLVM tier-2 compilation remains native
-only. Select **Interpreter Only** with `make config` to disable T1C.
+retires the corresponding modules, whose slots and code budget are reused.
+Runtime compilation blocked by browser policy falls back to interpretation.
+LLVM tier-2 compilation remains native only. Select **Interpreter Only**
+with `make config` to disable T1C.
+
+Guest RAM comes from Wasm memory, which grows zero-filled, so a VM's first
+run keeps the pages its guest never touches out of RAM. A reboot, or a
+later program in the same page, clears guest RAM in full and makes it
+resident. The pthread pool holds four workers, enough for the audio
+threads, since each idle worker costs several megabytes.
 
 Run the backend fixture with an activated Emscripten SDK and Node.js:
 

@@ -65,7 +65,11 @@ endif
 ifeq ($(CONFIG_SDL),y)
 # Disable STRICT mode to avoid -Werror in SDL2_mixer port compilation
 CFLAGS_emcc += -sSTRICT=0 -sUSE_SDL=2 -sSDL2_MIXER_FORMATS=wav,mid -sUSE_SDL_MIXER=2
-CFLAGS_emcc += -pthread -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency
+# Audio needs few threads: each sound effect or song runs on a thread that the
+# main thread joins at once, plus virtio-snd's TX thread. The pool must cover
+# them, because a blocked main thread cannot start a new worker, but every
+# idle worker costs megabytes, so do not size it by the host's core count.
+CFLAGS_emcc += -pthread -sPTHREAD_POOL_SIZE=4
 OBJS_EXT += syscall_sdl.o
 LDFLAGS += -pthread
 # Note: Emscripten 4.x inlines worker code into the main JS file

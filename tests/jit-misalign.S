@@ -24,6 +24,8 @@
 #if !defined(NO_CSR) && !defined(NO_HANDLER)
 #define WITH_HANDLER
 #endif
+    /* Nothing sets gp, so la must not relax to a gp-relative addi. */
+    .option norelax
     .text
     .global _start
 

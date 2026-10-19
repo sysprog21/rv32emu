@@ -106,6 +106,7 @@ EXPECTED_const-arith = constant arithmetic OK
 EXPECTED_const-shift = constant shifts OK
 EXPECTED_const-operand = constant operands OK
 EXPECTED_const-coperand = compressed constant operands OK
+EXPECTED_cjump-odd = compressed odd jumps OK
 EXPECTED_amo-align = AMO alignment OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
@@ -214,7 +215,7 @@ ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-const-arith check-const-operand
 endif
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-const-coperand
+GUEST_ASM_CHECK_TARGETS += check-const-coperand check-cjump-odd
 endif
 # A directly loaded system program has no handler for its own page faults.
 # fused-page-fault also passes unfused; it exercises fused records only with
@@ -430,6 +431,7 @@ $(eval $(call guest-asm-check-target,jit-muldiv,rv32im))
 $(eval $(call guest-asm-check-target,const-arith,rv32im))
 $(eval $(call guest-asm-check-target,const-operand,rv32im))
 $(eval $(call guest-asm-check-target,const-coperand,rv32ic))
+$(eval $(call guest-asm-check-target,cjump-odd,rv32ic))
 $(eval $(call guest-asm-check-target,const-shift,rv32i))
 $(eval $(call guest-asm-check-target,jit-interp-diff,rv32im))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr))

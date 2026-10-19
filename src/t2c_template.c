@@ -1545,6 +1545,7 @@ T2C_OP(clwsp, {
 
 T2C_OP(cjr, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
+    val_rs1 = T2C_LLVM_GEN_ALU32_IMM(And, val_rs1, ~1U);
     t2c_indirect_jump(builder, start, val_rs1, rv, block, ir, insn_counter,
                       taken_builder);
 })
@@ -1571,6 +1572,7 @@ T2C_OP(cjalr, {
      * to avoid being overriden by other operation.
      */
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
+    val_rs1 = T2C_LLVM_GEN_ALU32_IMM(And, val_rs1, ~1U);
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 2,
                              t2c_gen_ra_addr(start, builder, ir));
     t2c_indirect_jump(builder, start, val_rs1, rv, block, ir, insn_counter,

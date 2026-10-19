@@ -15,7 +15,17 @@
 /* Return to the fixture after every block unless a check enables chaining. */
 static uint32_t cycle_slice;
 #define WASM_CYCLE_SLICE cycle_slice
+/* Successors that a module may absorb come from this list, not a cache. */
+struct block;
+static struct block *find_block(uint32_t pc);
+#define WASM_FIND_BLOCK(rv, pc) ((void) (rv), (block_t *) find_block(pc))
 #include "jit_wasm.c"
+
+static block_t *known_block;
+static struct block *find_block(uint32_t pc)
+{
+    return known_block && known_block->pc_start == pc ? known_block : NULL;
+}
 
 static block_t *active;
 
@@ -420,6 +430,22 @@ static void check_control_flow(riscv_t *rv)
 }
 
 #if !RV32_HAS(SYSTEM) || RV32_HAS(SYSTEM_MMIO)
+#if !RV32_HAS(SYSTEM)
+static const rv_insn_t *region_record;
+/* Stands in for the interpreter replaying an absorbed block's load. */
+static bool region_helper(riscv_t *rv,
+                          const rv_insn_t *ir,
+                          uint64_t cycle,
+                          uint32_t pc)
+{
+    (void) pc;
+    region_record = ir;
+    rv->csr_cycle = cycle + 1;
+    rv->PC = 0x9000;
+    return true;
+}
+#endif
+
 /* 64 bytes of zeroed guest RAM. Translate only while it is attached: code
  * embeds the RAM address.
  */
@@ -627,6 +653,37 @@ static void check_user_memory(riscv_t *rv)
     group_base = rv->X[11] = 60; /* 64..67 is outside RAM */
     run(rv, &post, 1);
     assert(group_calls == 4 && rv->X[11] == 60);
+
+    /* A guard failing in an absorbed block hands the interpreter the module's
+     * own copy of the record, which outlives the block's.
+     */
+    rv_insn_t step_a[] = {
+        {.opcode = rv_insn_addi, .rd = 8, .rs1 = 8, .imm = 4},
+        {.opcode = rv_insn_jal, .imm = 0xfc},
+    };
+    rv_insn_t step_b[] = {
+        {.opcode = rv_insn_lw, .rd = 6, .rs1 = 8, .impl = region_helper},
+        {.opcode = rv_insn_bne, .rs1 = 8, .rs2 = 9, .imm = -0x104},
+    };
+    block_t walk = make_block(step_a, 2, 0x1000);
+    block_t load = make_block(step_b, 2, 0x1100);
+    known_block = &load;
+    active = &walk;
+    assert(jit_translate(rv, &walk));
+    known_block = NULL;
+    memset(step_b, 0xa5, sizeof(step_b)); /* the decoder reused them */
+    for (int pass = 0; pass < 2; pass++) {
+        rv->X[8] = 48;
+        rv->X[9] = 100;
+        rv->csr_cycle = 0;
+        region_record = NULL;
+        jit_wasm_run(rv, &walk);
+        /* 52, 56, 60 load in place; 64 is past RAM and replays. */
+        assert(region_record && region_record->opcode == rv_insn_lw);
+        assert(rv->X[8] == 64 && rv->PC == 0x9000 && rv->csr_cycle == 15);
+    }
+    jit_wasm_retire_block(rv, &walk);
+    active = NULL;
     detach_ram(rv);
 }
 #endif
@@ -823,6 +880,32 @@ int main(void)
     cycle_slice = 0;
     active = NULL;
 
+    /* A loop over two blocks runs inside one module: neither the tail call nor
+     * a return separates them.
+     */
+    rv_insn_t loop_a[] = {
+        {.opcode = rv_insn_addi, .rd = 5, .rs1 = 5, .imm = 1},
+        {.opcode = rv_insn_jal, .imm = 0xfc},
+    };
+    rv_insn_t loop_b[] = {
+        {.opcode = rv_insn_addi, .rd = 6, .rs1 = 6, .imm = 3},
+        {.opcode = rv_insn_bne, .rs1 = 5, .rs2 = 7, .imm = -0x104},
+    };
+    block_t head = make_block(loop_a, 2, 0x1000);
+    block_t latch = make_block(loop_b, 2, 0x1100);
+    known_block = &latch;
+    active = &head;
+    assert(jit_translate(rv, &head));
+    known_block = NULL;
+    rv->X[5] = rv->X[6] = 0;
+    rv->X[7] = 10;
+    rv->csr_cycle = 0;
+    jit_wasm_run(rv, &head);
+    assert(rv->X[5] == 10 && rv->X[6] == 30 && rv->X[7] == 10);
+    assert(rv->PC == 0x1108 && rv->csr_cycle == 40);
+    jit_wasm_retire_block(rv, &head);
+    active = NULL;
+
     /* JALR must read its source before writing an aliased link register. */
     rv->X[5] = 0x2001;
     rv_insn_t jump = {.opcode = rv_insn_jalr, .rd = 5, .rs1 = 5, .imm = 3};
@@ -930,6 +1013,33 @@ int main(void)
     for (int i = 0; i < 3; i++)
         assert(!chain[i].hot);
     active = NULL;
+
+    /* Page invalidation finds a module by its entry page, so it absorbs
+     * successors from that page only, and retiring it frees their records.
+     */
+    rv_insn_t near_a[] = {
+        {.opcode = rv_insn_addi, .rd = 5, .rs1 = 5, .imm = 1},
+        {.opcode = rv_insn_jal, .imm = 0xfc},
+    };
+    rv_insn_t near_b = {.opcode = rv_insn_addi, .rd = 6, .rs1 = 6, .imm = 1};
+    rv_insn_t far_b = near_b;
+    block_t page_entry = make_block(near_a, 2, 0x1000);
+    block_t same_page = make_block(&near_b, 1, 0x1100);
+    block_t next_page = make_block(&far_b, 1, 0x2100);
+    struct jit_state *pages = rv->jit_state;
+    known_block = &same_page;
+    active = &page_entry;
+    assert(jit_translate(rv, &page_entry));
+    struct wasm_map *absorbing = &pages->maps[page_entry.offset - 1];
+    assert(absorbing->arena);
+    jit_retire_space(pages, 0);
+    assert(!absorbing->arena && !absorbing->entry && !page_entry.hot);
+    near_a[1].imm = 0x10fc; /* now to 0x2100 */
+    known_block = &next_page;
+    assert(jit_translate(rv, &page_entry));
+    assert(!pages->maps[page_entry.offset - 1].arena);
+    jit_wasm_retire_block(rv, &page_entry);
+    known_block = NULL;
     active = NULL;
 #endif
     jit_state_exit(rv->jit_state);

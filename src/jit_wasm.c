@@ -90,10 +90,12 @@ enum {
     W_VOID = 0x40, /* empty block type */
     W_TYPE_I32 = 0x7f,
     W_TYPE_I64 = 0x7e,
+    W_BLOCK = 0x02,
     W_LOOP = 0x03,
     W_IF = 0x04,
     W_ELSE = 0x05,
     W_END = 0x0b,
+    W_BR = 0x0c,
     W_BR_IF = 0x0d,
     W_RETURN = 0x0f,
     W_CALL = 0x10,
@@ -219,6 +221,7 @@ EM_JS(void, wasm_remove, (int entry), { removeFunction(entry); });
  */
 struct wasm_profile {
     uint64_t calls, cycles, blocks, bytes, loops, lookup_hits, lookup_misses;
+    uint64_t region_blocks; /* successors compiled into another's module */
     uint64_t helpers[rv_insn_fuse13 + 1];
     double translate_ms, module_ms;
 };
@@ -238,11 +241,11 @@ static void wasm_profile_dump(const struct wasm_profile *profile)
             "WASM T1C profile: {\"calls\":%" PRIu64 ",\"cycles\":%" PRIu64
             ",\"blocks\":%" PRIu64 ",\"bytes\":%" PRIu64
             ",\"loop_blocks\":%" PRIu64 ",\"lookup_hits\":%" PRIu64
-            ",\"lookup_misses\":%" PRIu64
+            ",\"lookup_misses\":%" PRIu64 ",\"region_blocks\":%" PRIu64
             ",\"translate_ms\":%.3f,\"module_ms\":%.3f,\"helpers\":{",
             profile->calls, profile->cycles, profile->blocks, profile->bytes,
             profile->loops, profile->lookup_hits, profile->lookup_misses,
-            profile->translate_ms, profile->module_ms);
+            profile->region_blocks, profile->translate_ms, profile->module_ms);
     bool first = true;
     for (unsigned i = 0; i < ARRAY_SIZE(names); i++) {
         if (!profile->helpers[i])
@@ -262,6 +265,7 @@ struct wasm_map {
     uint32_t entry; /* function-table index; zero once retired */
     uint32_t size;  /* body bytes charged to the code budget */
     block_t *owner; /* NULL once retired */
+    void *arena;    /* records of the other blocks compiled into it */
 #if RV32_HAS(SYSTEM)
     uint32_t satp;
     uint16_t next_in_page; /* one-based index of the next map in its bucket */
@@ -304,6 +308,15 @@ static int wasm_step(riscv_t *rv, const rv_insn_t *original)
     }
     rv_insn_t ir = *original;
     ir.next = ir.branch_taken = ir.branch_untaken = NULL;
+
+    /* A trap taken inside the helper runs the guest's handler, which may retire
+     * this module and free the fused operands it owns.
+     */
+    opcode_fuse_t fuse[FUSE_MAX_ENTRIES];
+    if (ir.fuse) {
+        memcpy(fuse, ir.fuse, FUSE_SLOT_SIZE);
+        ir.fuse = fuse;
+    }
     rv->PC = ir.pc;
     const bool ok = ir.impl(rv, &ir, rv->csr_cycle, ir.pc) && !rv->next_insn;
 
@@ -323,6 +336,13 @@ struct wasm_emitter {
     bool failed;
     riscv_t *rv;
     bool keep_locals;
+
+    /* Next PCs set by the last control transfer, known before it runs. The
+     * region dispatch compares the actual next PC, so a wrong guess costs only
+     * space.
+     */
+    uint32_t succ[2];
+    int n_succ;
 };
 
 static void wasm_byte(struct wasm_emitter *e, uint8_t byte)
@@ -460,6 +480,15 @@ static void wasm_add_cycles(struct wasm_emitter *e)
         return;
     wasm_const64(e, e->cycles);
     wasm_byte(e, W_I64_ADD);
+}
+
+/* Move the emitter's pending cycles into the WASM_CYCLE local. */
+static void wasm_bank_cycles(struct wasm_emitter *e)
+{
+    wasm_lget(e, WASM_CYCLE);
+    wasm_add_cycles(e);
+    wasm_lset(e, WASM_CYCLE);
+    e->cycles = 0;
 }
 
 static void wasm_flush(struct wasm_emitter *e)
@@ -832,6 +861,8 @@ static void wasm_target(struct wasm_emitter *e, uint32_t pc)
 {
     wasm_const(e, pc);
     wasm_lset(e, WASM_NEXT_PC);
+    e->succ[0] = pc;
+    e->n_succ = 1;
 }
 
 /* A conditional branch pushes both successors, then its condition, and ends
@@ -843,6 +874,9 @@ static void wasm_successors(struct wasm_emitter *e,
 {
     wasm_const(e, taken);
     wasm_const(e, next);
+    e->succ[0] = taken;
+    e->succ[1] = next;
+    e->n_succ = 2;
 }
 
 static void wasm_select_next(struct wasm_emitter *e)
@@ -975,6 +1009,7 @@ static bool wasm_lower(struct wasm_emitter *e, const rv_insn_t *ir)
 #else
         wasm_lset(e, WASM_NEXT_PC);
 #endif
+        e->n_succ = 0; /* known only when it runs */
         wasm_const(e, ir->pc + 4);
         wasm_set(e, ir->rd);
         break;
@@ -1035,6 +1070,7 @@ static bool wasm_lower(struct wasm_emitter *e, const rv_insn_t *ir)
         wasm_const(e, -2);
         wasm_byte(e, W_I32_AND);
         wasm_lset(e, WASM_NEXT_PC);
+        e->n_succ = 0;
         if (ir->opcode == rv_insn_cjalr) {
             wasm_const(e, ir->pc + 2);
             wasm_set(e, rv_reg_ra);
@@ -1118,6 +1154,8 @@ static void wasm_retire(struct jit_state *state, struct wasm_map *map)
     if (map->entry) {
         wasm_remove(map->entry);
         map->entry = 0;
+        free(map->arena);
+        map->arena = NULL;
         state->offset -= map->size;
         const uint16_t index = map - state->maps + 1;
         state->free_maps[state->n_free++] = index - 1;
@@ -1153,6 +1191,8 @@ static void wasm_reset(struct jit_state *state)
     for (int i = 0; i < state->n_blocks; i++) {
         if (state->maps[i].entry)
             wasm_remove(state->maps[i].entry);
+        free(state->maps[i].arena);
+        state->maps[i].arena = NULL;
     }
     state->n_blocks = state->n_free = 0;
     state->offset = 0;
@@ -1340,10 +1380,10 @@ static void wasm_helper(struct wasm_emitter *e,
     wasm_return_if(e);
 }
 
-/* A bounded self-loop avoids dispatch and JS calls on tight guest loops, while
- * returning regularly for interrupts, timers and browser yields.
+/* Count one more iteration and push whether the loop bound still allows
+ * another.
  */
-static void wasm_loop_back(struct wasm_emitter *e, uint32_t pc_start)
+static void wasm_budget_left(struct wasm_emitter *e)
 {
     wasm_lget(e, WASM_BUDGET);
     wasm_const(e, 1);
@@ -1351,6 +1391,14 @@ static void wasm_loop_back(struct wasm_emitter *e, uint32_t pc_start)
     wasm_ltee(e, WASM_BUDGET);
     wasm_const(e, WASM_LOOP_LIMIT);
     wasm_byte(e, W_I32_LT_U);
+}
+
+/* A bounded self-loop avoids dispatch and JS calls on tight guest loops, while
+ * returning regularly for interrupts, timers and browser yields.
+ */
+static void wasm_loop_back(struct wasm_emitter *e, uint32_t pc_start)
+{
+    wasm_budget_left(e);
     wasm_lget(e, WASM_NEXT_PC);
     wasm_const(e, pc_start);
     wasm_byte(e, W_I32_EQ);
@@ -1359,30 +1407,223 @@ static void wasm_loop_back(struct wasm_emitter *e, uint32_t pc_start)
     wasm_uleb(e, 0); /* the loop */
 }
 
+/* A module holds one hot block and, when that block needs no helpers, up to
+ * WASM_REGION_BLOCKS - 1 of its successors that need none either. A dispatch
+ * loop keeps registers and the cycle count in locals across their edges, which
+ * otherwise cost a tail call, a lookup and a spill and reload each.
+ */
+#define WASM_REGION_BLOCKS 16
+#define WASM_REGION_RECORDS 512
+
+/* The test fixture supplies its own blocks. */
+#ifndef WASM_FIND_BLOCK
+#define WASM_FIND_BLOCK(rv, pc)                                                \
+    ((rv)->block_cache ? (block_t *) cache_get((rv)->block_cache, (pc), false) \
+                       : NULL)
+#endif
+
+/* What lowering a block reports: the registers it reads before writing, those
+ * it writes, its record count and its static successors.
+ */
+struct wasm_shape {
+    uint32_t inputs, dirty;
+    int records, n_succ;
+    uint32_t succ[2];
+};
+
+struct wasm_region {
+    const block_t *block[WASM_REGION_BLOCKS];  /* block[0] is the entry */
+    const rv_insn_t *head[WASM_REGION_BLOCKS]; /* records to lower */
+    uint32_t succ[WASM_REGION_BLOCKS][2];      /* static successors */
+    int n_succ[WASM_REGION_BLOCKS];
+    uint32_t inputs, dirty; /* unions over every member */
+    int count, records;
+    void *arena;
+};
+
+/* Lower a block into scratch as its hot path runs. */
+static bool wasm_probe(riscv_t *rv,
+                       uint8_t *scratch,
+                       const block_t *block,
+                       struct wasm_shape *shape)
+{
+    /* A block that ends without a control transfer falls through. */
+    struct wasm_emitter e = {
+        .code = scratch, .rv = rv, .succ = {block->pc_end}, .n_succ = 1};
+    *shape = (struct wasm_shape) {0};
+    int n = 0;
+    for (const rv_insn_t *ir = block->ir_head; ir; ir = ir->next, n++) {
+        if (!wasm_lower(&e, ir))
+            return false;
+    }
+    *shape = (struct wasm_shape) {.inputs = e.inputs,
+                                  .dirty = e.dirty,
+                                  .records = n,
+                                  .n_succ = e.n_succ,
+                                  .succ = {e.succ[0], e.succ[1]}};
+    return !e.failed;
+}
+
+static void wasm_region_add(struct wasm_region *region,
+                            const block_t *block,
+                            const struct wasm_shape *shape)
+{
+    const int i = region->count++;
+    region->block[i] = block;
+    region->succ[i][0] = shape->succ[0];
+    region->succ[i][1] = shape->succ[1];
+    region->n_succ[i] = shape->n_succ;
+    region->inputs |= shape->inputs;
+    region->dirty |= shape->dirty;
+    region->records += shape->records;
+}
+
+static bool wasm_region_member(riscv_t *rv,
+                               const struct wasm_region *region,
+                               const block_t *block,
+                               uint32_t pc)
+{
+    if (!block || block->pc_start != pc || !block->translatable ||
+        !block_matches_context(rv, block))
+        return false;
+#if RV32_HAS(SYSTEM)
+    /* Page invalidation finds a module by its entry PC's page. */
+    const uint32_t page = region->block[0]->pc_start >> RV_PG_SHIFT;
+    if (block->pc_start >> RV_PG_SHIFT != page ||
+        (block->pc_end - 1) >> RV_PG_SHIFT != page)
+        return false;
+#endif
+    for (int i = 0; i < region->count; i++) {
+        if (region->block[i] == block)
+            return false;
+    }
+    return true;
+}
+
+/* Gather successors breadth first, nearest ones first. */
+static void wasm_plan_region(riscv_t *rv,
+                             uint8_t *scratch,
+                             struct wasm_region *region)
+{
+    for (int i = 0; i < region->count; i++) {
+        for (int k = 0;
+             k < region->n_succ[i] && region->count < WASM_REGION_BLOCKS; k++) {
+            const uint32_t pc = region->succ[i][k];
+            const block_t *block = WASM_FIND_BLOCK(rv, pc);
+            struct wasm_shape shape;
+            if (!wasm_region_member(rv, region, block, pc) ||
+                !wasm_probe(rv, scratch, block, &shape) ||
+                region->records + shape.records > WASM_REGION_RECORDS)
+                continue;
+            wasm_region_add(region, block, &shape);
+        }
+    }
+}
+
+/* Generated slow paths pass their record to the interpreter, so the module must
+ * own copies of the records of every block but its entry, which a retirement
+ * detaches first. The cache may free those blocks at any time.
+ */
+static bool wasm_copy_region(struct wasm_region *region)
+{
+    size_t records = 0, slots = 0;
+    for (int i = 1; i < region->count; i++) {
+        for (const rv_insn_t *ir = region->block[i]->ir_head; ir;
+             ir = ir->next) {
+            records++;
+            slots += !!ir->fuse;
+        }
+    }
+    uint8_t *arena =
+        malloc(records * sizeof(rv_insn_t) + slots * FUSE_SLOT_SIZE);
+    if (!arena)
+        return false;
+    rv_insn_t *out = (rv_insn_t *) arena;
+    uint8_t *slot = arena + records * sizeof(rv_insn_t);
+    for (int i = 1; i < region->count; i++) {
+        region->head[i] = out;
+        for (const rv_insn_t *ir = region->block[i]->ir_head; ir;
+             ir = ir->next, out++) {
+            *out = *ir;
+            out->next = ir->next ? out + 1 : NULL;
+            out->branch_taken = out->branch_untaken = NULL;
+            out->branch_table = NULL;
+            if (ir->fuse) {
+                memcpy(slot, ir->fuse, FUSE_SLOT_SIZE);
+                out->fuse = (opcode_fuse_t *) slot;
+                slot += FUSE_SLOT_SIZE;
+            }
+        }
+    }
+    region->arena = arena;
+    return true;
+}
+
+/* Run the member whose start the next PC holds, until none does or the loop
+ * bound is reached. Every exit leaves the next PC for the tail.
+ */
+static void wasm_emit_region(struct wasm_emitter *e,
+                             const struct wasm_region *region)
+{
+    wasm_target(e, region->block[0]->pc_start);
+    wasm_open(e, W_BLOCK, W_VOID); /* exit */
+    wasm_open(e, W_LOOP, W_VOID);
+    wasm_open(e, W_BLOCK, W_VOID); /* next */
+    for (int i = 0; i < region->count; i++) {
+        const block_t *block = region->block[i];
+        wasm_lget(e, WASM_NEXT_PC);
+        wasm_const(e, block->pc_start);
+        wasm_byte(e, W_I32_EQ);
+        wasm_if(e);
+        wasm_target(e, block->pc_end);
+        for (const rv_insn_t *ir = region->head[i]; ir; ir = ir->next) {
+            if (!wasm_lower(e, ir))
+                e->failed = true; /* its probe succeeded */
+        }
+        wasm_bank_cycles(e);
+        wasm_byte(e, W_BR);
+        wasm_uleb(e, 1); /* next */
+        wasm_byte(e, W_END);
+    }
+    wasm_byte(e, W_BR);
+    wasm_uleb(e, 2);     /* exit: no member starts at the next PC */
+    wasm_byte(e, W_END); /* next */
+    wasm_budget_left(e);
+    wasm_byte(e, W_BR_IF);
+    wasm_uleb(e, 0);     /* the loop */
+    wasm_byte(e, W_END); /* loop */
+    wasm_byte(e, W_END); /* exit */
+}
+
 bool jit_translate(riscv_t *rv, block_t *block)
 {
     struct jit_state *state = rv->jit_state;
     if (state->disabled)
         return false;
     const double start = WASM_PROFILE_ENABLED ? emscripten_get_now() : 0;
-    struct wasm_emitter e = {.code = state->scratch, .rv = rv};
 
     /* First lower into the scratch buffer to discover blocks whose hot path
      * needs no helpers. Their loop-carried values need initial loads only once;
      * RAM guard failures still spill precise state before exiting.
      */
-    bool keep = true;
-    for (const rv_insn_t *ir = block->ir_head; ir; ir = ir->next) {
-        if (!wasm_lower(&e, ir)) {
-            keep = false;
-            break;
-        }
+    struct wasm_region region = {.head = {block->ir_head}};
+    struct wasm_shape shape;
+    const bool keep = wasm_probe(rv, state->scratch, block, &shape);
+    wasm_region_add(&region, block, &shape);
+    const struct wasm_region alone = region; /* the fallback */
+    if (keep) {
+        wasm_plan_region(rv, state->scratch, &region);
+        if (region.count > 1 && !wasm_copy_region(&region))
+            region = alone;
     }
-    uint32_t loop_dirty = e.dirty;
-    uint32_t inputs = e.inputs | loop_dirty;
-    e.size = e.loaded = e.dirty = e.inputs = e.cycles = 0;
-    e.failed = false;
-    e.keep_locals = keep;
+retry:;
+    struct wasm_emitter e = {
+        .code = state->scratch, .rv = rv, .keep_locals = keep};
+
+    /* Every member may run first, so preload what any of them reads, and what
+     * any writes, which every exit spills.
+     */
+    const uint32_t inputs = region.inputs | region.dirty;
 
     /* Local declarations: x1..x31 and WASM_ADDR..WASM_BUDGET, the i64
      * WASM_CYCLE, then WASM_TLB, WASM_VPN and the group offsets.
@@ -1404,29 +1645,37 @@ bool jit_translate(riscv_t *rv, block_t *block)
         }
         wasm_rv_load(&e, W_I64_LOAD, offsetof(riscv_t, csr_cycle));
         wasm_lset(&e, WASM_CYCLE);
-        e.dirty = loop_dirty; /* slow edges also spill prior iterations */
+        e.dirty = region.dirty; /* slow edges also spill prior iterations */
     }
-    wasm_open(&e, W_LOOP, W_VOID);
-    wasm_target(&e, block->pc_end);
-    for (const rv_insn_t *ir = block->ir_head; ir; ir = ir->next) {
-        if (!wasm_lower(&e, ir))
-            wasm_helper(&e, ir, ir->next ? ir->next->pc : block->pc_end);
-    }
-    if (keep) {
-        wasm_lget(&e, WASM_CYCLE);
-        wasm_add_cycles(&e);
-        wasm_lset(&e, WASM_CYCLE);
-        e.cycles = 0;
+    if (region.count > 1) {
+        wasm_emit_region(&e, &region);
     } else {
-        wasm_flush(&e);
+        wasm_open(&e, W_LOOP, W_VOID);
+        wasm_target(&e, block->pc_end);
+        for (const rv_insn_t *ir = block->ir_head; ir; ir = ir->next) {
+            if (!wasm_lower(&e, ir))
+                wasm_helper(&e, ir, ir->next ? ir->next->pc : block->pc_end);
+        }
+        if (keep) {
+            wasm_bank_cycles(&e);
+        } else {
+            wasm_flush(&e);
+        }
+        wasm_loop_back(&e, block->pc_start);
+        wasm_byte(&e, W_END); /* loop */
     }
-    wasm_loop_back(&e, block->pc_start);
-    wasm_byte(&e, W_END); /* loop */
     if (keep)
         wasm_flush(&e);
     wasm_tail(&e, state);
     wasm_byte(&e, W_END); /* function */
-    if (e.failed || e.size > state->size) {
+    const bool too_big = e.failed || e.size > state->size;
+    if (too_big && region.count > 1) {
+        /* Fall back to the entry block alone. */
+        free(region.arena);
+        region = alone;
+        goto retry;
+    }
+    if (too_big) {
         block->translatable = false;
         return false;
     }
@@ -1444,11 +1693,13 @@ bool jit_translate(riscv_t *rv, block_t *block)
         state->profile.blocks++;
         state->profile.bytes += e.size;
         state->profile.loops += keep;
+        state->profile.region_blocks += region.count - 1;
     }
     if (!entry) {
         /* A first failure means runtime compilation is unavailable (a CSP, for
          * example); a later one rejects only this block.
          */
+        free(region.arena);
         if (!state->installed)
             state->disabled = true;
         block->translatable = false;
@@ -1458,8 +1709,11 @@ bool jit_translate(riscv_t *rv, block_t *block)
     const int index =
         state->n_free ? state->free_maps[--state->n_free] : state->n_blocks++;
     struct wasm_map *map = &state->maps[index];
-    *map = (struct wasm_map) {
-        .pc = block->pc_start, .entry = entry, .size = e.size, .owner = block};
+    *map = (struct wasm_map) {.pc = block->pc_start,
+                              .entry = entry,
+                              .size = e.size,
+                              .owner = block,
+                              .arena = region.arena};
 #if RV32_HAS(SYSTEM)
     map->satp = block->satp;
     uint16_t *head = &state->pages[wasm_page_slot(map->pc, map->satp)];

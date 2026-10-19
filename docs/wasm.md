@@ -52,12 +52,17 @@ Misses, MMIO, alignment exceptions, and other operations retain the existing
 interpreter handlers.
 
 Blocks whose hot path needs no helpers keep loop-carried registers and the
-cycle counter in Wasm locals. Tight self-loops execute at most 256 iterations
-per function call. A block then tail-calls its compiled successor directly,
-and the chain returns to the dispatcher every 64K guest cycles, or when the
-hart halts, so interrupts and browser yields still run.
-Guard failures materialize the precise register and cycle state before
-executing the original instruction.
+cycle counter in Wasm locals. Such a block also absorbs up to 15 of its
+cached successors that need no helpers either (in system mode, those on the
+same page): a dispatch loop runs whichever of them the next PC selects, so
+loops spanning several blocks keep their registers in locals instead of
+crossing a module boundary at every edge. The module keeps copies of the
+absorbed blocks' records, since the block cache may free those blocks at
+any time. A module runs at most 256 blocks per function call, then
+tail-calls its compiled successor directly; the chain returns to the
+dispatcher every 64K guest cycles, or when the hart halts, so interrupts
+and browser yields still run. Guard failures materialize the precise
+register and cycle state before executing the original instruction.
 
 The browser uses cooperative message tasks with approximately 8 ms host
 time slices, avoiding nested-timer delays. The clock is sampled after 32K

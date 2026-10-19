@@ -13,8 +13,8 @@
 #include <string.h>
 
 /* Return to the fixture after every block unless a check enables chaining. */
-static unsigned edge_budget;
-#define WASM_EDGE_BUDGET edge_budget
+static uint32_t cycle_slice;
+#define WASM_CYCLE_SLICE cycle_slice
 #include "jit_wasm.c"
 
 static block_t *active;
@@ -61,6 +61,21 @@ static bool jump_helper(riscv_t *rv,
     return true;
 }
 #endif
+
+/* Stands in for an interpreter call that halts the hart, as an exit system call
+ * does, and then continues to the next record.
+ */
+static bool halt_helper(riscv_t *rv,
+                        const rv_insn_t *ir,
+                        uint64_t cycle,
+                        uint32_t pc)
+{
+    (void) ir;
+    rv->halt = true;
+    rv->csr_cycle = cycle + 1;
+    rv->PC = pc + 4;
+    return true;
+}
 
 /* Stands in for an interpreter chain that paused after leaving its block. */
 static const rv_insn_t paused_insn;
@@ -767,7 +782,7 @@ int main(void)
     assert(jit_translate(rv, &first));
     active = &second;
     assert(jit_translate(rv, &second));
-    edge_budget = 63;
+    cycle_slice = 128; /* 64 two-cycle blocks */
     rv->X[5] = rv->X[6] = 0;
     rv->csr_cycle = 0;
     jit_wasm_run(rv, &first);
@@ -780,7 +795,32 @@ int main(void)
     jit_wasm_run(rv, &second);
     assert(rv->X[5] == 32 && rv->X[6] == 99 && rv->csr_cycle == 130);
     jit_wasm_retire_block(rv, &second);
-    edge_budget = 0;
+
+    /* A helper that halts the hart ends the chain, even though it falls through
+     * to a compiled successor.
+     */
+    rv_insn_t halting[] = {
+        {.opcode = rv_insn_lw, .rd = 6, .impl = halt_helper},
+        {.opcode = rv_insn_jal, .imm = 0x100},
+    };
+    rv_insn_t after_halt = {
+        .opcode = rv_insn_addi, .rd = 7, .rs1 = 7, .imm = 1};
+    block_t halt_block = make_block(halting, 2, 0x1200);
+    block_t next_block = make_block(&after_halt, 1, 0x1304);
+    active = &halt_block;
+    assert(jit_translate(rv, &halt_block));
+    active = &next_block;
+    assert(jit_translate(rv, &next_block));
+    rv->X[7] = 0;
+    rv->csr_cycle = 0;
+    jit_wasm_run(rv, &next_block); /* publish its lookup entry */
+    assert(rv->X[7] == 1);
+    jit_wasm_run(rv, &halt_block);
+    assert(rv->halt && rv->X[7] == 1 && rv->PC == 0x1304);
+    rv->halt = false;
+    jit_wasm_retire_block(rv, &next_block);
+    jit_wasm_retire_block(rv, &halt_block);
+    cycle_slice = 0;
     active = NULL;
 
     /* JALR must read its source before writing an aliased link register. */

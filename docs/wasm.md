@@ -53,7 +53,9 @@ interpreter handlers.
 
 Blocks whose hot path needs no helpers keep loop-carried registers and the
 cycle counter in Wasm locals. Tight self-loops execute at most 256 iterations
-per function call, and a bounded chain follows already compiled successors.
+per function call. A block then tail-calls its compiled successor directly,
+and the chain returns to the dispatcher every 64K guest cycles, or when the
+hart halts, so interrupts and browser yields still run.
 Guard failures materialize the precise register and cycle state before
 executing the original instruction.
 

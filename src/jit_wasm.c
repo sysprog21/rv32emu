@@ -47,11 +47,10 @@ _Static_assert(sizeof(uintptr_t) == 1 << WASM_LOOKUP_SHIFT,
 #define WASM_MAX_BLOCKS 4096
 _Static_assert(WASM_MAX_BLOCKS <= UINT16_MAX + 1, "free_maps holds uint16_t");
 #define WASM_BODY_SIZE (256 * 1024)
-#define WASM_LOOP_LIMIT 256 /* self-loop iterations per call */
-#ifndef WASM_EDGE_BUDGET    /* the test fixture overrides it */
-#define WASM_EDGE_BUDGET 63 /* tail calls per entry from C */
+#define WASM_LOOP_LIMIT 256    /* self-loop iterations per call */
+#ifndef WASM_CYCLE_SLICE       /* the test fixture overrides it */
+#define WASM_CYCLE_SLICE 65536 /* guest cycles chained per entry from C */
 #endif
-#define WASM_CYCLE_SLICE 65536 /* guest cycles per entry from C */
 #ifdef JIT_WASM_PROFILE
 #define WASM_PROFILE_ENABLED 1
 #else
@@ -70,10 +69,9 @@ _Static_assert(WASM_MAX_BLOCKS <= UINT16_MAX + 1, "free_maps holds uint16_t");
 #define WASM_VPN 37     /* page number */
 #define WASM_GROUP 38   /* first of FUSE_MAX_ENTRIES group offsets */
 
-/* wasm_tail() runs after the loop and every access, so it reuses four of those
+/* wasm_tail() runs after the loop and every access, so it reuses three of those
  * locals.
  */
-#define WASM_TAIL_BUDGET WASM_BUDGET
 #define WASM_TAIL_SATP WASM_ADDR
 #define WASM_TAIL_MAP WASM_TLB
 #define WASM_TAIL_FUNC WASM_VPN
@@ -307,7 +305,14 @@ static int wasm_step(riscv_t *rv, const rv_insn_t *original)
     rv_insn_t ir = *original;
     ir.next = ir.branch_taken = ir.branch_untaken = NULL;
     rv->PC = ir.pc;
-    return ir.impl(rv, &ir, rv->csr_cycle, ir.pc) && !rv->next_insn;
+    const bool ok = ir.impl(rv, &ir, rv->csr_cycle, ir.pc) && !rv->next_insn;
+
+    /* Generated tails chain only below the cycle limit; a halt must end the
+     * chain even when the helper falls through to its successor.
+     */
+    if (rv->halt)
+        rv->wasm_jit_limit = 0;
+    return ok;
 }
 
 struct wasm_emitter {
@@ -1195,11 +1200,15 @@ void jit_wasm_run(riscv_t *rv, const block_t *block)
     assert(map->owner == block && map->entry);
 
     /* A hash collision returns to rv_step, which refills the entry here.
-     * Generated edges share this budget instead of returning through C.
+     * Generated edges chain until the guest cycle count reaches the limit.
      */
     state->lookup[wasm_slot(map->pc, BLOCK_SATP(map))] = (uintptr_t) map;
-    rv->wasm_jit_budget = WASM_EDGE_BUDGET;
     rv->wasm_jit_limit = rv->csr_cycle + WASM_CYCLE_SLICE;
+#if RV32_HAS(SYSTEM)
+    /* A trap the dispatcher has yet to take must stop the chain at once. */
+    if (rv->trap_cnt)
+        rv->wasm_jit_limit = 0;
+#endif
     const uint64_t before = rv->csr_cycle;
     ((void (*)(riscv_t *))(uintptr_t) map->entry)(rv);
     if (WASM_PROFILE_ENABLED) {
@@ -1236,23 +1245,17 @@ static void wasm_count(struct wasm_emitter *e, uint64_t *counter)
  */
 static void wasm_tail(struct wasm_emitter *e, struct jit_state *state)
 {
-    wasm_rv_load(e, W_I32_LOAD, offsetof(riscv_t, wasm_jit_budget));
-    wasm_ltee(e, WASM_TAIL_BUDGET);
-    wasm_if(e);
-    wasm_rv_load(e, W_I32_LOAD8_U, offsetof(riscv_t, halt));
-    wasm_byte(e, W_I32_EQZ);
+    /* One compare bounds the chain. jit_wasm_run() sets the limit, or zeroes it
+     * when a trap is already pending, and a helper that halts the hart zeroes
+     * it too. A helper that raises a trap returns at once, so the trap is taken
+     * in rv_step before any successor runs.
+     */
     if (e->keep_locals) /* just stored to csr_cycle */
         wasm_lget(e, WASM_CYCLE);
     else
         wasm_rv_load(e, W_I64_LOAD, offsetof(riscv_t, csr_cycle));
     wasm_rv_load(e, W_I64_LOAD, offsetof(riscv_t, wasm_jit_limit));
     wasm_byte(e, W_I64_LT_U);
-    wasm_byte(e, W_I32_AND);
-#if RV32_HAS(SYSTEM)
-    wasm_rv_load(e, W_I32_LOAD, offsetof(riscv_t, trap_cnt));
-    wasm_byte(e, W_I32_EQZ);
-    wasm_byte(e, W_I32_AND);
-#endif
     wasm_if(e);
     /* map = lookup[wasm_slot(next PC, satp)] */
     wasm_const(e, (uintptr_t) state->lookup);
@@ -1295,11 +1298,6 @@ static void wasm_tail(struct wasm_emitter *e, struct jit_state *state)
     wasm_byte(e, W_I32_AND);
 #endif
     wasm_if(e);
-    wasm_lget(e, 0);
-    wasm_lget(e, WASM_TAIL_BUDGET);
-    wasm_const(e, 1);
-    wasm_byte(e, W_I32_SUB);
-    wasm_mem(e, W_I32_STORE, offsetof(riscv_t, wasm_jit_budget));
     wasm_count(e, WASM_COUNTER(state, lookup_hits));
     wasm_lget(e, 0);
     wasm_lget(e, WASM_TAIL_FUNC);
@@ -1310,7 +1308,10 @@ static void wasm_tail(struct wasm_emitter *e, struct jit_state *state)
     wasm_byte(e, W_END);
     wasm_count(e, WASM_COUNTER(state, lookup_misses));
     wasm_byte(e, W_END);
-    wasm_byte(e, W_END);
+    /* The chain ends here, so rv_step needs the PC; a callee does not. */
+    wasm_lget(e, 0);
+    wasm_lget(e, WASM_NEXT_PC);
+    wasm_mem(e, W_I32_STORE, offsetof(riscv_t, PC));
 }
 
 /* Run ir in the interpreter with every live register flushed, and return when
@@ -1423,9 +1424,6 @@ bool jit_translate(riscv_t *rv, block_t *block)
     wasm_byte(&e, W_END); /* loop */
     if (keep)
         wasm_flush(&e);
-    wasm_lget(&e, 0);
-    wasm_lget(&e, WASM_NEXT_PC);
-    wasm_mem(&e, W_I32_STORE, offsetof(riscv_t, PC));
     wasm_tail(&e, state);
     wasm_byte(&e, W_END); /* function */
     if (e.failed || e.size > state->size) {

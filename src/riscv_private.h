@@ -419,7 +419,6 @@ struct riscv_internal {
     int wasm_block_depth;
     const rv_insn_t *next_insn;
 #if RV32_HAS(JIT)
-    uint32_t wasm_jit_budget;
     uint64_t wasm_jit_limit;
 #endif
 #ifdef WASM_DEBUG_BLOCKS

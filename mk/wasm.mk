@@ -37,6 +37,11 @@ WEB_FILES += $(OUT)/elf_list.js \
              $(OUT)/pak0.pak
 endif
 
+# Runtime-generated T1C modules share linear memory and enter via wasmTable.
+# The backend fixture (check-jit-wasm) links with the same settings.
+WASM_JIT_LINK_FLAGS := -sALLOW_TABLE_GROWTH=1 \
+    -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE='["$$addFunction","$$removeFunction"]'
+
 # Only configure Emscripten settings when using emcc
 ifeq ("$(CC_IS_EMCC)", "1")
 
@@ -45,6 +50,16 @@ BIN := $(BIN).js
 # Tail-call optimization - requires both compile and link flags
 CFLAGS += -mtail-call
 LDFLAGS += -mtail-call
+
+ifeq ($(CONFIG_JIT),y)
+CFLAGS_emcc += $(WASM_JIT_LINK_FLAGS)
+# Opt-in counters and readable CPU-profiler names; production has no counters.
+JIT_WASM_PROFILE ?= 0
+ifeq ($(JIT_WASM_PROFILE),1)
+CFLAGS += -DJIT_WASM_PROFILE
+CFLAGS_emcc += --profiling-funcs
+endif
+endif
 
 # SDL configuration for Emscripten
 ifeq ($(CONFIG_SDL),y)
@@ -73,7 +88,7 @@ endif
 CFLAGS_emcc += -sALLOW_MEMORY_GROWTH \
                -s"EXPORTED_FUNCTIONS=$(EXPORTED_FUNCS)" \
                -sSTACK_SIZE=4MB \
-               -DCYCLE_PER_STEP=2000000 \
+               -DCYCLE_PER_STEP=200000000 \
                -DWASM_BLOCK_LIMIT=5000 \
                -DWASM_BLOCK_HARD_LIMIT=10000 \
                -O3 \

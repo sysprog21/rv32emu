@@ -206,7 +206,12 @@ endif
 
 # Extension: JIT Compilation
 ifeq ($(CONFIG_JIT),y)
-    OBJS_EXT += jit.o
+    # Emscripten builds emit WebAssembly modules instead of host machine code.
+    ifeq ($(CC_IS_EMCC),1)
+        OBJS_EXT += jit_wasm.o
+    else
+        OBJS_EXT += jit.o
+    endif
     # Test switch: lower register shifts through CL even on BMI2 hosts, so
     # the fallback for older x86-64 CPUs runs in CI.
     JIT_DISABLE_BMI2 ?= 0
@@ -307,7 +312,7 @@ EFFECTIVE_CONFIG_VARS := \
 	CONFIG_ROOTFS_EXT4 \
 	MEM_START MEM_SIZE DTB_SIZE INITRD_SIZE USER_MEM_SIZE \
 	INITRD_ACTUAL_BYTES REAL_MEM_SIZE REAL_DTB_SIZE REAL_INITRD_SIZE \
-	VLEN SDL2_MIXER_USE_DYNAMIC JIT_DISABLE_BMI2
+	VLEN SDL2_MIXER_USE_DYNAMIC JIT_DISABLE_BMI2 JIT_WASM_PROFILE
 
 ifeq ($(CONFIG_EXT_F),y)
 $(OBJS): $(SOFTFLOAT_LIB)

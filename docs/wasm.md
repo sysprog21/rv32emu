@@ -40,6 +40,83 @@ executable for user-mode emulation, select one and click the 'Run' button
 to run it. For system emulation, click the 'Run Linux' button to boot
 Linux.
 
+## T1C compilation
+
+The Wasm presets enable T1C. Hot blocks become small WebAssembly modules
+that share the emulator's linear memory. Integer arithmetic, multiply/divide,
+and branches use Wasm instructions. User-mode RAM accesses and system-mode
+dTLB hits use inline loads/stores, including fused runs of word loads and
+stores and post-increment pairs. A fused run is guarded as a whole
+before any member executes, so a miss replays it through the interpreter.
+Misses, MMIO, alignment exceptions, and other operations retain the existing
+interpreter handlers.
+
+Blocks whose hot path needs no helpers keep loop-carried registers and the
+cycle counter in Wasm locals. Tight self-loops execute at most 256 iterations
+per function call, and a bounded chain follows already compiled successors.
+Guard failures materialize the precise register and cycle state before
+executing the original instruction.
+
+The browser uses cooperative message tasks with approximately 8 ms host
+time slices, avoiding nested-timer delays. The clock is sampled after 32K
+guest cycles, after 256 block dispatches (for loops that retire few cycles),
+and after each module compilation, so its cost follows the work done rather
+than the number of blocks dispatched. A larger guest-cycle cap lets
+faster backends do more work per slice instead of stopping at a fixed
+display-frame throughput ceiling. While the page is hidden, the loop falls
+back to animation frames, which the browser pauses, so a background tab does
+not keep a core busy.
+
+Generated functions occupy a bounded cache. Cache flushes and VM cleanup
+release their function-table slots; system-mode address-space invalidation
+retires the corresponding modules. Runtime compilation blocked by browser
+policy falls back to interpretation. LLVM tier-2 compilation remains native
+only. Select **Interpreter Only** with `make config` to disable T1C.
+
+Run the backend fixture with an activated Emscripten SDK and Node.js:
+
+```shell
+make check-jit-wasm
+```
+
+This opt-in check compiles and executes generated modules in user and system
+layouts, including shared memory, RAM bounds, dTLB permissions and dirty
+bits, and builds without the compressed instruction extension. Every
+lowered register operation, compressed form included, is compared with an
+independent model over boundary operands, and fused groups are checked on
+both their inline and replay paths.
+
+## Profiling
+
+Build with `JIT_WASM_PROFILE=1` to retain readable function names and collect
+per-VM T1C statistics. The flag participates in the effective build stamp;
+normal builds have no profiling counters. Generated block names include the
+guest PC and address-space context.
+
+```shell
+make CC=emcc JIT_WASM_PROFILE=1 -j8
+make CC=emcc JIT_WASM_PROFILE=1 prepare-web
+python3 tools/profile-wasm.py --guest build/riscv32/coremark \
+    --seconds 10 --output build/coremark-profile
+```
+
+The tool serves `demo/` with isolation headers and captures Chromium CPU
+samples using Playwright. It writes `.json` and `.log` files, plus a
+`.cpuprofile` unless `--benchmark` disables sampling.
+The JSON lists exclusive sampled time per function, whether the guest
+finished, and T1C counters emitted at VM cleanup: compiled blocks/bytes,
+translation and module compilation time, executed guest cycles, hot-edge
+lookups, and helper calls by opcode. Fused helper counts measure calls, not
+individual guest instructions. A timed-out capture stops the VM cleanly.
+
+Use `--mode system` to profile a running Linux VM, or `--url` for an already
+served demo page. Install Playwright as shown in the browser-check section
+below. CPU samples cover the selected capture interval; T1C counters cover
+the VM lifetime. Compare elapsed timings with profiling disabled, using the
+same guest for both builds. Pass `--benchmark` to disable CPU sampling and
+record elapsed time; only compare completed runs (`completed: true` in the
+JSON). The JSON also preserves terminal output for result validation.
+
 ## Hosted demo
 
 Alternatively, you may want to view a hosted `rv32emu` since building takes
@@ -61,7 +138,7 @@ python3 -m venv build/venv
 . build/venv/bin/activate
 python3 -m pip install playwright
 python3 -m playwright install chromium
-python3 tests/test-wasm-demo.py --mode user
+python3 tests/test-wasm-demo.py --mode user --expect-jit
 ```
 
 Use `--mode system` for a system build. User checks run `hello.elf` and verify

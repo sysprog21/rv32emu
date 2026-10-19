@@ -43,17 +43,17 @@ def loop_elf(instructions):
     return list(header + segment + code)
 
 
-async def check_demo(browser, url, mode):
+async def check_demo(browser, url, mode, expect_jit):
     # A fresh context ensures the COI service worker has not been installed.
     context = await browser.new_context()
     try:
-        await run_demo(context, url, mode)
+        await run_demo(context, url, mode, expect_jit)
     finally:
         await context.close()
     print(f"{mode}: browser smoke test passed", flush=True)
 
 
-async def run_demo(context, url, mode):
+async def run_demo(context, url, mode, expect_jit):
     # A slow font provider must not block the deferred runtime scripts or
     # service-worker bootstrap. Release an empty stylesheet once WASM starts.
     runtime_ready = asyncio.Event()
@@ -73,6 +73,21 @@ async def run_demo(context, url, mode):
     await context.route("https://fonts.googleapis.com/**", delayed_font)
     await context.route("https://fonts.gstatic.com/**", delayed_font)
     page = await context.new_page()
+    if expect_jit:
+        await page.add_init_script(
+            """
+            window.rv32emuJitModules = 0;
+            WebAssembly.Module = new Proxy(WebAssembly.Module, {
+                construct(target, args) {
+                    const module = new target(...args);
+                    const exports = WebAssembly.Module.exports(module);
+                    if (exports.length === 1 && exports[0].name === 'run')
+                        window.rv32emuJitModules++;
+                    return module;
+                }
+            });
+        """
+        )
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
 
@@ -167,6 +182,10 @@ async def run_demo(context, url, mode):
         output = await page.evaluate("terminalLog")
         assert "Segmentation fault" not in output, output
         assert "Kernel panic" not in output, output
+    if expect_jit:
+        assert await page.evaluate(
+            "window.rv32emuJitModules > 0"
+        ), "no T1C modules generated during the browser test"
     assert not errors, errors
 
 
@@ -188,7 +207,9 @@ async def main(args):
         for mode in modes:
             # A broken dispatch loop can block every page operation. Bound
             # the entire test, including evaluate(), rather than only waits.
-            await asyncio.wait_for(check_demo(browser, url, mode), 180)
+            await asyncio.wait_for(
+                check_demo(browser, url, mode, args.expect_jit), 180
+            )
         await browser.close()
 
 
@@ -200,5 +221,10 @@ if __name__ == "__main__":
     parser.add_argument("--directory", default="demo")
     parser.add_argument(
         "--mode", choices=["user", "system", "both"], default="both"
+    )
+    parser.add_argument(
+        "--expect-jit",
+        action="store_true",
+        help="require runtime-generated T1C modules (default Wasm presets)",
     )
     asyncio.run(main(parser.parse_args()))

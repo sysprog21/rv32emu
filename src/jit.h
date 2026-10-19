@@ -28,6 +28,10 @@
 #define JCC_JG 0x8f  /* Jump if Greater - signed (conditional) */
 #define JCC_JMP 0xe9 /* Jump unconditional */
 
+/* The native backend's state. The Wasm backend (jit_wasm.c) keeps its own
+ * definition private; shared code only passes struct jit_state pointers.
+ */
+#if !defined(__EMSCRIPTEN__)
 struct jump {
     uint32_t offset_loc;
     uint32_t target_pc;
@@ -99,6 +103,7 @@ struct jit_state {
     struct indirect_site *sites;
 #endif
 };
+#endif /* !__EMSCRIPTEN__ */
 
 struct host_reg {
     uint8_t reg_idx : 5;   /* index to the host's register file */
@@ -122,6 +127,50 @@ void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags);
 
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);
+#if defined(__EMSCRIPTEN__)
+void jit_wasm_run(riscv_t *rv, const block_t *block);
+void jit_wasm_retire_block(riscv_t *rv, block_t *block);
+#endif
+
+#if RV32_HAS(SYSTEM)
+#define BLOCK_SATP(block) ((block)->satp)
+#else
+#define BLOCK_SATP(block) 0
+#endif
+
+/* Whether a program that never reads a counter may have each block's cycles
+ * charged once on entry. Wasm charges generated operations and detached helpers
+ * separately.
+ */
+#if defined(__EMSCRIPTEN__)
+#define JIT_ENTRY_CYCLES 0
+#else
+#define JIT_ENTRY_CYCLES 1
+#endif
+
+/* Whether the block's compiled code still points at its IR records, which must
+ * then stay in place. Wasm helpers do; native code does not.
+ */
+static inline bool jit_block_retains_ir(const block_t *block)
+{
+#if defined(__EMSCRIPTEN__)
+    return block->hot; /* set exactly while the block owns a module */
+#else
+    (void) block;
+    return false;
+#endif
+}
+
+/* Drop backend resources tied to a block before its IR is freed. */
+static inline void jit_block_release(riscv_t *rv, block_t *block)
+{
+#if defined(__EMSCRIPTEN__)
+    jit_wasm_retire_block(rv, block);
+#else
+    (void) rv;
+    (void) block;
+#endif
+}
 bool jit_translate(riscv_t *rv, block_t *block);
 /* Release a block's IR records (defined in emulate.c). */
 void block_free_irs(riscv_t *rv, block_t *block);

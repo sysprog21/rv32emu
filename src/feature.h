@@ -13,11 +13,11 @@
  *
  * Kconfig Constraints (invalid combinations are prevented at config time):
  *   - T2C requires JIT && LLVM18 (enforced below and in Kconfig)
- *   - JIT is incompatible with Emscripten (WASM uses interpreter only)
+ *   - Emscripten supports T1C; T2C requires a native host
  *   - GDBSTUB is incompatible with Emscripten
  *   - SDL requires SDL2 library or Emscripten
  *   - SDL_MIXER requires SDL
- *   - ELF_LOADER requires SYSTEM mode
+ *   - ELF_LOADER requires SYSTEM mode (enforced below)
  *
  * Derived Features (computed from other features):
  *   - SYSTEM_MMIO = SYSTEM && !ELF_LOADER (for kernel boot with MMIO devices)
@@ -121,6 +121,14 @@
 
 /* Use ELF loader */
 #ifndef RV32_FEATURE_ELF_LOADER
+#define RV32_FEATURE_ELF_LOADER 0
+#endif
+
+/* The ELF loader is a system-mode option; legacy ENABLE_ELF_LOADER=1 can set
+ * it without SYSTEM, which Kconfig would reject.
+ */
+#if !RV32_FEATURE_SYSTEM
+#undef RV32_FEATURE_ELF_LOADER
 #define RV32_FEATURE_ELF_LOADER 0
 #endif
 

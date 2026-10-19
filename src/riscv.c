@@ -1258,7 +1258,7 @@ void rv_run(riscv_t *rv)
 
     if (!(attr->run_flag & (RV_RUN_TRACE | RV_RUN_GDBSTUB))) {
 #ifdef __EMSCRIPTEN__
-        emscripten_set_main_loop_arg(rv_step, (void *) rv, 0, 1);
+        em_run_main_loop(rv_step, rv);
 #elif RV32_HAS_HART_CORO
         if (!rv_coroutine_start(rv)) {
             rv_log_fatal("Failed to initialize hart coroutine");
@@ -1957,7 +1957,8 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
 #if RV32_HAS(JIT)
     rv->jit_elide_align_checks = rv->jit_elide_align_checks ||
                                  !elf_has_insn(elf, insn_uses_privileged_state);
-    rv->jit_entry_cycles = !elf_has_insn(elf, insn_reads_counter);
+    rv->jit_entry_cycles =
+        JIT_ENTRY_CYCLES && !elf_has_insn(elf, insn_reads_counter);
 #endif
 #endif
 

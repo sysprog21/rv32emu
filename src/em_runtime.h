@@ -35,6 +35,14 @@ void u8250_put_rx_char(uint8_t c);
 void u8250_reset_input_buffer(void);
 #endif
 
+/* Run step(arg) as the browser main loop, at full speed while the page is
+ * visible and once per animation frame while it is hidden. Does not return.
+ */
+void em_run_main_loop(em_arg_callback_func step, void *arg);
+
+/* Cancel the loop started by em_run_main_loop(). */
+void em_stop_main_loop(void);
+
 /* To enable/disable run button in index.html to prevent re-execution
  * when the process is already running.
  */

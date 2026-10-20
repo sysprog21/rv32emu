@@ -310,6 +310,18 @@ static void run_mapped_cases(riscv_t *cpu)
     /* Nothing else observes mcounteren, so a write must read back. */
     run_mapped_case(cpu, CSR_MCOUNTEREN, 1, 5, 0x7, 0);
     run_mapped_case(cpu, CSR_MCOUNTEREN, 2, 0, 0, 0x7);
+#if RV32_HAS(EXT_F)
+    /* frm is fcsr[7:5]; each access must keep fflags in fcsr[4:0]. */
+    cpu->csr_fcsr = 0x5f;
+    run_mapped_case(cpu, CSR_FRM, 1, 5, 0xfffffffb, 0x2);
+    expect_state(CSR_FRM, cpu->csr_fcsr, 0x7f);
+    run_mapped_case(cpu, CSR_FRM, 6, 4, 0, 0x3);
+    expect_state(CSR_FRM, cpu->csr_fcsr, 0xff);
+    run_mapped_case(cpu, CSR_FRM, 3, 5, 0x5, 0x7);
+    expect_state(CSR_FRM, cpu->csr_fcsr, 0x5f);
+    run_mapped_case(cpu, CSR_FRM, 2, 0, 0, 0x2);
+    expect_state(CSR_FRM, cpu->csr_fcsr, 0x5f);
+#endif
 }
 
 int main(void)

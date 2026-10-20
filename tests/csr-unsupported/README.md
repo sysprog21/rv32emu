@@ -31,12 +31,14 @@ missing lookup entries started to trap. `mvendorid`, `marchid`, `mimpid`,
 and `mhartid` must read their values without trapping. CSRRW and CSRRWI
 with a zero source must trap under both handlers, since those forms always
 write. `mie` must update its state, and a write to `mcounteren` must read
-back.
+back. With `CONFIG_EXT_F=y` (the default), four more cases check that `frm`
+reads and writes only `fcsr[7:5]` and keeps `fflags` in `fcsr[4:0]`, for
+424 execution cases.
 
 ## RVV coverage
 
 Enable `CONFIG_EXT_V=y CONFIG_EXT_F=y` to include 12 RVV cases in the normal
-suite, for 432 execution cases. These cover `vl`/`vtype`/`vlenb`, CSRRW/CSRRWI
+suite, for 436 execution cases. These cover `vl`/`vtype`/`vlenb`, CSRRW/CSRRWI
 with zero source, and both guest and default handlers. Each access must
 trap once at the CSR instruction, preserve `rd`, and stop dispatch before
 continuation.

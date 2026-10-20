@@ -534,6 +534,19 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     }
 }
 
+#if RV32_HAS(EXT_F)
+/* frm has no storage of its own; it is fcsr[7:5]. */
+static inline uint32_t csr_frm_read(const riscv_t *rv)
+{
+    return (rv->csr_fcsr >> 5) & 0x7;
+}
+
+static inline void csr_frm_write(riscv_t *rv, uint32_t frm)
+{
+    rv->csr_fcsr = (rv->csr_fcsr & ~(0x7U << 5)) | ((frm & 0x7) << 5);
+}
+#endif
+
 /* Sync cycle counter for cycle/time CSR reads.
  * TIME CSRs need cycle synced so update_time() derives correct timer.
  */
@@ -593,6 +606,14 @@ static inline bool csr_csrrw(riscv_t *rv,
     case CSR_MHARTID:
         return false;
     }
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FRM) {
+        const uint32_t frm = csr_frm_read(rv);
+        csr_frm_write(rv, val);
+        *result = frm;
+        return true;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (unlikely(!c))
         return false;
@@ -659,6 +680,14 @@ static inline bool csr_csrrs(riscv_t *rv,
         return true;
     }
 #endif
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FRM) {
+        const uint32_t frm = csr_frm_read(rv);
+        csr_frm_write(rv, frm | val);
+        *result = frm;
+        return true;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (unlikely(!c))
         return false;
@@ -712,6 +741,14 @@ static inline bool csr_csrrc(riscv_t *rv,
             rvv_csr_write(rv, csr, rvv_out & ~val);
         }
         *result = rvv_out;
+        return true;
+    }
+#endif
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FRM) {
+        const uint32_t frm = csr_frm_read(rv);
+        csr_frm_write(rv, frm & ~val);
+        *result = frm;
         return true;
     }
 #endif

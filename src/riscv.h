@@ -644,6 +644,7 @@ typedef struct {
 #if RV32_HAS(VIRTIO_SND)
     /* virtio-snd device */
     virtio_snd_state_t *vsnd;
+    uint32_t audio_timebase_hz;
     uint32_t vsnd_mmio_base_hi;
     int vsnd_irq;
 #endif /* RV32_HAS(VIRTIO_SND) */

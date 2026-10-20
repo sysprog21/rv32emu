@@ -31,15 +31,97 @@ MESSAGES=(
     "${COLOR_R}Fail to play PCM with speaker-test"
 )
 
-# GitHub Actions runners do not provide a physical audio output device.
-# Use the ALSA null PCM as the default output so PortAudio can exercise
-# the virtio-snd playback path in headless CI.
-if [[ "${CI:-}" == "true" && "$(uname -s)" == "Linux" ]]; then
-    cat > "${HOME}/.asoundrc" << 'EOF'
+CI_SOUND_DIR=""
+CI_SOUND_PID=""
+
+cleanup_ci_audio()
+{
+    local attempt
+    if [ -n "${CI_SOUND_PID}" ]; then
+        kill "${CI_SOUND_PID}" 2> /dev/null || true
+        for ((attempt = 0; attempt < 20; attempt++)); do
+            kill -0 "${CI_SOUND_PID}" 2> /dev/null || break
+            sleep 0.1
+        done
+        if kill -0 "${CI_SOUND_PID}" 2> /dev/null; then
+            kill -KILL "${CI_SOUND_PID}" 2> /dev/null || true
+        fi
+        wait "${CI_SOUND_PID}" 2> /dev/null || true
+        CI_SOUND_PID=""
+    fi
+    if [ -n "${CI_SOUND_DIR}" ]; then
+        rm -rf -- "${CI_SOUND_DIR}"
+        CI_SOUND_DIR=""
+    fi
+}
+
+setup_ci_audio()
+{
+    local tool plugin_dir attempt
+    for tool in pulseaudio pactl pkg-config; do
+        command -v "${tool}" > /dev/null 2>&1 || {
+            print_error "Headless audio requires ${tool}"
+            return 1
+        }
+    done
+    plugin_dir="${ALSA_PLUGIN_DIR:-$(pkg-config --variable=libdir alsa)/alsa-lib}"
+    if [ ! -r "${plugin_dir}/libasound_module_pcm_pulse.so" ]; then
+        print_error "Headless audio requires the ALSA PulseAudio plugin in ${plugin_dir}"
+        return 1
+    fi
+
+    CI_SOUND_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/rv32emu-sound.XXXXXX") || return 1
+    register_cleanup cleanup_ci_audio
+    mkdir -m 700 "${CI_SOUND_DIR}/config" "${CI_SOUND_DIR}/runtime" "${CI_SOUND_DIR}/state" || return 1
+    cat > "${CI_SOUND_DIR}/server.pa" << EOF
+load-module module-native-protocol-unix socket="${CI_SOUND_DIR}/native" auth-anonymous=1
+load-module module-null-sink sink_name=rv32emu-ci rate=48000 channels=1
+set-default-sink rv32emu-ci
+EOF
+    cat > "${CI_SOUND_DIR}/asound.conf" << EOF
 pcm.!default {
-    type null
+    type pulse
+    server "unix:${CI_SOUND_DIR}/native"
+    hint {
+        show on
+        description "rv32emu CI audio"
+    }
 }
 EOF
+    cat > "${CI_SOUND_DIR}/client.conf" << EOF
+    autospawn = no
+    default-server = unix:${CI_SOUND_DIR}/native
+EOF
+    export PULSE_SERVER="unix:${CI_SOUND_DIR}/native"
+    export PULSE_CLIENTCONFIG="${CI_SOUND_DIR}/client.conf"
+    export PULSE_COOKIE="${CI_SOUND_DIR}/cookie"
+    export ALSA_CONFIG_PATH="${CI_SOUND_DIR}/asound.conf"
+    export ALSA_PLUGIN_DIR="${plugin_dir}"
+    XDG_CONFIG_HOME="${CI_SOUND_DIR}/config" \
+        XDG_RUNTIME_DIR="${CI_SOUND_DIR}/runtime" \
+        PULSE_RUNTIME_PATH="${CI_SOUND_DIR}/runtime" \
+        PULSE_STATE_PATH="${CI_SOUND_DIR}/state" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=${CI_SOUND_DIR}/no-dbus" \
+        pulseaudio -n --daemonize=no --fail=yes --use-pid-file=no --exit-idle-time=-1 \
+        --file="${CI_SOUND_DIR}/server.pa" > "${CI_SOUND_DIR}/server.log" 2>&1 &
+    CI_SOUND_PID=$!
+    for ((attempt = 0; attempt < 50; attempt++)); do
+        if [ "$(pactl get-default-sink 2> /dev/null)" = "rv32emu-ci" ] \
+            && pactl list short sinks | awk '$2 == "rv32emu-ci" { found = 1 } END { exit !found }'; then
+            return 0
+        fi
+        kill -0 "${CI_SOUND_PID}" 2> /dev/null || break
+        sleep 0.1
+    done
+    print_error "Private headless audio server failed to start"
+    cat "${CI_SOUND_DIR}/server.log" >&2
+    return 1
+}
+
+# ALSA's null PCM has no sample clock. A private PulseAudio null sink paces
+# headless CI playback and keeps each test's output isolated.
+if [[ "${CI:-}" == "true" && "${OS_TYPE}" == "Linux" ]]; then
+    setup_ci_audio || exit 1
 fi
 
 RUN_LINUX="build/rv32emu ${OPTS_BASE_ROOTFS_EXT4} -x vsnd"

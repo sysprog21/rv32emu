@@ -323,6 +323,7 @@ typedef struct {
     pthread_mutex_t completed_mutex;
     struct list_head completed_queue;
 
+    uint64_t audio_epoch;
     bool pa_initialized;
     virtio_snd_state_t *vsnd;
 } virtio_snd_priv_t;
@@ -368,6 +369,23 @@ static void vsnd_completed_push(virtio_snd_state_t *vsnd,
 static inline virtio_snd_priv_t *vsnd_priv(virtio_snd_state_t *vsnd)
 {
     return (virtio_snd_priv_t *) vsnd->priv;
+}
+
+uint64_t virtio_snd_active_epoch(virtio_snd_state_t *vsnd)
+{
+    if ((!vsnd) || (!vsnd->priv))
+        return 0;
+    virtio_snd_priv_t *p = vsnd_priv(vsnd);
+    for (unsigned i = 0; i < VSND_DEV_CNT_MAX; ++i) {
+        virtio_snd_prop_t *props = &p->props[i];
+        pthread_mutex_lock(&props->lock.lock);
+        bool active = (props->pp.hdr.hdr.code == VIRTIO_SND_R_PCM_START) &&
+                      (props->pa_stream);
+        pthread_mutex_unlock(&props->lock.lock);
+        if (active)
+            return p->audio_epoch;
+    }
+    return 0;
 }
 
 static inline uint32_t vsnd_min(uint32_t a, uint32_t b)
@@ -1077,6 +1095,8 @@ static uint32_t virtio_snd_pcm_start(virtio_snd_state_t *vsnd,
         }
     }
 
+    if (++p->audio_epoch == 0)
+        p->audio_epoch++;
     *payload_len = 0;
     return VIRTIO_SND_S_OK;
 }

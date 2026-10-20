@@ -1,0 +1,14 @@
+identifier: rv32_compare
+name: GCC RV32 S-mode comparison
+vendor: others
+type: sim
+arch: riscv
+simulation:
+  - name: custom
+    exec: compare-run.py
+toolchain:
+  - cross-compile
+ram: 258048
+flash: 32768
+testing:
+  default: true

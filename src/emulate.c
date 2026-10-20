@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #if RV32_HAS(EXT_F)
@@ -1087,8 +1088,22 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
 #define RVOP_TAIL_INTER(rv, target, cycle, PC) \
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
+#if RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
+/*
+ * System-mode chains return to rv_step at the slice boundary, where pending
+ * interrupts and traps are checked.
+ */
+#define RVOP_TAIL(rv, target, cycle, PC)                            \
+    do {                                                            \
+        if (likely((cycle) < (rv)->branch_chain_cycle_target)) {    \
+            last_pc = (PC);                                         \
+            MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+        }                                                           \
+    } while (0)
+#else
 #define RVOP_TAIL(rv, target, cycle, PC) \
     MUST_TAIL return (target)->impl(rv, target, cycle, PC)
+#endif
 #endif
 
 #if RV32_HAS_PACKED_TAIL
@@ -1099,19 +1114,41 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     RVOP_TAIL_INTRA(rv, target, cycle, PC)
 #endif
 
-/* A conditional branch normally returns to rv_step() so that SYSTEM builds
- * can process trap state. Packed builds have no such state, so once an edge
- * has been learned, keep executing it in the existing tail-call chain. In JIT
- * builds the chain enters only blocks T1 cannot compile: any other block is
- * headed by do_enter_dispatch(), which returns to rv_step() for profiling.
- *
- * The cycle budget still bounds the chain: without it a hot loop would never
- * return to rv_step(), which is where halt and interrupt state are observed.
- * RVOP_CHAIN_TAIL follows the learned edge of a jump or compressed branch the
- * same way. Builds without packing always follow it through RVOP_TAIL_INTER,
- * which in WASM yields to the browser once the block depth runs out.
- */
-#if RV32_HAS_PACKED_TAIL
+#if defined(__EMSCRIPTEN__) && RV32_HAS(SYSTEM)
+#define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
+    do {                                               \
+        if (!(rv)->trap_cnt) {                         \
+            last_pc = (PC);                            \
+            RVOP_TAIL_INTER(rv, target, cycle, PC);    \
+        }                                              \
+    } while (0)
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC) \
+    RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)
+#elif RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
+/* Learned branch edges stop while a trap is pending. */
+#define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)                  \
+    do {                                                                \
+        if (!(rv)->trap_cnt) {                                          \
+            if (likely((cycle) < (rv)->branch_chain_cycle_target)) {    \
+                last_pc = (PC);                                         \
+                MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+            }                                                           \
+        }                                                               \
+    } while (0)
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC) \
+    RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)
+#elif RV32_HAS(SYSTEM)
+#define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
+    do {                                                            \
+        if (!(rv)->trap_cnt) {                                      \
+            last_pc = (PC);                                         \
+            MUST_TAIL return (target)->impl(rv, target, cycle, PC); \
+        }                                                           \
+    } while (0)
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC) \
+    RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)
+#elif RV32_HAS_PACKED_TAIL
+/* Keep packed native edges within the cycle slice. */
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
     do {                                                            \
         if (likely((cycle) < (rv)->branch_chain_cycle_target)) {    \
@@ -1125,6 +1162,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
     do {                                               \
     } while (0)
+/* Use the inter-block path so WASM can yield at its depth limit. */
 #define RVOP_CHAIN_TAIL(rv, target, cycle, PC)  \
     do {                                        \
         last_pc = (PC);                         \
@@ -2426,17 +2464,44 @@ retranslate:
         }
 #endif
 
-        /* If instruction fetch failed due to trap (page fault, etc.), break.
-         * The caller checks rv->trap_cnt and invokes trap handler.
-         * Note: insn==0 alone is ambiguous; we verify trap state explicitly.
+        /*
+         * If instruction fetch failed due to a trap, do not decode the zero
+         * placeholder. An inline handler may already have redirected SEPC,
+         * clearing trap_cnt; need_handle_signal still marks this fetch as
+         * abandoned. Zero alone is ambiguous because it can be a real
+         * instruction encoding, so check both signals.
          */
-        if (!insn)
+        if (!insn) {
+#if RV32_HAS(SYSTEM)
+            if ((rv->trap_cnt) || need_handle_signal)
+                break;
+            /*
+             * Zero is a valid fetched bit pattern and decodes as an illegal
+             * compressed instruction.  Only treat it as an ifetch failure
+             * when the memory interface raised a trap.
+             */
+#else
             break;
+#endif
+        }
 
         /* decode the instruction */
         if (!rv_decode(ir, insn)) {
-            rv->compressed = is_compressed(insn);
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
+            /*
+             * Do not raise a trap for a later instruction while translating
+             * the current block: preceding instructions still need to run.
+             * Leave the bad instruction at pc_end so it is retried as the
+             * first instruction of the next block, where its PC is current.
+             */
+            if (!prev_ir) {
+                rv->compressed = is_compressed(insn);
+                rv->PC = block->pc_end;
+                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
+            }
+#if RV32_HAS(JIT)
+            /* A truncated prefix has no native branch or page epilogue. */
+            block->translatable = false;
+#endif
             break;
         }
         ir->impl = insn_handler(ir);
@@ -2461,18 +2526,31 @@ retranslate:
             break;
         }
 
-#if RV32_HAS(BLOCK_CHAINING)
-        /* Terminate block at page boundary to enable O(1) cache invalidation.
-         * Each block fits entirely within one 4KB page, so SFENCE.VMA can
-         * invalidate blocks by page address without scanning entire cache.
+#if RV32_HAS(BLOCK_CHAINING) || RV32_HAS(SYSTEM)
+        /*
+         * Terminate blocks at page boundaries for O(1) cache invalidation with
+         * block chaining.
+         * SYSTEM builds also do this without chaining so a next-page fetch
+         * fault cannot precede retirement of instructions already decoded.
          */
         {
+#if RV32_HAS(BLOCK_CHAINING)
             const uint32_t page_end =
                 (block->pc_start & ~(RV_PG_SIZE - 1)) + RV_PG_SIZE;
             if (block->pc_end >= page_end) {
                 block->page_terminated = true;
                 break;
             }
+#else
+            const uint32_t page_mask = ~(RV_PG_SIZE - 1);
+            if ((block->pc_start & page_mask) != (block->pc_end & page_mask)) {
+#if RV32_HAS(JIT)
+                /* T1 has no generic tail for this non-branch boundary. */
+                block->translatable = false;
+#endif
+                break;
+            }
+#endif
         }
 #endif
 
@@ -3434,8 +3512,15 @@ static block_t *block_find_or_translate(riscv_t *rv
     if (unlikely(!next_blk))
         return NULL;
 
-    if (unlikely(!block_translate(rv, next_blk)))
+    if (unlikely(!block_translate(rv, next_blk))) {
+        /*
+         * Translation can stop before producing a cacheable block, for
+         * example when the first instruction traps.  Release its slot rather
+         * than leaking one block per such event.
+         */
+        mpool_free(rv->block_mp, next_blk);
         return NULL;
+    }
 #if RV32_HAS(SYSTEM)
     mmu_note_code(rv, next_blk->pc_start, next_blk->pc_end);
 #endif
@@ -3624,7 +3709,11 @@ static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
     if (unlikely(freq >= LOOP_THRESHOLD && block->has_loops))
         return true;
     /* using frequency exceeds predetermined threshold */
+#if RV32_HAS(SYSTEM_MMIO) && !RV32_HAS(T2C)
+    if (unlikely(freq >= 1024))
+#else
     if (unlikely(freq >= THRESHOLD))
+#endif
         return true;
     return false;
 }
@@ -3637,6 +3726,56 @@ static bool rv_has_plic_trap(riscv_t *rv)
             (rv->csr_sip & rv->csr_sie));
 }
 
+#if RV32_HAS(VIRTIO_SND)
+/*
+ * Keep guest audio deadlines in step with host playback while a stream runs.
+ * Discard host-time credit after a stall, but retain any guest-time debt.
+ */
+static void rv_pace_audio(riscv_t *rv)
+{
+    vm_attr_t *attr = PRIV(rv);
+    uint64_t epoch = virtio_snd_active_epoch(attr->vsnd);
+    if ((!epoch) || (!attr->audio_timebase_hz)) {
+        rv->audio_epoch = 0;
+        return;
+    }
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+        rv_log_error("Failed to read the audio pacing clock");
+        rv_halt(rv);
+        return;
+    }
+    uint64_t ns = (uint64_t) now.tv_sec * 1000000000ULL + now.tv_nsec;
+    if ((rv->audio_epoch != epoch) ||
+        (rv->csr_cycle < rv->audio_anchor_cycle)) {
+        rv->audio_epoch = epoch;
+        rv->audio_anchor_cycle = rv->csr_cycle;
+        rv->audio_anchor_ns = ns;
+        return;
+    }
+    uint64_t delta = rv->csr_cycle - rv->audio_anchor_cycle;
+    uint64_t hz = attr->audio_timebase_hz;
+    uint64_t target = rv->audio_anchor_ns + (delta / hz) * 1000000000ULL +
+                      (delta % hz) * 1000000000ULL / hz;
+    if (target < ns) {
+        rv->audio_anchor_cycle = rv->csr_cycle;
+        rv->audio_anchor_ns = ns;
+        return;
+    }
+    if (target > ns + 1000000ULL) {
+        /*
+         * Allow poll jitter and keep each sleep bounded for host input.
+         */
+        uint64_t wait = target - ns;
+        if (wait > 10000000ULL)
+            wait = 10000000ULL;
+        struct timespec delay = {.tv_sec = wait / 1000000000ULL,
+                                 .tv_nsec = wait % 1000000000ULL};
+        nanosleep(&delay, NULL);
+    }
+}
+#endif
+
 /* Return whether an interrupt trap was taken. */
 static bool rv_check_interrupt(riscv_t *rv)
 {
@@ -3644,6 +3783,9 @@ static bool rv_check_interrupt(riscv_t *rv)
     bool trapped = false;
     if (peripheral_update_ctr-- == 0) {
         peripheral_update_ctr = 64;
+#if RV32_HAS(VIRTIO_SND)
+        rv_pace_audio(rv);
+#endif
 #if defined(__EMSCRIPTEN__)
     escape_seq:
 #endif
@@ -3652,14 +3794,8 @@ static bool rv_check_interrupt(riscv_t *rv)
             emu_update_uart_interrupts(rv);
 
 #if RV32_HAS(GOLDFISH_RTC)
-        if (PRIV(rv)->rtc->irq_enabled) {
-            uint64_t now_nsec = rtc_get_now_nsec(PRIV(rv)->rtc);
-            if (rtc_alarm_fire(PRIV(rv)->rtc, now_nsec)) {
-                PRIV(rv)->rtc->alarm_status = 1;
-                PRIV(rv)->rtc->interrupt_status = 1;
-                emu_update_rtc_interrupts(rv);
-            }
-        }
+        rtc_update(PRIV(rv)->rtc, rtc_get_now_nsec(PRIV(rv)->rtc));
+        emu_update_rtc_interrupts(rv);
 #endif /* RV32_HAS(GOLDFISH_RTC) */
     }
 
@@ -3667,7 +3803,7 @@ static bool rv_check_interrupt(riscv_t *rv)
      * Timer is no longer incremented per-instruction; instead computed here.
      */
     uint64_t current_timer = rv->csr_cycle + rv->timer_offset;
-    if (current_timer > attr->timer)
+    if (current_timer >= attr->timer)
         rv->csr_sip |= RV_INT_STI;
     else
         rv->csr_sip &= ~RV_INT_STI;
@@ -3763,8 +3899,10 @@ void rv_step(void *arg)
 
     /* A reboot starts rv_step again with the reset guest's cycle counter. */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(BLOCK_CHAINING)
     rv->branch_chain_cycle_target = cycles_target;
+#endif
+#if RV32_HAS_PACKED_TAIL
 #if RV32_HAS(JIT)
     set_reset(&pc_set);
 #endif
@@ -3837,6 +3975,9 @@ void rv_step(void *arg)
         /* lookup the next block in block map or translate a new block,
          * and move onto the next block.
          */
+#if RV32_HAS(SYSTEM)
+        const uint32_t translate_pc = rv->PC;
+#endif
 #if RV32_HAS(JIT)
         uint32_t freq;
         block_t *block = block_find_or_translate(rv, &freq);
@@ -3855,11 +3996,20 @@ void rv_step(void *arg)
                 prev = NULL;
                 continue;
             }
+            /*
+             * A synchronous trap may already have run its handler during
+             * translation and switched the guest PC. Resume at that target
+             * even though no block was produced for the faulting address.
+             */
+            if (rv->PC != translate_pc) {
+                prev = NULL;
+                continue;
+            }
 #endif
             rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
                          rv->PC);
             rv->halt = true;
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(BLOCK_CHAINING)
             rv->branch_chain_cycle_target = 0;
 #endif
             return;
@@ -4046,7 +4196,12 @@ void rv_step(void *arg)
         if (has_loops && !block->has_loops)
             block->has_loops = true;
 #endif
-        prev = block;
+        /*
+         * A cycle-budget exit may have skipped a tail-chain after its edge
+         * was not entered. Do not carry an unmatched predecessor into the
+         * next rv_step slice; its last_pc can name an older edge.
+         */
+        prev = rv->csr_cycle >= cycles_target ? NULL : block;
     }
 
 #if RV32_HAS(SYSTEM_MMIO)
@@ -4059,9 +4214,10 @@ void rv_step(void *arg)
     }
 #endif
 
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(BLOCK_CHAINING)
     rv->branch_chain_cycle_target = 0;
-
+#endif
+#if RV32_HAS_PACKED_TAIL
     /* Incremental memory maintenance: reclaim unused pages periodically.
      * Native user mode takes longer step slices, so count retired cycles and
      * keep the cadence of 65536 calls with the default 100-cycle slice.
@@ -4210,10 +4366,8 @@ static void __trap_handler(riscv_t *rv)
          * as a nested trap before the sret instruction of this level. Its sret
          * returns here and the handling of this level resumes.
          */
-        if (rv->trap_cnt >= depth && rv_has_plic_trap(rv) &&
-            ilog2(rv->csr_sip & rv->csr_sie) ==
-                (SUPERVISOR_EXTERNAL_INTR & 0xf))
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
+        if (rv->trap_cnt >= depth)
+            rv_check_interrupt(rv);
 #endif /* SYSTEM_MMIO */
     }
 

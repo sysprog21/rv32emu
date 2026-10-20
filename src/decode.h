@@ -92,11 +92,11 @@ enum op_field {
     /* RV32 Zicsr Standard Extension */                \
     IIF(RV32_HAS(Zicsr))(                              \
         _(csrrw, 1, 4, 0, ENC(rs1, rd))                \
-        _(csrrs, 0, 4, 0, ENC(rs1, rd))                \
-        _(csrrc, 0, 4, 0, ENC(rs1, rd))                \
+        _(csrrs, 1, 4, 0, ENC(rs1, rd))                \
+        _(csrrc, 1, 4, 0, ENC(rs1, rd))                \
         _(csrrwi, 0, 4, 0, ENC(rs1, rd))               \
-        _(csrrsi, 0, 4, 0, ENC(rs1, rd))               \
-        _(csrrci, 0, 4, 0, ENC(rs1, rd))               \
+        _(csrrsi, 1, 4, 0, ENC(rs1, rd))               \
+        _(csrrci, 1, 4, 0, ENC(rs1, rd))               \
     )                                                  \
     /* RV32 Zba Standard Extension */                  \
     IIF(RV32_HAS(Zba))(                                \

@@ -693,6 +693,19 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
         exit(EXIT_FAILURE);
     }
 
+#if RV32_HAS(VIRTIO_SND)
+    int cpus = fdt_path_offset(dtb_buf, "/cpus");
+    const fdt32_t *timebase =
+        fdt_getprop(dtb_buf, cpus, "timebase-frequency", &totalsize);
+    attr->audio_timebase_hz = timebase && (totalsize == sizeof(*timebase))
+                                  ? fdt32_to_cpu(*timebase)
+                                  : 0;
+    if (vsnd_enabled && (!attr->audio_timebase_hz)) {
+        rv_log_error("Audio pacing requires a nonzero DTB timebase-frequency");
+        exit(EXIT_FAILURE);
+    }
+#endif
+
     if (bootargs) {
 #if RV32_HAS(ROOTFS_EXT4)
         if (!strstr(bootargs, "root=")) {
@@ -782,7 +795,7 @@ static void load_dtb(char **ram_loc, vm_attr_t *attr)
             const char *name = fdt_get_name(dtb_buf, subnode, NULL);
             assert(name);
 
-            char *at_pos = strchr(name, '@');
+            const char *at_pos = strchr(name, '@');
             assert(at_pos);
 
             char *endptr;
@@ -1436,6 +1449,7 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 
 #if RV32_HAS(VIRTIO_SND)
     rv->last_vsnd_refresh = rv->csr_cycle;
+    rv->audio_epoch = 0;
 #endif
 
     /* Set the reset address */

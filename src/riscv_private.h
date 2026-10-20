@@ -455,6 +455,7 @@ struct riscv_internal {
 
 #if RV32_HAS(VIRTIO_SND)
     uint64_t last_vsnd_refresh;
+    uint64_t audio_epoch, audio_anchor_cycle, audio_anchor_ns;
 #endif
 
 #if RV32_HAS(SYSTEM)
@@ -503,8 +504,8 @@ struct riscv_internal {
     uint32_t csr_fcsr;
 #endif
 
-#if RV32_HAS_PACKED_TAIL
-    /* Exclusive rv_step() cycle limit while native branch chaining is live. */
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(BLOCK_CHAINING)
+    /* Exclusive rv_step() cycle limit while branch chaining is live. */
     uint64_t branch_chain_cycle_target;
 #endif
 

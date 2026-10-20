@@ -116,6 +116,9 @@ jobs:
         artifacts: elf linux-image doom
         cache-suffix: host-${{ matrix.compiler }}
 
+    - name: Check system benchmark runners
+      run: python3 -m unittest discover -s tests -p 'test_*bench*.py'
+
     - name: Build with various optimization levels
       run: |
             .ci/build-opt-levels.sh defconfig
@@ -152,12 +155,20 @@ jobs:
             make distclean && make system_interpreter_defconfig && make ENABLE_ELF_LOADER=1 mmu-test $PARALLEL
             # Page faults a loaded program cannot handle: the emulator stops
             # at one on a fetch, and skips exactly the faulting access.
-            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test check-insn-page-fault check-misalign-page-fault check-fused-page-fault check-amo-page-fault $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test check-insn-page-fault check-misalign-page-fault check-fused-page-fault check-amo-page-fault check-load-page-fault check-load-page-fault-rvc check-load-page-fault-fp $PARALLEL
             # Flat supervisor kernels: TLB caching, superpage flushes, address
             # space switches, retiring decoded code, and counters across
             # traps, interpreted and T1.
             make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles $PARALLEL
             make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles $PARALLEL
+            # Without block chaining, a later fetch fault must not overtake
+            # instructions already decoded from the preceding page.
+            make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_BLOCK_CHAINING=0 check-fetch-page-boundary $PARALLEL
+            # WFI must notice a locally enabled pending interrupt even when
+            # global SIE is clear.
+            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-wfi-pending $PARALLEL
+            # Preserve x0 through cold loads and native MMIO reads.
+            make distclean && make system_defconfig && make check-load-x0-system $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL
@@ -458,6 +469,9 @@ jobs:
          riscv-toolchain: 'true'
          artifacts: elf doom
          cache-suffix: host-${{ matrix.compiler }}
+
+     - name: Check system benchmark runners
+       run: python3 -m unittest discover -s tests -p 'test_*bench*.py'
 
      - name: check + tests
        run: |

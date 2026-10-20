@@ -1,0 +1,61 @@
+/dts-v1/;
+
+#include <qemu/virt-riscv32.dtsi>
+#include <qemu/virt-riscv-plic.dtsi>
+
+/ {
+    chosen {
+        zephyr,console = &uart0;
+        zephyr,shell-uart = &uart0;
+        zephyr,sram = &ram0;
+    };
+
+    cpus {
+        riscv,privilege-modes = "m", "s", "u";
+        riscv,isa-extensions = "i", "m", "a", "c", "zicsr", "zifencei";
+    };
+};
+
+&uart0 {
+    status = "okay";
+};
+
+&plic {
+    interrupts-extended = <&hlic0 9>;
+};
+
+&virtio_mmio0 {
+    status = "disabled";
+};
+
+&virtio_mmio1 {
+    status = "disabled";
+};
+
+&virtio_mmio2 {
+    status = "disabled";
+};
+
+&virtio_mmio3 {
+    status = "disabled";
+};
+
+&virtio_mmio4 {
+    status = "disabled";
+};
+
+&virtio_mmio5 {
+    status = "disabled";
+};
+
+&virtio_mmio6 {
+    status = "disabled";
+};
+
+&virtio_mmio7 {
+    status = "disabled";
+};
+
+&pcie {
+    status = "disabled";
+};

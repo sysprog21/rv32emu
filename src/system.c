@@ -93,7 +93,7 @@ void emu_update_vsnd_interrupts(riscv_t *rv)
 void emu_update_rtc_interrupts(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
-    if (attr->rtc->interrupt_status)
+    if ((attr->rtc->interrupt_status) && (attr->rtc->irq_enabled))
         attr->plic->active |= IRQ_RTC_BIT;
     else
         attr->plic->active &= ~IRQ_RTC_BIT;

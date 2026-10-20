@@ -242,43 +242,39 @@ RVOP(jalr, {
     (type) x cond (type) y
 /* clang-format on */
 
-#define BRANCH_FUNC(type, cond)                                             \
-    IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                        \
-    if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {          \
-        IIF(RV32_HAS(SYSTEM))(                                              \
-            {                                                               \
-                if (!rv->trap_cnt) {                                        \
-                    is_branch_taken = false;                                \
-                }                                                           \
-            },                                                              \
-            is_branch_taken = false;);                                      \
-        struct rv_insn *untaken = ir->branch_untaken;                       \
-        if (!untaken)                                                       \
-            goto nextop;                                                    \
-        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(untaken, PC + 4, nextop);, );  \
-        PC += 4;                                                            \
-        IIF(RV32_HAS(SYSTEM))(                                              \
-            if (!rv->trap_cnt) RVOP_CHAIN_TAIL(rv, untaken, cycle, PC);, ); \
-        RVOP_NATIVE_BRANCH_TAIL(rv, untaken, cycle, PC);                    \
-        goto end_op;                                                        \
-    }                                                                       \
-    IIF(RV32_HAS(SYSTEM))(                                                  \
-        {                                                                   \
-            if (!rv->trap_cnt) {                                            \
-                is_branch_taken = true;                                     \
-            }                                                               \
-        },                                                                  \
-        is_branch_taken = true;);                                           \
-    PC += ir->imm;                                                          \
-    /* check instruction misaligned */                                      \
-    IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););   \
-    struct rv_insn *taken = ir->branch_taken;                               \
-    if (taken) {                                                            \
-        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(taken, PC, end_op);, );        \
-        IIF(RV32_HAS(SYSTEM))(                                              \
-            if (!rv->trap_cnt) RVOP_CHAIN_TAIL(rv, taken, cycle, PC);, );   \
-        RVOP_NATIVE_BRANCH_TAIL(rv, taken, cycle, PC);                      \
-    }                                                                       \
+#define BRANCH_FUNC(type, cond)                                            \
+    IIF(RV32_HAS(EXT_C))(, const uint32_t pc = PC;);                       \
+    if (BRANCH_COND(type, rv->X[ir->rs1], rv->X[ir->rs2], cond)) {         \
+        IIF(RV32_HAS(SYSTEM))(                                             \
+            {                                                              \
+                if (!rv->trap_cnt) {                                       \
+                    is_branch_taken = false;                               \
+                }                                                          \
+            },                                                             \
+            is_branch_taken = false;);                                     \
+        struct rv_insn *untaken = ir->branch_untaken;                      \
+        if (!untaken)                                                      \
+            goto nextop;                                                   \
+        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(untaken, PC + 4, nextop);, ); \
+        PC += 4;                                                           \
+        RVOP_NATIVE_BRANCH_TAIL(rv, untaken, cycle, PC);                   \
+        goto end_op;                                                       \
+    }                                                                      \
+    IIF(RV32_HAS(SYSTEM))(                                                 \
+        {                                                                  \
+            if (!rv->trap_cnt) {                                           \
+                is_branch_taken = true;                                    \
+            }                                                              \
+        },                                                                 \
+        is_branch_taken = true;);                                          \
+    PC += ir->imm;                                                         \
+    /* check instruction misaligned */                                     \
+    IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););  \
+    struct rv_insn *taken = ir->branch_taken;                              \
+    if (taken) {                                                           \
+        IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(taken, PC, end_op);, );       \
+        RVOP_NATIVE_BRANCH_TAIL(rv, taken, cycle, PC);                     \
+    }                                                                      \
     goto end_op;
 
 /* In RV32I and RV64I, if the branch is taken, set pc = pc + offset, where
@@ -584,7 +580,25 @@ RVOP(ebreak, {
 /* WFI: Wait for Interrupt */
 RVOP(wfi, {
     PC += 4;
-    /* FIXME: Implement */
+#if RV32_HAS(SYSTEM_MMIO)
+    /*
+     * Fast-forward idle guests to the enabled timer compare. A locally enabled
+     * pending interrupt must resume WFI regardless of the global SIE bit.
+     * Active audio streams retain normal virtual-time progress.
+     */
+    vm_attr_t *attr = PRIV(rv);
+    if (
+#if RV32_HAS(VIRTIO_SND)
+        (!virtio_snd_active_epoch(attr->vsnd)) &&
+#endif
+        (!(rv->csr_sip & rv->csr_sie)) && (rv->csr_sie & RV_INT_STI) &&
+        (attr->timer > rv->csr_cycle + rv->timer_offset)) {
+        cycle = attr->timer - rv->timer_offset;
+        rv->csr_cycle = cycle;
+        rv->PC = PC;
+        return true;
+    }
+#endif
     goto end_op;
 })
 

@@ -36,6 +36,12 @@ $(eval $(call test-framework,constopt,test-constopt.o,,))
 # ELF test: rejects malformed ELF input without reading outside the file
 $(eval $(call test-framework,elf,test-elf.o,$(OUT)/elf.o $(OUT)/io.o $(OUT)/map.o $(OUT)/utils.o $(OUT)/log.o,))
 
+ifeq ($(CONFIG_GOLDFISH_RTC),y)
+$(eval $(call test-framework,rtc,test-rtc.o,$(OUT)/devices/rtc.o $(OUT)/log.o,))
+$(eval $(call run-test-simple,rtc))
+tests: run-test-rtc
+endif
+
 # Test Runners
 
 # Cache test uses file comparison (input -> output -> compare with expected)
@@ -117,6 +123,8 @@ EXPECTED_loop-shapes = loop shapes OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
 EXPECTED_fused-page-fault = fused page fault OK
 EXPECTED_amo-page-fault = AMO page fault OK
+EXPECTED_illegal-prefix = illegal prefix ordering OK
+EXPECTED_load-page-fault = canceled loads preserve registers OK
 EXPECTED_jit-fencei = FENCE.I made the rewrite visible OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
@@ -169,6 +177,7 @@ GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
+GUEST_ASM_F_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ifc_zicsr)
 
 # A flat supervisor kernel exercises MMIO-mode TLBs without a guest libc.
 ifeq ($(CONFIG_SYSTEM),y)
@@ -225,6 +234,14 @@ GUEST_ASM_CHECK_TARGETS += check-insn-page-fault check-misalign-page-fault \
 	check-fused-page-fault
 ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-amo-page-fault
+endif
+GUEST_ASM_CHECK_TARGETS += check-fetch-page-boundary
+GUEST_ASM_CHECK_TARGETS += check-load-page-fault check-illegal-prefix
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-load-page-fault-rvc
+endif
+ifeq ($(CONFIG_EXT_F)$(CONFIG_EXT_C)$(GUEST_ASM_F_C_ZICSR_WORKS),yyy)
+GUEST_ASM_CHECK_TARGETS += check-load-page-fault-fp
 endif
 endif
 # Only system JIT builds honor FENCE.I, and only a directly loaded program can
@@ -406,7 +423,15 @@ check-amo-align: $(BIN) tests/amo-align.S | $(OUT)
 $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,fused-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,amo-page-fault,rv32ia_zicsr))
+$(eval $(call guest-asm-check-target,illegal-prefix,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,load-page-fault,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,load-page-fault,rv32ic_zicsr,-rvc))
+$(eval $(call guest-asm-check-target,load-page-fault,rv32ifc_zicsr,-fp))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
+
+EXPECTED_fetch-page-boundary = fetch fault ordering OK
+FETCH_PAGE_LDFLAGS = -Xlinker --section-start -Xlinker .faultpage=0x3ffff8
+$(eval $(call guest-asm-check-target,fetch-page-boundary,rv32i_zicsr,,$(FETCH_PAGE_LDFLAGS)))
 
 # The program must stop at its first instruction page fault, reporting it and
 # failing, instead of retrying the fetch forever.
@@ -461,6 +486,37 @@ check-rvv-smoke: $(BIN)
 	    tests/rvv-smoke.S -o $(OUT)/rvv-smoke.elf
 	$(call check-test, , $(OUT)/rvv-smoke.elf, rvv-smoke.elf, tail -n 1,$(EXPECTED_rvv_smoke))
 endif
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(CONFIG_RV32E),y)
+ifeq ($(CONFIG_Zicsr),y)
+ifeq ($(GUEST_ASM_ZICSR_WORKS),y)
+WFI_OBJCOPY_WORKS := $(shell $(CROSS_COMPILE)objcopy --version \
+	>/dev/null 2>&1 && echo y)
+ifeq ($(WFI_OBJCOPY_WORKS),y)
+CHECK_TARGETS += check-load-x0-system
+ifneq ($(CONFIG_ROOTFS_EXT4),y)
+CHECK_TARGETS += check-wfi-pending
+endif
+endif
+endif
+endif
+endif
+endif
+endif
+ifeq ($(CONFIG_SYSTEM)$(CONFIG_JIT)$(CONFIG_Zicsr),yyy)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(CONFIG_T2C),y)
+ifneq ($(CONFIG_RV32E),y)
+ifeq ($(MEM_START),0)
+ifeq ($(GUEST_ASM_ZICSR_WORKS)$(WFI_OBJCOPY_WORKS),yy)
+CHECK_TARGETS += check-t1-bare-mmu
+endif
+endif
+endif
+endif
+endif
+endif
 check: $(CHECK_TARGETS)
 
 # System tests
@@ -475,6 +531,89 @@ misalign-in-blk-emu: $(BIN)
 EXPECTED_mmu = Redirected page fault test passed!
 mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
+
+# A locally enabled pending interrupt must resume WFI when global SIE is clear.
+# With no pending interrupt, WFI still advances to the timer compare.
+EXPECTED_wfi_pending = WFI pending interrupt wakeup OK
+WFI_BIN = $(OUT)/wfi-pending.bin
+# This raw guest needs the system emulator without its ext4 rootfs device.
+.PHONY: check-wfi-pending
+check-wfi-pending: $(BIN) tests/wfi-pending.S | $(OUT)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32i_zicsr -mabi=ilp32 -nostdlib -static \
+	    -Wl,-e,_start -Wl,-Ttext=0x0 -o $(OUT)/wfi-pending.elf \
+	    tests/wfi-pending.S
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/wfi-pending.elf \
+	    $(WFI_BIN)
+	$(call check-test, -k, $(WFI_BIN), wfi, tail -n 1,$(EXPECTED_wfi_pending))
+
+# Raw system guests exercise cold loads and native MMIO helpers in JIT builds.
+EXPECTED_load_x0_system = system loads preserve x0 OK
+LOAD_X0_INPUT = $(OUT)/load-x0-system.in
+LOAD_X0_FLAGS = -k
+ifeq ($(CONFIG_ROOTFS_EXT4),y)
+LOAD_X0_ROOTFS = $(OUT)/load-x0-system.img
+LOAD_X0_FLAGS = -x vblk:$(LOAD_X0_ROOTFS),rootfs -k
+$(LOAD_X0_ROOTFS): | $(OUT)
+	$(Q)truncate -s 1M $@
+endif
+$(LOAD_X0_INPUT): | $(OUT)
+	$(Q)printf 'ABCDEFGHIJ' > $@
+
+define load-x0-system-target
+check-load-x0-$(1): $(BIN) tests/load-x0-system.S $(LOAD_X0_INPUT) $(LOAD_X0_ROOTFS) | $(OUT)
+	$$(Q)$$(CROSS_COMPILE)gcc -march=rv32i -mabi=ilp32 -nostdlib -static \
+	    -DLOAD_X0_MODE=$(2) -Wl,-e,_start -Wl,-Ttext=0x0 \
+	    -o $$(OUT)/load-x0-$(1).elf tests/load-x0-system.S
+	$$(Q)$$(CROSS_COMPILE)objcopy -O binary $$(OUT)/load-x0-$(1).elf \
+	    $$(OUT)/load-x0-$(1).bin
+	$$(call check-test, $$(LOAD_X0_FLAGS), $$(OUT)/load-x0-$(1).bin < $$(LOAD_X0_INPUT), load-x0-$(1), tail -n 1,$$(EXPECTED_load_x0_system))
+.PHONY: check-load-x0-$(1)
+endef
+$(eval $(call load-x0-system-target,cold,0))
+$(eval $(call load-x0-system-target,ram,1))
+$(eval $(call load-x0-system-target,mmio,2))
+.PHONY: check-load-x0-system
+check-load-x0-system: check-load-x0-cold check-load-x0-ram check-load-x0-mmio
+
+# Exercise SYSTEM_MMIO T1 memory access from a raw image. The guest assumes
+# RAM starts at zero and tests the configured final valid word.
+EXPECTED_t1_bare_mmu = !T1 bare MMU path OK
+T1_BARE_MMU_BIN = $(OUT)/t1-bare-mmu.bin
+T1_BARE_MMU_DUMMY_ROOTFS = $(OUT)/t1-bare-mmu-rootfs.img
+T1_BARE_MMU_ROOTFS_FLAGS = -x vblk:$(T1_BARE_MMU_DUMMY_ROOTFS),rootfs
+T1_BARE_MMU_RUN_FLAGS = -k
+ifeq ($(CONFIG_ROOTFS_EXT4),y)
+T1_BARE_MMU_RUN_FLAGS = $(T1_BARE_MMU_ROOTFS_FLAGS) -k
+T1_BARE_MMU_ROOTFS_DEP = $(T1_BARE_MMU_DUMMY_ROOTFS)
+endif
+$(T1_BARE_MMU_DUMMY_ROOTFS): | $(OUT)
+	$(Q)truncate -s 1048576 $@
+ifneq ($(filter check-t1-bare-mmu,$(MAKECMDGOALS)),)
+ifneq ($(CONFIG_SYSTEM)$(CONFIG_JIT)$(CONFIG_Zicsr),yyy)
+$(error check-t1-bare-mmu requires SYSTEM, JIT, and Zicsr)
+endif
+ifneq ($(CONFIG_ELF_LOADER),)
+$(error check-t1-bare-mmu requires ELF_LOADER=n)
+endif
+ifeq ($(CONFIG_T2C),y)
+$(error check-t1-bare-mmu requires T2C=n)
+endif
+ifeq ($(CONFIG_RV32E),y)
+$(error check-t1-bare-mmu requires RV32E=n)
+endif
+ifneq ($(MEM_START),0)
+$(error check-t1-bare-mmu requires MEM_START=0)
+endif
+endif
+.PHONY: check-t1-bare-mmu
+check-t1-bare-mmu: $(BIN) tests/t1-bare-mmu.S $(T1_BARE_MMU_ROOTFS_DEP) | $(OUT)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32i_zicsr -mabi=ilp32 -nostdlib -static \
+	    -DTEST_RAM_END=0x$(REAL_MEM_SIZE) -Wl,-e,_start -Wl,-Ttext=0x0 \
+	    -o $(OUT)/t1-bare-mmu.elf \
+	    tests/t1-bare-mmu.S
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/t1-bare-mmu.elf \
+	    $(T1_BARE_MMU_BIN)
+	$(call check-test, $(T1_BARE_MMU_RUN_FLAGS), $(T1_BARE_MMU_BIN), t1-bare-mmu, tail -n 1,$(EXPECTED_t1_bare_mmu))
 
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
 	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt

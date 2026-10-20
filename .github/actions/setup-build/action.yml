@@ -58,6 +58,7 @@ runs:
       run: |
         .ci/apt-install.sh curl wget lsb-release software-properties-common \
             gnupg libsdl2-dev libsdl2-mixer-dev portaudio19-dev pkg-config \
+            pulseaudio pulseaudio-utils libasound2-plugins \
             device-tree-compiler expect bc p7zip-full e2fsprogs
 
     # No Homebrew cache on purpose. The cache can only carry the Cellar, not

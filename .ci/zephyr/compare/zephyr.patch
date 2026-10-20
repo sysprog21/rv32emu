@@ -1,0 +1,78 @@
+diff --git a/cmake/modules/configuration_files.cmake b/cmake/modules/configuration_files.cmake
+index e7b553ce8e7..5710d7a64a4 100644
+--- a/cmake/modules/configuration_files.cmake
++++ b/cmake/modules/configuration_files.cmake
+@@ -99,6 +99,22 @@ zephyr_boilerplate_watch(DTC_OVERLAY_FILE)
+ 
+ zephyr_get(EXTRA_CONF_FILE SYSBUILD LOCAL VAR EXTRA_CONF_FILE OVERLAY_CONFIG MERGE REVERSE)
+ zephyr_get(EXTRA_DTC_OVERLAY_FILE SYSBUILD LOCAL MERGE REVERSE)
++
++# Keep the simulator's hardware map when a test supplies its own overlay.
++# Twister passes test overlays through DTC_OVERLAY_FILE, replacing the command
++# line EXTRA_DTC_OVERLAY_FILE value used by this comparison campaign. Append
++# the engine-specific board overlay after Zephyr merges both sources.
++if(BOARD_DIR MATCHES "/boards/local/rv32_compare$" AND
++   COMPARE_ENGINE MATCHES "^(qemu|rv32emu)$")
++  set(compare_engine_overlay "${BOARD_DIR}/${COMPARE_ENGINE}.overlay")
++  if(EXISTS "${compare_engine_overlay}")
++    list(FIND EXTRA_DTC_OVERLAY_FILE "${compare_engine_overlay}" compare_engine_overlay_index)
++    if(compare_engine_overlay_index EQUAL -1)
++      list(APPEND EXTRA_DTC_OVERLAY_FILE "${compare_engine_overlay}")
++    endif()
++  endif()
++endif()
++
+ zephyr_get(DTS_EXTRA_CPPFLAGS SYSBUILD LOCAL MERGE REVERSE)
+ build_info(application source-dir VALUE ${APPLICATION_SOURCE_DIR})
+ build_info(application configuration-dir VALUE ${APPLICATION_CONFIG_DIR})
+diff --git a/drivers/interrupt_controller/intc_plic.c b/drivers/interrupt_controller/intc_plic.c
+index 95523c96389..99fde38108a 100644
+--- a/drivers/interrupt_controller/intc_plic.c
++++ b/drivers/interrupt_controller/intc_plic.c
+@@ -922,7 +922,7 @@ SHELL_CMD_REGISTER(plic, &plic_cmds, "PLIC shell commands", NULL);
+ 		irq_enable(DT_INST_IRQN(n));                                                       \
+ 	}
+ 
+-#define HART_CONTEXTS(i, n) IF_ENABLED(IS_EQ(DT_INST_IRQN_BY_IDX(n, i), DT_INST_IRQN(n)), (i,))
++#define HART_CONTEXTS(i, n) IF_ENABLED(IS_EQ(DT_INST_IRQN_BY_IDX(n, i), DT_INST_IRQN(n)), (i + DT_INST_PROP(n, context_offset),))
+ #define PLIC_HART_CONTEXT_DECLARE(n)                                                               \
+ 	INTC_PLIC_STATIC const uint32_t plic_hart_contexts_##n[DT_CHILD_NUM(DT_PATH(cpus))] = {    \
+ 		LISTIFY(DT_INST_NUM_IRQS(n), HART_CONTEXTS, (), n)}
+diff --git a/dts/bindings/interrupt-controller/riscv,plic0.yaml b/dts/bindings/interrupt-controller/riscv,plic0.yaml
+index 5e5a179601b..b35804529e0 100644
+--- a/dts/bindings/interrupt-controller/riscv,plic0.yaml
++++ b/dts/bindings/interrupt-controller/riscv,plic0.yaml
+@@ -6,6 +6,11 @@
+ include: [interrupt-controller.yaml, base.yaml]
+ 
+ properties:
++  context-offset:
++    type: int
++    default: 0
++    description: Hardware context offset for the campaign supervisor-only DT.
++
+   reg:
+     required: true
+ 
+diff --git a/tests/subsys/debug/coredump/src/main.c b/tests/subsys/debug/coredump/src/main.c
+index 1f4a387a3b4..0d6857f7087 100644
+--- a/tests/subsys/debug/coredump/src/main.c
++++ b/tests/subsys/debug/coredump/src/main.c
+@@ -7,6 +7,7 @@
+ #include <zephyr/kernel.h>
+ #include <zephyr/sys/printk.h>
+ #include <zephyr/debug/coredump.h>
++#include <zephyr/devicetree.h>
+ 
+ #ifdef CONFIG_COVERAGE_DUMP
+ #include <zephyr/debug/gcov.h>
+@@ -46,7 +47,8 @@ __no_optimization void func_3(uint32_t *addr)
+ 	defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32) || \
+ 	defined(CONFIG_SOC_FAMILY_MAX32_RV32) || \
+ 	defined(CONFIG_SOC_FAMILY_OPENHWGROUP_CVA6) || \
+-	defined(CONFIG_SOC_FAMILY_NSIM_ARC_V)
++	defined(CONFIG_SOC_FAMILY_NSIM_ARC_V) || \
++	(DT_REG_ADDR(DT_CHOSEN(zephyr_sram)) == 0)
+ 	/* clang-format on */
+ 	ARG_UNUSED(addr);
+ 	/* Call k_panic() directly so Renode doesn't pause execution.

@@ -455,6 +455,20 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_mtvec);
     case CSR_MISA: /* Machine ISA and Extensions */
         return (uint32_t *) (&rv->csr_misa);
+    case CSR_MIE: /* Machine Interrupt Enable */
+        return (uint32_t *) (&rv->csr_mie);
+    case CSR_MCOUNTEREN: /* Machine Counter Enable */
+        return (uint32_t *) (&rv->csr_mcounteren);
+
+    /* Machine Information Registers (read-only) */
+    case CSR_MVENDORID: /* Vendor ID */
+        return (uint32_t *) (&rv->csr_mvendorid);
+    case CSR_MARCHID: /* Architecture ID */
+        return (uint32_t *) (&rv->csr_marchid);
+    case CSR_MIMPID: /* Implementation ID */
+        return (uint32_t *) (&rv->csr_mimpid);
+    case CSR_MHARTID: /* Hardware Thread ID */
+        return (uint32_t *) (&rv->csr_mhartid);
 
     /* Machine Trap Handling */
     case CSR_MEDELEG: /* Machine Exception Delegation Register */
@@ -569,6 +583,16 @@ static inline bool csr_csrrw(riscv_t *rv,
         return true;
     }
 #endif
+    /* csrrw/csrrwi always writes (even with rs1=x0). Trap when the target
+     * is a read-only machine information register.
+     */
+    switch (csr & 0xFFF) {
+    case CSR_MVENDORID:
+    case CSR_MARCHID:
+    case CSR_MIMPID:
+    case CSR_MHARTID:
+        return false;
+    }
     uint32_t *c = csr_get_ptr(rv, csr);
     if (unlikely(!c))
         return false;

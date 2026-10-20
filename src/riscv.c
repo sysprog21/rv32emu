@@ -1383,7 +1383,9 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     rv->csr_mvendorid = 0;
     rv->csr_marchid = 0;
     rv->csr_mimpid = 0;
+    rv->csr_mhartid = 0;
     rv->csr_mbadaddr = 0;
+    rv->csr_mcounteren = 0;
 
     rv->csr_sstatus = 0;
     rv->csr_stvec = 0;
@@ -1417,7 +1419,9 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     rv->csr_mvendorid = 0;
     rv->csr_marchid = 0;
     rv->csr_mimpid = 0;
+    rv->csr_mhartid = 0;
     rv->csr_mbadaddr = 0;
+    rv->csr_mcounteren = 0;
 #endif
 
 #if RV32_HAS(SYSTEM)

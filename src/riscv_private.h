@@ -531,7 +531,9 @@ struct riscv_internal {
     uint32_t csr_mvendorid; /* vendor ID */
     uint32_t csr_marchid;   /* Architecture ID */
     uint32_t csr_mimpid;    /* Implementation ID */
+    uint32_t csr_mhartid;   /* Hardware thread ID */
     uint32_t csr_mbadaddr;
+    uint32_t csr_mcounteren; /* Machine counter enable */
 
     uint32_t csr_sstatus;    /* supervisor status register */
     uint32_t csr_stvec;      /* supervisor trap vector base address register */

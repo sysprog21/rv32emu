@@ -21,13 +21,22 @@ handler is also tested. Unsupported cases check `rd` at entry and after
 exactly one trap/resumption; supported controls require no trap. Fresh PCs
 avoid stale translated code.
 
-The scalar suite has 397 execution cases and six separate decoder checks.
+The scalar suite has 420 execution cases and six separate decoder checks.
 Decoder rejection alone does not establish runtime trap delivery.
+
+## Mandatory CSRs
+
+Twenty-three of those cases cover machine CSRs that read as zero before
+missing lookup entries started to trap. `mvendorid`, `marchid`, `mimpid`,
+and `mhartid` must read their values without trapping. CSRRW and CSRRWI
+with a zero source must trap under both handlers, since those forms always
+write. `mie` must update its state, and a write to `mcounteren` must read
+back.
 
 ## RVV coverage
 
 Enable `CONFIG_EXT_V=y CONFIG_EXT_F=y` to include 12 RVV cases in the normal
-suite, for 409 execution cases. These cover `vl`/`vtype`/`vlenb`, CSRRW/CSRRWI
+suite, for 432 execution cases. These cover `vl`/`vtype`/`vlenb`, CSRRW/CSRRWI
 with zero source, and both guest and default handlers. Each access must
 trap once at the CSR instruction, preserve `rd`, and stop dispatch before
 continuation.

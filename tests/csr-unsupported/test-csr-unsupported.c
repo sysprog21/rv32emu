@@ -144,22 +144,19 @@ static void install_handler(riscv_t *cpu)
         put32(PRIV(cpu)->mem->mem_base + HANDLER_PC + 4 * i, code[i]);
 }
 
-static void run_case(riscv_t *cpu,
-                     unsigned csr,
-                     unsigned op,
-                     unsigned source,
-                     uint32_t source_value,
-                     unsigned rd,
-                     bool supported,
-                     bool default_handler,
-                     uint32_t initial_value)
+/* Load one case at a fresh PC and reset the hart state it observes. */
+static uint32_t load_case(riscv_t *cpu,
+                          uint32_t insn,
+                          unsigned op,
+                          unsigned source,
+                          uint32_t source_value,
+                          unsigned rd,
+                          bool default_handler,
+                          uint32_t initial_value)
 {
     const uint32_t pc = next_pc;
     /* Never reuse translated code after changing guest RAM. */
     next_pc += 32;
-    const uint32_t insn = csr_insn(csr, op, source, rd);
-    rv_insn_t decoded = {0};
-    const bool accepted = rv_decode(&decoded, insn);
     const uint32_t code[] = {
         /* addi x31, x0, 85: fault is not at the block start */
         0x05500f93,
@@ -189,6 +186,24 @@ static void run_case(riscv_t *cpu,
         fprintf(stderr, "cannot set test PC\n");
         exit(1);
     }
+    return pc;
+}
+
+static void run_case(riscv_t *cpu,
+                     unsigned csr,
+                     unsigned op,
+                     unsigned source,
+                     uint32_t source_value,
+                     unsigned rd,
+                     bool supported,
+                     bool default_handler,
+                     uint32_t initial_value)
+{
+    const uint32_t insn = csr_insn(csr, op, source, rd);
+    rv_insn_t decoded = {0};
+    const bool accepted = rv_decode(&decoded, insn);
+    const uint32_t pc = load_case(cpu, insn, op, source, source_value, rd,
+                                  default_handler, initial_value);
     /* A trap must return control to the dispatcher before fallthrough. */
     rv_step(cpu);
     const bool stopped_on_trap =
@@ -229,6 +244,72 @@ static void run_case(riscv_t *cpu,
                 "FAIL csr=%03x op=%u source=%u value=%08x rd=%u default=%u\n",
                 csr, op, source, source_value, rd, default_handler);
     }
+}
+
+/*
+ * Run a supported access to a CSR other than scratch, which the caller sets
+ * up and inspects. Require no trap, exactly one continuation, and rd.
+ */
+static void run_mapped_case(riscv_t *cpu,
+                            unsigned csr,
+                            unsigned op,
+                            unsigned source,
+                            uint32_t source_value,
+                            uint32_t expected_rd)
+{
+    const unsigned rd = 10;
+    const uint32_t insn = csr_insn(csr, op, source, rd);
+    rv_insn_t decoded = {0};
+    const bool accepted = rv_decode(&decoded, insn);
+    load_case(cpu, insn, op, source, source_value, rd, false, 0);
+    for (unsigned i = 0; (i < 16) && (!rv_has_halted(cpu)); i++)
+        rv_step(cpu);
+    const bool ok = accepted && rv_has_halted(cpu) && (trap_count == 0) &&
+                    (rv_get_reg(cpu, 30) == 1) &&
+                    (rv_get_reg(cpu, rd) == expected_rd);
+    case_count++;
+    if (!ok) {
+        failure_count++;
+        fprintf(stderr, "FAIL csr=%03x op=%u value=%08x mapped\n", csr, op,
+                source_value);
+    }
+}
+
+static void expect_state(unsigned csr, uint32_t actual, uint32_t expected)
+{
+    if (actual != expected) {
+        failure_count++;
+        fprintf(stderr, "FAIL csr=%03x state=%08x expected=%08x\n", csr, actual,
+                expected);
+    }
+}
+
+/* Mandatory CSRs must reach their state, not trap or read a stale zero. */
+static void run_mapped_cases(riscv_t *cpu)
+{
+    const struct {
+        unsigned csr;
+        uint32_t value;
+    } info[] = {
+        {CSR_MVENDORID, RV_MVENDORID},
+        {CSR_MARCHID, RV_MARCHID},
+        {CSR_MIMPID, RV_MIMPID},
+        {CSR_MHARTID, 0},
+    };
+    for (unsigned i = 0; i < sizeof(info) / sizeof(info[0]); i++) {
+        /* csrrs a0, id, x0 reads; csrrw/csrrwi always write, so trap. */
+        run_mapped_case(cpu, info[i].csr, 2, 0, 0, info[i].value);
+        for (unsigned op = 1; op <= 5; op += 4)
+            for (unsigned def = 0; def < 2; def++)
+                run_case(cpu, info[i].csr, op, 0, 0, 10, false, def, 0xa5);
+    }
+
+    cpu->csr_mie = 0x888;
+    run_mapped_case(cpu, CSR_MIE, 3, 5, 0x8, 0x888);
+    expect_state(CSR_MIE, cpu->csr_mie, 0x880);
+    /* Nothing else observes mcounteren, so a write must read back. */
+    run_mapped_case(cpu, CSR_MCOUNTEREN, 1, 5, 0x7, 0);
+    run_mapped_case(cpu, CSR_MCOUNTEREN, 2, 0, 0, 0x7);
 }
 
 int main(void)
@@ -305,6 +386,7 @@ int main(void)
     /* A valid zero-valued read must not be mistaken for a missing CSR. */
     for (unsigned i = 0; i < 6; i++)
         run_case(cpu, scratch, operations[i], 0, 0, 10, true, false, 0);
+    run_mapped_cases(cpu);
 #if RV32_HAS(EXT_V)
     /* Zero-source writes reach the helpers despite the decoder's checks. */
     for (unsigned csr = CSR_VL; csr <= CSR_VLENB; csr++)

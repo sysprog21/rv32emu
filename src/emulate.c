@@ -546,9 +546,9 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
  *
- * CSR helpers return false for missing entries, leaving result unchanged.
+ * CSR helpers return false for missing entries or writes to read-only entries,
+ * leaving result unchanged.
  * Callers save PC/cycle and raise ILLEGAL_INSN before rd writeback.
- * TODO: RVV read-only traps still return success and allow rd writeback.
  */
 static inline bool csr_csrrw(riscv_t *rv,
                              uint32_t csr,
@@ -562,11 +562,8 @@ static inline bool csr_csrrw(riscv_t *rv,
     if (rvv_csr_read(rv, csr, &rvv_out)) {
         /* csrrw/csrrwi always writes (even with rs1=x0). Trap when the
          * target is a read-only V CSR. */
-        if (rvv_csr_is_read_only(csr)) {
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-            *result = 0;
-            return true;
-        }
+        if (rvv_csr_is_read_only(csr))
+            return false;
         rvv_csr_write(rv, csr, val);
         *result = rvv_out;
         return true;
@@ -630,11 +627,8 @@ static inline bool csr_csrrs(riscv_t *rv,
          * 0, an actual write is requested - trap on read-only V CSRs.
          */
         if (val) {
-            if (rvv_csr_is_read_only(csr)) {
-                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-                *result = 0;
-                return true;
-            }
+            if (rvv_csr_is_read_only(csr))
+                return false;
             rvv_csr_write(rv, csr, rvv_out | val);
         }
         *result = rvv_out;
@@ -689,11 +683,8 @@ static inline bool csr_csrrc(riscv_t *rv,
     if (rvv_csr_read(rv, csr, &rvv_out)) {
         /* Same Zicsr no-write-on-x0 rule as csrrs above. */
         if (val) {
-            if (rvv_csr_is_read_only(csr)) {
-                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-                *result = 0;
-                return true;
-            }
+            if (rvv_csr_is_read_only(csr))
+                return false;
             rvv_csr_write(rv, csr, rvv_out & ~val);
         }
         *result = rvv_out;

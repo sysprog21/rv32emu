@@ -11,7 +11,7 @@
  * rv_step() returned immediately after the trap, before guest resumption.
  *
  * Run with make run-test-csr-unsupported (also in make check and make tests).
- * See README.md for configurations, test layout, and the separate RVV probe.
+ * See README.md for configurations, test layout, and integrated RVV cases.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -305,11 +305,13 @@ int main(void)
     /* A valid zero-valued read must not be mistaken for a missing CSR. */
     for (unsigned i = 0; i < 6; i++)
         run_case(cpu, scratch, operations[i], 0, 0, 10, true, false, 0);
-    /*
-     * TODO: RVV read-only helpers trap but return success with zero, so rd
-     * is clobbered and trap PC may precede the instruction.
-     * See README.md for the separate 12-case probe.
-     */
+#if RV32_HAS(EXT_V)
+    /* Zero-source writes reach the helpers despite the decoder's checks. */
+    for (unsigned csr = CSR_VL; csr <= CSR_VLENB; csr++)
+        for (unsigned op = 1; op <= 5; op += 4)
+            for (unsigned def = 0; def < 2; def++)
+                run_case(cpu, csr, op, 0, 0, 10, false, def, 0xa5);
+#endif
     unsigned decoder_failures = 0;
     for (unsigned i = 0; i < 6; i++) {
         rv_insn_t decoded = {0};

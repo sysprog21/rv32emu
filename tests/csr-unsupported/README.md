@@ -24,28 +24,14 @@ avoid stale translated code.
 The scalar suite has 397 execution cases and six separate decoder checks.
 Decoder rejection alone does not establish runtime trap delivery.
 
-## Separate RVV probe
+## RVV coverage
 
-RVV read-only trap handling is outside the passing scalar suite. To
-reproduce its 12 cases, enable `CONFIG_EXT_V=y CONFIG_EXT_F=y` and insert
-the following calls after the zero-valued supported controls and before
-`decoder_failures` in a temporary copy of `test-csr-unsupported.c`:
+Enable `CONFIG_EXT_V=y CONFIG_EXT_F=y` to include 12 RVV cases in the normal
+suite, for 409 execution cases. These cover `vl`/`vtype`/`vlenb`, CSRRW/CSRRWI
+with zero source, and both guest and default handlers. Each access must
+trap once at the CSR instruction, preserve `rd`, and stop dispatch before
+continuation.
 
-```c
-for (unsigned csr = 0xc20; csr <= 0xc22; csr++)
-    for (unsigned op = 1; op <= 5; op += 4)
-        for (unsigned def = 0; def < 2; def++)
-            run_case(cpu, csr, op, 0, 0, 10, false, def, 0xa5);
-```
-
-This covers `vl`/`vtype`/`vlenb`, CSRRW/CSRRWI, and both guest and default
-handlers. Zero-source writes reach the RVV helper; nonzero-source writes
-are rejected earlier by the decoder. The helper traps but returns success
-with zero, so `rd` is clobbered and the trap PC may precede the instruction.
-
-An earlier separate local probe reported 409 cases and 12 failures both
-before and after the unsupported-CSR fix. This is a historical result,
-not a fresh run at the current revision. Re-run the probe for the revision
-and configuration under review. Scalar passes in a V-enabled build do not
-establish RVV trap coverage; keep these failures separate from passing
-scalar results.
+Nonzero-source writes are rejected by the decoder. Decoder rejection alone
+does not prove runtime trap delivery. The CSRRS/CSRRC read-only helper paths
+are fixed but remain unreachable through those decoder-rejected writes.

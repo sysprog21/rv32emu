@@ -10,6 +10,7 @@
  * SC.W that reports failure while still performing its store is caught too.
  */
     .option norvc
+    .option norelax
     .text
     .global _start
 

@@ -232,11 +232,13 @@ comment "Emulation Mode"
 
 choice
     prompt "Execution Engine"
+    default JIT if CC_IS_EMCC
     default INTERPRETER_ONLY
     help
       Select the execution engine for RISC-V instruction emulation.
-      configs/defconfig selects the JIT; on hosts it does not support, the
-      interpreter is used instead.
+      WebAssembly builds default to the T1C JIT. configs/defconfig also
+      selects the JIT for supported native hosts; other hosts use the
+      interpreter instead.
 
 config INTERPRETER_ONLY
     bool "Interpreter Only"
@@ -246,12 +248,12 @@ config INTERPRETER_ONLY
 
 config JIT
     bool "JIT Compilation (Hybrid)"
-    depends on !CC_IS_EMCC && HOST_JIT_CAPABLE
+    depends on CC_IS_EMCC || HOST_JIT_CAPABLE
     help
       Hybrid interpreter + Just-In-Time compilation.
       Tier-1 JIT uses template-based code generation for hot paths.
 
-      JIT is only available on x86_64 and ARM64 platforms.
+      JIT is available on x86_64, ARM64, and Emscripten platforms.
       Falls back to interpreter for cold code.
 
 endchoice
@@ -259,7 +261,7 @@ endchoice
 config T2C
     bool "Tier-2 LLVM Compiler"
     default y
-    depends on JIT && HAVE_LLVM18
+    depends on JIT && HAVE_LLVM18 && !CC_IS_EMCC
     help
       Enable tier-2 JIT compiler powered by LLVM 18.
       Provides advanced optimizations for hot code paths.

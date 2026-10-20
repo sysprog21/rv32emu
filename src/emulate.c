@@ -3200,6 +3200,14 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
     if (block->lazy_fusion_done || block->n_lazy_candidates == 0)
         return;
 
+#if RV32_HAS(JIT)
+    /* Fusion frees records that compiled code may still point at. */
+    if (jit_block_retains_ir(block)) {
+        block->lazy_fusion_done = true;
+        return;
+    }
+#endif
+
 #if RV32_HAS(SYSTEM)
     /* Disable lazy fusion when MMU is active.
      * Virtual addresses may not correspond to physical RAM regions,
@@ -3350,6 +3358,8 @@ static void free_linked_block(riscv_t *rv, block_t *block)
 /* Release the IRs of a block that is leaving the cache */
 void block_free_irs(riscv_t *rv, block_t *block)
 {
+    /* Before the decoder pool reuses any record or its owning block. */
+    jit_block_release(rv, block);
     for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
         next_ir = block_next_ir(ir);
         free(ir->branch_table);
@@ -3726,8 +3736,13 @@ static DISABLE_UBSAN_FUNC void run_t1_block(riscv_t *rv,
                                             struct jit_state *state,
                                             const block_t *block)
 {
+#if defined(__EMSCRIPTEN__)
+    (void) state;
+    jit_wasm_run(rv, block);
+#else
     ((exec_block_func_t) state->buf)(rv,
                                      (uintptr_t) (state->buf + block->offset));
+#endif
 }
 
 #if RV32_HAS(T2C)
@@ -3755,8 +3770,28 @@ void rv_step(void *arg)
 #endif
 #endif
 
+#if defined(__EMSCRIPTEN__)
+    /* A fixed guest-cycle budget caps fast backends at the browser's frame
+     * rate. Use elapsed host time to yield, retaining the cycle cap as an upper
+     * bound. Sample the JS clock once per stride of guest cycles, so its cost
+     * follows the work done rather than the number of (possibly short) blocks;
+     * a sparse dispatch count covers loops that stall cycles.
+     */
+    const double wasm_deadline = emscripten_get_now() + 8.0;
+    uint64_t wasm_clock_cycle = rv->csr_cycle;
+    unsigned wasm_dispatches = 0;
+#endif
+
     /* loop until hitting the cycle target or hart is halted */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
+#if defined(__EMSCRIPTEN__)
+        if (rv->csr_cycle - wasm_clock_cycle >= (1U << 15) ||
+            !(++wasm_dispatches & 255)) {
+            wasm_clock_cycle = rv->csr_cycle;
+            if (emscripten_get_now() >= wasm_deadline)
+                break;
+        }
+#endif
 #if RV32_HAS(SYSTEM_MMIO)
         /* check for any interrupt after every block emulation */
 #ifdef __EMSCRIPTEN__
@@ -3962,7 +3997,14 @@ void rv_step(void *arg)
             && runtime_profiler(rv, block, freq)
 #endif
         ) {
-            if (jit_translate(rv, block)) {
+            const bool translated = jit_translate(rv, block);
+#if defined(__EMSCRIPTEN__)
+            /* Compiling a module takes host time that guest cycles do not show;
+             * read the clock on the next dispatch.
+             */
+            wasm_dispatches = 255;
+#endif
+            if (translated) {
 #if RV32_HAS_PACKED_TAIL
                 set_reset(&pc_set);
 #endif
@@ -4041,7 +4083,7 @@ void rv_step(void *arg)
 #ifdef __EMSCRIPTEN__
     if (rv_has_halted(rv)) {
         bool stop_requested = indirect_rv_stop_requested();
-        emscripten_cancel_main_loop();
+        em_stop_main_loop();
         reset_rv_run_state();
         indirect_rv_cleanup();
         rv_log_info("RISC-V emulator is destroyed");

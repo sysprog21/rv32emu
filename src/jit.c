@@ -600,12 +600,6 @@ static inline bool host_reg_maps_x0(int reg_idx)
     return false;
 }
 
-#if RV32_HAS(SYSTEM)
-#define BLOCK_SATP(block) ((block)->satp)
-#else
-#define BLOCK_SATP(block) 0
-#endif
-
 static inline uint32_t index_hash(uint64_t key, unsigned bits)
 {
     return (uint32_t) ((key * 0x61c8864680b583ebull) >> (64 - bits));

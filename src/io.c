@@ -16,6 +16,8 @@
 #include <stdatomic.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#elif defined(__EMSCRIPTEN__)
+#include <unistd.h> /* sbrk */
 #endif
 
 #include "io.h"
@@ -240,13 +242,40 @@ memory_t *memory_new(uint64_t size)
         free(mem);
         return NULL;
     }
+#if defined(__EMSCRIPTEN__)
+    /* Wasm memory grows zero-filled, and the browser commits its pages only
+     * when they are first written. Clear just the part of the block below the
+     * old break, which the allocator may have used before, and its first and
+     * last pages, where it keeps its own links even in fresh memory; touching
+     * the whole block would make all of guest RAM resident at once. This relies
+     * on the break never moving down: Emscripten's dlmalloc cannot trim, and
+     * emmalloc (under mimalloc) does only on an explicit malloc_trim(). No
+     * other thread allocates meanwhile, since a VM starts its audio threads
+     * later.
+     */
+    const uintptr_t old_break = (uintptr_t) sbrk(0);
+#endif
     data_memory_base = malloc(size);
     if (!data_memory_base) {
         free(mem);
         return NULL;
     }
     /* Zero-initialize for consistent behavior */
+#if defined(__EMSCRIPTEN__)
+    const uintptr_t base = (uintptr_t) data_memory_base;
+    const size_t page = 4096;
+    size_t dirty = base < old_break ? old_break - base : 0;
+    if (dirty < page)
+        dirty = page;
+    if (size <= 2 * page || dirty >= size - page) {
+        memset(data_memory_base, 0, size);
+    } else {
+        memset(data_memory_base, 0, dirty);
+        memset(data_memory_base + size - page, 0, page);
+    }
+#else
     memset(data_memory_base, 0, size);
+#endif
     data_memory_size = size;
 #undef MALLOC_MAX_SIZE
 #endif

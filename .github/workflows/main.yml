@@ -78,8 +78,9 @@ jobs:
               make wasm_defconfig
               .ci/emsdk-warm-cache.sh
               make $PARALLEL
+              make check-jit-wasm
               make prepare-web
-              python3 tests/test-wasm-demo.py --mode user
+              python3 tests/test-wasm-demo.py --mode user --expect-jit
 
       - name: Build system emulation
         run: |
@@ -87,7 +88,7 @@ jobs:
               make wasm_system_defconfig
               make $PARALLEL
               make prepare-web
-              python3 tests/test-wasm-demo.py --mode system
+              python3 tests/test-wasm-demo.py --mode system --expect-jit
 
   host-x64:
     name: x64 ${{ matrix.compiler }}

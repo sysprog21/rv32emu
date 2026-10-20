@@ -418,6 +418,9 @@ struct riscv_internal {
      */
     int wasm_block_depth;
     const rv_insn_t *next_insn;
+#if RV32_HAS(JIT)
+    uint64_t wasm_jit_limit;
+#endif
 #ifdef WASM_DEBUG_BLOCKS
     int max_block_depth_seen;      /* Track max recursion for validation */
     int yield_soft_count;          /* INTER yields at block boundaries */

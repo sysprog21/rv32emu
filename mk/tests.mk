@@ -106,6 +106,7 @@ EXPECTED_const-arith = constant arithmetic OK
 EXPECTED_const-shift = constant shifts OK
 EXPECTED_const-operand = constant operands OK
 EXPECTED_const-coperand = compressed constant operands OK
+EXPECTED_cjump-odd = compressed odd jumps OK
 EXPECTED_amo-align = AMO alignment OK
 EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
@@ -214,7 +215,7 @@ ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-const-arith check-const-operand
 endif
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-const-coperand
+GUEST_ASM_CHECK_TARGETS += check-const-coperand check-cjump-odd
 endif
 # A directly loaded system program has no handler for its own page faults.
 # fused-page-fault also passes unfused; it exercises fused records only with
@@ -430,6 +431,7 @@ $(eval $(call guest-asm-check-target,jit-muldiv,rv32im))
 $(eval $(call guest-asm-check-target,const-arith,rv32im))
 $(eval $(call guest-asm-check-target,const-operand,rv32im))
 $(eval $(call guest-asm-check-target,const-coperand,rv32ic))
+$(eval $(call guest-asm-check-target,cjump-odd,rv32ic))
 $(eval $(call guest-asm-check-target,const-shift,rv32i))
 $(eval $(call guest-asm-check-target,jit-interp-diff,rv32im))
 $(eval $(call guest-asm-check-target,jit-misalign,rv32i_zicsr))
@@ -477,5 +479,39 @@ mmu-test: $(BIN)
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
 	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
 .PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
+
+# This host-side backend fixture runs actual runtime-generated Wasm modules.
+# It is opt-in so native make check does not require Emscripten or Node.js.
+EMCC ?= emcc
+# emsdk puts its root, which holds a node/ directory, on PATH; GNU make's own
+# command lookup then fails with "node: Permission denied". Prefer the
+# absolute path that emsdk_env exports.
+NODE ?= $(or $(EMSDK_NODE),node)
+# Generated modules use Wasm tail calls. Node releases before 20 (emsdk
+# 3.1.51 bundles 16) enable them only with a flag that later ones reject.
+JIT_WASM_NODE_FLAGS = $(shell $(NODE) --experimental-wasm-return-call -e 0 \
+    >/dev/null 2>&1 && echo --experimental-wasm-return-call)
+JIT_WASM_TEST_FLAGS = -std=gnu11 -O2 -Wall -Wextra -Werror \
+    -include src/common.h -Isrc -DRV32_FEATURE_JIT=1 -DRV32_FEATURE_EXT_F=0 \
+    -sALLOW_MEMORY_GROWTH=1 $(WASM_JIT_LINK_FLAGS)
+
+# Build and run one fixture layout: $(1) is the output suffix, $(2) the
+# feature flags that select it.
+define jit-wasm-check
+	$(Q)$(EMCC) $(JIT_WASM_TEST_FLAGS) $(2) \
+	    tests/jit-wasm.c -o $(OUT)/test-jit-wasm$(1).js
+	$(Q)$(NODE) $(JIT_WASM_NODE_FLAGS) $(OUT)/test-jit-wasm$(1).js
+endef
+
+.PHONY: check-jit-wasm
+check-jit-wasm: | $(OUT)
+	$(call jit-wasm-check,,-DRV32_FEATURE_EXT_C=1)
+	$(call jit-wasm-check,-system,-DRV32_FEATURE_EXT_C=0 \
+	    -DRV32_FEATURE_SYSTEM=1 -DRV32_FEATURE_ELF_LOADER=1)
+	$(call jit-wasm-check,-shared,-DRV32_FEATURE_EXT_C=1 -pthread \
+	    -Wno-pthreads-mem-growth)
+	$(call jit-wasm-check,-mmu,-DRV32_FEATURE_EXT_C=1 \
+	    -DRV32_FEATURE_SYSTEM=1 -DRV32_FEATURE_ELF_LOADER=0)
+	$(call jit-wasm-check,-profile,-DRV32_FEATURE_EXT_C=1 -DJIT_WASM_PROFILE)
 
 endif # _MK_TESTS_INCLUDED

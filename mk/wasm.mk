@@ -37,6 +37,11 @@ WEB_FILES += $(OUT)/elf_list.js \
              $(OUT)/pak0.pak
 endif
 
+# Runtime-generated T1C modules share linear memory and enter via wasmTable.
+# The backend fixture (check-jit-wasm) links with the same settings.
+WASM_JIT_LINK_FLAGS := -sALLOW_TABLE_GROWTH=1 \
+    -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE='["$$addFunction","$$removeFunction"]'
+
 # Only configure Emscripten settings when using emcc
 ifeq ("$(CC_IS_EMCC)", "1")
 
@@ -46,11 +51,25 @@ BIN := $(BIN).js
 CFLAGS += -mtail-call
 LDFLAGS += -mtail-call
 
+ifeq ($(CONFIG_JIT),y)
+CFLAGS_emcc += $(WASM_JIT_LINK_FLAGS)
+# Opt-in counters and readable CPU-profiler names; production has no counters.
+JIT_WASM_PROFILE ?= 0
+ifeq ($(JIT_WASM_PROFILE),1)
+CFLAGS += -DJIT_WASM_PROFILE
+CFLAGS_emcc += --profiling-funcs
+endif
+endif
+
 # SDL configuration for Emscripten
 ifeq ($(CONFIG_SDL),y)
 # Disable STRICT mode to avoid -Werror in SDL2_mixer port compilation
 CFLAGS_emcc += -sSTRICT=0 -sUSE_SDL=2 -sSDL2_MIXER_FORMATS=wav,mid -sUSE_SDL_MIXER=2
-CFLAGS_emcc += -pthread -sPTHREAD_POOL_SIZE=navigator.hardwareConcurrency
+# Audio needs few threads: each sound effect or song runs on a thread that the
+# main thread joins at once, plus virtio-snd's TX thread. The pool must cover
+# them, because a blocked main thread cannot start a new worker, but every
+# idle worker costs megabytes, so do not size it by the host's core count.
+CFLAGS_emcc += -pthread -sPTHREAD_POOL_SIZE=4
 OBJS_EXT += syscall_sdl.o
 LDFLAGS += -pthread
 # Note: Emscripten 4.x inlines worker code into the main JS file
@@ -73,7 +92,7 @@ endif
 CFLAGS_emcc += -sALLOW_MEMORY_GROWTH \
                -s"EXPORTED_FUNCTIONS=$(EXPORTED_FUNCS)" \
                -sSTACK_SIZE=4MB \
-               -DCYCLE_PER_STEP=2000000 \
+               -DCYCLE_PER_STEP=200000000 \
                -DWASM_BLOCK_LIMIT=5000 \
                -DWASM_BLOCK_HARD_LIMIT=10000 \
                -O3 \

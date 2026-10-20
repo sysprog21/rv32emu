@@ -6,6 +6,9 @@
 #include "em_runtime.h"
 
 #if defined(__EMSCRIPTEN__)
+#include <emscripten/eventloop.h>
+#include <emscripten/html5.h>
+
 #if RV32_HAS(SYSTEM)
 EM_JS(void, enable_run_button, (void), {
     document.getElementById('runSysButton').disabled = false;
@@ -38,4 +41,50 @@ EM_JS(void, report_run_completion, (void), {
 });
 #endif
 
+/* Node and workers have no document to watch. */
+static bool has_document(void)
+{
+    return EM_ASM_INT({ return !!globalThis.document; });
+}
+
+/* Message tasks keep running in a hidden tab. Switch to animation frames, which
+ * the browser pauses there, until the page is visible again.
+ */
+static EM_BOOL visibility_changed(int type,
+                                  const EmscriptenVisibilityChangeEvent *ev,
+                                  void *user)
+{
+    (void) type;
+    (void) user;
+    if (ev->hidden)
+        emscripten_set_main_loop_timing(EM_TIMING_RAF, 1);
+    else
+        emscripten_set_main_loop_timing(EM_TIMING_SETIMMEDIATE, 0);
+    return EM_FALSE;
+}
+
+void em_run_main_loop(em_arg_callback_func step, void *arg)
+{
+    /* step limits host time per slice. Message tasks yield to input and
+     * rendering without the browser's nested-timer minimum delay.
+     */
+    emscripten_set_main_loop_arg(step, arg, 1000, 0);
+    emscripten_set_main_loop_timing(EM_TIMING_SETIMMEDIATE, 0);
+    if (has_document()) {
+        EmscriptenVisibilityChangeEvent ev;
+        if (emscripten_get_visibility_status(&ev) == EMSCRIPTEN_RESULT_SUCCESS)
+            visibility_changed(EMSCRIPTEN_EVENT_VISIBILITYCHANGE, &ev, NULL);
+        emscripten_set_visibilitychange_callback(NULL, EM_FALSE,
+                                                 visibility_changed);
+    }
+    emscripten_unwind_to_js_event_loop();
+}
+
+void em_stop_main_loop(void)
+{
+    emscripten_cancel_main_loop();
+    /* Without a main loop, a timing change would only log an error. */
+    if (has_document())
+        emscripten_set_visibilitychange_callback(NULL, EM_FALSE, NULL);
+}
 #endif

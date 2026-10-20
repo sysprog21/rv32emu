@@ -666,6 +666,7 @@ GEN_LOAD(clwsp, rv_insn_lw, S32, emit_load, JIT_MISALIGN_COMPRESSED)
 GEN(cjr, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_mov(state, vm_reg[0], temp_reg);
+    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, temp_reg, ~1U);
     store_back(state);
     emit_indirect_jump(state, rv, ir);
 })
@@ -688,6 +689,7 @@ GEN(cebreak, {
 GEN(cjalr, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_mov(state, vm_reg[0], temp_reg);
+    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, temp_reg, ~1U);
     vm_reg[1] = map_vm_reg(state, rv_reg_ra);
     emit_load_imm(state, vm_reg[1], ir->pc + 2);
     store_back(state);

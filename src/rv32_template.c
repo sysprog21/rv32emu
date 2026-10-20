@@ -1525,9 +1525,9 @@ RVOP(clwsp, {
     MEM_LOAD(rv->X[ir->rd], MEM_READ_W(rv, addr));
 })
 
-/* C.JR */
+/* C.JR expands to jalr x0, 0(rs1), which clears the target's low bit. */
 RVOP(cjr, {
-    PC = rv->X[ir->rs1];
+    PC = rv->X[ir->rs1] & ~1U;
     LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
     goto end_op;
 })
@@ -1547,7 +1547,7 @@ RVOP(cebreak, {
 /* C.JALR */
 RVOP(cjalr, {
     /* Unconditional jump and store PC+2 to ra */
-    const int32_t jump_to = rv->X[ir->rs1];
+    const uint32_t jump_to = rv->X[ir->rs1] & ~1U;
     rv->X[rv_reg_ra] = PC + 2;
     PC = jump_to;
     LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();

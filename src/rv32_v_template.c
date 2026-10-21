@@ -2043,7 +2043,7 @@ static inline bool rvv_op_sbc_borrow(uint32_t lhs,
                                      uint32_t sew_bits)
 {
     uint64_t lhs_u = rvv_trunc_elem(lhs, sew_bits);
-    uint64_t rhs_u = rvv_trunc_elem(rhs, sew_bits) + borrow_in;
+    uint64_t rhs_u = (uint64_t) rvv_trunc_elem(rhs, sew_bits) + borrow_in;
     return lhs_u < rhs_u;
 }
 

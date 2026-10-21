@@ -573,8 +573,10 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
  *
- * CSR helpers return false for missing entries or writes to read-only entries,
- * leaving result unchanged.
+ * CSR helpers return false for missing entries, writes to read-only V CSRs,
+ * and CSRRW/CSRRWI to the machine ID registers, leaving result unchanged.
+ * TODO: Also reject zero-source CSRRW/CSRRWI to cycle, time, instret, and
+ * their high halves.
  * Callers save PC/cycle and raise ILLEGAL_INSN before rd writeback.
  */
 static inline bool csr_csrrw(riscv_t *rv,

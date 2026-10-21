@@ -315,23 +315,22 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
-EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
-.PHONY: check-system-mmu-cache
-check-system-mmu-cache: $(BIN) tests/system-mmu-cache.S | $(OUT)
-	$(Q)$(call guest-asm-build,system-mmu-cache,rv32ia_zicsr,, \
+# system-asm-check-target(name, march): a flat supervisor kernel linked at 0,
+# loaded as a raw kernel image, that prints EXPECTED_<name> on success.
+define system-asm-check-target
+.PHONY: check-$(1)
+check-$(1): $$(BIN) tests/$(1).S | $$(OUT)
+	$$(Q)$$(call guest-asm-build,$(1),$(2),, \
 	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
-	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-mmu-cache \
-	    $(OUT)/system-mmu-cache.bin
-	$(call check-test,-k,$(OUT)/system-mmu-cache.bin,system-mmu-cache,tail -n 1,$(EXPECTED_system-mmu-cache))
+	$$(Q)$$(CROSS_COMPILE)objcopy -O binary $$(OUT)/$(1) $$(OUT)/$(1).bin
+	$$(call check-test,-k,$$(OUT)/$(1).bin,$(1),tail -n 1,$$(EXPECTED_$(1)))
+endef
 
+EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
-.PHONY: check-system-trap-cycles
-check-system-trap-cycles: $(BIN) tests/system-trap-cycles.S | $(OUT)
-	$(Q)$(call guest-asm-build,system-trap-cycles,rv32ia_zicsr,, \
-	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
-	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-trap-cycles \
-	    $(OUT)/system-trap-cycles.bin
-	$(call check-test,-k,$(OUT)/system-trap-cycles.bin,system-trap-cycles,tail -n 1,$(EXPECTED_system-trap-cycles))
+
+$(eval $(call system-asm-check-target,system-mmu-cache,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-trap-cycles,rv32ia_zicsr))
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c

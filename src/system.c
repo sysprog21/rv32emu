@@ -112,6 +112,9 @@ static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
 void mmu_tlb_flush_all(riscv_t *rv)
 {
     memset(rv->dtlb, 0, sizeof(rv->dtlb));
+#if RV32_HAS(JIT)
+    memset(rv->jit_dtlb, 0xff, sizeof(rv->jit_dtlb));
+#endif
     memset(rv->itlb, 0, sizeof(rv->itlb));
     memset(rv->tlb_super_slices, 0, sizeof(rv->tlb_super_slices));
 }
@@ -139,13 +142,30 @@ static inline void tlb_invalidate(riscv_t *rv, tlb_entry_t *entry)
     entry->vpn &= ~ITLB_EXEC_TAG;
 }
 
+/* Invalidate a dTLB slot together with the RAM tags derived from it. */
+static inline void dtlb_invalidate(riscv_t *rv, uint32_t idx)
+{
+    tlb_invalidate(rv, &rv->dtlb[idx]);
+#if RV32_HAS(JIT)
+    rv->jit_dtlb[idx].read_tag = UINT32_MAX;
+    rv->jit_dtlb[idx].write_tag = UINT32_MAX;
+#endif
+}
+
+static inline bool tlb_entry_in_superpage(const tlb_entry_t *entry,
+                                          uint32_t vpn1)
+{
+    return entry->valid && entry->level == TLB_PAGE_LEVEL_SUPER &&
+           tlb_entry_region(entry) == vpn1;
+}
+
 void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr)
 {
     uint32_t vpn = vaddr >> RV_PG_SHIFT;
     uint32_t idx = vpn & TLB_MASK;
 
     if (rv->dtlb[idx].valid && rv->dtlb[idx].vpn == vpn)
-        tlb_invalidate(rv, &rv->dtlb[idx]);
+        dtlb_invalidate(rv, idx);
 
     if (rv->itlb[idx].valid && tlb_entry_vpn(&rv->itlb[idx]) == vpn)
         tlb_invalidate(rv, &rv->itlb[idx]);
@@ -156,13 +176,10 @@ void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr)
      */
     const uint32_t vpn1 = vpn >> 10;
     for (int i = 0; i < TLB_SIZE && rv->tlb_super_slices[vpn1]; i++) {
-        tlb_entry_t *entries[] = {&rv->dtlb[i], &rv->itlb[i]};
-        for (int t = 0; t < 2; t++) {
-            if (entries[t]->valid &&
-                entries[t]->level == TLB_PAGE_LEVEL_SUPER &&
-                tlb_entry_region(entries[t]) == vpn1)
-                tlb_invalidate(rv, entries[t]);
-        }
+        if (tlb_entry_in_superpage(&rv->dtlb[i], vpn1))
+            dtlb_invalidate(rv, i);
+        if (tlb_entry_in_superpage(&rv->itlb[i], vpn1))
+            tlb_invalidate(rv, &rv->itlb[i]);
     }
 }
 
@@ -233,6 +250,37 @@ void mmu_forget_code(riscv_t *rv)
 }
 #endif
 
+#if RV32_HAS(JIT)
+static inline bool mmu_io_is_default(const riscv_t *rv)
+{
+    return rv->io.mem_translate == mmu_translate &&
+           rv->io.mem_read_w == mmu_read_w && rv->io.mem_read_s == mmu_read_s &&
+           rv->io.mem_read_b == mmu_read_b &&
+           rv->io.mem_write_w == mmu_write_w &&
+           rv->io.mem_write_s == mmu_write_s &&
+           rv->io.mem_write_b == mmu_write_b;
+}
+
+static inline void jit_dtlb_fill(riscv_t *rv,
+                                 uint32_t vaddr,
+                                 uint32_t paddr,
+                                 uint8_t perm,
+                                 bool dirty)
+{
+    const uint32_t idx = (vaddr >> RV_PG_SHIFT) & TLB_MASK;
+    const uint32_t va_page = vaddr & ~(RV_PG_SIZE - 1);
+    const uint32_t pa_page = paddr & ~(RV_PG_SIZE - 1);
+    memory_t *mem = PRIV(rv)->mem;
+    /* A tag hit bypasses the I/O callbacks, so replaced ones get no tags. */
+    const bool ram =
+        GUEST_RAM_CONTAINS(mem, pa_page, RV_PG_SIZE) && mmu_io_is_default(rv);
+    rv->jit_dtlb[idx].read_tag = ram && (perm & PTE_R) ? va_page : UINT32_MAX;
+    rv->jit_dtlb[idx].write_tag =
+        ram && (perm & PTE_W) && dirty ? va_page : UINT32_MAX;
+    rv->jit_dtlb[idx].addend = (uintptr_t) mem->mem_base + pa_page - va_page;
+}
+#endif
+
 /* TLB lookup for data accesses (read/write).
  * Returns physical address if TLB hit, 0 if miss.
  * Updates A/D bits in PTE on successful lookup.
@@ -261,6 +309,9 @@ static inline uint32_t dtlb_lookup(riscv_t *rv,
             pte_t *pte = (pte_t *) (attr->mem->mem_base + entry->pte_addr);
             *pte |= PTE_D;
             entry->dirty = 1;
+#if RV32_HAS(JIT)
+            jit_dtlb_fill(rv, vaddr, entry->ppn, entry->perm, true);
+#endif
         }
 
         *hit = true;
@@ -304,8 +355,11 @@ static inline void dtlb_populate(riscv_t *rv,
                                  pte_t *pte,
                                  uint32_t level)
 {
-    tlb_fill(rv, &rv->dtlb[(vaddr >> RV_PG_SHIFT) & TLB_MASK], vaddr, pte,
-             level);
+    tlb_entry_t *entry = &rv->dtlb[(vaddr >> RV_PG_SHIFT) & TLB_MASK];
+    tlb_fill(rv, entry, vaddr, pte, level);
+#if RV32_HAS(JIT)
+    jit_dtlb_fill(rv, vaddr, entry->ppn, entry->perm, entry->dirty);
+#endif
 }
 
 static inline void itlb_populate(riscv_t *rv,
@@ -649,8 +703,12 @@ bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr)
 
 uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
 {
-    if (!rv->csr_satp)
+    if (!rv->csr_satp) {
+#if RV32_HAS(JIT)
+        jit_dtlb_fill(rv, vaddr, vaddr, PTE_R | PTE_W, true);
+#endif
         return vaddr;
+    }
 
     /* Try dTLB first for fast path */
     bool hit;

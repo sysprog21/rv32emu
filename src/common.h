@@ -10,6 +10,7 @@
 
 #include "feature.h"
 #include "log.h"
+#include "t1c_stats.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #define UNUSED __attribute__((unused))

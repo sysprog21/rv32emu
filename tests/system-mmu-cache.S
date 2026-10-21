@@ -215,6 +215,68 @@ next_iteration:
     li t0, 0x11000
     lw t0, 0(t0)
     bnez t0, fail
+    # Read/write RAM tags must retain signedness and access width. Exercise
+    # both interpreted warmup and compiled accesses, and a colliding VPN.
+    li s0, 0x40000000
+    li s1, 0x40040000
+    li s2, 6000
+    li t0, 0xff80ab7f
+    sw t0, 0(s0)
+width_loop:
+    li t0, 0x81
+    sb t0, 1(s0)
+    li t0, 0x8001
+    sh t0, 2(s0)
+    lb t0, 1(s0)
+    li t1, -127
+    bne t0, t1, fail
+    lbu t0, 1(s0)
+    li t1, 129
+    bne t0, t1, fail
+    lh t0, 2(s0)
+    li t1, -32767
+    bne t0, t1, fail
+    lhu t0, 2(s0)
+    li t1, 32769
+    bne t0, t1, fail
+    lw t0, 0(s1)
+    li t1, 0x8001817f
+    bne t0, t1, fail
+    lw t0, 0(s0)
+    bne t0, t1, fail
+    addi s2, s2, -1
+    bnez s2, width_loop
+    li s2, 6000
+    li s3, 0x8001817f
+    jal ra, check_data_tag
+    # Remap a cached data page without retiring the compiled caller. Neither
+    # native nor interpreted RAM tags may keep the previous host addend.
+    li t0, 0x11000
+    li t1, 0x12345678
+    sw t1, 0(t0)
+    la t0, leaves
+    li t1, 0x444f
+    sw t1, 0(t0)
+    sfence.vma s0, zero
+    li s2, 6000
+    li s3, 0x12345678
+    jal ra, check_data_tag
+    lw t0, 0(s0)
+    li t1, 0x12345678
+    bne t0, t1, fail
+    li t1, 0x76543210
+    sw t1, 0(s0)
+    li t0, 0x11000
+    lw t0, 0(t0)
+    bne t0, t1, fail
+    # A write to a clean PTE must have taken the slow path to set D.
+    la t0, leaves
+    lw t1, 0(t0)
+    andi t1, t1, 0x80
+    beqz t1, fail
+    li t1, 0x40cf
+    sw t1, 0(t0)
+    sfence.vma s0, zero
     # Keep the target iTLB slot live across a selective mapping flush.
     # The caller runs on VPN 1; the target uses a different index (VPN 0x800).
     li t0, 0x800000
@@ -462,6 +524,14 @@ load_trap:
     addi t0, t0, 4
     csrw sepc, t0
     sret
+# This same load/store loop runs natively before and after a data-only fence.
+check_data_tag:
+    lw a0, 0(s0)
+    bne a0, s3, fail
+    sw s3, 0(s0)
+    addi s2, s2, -1
+    bnez s2, check_data_tag
+    ret
 #include "system-exit.inc"
 success: .asciz "SYSTEM MMU cache OK\n"
 failure: .asciz "SYSTEM MMU cache FAIL\n"

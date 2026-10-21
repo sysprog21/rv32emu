@@ -171,9 +171,11 @@ jobs:
             make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test check-insn-page-fault check-misalign-page-fault check-fused-page-fault check-amo-page-fault $PARALLEL
             # Flat supervisor kernels: TLB caching, superpage flushes, address
             # space switches, retiring decoded code, counters across traps,
-            # and fault retry with trap status fields, interpreted and T1.
-            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume $PARALLEL
-            make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume $PARALLEL
+            # fault retry, and code eviction, interpreted and T1. Interrupts
+            # are polled between dispatches, and the interpreter never leaves
+            # a chained loop to poll, so the interrupt check runs on T1 only.
+            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL

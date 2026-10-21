@@ -70,8 +70,9 @@
  *     not isolated.
  *   - dirty == 1 on writes; clean PTE writes fall back to C so PTE_D update
  *     stays in dtlb_lookup() / mmu_translate().
- *   - paddr range is checked against memory_t mem_size to keep MMIO mappings
- *     on the slow path.
+ *   - Arm64 checks paddr against mem_size inline. x86-64 tags only whole RAM
+ *     pages in jit_dtlb, with a precomputed host address addend; a single tag
+ *     comparison proves permission, dirty state, alignment and RAM range.
  */
 _Static_assert(sizeof(tlb_entry_t) == 16, "tlb_entry_t must be 16 bytes");
 _Static_assert(offsetof(tlb_entry_t, vpn) == 0, "tlb_entry_t.vpn offset");
@@ -84,15 +85,10 @@ _Static_assert(offsetof(tlb_entry_t, dirty) == 14, "tlb_entry_t.dirty offset");
 _Static_assert(offsetof(tlb_entry_t, level) == 15, "tlb_entry_t.level offset");
 _Static_assert((TLB_SIZE & (TLB_SIZE - 1)) == 0,
                "TLB_SIZE must be a power of two");
-/* The x86-64 fast path masks the VPN with `and esi, TLB_SIZE - 1` using opcode
- * 0x83 /4, whose 8-bit immediate is sign-extended to 32 bits.  TLB_SIZE - 1
- * must therefore fit in a signed 8-bit value (<= 127); otherwise the mask
- * becomes negative and the dTLB index calculation is wrong.  If you ever need
- * a larger TLB, switch that single instruction to the imm32 form (0x81 /4).
- */
-_Static_assert(TLB_SIZE <= 128,
-               "TLB_SIZE > 128 needs imm32 AND encoding in the x86-64 "
-               "fast path");
+#if defined(__x86_64__) && !defined(_WIN32)
+/* The x86-64 fast path scales the TLB index by 16. */
+_Static_assert(sizeof(jit_tlb_entry_t) == 16, "JIT dTLB stride");
+#endif
 _Static_assert(RV_PG_SHIFT == 12, "fast path assumes 4 KiB pages");
 _Static_assert(offsetof(memory_t, mem_base) == 0, "memory_t.mem_base offset");
 _Static_assert(offsetof(memory_t, mem_size) == 8, "memory_t.mem_size offset");
@@ -125,8 +121,8 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 #define JIT_CALL_PAD 0x8
 #endif
 
-/* The SYSTEM_MMIO fast path adds ~8 jump-table entries per load/store
- * (7 slow-path gating branches + 1 unconditional B), pushing
+/* The Arm64 SYSTEM_MMIO fast path adds up to ~8 jump-table entries per
+ * load/store (slow-path gating branches + 1 unconditional B), pushing
  * JUMPS_PER_INSN to 16.  state->jumps accumulates across chained blocks,
  * so the cap also gates how many instructions can be translated together.
  * 65536 keeps the table at 1 MiB (struct jump is 16 bytes under SYSTEM)
@@ -134,13 +130,10 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
  */
 #define MAX_JUMPS 65536
 
-/* User-mode T1 links a direct branch to its target whether or not the
- * interpreter has taken that edge yet, and records a jump whose target is not
- * compiled so that the target's translation can patch it later. A block
- * compiled before its successors were known thus still chains natively.
- * System mode keeps linking learned edges only.
+/* JIT_LINK_ALL_EDGES (jit.h): a block compiled before its successors were
+ * known still chains natively. System pending edges include SATP and are
+ * discarded when code retires.
  */
-#define JIT_LINK_ALL_EDGES (!RV32_HAS(SYSTEM))
 #define MAX_PENDING_JUMPS 65536
 #define MAX_BLOCKS 8192
 #define IN_JUMP_THRESHOLD 256
@@ -623,14 +616,33 @@ static inline uint32_t page_hash(uint32_t va, uint32_t satp)
 }
 #endif
 
+#if JIT_LINK_ALL_EDGES
+/* Forget every pending jump. Unless the index may hold stale heads, as at
+ * startup, clear only the buckets in use: retiring an address space would
+ * otherwise memset 64 KiB, though few jumps are usually pending.
+ */
+static void pending_reset(struct jit_state *state, bool full)
+{
+    if (full || state->n_pending > (1 << OFFSET_INDEX_BITS) / 16) {
+        memset(state->pending_index, -1, sizeof(state->pending_index));
+    } else {
+        for (int32_t i = 0; i < state->n_pending; i++) {
+            const struct pending_jump *jump = &state->pending[i];
+            const uint32_t satp = IIF(RV32_HAS(SYSTEM))(jump->target_satp, 0);
+            state->pending_index[offset_hash(jump->target_pc, satp)] = -1;
+        }
+    }
+    state->n_pending = 0;
+}
+#endif
+
 /* Empty the offset map, every index over it and the jumps pending into it */
 static void offset_map_reset(struct jit_state *state)
 {
     state->n_blocks = 0;
     memset(state->offset_index, -1, sizeof(state->offset_index));
 #if JIT_LINK_ALL_EDGES
-    state->n_pending = 0;
-    memset(state->pending_index, -1, sizeof(state->pending_index));
+    pending_reset(state, true);
 #endif
 #if RV32_HAS(SYSTEM)
     memset(state->space_index, -1, sizeof(state->space_index));
@@ -664,9 +676,9 @@ static inline void offset_map_insert(struct jit_state *state, block_t *block)
 }
 
 /* The live entry translated for pc in address space satp, if any */
-static struct offset_map *offset_map_find(struct jit_state *state,
-                                          uint32_t pc,
-                                          uint32_t satp UNUSED)
+FORCE_INLINE struct offset_map *offset_map_find(struct jit_state *state,
+                                                uint32_t pc,
+                                                uint32_t satp UNUSED)
 {
     for (int32_t i = state->offset_index[offset_hash(pc, satp)]; i >= 0;
          i = state->offset_map[i].next) {
@@ -685,6 +697,12 @@ static struct offset_map *offset_map_find(struct jit_state *state,
 #if RV32_HAS(SYSTEM)
 void jit_retire_space(struct jit_state *state, uint32_t satp)
 {
+    T1C_COUNT(retire_calls, 1);
+#if JIT_LINK_ALL_EDGES
+    /* Retired code must never be relinked, so drop every pending edge. */
+    T1C_COUNT(retire_pending_slots, state->n_pending);
+    pending_reset(state, false);
+#endif
     /* Retired entries leave the chain, so each flush visits only the code
      * translated since the previous one.
      */
@@ -2483,35 +2501,7 @@ static uint32_t emit_a64_bcond(struct jit_state *state, int cond)
 #endif
 
 #if defined(__x86_64__) && !defined(_WIN32)
-/* cmp byte ptr [r12+disp8], imm8 — 6 bytes: 41 80 7c 24 disp imm. */
-static void emit_x64_cmp_byte_r12_disp_imm8(struct jit_state *state,
-                                            uint8_t disp,
-                                            uint8_t imm)
-{
-    emit1(state, 0x41);
-    emit1(state, 0x80);
-    emit1(state, 0x7c);
-    emit1(state, 0x24);
-    emit1(state, disp);
-    emit1(state, imm);
-}
-
-/* test byte ptr [r12+disp8], imm8 — 5 bytes: 41 f6 44 24 disp imm. */
-static void emit_x64_test_byte_r12_disp_imm8(struct jit_state *state,
-                                             uint8_t disp,
-                                             uint8_t imm)
-{
-    emit1(state, 0x41);
-    emit1(state, 0xf6);
-    emit1(state, 0x44);
-    emit1(state, 0x24);
-    emit1(state, disp);
-    emit1(state, imm);
-}
-
-/* jcc rel32: emits 0F <opc> <rel32=0>; returns the offset of the rel32 field
- * so the caller can record it for resolve_jumps() to patch.
- */
+/* jcc rel32; return the displacement field for later patching. */
 static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
 {
     emit1(state, 0x0f);
@@ -2538,7 +2528,7 @@ static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
  * path) whenever any of the following are not met, so each one keeps the
  * slow path's behavior intact:
  *   - vaddr aligned to access_size
- *   - dTLB[idx] is valid and its VPN matches
+ *   - dTLB[idx] is valid and its VPN matches (x86-64 uses read/write tags)
  *   - entry.perm has PTE_R (load) or PTE_W (store)
  *   - For stores: entry.dirty == 1 (so PTE_D update stays in C)
  *   - paddr + access_size <= mem_size (MMIO and bound-violators take slow path)
@@ -2763,10 +2753,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
 
     return fastpath_end_loc;
 #elif defined(__x86_64__) && !defined(_WIN32)
-    /* Guest RAM is capped at 4 GiB.  The exact 4 GiB case is supported:
-     * mem_size itself no longer fits in uint32_t, but mem_size - access_size
-     * still does for every load/store width we JIT here.
-     */
+    /* RAM tags cover 32-bit guest addresses, including a full 4 GiB arena. */
     assert(mem->mem_size <= 0x100000000ULL);
     /* Slow path's reset_reg + map_vm_reg(rd) deterministically returns
      * register_map[0].reg_idx which is RAX on this ABI.  The caller passes
@@ -2776,109 +2763,36 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     if (!is_store)
         assert(load_dest_reg == RAX);
 
-    /* Up to 7 conditional branches funnel to the slow-path label.  Each
-     * entry stores the offset of the rel32 displacement field, matching
-     * what resolve_jumps() patches.
-     */
-    uint32_t slow_branches[8];
-    int n_slow = 0;
-
-    /* Alignment check */
-    if (access_size > 1) {
-        /* test cl, (size - 1) */
-        emit1(state, 0xf6);
-        emit_modrm(state, 0xc0, 0, RCX);
-        emit1(state, (uint8_t) (access_size - 1));
-        /* jnz rel32 (0f 85 rel32) — rel32 starts 2 bytes after opcode */
-        emit1(state, 0x0f);
-        emit1(state, 0x85);
-        slow_branches[n_slow++] = state->offset;
-        emit4(state, 0);
-    }
-
-    /* vpn = vaddr >> 12 into EAX (kept around for the CMP) */
-    /* mov eax, ecx */
-    emit1(state, 0x89);
-    emit_modrm_reg2reg(state, RCX, RAX);
-    /* shr eax, 12 */
-    emit1(state, 0xc1);
-    emit_modrm(state, 0xc0, 5, RAX);
-    emit1(state, 12);
-
-    /* idx (in ESI) = vpn & (TLB_SIZE - 1); then ESI <<= 4 */
-    /* mov esi, eax */
-    emit1(state, 0x89);
-    emit_modrm_reg2reg(state, RAX, RSI);
-    /* and esi, TLB_SIZE - 1   (imm8 fits since TLB_SIZE - 1 = 63) */
-    emit1(state, 0x83);
-    emit_modrm(state, 0xc0, 4, RSI);
-    emit1(state, (uint8_t) (TLB_SIZE - 1));
-    /* shl rsi, 4 — REX.W + C1 /4 imm8 */
-    emit1(state, 0x48);
-    emit1(state, 0xc1);
-    emit_modrm(state, 0xc0, 4, RSI);
-    emit1(state, 4);
-
-    /* r12 = rdi + offsetof(dtlb) + rsi (idx*16 already in rsi)
-     * LEA r12, [rdi + rsi*1 + dtlb_offset]
-     */
-    emit_rex(state, 1, 1, 0, 0);
-    emit1(state, 0x8d);
-    emit_sib_operand(state, R12, RDI, RSI, 0, offsetof(riscv_t, dtlb));
-
-    /* VPN match: cmp eax, [r12]; jne slow
-     * REX.B for r12 base, opcode 3b, mod=00 r/m=100 SIB, SIB.base=R12.
-     */
-    emit1(state, 0x41);
-    emit1(state, 0x3b);
-    emit1(state, 0x04);
-    emit1(state, 0x24);
-    slow_branches[n_slow++] = emit_x64_jcc32(state, 0x85); /* jne */
-
-    /* valid (byte at +13) != 0: je slow */
-    emit_x64_cmp_byte_r12_disp_imm8(state, 13, 0);
-    slow_branches[n_slow++] = emit_x64_jcc32(state, 0x84); /* je */
-
-    /* perm (byte at +12) has needed bit: jz slow */
-    emit_x64_test_byte_r12_disp_imm8(state, 12, is_store ? PTE_W : PTE_R);
-    slow_branches[n_slow++] = emit_x64_jcc32(state, 0x84); /* jz */
-
-    /* (stores) dirty (byte at +14) != 0: je slow */
-    if (is_store) {
-        emit_x64_cmp_byte_r12_disp_imm8(state, 14, 0);
-        slow_branches[n_slow++] = emit_x64_jcc32(state, 0x84); /* je */
-    }
-
-    /* The exact VPN tag identifies a translated 4 KiB slice, including
-     * superpage entries. The offset therefore always has twelve bits.
+    /* A tag match proves alignment, permissions, dirty state and RAM range.
+     * Only whole RAM pages receive tags; partial pages and MMIO stay in C.
+     * esi = ((vaddr >> 12) & TLB_MASK) * sizeof(jit_tlb_entry_t)
      */
     emit_mov32(state, RCX, RSI);
-    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, RSI, 0xFFF);
-    /* mov eax, [r12+4]  (4-byte ppn) */
+    emit_alu32_imm8(state, SHIFT_IMM_OPCODE, SHIFT_SHR, RSI, RV_PG_SHIFT - 4);
+    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, RSI, TLB_MASK << 4);
+
+    emit_rex(state, 1, 1, 0, 0);
+    emit1(state, 0x8d);
+    emit_sib_operand(state, R12, RDI, RSI, 0, offsetof(riscv_t, jit_dtlb));
+    emit_mov32(state, RCX, RAX);
+    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, RAX,
+                     ~(RV_PG_SIZE - 1) | (access_size - 1));
+    /* cmp eax, [r12 + read_tag/write_tag] */
     emit1(state, 0x41);
-    emit1(state, 0x8b);
-    emit1(state, 0x44);
-    emit1(state, 0x24);
-    emit1(state, 4);
-    /* or eax, esi — 09 /r */
-    emit1(state, 0x09);
-    emit_modrm_reg2reg(state, RSI, RAX);
+    emit1(state, 0x3b);
+    emit_sib_operand(state, RAX, R12, RSP, 0,
+                     is_store ? offsetof(jit_tlb_entry_t, write_tag)
+                              : offsetof(jit_tlb_entry_t, read_tag));
+    /* A mismatch takes the checked C slow path. */
+    const uint32_t slow_branch = emit_x64_jcc32(state, 0x85);
 
-    /* range: cmp eax, max_paddr; ja slow */
-    uint32_t max_paddr = (uint32_t) (mem->mem_size - access_size);
-    emit1(state, 0x3d); /* cmp eax, imm32 (short form) */
-    emit4(state, max_paddr);
-    slow_branches[n_slow++] = emit_x64_jcc32(state, 0x87); /* ja */
-
-    /* host addr: r12 = mem_base + rax */
-    /* mov r12, imm64 — REX.WB + B8+(r&7) + imm64 */
+    emit_mov32(state, RCX, RAX);
+    /* add rax, [r12 + addend] */
     emit1(state, 0x49);
-    emit1(state, 0xbc);
-    emit8(state, (uint64_t) (uintptr_t) mem->mem_base);
-    /* add r12, rax — REX.WB + 01 /r — opcode 01 has direction r/m += reg */
-    emit1(state, 0x49);
-    emit1(state, 0x01);
-    emit_modrm_reg2reg(state, RAX, R12);
+    emit1(state, 0x03);
+    emit_sib_operand(state, RAX, R12, RSP, 0,
+                     offsetof(jit_tlb_entry_t, addend));
+    emit_mov(state, RAX, R12);
 
     /* Access */
     if (is_store) {
@@ -2953,10 +2867,8 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     uint32_t fastpath_end_loc = state->offset;
     emit4(state, 0);
 
-    /* Slow path begins right after this; patch all gating branches. */
-    uint32_t slow_label = state->offset;
-    for (int i = 0; i < n_slow; i++)
-        emit_jump_target_offset(state, slow_branches[i], slow_label);
+    /* Slow path begins right after this. */
+    emit_jump_target_offset(state, slow_branch, state->offset);
 
     return fastpath_end_loc;
 #else
@@ -4600,6 +4512,8 @@ static void code_cache_flush(struct jit_state *state, riscv_t *rv)
 /* The caller holds cache_lock when T2C is built */
 void jit_flush(riscv_t *rv)
 {
+    T1C_COUNT(flushed_native_blocks,
+              ((struct jit_state *) rv->jit_state)->n_blocks);
     code_cache_flush(rv->jit_state, rv);
 }
 #endif
@@ -5665,13 +5579,19 @@ static void patch_pending_jumps(struct jit_state *state, int first_block)
 {
     for (int b = first_block; b < state->n_blocks; b++) {
         const struct offset_map *block = &state->offset_map[b];
-        int32_t *link = &state->pending_index[offset_hash(block->pc, 0)];
+        int32_t *link = &state->pending_index[offset_hash(
+            block->pc, IIF(RV32_HAS(SYSTEM))(block->satp, 0))];
         while (*link >= 0) {
             struct pending_jump *jump = &state->pending[*link];
-            if (jump->target_pc != block->pc) {
+            if (jump->target_pc != block->pc
+#if RV32_HAS(SYSTEM)
+                || jump->target_satp != block->satp
+#endif
+            ) {
                 link = &jump->next;
                 continue;
             }
+            T1C_COUNT(pending_patched, 1);
             patch_jump(state, jump->offset_loc, block->offset);
 #if defined(__aarch64__)
             sys_icache_invalidate(state->buf + jump->offset_loc,
@@ -5717,11 +5637,15 @@ static void resolve_jumps(struct jit_state *state)
 #if JIT_LINK_ALL_EDGES
             else if (state->n_pending < MAX_PENDING_JUMPS) {
                 /* Fall through to the exit until the target is compiled. */
-                int32_t *head =
-                    &state->pending_index[offset_hash(jump.target_pc, 0)];
+                int32_t *head = &state->pending_index[offset_hash(
+                    jump.target_pc,
+                    IIF(RV32_HAS(SYSTEM))(jump.target_satp, 0))];
                 state->pending[state->n_pending] = (struct pending_jump) {
                     .offset_loc = jump.offset_loc,
                     .target_pc = jump.target_pc,
+#if RV32_HAS(SYSTEM)
+                    .target_satp = jump.target_satp,
+#endif
                     .next = *head,
                 };
                 *head = state->n_pending++;
@@ -5731,6 +5655,29 @@ static void resolve_jumps(struct jit_state *state)
         patch_jump(state, jump.offset_loc, target_loc);
     }
 }
+
+#if JIT_RUN_CACHED
+/* Native code does not retain IR pointers. Its offset-map entry survives an
+ * IR-cache eviction and is retired by the same instruction/mapping fences.
+ * Probe that entry before paying for decoded-block lookup or reconstruction. */
+DISABLE_UBSAN_FUNC bool jit_run_cached(riscv_t *rv)
+{
+    struct jit_state *state = rv->jit_state;
+    const struct offset_map *entry =
+        offset_map_find(state, rv->PC, rv->csr_satp);
+    if (!entry)
+        return false;
+    assert(!rv->jit_entry_cycles);
+#if defined(__aarch64__)
+    __asm__ volatile("isb" ::: "memory");
+#endif
+    T1C_COUNT(native_entries, 1);
+    T1C_COUNT(cached_native_entries, 1);
+    ((exec_block_func_t) state->buf)(rv,
+                                     (uintptr_t) (state->buf + entry->offset));
+    return true;
+}
+#endif
 
 static void translate_chained_block(struct jit_state *state,
                                     riscv_t *rv,
@@ -5793,6 +5740,7 @@ static void translate_chained_block(struct jit_state *state,
 
 bool jit_translate(riscv_t *rv, block_t *block)
 {
+    T1C_COUNT(compile_requests, 1);
     struct jit_state *state = rv->jit_state;
     const struct offset_map *translated =
         offset_map_find(state, block->pc_start, BLOCK_SATP(block));

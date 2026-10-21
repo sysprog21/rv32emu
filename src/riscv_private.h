@@ -347,6 +347,12 @@ typedef struct {
     uint8_t dirty;     /* Cached dirty bit state (avoid repeated PTE writes) */
     uint8_t level;     /* Page level: 1=superpage (4MB), 2=4KB page */
 } tlb_entry_t;
+#if RV32_HAS(JIT)
+typedef struct {
+    uint32_t read_tag, write_tag;
+    uintptr_t addend;
+} jit_tlb_entry_t;
+#endif
 #endif
 
 typedef struct {
@@ -632,6 +638,11 @@ struct riscv_internal {
      * Reduces page table walk overhead for repeated memory accesses.
      */
     tlb_entry_t dtlb[TLB_SIZE];
+#if RV32_HAS(JIT)
+    /* Exact RAM tags fold permissions and dirty state into the hit test.
+     * An all-ones tag cannot equal a page base plus alignment bits. */
+    jit_tlb_entry_t jit_dtlb[TLB_SIZE];
+#endif
 
     /* Instruction TLB for caching instruction fetch translations.
      * Separate from dTLB for better hit rates and simpler permission checks.

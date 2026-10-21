@@ -354,6 +354,48 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
         (access);                \
         cycle = rv->csr_cycle;   \
     } while (0)
+#if RV32_HAS(JIT)
+/* A tag hit cannot trap, so it also avoids publishing/reloading the running
+ * cycle count around the MMU callback. Only the default MMU callbacks get
+ * tags (jit_dtlb_fill), so replacement I/O remains observable.
+ */
+#define MEM_SYSTEM_TAG(addr_, type) \
+    ((addr_) & (~(RV_PG_SIZE - 1) | (sizeof(type) - 1)))
+#define MEM_SYSTEM_READ(rv, addr, type, fn)                                 \
+    __extension__({                                                         \
+        uint32_t addr_ = (addr);                                            \
+        uint32_t idx_ = (addr_ >> RV_PG_SHIFT) & TLB_MASK;                  \
+        type value_;                                                        \
+        if (MEM_SYSTEM_TAG(addr_, type) == (rv)->jit_dtlb[idx_].read_tag) { \
+            memcpy(&value_, (void *) ((rv)->jit_dtlb[idx_].addend + addr_), \
+                   sizeof(value_));                                         \
+        } else {                                                            \
+            value_ = MEM_READ_CYCLES((rv)->io.mem_##fn(rv, addr_));         \
+        }                                                                   \
+        value_;                                                             \
+    })
+#define MEM_SYSTEM_WRITE(rv, addr, val, type, fn)                            \
+    do {                                                                     \
+        uint32_t addr_ = (addr);                                             \
+        uint32_t idx_ = (addr_ >> RV_PG_SHIFT) & TLB_MASK;                   \
+        type value_ = (val);                                                 \
+        if (MEM_SYSTEM_TAG(addr_, type) == (rv)->jit_dtlb[idx_].write_tag) { \
+            memcpy((void *) ((rv)->jit_dtlb[idx_].addend + addr_), &value_,  \
+                   sizeof(value_));                                          \
+        } else {                                                             \
+            MEM_WRITE_CYCLES((rv)->io.mem_##fn(rv, addr_, value_));          \
+        }                                                                    \
+    } while (0)
+#define MEM_READ_W(rv, addr) MEM_SYSTEM_READ(rv, addr, uint32_t, read_w)
+#define MEM_READ_S(rv, addr) MEM_SYSTEM_READ(rv, addr, uint16_t, read_s)
+#define MEM_READ_B(rv, addr) MEM_SYSTEM_READ(rv, addr, uint8_t, read_b)
+#define MEM_WRITE_W(rv, addr, val) \
+    MEM_SYSTEM_WRITE(rv, addr, val, uint32_t, write_w)
+#define MEM_WRITE_S(rv, addr, val) \
+    MEM_SYSTEM_WRITE(rv, addr, val, uint16_t, write_s)
+#define MEM_WRITE_B(rv, addr, val) \
+    MEM_SYSTEM_WRITE(rv, addr, val, uint8_t, write_b)
+#else
 #define MEM_READ_W(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_w(rv, addr))
 #define MEM_READ_S(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_s(rv, addr))
 #define MEM_READ_B(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_b(rv, addr))
@@ -363,6 +405,7 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
     MEM_WRITE_CYCLES((rv)->io.mem_write_s(rv, addr, val))
 #define MEM_WRITE_B(rv, addr, val) \
     MEM_WRITE_CYCLES((rv)->io.mem_write_b(rv, addr, val))
+#endif
 #endif
 
 /* True when the access just performed raised a trap.
@@ -661,6 +704,7 @@ RVOP(sfencevma, {
     RV_RESERVE_CLEAR(rv);
 #if RV32_HAS(SYSTEM)
     if (ir->rs1 == 0) {
+        T1C_COUNT(sfence_all, 1);
         /* Global flush: invalidate all TLB entries */
         mmu_tlb_flush_all(rv);
 #if RV32_HAS(JIT)
@@ -692,6 +736,7 @@ RVOP(sfencevma, {
 #endif
 #endif
     } else {
+        T1C_COUNT(sfence_page, 1);
         /* Selective flush: invalidate TLB entry for specific VA */
         uint32_t va = rv->X[ir->rs1];
         mmu_tlb_flush(rv, va);
@@ -762,6 +807,7 @@ RVOP(sfencevma, {
  * new code (e.g., dynamic linkers, JIT compilers running inside the guest).
  */
 RVOP(fencei, {
+    T1C_COUNT(fence_i, 1);
     PC += 4;
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
 #if RV32_HAS(T2C)
@@ -775,7 +821,8 @@ RVOP(fencei, {
      * block and drop all translated code, which also empties the T2C caches.
      * The guest issues it rarely, when it loads or patches code.
      */
-    cache_invalidate_all(rv->block_cache);
+    uint32_t n_invalidated UNUSED = cache_invalidate_all(rv->block_cache);
+    T1C_COUNT(fence_i_blocks, n_invalidated);
     jit_flush(rv);
 #if RV32_HAS(T2C)
     hart_unlock(rv, &rv->cache_lock);

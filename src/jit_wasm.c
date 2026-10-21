@@ -83,7 +83,6 @@ _Static_assert(WASM_MAX_BLOCKS <= UINT16_MAX + 1, "free_maps holds uint16_t");
 #define WASM_SLOT_SHIFT_LO 1
 #define WASM_SLOT_SHIFT_HI 11
 #define WASM_PAGE_BITS 10
-#define WASM_SATP_MIX 0x9e3779b1U /* golden-ratio multiplier */
 
 /* WebAssembly opcodes and types used by the emitter. */
 enum {
@@ -1129,11 +1128,9 @@ static uint32_t wasm_slot(uint32_t pc, uint32_t satp)
 }
 
 #if RV32_HAS(SYSTEM)
-static uint32_t wasm_page_slot(uint32_t va, uint32_t satp)
+static uint32_t wasm_page_slot(uint32_t va)
 {
-    return ((va >> RV_PG_SHIFT) ^
-            ((satp * WASM_SATP_MIX) >> (32 - WASM_PAGE_BITS))) &
-           ((1 << WASM_PAGE_BITS) - 1);
+    return (va >> RV_PG_SHIFT) & ((1 << WASM_PAGE_BITS) - 1);
 }
 #endif
 
@@ -1160,7 +1157,7 @@ static void wasm_retire(struct jit_state *state, struct wasm_map *map)
         const uint16_t index = map - state->maps + 1;
         state->free_maps[state->n_free++] = index - 1;
 #if RV32_HAS(SYSTEM)
-        uint16_t *link = &state->pages[wasm_page_slot(map->pc, map->satp)];
+        uint16_t *link = &state->pages[wasm_page_slot(map->pc)];
         while (*link != index) {
             assert(*link); /* every live map is in its bucket */
             link = &state->maps[*link - 1].next_in_page;
@@ -1716,7 +1713,7 @@ retry:;
                               .arena = region.arena};
 #if RV32_HAS(SYSTEM)
     map->satp = block->satp;
-    uint16_t *head = &state->pages[wasm_page_slot(map->pc, map->satp)];
+    uint16_t *head = &state->pages[wasm_page_slot(map->pc)];
     map->next_in_page = *head;
     *head = index + 1;
 #endif
@@ -1742,17 +1739,39 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
     }
 }
 
-bool jit_page_has_code(const struct jit_state *state,
-                       uint32_t va,
-                       uint32_t satp)
+void jit_retire_all(struct jit_state *state)
 {
-    for (uint16_t i = state->pages[wasm_page_slot(va, satp)]; i;
+    for (uint32_t i = 0; i < ARRAY_SIZE(state->pages); i++) {
+        while (state->pages[i])
+            wasm_retire(state, &state->maps[state->pages[i] - 1]);
+    }
+}
+
+static bool wasm_page_has_code_context(const struct jit_state *state,
+                                       uint32_t va,
+                                       uint32_t satp,
+                                       bool all_spaces)
+{
+    for (uint16_t i = state->pages[wasm_page_slot(va)]; i;
          i = state->maps[i - 1].next_in_page) {
         const struct wasm_map *map = &state->maps[i - 1];
-        if (map->satp == satp &&
+        if ((all_spaces || map->satp == satp) &&
             (map->pc >> RV_PG_SHIFT) == (va >> RV_PG_SHIFT))
             return true;
     }
     return false;
 }
+
+bool jit_page_has_code_any(const struct jit_state *state, uint32_t va)
+{
+    return wasm_page_has_code_context(state, va, 0, true);
+}
+
+bool jit_page_has_code(const struct jit_state *state,
+                       uint32_t va,
+                       uint32_t satp)
+{
+    return wasm_page_has_code_context(state, va, satp, false);
+}
+
 #endif

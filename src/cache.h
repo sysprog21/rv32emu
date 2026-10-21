@@ -81,8 +81,8 @@ void clear_cache_hot(const struct cache *cache, clear_func_t func);
  * @n_compiled: if not NULL, set to how many of them T2C compiled
  * @return: number of blocks invalidated
  *
- * This is used by SFENCE.VMA with rs1=0 (global flush) to invalidate
- * JIT-compiled blocks that may contain stale VA→PA mappings.
+ * Retained for future ASID-selective invalidation. Current SFENCE.VMA
+ * conservatively invalidates code across every retained address space.
  */
 uint32_t cache_invalidate_satp(struct cache *cache,
                                uint32_t satp,
@@ -91,11 +91,16 @@ uint32_t cache_invalidate_satp(struct cache *cache,
 /*
  * cache_invalidate_all - invalidate every block, in every address space
  * @cache: a pointer to target cache
+ * @n_compiled: if not NULL, receives the number with T2C functions
+ * @return: number of blocks invalidated
  *
- * For FENCE.I, after which any page may hold new instructions. Returns the
- * number of blocks invalidated.
+ * Used by FENCE.I and conservative SFENCE.VMA code retirement. The compiled
+ * count lets SFENCE skip execution-cache clears when none held T2C code.
  */
-uint32_t cache_invalidate_all(struct cache *cache);
+uint32_t cache_invalidate_all(struct cache *cache, uint32_t *n_compiled);
+
+/* Whether any retained address space has a decoded block on this VA page. */
+bool cache_has_va_any(const struct cache *cache, uint32_t va);
 
 /**
  * cache_invalidate_va - invalidate blocks within a VA page matching SATP
@@ -105,8 +110,7 @@ uint32_t cache_invalidate_all(struct cache *cache);
  * @n_compiled: if not NULL, set to how many of them T2C compiled
  * @return: number of blocks invalidated
  *
- * This is used by SFENCE.VMA with rs1!=0 (address-specific flush) to
- * invalidate JIT-compiled blocks in a specific virtual page.
+ * Retained for future address-space-selective invalidation of code pages.
  * Uses O(1) page-indexed lookup when BLOCK_CHAINING is enabled,
  * otherwise falls back to O(n) scan.
  */
@@ -136,7 +140,7 @@ uint32_t cache_invalidate_va(struct cache *cache,
 #define PAGE_INDEX_SIZE (1 << PAGE_INDEX_BITS)
 #endif /* RV32_HAS(BLOCK_CHAINING) */
 
-/* Buckets of the address-space index, which cache_invalidate_satp() walks */
+/* Live buckets used by per-SATP and all-space invalidation. */
 #define SATP_INDEX_BITS 8
 #define SATP_INDEX_SIZE (1 << SATP_INDEX_BITS)
 

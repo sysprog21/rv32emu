@@ -180,7 +180,7 @@ ifneq ($(CONFIG_ELF_LOADER),y)
 ifeq ($(CONFIG_Zicsr)$(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
 ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
 SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles \
-    check-system-trap-resume
+    check-system-trap-resume check-system-sfence-asid
 # Interrupts are polled between dispatches, and the interpreter chains a loop
 # without returning to the dispatcher, so only JIT builds deliver them there.
 ifeq ($(CONFIG_JIT),y)
@@ -350,6 +350,8 @@ check-$(1): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test,-k,$$(OUT)/$(1).bin,$(1),tail -n 1,$$(EXPECTED_$(1)))
 endef
 
+EXPECTED_system-sfence-asid = SYSTEM SFENCE ASID OK
+$(eval $(call system-asm-check-target,system-sfence-asid,rv32ia_zicsr))
 EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
 EXPECTED_system-interrupt-dispatch = SYSTEM interrupt dispatch OK

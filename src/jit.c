@@ -609,10 +609,10 @@ static inline uint32_t space_hash(uint32_t satp)
     return index_hash(satp, SPACE_INDEX_BITS);
 }
 
-static inline uint32_t page_hash(uint32_t va, uint32_t satp)
+static inline uint32_t page_hash(uint32_t va)
 {
-    return index_hash(((uint64_t) satp << 32) | (va >> RV_PG_SHIFT),
-                      PAGE_INDEX_BITS_JIT);
+    /* Group every address space's code on a VA page for all-ASID fences. */
+    return index_hash(va >> RV_PG_SHIFT, PAGE_INDEX_BITS_JIT);
 }
 #endif
 
@@ -669,7 +669,7 @@ static inline void offset_map_insert(struct jit_state *state, block_t *block)
     head = &state->space_index[space_hash(block->satp)];
     map_entry->next_in_space = *head;
     *head = idx;
-    head = &state->page_index[page_hash(block->pc_start, block->satp)];
+    head = &state->page_index[page_hash(block->pc_start)];
     map_entry->next_in_page = *head;
     *head = idx;
 #endif
@@ -718,15 +718,44 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
     }
 }
 
-bool jit_page_has_code(const struct jit_state *state,
-                       uint32_t va,
-                       uint32_t satp)
+void jit_retire_all(struct jit_state *state)
+{
+    T1C_COUNT(retire_calls, 1);
+#if JIT_LINK_ALL_EDGES
+    T1C_COUNT(retire_pending_slots, state->n_pending);
+    pending_reset(state, false);
+#endif
+    for (uint32_t i = 0; i < ARRAY_SIZE(state->space_index); i++) {
+        int32_t *link = &state->space_index[i];
+        while (*link >= 0) {
+            struct offset_map *entry = &state->offset_map[*link];
+            entry->retired = true;
+            *link = entry->next_in_space;
+        }
+    }
+    /* Every indexed native entry is now retired; do not accumulate dead
+     * entries in cross-space page probes between native-buffer flushes.
+     */
+    memset(state->page_index, -1, sizeof(state->page_index));
+}
+
+static bool jit_page_has_code_context(const struct jit_state *state,
+                                      uint32_t va,
+                                      uint32_t satp,
+                                      bool all_spaces)
 {
 #if !RV32_HAS(BLOCK_CHAINING)
     /* Blocks may then span pages, so any code of the address space may hold
      * instructions of this page.
      */
     (void) va;
+    if (all_spaces) {
+        for (uint32_t i = 0; i < ARRAY_SIZE(state->space_index); i++) {
+            if (state->space_index[i] >= 0)
+                return true;
+        }
+        return false;
+    }
     for (int32_t i = state->space_index[space_hash(satp)]; i >= 0;
          i = state->offset_map[i].next_in_space) {
         if (state->offset_map[i].satp == satp)
@@ -735,16 +764,28 @@ bool jit_page_has_code(const struct jit_state *state,
     return false;
 #else
     const uint32_t page = va & ~(RV_PG_SIZE - 1);
-    for (int32_t i = state->page_index[page_hash(va, satp)]; i >= 0;
+    for (int32_t i = state->page_index[page_hash(va)]; i >= 0;
          i = state->offset_map[i].next_in_page) {
         const struct offset_map *entry = &state->offset_map[i];
-        if (!entry->retired && entry->satp == satp &&
+        if (!entry->retired && (all_spaces || entry->satp == satp) &&
             (entry->pc & ~(RV_PG_SIZE - 1)) == page)
             return true;
     }
     return false;
 #endif
 }
+bool jit_page_has_code(const struct jit_state *state,
+                       uint32_t va,
+                       uint32_t satp)
+{
+    return jit_page_has_code_context(state, va, satp, false);
+}
+
+bool jit_page_has_code_any(const struct jit_state *state, uint32_t va)
+{
+    return jit_page_has_code_context(state, va, 0, true);
+}
+
 #endif
 
 #if !defined(__APPLE__)

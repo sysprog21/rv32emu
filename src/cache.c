@@ -85,10 +85,9 @@ typedef struct cache {
     struct hlist_head page_index[PAGE_INDEX_SIZE];
 #endif
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-    /* Address-space index for invalidation by satp, linked the same way. A full
-     * SFENCE.VMA, which Linux issues several times in the life of each process,
-     * then visits the blocks of one address space rather than every cached
-     * block, each a likely cache miss.
+    /* Live address-space index, linked the same way. Invalidated entries
+     * leave it, so repeated all-space fences visit only blocks decoded since
+     * the previous fence instead of every occupied cache slot.
      */
     struct hlist_head satp_index[SATP_INDEX_SIZE];
 #endif
@@ -355,11 +354,14 @@ void *cache_put(cache_t *cache, uint32_t key, void *value, uint32_t *freq)
             list_add(&replaced->list, &cache->list);
             cache->size++;
             cache->ghost_list_size--;
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
-            page_index_insert(cache, replaced);
-#endif
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-            satp_index_insert(cache, replaced);
+            /* An invalidated block already left the indexes; keep it out. */
+            if (!((const block_t *) replaced_value)->invalidated) {
+#if RV32_HAS(BLOCK_CHAINING)
+                page_index_insert(cache, replaced);
+#endif
+                satp_index_insert(cache, replaced);
+            }
 #endif
         }
         return NULL;
@@ -570,22 +572,31 @@ uint32_t cache_invalidate_satp(cache_t *cache,
     return count;
 }
 
-uint32_t cache_invalidate_all(cache_t *cache)
+uint32_t cache_invalidate_all(cache_t *cache, uint32_t *n_compiled)
 {
     uint32_t count = 0, compiled = 0;
-    cache_entry_t *entry = NULL;
-    list_for_each_entry (entry, &cache->list, list) {
-        block_t *block = (block_t *) entry->value;
-        if (!block || block->invalidated)
-            continue;
-        block_invalidate(block, &compiled);
-        entry_unindex(entry);
-        count++;
+    /* Invalidated entries leave the live indexes. Repeated fences visit only
+     * blocks decoded since the previous fence, never the whole cache list.
+     */
+    for (uint32_t i = 0; i < SATP_INDEX_SIZE; i++) {
+        cache_entry_t *entry;
+        struct hlist_node *next;
+        hlist_for_each_entry_safe (entry, next, &cache->satp_index[i],
+                                   satp_node) {
+            block_invalidate(entry->value, &compiled);
+            entry_unindex(entry);
+            count++;
+        }
     }
+    if (n_compiled)
+        *n_compiled = compiled;
     return count;
 }
 
-bool cache_has_va(const cache_t *cache, uint32_t va, uint32_t satp)
+static bool cache_has_va_context(const cache_t *cache,
+                                 uint32_t va,
+                                 uint32_t satp,
+                                 bool all_spaces)
 {
 #if RV32_HAS(BLOCK_CHAINING)
     const uint32_t va_page = va & ~(RV_PG_SIZE - 1);
@@ -594,15 +605,25 @@ bool cache_has_va(const cache_t *cache, uint32_t va, uint32_t satp)
         &cache->page_index[page_index_hash(va_page >> RV_PG_SHIFT)];
     hlist_for_each_entry (entry, head, page_node) {
         const block_t *block = entry->value;
-        if (block->satp == satp && !block->invalidated &&
+        if ((all_spaces || block->satp == satp) && !block->invalidated &&
             (block->pc_start & ~(RV_PG_SIZE - 1)) == va_page)
             return true;
     }
     return false;
 #else
-    (void) cache, (void) va, (void) satp;
+    (void) cache, (void) va, (void) satp, (void) all_spaces;
     return true;
 #endif
+}
+
+bool cache_has_va(const cache_t *cache, uint32_t va, uint32_t satp)
+{
+    return cache_has_va_context(cache, va, satp, false);
+}
+
+bool cache_has_va_any(const cache_t *cache, uint32_t va)
+{
+    return cache_has_va_context(cache, va, 0, true);
 }
 
 uint32_t cache_invalidate_va(cache_t *cache,

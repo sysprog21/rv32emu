@@ -606,7 +606,7 @@ static uint32_t csr_csrrw(riscv_t *rv,
      * has executed. This prevents the 'code' of RVOP from potentially
      * accessing a NULL ir.
      */
-    if (c == &rv->csr_satp)
+    if (c == &rv->csr_satp && *c != old_satp)
         need_clear_block_map = true;
 #endif
 #endif

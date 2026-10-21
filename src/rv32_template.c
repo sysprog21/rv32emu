@@ -715,22 +715,14 @@ RVOP(sfencevma, {
          */
         hart_lock(rv, &rv->cache_lock);
 #endif
-        /* Invalidate JIT blocks with current SATP, and stop reusing the code
-         * translated for it: a block rebuilt from the new mappings must not
-         * pick up what was translated from the old ones.
-         */
+        /* With no ASID filtering, a fence affects retained spaces too. */
         uint32_t n_compiled UNUSED;
-        cache_invalidate_satp(rv->block_cache, rv->csr_satp, &n_compiled);
-        jit_retire_space(rv->jit_state, rv->csr_satp);
+        cache_invalidate_all(rv->block_cache, &n_compiled);
+        jit_retire_all(rv->jit_state);
 #if RV32_HAS(T2C)
-        /* Only this address space's blocks were invalidated, so only its
-         * entries go, and only T2C-compiled blocks have any: clearing every
-         * entry would also drop the compiled code of other processes, and
-         * Linux issues this flush several times in the life of each process.
-         */
         if (n_compiled) {
-            jit_cache_clear_satp(rv->jit_cache, rv->csr_satp);
-            inline_cache_clear_satp(rv->inline_cache, rv->csr_satp);
+            jit_cache_clear(rv->jit_cache);
+            inline_cache_clear(rv->inline_cache);
         }
         hart_unlock(rv, &rv->cache_lock);
 #endif
@@ -746,34 +738,26 @@ RVOP(sfencevma, {
          * code: only this thread changes the indexes that answer that.
          */
         const bool has_code =
-            jit_page_has_code(rv->jit_state, va, rv->csr_satp) ||
+            jit_page_has_code_any(rv->jit_state, va) ||
             mmu_code_superpage(rv, va);
-        if (has_code || cache_has_va(rv->block_cache, va, rv->csr_satp)) {
+        if (has_code || cache_has_va_any(rv->block_cache, va)) {
 #if RV32_HAS(T2C)
             /* Hold cache_lock during invalidation to prevent race with T2C
              * compilation thread.
              */
             hart_lock(rv, &rv->cache_lock);
 #endif
-            uint32_t n_invalidated =
-                cache_invalidate_va(rv->block_cache, va, rv->csr_satp, NULL);
-            /* Blocks of other pages may still reach this page's old
-             * instructions: translated code through direct jumps, a T2C
-             * region spanning pages, and the interpreter through its links
-             * to the blocks it chains to. So when the page held any block or
-             * code, the whole address space goes. So does a flush in a 4 MiB
-             * region whose code came through a superpage: its leaf also maps
-             * the other pages.
+            /* Retire all spaces conservatively, including inbound links and
+             * regions that can enter the changed page from another page.
              */
-            if (has_code || n_invalidated) {
-                cache_invalidate_satp(rv->block_cache, rv->csr_satp, NULL);
-                jit_retire_space(rv->jit_state, rv->csr_satp);
+            uint32_t n_compiled UNUSED;
+            cache_invalidate_all(rv->block_cache, &n_compiled);
+            jit_retire_all(rv->jit_state);
 #if RV32_HAS(T2C)
-                jit_cache_clear_satp(rv->jit_cache, rv->csr_satp);
-                inline_cache_clear_satp(rv->inline_cache, rv->csr_satp);
-#endif
+            if (n_compiled) {
+                jit_cache_clear(rv->jit_cache);
+                inline_cache_clear(rv->inline_cache);
             }
-#if RV32_HAS(T2C)
             hart_unlock(rv, &rv->cache_lock);
 #endif
         }
@@ -821,7 +805,7 @@ RVOP(fencei, {
      * block and drop all translated code, which also empties the T2C caches.
      * The guest issues it rarely, when it loads or patches code.
      */
-    uint32_t n_invalidated UNUSED = cache_invalidate_all(rv->block_cache);
+    uint32_t n_invalidated UNUSED = cache_invalidate_all(rv->block_cache, NULL);
     T1C_COUNT(fence_i_blocks, n_invalidated);
     jit_flush(rv);
 #if RV32_HAS(T2C)

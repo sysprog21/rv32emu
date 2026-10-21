@@ -170,10 +170,11 @@ runs interpreted. Both tiers still come out slightly ahead of the interpreter
 there: in system builds a looping block compiles after 64 dispatches
 (`LOOP_THRESHOLD`), the interpreter profiles one chained branch in 32
 (`PROBE_INTERVAL`), the cache keeps 4096 blocks (`BLOCK_CACHE_CAPACITY_BITS`),
-and neither evicting a block, flushing a page without compiled code, nor
-flushing an address space scans the whole cache or the JIT's tables. Keying
-compiled code by physical page, so that a mapping flush keeps code whose page
-did not change, would turn this case into a clear gain.
+and those measurements used indexed per-address-space retirement. The
+SFENCE.VMA correctness follow-up below broadens retirement to every retained
+address space; these earlier measurements predate that change. Execution
+cache tables are cleared when compiled blocks were invalidated. Sharing
+compiled code by physical page remains a separate experiment.
 
 ## Continuous benchmarking
 
@@ -986,3 +987,130 @@ These are smoke checks for gross regressions, not statistical comparisons:
 | CoreMark | 4.897 / 3.685 s |
 | 300 fork/execs | 9.498 / 8.523 s |
 | gzip/MD5 pipeline | 1.721 / 1.177 s |
+
+
+## Unchanged SATP writes in the system interpreter
+
+On 2026-10-22, TODO task 2.9 changed `csr_csrrw` to request deferred block-map
+retirement only when the written SATP differs from its previous value. This
+matches the existing `csr_csrrs`/`csr_csrrc` guards and also covers `csrrwi`.
+The baseline includes the preceding interpreter FENCE.I fix (`18734ba`).
+Both binaries use `system_interpreter_defconfig`, `CC=gcc`,
+`CROSS_COMPILE=riscv64-linux-gnu-` and `ENABLE_ROOTFS_EXT4=0` on x86-64
+Linux 6.8.0-139, glibc 2.39. `make check tests` passed, including flat MMU
+kernels; RV32 libc-dependent guest C checks were explicitly skipped.
+
+Measured with:
+
+```sh
+python3 tests/system-boot.py \
+  --emulator before=/tmp/rv32emu-todo-satp-before \
+  --emulator after=build/rv32emu --cpu 0 --runs 5 \
+  --output build/system-boot-satp.json
+```
+
+The harness warmed each engine once, alternated order, and booted the same
+kernel/initrd. Host wall-clock seconds to login:
+
+| Pair | Before | After |
+| --- | ---: | ---: |
+| 1 | 8.534479 | 7.515850 |
+| 2 | 7.862725 | 7.855595 |
+| 3 | 7.873955 | 7.541753 |
+| 4 | 7.204627 | 7.808772 |
+| 5 | 10.144983 | 9.340663 |
+| Mean | 8.324154 | 8.012527 |
+
+The mean reduction is 0.311627 s (3.74%), with a paired Student-t 95%
+interval of [-0.491715, 1.114969] s (five differences, four degrees of
+freedom). The interval includes zero: **no measured speedup is claimed**.
+The change is retained as a consistency fix, not an accepted performance win.
+
+SHA-256 identities:
+
+* Kernel: `690557ad99324b44a364ab9db0fe376bc4ad8834cf7128825a25153ea6190731`
+* Initrd: `7b6ffc0c8876ec8a72a4e3d245c0111ca18bdd1d8cf26b3c253e90cd8448222f`
+* Before: `af7b19732740914bd150845d833aa0f4a5a74250dde33b3070f10c0517ca1edb`
+* After: `a2d9bae6b5f27c9b1df72abc1caa5f779a7674ac17cd936b75e42c5368118736`
+
+
+## SFENCE.VMA across retained address spaces
+
+TODO task 0.2 (2026-10-22) fixes stale decoded/native code surviving a fence
+issued from another SATP. All operand forms now conservatively retire code
+across retained address spaces, including native entries whose IR was evicted.
+VA-only page indexes keep data-only selective fences cheap with page-bounded
+blocks. Live SATP indexes avoid scanning already-invalidated IR slots; native
+retirement clears pending links and its retired page index. T2C cache clears
+remain locked and occur only when compiled blocks were invalidated.
+
+The baseline is `efb5369`; both timing binaries use `system_defconfig`,
+`CC=gcc` (Ubuntu GCC 14.2.0), `CROSS_COMPILE=riscv64-linux-gnu-` and
+`ENABLE_ROOTFS_EXT4=0`, on x86-64 Linux 6.8.0-139, CPU 0. Both use the same
+kernel/initrd. The full checks pass in S-INT, S-T1C and S-T2C. Each of the
+four `START_CASE` regression variants fails independently on the baseline.
+The revised test uses 4 KiB code leaves, exact root/ASID recycling, a new root
+with the same ASID, and a remapped global page. Emscripten was unavailable,
+so the corresponding Wasm backend changes were reviewed but not executed.
+
+Final binaries were measured after the review refinements. Preliminary
+samples taken before those refinements are excluded. Boot-to-login times
+come from `tests/system-boot.py --cpu 0 --runs 5`, after one warmup per
+engine with alternating order. Seconds:
+
+| Pair | Before | After |
+| --- | ---: | ---: |
+| 1 | 2.254933 | 2.410814 |
+| 2 | 2.241969 | 2.316780 |
+| 3 | 2.163948 | 2.892789 |
+| 4 | 3.069782 | 2.991331 |
+| 5 | 2.774704 | 2.803782 |
+| Mean | 2.501067 | 2.683099 |
+
+The paired 95% interval for time reduction is [-0.575870, 0.211806] s
+(Student-t, four degrees of freedom). No boot-time change is established.
+
+`tests/system-bench.sh <emulator> 1` ran three paired times, alternating
+engine order (before/after, after/before, before/after), with each invocation
+pinned to CPU 0 using `taskset`. Milliseconds, including all raw samples:
+
+| Workload | Before samples | After samples | Before mean | After mean | Paired reduction 95% interval |
+| --- | --- | --- | ---: | ---: | --- |
+| boot | 2325, 2595, 2607 | 2759, 2696, 2430 | 2509.000 | 2628.333 | [-879.262, 640.595] |
+| dhrystone | 14213, 13634, 13775 | 14027, 14425, 14387 | 13874.000 | 14279.667 | [-1697.806, 886.473] |
+| coremark | 3842, 4357, 4521 | 4115, 4096, 4276 | 4240.000 | 4162.333 | [-676.993, 832.327] |
+| fork-exec | 12118, 10311, 9378 | 10134, 11122, 9657 | 10602.333 | 10304.333 | [-3388.834, 3984.834] |
+| gzip-md5 | 1449, 1257, 1510 | 1969, 1495, 1143 | 1405.333 | 1535.667 | [-1256.134, 995.467] |
+
+These three-pair intervals use Student-t with two degrees of freedom. Every
+interval includes zero: no workload shows an established speedup or
+regression. The intervals are broad and do not exclude meaningful costs.
+The change is retained for correctness, not as a performance win.
+
+Separate `T1C_STATS=1` builds ran `tests/system-boot.py --require-stats
+--cpu 0 --runs 2` (one warmup per engine). These are diagnostic counts,
+not timing samples:
+
+| Counter | Before samples | After samples |
+| --- | --- | --- |
+| retire_calls | 298, 301 | 325, 324 |
+| fence_i | 607, 607 | 604, 604 |
+| fence_i_blocks | 49036, 60709 | 48505, 55170 |
+| sfence_all | 298, 301 | 295, 300 |
+| sfence_page | 285763, 285860 | 285900, 285831 |
+| decoded_blocks | 873763, 880428 | 885274, 880385 |
+| dispatches | 9382230, 9391525 | 10418070, 10390705 |
+
+SHA-256 identities from the timing report:
+
+* Kernel: `690557ad99324b44a364ab9db0fe376bc4ad8834cf7128825a25153ea6190731`
+* Initrd: `7b6ffc0c8876ec8a72a4e3d245c0111ca18bdd1d8cf26b3c253e90cd8448222f`
+* Before emulator: `64f1c17a840794504e21efdbc0623265a337bd035a2cb0586c5f92e45dabb4c8`
+* After emulator: `28ba77d06d66872501d960205ca695d4acd18ef3dddab520a89c2b86007d773f`
+
+Raw reports remain in `build/system-boot-sfence.json`,
+`build/system-bench-sfence.json`, `build/system-counters-sfence-before.json`
+and `build/system-counters-sfence.json`. To reproduce, build the baseline
+in a worktree at `efb5369`, build the changed tree with the same flags,
+then run the commands above using the two binary paths. Per-SATP invalidation
+APIs are intentionally retained for future ASID filtering and Wasm fixtures.

@@ -205,7 +205,7 @@ void jit_retire_space(struct jit_state *state, uint32_t satp);
 
 /* Whether any code translated for address space satp starts in the page of
  * va. Such code may be the target of direct jumps from other pages, so a flush
- * of the page has to retire the whole address space.
+ * of the page conservatively retires every retained address space.
  */
 bool jit_page_has_code(const struct jit_state *state,
                        uint32_t va,
@@ -215,6 +215,10 @@ bool jit_page_has_code(const struct jit_state *state,
  * address space may hold new instructions.
  */
 void jit_flush(riscv_t *rv);
+
+/* Retire live native entries in every retained address space. */
+void jit_retire_all(struct jit_state *state);
+bool jit_page_has_code_any(const struct jit_state *state, uint32_t va);
 #endif
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 
@@ -263,7 +267,7 @@ static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
  *
  * Invalidation: Inline cache entries are cleared on:
  * - Block eviction (inline_cache_clear_key in emulate.c)
- * - SFENCE.VMA (inline_cache_clear_satp in rv32_template.c)
+ * - SFENCE.VMA (inline_cache_clear in rv32_template.c)
  * - FENCE.I / code_cache_flush (inline_cache_clear in jit.c)
  *
  * On cache hit, ISB is skipped on ARM64 since we already executed this target

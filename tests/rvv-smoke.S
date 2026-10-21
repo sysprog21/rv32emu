@@ -1,5 +1,8 @@
 # RISC-V RVV smoke test for rv32emu.
 
+# Nothing sets gp, so la must not relax to a gp-relative addi.
+.option norelax
+
 .org 0
 .global _start
 

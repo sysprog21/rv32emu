@@ -1097,6 +1097,10 @@ typedef struct rv_insn {
      */
     struct rv_insn *branch_taken, *branch_untaken;
     branch_history_table_t *branch_table;
+#if RV32_T1C_STATS_ENABLED
+    /* Last, so the prefix shared with opcode_fuse_t is unchanged. */
+    struct block *stats_owner;
+#endif
 } rv_insn_t;
 
 /* The record after @ir in a finalized block, or NULL after the last one.

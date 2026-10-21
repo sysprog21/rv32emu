@@ -11,6 +11,20 @@
 #include "riscv_private.h"
 #include "utils.h"
 
+/* User mode and T1-only system mode link direct branches whether or not the
+ * interpreter has taken the edge yet, and record a jump whose target is not
+ * compiled so that the target's translation can patch it later.
+ */
+#define JIT_LINK_ALL_EDGES (!RV32_HAS(SYSTEM) || !RV32_HAS(T2C))
+
+/* T1-only system builds dispatch straight to live native code. */
+#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(JIT) && !RV32_HAS(T2C) && \
+    !defined(__EMSCRIPTEN__)
+#define JIT_RUN_CACHED 1
+#else
+#define JIT_RUN_CACHED 0
+#endif
+
 /* Jump condition codes for branch instruction code generation.
  * Values match x86-64 Jcc opcodes; on Arm64, emit_jcc_offset() maps these
  * to equivalent condition codes. Used by both architectures as symbolic
@@ -70,6 +84,9 @@ struct indirect_site;
 struct pending_jump {
     uint32_t offset_loc;
     uint32_t target_pc;
+#if RV32_HAS(SYSTEM)
+    uint32_t target_satp;
+#endif
     int32_t next;
 };
 
@@ -94,7 +111,7 @@ struct jit_state {
     int n_blocks;
     struct jump *jumps;
     int n_jumps;
-#if !RV32_HAS(SYSTEM)
+#if JIT_LINK_ALL_EDGES
     /* Pending jumps, chained by target as offset_index chains blocks */
     int32_t pending_index[1 << OFFSET_INDEX_BITS];
     struct pending_jump *pending;
@@ -171,6 +188,10 @@ static inline void jit_block_release(riscv_t *rv, block_t *block)
     (void) block;
 #endif
 }
+#if JIT_RUN_CACHED
+/* Run a live native entry without requiring its decoded block to be cached. */
+bool jit_run_cached(riscv_t *rv);
+#endif
 bool jit_translate(riscv_t *rv, block_t *block);
 /* Release a block's IR records (defined in emulate.c). */
 void block_free_irs(riscv_t *rv, block_t *block);

@@ -48,6 +48,8 @@ build/const-coperand
 build/amo-align
 build/lrsc
 build/jit-interp-diff*
+build/system-*
+build/t1c-perf/
 build/*/test-*
 *.a
 *.o

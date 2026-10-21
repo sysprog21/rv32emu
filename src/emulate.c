@@ -581,8 +581,10 @@ static uint32_t csr_csrrw(riscv_t *rv,
 
 #if RV32_HAS(SYSTEM)
     /* Flush TLB when SATP actually changes: address space changed */
-    if (c == &rv->csr_satp && *c != old_satp)
+    if (c == &rv->csr_satp && *c != old_satp) {
+        T1C_COUNT(satp_writes, 1);
         mmu_tlb_flush_all(rv);
+    }
 #if !RV32_HAS(JIT)
     /*
      * guestOS's process might have same VA, so block map cannot be reused
@@ -647,6 +649,7 @@ static uint32_t csr_csrrs(riscv_t *rv,
      * and, in the interpreter, the blocks decoded under the old mappings.
      */
     if (c == &rv->csr_satp && *c != old_satp) {
+        T1C_COUNT(satp_writes, 1);
         mmu_tlb_flush_all(rv);
 #if !RV32_HAS(JIT)
         need_clear_block_map = true;
@@ -701,6 +704,7 @@ static uint32_t csr_csrrc(riscv_t *rv,
      * and, in the interpreter, the blocks decoded under the old mappings.
      */
     if (c == &rv->csr_satp && *c != old_satp) {
+        T1C_COUNT(satp_writes, 1);
         mmu_tlb_flush_all(rv);
 #if !RV32_HAS(JIT)
         need_clear_block_map = true;
@@ -993,8 +997,19 @@ static uint32_t peripheral_update_ctr = 64;
  * than per instruction.
  */
 #if RV32_HAS(SYSTEM)
+#if RV32_T1C_STATS_ENABLED
+#define T1C_INTERPRET(ir)                                \
+    do {                                                 \
+        T1C_COUNT(interp_pc_syncs, 1);                   \
+        if ((ir)->stats_owner && (ir)->stats_owner->hot) \
+            T1C_COUNT(hot_interp_pc_syncs, 1);           \
+    } while (0)
+#else
+#define T1C_INTERPRET(ir) ((void) 0)
+#endif
 #define RVOP_SYNC_PC(rv, PC) \
     do {                     \
+        T1C_INTERPRET(ir);   \
         (rv)->PC = (PC);     \
     } while (0)
 #else
@@ -2439,6 +2454,9 @@ retranslate:
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, insn);
             break;
         }
+#if RV32_T1C_STATS_ENABLED
+        ir->stats_owner = block;
+#endif
         ir->impl = insn_handler(ir);
         ir->pc = block->pc_end; /* compute the end of pc */
         block->pc_end += is_compressed(insn) ? 2 : 4;
@@ -3408,6 +3426,16 @@ static block_t *block_find_or_translate(riscv_t *rv
     block_t *next_blk = lookup.value;
     *freq = lookup.freq;
     /* discard cache if satp mismatch or block was invalidated by SFENCE.VMA */
+#if RV32_T1C_STATS_ENABLED
+    if (!next_blk)
+        T1C_COUNT(lookup_cold, 1);
+    else if (next_blk->satp != rv->csr_satp)
+        T1C_COUNT(lookup_satp, 1);
+    else if (next_blk->invalidated)
+        T1C_COUNT(lookup_invalidated, 1);
+    else
+        T1C_COUNT(lookup_hits, 1);
+#endif
     if (!block_matches_context(rv, next_blk))
         next_blk = NULL;
 #endif
@@ -3436,6 +3464,13 @@ static block_t *block_find_or_translate(riscv_t *rv
 
     if (unlikely(!block_translate(rv, next_blk)))
         return NULL;
+    T1C_COUNT(decoded_blocks, 1);
+#if RV32_T1C_STATS_ENABLED
+    if (rv->priv_mode == RV_PRIV_U_MODE)
+        T1C_COUNT(decoded_user, 1);
+    else
+        T1C_COUNT(decoded_kernel, 1);
+#endif
 #if RV32_HAS(SYSTEM)
     mmu_note_code(rv, next_blk->pc_start, next_blk->pc_end);
 #endif
@@ -3605,12 +3640,21 @@ static block_t *block_find_or_translate(riscv_t *rv
  * blocks at every full SFENCE.VMA, which Linux issues several times in the life
  * of each process. Compiling a loop the second time it runs then costs more
  * than it saves whenever many short processes run, as shell scripts start;
- * waiting a little longer keeps the compiler for loops that last.
+ * waiting a little longer keeps the compiler for loops that last. Native
+ * T1-only system builds link successors compiled later, so eight loop
+ * dispatches or 64 ordinary ones amortize translation; T2C and WebAssembly
+ * keep their profiling policy.
  */
-#if RV32_HAS(SYSTEM)
+#if RV32_HAS(SYSTEM) && !RV32_HAS(T2C) && !defined(__EMSCRIPTEN__)
+#define LOOP_THRESHOLD 8
+#define BLOCK_THRESHOLD 64
+#elif RV32_HAS(SYSTEM)
 #define LOOP_THRESHOLD 64
 #else
 #define LOOP_THRESHOLD 2
+#endif
+#ifndef BLOCK_THRESHOLD
+#define BLOCK_THRESHOLD THRESHOLD
 #endif
 
 static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
@@ -3624,7 +3668,7 @@ static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
     if (unlikely(freq >= LOOP_THRESHOLD && block->has_loops))
         return true;
     /* using frequency exceeds predetermined threshold */
-    if (unlikely(freq >= THRESHOLD))
+    if (unlikely(freq >= BLOCK_THRESHOLD))
         return true;
     return false;
 }
@@ -3736,6 +3780,7 @@ static DISABLE_UBSAN_FUNC void run_t1_block(riscv_t *rv,
                                             struct jit_state *state,
                                             const block_t *block)
 {
+    T1C_COUNT(native_entries, 1);
 #if defined(__EMSCRIPTEN__)
     (void) state;
     jit_wasm_run(rv, block);
@@ -3784,6 +3829,7 @@ void rv_step(void *arg)
 
     /* loop until hitting the cycle target or hart is halted */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
+        T1C_COUNT(dispatches, 1);
 #if defined(__EMSCRIPTEN__)
         if (rv->csr_cycle - wasm_clock_cycle >= (1U << 15) ||
             !(++wasm_dispatches & 255)) {
@@ -3822,6 +3868,14 @@ void rv_step(void *arg)
                 break;
             }
             prev = NULL; /* Reset to avoid mis-chaining across unwind */
+            continue;
+        }
+#endif
+
+#if JIT_RUN_CACHED
+        if (jit_run_cached(rv)) {
+            settle_trap(rv);
+            prev = NULL;
             continue;
         }
 #endif
@@ -4164,6 +4218,11 @@ static void __trap_handler(riscv_t *rv)
     assert(ir);
 
     const uint32_t depth = rv->trap_cnt;
+#if RV32_T1C_STATS_ENABLED
+    const uint32_t cause =
+        RV_PRIV_IS_U_OR_S_MODE() ? rv->csr_scause : rv->csr_mcause;
+    const uint32_t cause_index = T1C_CAUSE_INDEX(cause);
+#endif
     /* A nested trap overwrites last_csr_sepc, so restore the one of this level
      * for CHECK_PENDING_SIGNAL after this level returns.
      */
@@ -4193,6 +4252,8 @@ static void __trap_handler(riscv_t *rv)
         if (!insn)
             break;
 
+        T1C_COUNT(trap_instructions, 1);
+        T1C_COUNT(trap_insns[cause_index], 1);
         rv_decode(ir, insn);
         reloc_enable_mmu_jalr_addr = rv->PC;
 
@@ -4260,13 +4321,14 @@ static void _trap_handler(riscv_t *rv)
     if (RV_PRIV_IS_U_OR_S_MODE()) {
         const uint32_t sstatus_sie =
             (rv->csr_sstatus & SSTATUS_SIE) >> SSTATUS_SIE_SHIFT;
-        rv->csr_sstatus |= (sstatus_sie << SSTATUS_SPIE_SHIFT);
-        rv->csr_sstatus &= ~(SSTATUS_SIE);
-        rv->csr_sstatus |= (rv->priv_mode << SSTATUS_SPP_SHIFT);
+        rv->csr_sstatus &= ~(SSTATUS_SPIE | SSTATUS_SIE | SSTATUS_SPP);
+        rv->csr_sstatus |= (sstatus_sie << SSTATUS_SPIE_SHIFT) |
+                           (rv->priv_mode << SSTATUS_SPP_SHIFT);
         rv->priv_mode = RV_PRIV_S_MODE;
         base = rv->csr_stvec & ~0x3;
         mode = rv->csr_stvec & 0x3;
         cause = rv->csr_scause;
+        T1C_COUNT(traps[T1C_CAUSE_INDEX(cause)], 1);
         rv->csr_sepc = rv->PC;
 #if RV32_HAS(SYSTEM)
         rv->last_csr_sepc = rv->csr_sepc;
@@ -4295,13 +4357,14 @@ static void _trap_handler(riscv_t *rv)
     } else { /* machine */
         const uint32_t mstatus_mie =
             (rv->csr_mstatus & MSTATUS_MIE) >> MSTATUS_MIE_SHIFT;
-        rv->csr_mstatus |= (mstatus_mie << MSTATUS_MPIE_SHIFT);
-        rv->csr_mstatus &= ~(MSTATUS_MIE);
-        rv->csr_mstatus |= (rv->priv_mode << MSTATUS_MPP_SHIFT);
+        rv->csr_mstatus &= ~(MSTATUS_MPIE | MSTATUS_MIE | MSTATUS_MPP);
+        rv->csr_mstatus |= (mstatus_mie << MSTATUS_MPIE_SHIFT) |
+                           (rv->priv_mode << MSTATUS_MPP_SHIFT);
         rv->priv_mode = RV_PRIV_M_MODE;
         base = rv->csr_mtvec & ~0x3;
         mode = rv->csr_mtvec & 0x3;
         cause = rv->csr_mcause;
+        T1C_COUNT(traps[T1C_CAUSE_INDEX(cause)], 1);
         rv->csr_mepc = rv->PC;
         if (!rv->csr_mtvec) { /* in case CSR is not configured */
 #if RV32_HAS(SYSTEM)

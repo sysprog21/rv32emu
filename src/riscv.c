@@ -6,6 +6,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,6 +56,34 @@
 #include "cache.h"
 #include "jit.h"
 #define CODE_CACHE_SIZE (4 * 1024 * 1024)
+#endif
+
+#if RV32_T1C_STATS_ENABLED
+struct t1c_stats rv_t1c_stats;
+static void t1c_print_array(const char *name, const uint64_t *v, unsigned n)
+{
+    fprintf(stderr, ",\"%s\":[", name);
+    for (unsigned i = 0; i < n; i++)
+        fprintf(stderr, "%s%" PRIu64, i ? "," : "", v[i]);
+    fputc(']', stderr);
+}
+
+void rv_t1c_stats_report(uint64_t guest_cycles)
+{
+    if (rv_t1c_stats.reported)
+        return;
+    rv_t1c_stats.reported = true;
+    fprintf(stderr, "T1C_STATS {\"guest_cycles\":%" PRIu64, guest_cycles);
+#define T1C_PRINT_FIELD(name) \
+    fprintf(stderr, ",\"" #name "\":%" PRIu64, rv_t1c_stats.name);
+    T1C_STATS_FIELDS(T1C_PRINT_FIELD)
+#undef T1C_PRINT_FIELD
+    t1c_print_array("traps", rv_t1c_stats.traps,
+                    ARRAY_SIZE(rv_t1c_stats.traps));
+    t1c_print_array("trap_insns", rv_t1c_stats.trap_insns,
+                    ARRAY_SIZE(rv_t1c_stats.trap_insns));
+    fputs("}\n", stderr);
+}
 #endif
 
 #define BLOCK_IR_MAP_CAPACITY_BITS 10
@@ -1006,6 +1035,10 @@ static void capture_keyboard_input(void)
 extern riscv_t *rv;
 static void rv_async_block_clear(void)
 {
+#if RV32_T1C_STATS_ENABLED
+    if (rv)
+        rv_t1c_stats_report(rv->csr_cycle);
+#endif
 #if !RV32_HAS(JIT)
     if (rv && rv->block_map.size)
         block_map_clear(rv);
@@ -1084,6 +1117,10 @@ riscv_t *rv_create(riscv_user_t rv_attr)
     if (!rv)
         return NULL;
     assert(rv);
+#if RV32_T1C_STATS_ENABLED
+    /* Each instance reports its own counters once. */
+    memset(&rv_t1c_stats, 0, sizeof(rv_t1c_stats));
+#endif
 
 #if RV32_HAS(SYSTEM_MMIO)
     /* register cleaning callback for CTRL+a+x exit */
@@ -1606,6 +1643,9 @@ static void block_list_clear(riscv_t *rv)
 void rv_delete(riscv_t *rv)
 {
     assert(rv);
+#if RV32_T1C_STATS_ENABLED
+    rv_t1c_stats_report(rv->csr_cycle);
+#endif
     vm_attr_t *attr = PRIV(rv);
 
 #if RV32_HAS(VIRTIO_SND)

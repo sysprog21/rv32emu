@@ -92,23 +92,7 @@ trap:
     rdinstret s5
     sret
 
-fail:
-    la a0, failure
-print:
-    li t1, 0xf4000000
-1:
-    lbu t0, 0(a0)
-    beqz t0, stop
-    sb t0, 0(t1)
-    addi a0, a0, 1
-    j 1b
-stop:
-    li a7, 0x53525354
-    li a6, 0
-    li a0, 0
-    li a1, 0
-    ecall
-    j stop
+#include "system-exit.inc"
 success: .asciz "SYSTEM trap cycles OK\n"
 failure: .asciz "SYSTEM trap cycles FAIL\n"
 .balign 4

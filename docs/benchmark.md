@@ -828,3 +828,161 @@ region register caching applies only to user mode.
   IMUL, named opcodes). An exit-time dump of the code cache over 65
   deterministic guest programs, and a system-mode kernel, is identical
   before and after those changes.
+
+## System T1C boot performance
+
+`tests/system-boot.py` times from process launch through `buildroot login:`
+using a pseudo-terminal and the host monotonic clock. It fails on an incomplete
+boot, interleaves engines, discards warmups, and records raw times, commands,
+and binary/image SHA-256 hashes. QEMU includes its OpenSBI startup. These are
+warm host file-cache measurements; neither engine uses an offline artifact.
+
+```sh
+# Build the baseline and keep its binary, then build the change.
+git checkout c9b22c0
+make distclean && make system_defconfig
+make -j8 ENABLE_ROOTFS_EXT4=0
+cp build/rv32emu build/rv32emu-before
+git checkout -
+make -j8 ENABLE_ROOTFS_EXT4=0
+python3 tests/system-boot.py \
+    --emulator before=build/rv32emu-before \
+    --emulator after=build/rv32emu \
+    --qemu /path/to/qemu-system-riscv32 \
+    --cpu 6 --runs 7 --output build/system-boot.json
+```
+
+Measured on an AMD Ryzen Threadripper 2990WX, GCC 13, `-O2` with LTO,
+512 MiB guest RAM, the prebuilt Linux Image and rootfs.cpio, pinned to CPU 6,
+seven interleaved runs:
+
+| Engine | Median boot to login |
+| --- | ---: |
+| T1C before (c9b22c0) | 3.298 s |
+| Optimized T1C | 2.281 s |
+| QEMU 11.0.2 TCG, virt, default firmware | 2.411 s |
+
+T1C takes 30.8% less time (1.45x faster), and `perf stat` counts about 33%
+fewer host cycles and instructions. Other batches on this host differed by
+tens of milliseconds, and QEMU varied between roughly 2.37 and 2.72 s, so
+compare builds only within one interleaved batch. QEMU runs its own virt
+machine and firmware rather than an identical emulated platform.
+
+### Changes
+
+Before these changes, a `perf record -e cycles:u` boot profile spent only 8.4%
+of samples in native guest code. MMU translation took 7.8%, interpreter loads
+and stores 12.6%, block lookup 5.4%, and the inlined dispatcher 14.4%.
+
+* Each hart caches separate read/write RAM tags and a host address addend
+  alongside the architectural dTLB. Only complete RAM pages with sufficient
+  permissions get a tag; writable tags also require the PTE dirty bit, so the
+  first write still sets it through the slow path. Comparing the tag with the
+  virtual page plus alignment bits proves all those conditions. MMIO, partial
+  RAM pages, misalignment and misses keep their checked slow paths. SATP
+  changes, selective fences, superpage invalidation and replacement clear the
+  tags with the dTLB.
+* The x86-64 native load/store probe uses one conditional branch instead of up
+  to six. In JIT builds, the interpreter tier shares the tags and skips
+  callback dispatch, translation, and cycle-count publication on a hit. Custom I/O callbacks keep
+  their original path. The Arm64 native emitter keeps its existing probe.
+* T1-only system blocks emit direct edges before their successors are known.
+  Later compilations patch pending edges keyed by both PC and SATP. Retiring
+  any address space discards every pending edge, so retired sources cannot be
+  relinked; keeping other spaces' edges measured no faster (below).
+* Before looking up decoded IR, the T1-only system dispatcher checks the native
+  offset map by PC and SATP, and that lookup is inlined into its callers. A live
+  entry runs directly even after its decoded block was evicted. Generated code
+  holds no IR pointers; full and selective mapping fences retire native entries,
+  and FENCE.I resets the native cache. Interrupt checks still precede each
+  dispatcher entry. T2C and WebAssembly keep their existing dispatch paths and
+  compile thresholds.
+* With smaller probes and late linking, T1-only system compilation pays off at
+  eight loop dispatches or 64 ordinary dispatches. User-mode and T2C thresholds
+  keep their previous policy. Pending links add a bounded 1 MiB allocation and
+  a 64 KiB index; RAM tags add 1 KiB per hart on 64-bit hosts.
+
+These experiments were measured in interleaved batches and dropped because
+they did not help:
+
+| Experiment | Control / experiment median |
+| --- | ---: |
+| Interpreter handoff at hot block heads | 2.364 / 2.364 s |
+| Keep pending links from other SATPs during retirement | 2.332 / 2.342 s |
+| Include SATP in decoded-block cache keys | 2.340 / 2.338 s |
+| Content-keyed single-instruction trap decode cache | 2.394 / 2.417 s |
+| Dispatch outermost interrupts through cached/T1 execution | 2.331 / 2.329 s |
+| Also unwind outermost page faults before their handlers | 2.362 / 2.379 s |
+| Keep x86 registers on RAM hits, spill/reload on misses | 2.282 / 2.278 s |
+| 256-entry native offset-map dispatch cache | 2.300 / 2.302 s |
+| Compile after 4 loop / 16 ordinary dispatches | 2.295 / 2.579 s |
+| Compile after 8 loop / 16 ordinary dispatches | 2.295 / 2.589 s |
+
+Lower thresholds raised compilation costs substantially. Simply growing the
+TLB, adding a block lookup cache, or keeping code through fences with
+snapshots did not consistently help either.
+
+### Counters
+
+```sh
+make -j8 ENABLE_ROOTFS_EXT4=0 T1C_STATS=1
+python3 tests/system-boot.py --emulator stats=build/rv32emu \
+    --require-stats --cpu 6 --runs 2 --output build/system-counters.json
+make -j8 ENABLE_ROOTFS_EXT4=0 T1C_STATS=0
+```
+
+The diagnostic build prints a `T1C_STATS` JSON object on serial-monitor exit
+or hart deletion, and the boot runner records it outside the measured
+interval. The counts are taken shortly after login, and OS boot work and
+interrupt counts vary between runs. Timing comparisons use `T1C_STATS=0`,
+which removes the counters and diagnostic IR-owner pointers.
+
+A boot before native dispatch recorded 10.29 million block lookups and 9,347
+compilation requests; after it, 3.01 million lookups and about 5,200 requests,
+with about 7.39 million native entries through the new probe. Both ran about
+300 million guest cycles and 1,025 supervisor timer interrupts. The
+single-instruction trap interpreter still decodes about 20 million
+instructions per boot, split roughly into 6.6 M instruction-fault, 4.4 M
+load-fault, 4.0 M store-fault, 4.8 M timer-interrupt and 0.1 M
+external-interrupt instructions. Changing asynchronous interrupt dispatch or
+keeping host registers across MMU probes remains future work.
+
+### Trap state
+
+Trap entry used to OR the saved interrupt-enable and previous-privilege bits
+into their old values, and SRET/MRET ORed the saved enable back into SIE/MIE.
+Entry now replaces SPIE/SPP (and MPIE/MPP), and return replaces SIE (and MIE),
+as the [RISC-V privileged specification](https://docs.riscv.org/reference/isa/priv/supervisor.html)
+requires.
+
+### Validation
+
+* `system-mmu-cache.S` covers signed and unsigned narrow loads, narrow stores,
+  colliding VPNs, dirty PTE updates, and one compiled load/store loop across a
+  data-page remap.
+* `system-trap-resume.S` checks that SRET restores SIE from SPIE, that a
+  U-mode trap records SPP and SPIE, and load/store/AMO and instruction-page
+  fault resolution with an exact retry.
+* `system-jit-eviction.S` runs 8,193 unique blocks between native-loop calls,
+  then checks code remapping with selective SFENCE.VMA and code replacement
+  with FENCE.I after IR eviction.
+* `system-interrupt-dispatch.S` checks repeated timer interrupts returning into
+  a compiled loop, live registers, SPP, and a nested exception leaving SIE
+  clear. Interrupts are polled only between dispatches, and the system
+  interpreter chains a running loop without returning there, so this check runs
+  only in JIT builds.
+
+These pass in T1C, T2C and UBSan system builds; the interpreter build runs all
+but the interrupt check. The Arm64 system build cross-compiles, but QEMU-user
+8.2.2 crashes on demand-paged RAM with both the original and changed binaries,
+so it was not run.
+
+One run of each `tests/system-bench.sh` workload, original / optimized T1C.
+These are smoke checks for gross regressions, not statistical comparisons:
+
+| Workload | Original / optimized wall time |
+| --- | ---: |
+| Dhrystone, 20 million runs | 17.379 / 13.369 s |
+| CoreMark | 4.897 / 3.685 s |
+| 300 fork/execs | 9.498 / 8.523 s |
+| gzip/MD5 pipeline | 1.721 / 1.177 s |

@@ -65,6 +65,9 @@ CFLAGS = -std=gnu11 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
 # (void), which would disable argument checking.
 CFLAGS += -Wmissing-prototypes -Wstrict-prototypes
 CFLAGS += -Wno-unused-label -include src/common.h -Isrc/ $(CFLAGS_NO_CET)
+# Counter-only builds are diagnostic artifacts, not performance measurements.
+T1C_STATS ?= 0
+CFLAGS += -DRV32_T1C_STATS=$(T1C_STATS)
 LDFLAGS += $(KCONFIG_LDFLAGS)
 OBJS_EXT :=
 deps :=
@@ -258,7 +261,8 @@ $(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
 # T2C optimization level from Kconfig (0-3, default 3)
 T2C_OPT_LEVEL ?= $(or $(CONFIG_T2C_OPT_LEVEL),3)
-$(OUT)/t2c.o: src/t2c.c src/t2c_template.c $(CONFIG_HEADER)
+$(OUT)/t2c.o: src/t2c.c src/t2c_template.c $(CONFIG_HEADER) \
+              $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -DCONFIG_T2C_OPT_LEVEL=$(T2C_OPT_LEVEL) -c -MMD -MF $@.d $<
 else
@@ -312,7 +316,7 @@ EFFECTIVE_CONFIG_VARS := \
 	CONFIG_ROOTFS_EXT4 \
 	MEM_START MEM_SIZE DTB_SIZE INITRD_SIZE USER_MEM_SIZE \
 	INITRD_ACTUAL_BYTES REAL_MEM_SIZE REAL_DTB_SIZE REAL_INITRD_SIZE \
-	VLEN SDL2_MIXER_USE_DYNAMIC JIT_DISABLE_BMI2 JIT_WASM_PROFILE
+	VLEN SDL2_MIXER_USE_DYNAMIC JIT_DISABLE_BMI2 JIT_WASM_PROFILE T1C_STATS
 
 ifeq ($(CONFIG_EXT_F),y)
 $(OBJS): $(SOFTFLOAT_LIB)

@@ -168,6 +168,8 @@ GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
+GUEST_ASM_A_ZICSR_FENCEI_WORKS := \
+    $(call guest-asm-arch-works,rv32ia_zicsr_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
 
 # A flat supervisor kernel exercises MMIO-mode TLBs without a guest libc.
@@ -175,7 +177,16 @@ ifeq ($(CONFIG_SYSTEM),y)
 ifneq ($(CONFIG_ELF_LOADER),y)
 ifeq ($(CONFIG_Zicsr)$(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
 ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
-SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles
+SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles \
+    check-system-trap-resume
+# Interrupts are polled between dispatches, and the interpreter chains a loop
+# without returning to the dispatcher, so only JIT builds deliver them there.
+ifeq ($(CONFIG_JIT),y)
+SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch
+endif
+ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
+SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction
+endif
 else
 $(info Skipping system MMU regression: $(CROSS_COMPILE)objcopy is unavailable)
 endif
@@ -315,23 +326,28 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
-EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
-.PHONY: check-system-mmu-cache
-check-system-mmu-cache: $(BIN) tests/system-mmu-cache.S | $(OUT)
-	$(Q)$(call guest-asm-build,system-mmu-cache,rv32ia_zicsr,, \
+# system-asm-check-target(name, march): a flat supervisor kernel linked at 0,
+# loaded as a raw kernel image, that prints EXPECTED_<name> on success.
+define system-asm-check-target
+.PHONY: check-$(1)
+check-$(1): $$(BIN) tests/$(1).S | $$(OUT)
+	$$(Q)$$(call guest-asm-build,$(1),$(2),, \
 	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
-	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-mmu-cache \
-	    $(OUT)/system-mmu-cache.bin
-	$(call check-test,-k,$(OUT)/system-mmu-cache.bin,system-mmu-cache,tail -n 1,$(EXPECTED_system-mmu-cache))
+	$$(Q)$$(CROSS_COMPILE)objcopy -O binary $$(OUT)/$(1) $$(OUT)/$(1).bin
+	$$(call check-test,-k,$$(OUT)/$(1).bin,$(1),tail -n 1,$$(EXPECTED_$(1)))
+endef
 
+EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
-.PHONY: check-system-trap-cycles
-check-system-trap-cycles: $(BIN) tests/system-trap-cycles.S | $(OUT)
-	$(Q)$(call guest-asm-build,system-trap-cycles,rv32ia_zicsr,, \
-	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
-	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-trap-cycles \
-	    $(OUT)/system-trap-cycles.bin
-	$(call check-test,-k,$(OUT)/system-trap-cycles.bin,system-trap-cycles,tail -n 1,$(EXPECTED_system-trap-cycles))
+EXPECTED_system-interrupt-dispatch = SYSTEM interrupt dispatch OK
+EXPECTED_system-trap-resume = SYSTEM trap resume OK
+EXPECTED_system-jit-eviction = SYSTEM JIT eviction OK
+
+$(eval $(call system-asm-check-target,system-mmu-cache,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-trap-cycles,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-trap-resume,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-jit-eviction,rv32ia_zicsr_zifencei))
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c

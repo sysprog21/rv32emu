@@ -175,7 +175,8 @@ ifeq ($(CONFIG_SYSTEM),y)
 ifneq ($(CONFIG_ELF_LOADER),y)
 ifeq ($(CONFIG_Zicsr)$(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
 ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
-SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles
+SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles \
+    check-system-trap-resume
 else
 $(info Skipping system MMU regression: $(CROSS_COMPILE)objcopy is unavailable)
 endif
@@ -328,9 +329,11 @@ endef
 
 EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
+EXPECTED_system-trap-resume = SYSTEM trap resume OK
 
 $(eval $(call system-asm-check-target,system-mmu-cache,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-trap-cycles,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-trap-resume,rv32ia_zicsr))
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c

@@ -610,6 +610,8 @@ RVOP(sret, {
 
     const uint32_t sstatus_spie =
         (rv->csr_sstatus & SSTATUS_SPIE) >> SSTATUS_SPIE_SHIFT;
+    /* SIE takes the saved SPIE, so clear it before restoring. */
+    rv->csr_sstatus &= ~SSTATUS_SIE;
     rv->csr_sstatus |= (sstatus_spie << SSTATUS_SIE_SHIFT);
     rv->csr_sstatus |= SSTATUS_SPIE;
 
@@ -632,6 +634,8 @@ RVOP(mret, {
 
     const uint32_t mstatus_mpie =
         (rv->csr_mstatus & MSTATUS_MPIE) >> MSTATUS_MPIE_SHIFT;
+    /* MIE takes the saved MPIE, so clear it before restoring. */
+    rv->csr_mstatus &= ~MSTATUS_MIE;
     rv->csr_mstatus |= (mstatus_mpie << MSTATUS_MIE_SHIFT);
     rv->csr_mstatus |= MSTATUS_MPIE;
 

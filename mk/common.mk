@@ -70,9 +70,11 @@ error_msg = $(PRINTF) "$(RED)$(strip $1)$(NC)\n"
 # check-decoder reads only the descriptor and the generator scripts, so it
 # is listed here to keep it from pulling in .config (and with it the
 # Kconfiglib clone) just to verify the committed decoder.
+# check-deploy-webui runs a host-side test that builds its own .config.
 CONFIG_TARGETS := config menuconfig defconfig oldconfig savedefconfig \
                   clean cleanconfig distclean env-check artifact \
-                  fetch-checksum build-linux-image check-decoder
+                  fetch-checksum build-linux-image check-decoder \
+                  check-deploy-webui
 
 # Targets where we can skip expensive dependency detection (pkg-config, llvm-config, etc.)
 # This speeds up 'make clean', etc. significantly

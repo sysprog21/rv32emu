@@ -876,7 +876,7 @@ RVOP(csrrs, {
     uint32_t tmp;
     if (unlikely(!csr_csrrs(rv, ir->imm,
                             (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1],
-                            cycle, &tmp))) {
+                            cycle, ir->rs1 != rv_reg_zero, &tmp))) {
         rv->csr_cycle = cycle;
         rv->PC = PC;
         return csr_trap_illegal_state(rv, 0);
@@ -889,7 +889,7 @@ RVOP(csrrc, {
     uint32_t tmp;
     if (unlikely(!csr_csrrc(rv, ir->imm,
                             (ir->rs1 == rv_reg_zero) ? 0U : rv->X[ir->rs1],
-                            cycle, &tmp))) {
+                            cycle, ir->rs1 != rv_reg_zero, &tmp))) {
         rv->csr_cycle = cycle;
         rv->PC = PC;
         return csr_trap_illegal_state(rv, 0);
@@ -911,7 +911,7 @@ RVOP(csrrwi, {
 /* CSRRSI */
 RVOP(csrrsi, {
     uint32_t tmp;
-    if (unlikely(!csr_csrrs(rv, ir->imm, ir->rs1, cycle, &tmp))) {
+    if (unlikely(!csr_csrrs(rv, ir->imm, ir->rs1, cycle, ir->rs1 != 0, &tmp))) {
         rv->csr_cycle = cycle;
         rv->PC = PC;
         return csr_trap_illegal_state(rv, 0);
@@ -922,7 +922,7 @@ RVOP(csrrsi, {
 /* CSRRCI */
 RVOP(csrrci, {
     uint32_t tmp;
-    if (unlikely(!csr_csrrc(rv, ir->imm, ir->rs1, cycle, &tmp))) {
+    if (unlikely(!csr_csrrc(rv, ir->imm, ir->rs1, cycle, ir->rs1 != 0, &tmp))) {
         rv->csr_cycle = cycle;
         rv->PC = PC;
         return csr_trap_illegal_state(rv, 0);

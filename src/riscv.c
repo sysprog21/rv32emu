@@ -1362,6 +1362,7 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 #endif
 
     rv->csr_mcycle_offset = 0;
+    rv->csr_minstret_offset = 0;
 #if RV32_HAS(SYSTEM)
     /* Not being trap */
     rv->trap_cnt = 0;

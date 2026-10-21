@@ -285,6 +285,97 @@ static void expect_state(unsigned csr, uint32_t actual, uint32_t expected)
     }
 }
 
+/* Writes replace the implicit increment; reads observe the previous count. */
+static void run_minstret_cases(riscv_t *cpu)
+{
+    const uint32_t code[] = {
+        csr_insn(0xb82, 5, 0, 0),
+        csr_insn(0xb02, 1, 5, 0),
+        csr_insn(0xc02, 2, 0, 10),
+        csr_insn(0xc82, 2, 0, 11),
+        csr_insn(0xb02, 2, 0, 12),
+        csr_insn(0xb82, 2, 0, 13),
+        csr_insn(0xb82, 5, 3, 14),
+        csr_insn(0xc02, 2, 0, 15),
+        csr_insn(0xc82, 2, 0, 16),
+        csr_insn(0xb02, 5, 8, 0),
+        csr_insn(0xb02, 2, 0, 17),
+        csr_insn(0xb02, 6, 2, 18),
+        csr_insn(0xb02, 7, 8, 19),
+        csr_insn(0xb02, 2, 6, 20),
+        csr_insn(0xb02, 3, 6, 21),
+        csr_insn(0xb02, 2, 0, 22),
+        csr_insn(0xb02, 2, 7, 23),
+        csr_insn(0xb02, 3, 7, 24),
+        csr_insn(0xb02, 6, 0, 25),
+        csr_insn(0xb02, 7, 0, 26),
+        csr_insn(0xb02, 5, 0, 0),
+        csr_insn(0xb02, 1, 0, 27),
+        csr_insn(0xb02, 2, 0, 28),
+        csr_insn(0xb82, 1, 8, 0),
+        csr_insn(0xb02, 1, 5, 0),
+        csr_insn(0xb02, 2, 0, 8),
+        csr_insn(0xb02, 2, 0, 9),
+        csr_insn(0xb82, 2, 0, 29),
+        0x00100073, /* ebreak */
+    };
+    const uint32_t expected[] = {
+        0xfffffffe, 0, 0, 1, 1, 2, 3, 8, 9, 11, 3, 7, 3, 4, 4, 4, 5, 0, 0,
+    };
+    const uint32_t pc = load_case(cpu, code[0], 1, 5, 0xfffffffe, 0, false, 0);
+    next_pc += sizeof(code);
+    for (unsigned i = 0; i < sizeof(code) / sizeof(code[0]); i++)
+        put32(PRIV(cpu)->mem->mem_base + pc + 4 * i, code[i]);
+    cpu->priv_mode = RV_PRIV_M_MODE;
+    cpu->X[6] = 4;
+    cpu->X[8] = UINT32_MAX;
+    const uint64_t cycle = cpu->csr_cycle;
+    const uint64_t mcycle_offset = cpu->csr_mcycle_offset;
+    for (unsigned i = 0; i < 16 && !rv_has_halted(cpu); i++)
+        rv_step(cpu);
+    case_count++;
+    expect_state(0xb02, trap_count, 0);
+    expect_state(0xb02, rv_has_halted(cpu), true);
+    expect_state(0xb02, cpu->X[0], 0);
+    for (unsigned i = 0; i < sizeof(expected) / sizeof(expected[0]); i++)
+        expect_state(0xb02, cpu->X[10 + i], expected[i]);
+    expect_state(0xb02, cpu->X[8], 0xfffffffe);
+    expect_state(0xb02, cpu->X[9], UINT32_MAX);
+    expect_state(0xb82, cpu->X[29], 0);
+    expect_state(0xb02, cpu->csr_cycle - cycle, 29);
+    expect_state(0xb02, cpu->csr_mcycle_offset != mcycle_offset, false);
+    /* High-half writes persist across blocks and leave mcycle alone. */
+    run_mapped_case(cpu, 0xb82, 1, 5, UINT32_MAX, 0);
+    run_mapped_case(cpu, 0xb82, 2, 5, 0, UINT32_MAX);
+    run_mapped_case(cpu, 0xb82, 3, 5, 0xfffffffc, UINT32_MAX);
+    run_mapped_case(cpu, 0xb82, 6, 4, 0, 3);
+    run_mapped_case(cpu, 0xb82, 7, 2, 0, 7);
+    run_mapped_case(cpu, 0xc82, 2, 0, 0, 5);
+    expect_state(0xb02, cpu->csr_mcycle_offset != mcycle_offset, false);
+    for (unsigned csr = 0xc02; csr <= 0xc82; csr += 0x80)
+        for (unsigned op = 1; op <= 5; op += 4)
+            for (unsigned def = 0; def < 2; def++)
+                run_case(cpu, csr, op, 0, 0, 10, false, def, 0xa5);
+    const unsigned operations[] = {1, 2, 3, 5, 6, 7};
+    for (unsigned csr = 0xb02; csr <= 0xb82; csr += 0x80) {
+        expect_state(csr, insn_reads_counter(csr_insn(csr, 2, 0, 10)), true);
+        for (unsigned mode = RV_PRIV_U_MODE; mode <= RV_PRIV_S_MODE; mode++)
+            for (unsigned i = 0; i < 6; i++) {
+                const uint32_t fault_pc =
+                    load_case(cpu, csr_insn(csr, operations[i], 0, 10),
+                              operations[i], 0, 0, 10, true, 0);
+                cpu->priv_mode = mode;
+                rv_step(cpu);
+                case_count++;
+                expect_state(csr, trap_count, 1);
+                expect_state(csr, cpu->csr_scause, ILLEGAL_INSN);
+                expect_state(csr, trap_pc, fault_pc + 4);
+                expect_state(csr, cpu->X[10], SENTINEL);
+                expect_state(csr, cpu->X[30], 0);
+            }
+    }
+}
+
 /* Mandatory CSRs must reach their state, not trap or read a stale zero. */
 static void run_mapped_cases(riscv_t *cpu)
 {
@@ -401,14 +492,14 @@ int main(void)
      * Three register-zero-value and six zero-result controls bring it to 33.
      * Eight missing CSRs x 24, minus 12 forbidden FFF writes, times two
      * handlers = 360; three register-zero cases and one encoding add four.
-     * Thus 397 execution cases are separate from six decoder checks below.
+     * Thus 397 execution cases are separate from the decoder checks below.
      * To extend coverage, add an address to missing[] only while lookup is
-     * absent. When machine counters are implemented, replace their negative
-     * cases with counter-specific positive controls, keeping missing cases.
+     * absent. When an address gains support, replace its negative cases with
+     * positive controls, keeping coverage for missing entries.
      */
     const unsigned operations[] = {1, 2, 3, 5, 6, 7};
-    const unsigned missing[] = {0x7ff, 0x800, 0xb01, 0xb02,
-                                0xb81, 0xb82, 0xbff, 0xfff};
+    const unsigned missing[] = {0x7ff, 0x800, 0xb01, 0xb03,
+                                0xb81, 0xb83, 0xbff, 0xfff};
     for (unsigned i = 0; i < 6; i++) {
         for (unsigned source = 0; source <= 5; source += 5) {
             for (unsigned rd = 0; rd <= 10; rd += 10) {
@@ -433,15 +524,16 @@ int main(void)
         /* A nonzero register field holding zero still performs an access. */
         if (operations[i] < 5) {
             run_case(cpu, scratch, operations[i], 5, 0, 10, true, false, 0xa5);
-            run_case(cpu, 0xb02, operations[i], 5, 0, 10, false, false, 0xa5);
+            run_case(cpu, 0xb03, operations[i], 5, 0, 10, false, false, 0xa5);
         }
     }
-    /* csrrw x1, minstret, x2: exact 0xb02110f3 */
-    run_case(cpu, 0xb02, 1, 2, 8, 1, false, false, 0xa5);
+    /* csrrw x1, unsupported mhpmcounter3, x2 */
+    run_case(cpu, 0xb03, 1, 2, 8, 1, false, false, 0xa5);
     /* A valid zero-valued read must not be mistaken for a missing CSR. */
     for (unsigned i = 0; i < 6; i++)
         run_case(cpu, scratch, operations[i], 0, 0, 10, true, false, 0);
     run_mapped_cases(cpu);
+    run_minstret_cases(cpu);
 #if RV32_HAS(SYSTEM)
     for (unsigned csr = 0xb00; csr <= 0xb80; csr += 0x80)
         for (unsigned i = 0; i < 6; i++)
@@ -455,12 +547,15 @@ int main(void)
                 run_case(cpu, csr, op, 0, 0, 10, false, def, 0xa5);
 #endif
     unsigned decoder_failures = 0;
-    for (unsigned i = 0; i < 6; i++) {
-        rv_insn_t decoded = {0};
-        decoder_failures +=
-            rv_decode(&decoded, csr_insn(0xfff, operations[i], 5, 10));
-    }
-    printf("CSR decoder: 6 forbidden cases, %u failures\n", decoder_failures);
+    const unsigned read_only[] = {0xfff, 0xc00, 0xc80, 0xc02, 0xc82};
+    for (unsigned csr = 0; csr < sizeof(read_only) / sizeof(read_only[0]);
+         csr++)
+        for (unsigned i = 0; i < 6; i++) {
+            rv_insn_t decoded = {0};
+            decoder_failures += rv_decode(
+                &decoded, csr_insn(read_only[csr], operations[i], 5, 10));
+        }
+    printf("CSR decoder: 30 forbidden cases, %u failures\n", decoder_failures);
     rv_delete(cpu);
     printf("CSR execution: %u cases, %u failures\n", case_count, failure_count);
     return ((failure_count != 0) || (decoder_failures != 0)) ? 1 : 0;

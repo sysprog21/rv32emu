@@ -81,6 +81,8 @@ enum {
 
     CSR_MCYCLE = 0xB00,
     CSR_MCYCLEH = 0xB80,
+    CSR_MINSTRET = 0xB02,
+    CSR_MINSTRETH = 0xB82,
 
     /* low words */
     CSR_CYCLE = 0xC00, /* Cycle counter for RDCYCLE instruction */
@@ -517,7 +519,8 @@ struct riscv_internal {
     uint64_t branch_chain_cycle_target;
 #endif
 
-    uint64_t csr_mcycle_offset; /* Guest mcycle adjustment */
+    uint64_t csr_mcycle_offset;   /* Guest mcycle adjustment */
+    uint64_t csr_minstret_offset; /* Guest instret adjustment to cycle model */
 
     /* csr registers */
     uint64_t csr_cycle;     /* Internal cycle clock */

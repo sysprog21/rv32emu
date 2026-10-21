@@ -445,7 +445,10 @@ static inline void rvv_csr_write(riscv_t *rv, uint32_t csr, uint32_t val)
 #endif
 
 /* get a pointer to a CSR */
-static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr, uint32_t *mcycle)
+static uint32_t *csr_get_ptr(riscv_t *rv,
+                             uint32_t csr,
+                             uint32_t *mcycle,
+                             uint32_t *minstret)
 {
     /* csr & 0xFFF prevent sign-extension in decode stage */
     switch (csr & 0xFFF) {
@@ -503,10 +506,14 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr, uint32_t *mcycle)
     case CSR_TIMEH: /* Upper 32 bits of time */
         update_time(rv);
         return &rv->csr_time[1];
+    case CSR_MINSTRET:
+        return rv->priv_mode == RV_PRIV_M_MODE ? minstret : NULL;
     case CSR_INSTRET: /* Number of Instructions Retired Counter */
-        return (uint32_t *) (&rv->csr_cycle);
+        return minstret;
+    case CSR_MINSTRETH:
+        return rv->priv_mode == RV_PRIV_M_MODE ? minstret + 1 : NULL;
     case CSR_INSTRETH: /* Upper 32 bits of instructions retired */
-        return &((uint32_t *) &rv->csr_cycle)[1];
+        return minstret + 1;
 #if RV32_HAS(EXT_F)
     case CSR_FFLAGS:
         return (uint32_t *) (&rv->csr_fcsr);
@@ -577,12 +584,12 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
  *
- * CSR helpers return false for missing entries, machine cycle accesses below
- * M-mode, writes to read-only V CSRs, and CSRRW/CSRRWI to cycle/cycleh or
- * machine IDs, leaving result unchanged.
- * TODO: Also reject zero-source CSRRW/CSRRWI to time, instret, and
- * their high halves.
+ * CSR helpers return false for missing entries, machine counter accesses below
+ * M-mode, writes to read-only V CSRs, and CSRRW/CSRRWI to cycle/instret
+ * shadows or machine IDs, leaving result unchanged.
+ * TODO: Also reject zero-source CSRRW/CSRRWI to time and timeh.
  * Callers save PC/cycle and raise ILLEGAL_INSN before rd writeback.
+ * For CSRRS/CSRRC, write reflects the encoded source, not its value.
  */
 static inline bool csr_csrrw(riscv_t *rv,
                              uint32_t csr,
@@ -605,11 +612,13 @@ static inline bool csr_csrrw(riscv_t *rv,
     }
 #endif
     /* csrrw/csrrwi always writes (even with rs1=x0). Trap when the target
-     * is a read-only cycle or machine information register.
+     * is a read-only cycle/instret or machine information register.
      */
     switch (csr & 0xFFF) {
     case CSR_CYCLE:
     case CSR_CYCLEH:
+    case CSR_INSTRET:
+    case CSR_INSTRETH:
     case CSR_MVENDORID:
     case CSR_MARCHID:
     case CSR_MIMPID:
@@ -627,7 +636,10 @@ static inline bool csr_csrrw(riscv_t *rv,
     /* Guest counter writes must not change the timer or execution budget. */
     const uint64_t count = cycle + rv->csr_mcycle_offset;
     uint32_t mcycle[] = {(uint32_t) count, count >> 32};
-    uint32_t *c = csr_get_ptr(rv, csr, mcycle);
+    /* Instret still uses the cycle model, but excludes this instruction. */
+    const uint64_t retired = cycle - 1 + rv->csr_minstret_offset;
+    uint32_t minstret[] = {(uint32_t) retired, retired >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle, minstret);
     if (unlikely(!c))
         return false;
 
@@ -646,6 +658,9 @@ static inline bool csr_csrrw(riscv_t *rv,
     if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
         rv->csr_mcycle_offset =
             (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
+    if (csr == CSR_MINSTRET || csr == CSR_MINSTRETH)
+        rv->csr_minstret_offset =
+            (((uint64_t) minstret[1] << 32) | minstret[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* Flush TLB when SATP actually changes: address space changed */
@@ -677,6 +692,7 @@ static inline bool csr_csrrs(riscv_t *rv,
                              uint32_t csr,
                              uint32_t val,
                              uint64_t cycle,
+                             bool write,
                              uint32_t *result)
 {
     csr &= 0xFFF;
@@ -709,7 +725,9 @@ static inline bool csr_csrrs(riscv_t *rv,
 #endif
     const uint64_t count = cycle + rv->csr_mcycle_offset;
     uint32_t mcycle[] = {(uint32_t) count, count >> 32};
-    uint32_t *c = csr_get_ptr(rv, csr, mcycle);
+    const uint64_t retired = cycle - 1 + rv->csr_minstret_offset;
+    uint32_t minstret[] = {(uint32_t) retired, retired >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle, minstret);
     if (unlikely(!c))
         return false;
 
@@ -728,6 +746,9 @@ static inline bool csr_csrrs(riscv_t *rv,
     if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
         rv->csr_mcycle_offset =
             (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
+    if (write && (csr == CSR_MINSTRET || csr == CSR_MINSTRETH))
+        rv->csr_minstret_offset =
+            (((uint64_t) minstret[1] << 32) | minstret[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB
@@ -754,6 +775,7 @@ static inline bool csr_csrrc(riscv_t *rv,
                              uint32_t csr,
                              uint32_t val,
                              uint64_t cycle,
+                             bool write,
                              uint32_t *result)
 {
     csr &= 0xFFF;
@@ -781,7 +803,9 @@ static inline bool csr_csrrc(riscv_t *rv,
 #endif
     const uint64_t count = cycle + rv->csr_mcycle_offset;
     uint32_t mcycle[] = {(uint32_t) count, count >> 32};
-    uint32_t *c = csr_get_ptr(rv, csr, mcycle);
+    const uint64_t retired = cycle - 1 + rv->csr_minstret_offset;
+    uint32_t minstret[] = {(uint32_t) retired, retired >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle, minstret);
     if (unlikely(!c))
         return false;
 
@@ -800,6 +824,9 @@ static inline bool csr_csrrc(riscv_t *rv,
     if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
         rv->csr_mcycle_offset =
             (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
+    if (write && (csr == CSR_MINSTRET || csr == CSR_MINSTRETH))
+        rv->csr_minstret_offset =
+            (((uint64_t) minstret[1] << 32) | minstret[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB

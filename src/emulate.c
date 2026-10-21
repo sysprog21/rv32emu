@@ -585,8 +585,8 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
  * any of the side effects that might occur on a CSR read.
  *
  * CSR helpers return false for missing entries, machine counter accesses below
- * M-mode, writes to read-only V CSRs, and CSRRW/CSRRWI to cycle/instret
- * shadows or machine IDs, leaving result unchanged.
+ * M-mode, writes to read-only V CSRs or cycle/instret shadows, and
+ * CSRRW/CSRRWI to machine IDs, leaving result unchanged.
  * TODO: Also reject zero-source CSRRW/CSRRWI to time and timeh.
  * Callers save PC/cycle and raise ILLEGAL_INSN before rd writeback.
  * For CSRRS/CSRRC, write reflects the encoded source, not its value.
@@ -697,6 +697,9 @@ static inline bool csr_csrrs(riscv_t *rv,
 {
     csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
+    if (write && (csr == CSR_CYCLE || csr == CSR_CYCLEH || csr == CSR_INSTRET ||
+                  csr == CSR_INSTRETH))
+        return false;
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
     if (rvv_csr_read(rv, csr, &rvv_out)) {
@@ -780,6 +783,9 @@ static inline bool csr_csrrc(riscv_t *rv,
 {
     csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
+    if (write && (csr == CSR_CYCLE || csr == CSR_CYCLEH || csr == CSR_INSTRET ||
+                  csr == CSR_INSTRETH))
+        return false;
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
     if (rvv_csr_read(rv, csr, &rvv_out)) {

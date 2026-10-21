@@ -45,7 +45,13 @@ rejection. The instruction sequence checks read-before-increment and write
 suppression, including a nonzero source register holding zero. Counter
 writes must not change the internal clock or the other counter's offset.
 SYSTEM builds add 12 checks that S-mode machine cycle accesses trap, for
-498 cases with F. Other CSR privilege checks remain separate work.
+498 cases with F. Another 32 SYSTEM cases execute read-only counter
+set/clear instructions inside the guest trap handler, where decoder
+rejection alone does not stop dispatch. They cover both counters and their
+high halves, zero-source reads, and nonzero sources (including a register
+holding zero), for 530 cases with F. Rejected writes must trap before
+changing `rd` or executing the continuation. Other CSR privilege checks
+remain separate work.
 
 `instret` and `minstret` still use the existing cycle-based approximation;
 this does not establish exact retirement across exceptions, fused operations,

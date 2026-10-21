@@ -376,6 +376,59 @@ static void run_minstret_cases(riscv_t *cpu)
     }
 }
 
+#if RV32_HAS(SYSTEM)
+static void stop_counter_trap(riscv_t *cpu)
+{
+    trap_count++;
+    trap_pc = cpu->PC;
+    trap_rd = cpu->X[10];
+    trap_cause = cpu->csr_scause;
+    rv_halt(cpu);
+}
+
+/* The guest handler dispatches even when rv_decode rejects the encoding. */
+static void run_handler_counter_cases(riscv_t *cpu)
+{
+    const unsigned counters[] = {0xc00, 0xc80, 0xc02, 0xc82};
+    const unsigned operations[] = {2, 3, 6, 7};
+    cpu->io.on_trap = stop_counter_trap;
+    for (unsigned c = 0; c < 4; c++)
+        for (unsigned op = 0; op < 4; op++)
+            for (unsigned source = 0; source <= 5; source += 5) {
+                const uint32_t pc =
+                    load_case(cpu, 0, operations[op], source, 0, 10, false, 0);
+                uint8_t *handler = PRIV(cpu)->mem->mem_base + pc + 16;
+                put32(handler,
+                      csr_insn(counters[c], operations[op], source, 10));
+                put32(handler + 4, 0x001f0f13); /* addi x30, x30, 1 */
+                put32(handler + 8, 0x00100073); /* ebreak */
+                cpu->csr_stvec = pc + 16;
+                cpu->csr_scause = ILLEGAL_INSN;
+                cpu->trap_cnt = 1;
+                const uint64_t cycle_offset = cpu->csr_mcycle_offset;
+                const uint64_t instret_offset = cpu->csr_minstret_offset;
+                trap_handler(cpu);
+                case_count++;
+                expect_state(counters[c], rv_has_halted(cpu), true);
+                expect_state(counters[c], trap_count, source != 0);
+                expect_state(counters[c], cpu->X[30], source == 0);
+                expect_state(counters[c],
+                             cpu->csr_mcycle_offset != cycle_offset, false);
+                expect_state(counters[c],
+                             cpu->csr_minstret_offset != instret_offset, false);
+                if (source) {
+                    expect_state(counters[c], trap_cause, ILLEGAL_INSN);
+                    expect_state(counters[c], trap_pc, pc + 16);
+                    expect_state(counters[c], trap_rd, SENTINEL);
+                    expect_state(counters[c], cpu->X[10], SENTINEL);
+                }
+                cpu->trap_cnt = 0;
+            }
+    cpu->io.on_trap = record_trap;
+    install_handler(cpu);
+}
+#endif
+
 /* Mandatory CSRs must reach their state, not trap or read a stale zero. */
 static void run_mapped_cases(riscv_t *cpu)
 {
@@ -545,6 +598,9 @@ int main(void)
         for (unsigned op = 1; op <= 5; op += 4)
             for (unsigned def = 0; def < 2; def++)
                 run_case(cpu, csr, op, 0, 0, 10, false, def, 0xa5);
+#endif
+#if RV32_HAS(SYSTEM)
+    run_handler_counter_cases(cpu);
 #endif
     unsigned decoder_failures = 0;
     const unsigned read_only[] = {0xfff, 0xc00, 0xc80, 0xc02, 0xc82};

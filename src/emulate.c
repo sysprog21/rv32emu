@@ -445,7 +445,7 @@ static inline void rvv_csr_write(riscv_t *rv, uint32_t csr, uint32_t val)
 #endif
 
 /* get a pointer to a CSR */
-static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
+static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr, uint32_t *mcycle)
 {
     /* csr & 0xFFF prevent sign-extension in decode stage */
     switch (csr & 0xFFF) {
@@ -487,10 +487,14 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_mip);
 
     /* Machine Counter/Timers */
+    case CSR_MCYCLE:
+        return rv->priv_mode == RV_PRIV_M_MODE ? mcycle : NULL;
     case CSR_CYCLE: /* Cycle counter for RDCYCLE instruction */
-        return (uint32_t *) &rv->csr_cycle;
+        return mcycle;
+    case CSR_MCYCLEH:
+        return rv->priv_mode == RV_PRIV_M_MODE ? mcycle + 1 : NULL;
     case CSR_CYCLEH: /* Upper 32 bits of cycle */
-        return &((uint32_t *) &rv->csr_cycle)[1];
+        return mcycle + 1;
 
     /* TIME/TIMEH - very roughly about 1 ms per tick */
     case CSR_TIME: /* Timer for RDTIME instruction */
@@ -573,9 +577,10 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
  *
- * CSR helpers return false for missing entries, writes to read-only V CSRs,
- * and CSRRW/CSRRWI to the machine ID registers, leaving result unchanged.
- * TODO: Also reject zero-source CSRRW/CSRRWI to cycle, time, instret, and
+ * CSR helpers return false for missing entries, machine cycle accesses below
+ * M-mode, writes to read-only V CSRs, and CSRRW/CSRRWI to cycle/cycleh or
+ * machine IDs, leaving result unchanged.
+ * TODO: Also reject zero-source CSRRW/CSRRWI to time, instret, and
  * their high halves.
  * Callers save PC/cycle and raise ILLEGAL_INSN before rd writeback.
  */
@@ -585,6 +590,7 @@ static inline bool csr_csrrw(riscv_t *rv,
                              uint64_t cycle,
                              uint32_t *result)
 {
+    csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
@@ -599,9 +605,11 @@ static inline bool csr_csrrw(riscv_t *rv,
     }
 #endif
     /* csrrw/csrrwi always writes (even with rs1=x0). Trap when the target
-     * is a read-only machine information register.
+     * is a read-only cycle or machine information register.
      */
     switch (csr & 0xFFF) {
+    case CSR_CYCLE:
+    case CSR_CYCLEH:
     case CSR_MVENDORID:
     case CSR_MARCHID:
     case CSR_MIMPID:
@@ -616,7 +624,10 @@ static inline bool csr_csrrw(riscv_t *rv,
         return true;
     }
 #endif
-    uint32_t *c = csr_get_ptr(rv, csr);
+    /* Guest counter writes must not change the timer or execution budget. */
+    const uint64_t count = cycle + rv->csr_mcycle_offset;
+    uint32_t mcycle[] = {(uint32_t) count, count >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle);
     if (unlikely(!c))
         return false;
 
@@ -630,6 +641,9 @@ static inline bool csr_csrrw(riscv_t *rv,
     uint32_t old_satp = *c;
 #endif
     *c = val;
+    if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
+        rv->csr_mcycle_offset =
+            (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* Flush TLB when SATP actually changes: address space changed */
@@ -663,6 +677,7 @@ static inline bool csr_csrrs(riscv_t *rv,
                              uint64_t cycle,
                              uint32_t *result)
 {
+    csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
@@ -690,7 +705,9 @@ static inline bool csr_csrrs(riscv_t *rv,
         return true;
     }
 #endif
-    uint32_t *c = csr_get_ptr(rv, csr);
+    const uint64_t count = cycle + rv->csr_mcycle_offset;
+    uint32_t mcycle[] = {(uint32_t) count, count >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle);
     if (unlikely(!c))
         return false;
 
@@ -704,6 +721,9 @@ static inline bool csr_csrrs(riscv_t *rv,
     uint32_t old_satp = *c;
 #endif
     *c |= val;
+    if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
+        rv->csr_mcycle_offset =
+            (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB
@@ -732,6 +752,7 @@ static inline bool csr_csrrc(riscv_t *rv,
                              uint64_t cycle,
                              uint32_t *result)
 {
+    csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
@@ -754,7 +775,9 @@ static inline bool csr_csrrc(riscv_t *rv,
         return true;
     }
 #endif
-    uint32_t *c = csr_get_ptr(rv, csr);
+    const uint64_t count = cycle + rv->csr_mcycle_offset;
+    uint32_t mcycle[] = {(uint32_t) count, count >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle);
     if (unlikely(!c))
         return false;
 
@@ -768,6 +791,9 @@ static inline bool csr_csrrc(riscv_t *rv,
     uint32_t old_satp = *c;
 #endif
     *c &= ~val;
+    if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
+        rv->csr_mcycle_offset =
+            (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB

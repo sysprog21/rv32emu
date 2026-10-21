@@ -262,6 +262,7 @@ static void run_mapped_case(riscv_t *cpu,
     rv_insn_t decoded = {0};
     const bool accepted = rv_decode(&decoded, insn);
     load_case(cpu, insn, op, source, source_value, rd, false, 0);
+    cpu->priv_mode = RV_PRIV_M_MODE;
     for (unsigned i = 0; (i < 16) && (!rv_has_halted(cpu)); i++)
         rv_step(cpu);
     const bool ok = accepted && rv_has_halted(cpu) && (trap_count == 0) &&
@@ -310,6 +311,33 @@ static void run_mapped_cases(riscv_t *cpu)
     /* Nothing else observes mcounteren, so a write must read back. */
     run_mapped_case(cpu, CSR_MCOUNTEREN, 1, 5, 0x7, 0);
     run_mapped_case(cpu, CSR_MCOUNTEREN, 2, 0, 0, 0x7);
+
+    /* Machine writes persist across blocks without changing the clock. */
+    const uint64_t cycle = cpu->csr_cycle;
+    const unsigned first_case = case_count;
+    run_mapped_case(cpu, 0xb80, 5, 1, 0, 0);
+    run_mapped_case(cpu, 0xb00, 1, 5, 0xfffffffe,
+                    (uint32_t) (cpu->csr_cycle + 2));
+    run_mapped_case(cpu, 0xc80, 2, 0, 0, 2);
+    run_mapped_case(cpu, 0xb80, 2, 0, 0, 2);
+    run_mapped_case(cpu, 0xc00, 2, 0, 0, 10);
+    run_mapped_case(cpu, 0xb00, 2, 0, 0, 14);
+    run_mapped_case(cpu, 0xb80, 2, 5, 4, 2);
+    run_mapped_case(cpu, 0xb80, 3, 5, 2, 6);
+    run_mapped_case(cpu, 0xb80, 6, 2, 0, 4);
+    run_mapped_case(cpu, 0xb80, 7, 4, 0, 6);
+    run_mapped_case(cpu, 0xc80, 2, 0, 0, 2);
+    expect_state(0xb00, cpu->csr_cycle, cycle + 4 * (case_count - first_case));
+    expect_state(0xb80, cpu->csr_cycle >> 32, cycle >> 32);
+    if (!insn_reads_counter(csr_insn(0xb00, 2, 0, 10)) ||
+        !insn_reads_counter(csr_insn(0xb80, 2, 0, 10))) {
+        failure_count++;
+        fprintf(stderr, "FAIL mcycle missing from counter entry check\n");
+    }
+    for (unsigned csr = 0xc00; csr <= 0xc80; csr += 0x80)
+        for (unsigned op = 1; op <= 5; op += 4)
+            run_case(cpu, csr, op, 0, 0, 10, false, false, 0xa5);
+
 #if RV32_HAS(EXT_F)
     /* frm is fcsr[7:5]; each access must keep fflags in fcsr[4:0]. */
     cpu->csr_fcsr = 0x5f;
@@ -357,15 +385,15 @@ int main(void)
      * six forms x two source fields x two destinations = 24 scratch cases.
      * Three register-zero-value and six zero-result controls bring it to 33.
      * Eight missing CSRs x 24, minus 12 forbidden FFF writes, times two
-     * handlers = 360; three register-zero cases and the review word add four.
+     * handlers = 360; three register-zero cases and one encoding add four.
      * Thus 397 execution cases are separate from six decoder checks below.
      * To extend coverage, add an address to missing[] only while lookup is
      * absent. When machine counters are implemented, replace their negative
      * cases with counter-specific positive controls, keeping missing cases.
      */
     const unsigned operations[] = {1, 2, 3, 5, 6, 7};
-    const unsigned missing[] = {0x7ff, 0x800, 0xb00, 0xb02,
-                                0xb80, 0xb82, 0xbff, 0xfff};
+    const unsigned missing[] = {0x7ff, 0x800, 0xb01, 0xb02,
+                                0xb81, 0xb82, 0xbff, 0xfff};
     for (unsigned i = 0; i < 6; i++) {
         for (unsigned source = 0; source <= 5; source += 5) {
             for (unsigned rd = 0; rd <= 10; rd += 10) {
@@ -390,15 +418,20 @@ int main(void)
         /* A nonzero register field holding zero still performs an access. */
         if (operations[i] < 5) {
             run_case(cpu, scratch, operations[i], 5, 0, 10, true, false, 0xa5);
-            run_case(cpu, 0xb00, operations[i], 5, 0, 10, false, false, 0xa5);
+            run_case(cpu, 0xb02, operations[i], 5, 0, 10, false, false, 0xa5);
         }
     }
-    /* csrrw x1, mcycle, x2: exact 0xb00110f3 */
-    run_case(cpu, 0xb00, 1, 2, 8, 1, false, false, 0xa5);
+    /* csrrw x1, minstret, x2: exact 0xb02110f3 */
+    run_case(cpu, 0xb02, 1, 2, 8, 1, false, false, 0xa5);
     /* A valid zero-valued read must not be mistaken for a missing CSR. */
     for (unsigned i = 0; i < 6; i++)
         run_case(cpu, scratch, operations[i], 0, 0, 10, true, false, 0);
     run_mapped_cases(cpu);
+#if RV32_HAS(SYSTEM)
+    for (unsigned csr = 0xb00; csr <= 0xb80; csr += 0x80)
+        for (unsigned i = 0; i < 6; i++)
+            run_case(cpu, csr, operations[i], 0, 0, 10, false, false, 0xa5);
+#endif
 #if RV32_HAS(EXT_V)
     /* Zero-source writes reach the helpers despite the decoder's checks. */
     for (unsigned csr = CSR_VL; csr <= CSR_VLENB; csr++)

@@ -21,7 +21,7 @@ handler is also tested. Unsupported cases check `rd` at entry and after
 exactly one trap/resumption; supported controls require no trap. Fresh PCs
 avoid stale translated code.
 
-The scalar suite has 420 execution cases and six separate decoder checks.
+The scalar suite has 435 execution cases and six separate decoder checks.
 Decoder rejection alone does not establish runtime trap delivery.
 
 ## Mandatory CSRs
@@ -33,12 +33,17 @@ with a zero source must trap under both handlers, since those forms always
 write. `mie` must update its state, and a write to `mcounteren` must read
 back. With `CONFIG_EXT_F=y` (the default), four more cases check that `frm`
 reads and writes only `fcsr[7:5]` and keeps `fflags` in `fcsr[4:0]`, for
-424 execution cases.
+439 execution cases.
+
+Fifteen cases cover `mcycle`/`mcycleh` writes, carry, read-only `cycle`
+shadows, and an unaffected internal clock. `minstret`/`minstreth` remain
+unsupported. SYSTEM builds add 12 checks that S-mode machine cycle accesses
+trap, for 451 cases with F. Other CSR privilege checks remain separate work.
 
 ## RVV coverage
 
 Enable `CONFIG_EXT_V=y CONFIG_EXT_F=y` to include 12 RVV cases in the normal
-suite, for 436 execution cases. These cover `vl`/`vtype`/`vlenb`, CSRRW/CSRRWI
+suite, for 451 execution cases. These cover `vl`/`vtype`/`vlenb`, CSRRW/CSRRWI
 with zero source, and both guest and default handlers. Each access must
 trap once at the CSR instruction, preserve `rd`, and stop dispatch before
 continuation.

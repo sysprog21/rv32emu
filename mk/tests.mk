@@ -101,6 +101,7 @@ EXPECTED_jit-branch-successor = JIT branch successor OK
 EXPECTED_jit-region-traps = JIT region traps OK
 EXPECTED_jit-bit-loop = JIT bit loop OK
 EXPECTED_jit-scaled-add = JIT scaled add OK
+EXPECTED_jit-cflw = JIT compressed FP OK
 EXPECTED_jit-mul = JIT multiply OK
 EXPECTED_const-arith = constant arithmetic OK
 EXPECTED_const-shift = constant shifts OK
@@ -161,6 +162,7 @@ guest-asm-arch-works = $(shell printf '' | $(CROSS_COMPILE)gcc -march=$(1) \
 	>/dev/null 2>&1 && echo y)
 GUEST_ASM_WORKS := $(call guest-asm-arch-works,rv32i)
 GUEST_ASM_M_WORKS := $(call guest-asm-arch-works,rv32im)
+GUEST_ASM_FC_WORKS := $(call guest-asm-arch-works,rv32ifc)
 GUEST_ASM_C_WORKS := $(call guest-asm-arch-works,rv32ic)
 GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
 GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
@@ -247,6 +249,9 @@ endif
 # the emulator under test has no JIT. Report them as skipped rather than
 # passing them through the interpreter and reporting green.
 ifeq ($(CONFIG_JIT),y)
+ifeq ($(CONFIG_EXT_F)$(CONFIG_EXT_C)$(GUEST_ASM_FC_WORKS),yyy)
+GUEST_ASM_CHECK_TARGETS += check-jit-cflw
+endif
 GUEST_ASM_CHECK_TARGETS += check-jit-alu-alias check-jit-indirect-targets
 GUEST_ASM_CHECK_TARGETS += check-jit-memory-address check-jit-compare \
 	check-jit-shift check-jit-spill-loop check-jit-direct-successor check-jit-carry \
@@ -442,6 +447,7 @@ $(eval $(call guest-asm-check-target,jit-alu-alias,rv32i))
 $(eval $(call guest-asm-check-target,jit-indirect-targets,rv32i))
 $(eval $(call guest-asm-check-target,jit-identity-normalize,rv32im))
 $(eval $(call guest-asm-check-target,jit-signed-div,rv32im))
+$(eval $(call guest-asm-check-target,jit-cflw,rv32ifc))
 $(eval $(call guest-asm-check-target,jit-mul,rv32im))
 $(eval $(call guest-asm-check-target,jit-muldiv,rv32im))
 $(eval $(call guest-asm-check-target,const-arith,rv32im))

@@ -4043,6 +4043,18 @@ static void emit_misalign_stubs(struct jit_state *state)
  * This eliminates per-instruction memory operations in the JIT hot path.
  */
 
+/* Keep unsupported emitters tied to the decoder's translatable flags.
+ * All unsupported T1C handlers must use GEN_UNSUPPORTED, including V stubs.
+ */
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
+    enum { jit_translatable_##inst = translatable };
+RV_INSN_LIST
+#undef _
+#define GEN_UNSUPPORTED(inst)                                        \
+    _Static_assert(!jit_translatable_##inst,                         \
+                   #inst " has no T1C emitter but is translatable"); \
+    GEN(inst, { assert(NULL); })
+
 #define GEN(inst, code)                                                       \
     static void do_##inst(struct jit_state *state UNUSED, riscv_t *rv UNUSED, \
                           rv_insn_t *ir UNUSED)                               \
@@ -4051,6 +4063,7 @@ static void emit_misalign_stubs(struct jit_state *state)
     }
 #include "rv32_jit.c"
 #undef GEN
+#undef GEN_UNSUPPORTED
 
 static void do_fuse1(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {

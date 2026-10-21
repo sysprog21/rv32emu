@@ -49,10 +49,11 @@ extern struct target_ops gdbstub_ops;
 #define IF_rs2(i, r) (i->rs2 == rv_reg_##r)
 #define IF_imm(i, v) (i->imm == v)
 
-#if RV32_HAS(SYSTEM)
 #if !RV32_HAS(JIT)
 static bool need_clear_block_map = false;
 #endif
+
+#if RV32_HAS(SYSTEM)
 static uint32_t reloc_enable_mmu_jalr_addr;
 static bool reloc_enable_mmu = false;
 bool need_retranslate = false;
@@ -72,19 +73,29 @@ static inline uint32_t fetch_instruction(riscv_t *rv, uint32_t pc)
     return rv->io.mem_ifetch(rv, pc);
 }
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
-/* Retire the blocks an SFENCE.VMA left pending, once no trap handler is still
- * running one of their instructions. Returns true if it cleared the map.
+#if !RV32_HAS(JIT)
+/* Retire blocks left pending by an instruction fence once no trap handler
+ * is running their instructions. Returns true if it cleared the map.
  */
 static inline bool retire_pending_blocks(riscv_t *rv)
 {
-    if (likely(!need_clear_block_map) || rv->trap_cnt)
+    if (likely(!need_clear_block_map)
+#if RV32_HAS(SYSTEM)
+        || rv->trap_cnt
+#endif
+    )
         return false;
     block_map_clear(rv);
     need_clear_block_map = false;
     return true;
 }
 
+#endif
+
+/* Only system instructions can request a clear and then reach nextop.
+ * User FENCE.I returns directly to the dispatcher, which consumes its clear.
+ */
+#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
 /* The deferred clear that ends a handler: resume at the next instruction. */
 #define RVOP_RETIRE_PENDING()                      \
     do {                                           \
@@ -3855,7 +3866,7 @@ void rv_step(void *arg)
 #endif
 
 #ifdef __EMSCRIPTEN__
-#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
+#if !RV32_HAS(JIT)
         if (need_clear_block_map)
             rv->next_insn = NULL;
 #endif
@@ -3920,7 +3931,7 @@ void rv_step(void *arg)
         }
         assert(block);
 
-#if RV32_HAS(SYSTEM) && !RV32_HAS(JIT)
+#if !RV32_HAS(JIT)
         /* An inline trap can skip the interrupted instruction, returning
          * before its nextop consumes the deferred clear. Retire old mappings
          * before executing any block, including one just fetched by a trap.

@@ -4508,26 +4508,39 @@ static void clear_hot(block_t *block)
     block->hot = false;
 }
 
-static void code_cache_flush(struct jit_state *state, riscv_t *rv)
+/* Drop all native code. Blocks still cached lose their hot flag, unless the
+ * caller already invalidated every one of them, which then never runs again.
+ */
+static void code_cache_reset(struct jit_state *state,
+                             riscv_t *rv,
+                             bool blocks_invalidated)
 {
     should_flush = false;
     state->offset = state->org_size;
     offset_map_reset(state);
-    clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
+    if (!blocks_invalidated)
+        clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
 #if RV32_HAS(T2C)
     jit_cache_clear(rv->jit_cache);
     inline_cache_clear(rv->inline_cache);
 #endif
-    return;
+}
+
+static void code_cache_flush(struct jit_state *state, riscv_t *rv)
+{
+    code_cache_reset(state, rv, false);
 }
 
 #if RV32_HAS(SYSTEM)
-/* The caller holds cache_lock when T2C is built */
+/* The caller holds cache_lock when T2C is built, and has invalidated every
+ * cached block (FENCE.I), so their hot flags need no walk to clear: with a
+ * large block cache that walk dominated the hundreds of FENCE.Is of a boot.
+ */
 void jit_flush(riscv_t *rv)
 {
     T1C_COUNT(flushed_native_blocks,
               ((struct jit_state *) rv->jit_state)->n_blocks);
-    code_cache_flush(rv->jit_state, rv);
+    code_cache_reset(rv->jit_state, rv, true);
 }
 #endif
 

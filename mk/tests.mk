@@ -240,10 +240,18 @@ ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-amo-page-fault
 endif
 endif
-# Only system JIT builds honor FENCE.I, and only a directly loaded program can
-# rewrite its own code without an operating system.
-ifeq ($(CONFIG_SYSTEM)$(CONFIG_JIT)$(CONFIG_ELF_LOADER)$(CONFIG_Zifencei)$(GUEST_ASM_FENCEI_WORKS),yyyyy)
+# Every interpreter and the system JIT honor FENCE.I. User JIT invalidation
+# is pending; keep that limitation visible when its guest checks are selected.
+ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_FENCEI_WORKS),yy)
+ifeq ($(CONFIG_JIT),y)
+ifeq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-jit-fencei
+else
+$(info Skipping FENCE.I regression: user JIT code invalidation is unsupported; see docs/fencei.md)
+endif
+else
+GUEST_ASM_CHECK_TARGETS += check-jit-fencei
+endif
 endif
 # The jit-* programs assert tier-1 code generation, so they prove nothing when
 # the emulator under test has no JIT. Report them as skipped rather than

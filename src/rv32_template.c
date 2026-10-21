@@ -828,10 +828,13 @@ RVOP(fencei, {
     hart_unlock(rv, &rv->cache_lock);
 #endif
 #endif
-    /* Note: In non-system JIT mode, self-modifying code is rare and blocks
-     * will be naturally evicted. Full cache invalidation is not implemented
-     * for this case as it would require additional infrastructure.
+/* User JIT invalidation is unsupported; see docs/fencei.md. */
+#if !RV32_HAS(JIT)
+    /* The active handler still owns its IR. Let the dispatcher retire it
+     * before fetching another block, after any synchronous trap unwinds.
      */
+    need_clear_block_map = true;
+#endif
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;

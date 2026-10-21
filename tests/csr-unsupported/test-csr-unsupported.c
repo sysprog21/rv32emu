@@ -349,6 +349,21 @@ static void run_mapped_cases(riscv_t *cpu)
     expect_state(CSR_FRM, cpu->csr_fcsr, 0x5f);
     run_mapped_case(cpu, CSR_FRM, 2, 0, 0, 0x2);
     expect_state(CSR_FRM, cpu->csr_fcsr, 0x5f);
+
+    /* fflags updates must preserve frm, including masks above bit 4. */
+    run_mapped_case(cpu, CSR_FRM, 5, 3, 0, 0x2);
+    run_mapped_case(cpu, CSR_FFLAGS, 5, 0, 0, 0x1f);
+    run_mapped_case(cpu, CSR_FRM, 2, 0, 0, 0x3);
+    expect_state(CSR_FCSR, cpu->csr_fcsr, 0x60);
+    run_mapped_case(cpu, CSR_FFLAGS, 1, 5, 0xffffffe1, 0);
+    expect_state(CSR_FCSR, cpu->csr_fcsr, 0x61);
+    run_mapped_case(cpu, CSR_FFLAGS, 2, 5, 0xffffffe2, 0x1);
+    expect_state(CSR_FCSR, cpu->csr_fcsr, 0x63);
+    run_mapped_case(cpu, CSR_FFLAGS, 3, 5, 0xffffffe1, 0x3);
+    expect_state(CSR_FCSR, cpu->csr_fcsr, 0x62);
+    run_mapped_case(cpu, CSR_FFLAGS, 6, 4, 0, 0x2);
+    run_mapped_case(cpu, CSR_FFLAGS, 7, 2, 0, 0x6);
+    expect_state(CSR_FCSR, cpu->csr_fcsr, 0x64);
 #endif
 }
 

@@ -633,8 +633,10 @@ static inline bool csr_csrrw(riscv_t *rv,
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
+    if (csr == CSR_FFLAGS) {
         out &= FFLAG_MASK;
+        val = (*c & ~FFLAG_MASK) | (val & FFLAG_MASK);
+    }
 #endif
 
 #if RV32_HAS(SYSTEM)
@@ -713,8 +715,10 @@ static inline bool csr_csrrs(riscv_t *rv,
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
+    if (csr == CSR_FFLAGS) {
         out &= FFLAG_MASK;
+        val &= FFLAG_MASK;
+    }
 #endif
 
 #if RV32_HAS(SYSTEM)
@@ -783,8 +787,10 @@ static inline bool csr_csrrc(riscv_t *rv,
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
+    if (csr == CSR_FFLAGS) {
         out &= FFLAG_MASK;
+        val &= FFLAG_MASK;
+    }
 #endif
 
 #if RV32_HAS(SYSTEM)

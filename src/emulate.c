@@ -585,9 +585,7 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
  * any of the side effects that might occur on a CSR read.
  *
  * CSR helpers return false for missing entries, machine counter accesses below
- * M-mode, writes to read-only V CSRs or cycle/instret shadows, and
- * CSRRW/CSRRWI to machine IDs, leaving result unchanged.
- * TODO: Also reject zero-source CSRRW/CSRRWI to time and timeh.
+ * M-mode, and writes to read-only CSRs, leaving result unchanged.
  * Callers save PC/cycle and raise ILLEGAL_INSN before rd writeback.
  * For CSRRS/CSRRC, write reflects the encoded source, not its value.
  */
@@ -599,6 +597,9 @@ static inline bool csr_csrrw(riscv_t *rv,
 {
     csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
+    /* CSRRW/CSRRWI always write, including with a zero source. */
+    if ((csr & 0xc00) == 0xc00)
+        return false;
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
     if (rvv_csr_read(rv, csr, &rvv_out)) {
@@ -611,20 +612,6 @@ static inline bool csr_csrrw(riscv_t *rv,
         return true;
     }
 #endif
-    /* csrrw/csrrwi always writes (even with rs1=x0). Trap when the target
-     * is a read-only cycle/instret or machine information register.
-     */
-    switch (csr & 0xFFF) {
-    case CSR_CYCLE:
-    case CSR_CYCLEH:
-    case CSR_INSTRET:
-    case CSR_INSTRETH:
-    case CSR_MVENDORID:
-    case CSR_MARCHID:
-    case CSR_MIMPID:
-    case CSR_MHARTID:
-        return false;
-    }
 #if RV32_HAS(EXT_F)
     if (csr == CSR_FRM) {
         const uint32_t frm = csr_frm_read(rv);
@@ -697,8 +684,7 @@ static inline bool csr_csrrs(riscv_t *rv,
 {
     csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
-    if (write && (csr == CSR_CYCLE || csr == CSR_CYCLEH || csr == CSR_INSTRET ||
-                  csr == CSR_INSTRETH))
+    if (write && (csr & 0xc00) == 0xc00)
         return false;
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
@@ -783,8 +769,7 @@ static inline bool csr_csrrc(riscv_t *rv,
 {
     csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
-    if (write && (csr == CSR_CYCLE || csr == CSR_CYCLEH || csr == CSR_INSTRET ||
-                  csr == CSR_INSTRETH))
+    if (write && (csr & 0xc00) == 0xc00)
         return false;
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;

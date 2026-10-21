@@ -387,43 +387,71 @@ static void stop_counter_trap(riscv_t *cpu)
 }
 
 /* The guest handler dispatches even when rv_decode rejects the encoding. */
-static void run_handler_counter_cases(riscv_t *cpu)
+static void run_handler_readonly_cases(riscv_t *cpu)
 {
-    const unsigned counters[] = {0xc00, 0xc80, 0xc02, 0xc82};
-    const unsigned operations[] = {2, 3, 6, 7};
+    const unsigned readonly_csrs[] = {
+        0xc00,     0xc80,         0xc02,       0xc82,      CSR_TIME,
+        CSR_TIMEH, CSR_MVENDORID, CSR_MARCHID, CSR_MIMPID, CSR_MHARTID,
+#if RV32_HAS(EXT_V)
+        CSR_VL,    CSR_VTYPE,     CSR_VLENB,
+#endif
+    };
+    const unsigned operations[] = {1, 2, 3, 5, 6, 7};
     cpu->io.on_trap = stop_counter_trap;
-    for (unsigned c = 0; c < 4; c++)
-        for (unsigned op = 0; op < 4; op++)
-            for (unsigned source = 0; source <= 5; source += 5) {
-                const uint32_t pc =
-                    load_case(cpu, 0, operations[op], source, 0, 10, false, 0);
-                uint8_t *handler = PRIV(cpu)->mem->mem_base + pc + 16;
-                put32(handler,
-                      csr_insn(counters[c], operations[op], source, 10));
-                put32(handler + 4, 0x001f0f13); /* addi x30, x30, 1 */
-                put32(handler + 8, 0x00100073); /* ebreak */
-                cpu->csr_stvec = pc + 16;
-                cpu->csr_scause = ILLEGAL_INSN;
-                cpu->trap_cnt = 1;
-                const uint64_t cycle_offset = cpu->csr_mcycle_offset;
-                const uint64_t instret_offset = cpu->csr_minstret_offset;
-                trap_handler(cpu);
-                case_count++;
-                expect_state(counters[c], rv_has_halted(cpu), true);
-                expect_state(counters[c], trap_count, source != 0);
-                expect_state(counters[c], cpu->X[30], source == 0);
-                expect_state(counters[c],
-                             cpu->csr_mcycle_offset != cycle_offset, false);
-                expect_state(counters[c],
-                             cpu->csr_minstret_offset != instret_offset, false);
-                if (source) {
-                    expect_state(counters[c], trap_cause, ILLEGAL_INSN);
-                    expect_state(counters[c], trap_pc, pc + 16);
-                    expect_state(counters[c], trap_rd, SENTINEL);
-                    expect_state(counters[c], cpu->X[10], SENTINEL);
+    for (unsigned c = 0; c < sizeof(readonly_csrs) / sizeof(readonly_csrs[0]);
+         c++)
+        for (unsigned op = 0; op < 6; op++)
+            for (unsigned value = 0; value < 2; value++)
+                for (unsigned source = 0; source <= 5; source += 5) {
+                    const uint32_t pc =
+                        load_case(cpu, 0, operations[op], source,
+                                  value ? UINT32_MAX : 0, 10, false, 0);
+                    const bool write =
+                        source || operations[op] == 1 || operations[op] == 5;
+                    const uint32_t ids[] = {cpu->csr_mvendorid,
+                                            cpu->csr_marchid, cpu->csr_mimpid,
+                                            cpu->csr_mhartid};
+                    const uint32_t timer[] = {cpu->csr_time[0],
+                                              cpu->csr_time[1]};
+                    uint8_t *handler = PRIV(cpu)->mem->mem_base + pc + 16;
+                    put32(handler, csr_insn(readonly_csrs[c], operations[op],
+                                            source, 10));
+                    put32(handler + 4, 0x001f0f13); /* addi x30, x30, 1 */
+                    put32(handler + 8, 0x00100073); /* ebreak */
+                    cpu->csr_stvec = pc + 16;
+                    cpu->csr_scause = ILLEGAL_INSN;
+                    cpu->trap_cnt = 1;
+                    const uint64_t cycle_offset = cpu->csr_mcycle_offset;
+                    const uint64_t instret_offset = cpu->csr_minstret_offset;
+                    trap_handler(cpu);
+                    case_count++;
+                    expect_state(readonly_csrs[c], rv_has_halted(cpu), true);
+                    expect_state(readonly_csrs[c], trap_count, write);
+                    expect_state(readonly_csrs[c], cpu->X[30], !write);
+                    expect_state(readonly_csrs[c],
+                                 cpu->csr_mcycle_offset != cycle_offset, false);
+                    expect_state(readonly_csrs[c],
+                                 cpu->csr_minstret_offset != instret_offset,
+                                 false);
+                    expect_state(readonly_csrs[c], cpu->csr_mvendorid, ids[0]);
+                    expect_state(readonly_csrs[c], cpu->csr_marchid, ids[1]);
+                    expect_state(readonly_csrs[c], cpu->csr_mimpid, ids[2]);
+                    expect_state(readonly_csrs[c], cpu->csr_mhartid, ids[3]);
+                    if (!write && c >= 6 && c < 10)
+                        expect_state(readonly_csrs[c], cpu->X[10], ids[c - 6]);
+                    if (write) {
+                        expect_state(readonly_csrs[c], cpu->csr_time[0],
+                                     timer[0]);
+                        expect_state(readonly_csrs[c], cpu->csr_time[1],
+                                     timer[1]);
+                        expect_state(readonly_csrs[c], trap_cause,
+                                     ILLEGAL_INSN);
+                        expect_state(readonly_csrs[c], trap_pc, pc + 16);
+                        expect_state(readonly_csrs[c], trap_rd, SENTINEL);
+                        expect_state(readonly_csrs[c], cpu->X[10], SENTINEL);
+                    }
+                    cpu->trap_cnt = 0;
                 }
-                cpu->trap_cnt = 0;
-            }
     cpu->io.on_trap = record_trap;
     install_handler(cpu);
 }
@@ -586,6 +614,10 @@ int main(void)
     for (unsigned i = 0; i < 6; i++)
         run_case(cpu, scratch, operations[i], 0, 0, 10, true, false, 0);
     run_mapped_cases(cpu);
+    for (unsigned csr = CSR_TIME; csr <= CSR_TIMEH; csr += 0x80)
+        for (unsigned op = 1; op <= 5; op += 4)
+            for (unsigned def = 0; def < 2; def++)
+                run_case(cpu, csr, op, 0, 0, 10, false, def, 0xa5);
     run_minstret_cases(cpu);
 #if RV32_HAS(SYSTEM)
     for (unsigned csr = 0xb00; csr <= 0xb80; csr += 0x80)
@@ -600,7 +632,7 @@ int main(void)
                 run_case(cpu, csr, op, 0, 0, 10, false, def, 0xa5);
 #endif
 #if RV32_HAS(SYSTEM)
-    run_handler_counter_cases(cpu);
+    run_handler_readonly_cases(cpu);
 #endif
     unsigned decoder_failures = 0;
     const unsigned read_only[] = {0xfff, 0xc00, 0xc80, 0xc02, 0xc82};

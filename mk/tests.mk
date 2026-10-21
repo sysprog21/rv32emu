@@ -461,6 +461,13 @@ check-rvv-smoke: $(BIN)
 	    tests/rvv-smoke.S -o $(OUT)/rvv-smoke.elf
 	$(call check-test, , $(OUT)/rvv-smoke.elf, rvv-smoke.elf, tail -n 1,$(EXPECTED_rvv_smoke))
 endif
+
+# Host-side check of tools/deploy-webui.sh. It runs no emulator code, so it is
+# kept out of check and run once by the emcc CI job instead.
+.PHONY: check-deploy-webui
+check-deploy-webui:
+	$(Q)python3 tests/test-deploy-webui.py
+
 check: $(CHECK_TARGETS)
 
 # System tests

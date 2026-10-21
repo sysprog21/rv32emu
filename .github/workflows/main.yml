@@ -90,6 +90,22 @@ jobs:
               make prepare-web
               python3 tests/test-wasm-demo.py --mode system --expect-jit
 
+      # The html mode of tools/deploy-webui.sh must render the same pages as
+      # the system prepare-web above. The distclean in that step removed
+      # demo/user, so only the pages it rebuilt are compared.
+      - name: Check HTML-only deployment
+        run: |
+              make check-deploy-webui
+              ref="$RUNNER_TEMP/demo-ref"
+              mkdir -p "$ref/system"
+              for f in index.html system/index.html; do
+                cp "demo/$f" "$ref/$f"
+              done
+              tools/deploy-webui.sh html
+              for f in index.html system/index.html; do
+                cmp "$ref/$f" "demo/$f"
+              done
+
   host-x64:
     name: x64 ${{ matrix.compiler }}
     needs: [detect-code-related-file-changes]

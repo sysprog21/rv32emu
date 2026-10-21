@@ -23,6 +23,16 @@ else
 DEMO_DIR := $(DEMO_DIR_BASE)/user
 endif
 
+# Values for the <ROOTFS> and <ROOTFS_CLI> placeholders in system.html. The
+# html mode of tools/deploy-webui.sh uses the same mapping; keep them in sync.
+ifeq ($(CONFIG_ROOTFS_EXT4),y)
+WEB_ROOTFS := rootfs.ext4
+WEB_ROOTFS_CLI := -x vblk:rootfs.ext4,rootfs
+else
+WEB_ROOTFS := rootfs.cpio.gz
+WEB_ROOTFS_CLI := -i rootfs.cpio.gz
+endif
+
 # Base web files. User mode also ships the bulky game-data assets that were
 # moved out of --embed-file so the WASM binary stays small. They are fetched
 # at runtime by user.html and written into MEMFS at the paths the binaries
@@ -282,6 +292,14 @@ define cp-web-worker
     $(Q)if [ -f $(basename $(BIN)).worker.js ]; then cp $(basename $(BIN)).worker.js $(DEMO_DIR)/; fi
 endef
 
+# Substitute the <ROOTFS> and <ROOTFS_CLI> placeholders in the staged
+# system.html. sed -i differs between BSD and GNU, so write a temporary file.
+define render-system-html
+    $(Q)sed -e 's|<ROOTFS>|$(WEB_ROOTFS)|g' -e 's|<ROOTFS_CLI>|$(WEB_ROOTFS_CLI)|g' \
+        $(DEMO_DIR)/system.html > $(DEMO_DIR)/system.html.tmp
+    $(Q)mv $(DEMO_DIR)/system.html.tmp $(DEMO_DIR)/system.html
+endef
+
 STATIC_WEB_FILES := $(WEB_JS_RESOURCES)/coi-serviceworker.min.js \
                     $(WEB_JS_RESOURCES)/common.js \
                     $(WEB_JS_RESOURCES)/wasm-loader.js \
@@ -323,24 +341,7 @@ prepare-web: $(start_web_deps)
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(call cp-web-worker)
 ifeq ($(CONFIG_SYSTEM),y)
-# Substitute the <ROOTFS> and <ROOTFS_CLI>
-ifeq ($(CONFIG_ROOTFS_EXT4),y)
-ifeq ($(UNAME_S),Darwin) # macOS
-	$(Q)sed -i '' 's/<ROOTFS>/rootfs.ext4/g' $(DEMO_DIR)/system.html
-	$(Q)sed -i '' 's/<ROOTFS_CLI>/-x vblk:rootfs.ext4,rootfs/g' $(DEMO_DIR)/system.html
-else # Linux
-	$(Q)sed -i 's/<ROOTFS>/rootfs.ext4/g' $(DEMO_DIR)/system.html
-	$(Q)sed -i 's/<ROOTFS_CLI>/-x vblk:rootfs.ext4,rootfs/g' $(DEMO_DIR)/system.html
-endif
-else
-ifeq ($(UNAME_S),Darwin) # macOS
-	$(Q)sed -i '' 's/<ROOTFS>/rootfs.cpio.gz/g' $(DEMO_DIR)/system.html
-	$(Q)sed -i '' 's/<ROOTFS_CLI>/-i rootfs.cpio.gz/g' $(DEMO_DIR)/system.html
-else # Linux
-	$(Q)sed -i 's/<ROOTFS>/rootfs.cpio.gz/g' $(DEMO_DIR)/system.html
-	$(Q)sed -i 's/<ROOTFS_CLI>/-i rootfs.cpio.gz/g' $(DEMO_DIR)/system.html
-endif
-endif
+	$(call render-system-html)
 	$(Q)cp build/linux-image/Image.gz $(DEMO_DIR)/
 	$(Q)cp build/linux-image/rootfs.ext4 $(DEMO_DIR)/
 	$(Q)gzip -9 -c $(OUT)/linux-image/rootfs.web.cpio > $(DEMO_DIR)/rootfs.cpio.gz
@@ -363,6 +364,7 @@ compress-web: $(start_web_deps)
 	$(foreach T, $(STATIC_WEB_FILES), $(call cp-web-file, $(T)))
 	$(call cp-web-worker)
 ifeq ($(CONFIG_SYSTEM),y)
+	$(call render-system-html)
 	$(Q)cp build/linux-image/Image.gz $(DEMO_DIR)/
 	$(Q)cp build/linux-image/rootfs.ext4 $(DEMO_DIR)/
 	$(Q)gzip -9 -c $(OUT)/linux-image/rootfs.web.cpio > $(DEMO_DIR)/rootfs.cpio.gz

@@ -72,23 +72,39 @@ case "$MODE" in
         done
         [ -f .config ] || error "Missing .config; run 'make wasm_system_defconfig' first"
         # Same mapping as prepare-web in mk/wasm.mk; keep the two in sync.
-        if grep -q '^CONFIG_ROOTFS_EXT4=y$' .config; then
+        # ENABLE_ROOTFS_EXT4 overrides .config here as it does for make.
+        case "${ENABLE_ROOTFS_EXT4:-}" in
+            1 | [yY] | [yY][eE][sS] | [tT][rR][uU][eE]) ext4=y ;;
+            0 | [nN] | [nN][oO] | [fF][aA][lL][sS][eE]) ext4=n ;;
+            "")
+                if grep -q '^CONFIG_ROOTFS_EXT4=y$' .config; then
+                    ext4=y
+                elif [ $? -eq 1 ]; then
+                    ext4=n
+                else
+                    error "Cannot read .config"
+                fi
+                ;;
+            *) error "Invalid ENABLE_ROOTFS_EXT4='$ENABLE_ROOTFS_EXT4'" ;;
+        esac
+        if [ "$ext4" = y ]; then
             rootfs=rootfs.ext4
             rootfs_cli='-x vblk:rootfs.ext4,rootfs'
         else
             rootfs=rootfs.cpio.gz
             rootfs_cli='-i rootfs.cpio.gz'
         fi
+        # Stage every page first, so a failure leaves the deployed ones intact.
         mkdir -p demo/{user,system}
-        cp "$src/user.html" demo/user/index.html
-        log "  ✓ User mode HTML updated"
-        # Render to a temporary file so a sed failure cannot truncate the live page.
+        trap 'rm -f demo/index.html.tmp demo/user/index.html.tmp demo/system/index.html.tmp' EXIT
+        cp "$src/user.html" demo/user/index.html.tmp
         sed -e "s|<ROOTFS>|$rootfs|g" -e "s|<ROOTFS_CLI>|$rootfs_cli|g" \
             "$src/system.html" > demo/system/index.html.tmp
-        mv demo/system/index.html.tmp demo/system/index.html
-        log "  ✓ System mode HTML updated"
-        cp "$src/demo-index.html" demo/index.html
-        log "  ✓ Demo index updated"
+        cp "$src/demo-index.html" demo/index.html.tmp
+        for f in user/index.html system/index.html index.html; do
+            mv "demo/$f.tmp" "demo/$f"
+        done
+        log "  ✓ User, system and index pages updated"
         ;;
 
     *)

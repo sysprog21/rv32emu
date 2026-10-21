@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """HTML-only deployment regression checks; no build toolchain required."""
 
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -25,12 +26,19 @@ class HtmlDeploymentTest(unittest.TestCase):
         result = self.deploy()
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def deploy(self):
+    def deploy(self, **env):
+        base = {
+            k: v for k, v in os.environ.items() if k != "ENABLE_ROOTFS_EXT4"
+        }
         return subprocess.run(
             ["bash", str(self.root / "tools/deploy-webui.sh"), "html"],
             capture_output=True,
             text=True,
+            env={**base, **env},
         )
+
+    def system_page(self):
+        return (self.root / "demo/system/index.html").read_text()
 
     def test_rootfs_configuration(self):
         for config, rootfs, cli in [
@@ -92,6 +100,29 @@ class HtmlDeploymentTest(unittest.TestCase):
     def test_missing_config_fails(self):
         (self.root / ".config").unlink()
         self.assert_failure_keeps_output()
+
+    @unittest.skipIf(os.geteuid() == 0, "root can read a mode 000 file")
+    def test_unreadable_input_fails(self):
+        # Both pass the existence checks, so the failure comes later: from
+        # grep on .config, and from sed after the output file is opened.
+        for name in [".config", "assets/wasm/html/system.html"]:
+            with self.subTest(input=name):
+                path = self.root / name
+                path.chmod(0)
+                try:
+                    self.assert_failure_keeps_output()
+                finally:
+                    path.chmod(0o644)
+
+    def test_enable_override(self):
+        for value, cli in [("0", "-i rootfs.cpio.gz"), ("yes", "-x vblk:")]:
+            with self.subTest(value=value):
+                result = self.deploy(ENABLE_ROOTFS_EXT4=value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(cli, self.system_page())
+        self.assertNotEqual(
+            self.deploy(ENABLE_ROOTFS_EXT4="maybe").returncode, 0
+        )
 
 
 if __name__ == "__main__":

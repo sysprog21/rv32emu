@@ -31,8 +31,11 @@ def read_profile(path):
 
 def read_define(path, name):
     """Return the integer a repository file #defines as name."""
-    return int(re.search(rf"^#define {name} (\d+)$", (ROOT / path).read_text(),
-                         re.MULTILINE).group(1))
+    return int(
+        re.search(
+            rf"^#define {name} (\d+)$", (ROOT / path).read_text(), re.MULTILINE
+        ).group(1)
+    )
 
 
 def t2c_threshold():
@@ -41,8 +44,11 @@ def t2c_threshold():
 
 def read_t1c_stats(stderr, required=False):
     """Return the last T1C_STATS report, or None in a build without one."""
-    reports = [json.loads(line[len("T1C_STATS "):]) for line in stderr.splitlines()
-               if line.startswith("T1C_STATS ")]
+    reports = [
+        json.loads(line[len("T1C_STATS ") :])
+        for line in stderr.splitlines()
+        if line.startswith("T1C_STATS ")
+    ]
     if required:
         assert len(reports) == 1, stderr
     return reports[-1] if reports else None
@@ -50,4 +56,6 @@ def read_t1c_stats(stderr, required=False):
 
 def interpreted_entries(stats):
     """Count entries to blocks T1 could compile but the interpreter ran."""
-    return stats["blockers"].get("translatable_interpreted", {}).get("entries", 0)
+    return (
+        stats["blockers"].get("translatable_interpreted", {}).get("entries", 0)
+    )

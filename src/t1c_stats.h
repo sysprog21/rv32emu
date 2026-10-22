@@ -51,7 +51,9 @@ struct t1c_stats {
     uint64_t traps[64];      /* traps taken per T1C_CAUSE_INDEX */
 };
 extern struct t1c_stats rv_t1c_stats;
-/* Indexed by decoded opcode. Only the emulator thread updates these arrays. */
+/* Indexed by decoded opcode, or by a T1C attribution reason from N_RV_INSNS
+ * up. Only the emulator thread updates these arrays.
+ */
 extern uint64_t rv_t1c_blockers_decoded[];
 extern uint64_t rv_t1c_blockers_entries[];
 extern uint64_t rv_t1c_blockers_insns[];

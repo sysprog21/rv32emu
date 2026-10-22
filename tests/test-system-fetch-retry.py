@@ -12,9 +12,16 @@ parser.add_argument("emulator")
 parser.add_argument("guest")
 parser.add_argument("--require-stats", action="store_true")
 args = parser.parse_args()
-result = subprocess.run([args.emulator, "-k", args.guest], capture_output=True,
-                        text=True, check=True, timeout=30)
-lines = [line for line in result.stdout.splitlines() if line.startswith("SYSTEM ")]
+result = subprocess.run(
+    [args.emulator, "-k", args.guest],
+    capture_output=True,
+    text=True,
+    check=True,
+    timeout=30,
+)
+lines = [
+    line for line in result.stdout.splitlines() if line.startswith("SYSTEM ")
+]
 assert lines == ["SYSTEM fetch retry OK"], result
 stats = read_t1c_stats(result.stderr, args.require_stats)
 if stats:

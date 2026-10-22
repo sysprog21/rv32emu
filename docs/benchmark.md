@@ -969,14 +969,14 @@ requires.
   with FENCE.I after IR eviction.
 * `system-interrupt-dispatch.S` checks repeated timer interrupts returning into
   a compiled loop, live registers, SPP, and a nested exception leaving SIE
-  clear. Interrupts are polled only between dispatches, and the system
-  interpreter chains a running loop without returning there, so this check runs
-  only in JIT builds.
+  clear. Interrupts are polled only between dispatches. This check first ran
+  only in JIT builds, because the system interpreter chained a running loop
+  without returning there; since the chain deadline checkpoint below, every
+  system build runs it.
 
-These pass in T1C, T2C and UBSan system builds; the interpreter build runs all
-but the interrupt check. The Arm64 system build cross-compiles, but QEMU-user
-8.2.2 crashes on demand-paged RAM with both the original and changed binaries,
-so it was not run.
+These pass in T1C, T2C, interpreter and UBSan system builds. The Arm64 system
+build cross-compiles, but QEMU-user 8.2.2 crashes on demand-paged RAM with both
+the original and changed binaries, so it was not run.
 
 One run of each `tests/system-bench.sh` workload, original / optimized T1C.
 These are smoke checks for gross regressions, not statistical comparisons:
@@ -989,873 +989,63 @@ These are smoke checks for gross regressions, not statistical comparisons:
 | gzip/MD5 pipeline | 1.721 / 1.177 s |
 
 
-## Unchanged SATP writes in the system interpreter
+## System JIT correctness and Zba (2026-10)
 
-On 2026-10-22, TODO task 2.9 changed `csr_csrrw` to request deferred block-map
-retirement only when the written SATP differs from its previous value. This
-matches the existing `csr_csrrs`/`csr_csrrc` guards and also covers `csrrwi`.
-The baseline includes the preceding interpreter FENCE.I fix (`18734ba`).
-Both binaries use `system_interpreter_defconfig`, `CC=gcc`,
-`CROSS_COMPILE=riscv64-linux-gnu-` and `ENABLE_ROOTFS_EXT4=0` on x86-64
-Linux 6.8.0-139, glibc 2.39. `make check tests` passed, including flat MMU
-kernels; RV32 libc-dependent guest C checks were explicitly skipped.
+This series fixes compatibility defects in the system JIT and compiles the
+Zba shift-add instructions. Most changes are correctness repairs; each has a
+flat supervisor or user regression that fails before its fix. Only the
+representative measurements are kept here.
 
-Measured with:
+Correctness changes:
 
-```sh
-python3 tests/system-boot.py \
-  --emulator before=/tmp/rv32emu-todo-satp-before \
-  --emulator after=build/rv32emu --cpu 0 --runs 5 \
-  --output build/system-boot-satp.json
-```
+* **Address spaces.** SFENCE.VMA retires decoded and native code in every
+  retained address space, including native entries whose IR was evicted, and
+  unchanged SATP writes no longer clear the interpreter block map.
+* **Privilege.** Page walks, TLB hits and block entry enforce U, SUM and MXR,
+  and MPRV selects the data context. Fetch privilege is part of iTLB tags,
+  block lookup, native link keys and T2C caches. Decode faults are precise,
+  including instructions that straddle a page.
+* **Interrupts.** Interpreter and native chains stop at the dispatch
+  deadline, so a hot loop can no longer starve timer interrupts. A handler
+  that consumes the whole slice still lets the resumed guest run one block.
+* **Code retirement during an access.** A page-fault handler may rewrite code
+  and fence while a memory helper is on the stack. The helper completes the
+  current access once and returns at the next guest PC, charging only the
+  executed prefix.
+* **Loads into x0.** T2C discarded load results into x0 by writing them;
+  it now keeps the access (volatile RAM read or MMU callback) and drops the
+  result. Lazy fusion mutates IR under the compiler's cache lock.
+* **Zero-count rotations.** rol, ror and rori no longer shift a 32-bit value
+  by 32 when the amount masks to zero.
+* **Fetch retries.** A retried fetch restores JIT eligibility for compatible
+  blocks.
 
-The harness warmed each engine once, alternated order, and booted the same
-kernel/initrd. Host wall-clock seconds to login:
+Diagnostics: T1C_STATS=1 attributes interpreted block entries to the first
+opcode that blocked translation. On rebuilt CoreMark this put 78.9% of
+weighted instructions behind sh1add/sh2add/sh3add, which motivated the Zba
+lowering. The counters are estimates, not retired-instruction counts, and
+T1C_STATS=0 builds contain none of them.
 
-| Pair | Before | After |
-| --- | ---: | ---: |
-| 1 | 8.534479 | 7.515850 |
-| 2 | 7.862725 | 7.855595 |
-| 3 | 7.873955 | 7.541753 |
-| 4 | 7.204627 | 7.808772 |
-| 5 | 10.144983 | 9.340663 |
-| Mean | 8.324154 | 8.012527 |
+### Zba lowering
 
-The mean reduction is 0.311627 s (3.74%), with a paired Student-t 95%
-interval of [-0.491715, 1.114969] s (five differences, four degrees of
-freedom). The interval includes zero: **no measured speedup is claimed**.
-The change is retained as a consistency fix, not an accepted performance win.
+sh1add, sh2add and sh3add compile in x86 and Arm64 T1C (LEA, or ADD with a
+shifted source), in LLVM T2C and in Wasm. The fixtures force dispatch for
+every alias and source form and require native or tier-2 entries for each.
+The Sv32 variant adds an index with bit 30 set to a high virtual base, so a
+64-bit shift/add would fault.
 
-SHA-256 identities:
+User throughput on CPU 6, rebuilt with `-march=rv32imafc_zba_zbb_zbs`, five
+interleaved runs; positive means faster, with paired 95% intervals:
 
-* Kernel: `690557ad99324b44a364ab9db0fe376bc4ad8834cf7128825a25153ea6190731`
-* Initrd: `7b6ffc0c8876ec8a72a4e3d245c0111ca18bdd1d8cf26b3c253e90cd8448222f`
-* Before: `af7b19732740914bd150845d833aa0f4a5a74250dde33b3070f10c0517ca1edb`
-* After: `a2d9bae6b5f27c9b1df72abc1caa5f779a7674ac17cd936b75e42c5368118736`
-
-
-## SFENCE.VMA across retained address spaces
-
-TODO task 0.2 (2026-10-22) fixes stale decoded/native code surviving a fence
-issued from another SATP. All operand forms now conservatively retire code
-across retained address spaces, including native entries whose IR was evicted.
-VA-only page indexes keep data-only selective fences cheap with page-bounded
-blocks. Live SATP indexes avoid scanning already-invalidated IR slots; native
-retirement clears pending links and its retired page index. T2C cache clears
-remain locked and occur only when compiled blocks were invalidated.
-
-The baseline is `efb5369`; both timing binaries use `system_defconfig`,
-`CC=gcc` (Ubuntu GCC 14.2.0), `CROSS_COMPILE=riscv64-linux-gnu-` and
-`ENABLE_ROOTFS_EXT4=0`, on x86-64 Linux 6.8.0-139, CPU 0. Both use the same
-kernel/initrd. The full checks pass in S-INT, S-T1C and S-T2C. Each of the
-four `START_CASE` regression variants fails independently on the baseline.
-The revised test uses 4 KiB code leaves, exact root/ASID recycling, a new root
-with the same ASID, and a remapped global page. Emscripten was unavailable,
-so the corresponding Wasm backend changes were reviewed but not executed.
-
-Final binaries were measured after the review refinements. Preliminary
-samples taken before those refinements are excluded. Boot-to-login times
-come from `tests/system-boot.py --cpu 0 --runs 5`, after one warmup per
-engine with alternating order. Seconds:
-
-| Pair | Before | After |
-| --- | ---: | ---: |
-| 1 | 2.254933 | 2.410814 |
-| 2 | 2.241969 | 2.316780 |
-| 3 | 2.163948 | 2.892789 |
-| 4 | 3.069782 | 2.991331 |
-| 5 | 2.774704 | 2.803782 |
-| Mean | 2.501067 | 2.683099 |
-
-The paired 95% interval for time reduction is [-0.575870, 0.211806] s
-(Student-t, four degrees of freedom). No boot-time change is established.
-
-`tests/system-bench.sh <emulator> 1` ran three paired times, alternating
-engine order (before/after, after/before, before/after), with each invocation
-pinned to CPU 0 using `taskset`. Milliseconds, including all raw samples:
-
-| Workload | Before samples | After samples | Before mean | After mean | Paired reduction 95% interval |
-| --- | --- | --- | ---: | ---: | --- |
-| boot | 2325, 2595, 2607 | 2759, 2696, 2430 | 2509.000 | 2628.333 | [-879.262, 640.595] |
-| dhrystone | 14213, 13634, 13775 | 14027, 14425, 14387 | 13874.000 | 14279.667 | [-1697.806, 886.473] |
-| coremark | 3842, 4357, 4521 | 4115, 4096, 4276 | 4240.000 | 4162.333 | [-676.993, 832.327] |
-| fork-exec | 12118, 10311, 9378 | 10134, 11122, 9657 | 10602.333 | 10304.333 | [-3388.834, 3984.834] |
-| gzip-md5 | 1449, 1257, 1510 | 1969, 1495, 1143 | 1405.333 | 1535.667 | [-1256.134, 995.467] |
-
-These three-pair intervals use Student-t with two degrees of freedom. Every
-interval includes zero: no workload shows an established speedup or
-regression. The intervals are broad and do not exclude meaningful costs.
-The change is retained for correctness, not as a performance win.
-
-Separate `T1C_STATS=1` builds ran `tests/system-boot.py --require-stats
---cpu 0 --runs 2` (one warmup per engine). These are diagnostic counts,
-not timing samples:
-
-| Counter | Before samples | After samples |
-| --- | --- | --- |
-| retire_calls | 298, 301 | 325, 324 |
-| fence_i | 607, 607 | 604, 604 |
-| fence_i_blocks | 49036, 60709 | 48505, 55170 |
-| sfence_all | 298, 301 | 295, 300 |
-| sfence_page | 285763, 285860 | 285900, 285831 |
-| decoded_blocks | 873763, 880428 | 885274, 880385 |
-| dispatches | 9382230, 9391525 | 10418070, 10390705 |
-
-SHA-256 identities from the timing report:
-
-* Kernel: `690557ad99324b44a364ab9db0fe376bc4ad8834cf7128825a25153ea6190731`
-* Initrd: `7b6ffc0c8876ec8a72a4e3d245c0111ca18bdd1d8cf26b3c253e90cd8448222f`
-* Before emulator: `64f1c17a840794504e21efdbc0623265a337bd035a2cb0586c5f92e45dabb4c8`
-* After emulator: `28ba77d06d66872501d960205ca695d4acd18ef3dddab520a89c2b86007d773f`
-
-Raw reports remain in `build/system-boot-sfence.json`,
-`build/system-bench-sfence.json`, `build/system-counters-sfence-before.json`
-and `build/system-counters-sfence.json`. To reproduce, build the baseline
-in a worktree at `efb5369`, build the changed tree with the same flags,
-then run the commands above using the two binary paths. Per-SATP invalidation
-APIs are intentionally retained for future ASID filtering and Wasm fixtures.
-
-### MMU privilege correctness follow-up (2026-10-22)
-
-Task 0.1 fixes U/SUM/MXR permission checks, MPRV data context, fetch privilege
-in retained code, precise decode faults and straddling instruction fetches.
-These are correctness requirements. The measurements below do not establish
-a performance win or meet the overall QEMU speed objective.
-
-Baseline: `4c0faa7`, `system_defconfig`, GCC 14.2, `ENABLE_ROOTFS_EXT4=0`.
-The changed binaries use the same configuration, without diagnostic counters
-or sanitizers. Host: x86-64 Linux 6.8.0-139, pinned to CPU 0. Kernel/initrd are
-the same prebuilt assets recorded in the preceding experiment. QEMU is the
-user-provided 11.0.2 `build-riscv32/qemu-system-riscv32`, with its firmware
-startup included. Host load remained variable; pinning does not isolate a CPU.
-
-A five-run interleaved boot-to-login comparison, after one warmup per engine:
-
-| Engine | Wall seconds, all five samples | Median seconds |
-| --- | --- | ---: |
-| Baseline S-T1C | 3.411, 3.391, 4.402, 5.408, 2.921 | 3.411 |
-| Changed S-T1C | 2.651, 2.968, 3.039, 2.791, 3.114 | 2.968 |
-| QEMU 11.0.2 | 4.476, 3.318, 3.346, 3.167, 2.821 | 3.318 |
-
-Pairing by run, the mean changed/baseline time difference is -21.5%, with a
-Student-t 95% interval [-47.0%, +4.0%]. It includes zero; the lower median
-cannot be called an established speedup. An earlier three-run pilot, before
-the final fetch/fence refinements, had medians 2.401 / 3.097 / 3.641 seconds
-for baseline / changed / QEMU respectively. Retaining both results documents
-the variance instead of selecting the favorable run.
-
-Three alternating baseline/changed workload pairs ran through
-`tests/system-bench.sh`, in orders before/after, after/before, before/after.
-These use the intermediate changed binary after precise fetch fixes, before
-the final straddling-upper-page fence guard and fetch common-path cleanup.
-Values are host milliseconds; intervals are paired percentage changes, with
-positive values meaning slower:
-
-| Workload | Baseline samples | Changed samples | Mean time change [95% interval] |
+| Configuration | Workload | vs baseline | vs QEMU 11.0.2 |
 | --- | --- | --- | --- |
-| Boot | 2986, 3062, 2581 | 3093, 3077, 3009 | +6.9% [-14.3%, +28.1%] |
-| Dhrystone | 14909, 15112, 14251 | 17678, 17466, 16350 | +16.3% [+11.3%, +21.3%] |
-| CoreMark | 4971, 4199, 4557 | 4614, 4221, 4611 | -1.8% [-13.4%, +9.7%] |
-| 300 fork/execs | 10178, 11305, 10577 | 11046, 11190, 10399 | +1.9% [-12.2%, +16.1%] |
-| gzip/MD5 | 1196, 1470, 1120 | 1836, 1364, 1422 | +24.4% [-51.2%, +100.0%] |
-
-Dhrystone regressed beyond its interval in this intermediate build. That
-cost needs follow-up profiling; correctness coverage is not evidence that
-performance acceptance has passed. The other workload intervals are broad.
-A repeat on the final C implementation (the same changed binary as the
-five-run boot comparison) produced these three alternating pairs:
-
-| Workload | Baseline samples | Changed samples | Mean time change [95% interval] |
-| --- | --- | --- | --- |
-| Boot | 3194, 2665, 2923 | 2976, 3308, 3175 | +8.6% [-29.8%, +47.1%] |
-| Dhrystone | 17296, 15537, 15510 | 18670, 16527, 16648 | +7.2% [+5.2%, +9.2%] |
-| CoreMark | 5500, 4021, 4072 | 4844, 4663, 5119 | +9.9% [-38.6%, +58.4%] |
-| 300 fork/execs | 11555, 11032, 11558 | 10262, 10900, 10825 | -6.2% [-18.7%, +6.2%] |
-| gzip/MD5 | 1236, 1412, 1751 | 1552, 1662, 1629 | +12.1% [-30.1%, +54.3%] |
-
-The final Dhrystone regression is smaller, but remains outside its interval.
-TODO 0.1 performance acceptance therefore stays open. Other rows do not
-establish a change. Investigate the per-memory-operation context guard before
-claiming that compatibility has been restored without a speed cost.
-
-The permission kernel's default 10,000 iterations reached no T2C entries in
-one diagnostic run. Compiling it with `-DMMU_PRIV_ITERATIONS=1000000` passed
-with over 19 million T2C entries. That test exposed a counter bug: publishing
-only at region exit charged unexecuted suffixes and hid the executed prefix
-from synchronous handlers. Sharing T1C's suffix calculation and publishing
-before trap-capable helpers changed its guest count from 343,702,245 to the
-expected 330,000,855 for that kernel variant (before the final U-mode MXR
-cases were added). Optional `t2c_entries` diagnostics substantiate actual
-tier-2 execution; they are not used in wall-time measurements. After adding
-the U-mode MXR cases, the expanded million-iteration kernel also passed under
-UBSan with 20,968,657 T2C entries and 373,001,021 observed guest cycles.
-
-Reproduce the boot run with:
-
-```sh
-python3 tests/system-boot.py --emulator before=<baseline-binary> \
-  --emulator after=<changed-binary> \
-  --qemu ~/qemu-build/qemu-11.0.2/build-riscv32/qemu-system-riscv32 \
-  --cpu 0 --runs 5 --warmup 1 --output build/system-boot-priv-final-t1c.json
-```
-
-SHA-256 of baseline / final boot changed / intermediate workload changed:
-
-* `7ba63bc29c0fc25e1e4c33db85a60aaab0c005e508574a946dea10091d045182`
-* `893e064e00bbf0357bb3e2201617ff3415374dde0f496a9f2f01de9e198168df`
-* `6ed75aaedef47149673687ea1b856acefa281be6993aad6a5f3ab996e1d50f19`
-
-Raw boot reports remain in `build/system-boot-priv-t1c.json` (pilot) and
-`build/system-boot-priv-final-t1c.json`; workload samples are also retained
-above because their temporary log is not a repository artifact.
-
-
-### Actual-U RAM tag specialization (2026-10-22)
-
-Class-zero tags for raw readable/writable U RAM let x86 T1C omit its per-access
-context load. Actual S/M, including MPRV-effective-U, keep nonzero classes.
-X-only MXR reads keep the checked path. Regular dTLB stamps are unchanged.
-
-The earlier CPU 0 measurements were confounded by an unrelated CPU-bound
-process observed on that CPU. A new CPU 6 series interleaves three runs of
-each binary, using the same kernel, initrd and `tests/system-bench.sh` workload.
-CPU 6 and its SMT sibling 38 were idle before measurement. Orders were
-pre/context/zero/QEMU, zero/QEMU/pre/context, QEMU/zero/context/pre.
-`pre` is 4c0faa7, `context` is efccf14, and `zero` is this specialization.
-QEMU is 11.0.2, virt/TCG, 512 MiB, default firmware, same Image/rootfs.
-All numbers below are wall milliseconds; diagnostic builds were excluded.
-
-| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
-|---|---|---|---|---|---|
-| pre | 2133, 2116, 2118 | 11863, 12125, 11976 | 3425, 3448, 3429 | 7993, 7974, 7958 | 1216, 1127, 1159 |
-| context | 2335, 2324, 2347 | 12833, 12836, 12802 | 3483, 3478, 3481 | 8299, 8349, 8399 | 1188, 1251, 1271 |
-| zero | 2425, 2343, 2342 | 12400, 12396, 12352 | 3442, 3453, 3449 | 8347, 8234, 8313 | 1115, 1132, 1121 |
-| QEMU | 2451, 2431, 2428 | 11844, 11929, 11908 | 2748, 2749, 2750 | 3845, 3699, 3687 | 666, 673, 664 |
-
-Paired percentage changes (positive means slower), mean and 95% Student-t
-interval over three pairs: zero/context Dhrystone -3.44% [-3.62%, -3.26%],
-gzip -9.15% [-16.22%, -2.08%]. CoreMark -0.94% is below the 2% acceptance
-threshold; boot and fork/exec intervals include zero. Zero/pre still regresses
-boot +11.66% [7.30%, 16.03%], Dhrystone +3.30% [0.43%, 6.17%], and fork/exec
-+4.05% [2.35%, 5.75%]. TODO 0.1 remains open. Against QEMU, zero is slower
-by 4.11% for Dhrystone, 25.43% CoreMark, 121.72% fork/exec and 68.15% gzip;
-boot's -2.74% interval includes zero. These results do not meet the overall
-QEMU performance goal. Three pairs are a small sample; retain the raw values.
-
-Binary SHA-256:
-
-* pre: `7ba63bc29c0fc25e1e4c33db85a60aaab0c005e508574a946dea10091d045182`
-* context: `893e064e00bbf0357bb3e2201617ff3415374dde0f496a9f2f01de9e198168df`
-* zero: `f1a9dd1d11fdbb30bbdde61c872cbd72f172d689cefa8d1b1dc56c6cb6b8ee64`
-* QEMU: `3e49196e45e0815e65f90fb63e206b5c80c0c2ec01fb747912b7cc9e373b3853`
-
-Raw structured report: `build/system-bench-zero-cpu6.json`. The table above
-preserves samples independently of generated artifacts.
-
-Separate CPU 6 hardware profiling attached `perf record -e cycles:u -F 499`
-and `perf stat -e cycles:u,instructions:u,branch-misses:u` to the emulator
-after login, then ran 20,000,000 Dhrystone iterations. The driver stopped
-the emulator at the final prompt before flushing perf, excluding shutdown
-idle time. Profiles reported zero lost samples. Generated code was labeled
-by its executable mapping, without guest-PC granularity. This diagnostic
-procedure includes attach/start boundaries and is not an acceptance benchmark.
-
-| Binary | Cycles | Instructions | Branch misses |
-|---|---:|---:|---:|
-| pre | 37,775,635,973 | 89,254,076,226 | 203,431,902 |
-| context | 42,058,157,713 | 100,484,562,704 | 219,696,304 |
-| zero | 40,139,701,489 | 98,021,314,291 | 192,400,695 |
-
-Zero's sampled cycles: generated T1C code 49.05%, hart coroutine 17.94%,
-trap handler 6.74%, `jit_dtlb_fill` 4.78%, `mmu_translate` 3.88%, and
-`jit_mmu_handler` 2.14%. A separate T1C_STATS run read before/after counter
-snapshots around the same command: 200,692,749 native entries (200,692,584
-cached), 165 compile requests, 32,259 decoded blocks, 86,308,119 interpreted
-trap instructions. Of these, 85,541,274 belong to 23,296 supervisor timer
-interrupts; the other nonzero causes are user ecalls, instruction/load/store
-page faults, and external interrupts. Misalignment is not the explanation.
-The ~200 million native entries establish frequent dispatcher transitions;
-they do not identify which exit type causes them. Profile that in TODO 1.5.
-The diagnostic build took substantially longer and was never timed against
-release binaries. Refill permission checks and interpreted timer handling
-are evidence-backed next targets; their optimizations still need review and
-measurement.
-
-Validation of this specialization: full S-T1C checks; full S-INT and S-T2C
-checks with UBSan; expanded million-iteration privilege kernel under S-T2C
-with UBSan; Linux login boots on sanitized S-INT/S-T2C; Wasm backend fixtures;
-AArch64 T1C object cross-compilation. The expanded privilege assembly also
-passes on QEMU 11.0.2: link at zero (its .org labels are fixed), define
-PHYS_BASE=0x80400000 and UART_PA=0x10000000, objcopy to raw binary and use
-`-M virt -accel tcg -m 512M -nographic -kernel <binary>`. Linking at the
-load address breaks this particular fixture's .org-relative layout.
-Browser Linux and M-mode firmware remain runtime coverage limits.
-
-### Shared refill permission-mask experiment (not adopted)
-
-A prototype computed U/S/SUM/MXR data permissions once in `dtlb_lookup`
-and passed an R/W mask into `jit_dtlb_fill`, replacing duplicate checks for
-read/write tags. Bare mode passed R|W explicitly; raw PTE_R still selected
-class-zero tags. Claude design, implementation and repeat reviews found no
-correctness issues in the prototype. Its exhaustive host tests covered all
-actual privilege/MPP,
-SUM/MXR/MPRV and R/W/X/U combinations. Full S-T1C checks and S-INT/S-T2C
-UBSan checks passed against the prototype. The prototype and its added
-host test were then reverted.
-
-CPU 6 wall milliseconds, three interleaved pairs; orders before/after,
-after/before, before/after. Before is 837a35d, after is the prototype.
-
-| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
-|---|---|---|---|---|---|
-| before | 2743, 3062, 2618 | 13141, 13642, 13379 | 3930, 3625, 3717 | 9219, 8865, 9262 | 1319, 1255, 1257 |
-| after | 2458, 2751, 2645 | 12738, 13176, 14729 | 3671, 3744, 3818 | 8789, 9273, 8657 | 1328, 1434, 1225 |
-
-Arithmetic paired percentage changes, mean [95% Student-t interval, df=2],
-positive
-means slower:
-
-* boot: -6.51% [-22.72%, +9.71%].
-* dhrystone: +1.20% [-17.92%, +20.33%].
-* coremark: -0.20% [-13.97%, +13.58%].
-* fork-exec: -2.20% [-17.01%, +12.61%].
-* gzip-md5: +4.13% [-18.03%, +26.29%].
-
-No row establishes the required 2% improvement with an interval excluding
-zero. Several rows are dominated by a single pair; the prototype is
-dropped rather than claimed as an improvement. This does not prove the
-underlying idea can never help. Profiling puts refill at only about 4.8%
-of cycles; the compiler may already merge some permission work, and function
-pointer checks/RAM bounds remain. Prioritize the much larger transition
-and trap costs. Raw report: `build/system-bench-refill.json`.
-
-SHA-256:
-
-* before: `f1a9dd1d11fdbb30bbdde61c872cbd72f172d689cefa8d1b1dc56c6cb6b8ee64`
-* after: `db0f479dac1e92e8e79e000e9ea6e161b20a78d79125f012b3a4b9265eb399e2`
-
-### System chain deadline correctness checkpoint
-
-The existing interrupt fixture forced a dispatcher return by reading
-`sscratch`. Removing that read made both T1C and the UBSan interpreter print
-FAIL. The fix bounds interpreter chains and native/T2C block entries using
-the existing system dispatch cycle budget. The checks occur before charging
-the next block, preserving its first unexecuted PC and the executed cycle
-prefix. A handler consuming the whole slice grants the resumed guest one
-block before yielding, preserving forward progress across short timer re-arms.
-Direct, call/return and long-handler test variants replace the forced escape.
-
-Extended diagnostic T2C runs with 2,048 interrupts passed under UBSan: direct
-chains reached 79,398 tier-2 entries; call/return chains reached 410,464. Both
-recorded exactly 2,048 supervisor timer interrupts and 2,048 nested load
-misalignment exceptions, and checked live registers plus completed-loop
-instruction effects. These counters substantiate tier-2 coverage and are not
-wall-time samples.
-
-The initial x86 T1C guard prototype was measured on CPU 6 with the same system
-workload, three interleaved pairs (before/after, after/before, before/after).
-Before is the 837a35d binary; after is the initial deadline implementation
-before the long-handler progress refinement and Arm64 load fix. Some builds
-and validation also ran on other CPUs during this diagnostic series. Treat
-these as preliminary cost measurements, not a performance acceptance series.
-The old unbounded baseline fails the no-poll interrupt regression.
-
-| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
-|---|---|---|---|---|---|
-| before | 2364, 2386, 2366 | 12464, 12687, 12482 | 3454, 3456, 3560 | 8418, 8378, 8370 | 1266, 1133, 1230 |
-| after | 2503, 2754, 2490 | 15543, 14698, 14567 | 4632, 4659, 4670 | 8527, 8603, 8630 | 1503, 1419, 1332 |
-
-Arithmetic paired percentage changes, mean [95% Student-t interval, df=2];
-positive means slower:
-
-* boot: +8.85% [-5.32%, +23.02%].
-* dhrystone: +19.09% [+6.96%, +31.22%].
-* coremark: +33.36% [+28.58%, +38.15%].
-* fork-exec: +2.36% [+0.01%, +4.72%].
-* gzip-md5: +17.42% [-3.82%, +38.66%].
-
-This guard is a correctness cost, not a speed improvement. The 100-cycle
-system slice now bounds native execution that formerly ran for much longer,
-so it also increases scheduler/device refresh frequency. Do not claim that
-the QEMU objective or TODO 0.1 performance acceptance is satisfied. System
-live indirect-target patching and measured polling cadence remain follow-up
-work; stronger performance claims require an isolated final-build repeat.
-Raw report: `build/system-bench-chain-deadline.json`.
-
-SHA-256:
-
-* before: `f1a9dd1d11fdbb30bbdde61c872cbd72f172d689cefa8d1b1dc56c6cb6b8ee64`
-* after: `81b2869d68be9925e98b4af7e51a6908c2cc8e0bd2020aa71d027c108cfdc1d9`
-
-The long-handler progress refinement has a separate negative control: the
-8,192-interrupt, interval-one fixture prints FAIL on the initial guarded T1C
-binary without the grant, and OK after the fix. Its handler watchdog reports
-failure if resumed code starves, rather than hanging the test indefinitely.
-A longer 32,768-target run passed UBSan with 21,192 actual T2C entries,
-32,801 timer exceptions and 32,801 nested exceptions (the stop condition is
-checked at the end of a completed outer pass, so it can exceed the target).
-
-Arm64 validation uses a complete cross-built T1C executable, not just an
-object: all ten flat system assembly checks passed under a locally built
-QEMU 11.0.2 AArch64 user runner, including direct/indirect/long-handler
-interrupts, precise trap cycles, SFENCE, MMU privilege and eviction. The hot
-8,192-interrupt long-handler fixture also passes there. The installed QEMU
-8.2.2 user runner crashes internally in demand-paged RAM initialization
-before JIT entry; the 11.0.2 runner resolves that test-environment limitation.
-Native Arm hardware timing and Arm-host T2C remain uncovered. Wasm backend
-fixtures and the full Emscripten 6.0.13 W-SYS build pass; browser Linux runtime
-coverage remains open.
-
-### System active-frame retirement and live-slot follow-up (2026-10-22)
-
-The a702155 repair checkpoint prepares system live-slot support but leaves it
-disabled. The separate follow-up enables the measured candidate, which fills
-indirect slots after a target becomes compiled, using both SATP and actual
-fetch privilege. The dispatcher-established 100-cycle deadline from 06ba78a
-still bounds every external block entry. Slot lookup only patches existing
-code; it neither compiles nor reclaims code. T2C retains its existing
-tier-promotion policy.
-
-Review exposed a compatibility prerequisite: a page-fault handler can modify
-an instruction and execute FENCE.I or SFENCE.VMA while a translated memory
-helper is still on the stack. Retiring future entries alone lets that frame
-execute the obsolete suffix. The new retirement generation makes native
-helpers complete the current access once and return at the next guest PC, with
-only the executed prefix charged. Interpreter and Wasm helpers stop between
-fused members. Atomic instructions preserve the marker across all of their
-accesses. Wasm copies helper IR and fused operands before entering a handler
-that can release the module. MMIO observes the current prefix, including the
-completed access, rather than the speculative block-end count.
-
-Validation:
-
-* Native system T1C `check tests`; system interpreter and T2C under UBSan;
-  user T1C/T2C under UBSan. Guest C regressions requiring an unavailable RV32
-  libc multilib are skipped by the existing toolchain check.
-* All 24 flat system kernels on cross-built Arm64 T1C under QEMU 11.0.2
-  AArch64 user mode. This proves generated-code execution, not native Arm
-  timing or Arm-host T2C coverage.
-* Five Wasm backend fixture configurations, including retirement during a
-  helper, and the full Emscripten 6.0.13 W-SYS build. Browser Linux runtime
-  remains unverified.
-* The new retirement fixture covers hot/cold loads, stores, one MMIO byte
-  write, post-increment and multiple-access fusions, same-SATP remapping,
-  compressed accesses, AMO and an exact cycle assertion. Interpreter, T1C and
-  T2C all read `0x000f428b` at the default cycle checkpoint.
-* A long warmup alone did not prove a tier-2 fault: GDB showed the original
-  probe could still fault in `do_lw`. Inner-loop variants re-enter the hot
-  memory loop directly. GDB then showed `mmu_read_w` / `mmu_write_w` called
-  from `t2c_block` during the invalidating handler, with 603,013 / 589,846
-  actual tier-2 entries in those diagnostic runs. Both pass under UBSan.
-* The default load, store, compressed load and inner-loop load fixtures print
-  FAIL on 06ba78a and OK after this fix. The MMIO variant requires exactly
-  `ZSYSTEM native retire OK`, catching a duplicated or missing write.
-* The diagnostic tiered UBSan binary boots Linux to login (6.8407 s in one
-  validation run; this is not a performance sample).
-
-Claude's review/refine/re-review cycle found the fused-member and AMO marker
-issues; both were fixed before the clean re-review. A separate suspected
-pre-existing T2C load-to-x0 defect is tracked in TODO 0.7. Passing this matrix
-is not a claim of complete compatibility or completion of the QEMU goal.
-
-The earlier three-pair live-slot experiment used an incomplete retirement
-prototype and is excluded from acceptance. Final timing uses the normal system
-T1C release binary, without UBSan, counters or debug symbols, and the same
-prebuilt Linux image/rootfs. The baseline is 06ba78a in a detached worktree.
-QEMU is the locally installed 11.0.2 system emulator, TCG `virt`, 512 MiB,
-default firmware, with the same kernel/rootfs and console command line. Each
-complete workload run is pinned to CPU 6. Engine order rotates between
-before/after/QEMU, QEMU/after/before, and after/before/QEMU. No builds from
-this task run during sampling; unrelated host activity is uncontrolled.
-
-Final samples, host milliseconds:
-
-| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| before | 2419, 2392, 2405 | 14876, 14612, 14945 | 4698, 4668, 4704 | 8654, 8481, 8436 | 1329, 1468, 1490 |
-| after | 2507, 2494, 2523 | 10942, 10823, 10911 | 4310, 4314, 4297 | 8998, 9144, 9125 | 1524, 1510, 1515 |
-| qemu | 2900, 2913, 2886 | 12221, 12106, 12247 | 2808, 2794, 2784 | 3983, 3769, 3746 | 690, 685, 683 |
-
-Arithmetic paired percentage changes [95% Student-t interval, df=2]; positive
-means slower:
-
-| Workload | After vs 06ba78a | After vs QEMU 11.0.2 |
-| --- | ---: | ---: |
-| boot | +4.27% [+2.69%, +5.85%] | -13.50% [-15.75%, -11.26%] |
-| dhrystone | -26.46% [-27.77%, -25.14%] | -10.66% [-11.22%, -10.09%] |
-| coremark | -8.16% [-9.51%, -6.82%] | +54.08% [+52.81%, +55.35%] |
-| fork-exec | +6.65% [+0.88%, +12.43%] | +137.37% [+112.68%, +162.06%] |
-| gzip-md5 | +6.40% [-11.45%, +24.25%] | +121.04% [+119.29%, +122.79%] |
-
-The combined candidate fails the no-regression acceptance rule: boot and
-fork/exec regress beyond their paired intervals despite clear compute wins. It
-beats QEMU on these boot and Dhrystone workloads, while CoreMark, fork/exec
-and gzip remain substantially slower. The full QEMU objective remains open.
-The independent series below separates retirement-repair cost from live-slot
-lookup cost. Report: `build/system-bench-live-final.json`.
-
-SHA-256:
-
-* before: `aef5d58a9efa4b036c7aad080eb9fb177af5ca8fc2cdd5bca7397a5c6764ae5c`
-* after: `9971a5b9ed8ebb10ac0f7a6368fdcf4c9f4c87603d0d0a48fbd90d7c6daf5467`
-* QEMU system executable:
-  `3e49196e45e0815e65f90fb63e206b5c80c0c2ec01fb747912b7cc9e373b3853`
-
-#### Isolating live-slot lookup from the retirement repair
-
-The a702155 repair checkpoint leaves system live slots disabled. It includes
-all retirement-generation, memory-completion and interpreter/Wasm stop
-changes. The second series compares this compatible baseline with the same
-release candidate above. The sole source difference in the isolation worktree
-is `JIT_INDIRECT_LOOKUP` excluding SYSTEM. Both use normal system T1C
-settings. There are three interleaved pairs, before/after, after/before,
-before/after, all pinned to CPU 6 with no builds from this task during
-sampling. Here before means repair only, and after means repair + live slots.
-
-| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| repair only | 2482, 2510, 2532 | 14867, 14820, 14893 | 4730, 4711, 4701 | 8757, 8934, 9203 | 1531, 1618, 1508 |
-| repair + live slots | 2448, 2480, 2491 | 10664, 10774, 10887 | 4264, 4303, 4291 | 8748, 9141, 8940 | 1472, 1651, 1382 |
-
-Arithmetic paired percentage changes [95% Student-t interval, df=2]; positive
-means slower:
-
-* boot: -1.39% [-1.92%, -0.87%].
-* dhrystone: -27.49% [-29.24%, -25.74%].
-* coremark: -9.08% [-10.74%, -7.41%].
-* fork-exec: -0.21% [-6.65%, +6.22%].
-* gzip-md5: -3.39% [-16.34%, +9.56%].
-
-Live-slot learning passes the performance gate against the compatible repair
-baseline for Dhrystone and CoreMark: both exceed a 2% reduction with intervals
-excluding zero, and no other measured row regresses beyond its interval. The
-1.39% boot reduction is below the 2% improvement threshold. Fork/exec and gzip
-intervals include zero; they establish no improvement. This does not undo the
-combined candidate's boot/fork regression against 06ba78a, nor prove that the
-repair alone causes all of that difference: host activity and the sampling
-periods also differ. Keep both series visible and pursue the remaining costs.
-Full QEMU performance and compatibility acceptance remains open, including
-user-mode performance, the other system workloads, the x0 finding and untested
-host/runtime combinations.
-
-Report: `build/system-bench-live-isolation.json`. Repair-only binary SHA-256:
-`672509fc21966f6a9e1b5b18fb5d4b799cf547b83eb64421946f9c157dea5db7`.
-
-Live-slot candidate SHA-256 (the same `after` binary in both series):
-`9971a5b9ed8ebb10ac0f7a6368fdcf4c9f4c87603d0d0a48fbd90d7c6daf5467`.
-
-### Tier-2 discarded loads and lazy-fusion IR ownership (2026-10-22)
-
-TODO 0.7 fixes a compatibility defect, with no speedup claim. Before the fix,
-a hardware watchpoint catches `X[0]` changing from zero to `0xfffffff1` inside
-the first `t2c_block`. Both the system and forced-dispatch user fixtures then
-abort at the existing zero-register assertion. Interpreter load handlers
-already discarded these results, while T2C scalar, fast/slow MMU and fused
-load emitters wrote them to the register file.
-
-A shared emission helper now discards the destination while retaining the
-access. Direct discarded RAM loads are volatile, and MMU callback calls keep
-their observable effects. Sign/zero extension for other destinations is
-unchanged. fuse9 still writes its LUI result, and fuse11 still increments its
-base. The helper covers all five scalar widths and fuse4/fuse9/fuse11.
-
-The user fixture forces dispatcher entry to its probe through ECALL on each
-pass. Its profile must show T2C publication and a cache-frequency minus
-T1-reentry margin greater than 16 times THRESHOLD; pre-T1 branch probes are
-bounded by two warmup thresholds. This proves substantial tier-2 execution,
-rather than publication alone. The test deletes stale profiles and, when
-fusion is enabled, asserts all three fused opcodes occur in decoded IR. Stores
-from zero immediately after fused loads check native T1 behavior too.
-
-Sv32 and bare supervisor fixtures use diagnostic tier-entry assertions. The
-bare fixture forces entry to its multi-load block so lazy fusion happens; the
-diagnostic counter in T2C builds with fusion and T1C_STATS=1 asserts at least
-one fused load sequence. T1C cached entries bypass the lazy-fusion lookup, so
-that assertion is not required there. A GDB symbol breakpoint independently
-confirms `t2c_fuse4` emits its four members on the compiler thread, followed
-by a successful guest run (789,544 actual tier-2 entries in that diagnostic
-run). A source-line breakpoint initially missed this macro-defined emitter and
-was not treated as coverage proof.
-
-Review also exposed a pre-existing race: lazy fusion can free successor IR
-while the background compiler walks it. Actual fusion mutation now holds the
-same cache_lock as the compiler's IR walk; completed, cold and Sv32 exits
-remain above the lock. A debugger stop at the mutation shows n_invoke=8 and
-the mutex owner equal to the emulator thread's LWP. The new diagnostic counter
-is absent from normal builds.
-
-The x0-MMIO variant faults inside `mmu_read_b` called from `t2c_block`. Its
-handler remaps the page to UART IIR and fences. The callback completes the
-read before returning to the retired native region; a later IIR read checks
-that the discarded access cleared THRE. This covers a real device effect and
-the changed slow-path result handling. It does not rely on a later interpreted
-retry. The GDB run records exactly one load page fault and 501,461 tier-2
-entries.
-
-The fixed user T2C UBSan binary passes all 1,433 IMACFZicsrZifencei
-RISCOF/Sail comparisons in a fresh work directory. These short architecture
-tests do not by themselves prove tier-2 coverage; the fixtures and diagnostics
-above do. System and user interpreter/T1C/T2C UBSan checks pass,
-including the new probes. No-fusion variants pass in both user and system T2C.
-The new kernels also pass on the existing Arm64 T1C binary under QEMU 11.0.2.
-The user interpreter check needed the existing hello.elf fixture copied into
-its temporary output directory before passing. Arm-host T2C remains unverified.
-
-For the native T1C bare diagnostic, the saved counters are
-native_entries=1,175,432, cached_native_entries=1,175,431 and
-lazy_fused_loads=0 at guest_cycles=72,000,109. The source path explains the
-difference from T2C: jit_run_cached bypasses block lookup, so n_invoke never
-reaches the lazy-fusion threshold. This is a transition-profiling finding for
-TODO 1.5, not evidence that the x0 repair speeds up the workload.
-
-## Blocking opcode diagnostics (2026-10-22)
-
-TODO 1.1 now exposes optional user and system interpreter-entry attribution
-through T1C_STATS=1. The sparse blockers object maps decoded opcode names to
-decoded, entries and insns counts. Decoded counts include every unsupported
-decode attempt, including discarded/retranslated prefixes. Entries count
-actual interpreted block starts, including chains that bypass rv_step, and
-attribute each blocked block to its first unsupported opcode. Insns weights
-each entry by the original cycle_cost before fusion. These are estimates:
-traps, partial execution or a mid-block native handoff can charge a full block
-without retiring all of it. They are not exact retired-instruction counts.
-
-The translatable_interpreted bucket includes cold blocks, failed compilation
-and compilable blocks still reached through interpreter chains. Context
-restrictions and Wasm backend rejections use separate context and wasm
-buckets. An unsupported base opcode takes priority over these non-opcode
-reasons. The original retranslate bucket exposed a lifecycle bug: retrying a
-system fetch permanently cleared translation eligibility. The subsequent
-repair removes that obsolete bucket and counts fetch_retranslations instead.
-No compiler thread updates these arrays. T1C_STATS=0 removes the diagnostic
-state and updates; performance measurements continue to use that setting.
-
-The atomic regression records exactly 100,000 amoaddw-block entries and
-300,005 weighted instructions across only 305 dispatcher visits in packed T1C.
-Its total attributed work is exactly 300,013 guest cycles. Separate
-load/store-head variants require actual fuse4/fuse3 heads when fusion is
-enabled and count those heads once. Local tiered checks verify the same exact
-entry/work counts; its interpreter probes cause additional outer dispatches.
-The x64 CI job runs all three user T1C diagnostic regressions. Local system
-tiered validation also checks exactly two million csrrs-block entries in the
-bare x0 kernel. The context and wasm reasons have not yet been exercised by
-dedicated runtime assertions. interp_pc_syncs counts sync sites, including
-repeated fused access syncs, and cannot serve as an exact guest instruction
-denominator.
-
-Static inspection of the current nbench, scimark2, miniz, CoreMark and
-Dhrystone artifacts finds no F/A/Zb instructions. Objdump aliases such as
-zext.b are base-ISA operations and are excluded. SciMark2 advertises F but
-uses double arithmetic, which remains software with only the F extension. To
-provide real Zb coverage, SciMark2's source archive was verified against the
-project's SHA-1 de278c5b8cef84ab6dda41855052c7bfef919e36 and rebuilt with the
-configured xPack GCC 15.2.0-1 toolchain, -O2, -march=rv32imafc_zba_zbb_zbs
--mabi=ilp32 and -lsemihost -lm. The resulting ELF SHA-256 is
-6125312c53883b1b86c7aa8d02bc86ac5dfeea2224f2005c69b9b14f6eb183ad.
-
-A 0.01-second-per-kernel diagnostic finishes successfully. It records
-9,699,982 guest cycles, with first-blocker estimates of 1,801,221 instructions
-for sh2add and 1,207,111 for sh3add. Their combined estimate is 31.01% of
-guest cycles, making Zba a concrete next target. Other recorded blockers
-include bclri (47,067), zexth (5,376), max (720), bset (8) and min (2). These
-short host-time-selected kernels are workload evidence, not timing acceptance
-or an exact instruction-share claim. Remaining rebuilt workload/system profiles
-and the remaining TODO 1.1 implementation/acceptance work are still pending.
-
-Local validation passes the user T1C UBSan full checks, the user T2C UBSan
-counter/x0 probes and host tests, and the system T2C UBSan full checks. A
-normal user T1C UBSan build with diagnostics disabled passes full checks and
-has no diagnostic counter/entry symbols. All five Wasm backend fixtures pass,
-and the full system Wasm diagnostic bundle compiles with existing assets.
-These are checkpoint checks, without a claim that TODO 1.1 is complete.
-
-A rebuilt CoreMark completes its fixed 80,000 iterations with “Correct
-operation validated.” Its diagnostic records 10,667,032,961 guest cycles:
-sh1add blocks carry 7,711,520,563 weighted instructions, sh2add 700,560,218
-and sh3add 19, together 78.86%. sexth and zexth add 536,320,011 and
-271,107,629. The program ignores the iteration argument and fixes 80,000 in
-core_main.c; an earlier 45-second diagnostic timeout was incomplete and is
-excluded. These estimates reinforce Zba priority without a speedup claim.
-
-One Linux boot diagnostic uses system T1C, the existing Image/rootfs.cpio,
-T1C_STATS=1 and the runner's --require-stats option. At 266,546,518 guest
-cycles, the largest opcode-blocked estimates are sfencevma (2,097,569),
-amoaddw (1,921,612), csrrci (1,810,544) and csrrs (988,236). The original
-diagnostic retranslate bucket recorded one entry and one instruction before
-the lifecycle repair described below. Per-opcode boot weights are each below
-1%; that does not establish the remaining system workload or user criteria.
-The 2.9355-second diagnostic boot time is excluded from performance
-acceptance. A rebuilt nbench Fourier diagnostic exceeded its 90-second cap and
-supplies no completed profile. The remaining workload profiles stay pending.
-
-## Defined zero-count rotations (2026-10-22)
-
-Expanding TODO 1.1 validation to the B suite exposed a pre-existing
-interpreter defect: rol, ror and rori shifted a uint32_t by 32 when the
-requested amount masked to zero. The old interpreter UBSan binary fails the
-focused fixture at rv32_template.c:1786, and the first B-suite run reports
-all three handlers. Masking the complementary shift by 31 defines the zero
-case without changing nonzero rotations or operand aliasing.
-
-The new focused assembly regression covers seven input words, ten register
-counts (including counts above 31), every immediate amount and aliases of
-the destination with either source. User interpreter/T1C/T2C UBSan checks
-pass. A fresh B-suite RISCOF/Sail comparison passes after the repair. These
-rotates still execute in the interpreter, so the shared fix applies in every
-mode; these checks do not claim native rotate execution or a speedup.
-
-## Zba lowering checkpoint (2026-10-22)
-
-sh1add/sh2add/sh3add now compile in native T1C, LLVM T2C and Wasm. Native
-emission shares the existing scaled-address peephole: x86 uses LEA r32 and
-Arm64 uses ADD Wd with a shifted W source. Both read their operands before
-writing and truncate to 32 bits. Both native liveness classifiers include
-both sources. Other Zb families remain interpreted.
-
-The user fixture loads awkward operands from memory and separates reference
-shift/add pairs with XORI, so the x86 peephole cannot answer both sides.
-Each alias/source/address case forces dispatch and requires actual native
-execution; tiered builds require substantial entries after promotion for
-every Zba-containing profile row. The system variant maps a high virtual
-base through Sv32 and adds an index with bit 30 set, so a 64-bit rather than
-32-bit shift/add would produce an invalid address. The pressure variants use
-a memory-loaded nonzero index; GDB confirms translate_register_loop returns
-true and the guest passes. This is a one-time implementation check; ordinary
-pressure tests check semantic results rather than the private emitter shape.
-
-An interpreted system block keeps chaining along a learned direct edge into
-its successor after that successor compiles, returning to the dispatcher on
-only one transition in PROBE_INTERVAL. Direct-jump dispatch therefore left
-the Sv32 probes mostly interpreted: system T1C recorded 21,380,396
-interpreted entries against 1,597,483 native ones while the old aggregate
-check passed. The system variant now dispatches through an indirect jump,
-which returns a hot target to the dispatcher, and records 22,164,010 native
-entries against 89,114 interpreted (tiered: 21,302,797 tier-2 entries
-against 93,788). Diagnostic runs require that no Zba form stays interpreted
-for half of its iterations, and the pressure variants apply the same bound
-per loop block. CI runs both with T1C_STATS=1.
-
-User T1C/T2C and system T1C/T2C UBSan suites pass, including the new probes.
-System ELF-loader and Arm64 T1C probes pass too. The Wasm fixture layouts
-exercise real generated modules, including a Zba alias/overflow/zero-register
-matrix; Zba is enabled by default, so no separate Zba layout is needed.
-All 32 B-extension Sail comparisons pass after the separate zero-rotation
-repair. Short Sail tests alone do not establish native/tier-2 coverage.
-Arm-host T2C remains unverified.
-
-Release measurements use GCC, UBSan off, T1C_STATS=0, CPU 6 and the same
-rebuilt guests in every engine. The isolated baseline is 4373344, including
-the rotation repair. Five pairs/triples alternate engine order; no samples
-are discarded. Intervals use Student's t on paired log throughput ratios.
-These intervals cover noise within each session. T1C and tiered sessions
-are separate, so comparisons across configurations are not paired. QEMU's
-SciMark2 mean changes by about 5.9% between sessions; the tiered deficit
-remains, but its magnitude depends on the matched session.
-CoreMark's fixed 80,000 iterations use external wall-clock throughput.
-Validation rejects any stdout line beginning `ERROR!` unless it begins
-`ERROR! Must execute for at least 10 secs`, rejects `Cannot validate`, and
-requires either `Correct operation validated.` or the allowed timing warning.
-Every subprocess must also exit successfully. The timing warning on faster
-runs is not a correctness failure; no official CoreMark score is claimed.
-SciMark2 uses its composite score with 0.2 seconds minimum per kernel, so its
-wall time is not a fixed-work comparison.
-
-| Configuration | Workload | Throughput change vs baseline (95% CI) | Change vs QEMU 11.0.2 (95% CI) |
-| --- | --- | --- | --- |
-| T1C | coremark | +212.99% [+197.93%, +228.81%] | +36.24% [+34.13%, +38.39%] |
-| T1C | scimark2 | +18.65% [+18.06%, +19.24%] | +199.37% [+196.89%, +201.86%] |
-| T2C | coremark | +257.32% [+250.93%, +263.82%] | +18.31% [+16.30%, +20.35%] |
-| T2C | scimark2 | +13.37% [+7.22%, +19.89%] | -15.48% [-15.95%, -15.01%] |
-
-Positive values mean higher throughput. The tiered SciMark2 result remains
-slower than QEMU despite improving against its own baseline. These two
-workloads do not establish the full user/system goal; 1.5 must explain the
-tiered-configuration gap before promotion policy changes. Tiered CoreMark
-also averages roughly 12.8% below T1C across the separate sessions.
-
-Raw five-sample throughput values (CoreMark iterations/host-second; SciMark2
-composite MFLOPS) are below. Each engine's samples remain paired by index.
-
-| Configuration/workload | Baseline | Candidate | QEMU |
-| --- | --- | --- | --- |
-| T1C/coremark | 2702.210293, 2626.618085, 2619.013130, 2598.383760, 2622.895203 | 7880.690174, 8343.511275, 8332.721205, 8336.761526, 8331.246048 | 5915.054687, 6075.217407, 6095.468189, 6089.275408, 6077.638370 |
-| T1C/scimark2 | 20.610000, 20.580000, 20.670000, 20.670000, 20.640000 | 24.500000, 24.530000, 24.530000, 24.370000, 24.480000 | 8.200000, 8.140000, 8.220000, 8.210000, 8.120000 |
-| T2C/coremark | 2004.394953, 2024.443912, 2020.756950, 2021.678913, 1988.287988 | 7004.505414, 7214.476890, 7257.798899, 7238.944656, 7230.872459 | 6066.546456, 6065.814341, 6076.859358, 6080.642742, 6091.871050 |
-| T2C/scimark2 | 6.620000, 6.590000, 6.540000, 5.960000, 6.580000 | 7.360000, 7.280000, 7.320000, 7.320000, 7.300000 | 8.680000, 8.660000, 8.680000, 8.610000, 8.650000 |
-
-Binary SHA-256 values:
-
-* T1C before: `2f9c7132b0d3ae491842e2af12453bf8cdc666dca45acbdc1fbc73b5baddb93c`
-* T1C after: `c3eecc7656de0f96de305f1e6b4bc28e9566ac3b4d0587635333b0f0065d3581`
-* T1C qemu: `ed73f766f2ed8789084f4c9b58bca0d85aef86c60518010777d539ed5a0fd7c9`
-* T2C before: `e7b58824d3980599f757949120bb69310f7de985e309e0fb815d1ff914fed0ec`
-* T2C after: `b2788918bb9a31edf61495eea6d6233a5fb45f1159ef35407647594d9d43c364`
-* Guest coremark: `3fd122cb3a8768b2a5f21cc1f49d1f37f5aa8cf55f40a23bf7b46d0011d2eb30`
-* Guest scimark2: `6125312c53883b1b86c7aa8d02bc86ac5dfeea2224f2005c69b9b14f6eb183ad`
-
-Reports are build/user-bench-zba-t1c.json and
-build/user-bench-zba-t2c.json. The guest sources/flags are the rebuilt
-SciMark2 and CoreMark variants described in the preceding profiling section.
-Other rebuilt nbench/miniz/Dhrystone comparisons remain pending.
-
-User entry-only cycle charging can omit repeated native local-loop work when
-an ELF never reads counters. The 20,000-iteration pressure test reports 1,968
-cycles in its diagnostic run despite successful register-loop execution.
-Raw blocker weights can rank work, but ratios to such reported cycles are
-not exact guest-instruction shares. The earlier profiling percentages are
-ratios to their reported cycle denominators, with the stated estimate limits.
-TODO 1.5 must add accurate diagnostic charging or expose the charging mode
-before 1.1's one-percent completion test is applied to these programs.
-
-Five alternating system T1C pairs use the same Linux Image/rootfs.cpio and
-CPU 6. These prebuilt system workloads contain no Zba, so this is a regression
-check rather than evidence of a system Zba speedup. Results are host elapsed
-time changes; negative is faster. Intervals use paired percent differences
-and Student's t. No result both exceeds the 2% threshold and excludes zero
-in the favorable direction; no significant regression is found either.
-
-| System workload | Elapsed change (95% CI) | Baseline ms | Candidate ms |
-| --- | --- | --- | --- |
-| boot | -0.81% [-2.63%, +1.02%] | 2378, 2361, 2417, 2372, 2377 | 2346, 2378, 2346, 2382, 2356 |
-| dhrystone | -0.84% [-1.40%, -0.27%] | 10692, 10766, 10669, 10770, 10815 | 10637, 10617, 10643, 10655, 10710 |
-| coremark | -0.09% [-0.61%, +0.44%] | 4263, 4267, 4263, 4287, 4277 | 4268, 4265, 4274, 4252, 4279 |
-| fork-exec | +0.31% [-1.58%, +2.21%] | 8950, 8781, 9007, 8675, 8909 | 9048, 8865, 8858, 8853, 8831 |
-| gzip-md5 | -3.89% [-9.78%, +2.00%] | 1336, 1422, 1534, 1513, 1424 | 1348, 1402, 1428, 1352, 1404 |
-
-System binary SHA-256 values:
-
-* before: `17958f7861881e4da397446b76872daf3603e095785b4644b0f924f3eab86d28`
-* after: `29d079828a5c3f76a4edcb37eb3994838293b7604f1af684cb48374b0b92f6ef`
-
-The raw report is build/system-bench-zba.json. Native user checks with Zba
-disabled also verify the pre-existing x86 scaled-add peephole; the shared
-helper is omitted on Arm64 when neither caller needs it. The off-feature
-Arm64 build and scaled-add guest pass under QEMU 11.0.2.
-
-The unchanged prebuilt user CoreMark and Dhrystone also run in five
-T1C pairs using the same before/after T1C binaries listed above:
-
-```sh
-taskset -c 6 python3 tests/bench.py \
-    --baseline /tmp/rv32emu-zba-baseline437/build/rv32emu \
-    --emu /tmp/rv32emu-zba-user-release/rv32emu \
-    --schedule interleaved --runs 5 --quiet \
-    --json build/user-bench-zba-prebuilt.json coremark dhrystone
-```
-
-These guests contain no Zba. CoreMark throughput changes
-+0.23% [-1.01%, +1.49%] and Dhrystone -1.18% [-4.68%, +2.45%]; both are
-reported as no significant change. The raw report is
-build/user-bench-zba-prebuilt.json. Timing precision does not rule out small
-changes; these checks establish no additional speedup claim.
-
-After adding the off-feature Arm64 helper guard, rebuilding both default
-user release configurations produces byte-identical timed binaries. The
-private register-loop shape remains a one-time GDB check, not a persistent
-CI assertion. The distinct live-entry proofs and semantic fixtures remain
-part of make check.
-
-Guest rebuild commands (xPack riscv-none-elf GCC 15.2.0-1):
+| T1C | CoreMark | +212.99% [+197.93%, +228.81%] | +36.24% [+34.13%, +38.39%] |
+| T1C | SciMark2 | +18.65% [+18.06%, +19.24%] | +199.37% [+196.89%, +201.86%] |
+| T2C | CoreMark | +257.32% [+250.93%, +263.82%] | +18.31% [+16.30%, +20.35%] |
+| T2C | SciMark2 | +13.37% [+7.22%, +19.89%] | -15.48% [-15.95%, -15.01%] |
+
+The prebuilt CoreMark and Dhrystone contain no Zba, and showed no
+significant change. Guests were rebuilt with xPack GCC 15.2.0-1:
 
 ```sh
 ZBA_CC=/path/to/toolchain/bin/riscv-none-elf-gcc
@@ -1873,35 +1063,78 @@ make -C /path/to/scimark2 CC="$ZBA_CC" \
     tests/ansibench/coremark/src/core_state.c \
     tests/ansibench/coremark/src/core_util.c \
     tests/ansibench/coremark/src/core_portme.c \
-    -lm -lsemihost -o /tmp/coremark-zba
+    -lm -lsemihost -o build/coremark-zba
 ```
 
-The CoreMark source's fixed iteration assignment overrides ITERATIONS=1000
-as well as the command-line iteration argument. Measurement commands and
-per-run wall times are retained in the raw user reports. System image hashes
-and the host/compiler/QEMU version are retained in the system report.
+CoreMark's source fixes 80,000 iterations regardless of ITERATIONS, so it is
+compared by wall-clock throughput; no official CoreMark score is claimed.
 
-## System fetch-retry eligibility checkpoint (2026-10-22)
+### System performance
 
-A fetch retry now initializes its unpublished block through the same helper
-as fresh allocation. Compatible instructions regain JIT eligibility; an
-unsupported opcode decoded after the retry still clears it. The optional
-fetch_retranslations counter records retry events; the obsolete retranslate
-blocker bucket is removed. No release-mode counter work is added.
+The correctness changes first cost system time: per-commit timing traced it
+to three causes, each now fixed.
 
-The flat Sv32 regression returns from its first instruction page fault
-without repairing the mapping. Its second fault maps the page, forcing the
-decoder retry. Both compatible and CSR-containing loops run 65,536 iterations
-and each faults exactly twice. Diagnostic assertions require two retries,
-native execution, fewer than 16,384 compatible interpreted entries and at
-least 65,536 csrrs-block entries while csrrs remains unsupported. The prior
-binary reproduces 65,536 retranslate entries (196,608 weighted instructions)
-for the compatible loop. This is an eligibility repair; no throughput gain
-is claimed from the single retry seen in the earlier Linux boot diagnostic.
+* Chains stopped at the 100-cycle system slice, returning hot code to the
+  dispatcher every hundred instructions. Chains now end at the slice or when
+  the cycle-derived timer comes due, and the slice is 1000 cycles.
+* SUM was part of dTLB stamps and RAM tags, so the SUM toggles around each
+  user copy refilled kernel entries. The S context now ignores SUM; slots
+  stamped for U pages while SUM was set are parked when it clears.
+* An interrupted-block flag added a second load to every interpreted
+  instruction; it now shares a 64-bit word with trap_cnt.
 
-User and system interpreter, T1C and tiered UBSan check/tests suites pass.
-The positive T1C diagnostic records two retries, 1,919 native entries, 376
-compatible interpreted entries and 65,536 csrrs-block entries. System suites
-include trap-resume and native-retirement variants. CI runs the regression
-with system T1C_STATS=1 and requires its report, so missing diagnostics cannot
-silently skip the native-eligibility assertions.
+Live indirect slots, enabled for system T1C in this series, account for most
+of the Dhrystone gain. Five interleaved rounds of `tests/system-bench.sh` on
+CPU 6, system T1C, medians in milliseconds, against master (ffe36e0):
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+|---|---|---|---|---|---|
+| master | 2129 | 11801 | 3403 | 8021 | 1115 |
+| before the fixes | 2375 (+11.6%) | 10594 (-10.2%) | 4232 (+24.4%) | 8695 (+8.4%) | 1409 (+26.4%) |
+| this series | 2186 (+2.7%) | 8708 (-26.2%) | 3327 (-2.2%) | 8239 (+2.7%) | 1214 (+8.9%) |
+
+Five rounds on a shared host are a small sample, and gzip varies by about
+10% between rounds. QEMU 11.0.2 remains faster on CoreMark, fork/exec and
+gzip.
+
+### Trap, fence and address-space paths (2026-10-23)
+
+Over boot plus 1000 fork/execs, page-fault handlers ran a third of guest
+instructions one at a time, decoded afresh outside the block cache; each of
+about ten global SFENCE.VMAs per fork/exec retired all compiled code; and
+every process decoded and compiled the kernel's code paths again.
+
+* Outside a nested handler, a page fault aborts its access, the dispatcher
+  runs the handler as ordinary code, and its sret retries the instruction.
+* Interpreter chains leave for the dispatcher at a block with live native
+  code instead of interpreting around it.
+* A fence retires only address spaces in which a recorded root or leaf entry
+  of a code page changed. A page is recorded only when the iTLB translation
+  its fetch used agrees with the page tables.
+* S-mode code fetched only through global mappings is shared by every
+  address space, and checked against each space switched to. T2C builds keep
+  per-space code: there the extra tier-2 compilation slowed boots by 20%.
+* WFI skips to the next timer deadline or device poll.
+
+After these, 24.5% of guest instructions run interpreted in blocks T1C could
+compile, down from 51%, and shared kernel code is retired once in that run.
+
+Five interleaved rounds of `tests/system-bench.sh` on CPU 6, system T1C,
+medians in milliseconds. QEMU 11.0.2 runs the same kernel and initramfs on
+`virt` with OpenSBI (`-M virt -accel tcg -m 512M`), so its boot also covers
+firmware.
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+|---|---:|---:|---:|---:|---:|
+| master (ffe36e0) | 2144 | 11834 | 3430 | 8181 | 1194 |
+| this series | 1891 | 8771 | 3404 | 5316 | 1119 |
+| QEMU 11.0.2 | 2489 | 12403 | 2825 | 3802 | 681 |
+
+Against master: boot -11.8%, Dhrystone -25.9%, CoreMark -0.8%, fork/exec
+-35.0%, gzip -6.3%. Against QEMU, boot takes 24.0% and Dhrystone 29.3% less
+time, while CoreMark takes 20.5%, fork/exec 39.8% and gzip 64.3% longer.
+
+Not adopted: decoding trap handlers through a cache (no gain), delivering
+interrupts through the dispatcher (2.6% slower fork/exec), honoring ASIDs in
+SFENCE.VMA (Linux issued none), and a larger block cache, which compiles
+more cold code and was slower with and without shared kernel code.

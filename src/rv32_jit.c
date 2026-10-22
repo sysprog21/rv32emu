@@ -226,8 +226,7 @@
         memory_t *m = PRIV(rv)->mem;                                           \
         vm_reg[0] = ra_load(state, ir->rs1);                                   \
         emit_misalign_guard(state, rv, ir->rs1, ir->imm, size, flags, ir->pc); \
-        IIF(RV32_HAS(SYSTEM_MMIO))                                             \
-        (                                                                      \
+        IIF(RV32_HAS(SYSTEM_MMIO))(                                            \
             {                                                                  \
                 emit_load_imm_sext(state, temp_reg, ir->imm);                  \
                 emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);            \
@@ -321,8 +320,7 @@
         vm_reg[0] = ra_load(state, ir->rs1);                                   \
         emit_misalign_guard(state, rv, ir->rs1, ir->imm, size,                 \
                             JIT_MISALIGN_STORE | (flags), ir->pc);             \
-        IIF(RV32_HAS(SYSTEM_MMIO))                                             \
-        (                                                                      \
+        IIF(RV32_HAS(SYSTEM_MMIO))(                                            \
             {                                                                  \
                 emit_load_imm_sext(state, temp_reg, ir->imm);                  \
                 emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);            \

@@ -19,7 +19,11 @@ profile = pathlib.Path(args.emulator).parent / (
 )
 profile.unlink(missing_ok=True)
 result = subprocess.run(
-    [args.emulator, "-p", args.guest], check=True, capture_output=True, text=True, timeout=30
+    [args.emulator, "-p", args.guest],
+    check=True,
+    capture_output=True,
+    text=True,
+    timeout=30,
 )
 stats = read_t1c_stats(result.stderr, True)
 blocked = stats["blockers"]["amoaddw"]
@@ -30,11 +34,15 @@ assert blocked["insns"] == (600005 if args.fused_head else 300005), blocked
 rows = read_profile(profile)
 if args.expect_fusion:
     opcode = "fuse4" if args.fused_head == "load" else "fuse3"
-    assert any(row["IR list"].startswith(opcode) for row in rows.values()), opcode
+    assert any(
+        row["IR list"].startswith(opcode) for row in rows.values()
+    ), opcode
 assert blocked["decoded"] == 2, blocked
 # Tiered builds probe their interpreted chains back into the dispatcher;
 # packed T1 builds keep the loop chained for almost all iterations.
 if "t2c" not in next(iter(rows.values())):
     assert stats["dispatches"] < 1000, stats["dispatches"]
-assert sum(v["insns"] for v in stats["blockers"].values()) == stats["guest_cycles"]
+assert (
+    sum(v["insns"] for v in stats["blockers"].values()) == stats["guest_cycles"]
+)
 print("JIT blocked-opcode attribution OK")

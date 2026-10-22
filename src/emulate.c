@@ -1234,8 +1234,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
         RVOP_SYNC_PC(rv, PC);                                             \
         cycle++;                                                          \
         code;                                                             \
-        IIF(RV32_HAS(SYSTEM))                                             \
-        (                                                                 \
+        IIF(RV32_HAS(SYSTEM))(                                            \
             if (need_handle_signal) {                                     \
                 need_handle_signal = false;                               \
                 block_interrupted = true;                                 \
@@ -1248,8 +1247,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
         RVOP_TAIL_INTRA_IMPL(rv, RVOP_NEXT_IMPL(ir), next, cycle, PC);    \
         /* Fast path: intra-block */                                      \
     end_op:                                                               \
-        IIF(RV32_HAS(BLOCK_CHAINING))                                     \
-        (                                                                 \
+        IIF(RV32_HAS(BLOCK_CHAINING))(                                    \
             {                                                             \
                 /* Page-terminated block fallthrough: if branch_taken is  \
                  * set AND this is NOT a branch instruction, tail-call    \
@@ -1259,8 +1257,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
                 if (!insn_is_branch(ir->opcode)) {                        \
                     struct rv_insn *taken = ir->branch_taken;             \
                     if (taken) {                                          \
-                        IIF(RV32_HAS(SYSTEM))                             \
-                        (                                                 \
+                        IIF(RV32_HAS(SYSTEM))(                            \
                             if (!rv->trap_cnt && !block_interrupted) {    \
                                 RVOP_CHAIN_TAIL(rv, taken, cycle, PC);    \
                             },                                            \

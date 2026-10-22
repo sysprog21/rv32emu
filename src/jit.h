@@ -13,6 +13,8 @@
 
 /* Instructions charged at block entry that follow a trapping instruction.
  * Fused records can contain several independently faulting instructions.
+ * Their members are all 4 bytes: trace fusion, the only form that mixes
+ * widths, is disabled in JIT builds.
  */
 static inline uint32_t block_unretired_after(const block_t *block, uint32_t pc)
 {

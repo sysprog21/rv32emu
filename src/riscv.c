@@ -2446,8 +2446,9 @@ void rv_profile(riscv_t *rv, char *out_file_path)
             "code; initial compilation entries and internal chains are "
             "excluded.\n");
 #if JIT_RUN_CACHED
-    fprintf(f, "# Cached native entries bypass blocks and are excluded too; "
-               "T1C_STATS cached_native_entries counts them.\n");
+    fprintf(f,
+            "# Cached native entries bypass blocks and are excluded too; "
+            "a T1C_STATS=1 build counts them as cached_native_entries.\n");
 #endif
     fprintf(f,
             "# indirect_history lists interpreter-observed PC:count "

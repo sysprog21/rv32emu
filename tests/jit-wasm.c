@@ -772,11 +772,11 @@ static void check_system_memory(riscv_t *rv)
     memcpy(ram.bytes + 4, &value, 4);
     const uint32_t va = 0x40001004;
     tlb_entry_t *mapping = &rv->dtlb[(va >> 12) & TLB_MASK];
-    *mapping = (tlb_entry_t){.vpn = va >> 12,
-                             .ppn = 0,
-                             .valid = rv->mmu_access_context,
-                             .dirty = 1,
-                             .perm = 22};
+    *mapping = (tlb_entry_t) {.vpn = va >> 12,
+                              .ppn = 0,
+                              .valid = rv->mmu_access_context,
+                              .dirty = 1,
+                              .perm = 22};
     rv_insn_t load = {
         .opcode = rv_insn_lw, .rd = 6, .rs1 = 8, .impl = memory_helper};
     rv->X[8] = va;
@@ -787,11 +787,11 @@ static void check_system_memory(riscv_t *rv)
     /* Every gating condition must take the original instruction's slow path. */
     helper_exit = false;
     for (unsigned condition = 0; condition < 7; condition++) {
-        *mapping = (tlb_entry_t){.vpn = va >> 12,
-                                 .ppn = 0,
-                                 .valid = rv->mmu_access_context,
-                                 .dirty = 1,
-                                 .perm = 22};
+        *mapping = (tlb_entry_t) {.vpn = va >> 12,
+                                  .ppn = 0,
+                                  .valid = rv->mmu_access_context,
+                                  .dirty = 1,
+                                  .perm = 22};
         rv->X[8] = va;
         load.opcode = rv_insn_lw;
         if (condition == 0)
@@ -818,11 +818,11 @@ static void check_system_memory(riscv_t *rv)
     /* Grouped accesses use the same guard. */
     const uint32_t group_va = 0x40002020;
     mapping = &rv->dtlb[(group_va >> 12) & TLB_MASK];
-    *mapping = (tlb_entry_t){.vpn = group_va >> 12,
-                             .ppn = 0,
-                             .valid = rv->mmu_access_context,
-                             .dirty = 1,
-                             .perm = 22};
+    *mapping = (tlb_entry_t) {.vpn = group_va >> 12,
+                              .ppn = 0,
+                              .valid = rv->mmu_access_context,
+                              .dirty = 1,
+                              .perm = 22};
     group_base = rv->X[11] = group_va;
     rv->X[12] = 0x11111111;
     opcode_fuse_t stores[] = {

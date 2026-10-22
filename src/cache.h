@@ -99,7 +99,22 @@ uint32_t cache_invalidate_satp(struct cache *cache,
  */
 uint32_t cache_invalidate_all(struct cache *cache, uint32_t *n_compiled);
 
-/* Whether any retained address space has a decoded block on this VA page. */
+/*
+ * cache_has_va - whether any valid block of address space satp starts in the
+ * page of va
+ *
+ * Only the emulator thread changes the index this reads, so that thread may
+ * call it without cache_lock, to skip taking the lock for a flush that has
+ * nothing to invalidate. Without block chaining there is no index, and the
+ * answer is always true.
+ */
+bool cache_has_va(const struct cache *cache, uint32_t va, uint32_t satp);
+
+/* cache_has_va_any - whether a valid block of any retained address space
+ * starts in the page of va. A block that only straddles into the page does
+ * not count. The locking rule and the answer without block chaining are those
+ * of cache_has_va().
+ */
 bool cache_has_va_any(const struct cache *cache, uint32_t va);
 
 /**
@@ -114,17 +129,6 @@ bool cache_has_va_any(const struct cache *cache, uint32_t va);
  * Uses O(1) page-indexed lookup when BLOCK_CHAINING is enabled,
  * otherwise falls back to O(n) scan.
  */
-/*
- * cache_has_va - whether any valid block of address space satp starts in the
- * page of va
- *
- * Only the emulator thread changes the index this reads, so that thread may
- * call it without cache_lock, to skip taking the lock for a flush that has
- * nothing to invalidate. Without block chaining there is no index, and the
- * answer is always true.
- */
-bool cache_has_va(const struct cache *cache, uint32_t va, uint32_t satp);
-
 uint32_t cache_invalidate_va(struct cache *cache,
                              uint32_t va,
                              uint32_t satp,

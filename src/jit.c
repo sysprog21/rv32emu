@@ -5804,7 +5804,7 @@ static void resolve_jumps(struct jit_state *state)
                 int32_t *head = &state->pending_index[offset_hash(
                     jump.target_pc,
                     IIF(RV32_HAS(SYSTEM))(jump.target_satp, 0))];
-                state->pending[state->n_pending] = (struct pending_jump){
+                state->pending[state->n_pending] = (struct pending_jump) {
                     .offset_loc = jump.offset_loc,
                     .target_pc = jump.target_pc,
 #if RV32_HAS(SYSTEM)

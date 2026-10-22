@@ -1705,6 +1705,10 @@ retry:;
     }
     if (too_big) {
         block->translatable = false;
+#if RV32_T1C_STATS_ENABLED
+        if (block->stats_blocker == T1C_INTERPRETED_TRANSLATABLE)
+            block->stats_blocker = T1C_BLOCKER_WASM;
+#endif
         return false;
     }
     if ((state->n_blocks == WASM_MAX_BLOCKS && !state->n_free) ||
@@ -1731,6 +1735,10 @@ retry:;
         if (!state->installed)
             state->disabled = true;
         block->translatable = false;
+#if RV32_T1C_STATS_ENABLED
+        if (block->stats_blocker == T1C_INTERPRETED_TRANSLATABLE)
+            block->stats_blocker = T1C_BLOCKER_WASM;
+#endif
         return false;
     }
     state->installed = true;

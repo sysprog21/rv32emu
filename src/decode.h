@@ -882,6 +882,17 @@ enum {
 };
 /* clang-format on */
 
+#if RV32_T1C_STATS_ENABLED
+/* Base opcodes precede these reasons; their values may alias fused opcodes. */
+enum {
+    T1C_INTERPRETED_TRANSLATABLE = N_RV_INSNS,
+    T1C_BLOCKER_CONTEXT,
+    T1C_BLOCKER_WASM,
+    T1C_BLOCKER_RETRANSLATE,
+    T1C_STATS_REASONS
+};
+#endif
+
 /* clang-format off */
 /* instruction decode masks */
 enum {

@@ -133,6 +133,10 @@ typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompassed */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
     uint32_t cycle_cost;       /**< cycle cost for block-level counting */
+#if RV32_T1C_STATS_ENABLED
+    /* First unsupported opcode, or a T1C_* attribution reason. */
+    unsigned stats_blocker;
+#endif
 #if RV32_HAS(SYSTEM)
     uint32_t
         priv_mode; /* privilege whose fetch permissions decoded the block */

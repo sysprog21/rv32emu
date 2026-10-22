@@ -58,7 +58,20 @@
 #define CODE_CACHE_SIZE (4 * 1024 * 1024)
 #endif
 
+static const char *insn_name_table[] = {
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
+    [rv_insn_##inst] = #inst,
+    RV_INSN_LIST
+#undef _
+#define _(inst) [rv_insn_##inst] = #inst,
+        FUSE_INSN_LIST
+#undef _
+};
+
 #if RV32_T1C_STATS_ENABLED
+uint64_t rv_t1c_blockers_decoded[T1C_STATS_REASONS];
+uint64_t rv_t1c_blockers_entries[T1C_STATS_REASONS];
+uint64_t rv_t1c_blockers_insns[T1C_STATS_REASONS];
 struct t1c_stats rv_t1c_stats;
 static void t1c_print_array(const char *name, const uint64_t *v, unsigned n)
 {
@@ -82,7 +95,27 @@ void rv_t1c_stats_report(uint64_t guest_cycles)
                     ARRAY_SIZE(rv_t1c_stats.traps));
     t1c_print_array("trap_insns", rv_t1c_stats.trap_insns,
                     ARRAY_SIZE(rv_t1c_stats.trap_insns));
-    fputs("}\n", stderr);
+    fputs(",\"blockers\":{", stderr);
+    static const char *other_reasons[] = {
+        "translatable_interpreted", "context", "wasm", "retranslate"
+    };
+    _Static_assert(ARRAY_SIZE(other_reasons) == T1C_STATS_REASONS - N_RV_INSNS,
+                   "Every non-opcode attribution reason needs a label");
+    const char *separator = "";
+    for (unsigned op = 0; op < ARRAY_SIZE(rv_t1c_blockers_entries); op++) {
+        if (!rv_t1c_blockers_decoded[op] && !rv_t1c_blockers_entries[op])
+            continue;
+        fprintf(stderr,
+                "%s\"%s\":{\"decoded\":%" PRIu64 ",\"entries\":%" PRIu64
+                ",\"insns\":%" PRIu64 "}",
+                separator,
+                op < N_RV_INSNS ? insn_name_table[op]
+                                : other_reasons[op - N_RV_INSNS],
+                rv_t1c_blockers_decoded[op], rv_t1c_blockers_entries[op],
+                rv_t1c_blockers_insns[op]);
+        separator = ",";
+    }
+    fputs("}}\n", stderr);
 }
 #endif
 
@@ -1121,6 +1154,9 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 #if RV32_T1C_STATS_ENABLED
     /* Each instance reports its own counters once. */
     memset(&rv_t1c_stats, 0, sizeof(rv_t1c_stats));
+    memset(rv_t1c_blockers_decoded, 0, sizeof(rv_t1c_blockers_decoded));
+    memset(rv_t1c_blockers_entries, 0, sizeof(rv_t1c_blockers_entries));
+    memset(rv_t1c_blockers_insns, 0, sizeof(rv_t1c_blockers_insns));
 #endif
 
 #if RV32_HAS(SYSTEM_MMIO)
@@ -2342,16 +2378,6 @@ fail_mpool:
     return false;
 }
 
-static const char *insn_name_table[] = {
-#define _(inst, can_branch, insn_len, translatable, reg_mask) \
-    [rv_insn_##inst] = #inst,
-    RV_INSN_LIST
-#undef _
-#define _(inst) [rv_insn_##inst] = #inst,
-        FUSE_INSN_LIST
-#undef _
-};
-
 #if RV32_HAS(JIT)
 /* A prof_func_t, so that cache_profile() calls it through its own type. */
 static void profile(void *entry, uint32_t freq, FILE *output_file)
@@ -2419,6 +2445,10 @@ void rv_profile(riscv_t *rv, char *out_file_path)
             "# t1_reentries counts dispatcher entries to already-hot T1 "
             "code; initial compilation entries and internal chains are "
             "excluded.\n");
+#if JIT_RUN_CACHED
+    fprintf(f, "# Cached native entries bypass blocks and are excluded too; "
+               "T1C_STATS cached_native_entries counts them.\n");
+#endif
     fprintf(f,
             "# indirect_history lists interpreter-observed PC:count "
             "(PC@SATP:count in system mode), not compiled executions.\n");

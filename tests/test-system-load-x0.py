@@ -11,6 +11,7 @@ parser.add_argument("emulator")
 parser.add_argument("guest")
 parser.add_argument("--require-t2c", action="store_true")
 parser.add_argument("--expect-fusion", action="store_true")
+parser.add_argument("--expect-csr-entries", type=int)
 args = parser.parse_args()
 result = subprocess.run([args.emulator, "-k", args.guest], capture_output=True,
                         text=True, check=True, timeout=120)
@@ -20,6 +21,8 @@ stats = [line.removeprefix("T1C_STATS ")
          for line in result.stderr.splitlines() if line.startswith("T1C_STATS ")]
 if stats:
     counters = json.loads(stats[-1])
+    if args.expect_csr_entries is not None:
+        assert counters["blockers"]["csrrs"]["entries"] == args.expect_csr_entries, counters
     if args.expect_fusion:
         assert counters["lazy_fused_loads"] > 0, counters
     if args.require_t2c:

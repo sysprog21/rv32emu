@@ -162,6 +162,11 @@ jobs:
             make -C tests/system/alignment/
             make distclean && make system_interpreter_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 misalign-in-blk-emu $PARALLEL
 
+    - name: JIT blocked-opcode diagnostics
+      run: |
+            make defconfig
+            make OUT=build/blocker-stats T1C_STATS=1 check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-store $PARALLEL
+
     - name: MMU test
       run: |
             make -C tests/system/mmu/

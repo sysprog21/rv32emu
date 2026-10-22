@@ -1046,6 +1046,20 @@ extern void emu_update_rtc_interrupts(riscv_t *rv);
 static uint32_t peripheral_update_ctr = 64;
 #endif
 
+#if RV32_T1C_STATS_ENABLED
+static inline void t1c_count_block_entry(const rv_insn_t *ir, uint32_t pc)
+{
+    const block_t *block = ir->stats_owner;
+    if (!block || ir != block->ir_head || pc != block->pc_start)
+        return;
+    const unsigned reason = block->stats_blocker;
+    rv_t1c_blockers_entries[reason]++;
+    rv_t1c_blockers_insns[reason] += block->cycle_cost;
+}
+#else
+#define t1c_count_block_entry(ir, pc) ((void) 0)
+#endif
+
 /* Interpreter-based execution path.
  * Each handler increments the cycle count it carries in a register, so a
  * trap or counter read anywhere in a block sees an exact value. Counting per
@@ -1064,16 +1078,22 @@ static uint32_t peripheral_update_ctr = 64;
 #else
 #define T1C_INTERPRET(ir) ((void) 0)
 #endif
-#define RVOP_SYNC_PC(rv, PC) \
-    do {                     \
-        T1C_INTERPRET(ir);   \
-        (rv)->PC = (PC);     \
+#define RVOP_SYNC_PC_ACCESS(rv, PC) \
+    do {                            \
+        T1C_INTERPRET(ir);          \
+        (rv)->PC = (PC);            \
     } while (0)
 #else
-#define RVOP_SYNC_PC(rv, PC) \
-    do {                     \
-    } while (0)
+#define RVOP_SYNC_PC_ACCESS(rv, PC) ((void) 0)
 #endif
+/* Both macros use the handler's ir. Access syncs inside a fused group must
+ * preserve fault PCs without counting its first instruction a second time.
+ */
+#define RVOP_SYNC_PC(rv, PC)           \
+    do {                               \
+        t1c_count_block_entry(ir, PC); \
+        RVOP_SYNC_PC_ACCESS(rv, PC);   \
+    } while (0)
 
 FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 {
@@ -1500,7 +1520,7 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
     for (int i = 0; i < ir->imm2; i++) {
         cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
-        RVOP_SYNC_PC(rv, PC); /* a page fault names this access */
+        RVOP_SYNC_PC_ACCESS(rv, PC); /* a page fault names this access */
         RV_EXC_MISALIGN_HANDLER(3, STORE, false, 1);
         uint32_t value = rv->X[fuse[i].rs2];
         MEM_WRITE_W(rv, addr, value);
@@ -1532,7 +1552,7 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
     for (int i = 0; i < ir->imm2; i++) {
         cycle++;
         uint32_t addr = rv->X[fuse[i].rs1] + fuse[i].imm;
-        RVOP_SYNC_PC(rv, PC); /* a page fault names this access */
+        RVOP_SYNC_PC_ACCESS(rv, PC); /* a page fault names this access */
         RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
         const uint32_t value = MEM_READ_W(rv, addr);
         /* Commit nothing past a faulting member: later members may overwrite
@@ -1723,7 +1743,7 @@ static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
      */
     rv->X[ir->rd] = ir->imm;
     PC += 4;
-    RVOP_SYNC_PC(rv, PC); /* a page fault names the LW or SW */
+    RVOP_SYNC_PC_ACCESS(rv, PC); /* a page fault names the LW or SW */
     cycle++;
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
@@ -1753,7 +1773,7 @@ static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
      */
     rv->X[ir->rd] = ir->imm;
     PC += 4;
-    RVOP_SYNC_PC(rv, PC); /* a page fault names the LW or SW */
+    RVOP_SYNC_PC_ACCESS(rv, PC); /* a page fault names the LW or SW */
     cycle++;
     /* Cast to uint32_t to avoid signed overflow UB */
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
@@ -2498,6 +2518,10 @@ static void free_decoded_irs(riscv_t *rv, block_t *block)
 static bool block_translate(riscv_t *rv, block_t *block)
 {
 retranslate:
+#if RV32_T1C_STATS_ENABLED
+    block->stats_blocker = block->translatable ? T1C_INTERPRETED_TRANSLATABLE
+                                               : T1C_BLOCKER_RETRANSLATE;
+#endif
 #if RV32_HAS(SYSTEM)
     block->priv_mode = rv->priv_mode;
 #if RV32_HAS(JIT)
@@ -2575,8 +2599,14 @@ retranslate:
         block->n_insn++;
         prev_ir = ir;
 #if RV32_HAS(JIT)
-        if (!insn_is_translatable(ir->opcode))
+        if (!insn_is_translatable(ir->opcode)) {
+#if RV32_T1C_STATS_ENABLED
+            rv_t1c_blockers_decoded[ir->opcode]++;
+            if (block->stats_blocker >= N_RV_INSNS)
+                block->stats_blocker = ir->opcode;
+#endif
             block->translatable = false;
+        }
 #endif
         /* stop on branch */
         if (insn_is_branch(ir->opcode)) {
@@ -3556,12 +3586,14 @@ static block_t *block_find_or_translate(riscv_t *rv
 #if RV32_T1C_STATS_ENABLED
     if (!next_blk)
         T1C_COUNT(lookup_cold, 1);
+#if RV32_HAS(SYSTEM)
     else if (next_blk->satp != rv->csr_satp)
         T1C_COUNT(lookup_satp, 1);
     else if (next_blk->priv_mode != rv->priv_mode)
         T1C_COUNT(lookup_priv, 1);
     else if (next_blk->invalidated)
         T1C_COUNT(lookup_invalidated, 1);
+#endif
     else
         T1C_COUNT(lookup_hits, 1);
 #endif
@@ -3598,10 +3630,14 @@ static block_t *block_find_or_translate(riscv_t *rv
     }
     T1C_COUNT(decoded_blocks, 1);
 #if RV32_T1C_STATS_ENABLED
+#if RV32_HAS(SYSTEM)
     if (rv->priv_mode == RV_PRIV_U_MODE)
+#endif
         T1C_COUNT(decoded_user, 1);
+#if RV32_HAS(SYSTEM)
     else
         T1C_COUNT(decoded_kernel, 1);
+#endif
 #endif
 #if RV32_HAS(SYSTEM)
     mmu_note_code(rv, next_blk->pc_start, next_blk->pc_end);
@@ -3614,8 +3650,13 @@ static block_t *block_find_or_translate(riscv_t *rv
      * guest memory physically, so code that runs with paging on stays
      * interpreted. Building that path for every system build would lift this.
      */
-    if (next_blk->satp)
+    if (next_blk->satp) {
         next_blk->translatable = false;
+#if RV32_T1C_STATS_ENABLED
+        if (next_blk->stats_blocker == T1C_INTERPRETED_TRANSLATABLE)
+            next_blk->stats_blocker = T1C_BLOCKER_CONTEXT;
+#endif
+    }
 #endif
 #endif
 

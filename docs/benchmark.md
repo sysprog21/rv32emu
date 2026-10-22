@@ -932,11 +932,11 @@ python3 tests/system-boot.py --emulator stats=build/rv32emu \
 make -j8 ENABLE_ROOTFS_EXT4=0 T1C_STATS=0
 ```
 
-The diagnostic build prints a `T1C_STATS` JSON object on serial-monitor exit
-or hart deletion, and the boot runner records it outside the measured
-interval. The counts are taken shortly after login, and OS boot work and
-interrupt counts vary between runs. Timing comparisons use `T1C_STATS=0`,
-which removes the counters and diagnostic IR-owner pointers.
+User and system JIT diagnostic builds print a `T1C_STATS` JSON object on hart
+deletion (also on system serial-monitor exit), and the boot runner records it
+outside the measured interval. The counts are taken shortly after login, and
+OS boot work and interrupt counts vary between runs. Timing comparisons use
+`T1C_STATS=0`, which removes the counters and diagnostic IR-owner pointers.
 
 A boot before native dispatch recorded 10.29 million block lookups and 9,347
 compilation requests; after it, 3.01 million lookups and about 5,200 requests,
@@ -1607,3 +1607,82 @@ lazy_fused_loads=0 at guest_cycles=72,000,109. The source path explains the
 difference from T2C: jit_run_cached bypasses block lookup, so n_invoke never
 reaches the lazy-fusion threshold. This is a transition-profiling finding for
 TODO 1.5, not evidence that the x0 repair speeds up the workload.
+
+## Blocking opcode diagnostics (2026-10-22)
+
+TODO 1.1 now exposes optional user and system interpreter-entry attribution
+through T1C_STATS=1. The sparse blockers object maps decoded opcode names to
+decoded, entries and insns counts. Decoded counts include every unsupported
+decode attempt, including discarded/retranslated prefixes. Entries count
+actual interpreted block starts, including chains that bypass rv_step, and
+attribute each blocked block to its first unsupported opcode. Insns weights
+each entry by the original cycle_cost before fusion. These are estimates:
+traps, partial execution or a mid-block native handoff can charge a full block
+without retiring all of it. They are not exact retired-instruction counts.
+
+The translatable_interpreted bucket includes cold blocks, failed compilation
+and compilable blocks still reached through interpreter chains. Context
+restrictions, Wasm backend rejections and permanent demotion after system
+fetch retranslation use separate context, wasm and retranslate buckets. An
+unsupported base opcode takes priority over these non-opcode reasons; the
+retranslate bucket therefore counts only blocks with no opcode blocker. No
+compiler thread updates these arrays. T1C_STATS=0 removes the diagnostic state
+and updates; performance measurements continue to use that setting.
+
+The atomic regression records exactly 100,000 amoaddw-block entries and
+300,005 weighted instructions across only 305 dispatcher visits in packed T1C.
+Its total attributed work is exactly 300,013 guest cycles. Separate
+load/store-head variants require actual fuse4/fuse3 heads when fusion is
+enabled and count those heads once. Local tiered checks verify the same exact
+entry/work counts; its interpreter probes cause additional outer dispatches.
+The x64 CI job runs all three user T1C diagnostic regressions. Local system
+tiered validation also checks exactly two million csrrs-block entries in the
+bare x0 kernel. The context, wasm and retranslate reasons have not yet been
+exercised by dedicated runtime assertions. interp_pc_syncs counts sync sites,
+including repeated fused access syncs, and cannot serve as an exact guest
+instruction denominator.
+
+Static inspection of the current nbench, scimark2, miniz, CoreMark and
+Dhrystone artifacts finds no F/A/Zb instructions. Objdump aliases such as
+zext.b are base-ISA operations and are excluded. SciMark2 advertises F but
+uses double arithmetic, which remains software with only the F extension. To
+provide real Zb coverage, SciMark2's source archive was verified against the
+project's SHA-1 de278c5b8cef84ab6dda41855052c7bfef919e36 and rebuilt with the
+configured xPack GCC 15.2.0-1 toolchain, -O2, -march=rv32imafc_zba_zbb_zbs
+-mabi=ilp32 and -lsemihost -lm. The resulting ELF SHA-256 is
+6125312c53883b1b86c7aa8d02bc86ac5dfeea2224f2005c69b9b14f6eb183ad.
+
+A 0.01-second-per-kernel diagnostic finishes successfully. It records
+9,699,982 guest cycles, with first-blocker estimates of 1,801,221 instructions
+for sh2add and 1,207,111 for sh3add. Their combined estimate is 31.01% of
+guest cycles, making Zba a concrete next target. Other recorded blockers
+include bclri (47,067), zexth (5,376), max (720), bset (8) and min (2). These
+short host-time-selected kernels are workload evidence, not timing acceptance
+or an exact instruction-share claim. Remaining rebuilt workload/system profiles
+and the remaining TODO 1.1 implementation/acceptance work are still pending.
+
+Local validation passes the user T1C UBSan full checks, the user T2C UBSan
+counter/x0 probes and host tests, and the system T2C UBSan full checks. A
+normal user T1C UBSan build with diagnostics disabled passes full checks and
+has no diagnostic counter/entry symbols. All five Wasm backend fixtures pass,
+and the full system Wasm diagnostic bundle compiles with existing assets.
+These are checkpoint checks, without a claim that TODO 1.1 is complete.
+
+A rebuilt CoreMark completes its fixed 80,000 iterations with “Correct
+operation validated.” Its diagnostic records 10,667,032,961 guest cycles:
+sh1add blocks carry 7,711,520,563 weighted instructions, sh2add 700,560,218
+and sh3add 19, together 78.86%. sexth and zexth add 536,320,011 and
+271,107,629. The program ignores the iteration argument and fixes 80,000 in
+core_main.c; an earlier 45-second diagnostic timeout was incomplete and is
+excluded. These estimates reinforce Zba priority without a speedup claim.
+
+One Linux boot diagnostic uses system T1C, the existing Image/rootfs.cpio,
+T1C_STATS=1 and the runner's --require-stats option. At 266,546,518 guest
+cycles, the largest opcode-blocked estimates are sfencevma (2,097,569),
+amoaddw (1,921,612), csrrci (1,810,544) and csrrs (988,236). The dedicated
+retranslate bucket records one entry and one instruction, exercising its
+JSON name lookup during actual boot. Per-opcode boot weights are each below
+1%; that does not establish the remaining system workload or user criteria.
+The 2.9355-second diagnostic boot time is excluded from performance acceptance.
+A rebuilt nbench Fourier diagnostic exceeded its 90-second cap and supplies
+no completed profile. The remaining workload profiles stay pending.

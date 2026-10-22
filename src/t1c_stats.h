@@ -1,4 +1,4 @@
-/* Optional system JIT diagnostics. Disabled builds emit no counter updates. */
+/* Optional JIT diagnostics. Disabled builds emit no counter updates. */
 #pragma once
 
 #include <stdbool.h>
@@ -10,7 +10,7 @@
 #define RV32_T1C_STATS 0
 #endif
 
-#if RV32_T1C_STATS && RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+#if RV32_T1C_STATS && RV32_HAS(JIT)
 #define RV32_T1C_STATS_ENABLED 1
 #define T1C_STATS_FIELDS(_)  \
     _(dispatches)            \
@@ -50,6 +50,10 @@ struct t1c_stats {
     uint64_t traps[64];      /* traps taken per T1C_CAUSE_INDEX */
 };
 extern struct t1c_stats rv_t1c_stats;
+/* Indexed by decoded opcode. Only the emulator thread updates these arrays. */
+extern uint64_t rv_t1c_blockers_decoded[];
+extern uint64_t rv_t1c_blockers_entries[];
+extern uint64_t rv_t1c_blockers_insns[];
 void rv_t1c_stats_report(uint64_t guest_cycles);
 #define T1C_COUNT(name, n) (rv_t1c_stats.name += (uint64_t) (n))
 /* Exceptions take slots 0-31 and interrupts 32-63. */

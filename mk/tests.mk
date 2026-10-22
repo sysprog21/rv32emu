@@ -222,6 +222,10 @@ GUEST_ASM_CHECK_TARGETS := check-block-eviction
 GUEST_ASM_CHECK_TARGETS += check-const-shift check-load-x0
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes check-t2c-load-x0
+ifeq ($(CONFIG_JIT)$(T1C_STATS)$(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),y1yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-blocker-stats check-jit-blocker-stats-load \
+	check-jit-blocker-stats-store
+endif
 # Short loops reach T1 through loop detection only where T1 uses packed IR,
 # which T2C builds do not.
 ifeq ($(CONFIG_JIT),y)
@@ -379,6 +383,7 @@ $(eval $(call system-asm-check-target,system-sfence-asid,rv32ia_zicsr))
 EXPECTED_system-load-x0 = SYSTEM load x0 OK
 # Diagnostics assert actual tier-2 entries and, in bare T2C mode, lazy fusion.
 .PHONY: check-system-load-x0 check-system-load-x0-bare
+check-system-load-x0-bare: SYSTEM_X0_COUNTERS = $(if $(filter 1,$(T1C_STATS)),--expect-csr-entries 2000000)
 check-system-load-x0-bare: SYSTEM_X0_SUFFIX := -bare
 check-system-load-x0-bare: SYSTEM_X0_FLAGS := -DLOAD_X0_BARE -DLOAD_X0_ITERATIONS=2000000
 check-system-load-x0-bare: SYSTEM_X0_FUSION = $(if $(filter yy,$(CONFIG_MOP_FUSION)$(CONFIG_T2C)),--expect-fusion)
@@ -387,7 +392,7 @@ check-system-load-x0 check-system-load-x0-bare: $(BIN) tests/system-load-x0.S te
 	    $(SYSTEM_X0_FLAGS) -Xlinker -Ttext=0 -Xlinker --build-id=none)
 	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin
 	$(Q)python3 tests/test-system-load-x0.py $(BIN) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin \
-	    $(SYSTEM_X0_FUSION) $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
+	    $(SYSTEM_X0_FUSION) $(SYSTEM_X0_COUNTERS) $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
 
 EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
@@ -476,6 +481,18 @@ $(eval $(call guest-asm-check-target,register-loop,rv32i_zicsr,-cycles,-DCHECK_C
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i_zicsr,-csr,-DUSE_CSR))
+
+.PHONY: check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-store
+check-jit-blocker-stats-load: BLOCKER_STATS_SUFFIX = -load
+check-jit-blocker-stats-load: BLOCKER_STATS_FLAGS = -DSTATS_FUSED_HEAD=1
+check-jit-blocker-stats-load: BLOCKER_STATS_HEAD = load
+check-jit-blocker-stats-store: BLOCKER_STATS_SUFFIX = -store
+check-jit-blocker-stats-store: BLOCKER_STATS_FLAGS = -DSTATS_FUSED_HEAD=2
+check-jit-blocker-stats-store: BLOCKER_STATS_HEAD = store
+check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-store: $(BIN) tests/jit-blocker-stats.S tests/test-jit-blocker-stats.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call guest-asm-build,jit-blocker-stats,rv32ia,$(BLOCKER_STATS_SUFFIX),$(BLOCKER_STATS_FLAGS))
+	$(Q)python3 tests/test-jit-blocker-stats.py $(BIN) $(OUT)/jit-blocker-stats$(BLOCKER_STATS_SUFFIX) \
+	    $(if $(BLOCKER_STATS_HEAD),--fused-head $(BLOCKER_STATS_HEAD) $(if $(filter y,$(CONFIG_MOP_FUSION)),--expect-fusion))
 
 .PHONY: check-t2c-load-x0
 # Only a tier-2 build needs the run to outlast compilation; see the guest.

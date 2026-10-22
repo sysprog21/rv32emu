@@ -1145,11 +1145,12 @@ static inline bool insn_uses_privileged_state(uint32_t insn)
 }
 
 /* Whether a 32-bit instruction accesses a user counter CSR: cycle, time,
- * instret or a hardware performance counter, including the high halves.
+ * instret or a hardware performance counter, including the high halves,
+ * or the machine cycle and instructions-retired counters.
  */
 static inline bool insn_reads_counter(uint32_t insn)
 {
     const uint32_t csr = insn >> 20;
     return (insn & 0x7f) == 0x73 && ((insn >> 12) & 3) &&
-           ((csr & ~0x9f) == 0xc00); /* 0xc00-0xc1f and 0xc80-0xc9f */
+           (((csr & ~0x9f) == 0xc00) || ((csr & ~0x82) == 0xb00));
 }

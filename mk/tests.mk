@@ -55,6 +55,23 @@ $(eval $(call run-test-simple,constopt))
 
 tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
 
+ifneq ($(CONFIG_BUILD_WASM),y)
+$(eval $(call test-framework,trap,test-trap.o,$(filter-out $(OUT)/main.o,$(OBJS)) $(DEV_OBJS),))
+$(eval $(call run-test-simple,trap))
+tests check: run-test-trap
+endif
+
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(CONFIG_BUILD_WASM),y)
+.PHONY: check-unhandled-exit
+check-unhandled-exit: $(BIN) tests/test-unhandled-exit.py
+	$(Q)python3 tests/test-unhandled-exit.py $(BIN)
+tests check: check-unhandled-exit
+endif
+endif
+endif
+
 # Integration Tests (run emulator with test programs)
 
 LOG_FILTER := sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'
@@ -148,6 +165,15 @@ ifneq ($(CONFIG_SYSTEM),y)
 RUN_USER_ELF := y
 else ifeq ($(CONFIG_ELF_LOADER),y)
 RUN_USER_ELF := y
+endif
+
+# Native CSR execution tests use the emulator objects, without the CLI main.
+ifeq ($(CONFIG_Zicsr)$(RUN_USER_ELF),yy)
+ifeq ($(filter y,$(CONFIG_BUILD_WASM) $(CONFIG_RV32E)),)
+$(eval $(call test-framework,csr-unsupported,test-csr-unsupported.o,$(filter-out $(OUT)/main.o,$(OBJS)) $(DEV_OBJS),))
+$(eval $(call run-test-simple,csr-unsupported))
+tests check: run-test-csr-unsupported
+endif
 endif
 
 ifneq ($(CROSS_COMPILE),)
@@ -500,7 +526,8 @@ mmu-test: $(BIN)
 	$(call check-test, , tests/system/mmu/vm.elf, vm.elf, tail -n 1,$(EXPECTED_mmu))
 
 .PHONY: tests run-test-cache run-test-block-edge run-test-map run-test-path \
-	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
+	run-test-elf run-test-io run-test-decode run-test-set run-test-constopt \
+	run-test-trap run-test-csr-unsupported
 .PHONY: check $(CHECK_TARGETS) misalign misalign-in-blk-emu mmu-test
 
 # This host-side backend fixture runs actual runtime-generated Wasm modules.

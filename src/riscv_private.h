@@ -79,6 +79,11 @@ enum {
     CSR_MTVAL = 0x343,    /* Machine bad address or instruction */
     CSR_MIP = 0x344,      /* Machine interrupt pending */
 
+    CSR_MCYCLE = 0xB00,
+    CSR_MCYCLEH = 0xB80,
+    CSR_MINSTRET = 0xB02,
+    CSR_MINSTRETH = 0xB82,
+
     /* low words */
     CSR_CYCLE = 0xC00, /* Cycle counter for RDCYCLE instruction */
     CSR_TIME = 0xC01,  /* Timer for RDTIME instruction */
@@ -514,8 +519,11 @@ struct riscv_internal {
     uint64_t branch_chain_cycle_target;
 #endif
 
+    uint64_t csr_mcycle_offset;   /* Guest mcycle adjustment */
+    uint64_t csr_minstret_offset; /* Guest instret adjustment to cycle model */
+
     /* csr registers */
-    uint64_t csr_cycle;     /* Machine cycle counter */
+    uint64_t csr_cycle;     /* Internal cycle clock */
     uint32_t csr_time[2];   /* Performance counter */
     uint32_t csr_mstatus;   /* Machine status register */
     uint32_t csr_mtvec;     /* Machine trap-handler base address */
@@ -531,7 +539,9 @@ struct riscv_internal {
     uint32_t csr_mvendorid; /* vendor ID */
     uint32_t csr_marchid;   /* Architecture ID */
     uint32_t csr_mimpid;    /* Implementation ID */
+    uint32_t csr_mhartid;   /* Hardware thread ID */
     uint32_t csr_mbadaddr;
+    uint32_t csr_mcounteren; /* Machine counter enable */
 
     uint32_t csr_sstatus;    /* supervisor status register */
     uint32_t csr_stvec;      /* supervisor trap vector base address register */

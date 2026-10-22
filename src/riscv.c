@@ -1361,6 +1361,8 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     rv->priv_mode = RV_PRIV_M_MODE;
 #endif
 
+    rv->csr_mcycle_offset = 0;
+    rv->csr_minstret_offset = 0;
 #if RV32_HAS(SYSTEM)
     /* Not being trap */
     rv->trap_cnt = 0;
@@ -1383,7 +1385,9 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     rv->csr_mvendorid = 0;
     rv->csr_marchid = 0;
     rv->csr_mimpid = 0;
+    rv->csr_mhartid = 0;
     rv->csr_mbadaddr = 0;
+    rv->csr_mcounteren = 0;
 
     rv->csr_sstatus = 0;
     rv->csr_stvec = 0;
@@ -1417,7 +1421,9 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     rv->csr_mvendorid = 0;
     rv->csr_marchid = 0;
     rv->csr_mimpid = 0;
+    rv->csr_mhartid = 0;
     rv->csr_mbadaddr = 0;
+    rv->csr_mcounteren = 0;
 #endif
 
 #if RV32_HAS(SYSTEM)

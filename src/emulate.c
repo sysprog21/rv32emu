@@ -445,7 +445,10 @@ static inline void rvv_csr_write(riscv_t *rv, uint32_t csr, uint32_t val)
 #endif
 
 /* get a pointer to a CSR */
-static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
+static uint32_t *csr_get_ptr(riscv_t *rv,
+                             uint32_t csr,
+                             uint32_t *mcycle,
+                             uint32_t *minstret)
 {
     /* csr & 0xFFF prevent sign-extension in decode stage */
     switch (csr & 0xFFF) {
@@ -455,6 +458,20 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_mtvec);
     case CSR_MISA: /* Machine ISA and Extensions */
         return (uint32_t *) (&rv->csr_misa);
+    case CSR_MIE: /* Machine Interrupt Enable */
+        return (uint32_t *) (&rv->csr_mie);
+    case CSR_MCOUNTEREN: /* Machine Counter Enable */
+        return (uint32_t *) (&rv->csr_mcounteren);
+
+    /* Machine Information Registers (read-only) */
+    case CSR_MVENDORID: /* Vendor ID */
+        return (uint32_t *) (&rv->csr_mvendorid);
+    case CSR_MARCHID: /* Architecture ID */
+        return (uint32_t *) (&rv->csr_marchid);
+    case CSR_MIMPID: /* Implementation ID */
+        return (uint32_t *) (&rv->csr_mimpid);
+    case CSR_MHARTID: /* Hardware Thread ID */
+        return (uint32_t *) (&rv->csr_mhartid);
 
     /* Machine Trap Handling */
     case CSR_MEDELEG: /* Machine Exception Delegation Register */
@@ -473,10 +490,14 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_mip);
 
     /* Machine Counter/Timers */
+    case CSR_MCYCLE:
+        return rv->priv_mode == RV_PRIV_M_MODE ? mcycle : NULL;
     case CSR_CYCLE: /* Cycle counter for RDCYCLE instruction */
-        return (uint32_t *) &rv->csr_cycle;
+        return mcycle;
+    case CSR_MCYCLEH:
+        return rv->priv_mode == RV_PRIV_M_MODE ? mcycle + 1 : NULL;
     case CSR_CYCLEH: /* Upper 32 bits of cycle */
-        return &((uint32_t *) &rv->csr_cycle)[1];
+        return mcycle + 1;
 
     /* TIME/TIMEH - very roughly about 1 ms per tick */
     case CSR_TIME: /* Timer for RDTIME instruction */
@@ -485,10 +506,14 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     case CSR_TIMEH: /* Upper 32 bits of time */
         update_time(rv);
         return &rv->csr_time[1];
+    case CSR_MINSTRET:
+        return rv->priv_mode == RV_PRIV_M_MODE ? minstret : NULL;
     case CSR_INSTRET: /* Number of Instructions Retired Counter */
-        return (uint32_t *) (&rv->csr_cycle);
+        return minstret;
+    case CSR_MINSTRETH:
+        return rv->priv_mode == RV_PRIV_M_MODE ? minstret + 1 : NULL;
     case CSR_INSTRETH: /* Upper 32 bits of instructions retired */
-        return &((uint32_t *) &rv->csr_cycle)[1];
+        return minstret + 1;
 #if RV32_HAS(EXT_F)
     case CSR_FFLAGS:
         return (uint32_t *) (&rv->csr_fcsr);
@@ -520,6 +545,19 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     }
 }
 
+#if RV32_HAS(EXT_F)
+/* frm has no storage of its own; it is fcsr[7:5]. */
+static inline uint32_t csr_frm_read(const riscv_t *rv)
+{
+    return (rv->csr_fcsr >> 5) & 0x7;
+}
+
+static inline void csr_frm_write(riscv_t *rv, uint32_t frm)
+{
+    rv->csr_fcsr = (rv->csr_fcsr & ~(0x7U << 5)) | ((frm & 0x7) << 5);
+}
+#endif
+
 /* Sync cycle counter for cycle/time CSR reads.
  * TIME CSRs need cycle synced so update_time() derives correct timer.
  */
@@ -538,46 +576,78 @@ static inline void csr_sync_cycle(riscv_t *rv, uint32_t csr, uint64_t cycle)
     }
 }
 
-/* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
+/*
+ * CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
  * zero-extends the value to XLEN bits, and then writes it to register rd.
  * The initial value in rs1 is written to the CSR.
  * If rd == x0, then the instruction shall not read the CSR and shall not cause
  * any of the side effects that might occur on a CSR read.
+ *
+ * CSR helpers return false for missing entries, machine counter accesses below
+ * M-mode, and writes to read-only CSRs, leaving result unchanged.
+ * Callers save PC/cycle and raise ILLEGAL_INSN before rd writeback.
+ * For CSRRS/CSRRC, write reflects the encoded source, not its value.
  */
-static uint32_t csr_csrrw(riscv_t *rv,
-                          uint32_t csr,
-                          uint32_t val,
-                          uint64_t cycle)
+static inline bool csr_csrrw(riscv_t *rv,
+                             uint32_t csr,
+                             uint32_t val,
+                             uint64_t cycle,
+                             uint32_t *result)
 {
+    csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
+    /* CSRRW/CSRRWI always write, including with a zero source. */
+    if ((csr & 0xc00) == 0xc00)
+        return false;
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
     if (rvv_csr_read(rv, csr, &rvv_out)) {
         /* csrrw/csrrwi always writes (even with rs1=x0). Trap when the
          * target is a read-only V CSR. */
-        if (rvv_csr_is_read_only(csr)) {
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-            return 0;
-        }
+        if (rvv_csr_is_read_only(csr))
+            return false;
         rvv_csr_write(rv, csr, val);
-        return rvv_out;
+        *result = rvv_out;
+        return true;
     }
 #endif
-    uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FRM) {
+        const uint32_t frm = csr_frm_read(rv);
+        csr_frm_write(rv, val);
+        *result = frm;
+        return true;
+    }
+#endif
+    /* Guest counter writes must not change the timer or execution budget. */
+    const uint64_t count = cycle + rv->csr_mcycle_offset;
+    uint32_t mcycle[] = {(uint32_t) count, count >> 32};
+    /* Instret still uses the cycle model, but excludes this instruction. */
+    const uint64_t retired = cycle - 1 + rv->csr_minstret_offset;
+    uint32_t minstret[] = {(uint32_t) retired, retired >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle, minstret);
+    if (unlikely(!c))
+        return false;
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
+    if (csr == CSR_FFLAGS) {
         out &= FFLAG_MASK;
+        val = (*c & ~FFLAG_MASK) | (val & FFLAG_MASK);
+    }
 #endif
 
 #if RV32_HAS(SYSTEM)
     uint32_t old_satp = *c;
 #endif
     *c = val;
+    if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
+        rv->csr_mcycle_offset =
+            (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
+    if (csr == CSR_MINSTRET || csr == CSR_MINSTRETH)
+        rv->csr_minstret_offset =
+            (((uint64_t) minstret[1] << 32) | minstret[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* Flush TLB when SATP actually changes: address space changed */
@@ -600,16 +670,22 @@ static uint32_t csr_csrrw(riscv_t *rv,
 #endif
 #endif
 
-    return out;
+    *result = out;
+    return true;
 }
 
 /* perform csrrs (atomic read and set) */
-static uint32_t csr_csrrs(riscv_t *rv,
-                          uint32_t csr,
-                          uint32_t val,
-                          uint64_t cycle)
+static inline bool csr_csrrs(riscv_t *rv,
+                             uint32_t csr,
+                             uint32_t val,
+                             uint64_t cycle,
+                             bool write,
+                             uint32_t *result)
 {
+    csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
+    if (write && (csr & 0xc00) == 0xc00)
+        return false;
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
     if (rvv_csr_read(rv, csr, &rvv_out)) {
@@ -620,29 +696,48 @@ static uint32_t csr_csrrs(riscv_t *rv,
          * 0, an actual write is requested - trap on read-only V CSRs.
          */
         if (val) {
-            if (rvv_csr_is_read_only(csr)) {
-                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-                return 0;
-            }
+            if (rvv_csr_is_read_only(csr))
+                return false;
             rvv_csr_write(rv, csr, rvv_out | val);
         }
-        return rvv_out;
+        *result = rvv_out;
+        return true;
     }
 #endif
-    uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FRM) {
+        const uint32_t frm = csr_frm_read(rv);
+        csr_frm_write(rv, frm | val);
+        *result = frm;
+        return true;
+    }
+#endif
+    const uint64_t count = cycle + rv->csr_mcycle_offset;
+    uint32_t mcycle[] = {(uint32_t) count, count >> 32};
+    const uint64_t retired = cycle - 1 + rv->csr_minstret_offset;
+    uint32_t minstret[] = {(uint32_t) retired, retired >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle, minstret);
+    if (unlikely(!c))
+        return false;
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
+    if (csr == CSR_FFLAGS) {
         out &= FFLAG_MASK;
+        val &= FFLAG_MASK;
+    }
 #endif
 
 #if RV32_HAS(SYSTEM)
     uint32_t old_satp = *c;
 #endif
     *c |= val;
+    if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
+        rv->csr_mcycle_offset =
+            (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
+    if (write && (csr == CSR_MINSTRET || csr == CSR_MINSTRETH))
+        rv->csr_minstret_offset =
+            (((uint64_t) minstret[1] << 32) | minstret[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB
@@ -657,47 +752,72 @@ static uint32_t csr_csrrs(riscv_t *rv,
     }
 #endif
 
-    return out;
+    *result = out;
+    return true;
 }
 
 /* perform csrrc (atomic read and clear)
  * Read old value of CSR, zero-extend to XLEN bits, write to rd.
  * Read value from rs1, use as bit mask to clear bits in CSR.
  */
-static uint32_t csr_csrrc(riscv_t *rv,
-                          uint32_t csr,
-                          uint32_t val,
-                          uint64_t cycle)
+static inline bool csr_csrrc(riscv_t *rv,
+                             uint32_t csr,
+                             uint32_t val,
+                             uint64_t cycle,
+                             bool write,
+                             uint32_t *result)
 {
+    csr &= 0xFFF;
     csr_sync_cycle(rv, csr, cycle);
+    if (write && (csr & 0xc00) == 0xc00)
+        return false;
 #if RV32_HAS(EXT_V)
     uint32_t rvv_out;
     if (rvv_csr_read(rv, csr, &rvv_out)) {
         /* Same Zicsr no-write-on-x0 rule as csrrs above. */
         if (val) {
-            if (rvv_csr_is_read_only(csr)) {
-                SET_CAUSE_AND_TVAL_THEN_TRAP(rv, ILLEGAL_INSN, 0);
-                return 0;
-            }
+            if (rvv_csr_is_read_only(csr))
+                return false;
             rvv_csr_write(rv, csr, rvv_out & ~val);
         }
-        return rvv_out;
+        *result = rvv_out;
+        return true;
     }
 #endif
-    uint32_t *c = csr_get_ptr(rv, csr);
-    if (!c)
-        return 0;
+#if RV32_HAS(EXT_F)
+    if (csr == CSR_FRM) {
+        const uint32_t frm = csr_frm_read(rv);
+        csr_frm_write(rv, frm & ~val);
+        *result = frm;
+        return true;
+    }
+#endif
+    const uint64_t count = cycle + rv->csr_mcycle_offset;
+    uint32_t mcycle[] = {(uint32_t) count, count >> 32};
+    const uint64_t retired = cycle - 1 + rv->csr_minstret_offset;
+    uint32_t minstret[] = {(uint32_t) retired, retired >> 32};
+    uint32_t *c = csr_get_ptr(rv, csr, mcycle, minstret);
+    if (unlikely(!c))
+        return false;
 
     uint32_t out = *c;
 #if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
+    if (csr == CSR_FFLAGS) {
         out &= FFLAG_MASK;
+        val &= FFLAG_MASK;
+    }
 #endif
 
 #if RV32_HAS(SYSTEM)
     uint32_t old_satp = *c;
 #endif
     *c &= ~val;
+    if (csr == CSR_MCYCLE || csr == CSR_MCYCLEH)
+        rv->csr_mcycle_offset =
+            (((uint64_t) mcycle[1] << 32) | mcycle[0]) - cycle;
+    if (write && (csr == CSR_MINSTRET || csr == CSR_MINSTRETH))
+        rv->csr_minstret_offset =
+            (((uint64_t) minstret[1] << 32) | minstret[0]) - cycle;
 
 #if RV32_HAS(SYSTEM)
     /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB
@@ -712,8 +832,10 @@ static uint32_t csr_csrrc(riscv_t *rv,
     }
 #endif
 
-    return out;
+    *result = out;
+    return true;
 }
+
 #endif
 
 #if RV32_HAS(GDBSTUB)
@@ -4345,6 +4467,14 @@ static void _trap_handler(riscv_t *rv)
                                         &rv->csr_sepc);
                 return;
             }
+#else
+            if ((cause & (1U << 31)) == 0) {
+                rv_log_fatal("Exception %u at 0x%08x without a trap vector",
+                             cause, rv->PC);
+                PRIV(rv)->exit_code = EXIT_FAILURE;
+                rv->halt = true;
+                return;
+            }
 #endif
             /* For system mode without trap vector, restore PC from sepc
              * and clear trap_cnt to continue execution. This handles
@@ -4368,13 +4498,23 @@ static void _trap_handler(riscv_t *rv)
         rv->csr_mepc = rv->PC;
         if (!rv->csr_mtvec) { /* in case CSR is not configured */
 #if RV32_HAS(SYSTEM)
-            /* For system mode without trap vector, restore PC from mepc
-             * and clear trap_cnt to continue execution. This handles
-             * spurious interrupts during early boot before handlers are set.
+            /*
+             * For interrupts in system mode without a trap vector, restore
+             * PC from mepc and decrement trap_cnt to continue execution.
+             * This handles spurious interrupts during early boot before
+             * handlers are set.
              */
             rv->PC = rv->csr_mepc;
             if (rv->trap_cnt)
                 rv->trap_cnt--;
+#if !RV32_HAS(ELF_LOADER)
+            if ((cause & (1U << 31)) == 0) {
+                rv_log_fatal("Exception %u at 0x%08x without a trap vector",
+                             cause, rv->PC);
+                PRIV(rv)->exit_code = EXIT_FAILURE;
+                rv->halt = true;
+            }
+#endif
 #else
             rv_trap_default_handler(rv, cause, rv->csr_mtval, &rv->csr_mepc);
 #endif
@@ -4388,9 +4528,8 @@ static void _trap_handler(riscv_t *rv)
         break;
     /* VECTORED: Asynchronous traps set PC to base + 4 * code */
     case 1:
-        /* MSB of code is used to indicate whether the trap is interrupt
-         * or exception, so it is not considered as the 'real' code */
-        rv->PC = base + 4 * (cause & MASK(31));
+        /* Synchronous exceptions enter BASE in either mode. */
+        rv->PC = base + ((cause >> 31) ? 4 * (cause & MASK(31)) : 0);
         break;
     }
     IIF(RV32_HAS(SYSTEM))(if (rv->trap_cnt) __trap_handler(rv);, )

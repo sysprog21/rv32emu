@@ -45,6 +45,7 @@ jobs:
                         -e "+BUILDROOT_VERSION" \
                         -e "+LINUX_VERSION" \
                         -e "+LINUX_PATCHLEVEL" \
+                        -e "+UBOOT_VERSION" \
                      ) >> linux-image-version-change
             if [[ -s linux-image-version-change ]]; then
                 echo "has_changed_linux_image_version=true" >> $GITHUB_OUTPUT
@@ -66,7 +67,7 @@ jobs:
         with:
           submodules: 'true'
       - name: Install dependencies
-        run: .ci/apt-install.sh build-essential git
+        run: .ci/apt-install.sh build-essential bison flex git
       - name: Build Linux image
         run: |
           make build-linux-image

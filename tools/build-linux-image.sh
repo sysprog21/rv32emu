@@ -296,6 +296,19 @@ function do_simplefs
     ASSERT cp -f $SRC_DIR/simplefs/simplefs.ko $OUTPUT_DIR
 }
 
+function do_uboot
+{
+    cp -f assets/system/configs/u-boot.config ${SRC_DIR}/u-boot/.config
+    export PATH="${SRC_DIR}/buildroot/output/host/bin:${PATH}"
+    export CROSS_COMPILE=riscv32-buildroot-linux-gnu-
+    pushd ${SRC_DIR}/u-boot
+    ASSERT make olddefconfig
+    ASSERT make ${PARALLEL} u-boot.bin
+    popd
+    ASSERT cp -f ${SRC_DIR}/u-boot/u-boot.bin ${OUTPUT_DIR}
+}
+
 do_buildroot && OK
 do_linux && OK
 do_simplefs && OK
+do_uboot && OK

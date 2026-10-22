@@ -38,7 +38,8 @@
     _(fence_i_blocks)        \
     _(retire_calls)          \
     _(retire_pending_slots)  \
-    _(pending_patched)
+    _(pending_patched)       \
+    _(lazy_fused_loads)
 
 struct t1c_stats {
 #define T1C_STATS_FIELD(name) uint64_t name;

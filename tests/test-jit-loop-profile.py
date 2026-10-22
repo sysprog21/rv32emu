@@ -4,23 +4,15 @@ import pathlib
 import subprocess
 import sys
 
+from jit_profile import read_profile, read_symbols
+
 emulator, guest, nm = sys.argv[1:]
-symbols = {}
-for line in subprocess.check_output([nm, guest], text=True).splitlines():
-    fields = line.split()
-    if len(fields) == 3:
-        symbols[fields[2]] = int(fields[0], 16)
+symbols = read_symbols(nm, guest)
 
 subprocess.run([emulator, "-p", guest], check=True)
 profile = pathlib.Path(emulator).parent / (pathlib.Path(guest).name + ".prof")
 # Columns depend on the build configuration, so look them up by header name.
-header, rows = None, {}
-for line in profile.read_text().splitlines():
-    fields = [field.strip() for field in line.split("|")]
-    if fields[0] == "PC start":
-        header = fields
-    elif fields[0].startswith("0x"):
-        rows[int(fields[0], 16)] = dict(zip(header, fields))
+rows = read_profile(profile)
 
 for name in ("self_loop", "cycle_head"):
     row = rows[symbols[name]]

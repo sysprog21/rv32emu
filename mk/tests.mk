@@ -190,7 +190,8 @@ ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-decode-trap
 endif
 SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles \
-    check-system-trap-resume check-system-sfence-asid check-system-mmu-priv
+    check-system-trap-resume check-system-sfence-asid check-system-mmu-priv \
+    check-system-load-x0 check-system-load-x0-bare
 SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
     check-system-interrupt-dispatch-indirect \
     check-system-interrupt-dispatch-long-handler
@@ -201,7 +202,8 @@ SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction \
     check-system-native-retire-fused check-system-native-retire-sfence \
     check-system-native-retire-multi-load check-system-native-retire-multi-store \
     check-system-native-retire-cycles check-system-native-retire-amo \
-    check-system-native-retire-inner check-system-native-retire-inner-store
+    check-system-native-retire-inner check-system-native-retire-inner-store \
+    check-system-native-retire-x0-mmio
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-native-retire-rvc \
     check-system-native-retire-rvc-store
@@ -219,7 +221,7 @@ ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
 GUEST_ASM_CHECK_TARGETS += check-const-shift check-load-x0
 ifneq ($(CONFIG_SYSTEM),y)
-GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes
+GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes check-t2c-load-x0
 # Short loops reach T1 through loop detection only where T1 uses packed IR,
 # which T2C builds do not.
 ifeq ($(CONFIG_JIT),y)
@@ -374,6 +376,19 @@ EXPECTED_system-mmu-priv = SYSTEM MMU privilege OK
 $(eval $(call system-asm-check-target,system-mmu-priv,rv32ia_zicsr))
 EXPECTED_system-sfence-asid = SYSTEM SFENCE ASID OK
 $(eval $(call system-asm-check-target,system-sfence-asid,rv32ia_zicsr))
+EXPECTED_system-load-x0 = SYSTEM load x0 OK
+# Diagnostics assert actual tier-2 entries and, in bare T2C mode, lazy fusion.
+.PHONY: check-system-load-x0 check-system-load-x0-bare
+check-system-load-x0-bare: SYSTEM_X0_SUFFIX := -bare
+check-system-load-x0-bare: SYSTEM_X0_FLAGS := -DLOAD_X0_BARE -DLOAD_X0_ITERATIONS=2000000
+check-system-load-x0-bare: SYSTEM_X0_FUSION = $(if $(filter yy,$(CONFIG_MOP_FUSION)$(CONFIG_T2C)),--expect-fusion)
+check-system-load-x0 check-system-load-x0-bare: $(BIN) tests/system-load-x0.S tests/test-system-load-x0.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call guest-asm-build,system-load-x0,rv32ia_zicsr,$(SYSTEM_X0_SUFFIX), \
+	    $(SYSTEM_X0_FLAGS) -Xlinker -Ttext=0 -Xlinker --build-id=none)
+	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin
+	$(Q)python3 tests/test-system-load-x0.py $(BIN) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin \
+	    $(SYSTEM_X0_FUSION) $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
+
 EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
 EXPECTED_system-interrupt-dispatch = SYSTEM interrupt dispatch OK
@@ -400,6 +415,7 @@ $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-amo,-DRETIRE_AMO))
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-inner,-DRETIRE_INNER))
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-inner-store,-DRETIRE_INNER -DRETIRE_STORE))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-x0-mmio,-DRETIRE_INNER -DRETIRE_X0_MMIO,ZSYSTEM native retire OK))
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-multi-load,-DRETIRE_MULTI_LOAD))
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-multi-store,-DRETIRE_MULTI_STORE -DRETIRE_STORE))
 
@@ -461,8 +477,19 @@ $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i_zicsr,-csr,-DUSE_CSR))
 
+.PHONY: check-t2c-load-x0
+# Only a tier-2 build needs the run to outlast compilation; see the guest.
+check-t2c-load-x0: $(BIN) tests/t2c-load-x0.S tests/test-t2c-load-x0.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call guest-asm-build,t2c-load-x0,rv32i,,$(if $(filter y,$(CONFIG_T2C)),,-DLOAD_X0_ITERATIONS=1000000))
+ifeq ($(CONFIG_T2C),y)
+	$(Q)python3 tests/test-t2c-load-x0.py $(BIN) $(OUT)/t2c-load-x0 $(CROSS_COMPILE)nm \
+	    $(if $(filter y,$(CONFIG_MOP_FUSION)),--expect-fusion)
+else
+	$(call check-test, , $(OUT)/t2c-load-x0, t2c-load-x0, tail -n 1,tiered load into x0 OK)
+endif
+
 .PHONY: check-jit-loop-profile
-check-jit-loop-profile: $(BIN) tests/jit-loop-profile.S tests/test-jit-loop-profile.py | $(OUT)
+check-jit-loop-profile: $(BIN) tests/jit-loop-profile.S tests/test-jit-loop-profile.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call guest-asm-build,jit-loop-profile,rv32i)
 	$(Q)python3 tests/test-jit-loop-profile.py $(BIN) $(OUT)/jit-loop-profile $(CROSS_COMPILE)nm
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))

@@ -3365,6 +3365,14 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
         return;
 #endif
 
+#if RV32_HAS(T2C)
+    /* The compiler walks successor IR under cache_lock. Fusion removes IR
+     * records, so serialize its mutation with that walk. Keep cold blocks and
+     * the completed/Sv32 fast exits above free of locking.
+     */
+    hart_lock(rv, &rv->cache_lock);
+#endif
+
     /* Check if all candidates have reached a final state */
     bool all_finalized = true;
 
@@ -3394,6 +3402,8 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
                 (cand->opcode == rv_insn_lw) ? rv_insn_fuse4 : rv_insn_fuse3;
             if (try_fuse_sequence(rv, block, cand->ir, cand->count,
                                   fuse_opcode)) {
+                if (cand->opcode == rv_insn_lw)
+                    T1C_COUNT(lazy_fused_loads, 1);
                 cand->verified = true;
             } else {
                 /* Allocation failed, can retry later */
@@ -3405,6 +3415,9 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
     /* Only mark done when all candidates have final state */
     if (all_finalized)
         block->lazy_fusion_done = true;
+#if RV32_HAS(T2C)
+    hart_unlock(rv, &rv->cache_lock);
+#endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 #endif /* RV32_HAS(MOP_FUSION) */

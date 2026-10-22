@@ -43,6 +43,14 @@ _start:
     li s6, 'Z'
 #endif
     sw s6, 0(s2)
+#ifdef RETIRE_X0_MMIO
+    /* The faulting read maps to UART IIR, whose THRE pending bit clears on
+     * read. Retain a3 as a sentinel because the probe discards its result.
+     */
+    addi s3, s3, 2
+    mv a3, s6
+    li s8, 0
+#endif
     li t0, 1
     sw t0, 4(s2)
 #ifdef RETIRE_SFENCE
@@ -97,6 +105,13 @@ warm:
     addi s5, s5, -1
     bnez s5, warm
     bnez s4, fail
+#ifdef RETIRE_X0_MMIO
+    li t0, 0xf4000000
+    li t1, 2
+    sb t1, 1(t0)             /* enable UART THRE */
+    li t1, 'Z'
+    sb t1, 0(t0)             /* make THRE pending exactly once */
+#endif
     sw zero, 0(s1)
 #if defined(RETIRE_STORE) && !defined(RETIRE_MMIO)
     /* A dropped faulting store must not pass using the warmup value. */
@@ -114,6 +129,14 @@ warm:
     jal ra, probe
 #endif
 validate_replacement:
+#ifdef RETIRE_X0_MMIO
+    bne zero, s8, fail
+    li t0, 0xf4000000
+    lbu t0, 2(t0)            /* x0 read must already have cleared THRE */
+    andi t0, t0, 1           /* bit 0 set: no interrupt pending */
+    li t1, 1
+    bne t0, t1, fail
+#endif
 #ifdef RETIRE_MULTI_LOAD
     mv a5, a4
 #endif
@@ -178,7 +201,9 @@ probe:
     li a4, 1
 #endif
 fault_access:
-#ifdef RETIRE_AMO
+#ifdef RETIRE_X0_MMIO
+    lb zero, 0(s3)
+#elif defined(RETIRE_AMO)
     amoadd.w a3, a4, (s3)
 #elif defined(RETIRE_STORE)
 #ifdef RETIRE_RVC
@@ -232,7 +257,7 @@ handler:
     li t0, 1
     bne s4, t0, fail
     li t0, 0x40cf
-#ifdef RETIRE_MMIO
+#if defined(RETIRE_MMIO) || defined(RETIRE_X0_MMIO)
     li t0, 0x3d0000c7
 #endif
     sw t0, 0(s1)

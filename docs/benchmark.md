@@ -1543,3 +1543,67 @@ Report: `build/system-bench-live-isolation.json`. Repair-only binary SHA-256:
 
 Live-slot candidate SHA-256 (the same `after` binary in both series):
 `9971a5b9ed8ebb10ac0f7a6368fdcf4c9f4c87603d0d0a48fbd90d7c6daf5467`.
+
+### Tier-2 discarded loads and lazy-fusion IR ownership (2026-10-22)
+
+TODO 0.7 fixes a compatibility defect, with no speedup claim. Before the fix,
+a hardware watchpoint catches `X[0]` changing from zero to `0xfffffff1` inside
+the first `t2c_block`. Both the system and forced-dispatch user fixtures then
+abort at the existing zero-register assertion. Interpreter load handlers
+already discarded these results, while T2C scalar, fast/slow MMU and fused
+load emitters wrote them to the register file.
+
+A shared emission helper now discards the destination while retaining the
+access. Direct discarded RAM loads are volatile, and MMU callback calls keep
+their observable effects. Sign/zero extension for other destinations is
+unchanged. fuse9 still writes its LUI result, and fuse11 still increments its
+base. The helper covers all five scalar widths and fuse4/fuse9/fuse11.
+
+The user fixture forces dispatcher entry to its probe through ECALL on each
+pass. Its profile must show T2C publication and a cache-frequency minus
+T1-reentry margin greater than 16 times THRESHOLD; pre-T1 branch probes are
+bounded by two warmup thresholds. This proves substantial tier-2 execution,
+rather than publication alone. The test deletes stale profiles and, when
+fusion is enabled, asserts all three fused opcodes occur in decoded IR. Stores
+from zero immediately after fused loads check native T1 behavior too.
+
+Sv32 and bare supervisor fixtures use diagnostic tier-entry assertions. The
+bare fixture forces entry to its multi-load block so lazy fusion happens; the
+diagnostic counter in T2C builds with fusion and T1C_STATS=1 asserts at least
+one fused load sequence. T1C cached entries bypass the lazy-fusion lookup, so
+that assertion is not required there. A GDB symbol breakpoint independently
+confirms `t2c_fuse4` emits its four members on the compiler thread, followed
+by a successful guest run (789,544 actual tier-2 entries in that diagnostic
+run). A source-line breakpoint initially missed this macro-defined emitter and
+was not treated as coverage proof.
+
+Review also exposed a pre-existing race: lazy fusion can free successor IR
+while the background compiler walks it. Actual fusion mutation now holds the
+same cache_lock as the compiler's IR walk; completed, cold and Sv32 exits
+remain above the lock. A debugger stop at the mutation shows n_invoke=8 and
+the mutex owner equal to the emulator thread's LWP. The new diagnostic counter
+is absent from normal builds.
+
+The x0-MMIO variant faults inside `mmu_read_b` called from `t2c_block`. Its
+handler remaps the page to UART IIR and fences. The callback completes the
+read before returning to the retired native region; a later IIR read checks
+that the discarded access cleared THRE. This covers a real device effect and
+the changed slow-path result handling. It does not rely on a later interpreted
+retry. The GDB run records exactly one load page fault and 501,461 tier-2
+entries.
+
+The fixed user T2C UBSan binary passes all 1,433 IMACFZicsrZifencei
+RISCOF/Sail comparisons in a fresh work directory. These short architecture
+tests do not by themselves prove tier-2 coverage; the fixtures and diagnostics
+above do. System and user interpreter/T1C/T2C UBSan checks pass,
+including the new probes. No-fusion variants pass in both user and system T2C.
+The new kernels also pass on the existing Arm64 T1C binary under QEMU 11.0.2.
+The user interpreter check needed the existing hello.elf fixture copied into
+its temporary output directory before passing. Arm-host T2C remains unverified.
+
+For the native T1C bare diagnostic, the saved counters are
+native_entries=1,175,432, cached_native_entries=1,175,431 and
+lazy_fused_loads=0 at guest_cycles=72,000,109. The source path explains the
+difference from T2C: jit_run_cached bypasses block lookup, so n_invoke never
+reaches the lazy-fusion threshold. This is a transition-profiling finding for
+TODO 1.5, not evidence that the x0 repair speeds up the workload.

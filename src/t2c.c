@@ -135,6 +135,31 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
 T2C_LLVM_GEN_ADDR(rs1, X, ir->rs1);
 T2C_LLVM_GEN_ADDR(rs2, X, ir->rs2);
 T2C_LLVM_GEN_ADDR(rd, X, ir->rd);
+
+/* Preserve a discarded guest access when LLVM has no register result to
+ * store. Direct RAM loads stay volatile; MMU callback calls already carry
+ * their own observable side effects.
+ */
+static void t2c_gen_load_result(LLVMBuilderRef *builder,
+                                LLVMValueRef value,
+                                LLVMValueRef destination,
+                                bool is_signed)
+{
+    if (!destination) {
+        if (LLVMIsALoadInst(value))
+            LLVMSetVolatile(value, true);
+        return;
+    }
+    value = LLVMBuildIntCast2(*builder, value, LLVMInt32Type(), is_signed, "");
+    LLVMBuildStore(*builder, value, destination);
+}
+
+static LLVMValueRef t2c_gen_load_rd_addr(LLVMValueRef start,
+                                         LLVMBuilderRef *builder,
+                                         rv_insn_t *ir)
+{
+    return ir->rd ? t2c_gen_rd_addr(start, builder, ir) : NULL;
+}
 #if RV32_HAS(EXT_C)
 T2C_LLVM_GEN_ADDR(ra, X, rv_reg_ra);
 T2C_LLVM_GEN_ADDR(sp, X, rv_reg_sp);
@@ -714,8 +739,8 @@ static void t2c_promote_guest_regs(LLVMValueRef fn, LLVMBasicBlockRef entry)
         if (t2c_may_alias_x(user, rv_arg))
             goto keep_in_memory;
 
-        /* x0 stays in memory: it must read zero, whatever a handler stores
-         * there. A promoted address must only be loaded from or stored to.
+        /* x0 stays in memory; load emitters discard its results so that it
+         * remains zero. A promoted address must only be loaded or stored.
          */
         int r = t2c_guest_reg(user, rv_arg);
         if (r <= 0)

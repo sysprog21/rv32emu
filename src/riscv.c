@@ -96,9 +96,8 @@ void rv_t1c_stats_report(uint64_t guest_cycles)
     t1c_print_array("trap_insns", rv_t1c_stats.trap_insns,
                     ARRAY_SIZE(rv_t1c_stats.trap_insns));
     fputs(",\"blockers\":{", stderr);
-    static const char *other_reasons[] = {
-        "translatable_interpreted", "context", "wasm", "retranslate"
-    };
+    static const char *other_reasons[] = {"translatable_interpreted", "context",
+                                          "wasm"};
     _Static_assert(ARRAY_SIZE(other_reasons) == T1C_STATS_REASONS - N_RV_INSNS,
                    "Every non-opcode attribution reason needs a label");
     const char *separator = "";
@@ -2034,8 +2033,9 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
 #if RV32_HAS(JIT)
     rv->jit_elide_align_checks = rv->jit_elide_align_checks ||
                                  !elf_has_insn(elf, insn_uses_privileged_state);
-    rv->jit_entry_cycles =
-        JIT_ENTRY_CYCLES && !elf_has_insn(elf, insn_reads_counter);
+    /* System chains end at a cycle deadline, which needs per-block counts. */
+    rv->jit_entry_cycles = JIT_ENTRY_CYCLES && !RV32_HAS(SYSTEM) &&
+                           !elf_has_insn(elf, insn_reads_counter);
 #endif
 #endif
 

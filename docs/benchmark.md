@@ -1622,12 +1622,13 @@ without retiring all of it. They are not exact retired-instruction counts.
 
 The translatable_interpreted bucket includes cold blocks, failed compilation
 and compilable blocks still reached through interpreter chains. Context
-restrictions, Wasm backend rejections and permanent demotion after system
-fetch retranslation use separate context, wasm and retranslate buckets. An
-unsupported base opcode takes priority over these non-opcode reasons; the
-retranslate bucket therefore counts only blocks with no opcode blocker. No
-compiler thread updates these arrays. T1C_STATS=0 removes the diagnostic state
-and updates; performance measurements continue to use that setting.
+restrictions and Wasm backend rejections use separate context and wasm
+buckets. An unsupported base opcode takes priority over these non-opcode
+reasons. The original retranslate bucket exposed a lifecycle bug: retrying a
+system fetch permanently cleared translation eligibility. The subsequent
+repair removes that obsolete bucket and counts fetch_retranslations instead.
+No compiler thread updates these arrays. T1C_STATS=0 removes the diagnostic
+state and updates; performance measurements continue to use that setting.
 
 The atomic regression records exactly 100,000 amoaddw-block entries and
 300,005 weighted instructions across only 305 dispatcher visits in packed T1C.
@@ -1637,10 +1638,10 @@ enabled and count those heads once. Local tiered checks verify the same exact
 entry/work counts; its interpreter probes cause additional outer dispatches.
 The x64 CI job runs all three user T1C diagnostic regressions. Local system
 tiered validation also checks exactly two million csrrs-block entries in the
-bare x0 kernel. The context, wasm and retranslate reasons have not yet been
-exercised by dedicated runtime assertions. interp_pc_syncs counts sync sites,
-including repeated fused access syncs, and cannot serve as an exact guest
-instruction denominator.
+bare x0 kernel. The context and wasm reasons have not yet been exercised by
+dedicated runtime assertions. interp_pc_syncs counts sync sites, including
+repeated fused access syncs, and cannot serve as an exact guest instruction
+denominator.
 
 Static inspection of the current nbench, scimark2, miniz, CoreMark and
 Dhrystone artifacts finds no F/A/Zb instructions. Objdump aliases such as
@@ -1679,13 +1680,13 @@ excluded. These estimates reinforce Zba priority without a speedup claim.
 One Linux boot diagnostic uses system T1C, the existing Image/rootfs.cpio,
 T1C_STATS=1 and the runner's --require-stats option. At 266,546,518 guest
 cycles, the largest opcode-blocked estimates are sfencevma (2,097,569),
-amoaddw (1,921,612), csrrci (1,810,544) and csrrs (988,236). The dedicated
-retranslate bucket records one entry and one instruction, exercising its
-JSON name lookup during actual boot. Per-opcode boot weights are each below
+amoaddw (1,921,612), csrrci (1,810,544) and csrrs (988,236). The original
+diagnostic retranslate bucket recorded one entry and one instruction before
+the lifecycle repair described below. Per-opcode boot weights are each below
 1%; that does not establish the remaining system workload or user criteria.
-The 2.9355-second diagnostic boot time is excluded from performance acceptance.
-A rebuilt nbench Fourier diagnostic exceeded its 90-second cap and supplies
-no completed profile. The remaining workload profiles stay pending.
+The 2.9355-second diagnostic boot time is excluded from performance
+acceptance. A rebuilt nbench Fourier diagnostic exceeded its 90-second cap and
+supplies no completed profile. The remaining workload profiles stay pending.
 
 ## Defined zero-count rotations (2026-10-22)
 
@@ -1879,3 +1880,28 @@ The CoreMark source's fixed iteration assignment overrides ITERATIONS=1000
 as well as the command-line iteration argument. Measurement commands and
 per-run wall times are retained in the raw user reports. System image hashes
 and the host/compiler/QEMU version are retained in the system report.
+
+## System fetch-retry eligibility checkpoint (2026-10-22)
+
+A fetch retry now initializes its unpublished block through the same helper
+as fresh allocation. Compatible instructions regain JIT eligibility; an
+unsupported opcode decoded after the retry still clears it. The optional
+fetch_retranslations counter records retry events; the obsolete retranslate
+blocker bucket is removed. No release-mode counter work is added.
+
+The flat Sv32 regression returns from its first instruction page fault
+without repairing the mapping. Its second fault maps the page, forcing the
+decoder retry. Both compatible and CSR-containing loops run 65,536 iterations
+and each faults exactly twice. Diagnostic assertions require two retries,
+native execution, fewer than 16,384 compatible interpreted entries and at
+least 65,536 csrrs-block entries while csrrs remains unsupported. The prior
+binary reproduces 65,536 retranslate entries (196,608 weighted instructions)
+for the compatible loop. This is an eligibility repair; no throughput gain
+is claimed from the single retry seen in the earlier Linux boot diagnostic.
+
+User and system interpreter, T1C and tiered UBSan check/tests suites pass.
+The positive T1C diagnostic records two retries, 1,919 native entries, 376
+compatible interpreted entries and 65,536 csrrs-block entries. System suites
+include trap-resume and native-retirement variants. CI runs the regression
+with system T1C_STATS=1 and requires its report, so missing diagnostics cannot
+silently skip the native-eligibility assertions.

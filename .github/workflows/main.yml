@@ -181,8 +181,10 @@ jobs:
             # chained loops, interpreted and T1.
             make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch $PARALLEL
             make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch $PARALLEL
-            # Prove that Sv32 Zba probes run compiled rather than interpreted.
-            make OUT=build/system-stats T1C_STATS=1 ENABLE_ROOTFS_EXT4=0 check-system-zba $PARALLEL
+            # Prove retry events and restored native eligibility, while the
+            # unsupported CSR payload still falls back to interpretation, and
+            # that Sv32 Zba probes run compiled rather than interpreted.
+            make OUT=build/system-stats T1C_STATS=1 ENABLE_ROOTFS_EXT4=0 check-system-fetch-retry check-system-zba $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL

@@ -812,13 +812,9 @@ out:
 HASH_FUNC_IMPL(map_hash, BLOCK_MAP_CAPACITY_BITS, 1 << BLOCK_MAP_CAPACITY_BITS)
 #endif
 
-/* allocate a basic block */
-static block_t *block_alloc(riscv_t *rv)
+/* Initialize a fresh, unpublished block, including after a fetch retry. */
+static void block_reset(block_t *block)
 {
-    block_t *block = mpool_alloc(rv->block_mp);
-    if (unlikely(!block))
-        return NULL;
-    assert(block);
     block->n_insn = 0;
     block->ir_head = block->ir_tail = NULL;
 #if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(MOP_FUSION)
@@ -843,6 +839,15 @@ static block_t *block_alloc(riscv_t *rv)
     block->llvm_engine = NULL;
 #endif
 #endif
+}
+
+/* allocate a basic block */
+static block_t *block_alloc(riscv_t *rv)
+{
+    block_t *block = mpool_alloc(rv->block_mp);
+    if (unlikely(!block))
+        return NULL;
+    block_reset(block);
     return block;
 }
 
@@ -2519,8 +2524,7 @@ static bool block_translate(riscv_t *rv, block_t *block)
 {
 retranslate:
 #if RV32_T1C_STATS_ENABLED
-    block->stats_blocker = block->translatable ? T1C_INTERPRETED_TRANSLATABLE
-                                               : T1C_BLOCKER_RETRANSLATE;
+    block->stats_blocker = T1C_INTERPRETED_TRANSLATABLE;
 #endif
 #if RV32_HAS(SYSTEM)
     block->priv_mode = rv->priv_mode;
@@ -2550,10 +2554,8 @@ retranslate:
 #if RV32_HAS(SYSTEM)
         if (!insn && need_retranslate) {
             free_decoded_irs(rv, block);
-            memset(block, 0, sizeof(block_t));
-#if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
-            block_init_edge_lists(block);
-#endif
+            block_reset(block);
+            T1C_COUNT(fetch_retranslations, 1);
             need_retranslate = false;
             need_handle_signal = false;
             goto retranslate;
@@ -2668,6 +2670,14 @@ retranslate:
 
     block->ir_tail = prev_ir;
     block->ir_tail->next = NULL;
+#if RV32_HAS(JIT) && !RV32_HAS(BLOCK_CHAINING)
+    /* Generated code emits a fallthrough exit only for page-terminated
+     * blocks, which need chaining. A block that stops before a branch (a page
+     * boundary, an undecodable or unfetchable successor) stays interpreted.
+     */
+    if (!insn_is_branch(block->ir_tail->opcode))
+        block->translatable = false;
+#endif
     /* Set cycle cost before macro-op fusion. This intentionally counts
      * original instructions for accurate timing - fused operations still
      * represent the same logical work as unfused sequences.

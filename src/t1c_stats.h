@@ -22,6 +22,7 @@
     _(decoded_kernel)        \
     _(decoded_user)          \
     _(flushed_native_blocks) \
+    _(fetch_retranslations)  \
     _(decoded_blocks)        \
     _(native_entries)        \
     _(cached_native_entries) \

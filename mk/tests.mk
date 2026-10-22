@@ -194,7 +194,8 @@ endif
 ifeq ($(CONFIG_Zba)$(GUEST_ASM_ZBA_WORKS)$(GUEST_ASM_ZICSR_WORKS),yyy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-zba
 endif
-SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles \
+SYSTEM_ASM_CHECK_TARGETS += check-system-fetch-retry \
+    check-system-mmu-cache check-system-trap-cycles \
     check-system-trap-resume check-system-sfence-asid check-system-mmu-priv \
     check-system-load-x0 check-system-load-x0-bare
 SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
@@ -396,6 +397,12 @@ EXPECTED_system-mmu-priv = SYSTEM MMU privilege OK
 $(eval $(call system-asm-check-target,system-mmu-priv,rv32ia_zicsr))
 EXPECTED_system-sfence-asid = SYSTEM SFENCE ASID OK
 $(eval $(call system-asm-check-target,system-sfence-asid,rv32ia_zicsr))
+.PHONY: check-system-fetch-retry
+check-system-fetch-retry: $(BIN) tests/system-fetch-retry.S tests/test-system-fetch-retry.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call system-asm-build,system-fetch-retry,rv32ia_zicsr)
+	$(Q)python3 tests/test-system-fetch-retry.py $(BIN) $(OUT)/system-fetch-retry.bin \
+	    $(T1C_REQUIRE_STATS)
+
 .PHONY: check-system-zba
 check-system-zba: $(BIN) tests/jit-zba.S tests/test-system-zba.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call system-asm-build,jit-zba,rv32i_zba_zicsr,-system,-DSYSTEM_MODE)

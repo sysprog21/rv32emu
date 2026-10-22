@@ -23,6 +23,9 @@ RET=$((${RET} + $?))
 (. "${SCRIPT_DIR}/virtio-blk.sh")
 RET=$((${RET} + $?))
 
+(. "${SCRIPT_DIR}/uboot.sh")
+RET=$((${RET} + $?))
+
 # Virtio-net user-mode backend test
 if grep -q '^CONFIG_VIRTIO_NET_USER=y$' .config; then
     (

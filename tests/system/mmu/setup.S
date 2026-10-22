@@ -1,19 +1,10 @@
 .section .text.setup
 TRAPFRAME_SIZE = 35 * 4
 PG_SIZE = 4096
-/* Separate stack areas for user and kernel/trap handler to avoid corruption.
- * Kernel stack: _end + PG_SIZE (for trap handler/trapframe)
- * User stack: _end + 3*PG_SIZE (2 pages above kernel stack, grows down)
- *
- * Layout: [kernel BSS][gap][trapframe|kernel stack][gap][user stack grows down]
- *                     _end  _end+PG_SIZE          _end+2*PG_SIZE  _end+3*PG_SIZE
- *
- * Note: User stack uses physical address for syscall compatibility.
- * The emulator's syscall handlers (ELF_LOADER mode) access guest memory
- * via physical addresses, not virtual addresses.
+/* Kernel stack for the trap handler and trapframe: _end + PG_SIZE. The user
+ * stack is a separate user page; see USER_STACK_VA in vm_setup.c.
  */
 KERNEL_STACK_TOP = _end + PG_SIZE
-USER_STACK_TOP = _end + 3 * PG_SIZE
 
 # FIXME: implement proper machine trap vector
 # Since I assume that all interrupts and exceptions are
@@ -71,11 +62,6 @@ _start:
 _exit:
     li a7, 93
     ecall
-
-.globl user_entry
-user_entry:
-    la sp, USER_STACK_TOP  # Use separate user stack
-    jr x0  # jump to user space main at VA 0x0
 
 .globl supervisor_trap_entry
 supervisor_trap_entry:

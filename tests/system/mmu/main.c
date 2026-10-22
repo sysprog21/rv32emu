@@ -68,19 +68,19 @@
  */
 __attribute__((section(".mystring"))) const char pf_str[] = "rv32emu";
 
-extern void _exit(int status);
-
+__attribute__((noreturn)) static void user_exit(int status);
 static uint32_t load_words(const volatile uint32_t *p, uint32_t n);
 
-/* main() must come first in .text.main: user_entry jumps to VA 0x0. */
+/* main() must come first in .text.main: vm_boot() enters user mode at VA 0x0.
+ */
 int SECTION_TEXT_MAIN main()
 {
     /* TEST 1: Instruction Fetch Page Fault
      *
      * Reaching this point means the instruction fetch page fault was handled.
-     * When user_entry jumped to VA 0x0, the MMU found no valid PTE in user_l1pt
-     * and raised scause=12. The trap handler allocated a frame, copied main()
-     * from the kernel's direct mapping, and resumed execution here.
+     * When vm_boot() entered user mode at VA 0x0, the MMU found no valid PTE in
+     * user_l1pt and raised scause=12. The trap handler allocated a frame,
+     * copied main() from the kernel's direct mapping, and resumed here.
      */
     int x = 100;
     int y = 200;
@@ -106,7 +106,7 @@ int SECTION_TEXT_MAIN main()
     for (int i = 0; i < 8; i++) {
         if (buf[i] != *(qtr + i)) {
             TEST_LOGGER("[Load page fault test] rv32emu string not match\n")
-            _exit(FAIL);
+            user_exit(FAIL);
         }
     }
     TEST_LOGGER("Load page fault test passed!\n");
@@ -138,7 +138,7 @@ int SECTION_TEXT_MAIN main()
     for (int i = 0; i < 8; i++) {
         if (buf[i] != *(ptr + i)) {
             TEST_LOGGER("[Store page fault test] rv32emu string not match\n")
-            _exit(FAIL);
+            user_exit(FAIL);
         }
     }
     TEST_LOGGER("Store page fault test passed!\n");
@@ -153,12 +153,12 @@ int SECTION_TEXT_MAIN main()
     for (int i = 0; i < 200000; i++) {
         if (load_words((const volatile uint32_t *) 0x2000, 16)) {
             TEST_LOGGER("[Redirected page fault test] mapped load skipped\n")
-            _exit(FAIL);
+            user_exit(FAIL);
         }
     }
     if (load_words((const volatile uint32_t *) 0x3000, 64) != 64) {
         TEST_LOGGER("[Redirected page fault test] wrong number of skips\n")
-        _exit(FAIL);
+        user_exit(FAIL);
     }
     register uint32_t skipped asm("t6") = 0;
     asm volatile("jalr ra, 0(%1)"
@@ -167,11 +167,11 @@ int SECTION_TEXT_MAIN main()
                  : "ra", "memory");
     if (skipped != 1) {
         TEST_LOGGER("[Redirected page fault test] call not returned\n")
-        _exit(FAIL);
+        user_exit(FAIL);
     }
     TEST_LOGGER("Redirected page fault test passed!\n");
 
-    _exit(SUCCESS);
+    user_exit(SUCCESS);
 }
 
 /* Load n words from p, alternating between its first two words, and return how
@@ -190,4 +190,15 @@ load_words(const volatile uint32_t *p, uint32_t n)
         (void) v;
     }
     return skipped;
+}
+
+/* Exit via the Linux exit syscall (nr=93). The kernel's user_exit lies on a
+ * supervisor page, which user code cannot execute.
+ */
+static void SECTION_TEXT_MAIN user_exit(int status)
+{
+    register int a0 asm("a0") = status;
+    register int a7 asm("a7") = 93;
+    asm volatile("ecall" ::"r"(a0), "r"(a7));
+    __builtin_unreachable();
 }

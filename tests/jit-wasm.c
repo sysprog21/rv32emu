@@ -692,6 +692,7 @@ static void check_user_memory(riscv_t *rv)
 /* Single and grouped accesses through the dTLB guard. */
 static void check_system_memory(riscv_t *rv)
 {
+    rv->mmu_access_context = 0x20; /* U-mode, MXR=0 */
     struct test_ram ram;
     attach_ram(rv, &ram);
     rv->X[5] = 42;
@@ -699,8 +700,11 @@ static void check_system_memory(riscv_t *rv)
     memcpy(ram.bytes + 4, &value, 4);
     const uint32_t va = 0x40001004;
     tlb_entry_t *mapping = &rv->dtlb[(va >> 12) & TLB_MASK];
-    *mapping = (tlb_entry_t) {
-        .vpn = va >> 12, .ppn = 0, .valid = 1, .dirty = 1, .perm = 6};
+    *mapping = (tlb_entry_t){.vpn = va >> 12,
+                             .ppn = 0,
+                             .valid = rv->mmu_access_context,
+                             .dirty = 1,
+                             .perm = 22};
     rv_insn_t load = {
         .opcode = rv_insn_lw, .rd = 6, .rs1 = 8, .impl = memory_helper};
     rv->X[8] = va;
@@ -710,9 +714,12 @@ static void check_system_memory(riscv_t *rv)
     assert(rv->X[6] == value && helper_calls == before && rv->csr_cycle == 1);
     /* Every gating condition must take the original instruction's slow path. */
     helper_exit = false;
-    for (unsigned condition = 0; condition < 6; condition++) {
-        *mapping = (tlb_entry_t) {
-            .vpn = va >> 12, .ppn = 0, .valid = 1, .dirty = 1, .perm = 6};
+    for (unsigned condition = 0; condition < 7; condition++) {
+        *mapping = (tlb_entry_t){.vpn = va >> 12,
+                                 .ppn = 0,
+                                 .valid = rv->mmu_access_context,
+                                 .dirty = 1,
+                                 .perm = 22};
         rv->X[8] = va;
         load.opcode = rv_insn_lw;
         if (condition == 0)
@@ -730,6 +737,8 @@ static void check_system_memory(riscv_t *rv)
             load.rs2 = 5;
             mapping->dirty = 0;
         }
+        if (condition == 6)
+            mapping->valid ^= 0x10; /* another privilege/status context */
         run(rv, &load, 1);
         assert(helper_calls == before + (int) condition + 1);
     }
@@ -737,8 +746,11 @@ static void check_system_memory(riscv_t *rv)
     /* Grouped accesses use the same guard. */
     const uint32_t group_va = 0x40002020;
     mapping = &rv->dtlb[(group_va >> 12) & TLB_MASK];
-    *mapping = (tlb_entry_t) {
-        .vpn = group_va >> 12, .ppn = 0, .valid = 1, .dirty = 1, .perm = 6};
+    *mapping = (tlb_entry_t){.vpn = group_va >> 12,
+                             .ppn = 0,
+                             .valid = rv->mmu_access_context,
+                             .dirty = 1,
+                             .perm = 22};
     group_base = rv->X[11] = group_va;
     rv->X[12] = 0x11111111;
     opcode_fuse_t stores[] = {
@@ -760,6 +772,36 @@ static void check_system_memory(riscv_t *rv)
     assert(group_calls == 1 && !word);
     group_calls = 0;
     detach_ram(rv);
+}
+#endif
+
+#if RV32_HAS(SYSTEM)
+/* A published S-mode target cannot be reached by a U-mode Wasm tail call. */
+static void check_privilege_tail(riscv_t *rv)
+{
+    uint32_t saved_priv = rv->priv_mode;
+    rv_insn_t target_ir = {.opcode = rv_insn_addi, .rd = 7, .rs1 = 7, .imm = 1};
+    block_t target = make_block(&target_ir, 1, 0x210100);
+    target.priv_mode = RV_PRIV_S_MODE;
+    rv->priv_mode = RV_PRIV_S_MODE;
+    active = &target;
+    assert(jit_translate(rv, &target));
+    rv->X[7] = 0;
+    jit_wasm_run(rv, &target);
+    assert(rv->X[7] == 1);
+
+    rv_insn_t jump = {.opcode = rv_insn_jal, .imm = 0x100};
+    block_t caller = make_block(&jump, 1, 0x210000);
+    caller.priv_mode = RV_PRIV_U_MODE;
+    rv->priv_mode = RV_PRIV_U_MODE;
+    active = &caller;
+    assert(jit_translate(rv, &caller));
+    jit_wasm_run(rv, &caller);
+    assert(rv->PC == target.pc_start && rv->X[7] == 1);
+    jit_wasm_retire_block(rv, &caller);
+    jit_wasm_retire_block(rv, &target);
+    rv->priv_mode = saved_priv;
+    active = NULL;
 }
 #endif
 
@@ -976,6 +1018,7 @@ int main(void)
 #endif
 
 #if RV32_HAS(SYSTEM)
+    check_privilege_tail(rv);
     rv_insn_t probe = {.opcode = rv_insn_nop};
     block_t probe_block = make_block(&probe, 1, 0x1000);
     active = &probe_block;

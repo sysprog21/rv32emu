@@ -39,6 +39,7 @@ uint64_t memory_get_usage(void);
 
 /* read an instruction from memory */
 uint32_t memory_ifetch(uint32_t addr);
+uint16_t memory_ifetch_half(uint32_t addr);
 
 /* read a word from memory */
 uint32_t memory_read_w(uint32_t addr);

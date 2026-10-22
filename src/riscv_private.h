@@ -133,6 +133,10 @@ typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompassed */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
     uint32_t cycle_cost;       /**< cycle cost for block-level counting */
+#if RV32_HAS(SYSTEM)
+    uint32_t
+        priv_mode; /* privilege whose fetch permissions decoded the block */
+#endif
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
 
@@ -308,6 +312,9 @@ static inline void block_link_edge(block_t *source, bool taken, block_t *target)
 #if RV32_HAS(T2C)
 typedef struct {
     uint64_t key; /**< cache key (PC or PC|SATP) to look up block */
+#if RV32_HAS(SYSTEM)
+    uint32_t priv_mode; /* context of the queued block */
+#endif
     struct list_head list;
 } queue_entry_t;
 #endif
@@ -335,6 +342,8 @@ typedef struct {
  * into the comparison key. Invalidation must clear this tag as well.
  */
 #define ITLB_EXEC_TAG (UINT32_C(1) << (32 - RV_PG_SHIFT))
+#define ITLB_PRIV_SHIFT (33 - RV_PG_SHIFT)
+#define ITLB_VPN_MASK MASK(32 - RV_PG_SHIFT)
 
 #define CODE_PAGE_FILTER_BITS 8192
 
@@ -342,8 +351,8 @@ typedef struct {
     uint32_t vpn;      /* Virtual address >> 12; iTLB includes ITLB_EXEC_TAG */
     uint32_t ppn;      /* Translated 4 KiB physical page base */
     uint32_t pte_addr; /* Physical address of PTE for A/D bit updates */
-    uint8_t perm;      /* Permission bits: R(1), W(2), X(4), U(16) */
-    uint8_t valid;     /* Entry validity flag */
+    uint8_t perm;      /* Raw PTE permission bits: R(2), W(4), X(8), U(16) */
+    uint8_t valid;     /* nonzero access-context stamp; zero means invalid */
     uint8_t dirty;     /* Cached dirty bit state (avoid repeated PTE writes) */
     uint8_t level;     /* Page level: 1=superpage (4MB), 2=4KB page */
 } tlb_entry_t;
@@ -545,6 +554,9 @@ struct riscv_internal {
     uint32_t csr_satp;       /* supervisor address translation and protection */
 
     uint32_t priv_mode; /* U-mode or S-mode or M-mode */
+#if RV32_HAS(SYSTEM)
+    uint32_t mmu_access_context; /* nonzero dTLB context stamp in bits 4..7 */
+#endif
 
     bool compressed; /**< current instruction is compressed or not */
 
@@ -639,7 +651,8 @@ struct riscv_internal {
      */
     tlb_entry_t dtlb[TLB_SIZE];
 #if RV32_HAS(JIT)
-    /* Exact RAM tags fold permissions and dirty state into the hit test.
+    /* Exact RAM tags fold permissions, access context and dirty state into
+     * the hit test. Context occupies bits 4..7; alignment occupies bits 0..1.
      * An all-ones tag cannot equal a page base plus alignment bits. */
     jit_tlb_entry_t jit_dtlb[TLB_SIZE];
 #endif
@@ -690,6 +703,11 @@ struct riscv_internal {
      */
     uint8_t tlb_super_slices[1U << 10];
 
+    /* dTLB slots stamped for U pages while S-mode data accesses had SUM set.
+     * The S context ignores SUM, so these are parked when that window closes.
+     */
+    uint64_t sum_user_slots;
+
     /* 4 MiB regions holding blocks whose code may have been fetched through
      * a superpage leaf. Flushing any address there may remap that code, so it
      * retires the address space's blocks. JIT builds never clear these bits:
@@ -738,11 +756,16 @@ void rv_reset_dispatcher_state(void);
 static inline bool block_matches_context(const riscv_t *rv UNUSED,
                                          const block_t *block)
 {
-    /* satp and invalidated only exist where the JIT caches blocks across
-     * address spaces; elsewhere there is nothing to disambiguate.
-     */
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-    return block && block->satp == rv->csr_satp && !block->invalidated;
+    /* Every system engine checks fetch privilege; JIT engines additionally
+     * retain blocks across SATP changes and mapping fences. */
+#if RV32_HAS(SYSTEM)
+    if (!block || block->priv_mode != rv->priv_mode)
+        return false;
+#if RV32_HAS(JIT)
+    return block->satp == rv->csr_satp && !block->invalidated;
+#else
+    return true;
+#endif
 #else
     return block;
 #endif

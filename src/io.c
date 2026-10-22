@@ -407,6 +407,16 @@ uint32_t memory_ifetch(uint32_t addr)
     return val;
 }
 
+/* Page-straddling instructions fetch each half through its own translation. */
+uint16_t memory_ifetch_half(uint32_t addr)
+{
+    if ((uint64_t) addr + sizeof(uint16_t) > data_memory_size)
+        return 0;
+    uint16_t val;
+    memcpy(&val, data_memory_base + addr, sizeof(val));
+    return val;
+}
+
 /* Safe unaligned memory access using memcpy (compiler optimizes to load/store)
  */
 #define MEM_READ_IMPL(size, type)                            \

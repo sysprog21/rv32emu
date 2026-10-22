@@ -1114,3 +1114,222 @@ and `build/system-counters-sfence.json`. To reproduce, build the baseline
 in a worktree at `efb5369`, build the changed tree with the same flags,
 then run the commands above using the two binary paths. Per-SATP invalidation
 APIs are intentionally retained for future ASID filtering and Wasm fixtures.
+
+### MMU privilege correctness follow-up (2026-10-22)
+
+Task 0.1 fixes U/SUM/MXR permission checks, MPRV data context, fetch privilege
+in retained code, precise decode faults and straddling instruction fetches.
+These are correctness requirements. The measurements below do not establish
+a performance win or meet the overall QEMU speed objective.
+
+Baseline: `4c0faa7`, `system_defconfig`, GCC 14.2, `ENABLE_ROOTFS_EXT4=0`.
+The changed binaries use the same configuration, without diagnostic counters
+or sanitizers. Host: x86-64 Linux 6.8.0-139, pinned to CPU 0. Kernel/initrd are
+the same prebuilt assets recorded in the preceding experiment. QEMU is the
+user-provided 11.0.2 `build-riscv32/qemu-system-riscv32`, with its firmware
+startup included. Host load remained variable; pinning does not isolate a CPU.
+
+A five-run interleaved boot-to-login comparison, after one warmup per engine:
+
+| Engine | Wall seconds, all five samples | Median seconds |
+| --- | --- | ---: |
+| Baseline S-T1C | 3.411, 3.391, 4.402, 5.408, 2.921 | 3.411 |
+| Changed S-T1C | 2.651, 2.968, 3.039, 2.791, 3.114 | 2.968 |
+| QEMU 11.0.2 | 4.476, 3.318, 3.346, 3.167, 2.821 | 3.318 |
+
+Pairing by run, the mean changed/baseline time difference is -21.5%, with a
+Student-t 95% interval [-47.0%, +4.0%]. It includes zero; the lower median
+cannot be called an established speedup. An earlier three-run pilot, before
+the final fetch/fence refinements, had medians 2.401 / 3.097 / 3.641 seconds
+for baseline / changed / QEMU respectively. Retaining both results documents
+the variance instead of selecting the favorable run.
+
+Three alternating baseline/changed workload pairs ran through
+`tests/system-bench.sh`, in orders before/after, after/before, before/after.
+These use the intermediate changed binary after precise fetch fixes, before
+the final straddling-upper-page fence guard and fetch common-path cleanup.
+Values are host milliseconds; intervals are paired percentage changes, with
+positive values meaning slower:
+
+| Workload | Baseline samples | Changed samples | Mean time change [95% interval] |
+| --- | --- | --- | --- |
+| Boot | 2986, 3062, 2581 | 3093, 3077, 3009 | +6.9% [-14.3%, +28.1%] |
+| Dhrystone | 14909, 15112, 14251 | 17678, 17466, 16350 | +16.3% [+11.3%, +21.3%] |
+| CoreMark | 4971, 4199, 4557 | 4614, 4221, 4611 | -1.8% [-13.4%, +9.7%] |
+| 300 fork/execs | 10178, 11305, 10577 | 11046, 11190, 10399 | +1.9% [-12.2%, +16.1%] |
+| gzip/MD5 | 1196, 1470, 1120 | 1836, 1364, 1422 | +24.4% [-51.2%, +100.0%] |
+
+Dhrystone regressed beyond its interval in this intermediate build. That
+cost needs follow-up profiling; correctness coverage is not evidence that
+performance acceptance has passed. The other workload intervals are broad.
+A repeat on the final C implementation (the same changed binary as the
+five-run boot comparison) produced these three alternating pairs:
+
+| Workload | Baseline samples | Changed samples | Mean time change [95% interval] |
+| --- | --- | --- | --- |
+| Boot | 3194, 2665, 2923 | 2976, 3308, 3175 | +8.6% [-29.8%, +47.1%] |
+| Dhrystone | 17296, 15537, 15510 | 18670, 16527, 16648 | +7.2% [+5.2%, +9.2%] |
+| CoreMark | 5500, 4021, 4072 | 4844, 4663, 5119 | +9.9% [-38.6%, +58.4%] |
+| 300 fork/execs | 11555, 11032, 11558 | 10262, 10900, 10825 | -6.2% [-18.7%, +6.2%] |
+| gzip/MD5 | 1236, 1412, 1751 | 1552, 1662, 1629 | +12.1% [-30.1%, +54.3%] |
+
+The final Dhrystone regression is smaller, but remains outside its interval.
+TODO 0.1 performance acceptance therefore stays open. Other rows do not
+establish a change. Investigate the per-memory-operation context guard before
+claiming that compatibility has been restored without a speed cost.
+
+The permission kernel's default 10,000 iterations reached no T2C entries in
+one diagnostic run. Compiling it with `-DMMU_PRIV_ITERATIONS=1000000` passed
+with over 19 million T2C entries. That test exposed a counter bug: publishing
+only at region exit charged unexecuted suffixes and hid the executed prefix
+from synchronous handlers. Sharing T1C's suffix calculation and publishing
+before trap-capable helpers changed its guest count from 343,702,245 to the
+expected 330,000,855 for that kernel variant (before the final U-mode MXR
+cases were added). Optional `t2c_entries` diagnostics substantiate actual
+tier-2 execution; they are not used in wall-time measurements. After adding
+the U-mode MXR cases, the expanded million-iteration kernel also passed under
+UBSan with 20,968,657 T2C entries and 373,001,021 observed guest cycles.
+
+Reproduce the boot run with:
+
+```sh
+python3 tests/system-boot.py --emulator before=<baseline-binary> \
+  --emulator after=<changed-binary> \
+  --qemu ~/qemu-build/qemu-11.0.2/build-riscv32/qemu-system-riscv32 \
+  --cpu 0 --runs 5 --warmup 1 --output build/system-boot-priv-final-t1c.json
+```
+
+SHA-256 of baseline / final boot changed / intermediate workload changed:
+
+* `7ba63bc29c0fc25e1e4c33db85a60aaab0c005e508574a946dea10091d045182`
+* `893e064e00bbf0357bb3e2201617ff3415374dde0f496a9f2f01de9e198168df`
+* `6ed75aaedef47149673687ea1b856acefa281be6993aad6a5f3ab996e1d50f19`
+
+Raw boot reports remain in `build/system-boot-priv-t1c.json` (pilot) and
+`build/system-boot-priv-final-t1c.json`; workload samples are also retained
+above because their temporary log is not a repository artifact.
+
+
+### Actual-U RAM tag specialization (2026-10-22)
+
+Class-zero tags for raw readable/writable U RAM let x86 T1C omit its per-access
+context load. Actual S/M, including MPRV-effective-U, keep nonzero classes.
+X-only MXR reads keep the checked path. Regular dTLB stamps are unchanged.
+
+The earlier CPU 0 measurements were confounded by an unrelated CPU-bound
+process observed on that CPU. A new CPU 6 series interleaves three runs of
+each binary, using the same kernel, initrd and `tests/system-bench.sh` workload.
+CPU 6 and its SMT sibling 38 were idle before measurement. Orders were
+pre/context/zero/QEMU, zero/QEMU/pre/context, QEMU/zero/context/pre.
+`pre` is 4c0faa7, `context` is efccf14, and `zero` is this specialization.
+QEMU is 11.0.2, virt/TCG, 512 MiB, default firmware, same Image/rootfs.
+All numbers below are wall milliseconds; diagnostic builds were excluded.
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+|---|---|---|---|---|---|
+| pre | 2133, 2116, 2118 | 11863, 12125, 11976 | 3425, 3448, 3429 | 7993, 7974, 7958 | 1216, 1127, 1159 |
+| context | 2335, 2324, 2347 | 12833, 12836, 12802 | 3483, 3478, 3481 | 8299, 8349, 8399 | 1188, 1251, 1271 |
+| zero | 2425, 2343, 2342 | 12400, 12396, 12352 | 3442, 3453, 3449 | 8347, 8234, 8313 | 1115, 1132, 1121 |
+| QEMU | 2451, 2431, 2428 | 11844, 11929, 11908 | 2748, 2749, 2750 | 3845, 3699, 3687 | 666, 673, 664 |
+
+Paired percentage changes (positive means slower), mean and 95% Student-t
+interval over three pairs: zero/context Dhrystone -3.44% [-3.62%, -3.26%],
+gzip -9.15% [-16.22%, -2.08%]. CoreMark -0.94% is below the 2% acceptance
+threshold; boot and fork/exec intervals include zero. Zero/pre still regresses
+boot +11.66% [7.30%, 16.03%], Dhrystone +3.30% [0.43%, 6.17%], and fork/exec
++4.05% [2.35%, 5.75%]. TODO 0.1 remains open. Against QEMU, zero is slower
+by 4.11% for Dhrystone, 25.43% CoreMark, 121.72% fork/exec and 68.15% gzip;
+boot's -2.74% interval includes zero. These results do not meet the overall
+QEMU performance goal. Three pairs are a small sample; retain the raw values.
+
+Binary SHA-256:
+
+* pre: `7ba63bc29c0fc25e1e4c33db85a60aaab0c005e508574a946dea10091d045182`
+* context: `893e064e00bbf0357bb3e2201617ff3415374dde0f496a9f2f01de9e198168df`
+* zero: `f1a9dd1d11fdbb30bbdde61c872cbd72f172d689cefa8d1b1dc56c6cb6b8ee64`
+* QEMU: `3e49196e45e0815e65f90fb63e206b5c80c0c2ec01fb747912b7cc9e373b3853`
+
+Raw structured report: `build/system-bench-zero-cpu6.json`. The table above
+preserves samples independently of generated artifacts.
+
+Separate CPU 6 hardware profiling attached `perf record -e cycles:u -F 499`
+and `perf stat -e cycles:u,instructions:u,branch-misses:u` to the emulator
+after login, then ran 20,000,000 Dhrystone iterations. The driver stopped
+the emulator at the final prompt before flushing perf, excluding shutdown
+idle time. Profiles reported zero lost samples. Generated code was labeled
+by its executable mapping, without guest-PC granularity. This diagnostic
+procedure includes attach/start boundaries and is not an acceptance benchmark.
+
+| Binary | Cycles | Instructions | Branch misses |
+|---|---:|---:|---:|
+| pre | 37,775,635,973 | 89,254,076,226 | 203,431,902 |
+| context | 42,058,157,713 | 100,484,562,704 | 219,696,304 |
+| zero | 40,139,701,489 | 98,021,314,291 | 192,400,695 |
+
+Zero's sampled cycles: generated T1C code 49.05%, hart coroutine 17.94%,
+trap handler 6.74%, `jit_dtlb_fill` 4.78%, `mmu_translate` 3.88%, and
+`jit_mmu_handler` 2.14%. A separate T1C_STATS run read before/after counter
+snapshots around the same command: 200,692,749 native entries (200,692,584
+cached), 165 compile requests, 32,259 decoded blocks, 86,308,119 interpreted
+trap instructions. Of these, 85,541,274 belong to 23,296 supervisor timer
+interrupts; the other nonzero causes are user ecalls, instruction/load/store
+page faults, and external interrupts. Misalignment is not the explanation.
+The ~200 million native entries establish frequent dispatcher transitions;
+they do not identify which exit type causes them. Profile that in TODO 1.5.
+The diagnostic build took substantially longer and was never timed against
+release binaries. Refill permission checks and interpreted timer handling
+are evidence-backed next targets; their optimizations still need review and
+measurement.
+
+Validation of this specialization: full S-T1C checks; full S-INT and S-T2C
+checks with UBSan; expanded million-iteration privilege kernel under S-T2C
+with UBSan; Linux login boots on sanitized S-INT/S-T2C; Wasm backend fixtures;
+AArch64 T1C object cross-compilation. The expanded privilege assembly also
+passes on QEMU 11.0.2: link at zero (its .org labels are fixed), define
+PHYS_BASE=0x80400000 and UART_PA=0x10000000, objcopy to raw binary and use
+`-M virt -accel tcg -m 512M -nographic -kernel <binary>`. Linking at the
+load address breaks this particular fixture's .org-relative layout.
+Browser Linux and M-mode firmware remain runtime coverage limits.
+
+### Shared refill permission-mask experiment (not adopted)
+
+A prototype computed U/S/SUM/MXR data permissions once in `dtlb_lookup`
+and passed an R/W mask into `jit_dtlb_fill`, replacing duplicate checks for
+read/write tags. Bare mode passed R|W explicitly; raw PTE_R still selected
+class-zero tags. Claude design, implementation and repeat reviews found no
+correctness issues in the prototype. Its exhaustive host tests covered all
+actual privilege/MPP,
+SUM/MXR/MPRV and R/W/X/U combinations. Full S-T1C checks and S-INT/S-T2C
+UBSan checks passed against the prototype. The prototype and its added
+host test were then reverted.
+
+CPU 6 wall milliseconds, three interleaved pairs; orders before/after,
+after/before, before/after. Before is 837a35d, after is the prototype.
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+|---|---|---|---|---|---|
+| before | 2743, 3062, 2618 | 13141, 13642, 13379 | 3930, 3625, 3717 | 9219, 8865, 9262 | 1319, 1255, 1257 |
+| after | 2458, 2751, 2645 | 12738, 13176, 14729 | 3671, 3744, 3818 | 8789, 9273, 8657 | 1328, 1434, 1225 |
+
+Arithmetic paired percentage changes, mean [95% Student-t interval, df=2],
+positive
+means slower:
+
+* boot: -6.51% [-22.72%, +9.71%].
+* dhrystone: +1.20% [-17.92%, +20.33%].
+* coremark: -0.20% [-13.97%, +13.58%].
+* fork-exec: -2.20% [-17.01%, +12.61%].
+* gzip-md5: +4.13% [-18.03%, +26.29%].
+
+No row establishes the required 2% improvement with an interval excluding
+zero. Several rows are dominated by a single pair; the prototype is
+dropped rather than claimed as an improvement. This does not prove the
+underlying idea can never help. Profiling puts refill at only about 4.8%
+of cycles; the compiler may already merge some permission work, and function
+pointer checks/RAM bounds remain. Prioritize the much larger transition
+and trap costs. Raw report: `build/system-bench-refill.json`.
+
+SHA-256:
+
+* before: `f1a9dd1d11fdbb30bbdde61c872cbd72f172d689cefa8d1b1dc56c6cb6b8ee64`
+* after: `db0f479dac1e92e8e79e000e9ea6e161b20a78d79125f012b3a4b9265eb399e2`

@@ -163,7 +163,7 @@ RVOP(jal, {
             struct rv_insn *target = ir->branch_table->target[bht_idx];        \
             if (ir->branch_table->PC[bht_idx] == PC && target)                 \
                 RVOP_CHAIN_TAIL(rv, target, cycle, PC);                        \
-            block_t *block = block_find(&rv->block_map, PC);                   \
+            block_t *block = block_find(&rv->block_map, rv, PC);               \
             if (block) {                                                       \
                 /* Direct replacement at computed index */                     \
                 ir->branch_table->PC[bht_idx] = PC;                            \
@@ -366,7 +366,8 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
         uint32_t addr_ = (addr);                                            \
         uint32_t idx_ = (addr_ >> RV_PG_SHIFT) & TLB_MASK;                  \
         type value_;                                                        \
-        if (MEM_SYSTEM_TAG(addr_, type) == (rv)->jit_dtlb[idx_].read_tag) { \
+        if ((MEM_SYSTEM_TAG(addr_, type) | mmu_ram_tag_context(rv)) ==      \
+            (rv)->jit_dtlb[idx_].read_tag) {                                \
             memcpy(&value_, (void *) ((rv)->jit_dtlb[idx_].addend + addr_), \
                    sizeof(value_));                                         \
         } else {                                                            \
@@ -374,17 +375,18 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
         }                                                                   \
         value_;                                                             \
     })
-#define MEM_SYSTEM_WRITE(rv, addr, val, type, fn)                            \
-    do {                                                                     \
-        uint32_t addr_ = (addr);                                             \
-        uint32_t idx_ = (addr_ >> RV_PG_SHIFT) & TLB_MASK;                   \
-        type value_ = (val);                                                 \
-        if (MEM_SYSTEM_TAG(addr_, type) == (rv)->jit_dtlb[idx_].write_tag) { \
-            memcpy((void *) ((rv)->jit_dtlb[idx_].addend + addr_), &value_,  \
-                   sizeof(value_));                                          \
-        } else {                                                             \
-            MEM_WRITE_CYCLES((rv)->io.mem_##fn(rv, addr_, value_));          \
-        }                                                                    \
+#define MEM_SYSTEM_WRITE(rv, addr, val, type, fn)                           \
+    do {                                                                    \
+        uint32_t addr_ = (addr);                                            \
+        uint32_t idx_ = (addr_ >> RV_PG_SHIFT) & TLB_MASK;                  \
+        type value_ = (val);                                                \
+        if ((MEM_SYSTEM_TAG(addr_, type) | mmu_ram_tag_context(rv)) ==      \
+            (rv)->jit_dtlb[idx_].write_tag) {                               \
+            memcpy((void *) ((rv)->jit_dtlb[idx_].addend + addr_), &value_, \
+                   sizeof(value_));                                         \
+        } else {                                                            \
+            MEM_WRITE_CYCLES((rv)->io.mem_##fn(rv, addr_, value_));         \
+        }                                                                   \
     } while (0)
 #define MEM_READ_W(rv, addr) MEM_SYSTEM_READ(rv, addr, uint32_t, read_w)
 #define MEM_READ_S(rv, addr) MEM_SYSTEM_READ(rv, addr, uint16_t, read_s)
@@ -658,6 +660,8 @@ RVOP(sret, {
     rv->csr_sstatus |= (sstatus_spie << SSTATUS_SIE_SHIFT);
     rv->csr_sstatus |= SSTATUS_SPIE;
 
+    rv->csr_mstatus &= ~MSTATUS_MPRV;
+    mmu_access_context_changed(rv);
     rv->PC = rv->csr_sepc;
 
     return true;
@@ -682,6 +686,11 @@ RVOP(mret, {
     rv->csr_mstatus |= (mstatus_mpie << MSTATUS_MIE_SHIFT);
     rv->csr_mstatus |= MSTATUS_MPIE;
 
+#if RV32_HAS(SYSTEM)
+    if (rv->priv_mode != RV_PRIV_M_MODE)
+        rv->csr_mstatus &= ~MSTATUS_MPRV;
+    mmu_access_context_changed(rv);
+#endif
     rv->PC = rv->csr_mepc;
     return true;
 })
@@ -737,10 +746,20 @@ RVOP(sfencevma, {
          * without cache_lock, whether the page holds any block or translated
          * code: only this thread changes the indexes that answer that.
          */
+        const uint32_t previous_page = (va & ~(RV_PG_SIZE - 1)) - RV_PG_SIZE;
+        /* A C-enabled block starting at the previous page's last halfword
+         * can depend on this page for its upper instruction half.
+         * Conservatively retire when either indexed start page holds code,
+         * across all tiers.
+         */
         const bool has_code =
             jit_page_has_code_any(rv->jit_state, va) ||
-            mmu_code_superpage(rv, va);
-        if (has_code || cache_has_va_any(rv->block_cache, va)) {
+            mmu_code_superpage(rv, va) ||
+            cache_has_va_any(rv->block_cache, va) ||
+            (RV32_HAS(EXT_C) &&
+             (jit_page_has_code_any(rv->jit_state, previous_page) ||
+              cache_has_va_any(rv->block_cache, previous_page)));
+        if (has_code) {
 #if RV32_HAS(T2C)
             /* Hold cache_lock during invalidation to prevent race with T2C
              * compilation thread.

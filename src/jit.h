@@ -11,6 +11,24 @@
 #include "riscv_private.h"
 #include "utils.h"
 
+/* Instructions charged at block entry that follow a trapping instruction.
+ * Fused records can contain several independently faulting instructions.
+ */
+static inline uint32_t block_unretired_after(const block_t *block, uint32_t pc)
+{
+    uint32_t n = 0;
+    for (const rv_insn_t *ir = block->ir_head, *next; ir; ir = next) {
+        next = ir == block->ir_tail ? NULL : block_next_ir(ir);
+        const uint32_t end = next ? next->pc : block->pc_end;
+        const uint32_t count = end - ir->pc > 4 ? (end - ir->pc) / 4 : 1;
+        if (pc < ir->pc)
+            n += count;
+        else if (pc < end && count > 1)
+            n += count - 1 - (pc - ir->pc) / 4;
+    }
+    return n;
+}
+
 /* User mode and T1-only system mode link direct branches whether or not the
  * interpreter has taken the edge yet, and record a jump whose target is not
  * compiled so that the target's translation can patch it later.
@@ -52,15 +70,16 @@ struct jump {
     uint32_t target_offset;
 #if RV32_HAS(SYSTEM)
     uint32_t target_satp;
+    uint32_t target_priv;
 #endif
 };
 
 /* A translated block: where its code starts in the code cache. Entries are
  * found through hash chains of indices into the offset map, -1 ending a chain:
- * by pc and satp for lookups, and in system mode also by address space and by
- * page, so that the entries of either can be retired when the guest flushes
- * them. A retired entry is never found again; its code stays in the cache,
- * unreachable, until the cache is flushed.
+ * by pc, satp and fetch privilege for lookups, and in system mode also by
+ * address space and by page, so that the entries of either can be retired when
+ * the guest flushes them. A retired entry is never found again; its code stays
+ * in the cache, unreachable, until the cache is flushed.
  */
 struct offset_map {
     uint32_t pc;
@@ -68,6 +87,7 @@ struct offset_map {
     int32_t next;
 #if RV32_HAS(SYSTEM)
     uint32_t satp;
+    uint32_t priv_mode;
     int32_t next_in_space;
     int32_t next_in_page;
     bool retired;
@@ -86,11 +106,15 @@ struct pending_jump {
     uint32_t target_pc;
 #if RV32_HAS(SYSTEM)
     uint32_t target_satp;
+    uint32_t target_priv;
 #endif
     int32_t next;
 };
 
 struct jit_state {
+#if RV32_HAS(SYSTEM)
+    uint32_t priv_mode; /* context of the blocks currently being emitted */
+#endif
 #if defined(__x86_64__)
     bool has_bmi2; /* detected once; never emit unsupported host instructions */
 #endif
@@ -151,8 +175,10 @@ void jit_wasm_retire_block(riscv_t *rv, block_t *block);
 
 #if RV32_HAS(SYSTEM)
 #define BLOCK_SATP(block) ((block)->satp)
+#define BLOCK_PRIV(block) ((block)->priv_mode)
 #else
 #define BLOCK_SATP(block) 0
+#define BLOCK_PRIV(block) 0
 #endif
 
 /* Whether a program that never reads a counter may have each block's cycles
@@ -278,6 +304,9 @@ static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
 struct inline_cache {
     uint64_t key; /* target PC (+ satp<<32 in system mode), 0 = empty */
     void *entry;  /* cached function pointer */
+#if RV32_HAS(SYSTEM)
+    uint32_t priv_mode; /* fetch privilege of the compiled function */
+#endif
 };
 
 /* Slot of the inline cache entry for pc in address space satp (0 outside system
@@ -291,7 +320,7 @@ static inline uint32_t inline_cache_slot(uint32_t pc, uint32_t satp)
 }
 
 /* Verify inline_cache struct layout for LLVM IR generation.
- * LLVM type: { i64 key, ptr entry }
+ * LLVM type: { i64 key, ptr entry [, i32 priv_mode] }
  * Offsets: key=0, entry=8
  *
  * T2C requires 64-bit host to ensure atomic 64-bit key loads (no torn reads).
@@ -303,8 +332,13 @@ static_assert(offsetof(struct inline_cache, key) == 0,
               "inline_cache.key must be at offset 0");
 static_assert(offsetof(struct inline_cache, entry) == 8,
               "inline_cache.entry must be at offset 8");
-static_assert(sizeof(struct inline_cache) == 16,
-              "inline_cache must be 16 bytes");
+#if RV32_HAS(SYSTEM)
+static_assert(offsetof(struct inline_cache, priv_mode) == 16,
+              "inline_cache privilege must match LLVM field 2");
+static_assert(sizeof(struct inline_cache) == 24, "system inline cache ABI");
+#else
+static_assert(sizeof(struct inline_cache) == 16, "user inline cache ABI");
+#endif
 
 struct inline_cache *inline_cache_init(void);
 void inline_cache_exit(struct inline_cache *cache);
@@ -314,14 +348,17 @@ void inline_cache_clear_satp(struct inline_cache *cache, uint32_t satp);
 
 /* jit_cache entry for T2C compiled code lookup.
  * Thread safety: Uses seqlock pattern for lock-free readers.
- * - Writers (under cache_lock): increment seq to odd, write entry+key,
- *   increment seq to even
+ * - Writers (under cache_lock): increment seq to odd, write
+ * entry+key+privilege, increment seq to even
  * - Lock-free readers (LLVM-generated): read seq1, if odd retry; read
  *   entry+key; read seq2; if seq1 != seq2 retry Seqlock ensures readers see
- *   consistent (key, entry) pairs without ABA problem.
+ *   consistent (key, entry, privilege) snapshots without ABA problems.
  */
 struct jit_cache {
     uint32_t seq; /* sequence counter: odd = write in progress, even = stable */
+#if RV32_HAS(SYSTEM)
+    uint32_t priv_mode; /* occupies the existing four-byte alignment gap */
+#endif
     uint64_t key; /* program counter, composed to satp in system simulation */
     void *entry;  /* entry of JIT-ed code */
 };
@@ -329,7 +366,7 @@ struct jit_cache {
 /* Verify struct layout requirements for lock-free seqlock reads and LLVM IR.
  *
  * The jit_cache struct layout must match the LLVM type definition in t2c.c:
- *   LLVM: { i32 seq, i32 pad, i64 key, ptr entry }
+ *   LLVM: { i32 seq, i32 priv_or_pad, i64 key, ptr entry }
  *   Offsets: seq=0, pad=4, key=8, entry=16 (on 64-bit)
  *
  * The key field must be 8-byte aligned for atomic 64-bit loads without
@@ -338,6 +375,11 @@ struct jit_cache {
  * If this struct layout changes, the LLVM type in t2c.c must be updated to
  * match (search for "jit_cache_memb" in t2c.c).
  */
+#if RV32_HAS(SYSTEM)
+static_assert(offsetof(struct jit_cache, priv_mode) == 4,
+              "jit_cache privilege must match LLVM field 1");
+#endif
+static_assert(sizeof(struct jit_cache) == 24, "jit_cache ABI must match LLVM");
 static_assert(offsetof(struct jit_cache, seq) == 0,
               "jit_cache.seq must be at offset 0 to match LLVM IR");
 static_assert(offsetof(struct jit_cache, key) == 8,
@@ -351,7 +393,10 @@ static_assert(offsetof(struct jit_cache, entry) % sizeof(void *) == 0,
 
 struct jit_cache *jit_cache_init(void);
 void jit_cache_exit(struct jit_cache *cache);
-void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry);
+void jit_cache_update(struct jit_cache *cache,
+                      uint64_t key,
+                      void *entry,
+                      uint32_t priv_mode);
 void jit_cache_clear(struct jit_cache *cache);
 void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp);
 

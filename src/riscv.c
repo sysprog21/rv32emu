@@ -325,7 +325,8 @@ static void *t2c_runloop(void *arg)
 #if RV32_HAS(SYSTEM)
         /* Verify SATP matches (for system mode) */
         uint32_t satp = (uint32_t) (entry->key >> 32);
-        if (block && block->satp != satp)
+        if (block &&
+            (block->satp != satp || block->priv_mode != entry->priv_mode))
             block = NULL;
 #endif
         /* Compile only if block still exists in cache */

@@ -109,10 +109,53 @@ static bool ppn_is_valid(riscv_t *rv, uint32_t ppn)
     return ppn < nr_pg_max;
 }
 
+/* Whether S-mode data accesses may currently reach U pages. */
+static inline bool mmu_sum_window(const riscv_t *rv)
+{
+    return mmu_data_priv(rv) == RV_PRIV_S_MODE &&
+           (rv->csr_sstatus & SSTATUS_SUM);
+}
+
+/* Record a dTLB slot stamped for a U page in S mode; see sum_user_slots. */
+static inline void mmu_note_stamp(riscv_t *rv, uint32_t idx, uint8_t perm)
+{
+    if ((perm & PTE_U) && mmu_data_priv(rv) == RV_PRIV_S_MODE)
+        rv->sum_user_slots |= UINT64_C(1) << idx;
+}
+
+void mmu_access_context_changed(riscv_t *rv)
+{
+    const uint32_t context = mmu_access_context_value(rv);
+    if (rv->mmu_access_context != context) {
+        rv->mmu_access_context = context;
+        T1C_COUNT(tlb_ctx_changes, 1);
+    }
+    /* The S stamps of U pages were valid only while SUM was set. Park them:
+     * the C lookup rechecks permission live, and refreshes the stamp.
+     */
+    if (rv->sum_user_slots && !mmu_sum_window(rv)) {
+        _Static_assert(TLB_SIZE <= 64, "sum_user_slots holds one bit per slot");
+        for (uint32_t idx = 0; idx < TLB_SIZE; idx++) {
+            if (!(rv->sum_user_slots >> idx & 1))
+                continue;
+            if (rv->dtlb[idx].valid)
+                rv->dtlb[idx].valid = MMU_CONTEXT_PARKED;
+#if RV32_HAS(JIT)
+            rv->jit_dtlb[idx].read_tag = UINT32_MAX;
+            rv->jit_dtlb[idx].write_tag = UINT32_MAX;
+#endif
+        }
+        rv->sum_user_slots = 0;
+    }
+}
+
 void mmu_tlb_flush_all(riscv_t *rv)
 {
+    rv->sum_user_slots = 0;
+    mmu_access_context_changed(rv);
     memset(rv->dtlb, 0, sizeof(rv->dtlb));
 #if RV32_HAS(JIT)
+    /* Zero is a valid U-mode RAM tag for page zero, never an empty slot. */
     memset(rv->jit_dtlb, 0xff, sizeof(rv->jit_dtlb));
 #endif
     memset(rv->itlb, 0, sizeof(rv->itlb));
@@ -122,7 +165,7 @@ void mmu_tlb_flush_all(riscv_t *rv)
 /* The VPN of a TLB entry; iTLB tags carry ITLB_EXEC_TAG. */
 static inline uint32_t tlb_entry_vpn(const tlb_entry_t *entry)
 {
-    return entry->vpn & ~ITLB_EXEC_TAG;
+    return entry->vpn & ITLB_VPN_MASK;
 }
 
 /* The 4 MiB region of a TLB entry. */
@@ -139,7 +182,7 @@ static inline void tlb_invalidate(riscv_t *rv, tlb_entry_t *entry)
     if (entry->level == TLB_PAGE_LEVEL_SUPER)
         rv->tlb_super_slices[tlb_entry_region(entry)]--;
     entry->valid = 0;
-    entry->vpn &= ~ITLB_EXEC_TAG;
+    entry->vpn &= ITLB_VPN_MASK;
 }
 
 /* Invalidate a dTLB slot together with the RAM tags derived from it. */
@@ -205,7 +248,7 @@ static void note_code_page(riscv_t *rv, uint32_t vpn)
 #if !RV32_HAS(JIT)
     bit_set(rv->code_pages, code_page_slot(vpn));
 #endif
-    if (!rv->csr_satp)
+    if (!mmu_paging(rv, rv->priv_mode))
         return;
     /* The fetch just filled the iTLB. Without an exact 4 KiB entry for this
      * page, assume the code came through a superpage.
@@ -274,9 +317,20 @@ static inline void jit_dtlb_fill(riscv_t *rv,
     /* A tag hit bypasses the I/O callbacks, so replaced ones get no tags. */
     const bool ram =
         GUEST_RAM_CONTAINS(mem, pa_page, RV_PG_SIZE) && mmu_io_is_default(rv);
-    rv->jit_dtlb[idx].read_tag = ram && (perm & PTE_R) ? va_page : UINT32_MAX;
-    rv->jit_dtlb[idx].write_tag =
-        ram && (perm & PTE_W) && dirty ? va_page : UINT32_MAX;
+    const uint32_t context = mmu_ram_tag_context(rv);
+    /* MXR-dependent X-only reads must never match the class-zero U probe. */
+    const uint32_t read_context =
+        perm & PTE_R ? context : rv->mmu_access_context;
+    rv->jit_dtlb[idx].read_tag = ram && (!mmu_paging(rv, mmu_data_priv(rv)) ||
+                                         mmu_perm_ok(rv, perm, PTE_R))
+                                     ? va_page | read_context
+                                     : UINT32_MAX;
+    rv->jit_dtlb[idx].write_tag = ram &&
+                                          (!mmu_paging(rv, mmu_data_priv(rv)) ||
+                                           mmu_perm_ok(rv, perm, PTE_W)) &&
+                                          dirty
+                                      ? va_page | context
+                                      : UINT32_MAX;
     rv->jit_dtlb[idx].addend = (uintptr_t) mem->mem_base + pa_page - va_page;
 }
 #endif
@@ -296,8 +350,7 @@ static inline uint32_t dtlb_lookup(riscv_t *rv,
 
     if (entry->valid && entry->vpn == vpn) {
         /* Check permissions */
-        uint8_t needed = write ? PTE_W : PTE_R;
-        if (!(entry->perm & needed)) {
+        if (!mmu_perm_ok(rv, entry->perm, write ? PTE_W : PTE_R)) {
             *hit = false;
             return 0;
         }
@@ -309,11 +362,12 @@ static inline uint32_t dtlb_lookup(riscv_t *rv,
             pte_t *pte = (pte_t *) (attr->mem->mem_base + entry->pte_addr);
             *pte |= PTE_D;
             entry->dirty = 1;
-#if RV32_HAS(JIT)
-            jit_dtlb_fill(rv, vaddr, entry->ppn, entry->perm, true);
-#endif
         }
-
+        entry->valid = rv->mmu_access_context;
+        mmu_note_stamp(rv, idx, entry->perm);
+#if RV32_HAS(JIT)
+        jit_dtlb_fill(rv, vaddr, entry->ppn, entry->perm, entry->dirty);
+#endif
         *hit = true;
         /* Tags distinguish individual 4 KiB VPNs even for superpages. */
         return entry->ppn | (vaddr & MASK(RV_PG_SHIFT));
@@ -347,7 +401,7 @@ static inline void tlb_fill(riscv_t *rv,
     entry->perm = *pte & (PTE_R | PTE_W | PTE_X | PTE_U);
     entry->dirty = (*pte & PTE_D) ? 1 : 0;
     entry->level = level;
-    entry->valid = 1;
+    entry->valid = rv->mmu_access_context;
 }
 
 static inline void dtlb_populate(riscv_t *rv,
@@ -355,8 +409,10 @@ static inline void dtlb_populate(riscv_t *rv,
                                  pte_t *pte,
                                  uint32_t level)
 {
-    tlb_entry_t *entry = &rv->dtlb[(vaddr >> RV_PG_SHIFT) & TLB_MASK];
+    const uint32_t idx = (vaddr >> RV_PG_SHIFT) & TLB_MASK;
+    tlb_entry_t *entry = &rv->dtlb[idx];
     tlb_fill(rv, entry, vaddr, pte, level);
+    mmu_note_stamp(rv, idx, entry->perm);
 #if RV32_HAS(JIT)
     jit_dtlb_fill(rv, vaddr, entry->ppn, entry->perm, entry->dirty);
 #endif
@@ -370,7 +426,7 @@ static inline void itlb_populate(riscv_t *rv,
     tlb_entry_t *entry = &rv->itlb[(vaddr >> RV_PG_SHIFT) & TLB_MASK];
     tlb_fill(rv, entry, vaddr, pte, level);
     if (entry->perm & PTE_X)
-        entry->vpn |= ITLB_EXEC_TAG;
+        entry->vpn |= ITLB_EXEC_TAG | (rv->priv_mode << ITLB_PRIV_SHIFT);
 }
 
 #define PAGE_TABLE(ppn)                                               \
@@ -460,40 +516,7 @@ pte_t *mmu_walk(riscv_t *rv, const uint32_t vaddr, uint32_t *level)
             __UNREACHABLE;                                                    \
             break;                                                            \
         }                                                                     \
-        if (pte && (!(*pte & PTE_V))) {                                       \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
-            return false;                                                     \
-        }                                                                     \
-        if (!(pte && (*pte & access_bits))) {                                 \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
-            return false;                                                     \
-        }                                                                     \
-        /*                                                                    \
-         * (1) When MXR=0, only loads from pages marked readable (R=1) will   \
-         * succeed.                                                           \
-         *                                                                    \
-         * (2) When MXR=1, loads from pages marked either readable or         \
-         * executable (R=1 or X=1) will succeed.                              \
-         */                                                                   \
-        if (pte && ((!(SSTATUS_MXR & rv->csr_sstatus) && !(*pte & PTE_R) &&   \
-                     (access_bits == PTE_R)) ||                               \
-                    ((SSTATUS_MXR & rv->csr_sstatus) &&                       \
-                     !((*pte & PTE_R) | (*pte & PTE_X)) &&                    \
-                     (access_bits == PTE_R)))) {                              \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
-            return false;                                                     \
-        }                                                                     \
-        /*                                                                    \
-         * When SUM=0, S-mode memory accesses to pages that are accessible by \
-         * U-mode will fault.                                                 \
-         */                                                                   \
-        if (pte && rv->priv_mode == RV_PRIV_S_MODE &&                         \
-            !(SSTATUS_SUM & rv->csr_sstatus) && (*pte & PTE_U)) {             \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
-            return false;                                                     \
-        }                                                                     \
-        /* PTE not found, map it in handler */                                \
-        if (!pte) {                                                           \
+        if (!pte || !(*pte & PTE_V) || !mmu_perm_ok(rv, *pte, access_bits)) { \
             SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
             return false;                                                     \
         }                                                                     \
@@ -523,6 +546,8 @@ MMU_FAULT_CHECK_IMPL(write, pagefault_store)
  */
 uint32_t __attribute__((noinline)) mmu_ifetch_miss(riscv_t *rv, uint32_t vaddr)
 {
+    const uint32_t access_priv = rv->priv_mode;
+    const uint32_t access_satp = rv->csr_satp;
     /* TLB miss - do full page walk */
     uint32_t level;
     pte_t *pte = mmu_walk(rv, vaddr, &level);
@@ -533,8 +558,11 @@ uint32_t __attribute__((noinline)) mmu_ifetch_miss(riscv_t *rv, uint32_t vaddr)
         /* Retry only if the handler returned to the access and let the hart run
          * on; a halted hart would otherwise retry forever.
          */
-        if (need_handle_signal || rv_has_halted(rv))
+        if (need_handle_signal || rv_has_halted(rv) ||
+            rv->priv_mode != access_priv || rv->csr_satp != access_satp) {
+            need_handle_signal = true;
             return 0;
+        }
         /* Retry walk after trap handler has set up the page */
         pte = mmu_walk(rv, vaddr, &level);
         /* Re-validate permissions after retry */
@@ -554,7 +582,9 @@ uint32_t __attribute__((noinline)) mmu_ifetch_miss(riscv_t *rv, uint32_t vaddr)
     itlb_populate(rv, vaddr, pte, level);
 
     get_ppn_and_offset();
-    return memory_ifetch(ppn | offset);
+    return (vaddr & MASK(RV_PG_SHIFT)) == RV_PG_SIZE - 2
+               ? memory_ifetch_half(ppn | offset)
+               : memory_ifetch(ppn | offset);
 }
 
 uint32_t rv_mmu_ifetch(riscv_t *rv, uint32_t vaddr)
@@ -678,7 +708,7 @@ void mmu_write_b(riscv_t *rv, const uint32_t vaddr, const uint8_t val)
  */
 bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr)
 {
-    if (!rv->csr_satp) {
+    if (!mmu_paging(rv, mmu_data_priv(rv))) {
         *paddr = vaddr;
         return true;
     }
@@ -703,7 +733,11 @@ bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr)
 
 uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
 {
-    if (!rv->csr_satp) {
+    assert(rv->mmu_access_context == mmu_access_context_value(rv));
+    const uint32_t access_priv = rv->priv_mode;
+    const uint32_t access_satp = rv->csr_satp;
+    const uint32_t access_context = rv->mmu_access_context;
+    if (!mmu_paging(rv, mmu_data_priv(rv))) {
 #if RV32_HAS(JIT)
         jit_dtlb_fill(rv, vaddr, vaddr, PTE_R | PTE_W, true);
 #endif
@@ -727,8 +761,13 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
         /* Retry only if the handler returned to the access and let the hart run
          * on; a halted hart would otherwise retry forever.
          */
-        if (need_handle_signal || rv_has_halted(rv))
+        if (need_handle_signal || rv_has_halted(rv) ||
+            rv->priv_mode != access_priv ||
+            rv->mmu_access_context != access_context ||
+            rv->csr_satp != access_satp) {
+            need_handle_signal = true;
             return 0;
+        }
         /* Retry walk after trap handler has set up the page */
         pte = mmu_walk(rv, vaddr, &level);
         /* Re-validate permissions after retry */

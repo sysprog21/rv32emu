@@ -16,6 +16,7 @@
     _(dispatches)            \
     _(lookup_hits)           \
     _(lookup_cold)           \
+    _(lookup_priv)           \
     _(lookup_satp)           \
     _(lookup_invalidated)    \
     _(decoded_kernel)        \
@@ -28,6 +29,8 @@
     _(interp_pc_syncs)       \
     _(hot_interp_pc_syncs)   \
     _(trap_instructions)     \
+    _(t2c_entries)           \
+    _(tlb_ctx_changes)       \
     _(satp_writes)           \
     _(sfence_all)            \
     _(sfence_page)           \

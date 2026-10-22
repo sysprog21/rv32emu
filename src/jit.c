@@ -665,6 +665,7 @@ static inline void offset_map_insert(struct jit_state *state, block_t *block)
     *head = idx;
 #if RV32_HAS(SYSTEM)
     map_entry->satp = block->satp;
+    map_entry->priv_mode = block->priv_mode;
     map_entry->retired = false;
     head = &state->space_index[space_hash(block->satp)];
     map_entry->next_in_space = *head;
@@ -678,7 +679,8 @@ static inline void offset_map_insert(struct jit_state *state, block_t *block)
 /* The live entry translated for pc in address space satp, if any */
 FORCE_INLINE struct offset_map *offset_map_find(struct jit_state *state,
                                                 uint32_t pc,
-                                                uint32_t satp UNUSED)
+                                                uint32_t satp UNUSED,
+                                                uint32_t priv UNUSED)
 {
     for (int32_t i = state->offset_index[offset_hash(pc, satp)]; i >= 0;
          i = state->offset_map[i].next) {
@@ -686,7 +688,7 @@ FORCE_INLINE struct offset_map *offset_map_find(struct jit_state *state,
         if (entry->pc != pc)
             continue;
 #if RV32_HAS(SYSTEM)
-        if (entry->satp != satp || entry->retired)
+        if (entry->satp != satp || entry->priv_mode != priv || entry->retired)
             continue;
 #endif
         return entry;
@@ -970,6 +972,7 @@ static inline void emit_jump_target_address(struct jit_state *state,
     jump->target_pc = target_pc;
 #if RV32_HAS(SYSTEM)
     jump->target_satp = target_satp;
+    jump->target_priv = state->priv_mode;
 #endif
     emit4(state, 0);
 }
@@ -1991,6 +1994,7 @@ static inline void emit_jmp(struct jit_state *state,
     emit_a64(state, UBR_B);
 #if RV32_HAS(SYSTEM)
     jump->target_satp = target_satp;
+    jump->target_priv = state->priv_mode;
 #endif
 #endif
 }
@@ -2024,17 +2028,7 @@ static uint32_t unretired_after(const riscv_t *rv, uint32_t pc)
 {
     if (rv->jit_entry_cycles || !cur_block)
         return 0;
-    uint32_t n = 0;
-    for (const rv_insn_t *ir = cur_block->ir_head, *next; ir; ir = next) {
-        next = ir == cur_block->ir_tail ? NULL : block_next_ir(ir);
-        const uint32_t end = next ? next->pc : cur_block->pc_end;
-        const uint32_t count = end - ir->pc > 4 ? (end - ir->pc) / 4 : 1;
-        if (pc < ir->pc)
-            n += count;
-        else if (pc < end && count > 1)
-            n += count - 1 - (pc - ir->pc) / 4;
-    }
-    return n;
+    return block_unretired_after(cur_block, pc);
 }
 
 static void emit_cycle_count(struct jit_state *state, uint32_t n)
@@ -2692,19 +2686,24 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     emit_addsub_register(state, false, AS_SUBS, RZ, R24, R10);
     slow_branches[n_slow++] = emit_a64_bcond(state, COND_NE);
 
-    /* valid != 0: LDRB w24,[x25,#13]; CBZ w24, slow */
-    emit_loadstore_imm(state, LS_LDRB, R24, R25, 13);
-    slow_branches[n_slow++] = emit_a64_cbz(state, R24);
+    /* The valid stamp must match the current effective data context. */
+    emit_loadstore_imm(state, LS_LDRB, R24, R25, offsetof(tlb_entry_t, valid));
+    emit_load_imm_sext(state, R10, offsetof(riscv_t, mmu_access_context));
+    emit_addsub_register(state, true, AS_ADD, R10, R0, R10);
+    emit_loadstore_imm(state, LS_LDRW, R10, R10, 0);
+    emit_addsub_register(state, false, AS_SUBS, RZ, R24, R10);
+    slow_branches[n_slow++] = emit_a64_bcond(state, COND_NE);
 
     /* perm has needed bit: LDRB w24,[x25,#12]; AND with PTE_R/W */
-    emit_loadstore_imm(state, LS_LDRB, R24, R25, 12);
+    emit_loadstore_imm(state, LS_LDRB, R24, R25, offsetof(tlb_entry_t, perm));
     emit_load_imm(state, R10, is_store ? PTE_W : PTE_R);
     emit_logical_register(state, false, LOG_AND, R24, R24, R10);
     slow_branches[n_slow++] = emit_a64_cbz(state, R24);
 
     /* For stores, dirty must be 1 (so PTE_D update stays in C) */
     if (is_store) {
-        emit_loadstore_imm(state, LS_LDRB, R24, R25, 14);
+        emit_loadstore_imm(state, LS_LDRB, R24, R25,
+                           offsetof(tlb_entry_t, dirty));
         slow_branches[n_slow++] = emit_a64_cbz(state, R24);
     }
 
@@ -2818,6 +2817,17 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     emit_mov32(state, RCX, RAX);
     emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, RAX,
                      ~(RV_PG_SIZE - 1) | (access_size - 1));
+    /* Privilege-keyed dispatch and links guarantee the emitted U block runs
+     * in U mode; trap-capable helpers leave the block when privilege changes.
+     * Its class-zero raw-R/W tags need no runtime context load. X-only user
+     * reads never match and take the MXR-aware slow path instead.
+     */
+    assert(cur_block && state->priv_mode == cur_block->priv_mode);
+    if (state->priv_mode != RV_PRIV_U_MODE) {
+        emit1(state, 0x0b); /* or eax, [rdi + context] */
+        emit_modrm_and_displacement(state, RAX, RDI,
+                                    offsetof(riscv_t, mmu_access_context));
+    }
     /* cmp eax, [r12 + read_tag/write_tag] */
     emit1(state, 0x41);
     emit1(state, 0x3b);
@@ -3884,7 +3894,7 @@ static void indirect_site_fill(struct jit_state *state,
 static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
 {
     struct jit_state *state = rv->jit_state;
-    const struct offset_map *target = offset_map_find(state, rv->PC, 0);
+    const struct offset_map *target = offset_map_find(state, rv->PC, 0, 0);
     if (!target)
         return (uintptr_t) state->buf + state->exit_loc;
     indirect_site_fill(state, &state->sites[site], rv->PC, target->offset);
@@ -5652,7 +5662,8 @@ static void patch_pending_jumps(struct jit_state *state, int first_block)
             struct pending_jump *jump = &state->pending[*link];
             if (jump->target_pc != block->pc
 #if RV32_HAS(SYSTEM)
-                || jump->target_satp != block->satp
+                || jump->target_satp != block->satp ||
+                jump->target_priv != block->priv_mode
 #endif
             ) {
                 link = &jump->next;
@@ -5697,7 +5708,8 @@ static void resolve_jumps(struct jit_state *state)
             target_loc = jump.offset_loc + sizeof(uint32_t);
             const struct offset_map *target =
                 offset_map_find(state, jump.target_pc,
-                                IIF(RV32_HAS(SYSTEM))(jump.target_satp, 0));
+                                IIF(RV32_HAS(SYSTEM))(jump.target_satp, 0),
+                                IIF(RV32_HAS(SYSTEM))(jump.target_priv, 0));
             if (target) {
                 target_loc = target->offset;
             }
@@ -5707,11 +5719,12 @@ static void resolve_jumps(struct jit_state *state)
                 int32_t *head = &state->pending_index[offset_hash(
                     jump.target_pc,
                     IIF(RV32_HAS(SYSTEM))(jump.target_satp, 0))];
-                state->pending[state->n_pending] = (struct pending_jump) {
+                state->pending[state->n_pending] = (struct pending_jump){
                     .offset_loc = jump.offset_loc,
                     .target_pc = jump.target_pc,
 #if RV32_HAS(SYSTEM)
                     .target_satp = jump.target_satp,
+                    .target_priv = jump.target_priv,
 #endif
                     .next = *head,
                 };
@@ -5731,7 +5744,7 @@ DISABLE_UBSAN_FUNC bool jit_run_cached(riscv_t *rv)
 {
     struct jit_state *state = rv->jit_state;
     const struct offset_map *entry =
-        offset_map_find(state, rv->PC, rv->csr_satp);
+        offset_map_find(state, rv->PC, rv->csr_satp, rv->priv_mode);
     if (!entry)
         return false;
     assert(!rv->jit_entry_cycles);
@@ -5771,7 +5784,8 @@ static void translate_chained_block(struct jit_state *state,
                                     riscv_t *rv,
                                     block_t *block)
 {
-    if (offset_map_find(state, block->pc_start, BLOCK_SATP(block)))
+    if (offset_map_find(state, block->pc_start, BLOCK_SATP(block),
+                        BLOCK_PRIV(block)))
         return;
 
     /* A full offset map, retired entries included, is a full cache: flush it,
@@ -5787,6 +5801,9 @@ static void translate_chained_block(struct jit_state *state,
         return;
 
     offset_map_insert(state, block);
+#if RV32_HAS(SYSTEM)
+    state->priv_mode = block->priv_mode;
+#endif
     translate(state, rv, block);
     if (unlikely(should_flush))
         return;
@@ -5809,8 +5826,8 @@ bool jit_translate(riscv_t *rv, block_t *block)
 {
     T1C_COUNT(compile_requests, 1);
     struct jit_state *state = rv->jit_state;
-    const struct offset_map *translated =
-        offset_map_find(state, block->pc_start, BLOCK_SATP(block));
+    const struct offset_map *translated = offset_map_find(
+        state, block->pc_start, BLOCK_SATP(block), BLOCK_PRIV(block));
     if (translated) {
         /* Block already translated - skip */
         block->offset = translated->offset;
@@ -5863,7 +5880,8 @@ restart:
      * marking the block hot.  Otherwise resolve_jumps and cache maintenance
      * would operate on an empty / stale code region.
      */
-    if (!offset_map_find(state, block->pc_start, BLOCK_SATP(block))) {
+    if (!offset_map_find(state, block->pc_start, BLOCK_SATP(block),
+                         BLOCK_PRIV(block))) {
 #if defined(__APPLE__) && defined(__aarch64__)
         jit_exit_write_mode();
 #endif
@@ -5914,6 +5932,9 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
 #endif
 
     state->offset = 0;
+#if RV32_HAS(SYSTEM)
+    state->priv_mode = UINT32_MAX;
+#endif
     state->n_jumps = 0;
     state->size = size;
     state->buf = mmap(0, size, PROT_READ | PROT_WRITE | PROT_EXEC,

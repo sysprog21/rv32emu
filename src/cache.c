@@ -640,8 +640,9 @@ uint32_t cache_invalidate_va(cache_t *cache,
     uint32_t count = 0, compiled = 0;
 
 #if RV32_HAS(BLOCK_CHAINING)
-    /* With page-bounded blocks, each block fits entirely within one 4KB page,
-     * so only the bucket for this page needs checking.
+    /* This API invalidates blocks starting on the requested page. The
+     * SFENCE.VMA caller also checks the preceding page for a straddling
+     * instruction and conservatively retires all retained code when needed.
      */
     cache_entry_t *pentry;
     struct hlist_node *next;

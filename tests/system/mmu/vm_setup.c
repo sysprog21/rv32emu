@@ -126,6 +126,12 @@ typedef struct {
 /* User page that stays unmapped; see handle_trap() and main.c */
 #define POISON_VA 0x3000
 
+/* User stack page, mapped at its physical address: the emulator's syscall
+ * handlers (ELF_LOADER mode) read guest buffers by physical address. The
+ * kernel pages lack PTE_U, so U-mode can neither run nor store there.
+ */
+#define USER_STACK_VA 0x3FF000
+
 /* Exception cause codes (scause register values per RISC-V privilege spec) */
 #define CAUSE_USER_ECALL 8
 #define CAUSE_SUPERVISOR_ECALL 9
@@ -150,7 +156,6 @@ typedef struct {
 /* External symbols from setup.S and linker script */
 extern void main();                  /* User code entry at VA 0x0 */
 extern void _start();                /* Kernel entry at PA 0x00800000 */
-extern int user_entry();             /* Trampoline to jump to user space */
 extern void supervisor_trap_entry(); /* S-mode trap vector (saves context) */
 extern void pop_tf(trapframe_t *);   /* Restore context and sret */
 extern void _exit(int status);       /* Exit via ecall (syscall 93) */
@@ -478,8 +483,12 @@ void SECTION_TEXT_VMSETUP vm_boot()
 {
     /* L1[0]: Point to L2 table for user VA 0x00000000-0x003FFFFF.
      * User pages are initially unmapped; PTEs populated on demand by faults.
+     * Only the user stack is mapped up front.
      */
     l1pt[0] = ((pte_t) user_l1pt >> PG_SHIFT << PTE_PPN_SHIFT) | PTE_V;
+    user_l1pt[USER_STACK_VA >> PG_SHIFT] =
+        (USER_STACK_VA >> PG_SHIFT << PTE_PPN_SHIFT) | PTE_V | PTE_R | PTE_W |
+        PTE_U | PTE_A | PTE_D;
 
     /* L1[1023]: Kernel direct map at VA 0xFFC00000 for accessing user memory.
      * Maps PA of main() so kernel can copy user pages during fault handling.
@@ -536,11 +545,10 @@ void SECTION_TEXT_VMSETUP vm_boot()
     }
     freelist_nodes[MAX_TEST_PG - 1].next = 0;
 
-    /* Enter user mode: set up minimal trapframe and sret to user_entry,
-     * which will set up user stack and jump to VA 0x0 (main).
-     */
+    /* Enter user mode: sret to VA 0x0 (main) on the user stack. */
     trapframe_t tf;
     memset(&tf, 0, sizeof(tf));
-    tf.epc = (uint32_t) &user_entry;
+    tf.epc = (uint32_t) main;
+    tf.sp = USER_STACK_VA + PG_SIZE;
     pop_tf(&tf);
 }

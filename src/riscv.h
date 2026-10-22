@@ -169,6 +169,9 @@ enum {
 #define SSTATUS_SPP MSTATUS_SPP
 #define SSTATUS_SUM MSTATUS_SUM
 #define SSTATUS_MXR MSTATUS_MXR
+#define SSTATUS_VISIBLE_MASK                                                \
+    (SSTATUS_SIE | SSTATUS_SPIE | SSTATUS_UBE | SSTATUS_SPP | SSTATUS_SUM | \
+     SSTATUS_MXR | UINT32_C(0x8001e000)) /* SD, XS and FS */
 #define SIP_SSIP_SHIFT 1
 #define SIP_STIP_SHIFT 5
 #define SIP_SEIP_SHIFT 9

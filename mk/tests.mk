@@ -55,6 +55,13 @@ $(eval $(call run-test-simple,constopt))
 
 tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
 
+# Effective privilege and permission rules also cover MPRV without firmware.
+ifeq ($(CONFIG_SYSTEM),y)
+$(eval $(call test-framework,mmu-context,test-mmu-context.o,,))
+$(eval $(call run-test-simple,mmu-context))
+tests: run-test-mmu-context
+endif
+
 # Integration Tests (run emulator with test programs)
 
 LOG_FILTER := sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'
@@ -179,8 +186,11 @@ ifeq ($(CONFIG_SYSTEM),y)
 ifneq ($(CONFIG_ELF_LOADER),y)
 ifeq ($(CONFIG_Zicsr)$(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
 ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
+SYSTEM_ASM_CHECK_TARGETS += check-system-decode-trap
+endif
 SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles \
-    check-system-trap-resume check-system-sfence-asid
+    check-system-trap-resume check-system-sfence-asid check-system-mmu-priv
 # Interrupts are polled between dispatches, and the interpreter chains a loop
 # without returning to the dispatcher, so only JIT builds deliver them there.
 ifeq ($(CONFIG_JIT),y)
@@ -350,6 +360,10 @@ check-$(1): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test,-k,$$(OUT)/$(1).bin,$(1),tail -n 1,$$(EXPECTED_$(1)))
 endef
 
+EXPECTED_system-decode-trap = SYSTEM decode trap OK
+$(eval $(call system-asm-check-target,system-decode-trap,rv32ic_zicsr))
+EXPECTED_system-mmu-priv = SYSTEM MMU privilege OK
+$(eval $(call system-asm-check-target,system-mmu-priv,rv32ia_zicsr))
 EXPECTED_system-sfence-asid = SYSTEM SFENCE ASID OK
 $(eval $(call system-asm-check-target,system-sfence-asid,rv32ia_zicsr))
 EXPECTED_system-mmu-cache = SYSTEM MMU cache OK

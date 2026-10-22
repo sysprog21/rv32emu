@@ -267,6 +267,7 @@ struct wasm_map {
     void *arena;    /* records of the other blocks compiled into it */
 #if RV32_HAS(SYSTEM)
     uint32_t satp;
+    uint32_t priv_mode;
     uint16_t next_in_page; /* one-based index of the next map in its bucket */
 #endif
 };
@@ -650,7 +651,8 @@ static void wasm_ram_guard(struct wasm_emitter *e,
     wasm_byte(e, W_I32_ADD);
     wasm_ltee(e, WASM_TLB);
     wasm_mem(e, W_I32_LOAD8_U, offsetof(tlb_entry_t, valid));
-    wasm_byte(e, W_I32_EQZ);
+    wasm_rv_load(e, W_I32_LOAD, offsetof(riscv_t, mmu_access_context));
+    wasm_byte(e, W_I32_NE);
     wasm_lget(e, WASM_TLB);
     wasm_mem(e, W_I32_LOAD, offsetof(tlb_entry_t, vpn));
     wasm_lget(e, WASM_VPN);
@@ -1235,6 +1237,7 @@ void jit_wasm_run(riscv_t *rv, const block_t *block)
     struct jit_state *state = rv->jit_state;
     struct wasm_map *map = &state->maps[block->offset - 1];
     assert(map->owner == block && map->entry);
+    assert(block_matches_context(rv, block));
 
     /* A hash collision returns to rv_step, which refills the entry here.
      * Generated edges chain until the guest cycle count reaches the limit.
@@ -1331,6 +1334,11 @@ static void wasm_tail(struct wasm_emitter *e, struct jit_state *state)
     wasm_lget(e, WASM_TAIL_MAP);
     wasm_mem(e, W_I32_LOAD, offsetof(struct wasm_map, satp));
     wasm_lget(e, WASM_TAIL_SATP);
+    wasm_byte(e, W_I32_EQ);
+    wasm_byte(e, W_I32_AND);
+    wasm_lget(e, WASM_TAIL_MAP);
+    wasm_mem(e, W_I32_LOAD, offsetof(struct wasm_map, priv_mode));
+    wasm_rv_load(e, W_I32_LOAD, offsetof(riscv_t, priv_mode));
     wasm_byte(e, W_I32_EQ);
     wasm_byte(e, W_I32_AND);
 #endif
@@ -1713,6 +1721,7 @@ retry:;
                               .arena = region.arena};
 #if RV32_HAS(SYSTEM)
     map->satp = block->satp;
+    map->priv_mode = block->priv_mode;
     uint16_t *head = &state->pages[wasm_page_slot(map->pc)];
     map->next_in_page = *head;
     *head = index + 1;

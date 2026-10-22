@@ -6,7 +6,7 @@ source "${SCRIPT_DIR}/../.ci/common.sh"
 
 function ASSERT
 {
-    $*
+    "$@"
     RES=$?
     if [ $RES -ne 0 ]; then
         echo 'Assert failed: "' $* '"'
@@ -274,7 +274,7 @@ function do_buildroot
 function do_linux
 {
     cp -f assets/system/configs/linux.config ${SRC_DIR}/linux/.config
-    export PATH="${SRC_DIR}/buildroot/output/host/bin:${PATH}"
+    export PATH="${SRC_DIR}/buildroot/output/host/bin:${SRC_DIR}/buildroot/output/host/sbin:${PATH}"
     export CROSS_COMPILE=riscv32-buildroot-linux-gnu-
     export ARCH=riscv
     pushd ${SRC_DIR}/linux
@@ -283,6 +283,9 @@ function do_linux
     popd
     ASSERT cp -f ${SRC_DIR}/linux/arch/riscv/boot/Image ${OUTPUT_DIR}
     ASSERT cp -f ${SRC_DIR}/linux/arch/riscv/boot/Image.gz ${OUTPUT_DIR}
+    ASSERT debugfs -w -R "write ${OUTPUT_DIR}/Image Image" ${OUTPUT_DIR}/rootfs.ext4
+    ASSERT cmp ${OUTPUT_DIR}/Image <(debugfs -R "cat /Image" ${OUTPUT_DIR}/rootfs.ext4 2> /dev/null)
+    ASSERT gzip -n -9 -f -k ${OUTPUT_DIR}/rootfs.ext4
 }
 
 function do_simplefs

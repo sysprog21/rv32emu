@@ -1686,3 +1686,196 @@ JSON name lookup during actual boot. Per-opcode boot weights are each below
 The 2.9355-second diagnostic boot time is excluded from performance acceptance.
 A rebuilt nbench Fourier diagnostic exceeded its 90-second cap and supplies
 no completed profile. The remaining workload profiles stay pending.
+
+## Defined zero-count rotations (2026-10-22)
+
+Expanding TODO 1.1 validation to the B suite exposed a pre-existing
+interpreter defect: rol, ror and rori shifted a uint32_t by 32 when the
+requested amount masked to zero. The old interpreter UBSan binary fails the
+focused fixture at rv32_template.c:1786, and the first B-suite run reports
+all three handlers. Masking the complementary shift by 31 defines the zero
+case without changing nonzero rotations or operand aliasing.
+
+The new focused assembly regression covers seven input words, ten register
+counts (including counts above 31), every immediate amount and aliases of
+the destination with either source. User interpreter/T1C/T2C UBSan checks
+pass. A fresh B-suite RISCOF/Sail comparison passes after the repair. These
+rotates still execute in the interpreter, so the shared fix applies in every
+mode; these checks do not claim native rotate execution or a speedup.
+
+## Zba lowering checkpoint (2026-10-22)
+
+sh1add/sh2add/sh3add now compile in native T1C, LLVM T2C and Wasm. Native
+emission shares the existing scaled-address peephole: x86 uses LEA r32 and
+Arm64 uses ADD Wd with a shifted W source. Both read their operands before
+writing and truncate to 32 bits. Both native liveness classifiers include
+both sources. Other Zb families remain interpreted.
+
+The user fixture loads awkward operands from memory and separates reference
+shift/add pairs with XORI, so the x86 peephole cannot answer both sides.
+Each alias/source/address case forces dispatch and requires actual native
+execution; tiered builds require substantial entries after promotion for
+every Zba-containing profile row. The system variant maps a high virtual
+base through Sv32 and adds an index with bit 30 set, so a 64-bit rather than
+32-bit shift/add would produce an invalid address. The pressure variants use
+a memory-loaded nonzero index; GDB confirms translate_register_loop returns
+true and the guest passes. This is a one-time implementation check; ordinary
+pressure tests check semantic results rather than the private emitter shape.
+
+An interpreted system block keeps chaining along a learned direct edge into
+its successor after that successor compiles, returning to the dispatcher on
+only one transition in PROBE_INTERVAL. Direct-jump dispatch therefore left
+the Sv32 probes mostly interpreted: system T1C recorded 21,380,396
+interpreted entries against 1,597,483 native ones while the old aggregate
+check passed. The system variant now dispatches through an indirect jump,
+which returns a hot target to the dispatcher, and records 22,164,010 native
+entries against 89,114 interpreted (tiered: 21,302,797 tier-2 entries
+against 93,788). Diagnostic runs require that no Zba form stays interpreted
+for half of its iterations, and the pressure variants apply the same bound
+per loop block. CI runs both with T1C_STATS=1.
+
+User T1C/T2C and system T1C/T2C UBSan suites pass, including the new probes.
+System ELF-loader and Arm64 T1C probes pass too. The Wasm fixture layouts
+exercise real generated modules, including a Zba alias/overflow/zero-register
+matrix; Zba is enabled by default, so no separate Zba layout is needed.
+All 32 B-extension Sail comparisons pass after the separate zero-rotation
+repair. Short Sail tests alone do not establish native/tier-2 coverage.
+Arm-host T2C remains unverified.
+
+Release measurements use GCC, UBSan off, T1C_STATS=0, CPU 6 and the same
+rebuilt guests in every engine. The isolated baseline is 4373344, including
+the rotation repair. Five pairs/triples alternate engine order; no samples
+are discarded. Intervals use Student's t on paired log throughput ratios.
+These intervals cover noise within each session. T1C and tiered sessions
+are separate, so comparisons across configurations are not paired. QEMU's
+SciMark2 mean changes by about 5.9% between sessions; the tiered deficit
+remains, but its magnitude depends on the matched session.
+CoreMark's fixed 80,000 iterations use external wall-clock throughput.
+Validation rejects any stdout line beginning `ERROR!` unless it begins
+`ERROR! Must execute for at least 10 secs`, rejects `Cannot validate`, and
+requires either `Correct operation validated.` or the allowed timing warning.
+Every subprocess must also exit successfully. The timing warning on faster
+runs is not a correctness failure; no official CoreMark score is claimed.
+SciMark2 uses its composite score with 0.2 seconds minimum per kernel, so its
+wall time is not a fixed-work comparison.
+
+| Configuration | Workload | Throughput change vs baseline (95% CI) | Change vs QEMU 11.0.2 (95% CI) |
+| --- | --- | --- | --- |
+| T1C | coremark | +212.99% [+197.93%, +228.81%] | +36.24% [+34.13%, +38.39%] |
+| T1C | scimark2 | +18.65% [+18.06%, +19.24%] | +199.37% [+196.89%, +201.86%] |
+| T2C | coremark | +257.32% [+250.93%, +263.82%] | +18.31% [+16.30%, +20.35%] |
+| T2C | scimark2 | +13.37% [+7.22%, +19.89%] | -15.48% [-15.95%, -15.01%] |
+
+Positive values mean higher throughput. The tiered SciMark2 result remains
+slower than QEMU despite improving against its own baseline. These two
+workloads do not establish the full user/system goal; 1.5 must explain the
+tiered-configuration gap before promotion policy changes. Tiered CoreMark
+also averages roughly 12.8% below T1C across the separate sessions.
+
+Raw five-sample throughput values (CoreMark iterations/host-second; SciMark2
+composite MFLOPS) are below. Each engine's samples remain paired by index.
+
+| Configuration/workload | Baseline | Candidate | QEMU |
+| --- | --- | --- | --- |
+| T1C/coremark | 2702.210293, 2626.618085, 2619.013130, 2598.383760, 2622.895203 | 7880.690174, 8343.511275, 8332.721205, 8336.761526, 8331.246048 | 5915.054687, 6075.217407, 6095.468189, 6089.275408, 6077.638370 |
+| T1C/scimark2 | 20.610000, 20.580000, 20.670000, 20.670000, 20.640000 | 24.500000, 24.530000, 24.530000, 24.370000, 24.480000 | 8.200000, 8.140000, 8.220000, 8.210000, 8.120000 |
+| T2C/coremark | 2004.394953, 2024.443912, 2020.756950, 2021.678913, 1988.287988 | 7004.505414, 7214.476890, 7257.798899, 7238.944656, 7230.872459 | 6066.546456, 6065.814341, 6076.859358, 6080.642742, 6091.871050 |
+| T2C/scimark2 | 6.620000, 6.590000, 6.540000, 5.960000, 6.580000 | 7.360000, 7.280000, 7.320000, 7.320000, 7.300000 | 8.680000, 8.660000, 8.680000, 8.610000, 8.650000 |
+
+Binary SHA-256 values:
+
+* T1C before: `2f9c7132b0d3ae491842e2af12453bf8cdc666dca45acbdc1fbc73b5baddb93c`
+* T1C after: `c3eecc7656de0f96de305f1e6b4bc28e9566ac3b4d0587635333b0f0065d3581`
+* T1C qemu: `ed73f766f2ed8789084f4c9b58bca0d85aef86c60518010777d539ed5a0fd7c9`
+* T2C before: `e7b58824d3980599f757949120bb69310f7de985e309e0fb815d1ff914fed0ec`
+* T2C after: `b2788918bb9a31edf61495eea6d6233a5fb45f1159ef35407647594d9d43c364`
+* Guest coremark: `3fd122cb3a8768b2a5f21cc1f49d1f37f5aa8cf55f40a23bf7b46d0011d2eb30`
+* Guest scimark2: `6125312c53883b1b86c7aa8d02bc86ac5dfeea2224f2005c69b9b14f6eb183ad`
+
+Reports are build/user-bench-zba-t1c.json and
+build/user-bench-zba-t2c.json. The guest sources/flags are the rebuilt
+SciMark2 and CoreMark variants described in the preceding profiling section.
+Other rebuilt nbench/miniz/Dhrystone comparisons remain pending.
+
+User entry-only cycle charging can omit repeated native local-loop work when
+an ELF never reads counters. The 20,000-iteration pressure test reports 1,968
+cycles in its diagnostic run despite successful register-loop execution.
+Raw blocker weights can rank work, but ratios to such reported cycles are
+not exact guest-instruction shares. The earlier profiling percentages are
+ratios to their reported cycle denominators, with the stated estimate limits.
+TODO 1.5 must add accurate diagnostic charging or expose the charging mode
+before 1.1's one-percent completion test is applied to these programs.
+
+Five alternating system T1C pairs use the same Linux Image/rootfs.cpio and
+CPU 6. These prebuilt system workloads contain no Zba, so this is a regression
+check rather than evidence of a system Zba speedup. Results are host elapsed
+time changes; negative is faster. Intervals use paired percent differences
+and Student's t. No result both exceeds the 2% threshold and excludes zero
+in the favorable direction; no significant regression is found either.
+
+| System workload | Elapsed change (95% CI) | Baseline ms | Candidate ms |
+| --- | --- | --- | --- |
+| boot | -0.81% [-2.63%, +1.02%] | 2378, 2361, 2417, 2372, 2377 | 2346, 2378, 2346, 2382, 2356 |
+| dhrystone | -0.84% [-1.40%, -0.27%] | 10692, 10766, 10669, 10770, 10815 | 10637, 10617, 10643, 10655, 10710 |
+| coremark | -0.09% [-0.61%, +0.44%] | 4263, 4267, 4263, 4287, 4277 | 4268, 4265, 4274, 4252, 4279 |
+| fork-exec | +0.31% [-1.58%, +2.21%] | 8950, 8781, 9007, 8675, 8909 | 9048, 8865, 8858, 8853, 8831 |
+| gzip-md5 | -3.89% [-9.78%, +2.00%] | 1336, 1422, 1534, 1513, 1424 | 1348, 1402, 1428, 1352, 1404 |
+
+System binary SHA-256 values:
+
+* before: `17958f7861881e4da397446b76872daf3603e095785b4644b0f924f3eab86d28`
+* after: `29d079828a5c3f76a4edcb37eb3994838293b7604f1af684cb48374b0b92f6ef`
+
+The raw report is build/system-bench-zba.json. Native user checks with Zba
+disabled also verify the pre-existing x86 scaled-add peephole; the shared
+helper is omitted on Arm64 when neither caller needs it. The off-feature
+Arm64 build and scaled-add guest pass under QEMU 11.0.2.
+
+The unchanged prebuilt user CoreMark and Dhrystone also run in five
+T1C pairs using the same before/after T1C binaries listed above:
+
+```sh
+taskset -c 6 python3 tests/bench.py \
+    --baseline /tmp/rv32emu-zba-baseline437/build/rv32emu \
+    --emu /tmp/rv32emu-zba-user-release/rv32emu \
+    --schedule interleaved --runs 5 --quiet \
+    --json build/user-bench-zba-prebuilt.json coremark dhrystone
+```
+
+These guests contain no Zba. CoreMark throughput changes
++0.23% [-1.01%, +1.49%] and Dhrystone -1.18% [-4.68%, +2.45%]; both are
+reported as no significant change. The raw report is
+build/user-bench-zba-prebuilt.json. Timing precision does not rule out small
+changes; these checks establish no additional speedup claim.
+
+After adding the off-feature Arm64 helper guard, rebuilding both default
+user release configurations produces byte-identical timed binaries. The
+private register-loop shape remains a one-time GDB check, not a persistent
+CI assertion. The distinct live-entry proofs and semantic fixtures remain
+part of make check.
+
+Guest rebuild commands (xPack riscv-none-elf GCC 15.2.0-1):
+
+```sh
+ZBA_CC=/path/to/toolchain/bin/riscv-none-elf-gcc
+make -C /path/to/scimark2 CC="$ZBA_CC" \
+    CFLAGS='-march=rv32imafc_zba_zbb_zbs -mabi=ilp32 -O2' \
+    LDFLAGS=-lsemihost
+"$ZBA_CC" -std=c99 -march=rv32imafc_zba_zbb_zbs -mabi=ilp32 -O2 \
+    -Wno-implicit-function-declaration -Itests/ansibench/coremark/include \
+    -DPERFORMANCE_RUN=1 -DMULTITHREAD=1 -DDUMMY_NO_MULTITHREAD \
+    -DUINTPTR_TYPE -DITERATIONS=1000 \
+    '-DFLAGS_STR="rv32imafc_zba_zbb_zbs -O2"' \
+    tests/ansibench/coremark/src/core_main.c \
+    tests/ansibench/coremark/src/core_matrix.c \
+    tests/ansibench/coremark/src/core_list_join.c \
+    tests/ansibench/coremark/src/core_state.c \
+    tests/ansibench/coremark/src/core_util.c \
+    tests/ansibench/coremark/src/core_portme.c \
+    -lm -lsemihost -o /tmp/coremark-zba
+```
+
+The CoreMark source's fixed iteration assignment overrides ITERATIONS=1000
+as well as the command-line iteration argument. Measurement commands and
+per-run wall times are retained in the raw user reports. System image hashes
+and the host/compiler/QEMU version are retained in the system report.

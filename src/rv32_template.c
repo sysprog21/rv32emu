@@ -1786,21 +1786,21 @@ RVOP(zexth, { rv->X[ir->rd] = rv->X[ir->rs1] & 0x0000ffff; })
 RVOP(rol, {
     const unsigned int shamt = rv->X[ir->rs2] & 0b11111;
     rv->X[ir->rd] =
-        (rv->X[ir->rs1] << shamt) | (rv->X[ir->rs1] >> (32 - shamt));
+        (rv->X[ir->rs1] << shamt) | (rv->X[ir->rs1] >> ((32 - shamt) & 31));
 })
 
 /* ROR */
 RVOP(ror, {
     const unsigned int shamt = rv->X[ir->rs2] & 0b11111;
     rv->X[ir->rd] =
-        (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << (32 - shamt));
+        (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << ((32 - shamt) & 31));
 })
 
 /* RORI */
 RVOP(rori, {
     const unsigned int shamt = ir->imm & 0b11111;
     rv->X[ir->rd] =
-        (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << (32 - shamt));
+        (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << ((32 - shamt) & 31));
 })
 
 /* ORCB */

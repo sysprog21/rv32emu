@@ -965,6 +965,21 @@ static bool wasm_lower(struct wasm_emitter *e, const rv_insn_t *ir)
         ALU(slli, W_I32_SHL, true);
         ALU(srli, W_I32_SHR_U, true);
         ALU(srai, W_I32_SHR_S, true);
+#if RV32_HAS(Zba)
+#define SHIFT_ADD(inst, shift)   \
+    case rv_insn_##inst:         \
+        wasm_get(e, ir->rs1);    \
+        wasm_const(e, shift);    \
+        wasm_byte(e, W_I32_SHL); \
+        wasm_get(e, ir->rs2);    \
+        wasm_byte(e, W_I32_ADD); \
+        wasm_set(e, ir->rd);     \
+        break
+        SHIFT_ADD(sh1add, 1);
+        SHIFT_ADD(sh2add, 2);
+        SHIFT_ADD(sh3add, 3);
+#undef SHIFT_ADD
+#endif
 #if RV32_HAS(EXT_M)
         ALU(mul, W_I32_MUL, false);
     case rv_insn_div:

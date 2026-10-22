@@ -3373,6 +3373,11 @@ static inline void liveness_calc(block_t *block)
         case rv_insn_sra:
         case rv_insn_or:
         case rv_insn_and:
+#if RV32_HAS(Zba)
+        case rv_insn_sh1add:
+        case rv_insn_sh2add:
+        case rv_insn_sh3add:
+#endif
             liveness[ir->rs1] = idx;
             liveness[ir->rs2] = idx;
             break;
@@ -4148,6 +4153,33 @@ static void emit_misalign_stubs(struct jit_state *state)
  * This eliminates per-instruction memory operations in the JIT hot path.
  */
 
+#if defined(__x86_64__) || RV32_HAS(Zba)
+/* A 32-bit scaled add reads both operands before writing the destination,
+ * so every guest register alias is safe and the result stays zero-extended.
+ * Shared by Zba and the x86 shift/add peephole.
+ */
+static void emit_guest_shift_add(struct jit_state *state,
+                                 unsigned source,
+                                 unsigned base_reg,
+                                 unsigned destination,
+                                 unsigned shift)
+{
+    ra_load2(state, source, base_reg);
+    const int index = vm_reg[0], base = vm_reg[1];
+    const int result = map_vm_reg_reserved2(state, destination, index, base);
+#if defined(__x86_64__)
+    if ((result | index | base) & 8)
+        emit_rex(state, 0, !!(result & 8), !!(index & 8), !!(base & 8));
+    emit1(state, 0x8d); /* LEA r32, [base + index * 2^shift] */
+    emit_sib_operand(state, result, base, index, shift, 0);
+#elif defined(__aarch64__)
+    emit_a64(state, 0x0b000000 | (index << 16) | (shift << 10) | (base << 5) |
+                        result); /* ADD Wd, Wn, Wm, LSL #shift */
+#endif
+    set_dirty(result, true);
+}
+#endif
+
 /* Keep unsupported emitters tied to the decoder's translatable flags.
  * All unsupported T1C handlers must use GEN_UNSUPPORTED, including V stubs.
  */
@@ -4709,19 +4741,6 @@ static bool shift_add_pair(const rv_insn_t *shift,
     };
     return true;
 }
-
-static void emit_shift_add(struct jit_state *state,
-                           const struct shift_add *plan)
-{
-    ra_load2(state, plan->source, plan->base);
-    int index = vm_reg[0], base = vm_reg[1];
-    int result = map_vm_reg_reserved2(state, plan->result, index, base);
-    if ((result | index | base) & 8)
-        emit_rex(state, 0, !!(result & 8), !!(index & 8), !!(base & 8));
-    emit1(state, 0x8d); /* LEA r32, [base + index * scale] */
-    emit_sib_operand(state, result, base, index, plan->scale, 0);
-    set_dirty(result, true);
-}
 #endif
 
 /* Translate one record, with two x86 peepholes across adjacent records: a
@@ -4746,7 +4765,8 @@ static void translate_record(struct jit_state *state,
             prefix.imm2--;
             do_fuse5(state, rv, &prefix);
         }
-        emit_shift_add(state, &scaled);
+        emit_guest_shift_add(state, scaled.source, scaled.base, scaled.result,
+                             scaled.scale);
         return;
     }
     if (previous && previous->opcode == rv_insn_add && previous->rd &&
@@ -4862,6 +4882,11 @@ static bool loop_body_regs(const rv_insn_t *ir,
     case rv_insn_sra:
     case rv_insn_or:
     case rv_insn_and:
+#if RV32_HAS(Zba)
+    case rv_insn_sh1add:
+    case rv_insn_sh2add:
+    case rv_insn_sh3add:
+#endif
 #if RV32_HAS(EXT_M)
     case rv_insn_mul:
     case rv_insn_mulh:

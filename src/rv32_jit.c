@@ -715,9 +715,12 @@ GEN_UNSUPPORTED(cflw)
 GEN_UNSUPPORTED(cfsw)
 #endif
 #if RV32_HAS(Zba)
-GEN_UNSUPPORTED(sh1add)
-GEN_UNSUPPORTED(sh2add)
-GEN_UNSUPPORTED(sh3add)
+#define GEN_SHIFT_ADD(inst, shift) \
+    GEN(inst, { emit_guest_shift_add(state, ir->rs1, ir->rs2, ir->rd, shift); })
+GEN_SHIFT_ADD(sh1add, 1)
+GEN_SHIFT_ADD(sh2add, 2)
+GEN_SHIFT_ADD(sh3add, 3)
+#undef GEN_SHIFT_ADD
 #endif
 #if RV32_HAS(Zbb)
 GEN_UNSUPPORTED(andn)

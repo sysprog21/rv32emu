@@ -128,20 +128,30 @@ static block_t make_block(rv_insn_t *irs, unsigned n, uint32_t pc)
                       .translatable = true};
 }
 
-static void run(riscv_t *rv, rv_insn_t *irs, unsigned n)
+static void translate(riscv_t *rv, block_t *block)
 {
-    block_t block = make_block(irs, n, 0x1000);
-    active = &block;
-    assert(jit_translate(rv, &block));
-    assert(block.hot && !((struct jit_state *) rv->jit_state)->disabled);
+    active = block;
+    assert(jit_translate(rv, block));
+    assert(block->hot && !((struct jit_state *) rv->jit_state)->disabled);
     static bool grown;
     if (!grown) {
         assert(emscripten_resize_heap(emscripten_get_heap_size() + 65536));
         grown = true;
     }
-    jit_wasm_run(rv, &block);
-    jit_wasm_retire_block(rv, &block);
+}
+
+static void retire(riscv_t *rv, block_t *block)
+{
+    jit_wasm_retire_block(rv, block);
     active = NULL;
+}
+
+static void run(riscv_t *rv, rv_insn_t *irs, unsigned n)
+{
+    block_t block = make_block(irs, n, 0x1000);
+    translate(rv, &block);
+    jit_wasm_run(rv, &block);
+    retire(rv, &block);
 }
 
 /* An independent model of each register operation, written from the ISA rather
@@ -185,6 +195,14 @@ static uint32_t reference(unsigned op, uint32_t a, uint32_t b, int32_t imm)
     case rv_insn_add:
         C_CASE(cadd)
         return a + b;
+#if RV32_HAS(Zba)
+    case rv_insn_sh1add:
+        return (a << 1) + b;
+    case rv_insn_sh2add:
+        return (a << 2) + b;
+    case rv_insn_sh3add:
+        return (a << 3) + b;
+#endif
     case rv_insn_sub:
         C_CASE(csub)
         return a - b;
@@ -291,6 +309,9 @@ static void check_register_ops(riscv_t *rv)
         rv_insn_srli,      rv_insn_srai,      rv_insn_add,    rv_insn_sub,
         rv_insn_xor,       rv_insn_or,        rv_insn_and,    rv_insn_slt,
         rv_insn_sltu,      rv_insn_sll,       rv_insn_srl,    rv_insn_sra,
+#if RV32_HAS(Zba)
+        rv_insn_sh1add,    rv_insn_sh2add,    rv_insn_sh3add,
+#endif
 #if RV32_HAS(EXT_M)
         rv_insn_mul,       rv_insn_mulh,      rv_insn_mulhsu, rv_insn_mulhu,
 #endif
@@ -339,6 +360,45 @@ static void check_register_ops(riscv_t *rv)
     assert(rv->X[10] == 0x12346000);
     assert(checked > 500);
 }
+
+#if RV32_HAS(Zba)
+static void check_zba_aliases(riscv_t *rv)
+{
+    static const uint32_t values[] = {
+        0, 1, UINT32_MAX, 0x80000000, 0x40000000, 0x20000001, 0x12345678};
+    static const unsigned ops[] = {rv_insn_sh1add, rv_insn_sh2add,
+                                   rv_insn_sh3add};
+    /* rd, rs1, rs2: distinct, either alias, shared sources, all shared, x0. */
+    static const unsigned regs[][3] = {{10, 11, 12}, {11, 11, 12}, {12, 11, 12},
+                                       {10, 11, 11}, {11, 11, 11}, {0, 11, 12},
+                                       {10, 0, 12},  {10, 11, 0},  {10, 0, 0}};
+    /* A module depends only on its instructions: translate each form once. */
+    for (unsigned o = 0; o < ARRAY_SIZE(ops); o++)
+        for (unsigned r = 0; r < ARRAY_SIZE(regs); r++) {
+            rv_insn_t ir = {.opcode = ops[o],
+                            .rd = regs[r][0],
+                            .rs1 = regs[r][1],
+                            .rs2 = regs[r][2]};
+            block_t block = make_block(&ir, 1, 0x1000);
+            translate(rv, &block);
+            for (unsigned a = 0; a < ARRAY_SIZE(values); a++)
+                for (unsigned b = 0; b < ARRAY_SIZE(values); b++) {
+                    rv->X[0] = 0;
+                    rv->X[11] = values[a];
+                    rv->X[12] = values[b];
+                    const uint32_t expected =
+                        ir.rd ? reference(ir.opcode, rv->X[ir.rs1],
+                                          rv->X[ir.rs2], 0)
+                              : 0;
+                    const uint64_t before = rv->csr_cycle;
+                    jit_wasm_run(rv, &block);
+                    assert(rv->X[ir.rd] == expected && !rv->X[0]);
+                    assert(rv->csr_cycle == before + 1);
+                }
+            retire(rv, &block);
+        }
+}
+#endif
 
 /* Each conditional branch, taken and not, and the compressed jumps. */
 static void check_control_flow(riscv_t *rv)
@@ -823,6 +883,10 @@ int main(void)
     assert(rv);
     rv->jit_state = jit_state_init(4 * 1024 * 1024, 0);
     assert(rv->jit_state);
+
+#if RV32_HAS(Zba)
+    check_zba_aliases(rv);
+#endif
 
     /* Source/destination aliasing, wrapping arithmetic, signed comparisons,
      * zero-register writes, shift masking, and precise 64-bit cycle carries.

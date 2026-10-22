@@ -173,6 +173,8 @@ GUEST_ASM_FC_WORKS := $(call guest-asm-arch-works,rv32ifc)
 GUEST_ASM_C_WORKS := $(call guest-asm-arch-works,rv32ic)
 GUEST_ASM_MC_WORKS := $(call guest-asm-arch-works,rv32imc)
 GUEST_ASM_A_WORKS := $(call guest-asm-arch-works,rv32ia)
+GUEST_ASM_ZBB_WORKS := $(call guest-asm-arch-works,rv32i_zbb)
+GUEST_ASM_ZBA_WORKS := $(call guest-asm-arch-works,rv32i_zba)
 GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
@@ -188,6 +190,9 @@ ifeq ($(CONFIG_Zicsr)$(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yyy)
 ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-decode-trap
+endif
+ifeq ($(CONFIG_Zba)$(GUEST_ASM_ZBA_WORKS)$(GUEST_ASM_ZICSR_WORKS),yyy)
+SYSTEM_ASM_CHECK_TARGETS += check-system-zba
 endif
 SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles \
     check-system-trap-resume check-system-sfence-asid check-system-mmu-priv \
@@ -220,6 +225,9 @@ ifeq ($(GUEST_ASM_WORKS)$(RUN_USER_ELF),yy)
 # Block-cache replacement is exercised by every execution mode.
 GUEST_ASM_CHECK_TARGETS := check-block-eviction
 GUEST_ASM_CHECK_TARGETS += check-const-shift check-load-x0
+ifeq ($(CONFIG_Zbb)$(GUEST_ASM_ZBB_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-rotate-zero
+endif
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes check-t2c-load-x0
 ifeq ($(CONFIG_JIT)$(T1C_STATS)$(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),y1yy)
@@ -283,6 +291,10 @@ endif
 ifeq ($(CONFIG_JIT),y)
 ifeq ($(CONFIG_EXT_F)$(CONFIG_EXT_C)$(GUEST_ASM_FC_WORKS),yyy)
 GUEST_ASM_CHECK_TARGETS += check-jit-cflw
+endif
+ifeq ($(CONFIG_Zba)$(GUEST_ASM_ZBA_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-zba check-jit-spill-loop-zba \
+	check-jit-spill-loop-region-zba
 endif
 GUEST_ASM_CHECK_TARGETS += check-jit-alu-alias check-jit-indirect-targets
 GUEST_ASM_CHECK_TARGETS += check-jit-memory-address check-jit-compare \
@@ -355,6 +367,12 @@ endif
 # extra assembler flags in $(4).
 guest-asm-build = $(CROSS_COMPILE)gcc -march=$(2) -mabi=ilp32 -nostdlib \
 	-static -fno-pie -no-pie -Wl,-e,_start $(4) -o $(OUT)/$(1)$(3) tests/$(1).S
+# The same, as a flat kernel linked at 0 and loaded raw from $(OUT)/$(1)$(3).bin.
+system-asm-build = $(call guest-asm-build,$(1),$(2),$(3),$(4) \
+	-Xlinker -Ttext=0 -Xlinker --build-id=none) && \
+	$(CROSS_COMPILE)objcopy -O binary $(OUT)/$(1)$(3) $(OUT)/$(1)$(3).bin
+# Checkers that read T1C diagnostics must find them in a JIT stats build.
+T1C_REQUIRE_STATS = $(if $(filter y1,$(CONFIG_JIT)$(T1C_STATS)),--require-stats)
 
 define guest-asm-check-target
 .PHONY: check-$(1)$(3)
@@ -368,9 +386,7 @@ endef
 define system-asm-check-target
 .PHONY: check-$(1)$(3)
 check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
-	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3), $(4) \
-	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
-	$$(Q)$$(CROSS_COMPILE)objcopy -O binary $$(OUT)/$(1)$(3) $$(OUT)/$(1)$(3).bin
+	$$(Q)$$(call system-asm-build,$(1),$(2),$(3),$(4))
 	$$(call check-test,-k,$$(OUT)/$(1)$(3).bin,$(1)$(3),tail -n 1,$$(if $(5),$(5),$$(EXPECTED_$(1))))
 endef
 
@@ -380,6 +396,13 @@ EXPECTED_system-mmu-priv = SYSTEM MMU privilege OK
 $(eval $(call system-asm-check-target,system-mmu-priv,rv32ia_zicsr))
 EXPECTED_system-sfence-asid = SYSTEM SFENCE ASID OK
 $(eval $(call system-asm-check-target,system-sfence-asid,rv32ia_zicsr))
+.PHONY: check-system-zba
+check-system-zba: $(BIN) tests/jit-zba.S tests/test-system-zba.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call system-asm-build,jit-zba,rv32i_zba_zicsr,-system,-DSYSTEM_MODE)
+	$(Q)python3 tests/test-system-zba.py $(BIN) $(OUT)/jit-zba-system.bin \
+	    $(T1C_REQUIRE_STATS) \
+	    $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
+
 EXPECTED_system-load-x0 = SYSTEM load x0 OK
 # Diagnostics assert actual tier-2 entries and, in bare T2C mode, lazy fusion.
 .PHONY: check-system-load-x0 check-system-load-x0-bare
@@ -388,9 +411,7 @@ check-system-load-x0-bare: SYSTEM_X0_SUFFIX := -bare
 check-system-load-x0-bare: SYSTEM_X0_FLAGS := -DLOAD_X0_BARE -DLOAD_X0_ITERATIONS=2000000
 check-system-load-x0-bare: SYSTEM_X0_FUSION = $(if $(filter yy,$(CONFIG_MOP_FUSION)$(CONFIG_T2C)),--expect-fusion)
 check-system-load-x0 check-system-load-x0-bare: $(BIN) tests/system-load-x0.S tests/test-system-load-x0.py tests/jit_profile.py | $(OUT)
-	$(Q)$(call guest-asm-build,system-load-x0,rv32ia_zicsr,$(SYSTEM_X0_SUFFIX), \
-	    $(SYSTEM_X0_FLAGS) -Xlinker -Ttext=0 -Xlinker --build-id=none)
-	$(Q)$(CROSS_COMPILE)objcopy -O binary $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin
+	$(Q)$(call system-asm-build,system-load-x0,rv32ia_zicsr,$(SYSTEM_X0_SUFFIX),$(SYSTEM_X0_FLAGS))
 	$(Q)python3 tests/test-system-load-x0.py $(BIN) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin \
 	    $(SYSTEM_X0_FUSION) $(SYSTEM_X0_COUNTERS) $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
 
@@ -482,6 +503,22 @@ $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i_zicsr,-csr,-DUSE_CSR))
 
+# Zba under register pressure; diagnostics prove the loop ran compiled.
+.PHONY: check-jit-spill-loop-zba check-jit-spill-loop-region-zba
+check-jit-spill-loop-zba: SPILL_ZBA_SUFFIX := -zba
+check-jit-spill-loop-region-zba: SPILL_ZBA_SUFFIX := -region-zba
+check-jit-spill-loop-region-zba: SPILL_ZBA_FLAGS := -DREGION_BRANCH
+check-jit-spill-loop-region-zba: SPILL_ZBA_ARGS := --blocks-per-iteration 2
+check-jit-spill-loop-zba check-jit-spill-loop-region-zba: $(BIN) tests/jit-spill-loop.S tests/test-jit-spill-loop-zba.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call guest-asm-build,jit-spill-loop,rv32i_zba,$(SPILL_ZBA_SUFFIX),-DUSE_ZBA $(SPILL_ZBA_FLAGS))
+	$(Q)python3 tests/test-jit-spill-loop-zba.py $(BIN) $(OUT)/jit-spill-loop$(SPILL_ZBA_SUFFIX) \
+	    $(SPILL_ZBA_ARGS) $(T1C_REQUIRE_STATS)
+
+.PHONY: check-jit-zba
+check-jit-zba: $(BIN) tests/jit-zba.S tests/test-jit-zba.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call guest-asm-build,jit-zba,rv32i_zba)
+	$(Q)python3 tests/test-jit-zba.py $(BIN) $(OUT)/jit-zba $(CROSS_COMPILE)nm
+
 .PHONY: check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-store
 check-jit-blocker-stats-load: BLOCKER_STATS_SUFFIX = -load
 check-jit-blocker-stats-load: BLOCKER_STATS_FLAGS = -DSTATS_FUSED_HEAD=1
@@ -511,6 +548,8 @@ check-jit-loop-profile: $(BIN) tests/jit-loop-profile.S tests/test-jit-loop-prof
 	$(Q)python3 tests/test-jit-loop-profile.py $(BIN) $(OUT)/jit-loop-profile $(CROSS_COMPILE)nm
 $(eval $(call guest-asm-check-target,jit-memory-address,rv32ic,-rvc))
 
+EXPECTED_rotate-zero = Zbb rotations OK
+$(eval $(call guest-asm-check-target,rotate-zero,rv32i_zbb))
 $(eval $(call guest-asm-check-target,lrsc,rv32ia))
 .PHONY: check-amo-align
 check-amo-align: $(BIN) tests/amo-align.S | $(OUT)

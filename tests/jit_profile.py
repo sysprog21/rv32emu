@@ -1,8 +1,12 @@
-"""Read symbols and emulator profiles for native JIT regression checks."""
+"""Read symbols, profiles and diagnostics for native JIT regression checks."""
 
+import json
 import pathlib
 import re
 import subprocess
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+ZBA_OPS = {"sh1add", "sh2add", "sh3add"}
 
 
 def read_symbols(nm, guest):
@@ -25,7 +29,25 @@ def read_profile(path):
     return rows
 
 
-def t2c_threshold():
-    header = pathlib.Path(__file__).resolve().parent.parent / "src/cache.h"
-    return int(re.search(r"^#define THRESHOLD (\d+)$", header.read_text(),
+def read_define(path, name):
+    """Return the integer a repository file #defines as name."""
+    return int(re.search(rf"^#define {name} (\d+)$", (ROOT / path).read_text(),
                          re.MULTILINE).group(1))
+
+
+def t2c_threshold():
+    return read_define("src/cache.h", "THRESHOLD")
+
+
+def read_t1c_stats(stderr, required=False):
+    """Return the last T1C_STATS report, or None in a build without one."""
+    reports = [json.loads(line[len("T1C_STATS "):]) for line in stderr.splitlines()
+               if line.startswith("T1C_STATS ")]
+    if required:
+        assert len(reports) == 1, stderr
+    return reports[-1] if reports else None
+
+
+def interpreted_entries(stats):
+    """Count entries to blocks T1 could compile but the interpreter ran."""
+    return stats["blockers"].get("translatable_interpreted", {}).get("entries", 0)

@@ -1718,11 +1718,20 @@ T2C_OP(cfsw, { __UNREACHABLE; })
 #endif
 
 #if RV32_HAS(Zba)
-T2C_OP(sh1add, { __UNREACHABLE; })
-
-T2C_OP(sh2add, { __UNREACHABLE; })
-
-T2C_OP(sh3add, { __UNREACHABLE; })
+#define T2C_SHIFT_ADD(inst, shift)                                          \
+    T2C_OP(inst, {                                                          \
+        T2C_LLVM_GEN_LOAD_VMREG(rs1, 32,                                    \
+                                t2c_gen_rs1_addr(start, builder, ir));      \
+        T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,                                    \
+                                t2c_gen_rs2_addr(start, builder, ir));      \
+        LLVMValueRef shifted = T2C_LLVM_GEN_ALU32_IMM(Shl, val_rs1, shift); \
+        LLVMValueRef res = LLVMBuildAdd(*builder, shifted, val_rs2, #inst); \
+        LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir)); \
+    })
+T2C_SHIFT_ADD(sh1add, 1)
+T2C_SHIFT_ADD(sh2add, 2)
+T2C_SHIFT_ADD(sh3add, 3)
+#undef T2C_SHIFT_ADD
 #endif
 
 #if RV32_HAS(Zbb)

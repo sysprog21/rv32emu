@@ -21,6 +21,9 @@ static struct block *find_block(uint32_t pc);
 #define WASM_FIND_BLOCK(rv, pc) ((void) (rv), (block_t *) find_block(pc))
 #include "jit_wasm.c"
 
+/* This fixture supplies detached implementations, without interpreter state. */
+void rv_begin_wasm_helper(void) {}
+
 static block_t *known_block;
 static struct block *find_block(uint32_t pc)
 {
@@ -40,6 +43,9 @@ void clear_cache_hot(const struct cache *cache, clear_func_t clear)
 
 static int helper_calls;
 static bool helper_exit;
+#if RV32_HAS(SYSTEM)
+static unsigned helper_retire;
+#endif
 static bool memory_helper(riscv_t *rv,
                           const rv_insn_t *ir,
                           uint64_t cycle,
@@ -51,6 +57,12 @@ static bool memory_helper(riscv_t *rv,
     rv->csr_cycle = cycle + 1;
     rv->PC = helper_exit ? 0x9000 : pc + 4;
     helper_calls++;
+#if RV32_HAS(SYSTEM)
+    if (helper_retire == 1)
+        jit_flush(rv);
+    else if (helper_retire == 2)
+        jit_retire_all(rv->jit_state);
+#endif
     return true;
 }
 
@@ -1006,6 +1018,21 @@ int main(void)
     run(rv, memory, 3);
     assert(helper_calls == 2 && rv->X[7] == 123 && rv->PC == 0x9000);
     assert(rv->csr_cycle == 2);
+
+#if RV32_HAS(SYSTEM)
+    /* Retirement may free this module's IR arena inside its own helper. The
+     * completed load stays visible, but the stale ADDI must not execute.
+     */
+    helper_exit = false;
+    for (helper_retire = 1; helper_retire <= 2; helper_retire++) {
+        rv->X[7] = 123;
+        rv->csr_cycle = 0;
+        run(rv, memory, 3);
+        assert(rv->X[6] == 43 && rv->X[7] == 123);
+        assert(rv->PC == 0x1008 && rv->csr_cycle == 2);
+    }
+    helper_retire = 0;
+#endif
 
 
     check_register_ops(rv);

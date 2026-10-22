@@ -957,11 +957,13 @@ enum {
 #define RVOP_NEXT_IR(ir) ((ir)->next)
 #define RVOP_NEXT_IMPL(ir) ((ir)->next->impl)
 #if RV32_HAS(GDBSTUB)
-#define RVOP_NO_NEXT(ir) \
-    (!ir->next | rv->debug_mode IIF(RV32_HAS(SYSTEM))(| (rv->trap_cnt != 0), ))
+#define RVOP_NO_NEXT(ir)                               \
+    (!ir->next | rv->debug_mode IIF(RV32_HAS(SYSTEM))( \
+                     | (rv->trap_cnt != 0) | block_interrupted, ))
 #else
-#define RVOP_NO_NEXT(ir) \
-    (!ir->next IIF(RV32_HAS(SYSTEM))(| (rv->trap_cnt != 0), ))
+#define RVOP_NO_NEXT(ir)              \
+    (!ir->next IIF(RV32_HAS(SYSTEM))( \
+        | (rv->trap_cnt != 0) | block_interrupted, ))
 #endif
 #endif
 
@@ -1011,10 +1013,17 @@ void rv_reset_dispatcher_state(void)
 }
 #endif
 
-/* Declared in em_runtime.h behind the same guard, and only reached from the
- * Emscripten main-loop teardown below.
+/* Wasm helpers execute detached instructions outside rv_step. Start a fresh
+ * interruption scope without clearing a marker between an AMO's accesses.
  */
 #if defined(__EMSCRIPTEN__)
+void rv_begin_wasm_helper(void)
+{
+#if RV32_HAS(SYSTEM)
+    block_interrupted = false;
+#endif
+}
+
 void reset_rv_run_state(void)
 {
     prev = NULL;
@@ -1227,7 +1236,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
                     if (taken) {                                          \
                         IIF(RV32_HAS(SYSTEM))                             \
                         (                                                 \
-                            if (!rv->trap_cnt) {                          \
+                            if (!rv->trap_cnt && !block_interrupted) {    \
                                 RVOP_CHAIN_TAIL(rv, taken, cycle, PC);    \
                             },                                            \
                             {                                             \
@@ -1504,6 +1513,10 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
         check_tohost_write(rv, addr, value);
 #endif
         PC += 4;
+#if RV32_HAS(SYSTEM)
+        if (block_interrupted)
+            break;
+#endif
     }
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
@@ -1530,6 +1543,10 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
         if (fuse[i].rd)
             rv->X[fuse[i].rd] = value;
         PC += 4;
+#if RV32_HAS(SYSTEM)
+        if (block_interrupted)
+            break;
+#endif
     }
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
@@ -1768,6 +1785,13 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
     RV_EXC_MISALIGN_HANDLER(3, LOAD, false, 1);
     const uint32_t value = MEM_READ_W(rv, addr);
     PC += 4;
+#if RV32_HAS(SYSTEM)
+    if (block_interrupted) {
+        if (!MEM_ACCESS_FAULTED() && ir->rd)
+            rv->X[ir->rd] = value;
+        return fuse_next_or_stop(rv, ir, cycle, PC);
+    }
+#endif
     cycle++;
     /* Commit the load and the increment only if the load completed. The
      * guest handler runs inside the access, so trap_cnt is back to its

@@ -226,7 +226,8 @@
         memory_t *m = PRIV(rv)->mem;                                           \
         vm_reg[0] = ra_load(state, ir->rs1);                                   \
         emit_misalign_guard(state, rv, ir->rs1, ir->imm, size, flags, ir->pc); \
-        IIF(RV32_HAS(SYSTEM_MMIO))(                                            \
+        IIF(RV32_HAS(SYSTEM_MMIO))                                             \
+        (                                                                      \
             {                                                                  \
                 emit_load_imm_sext(state, temp_reg, ir->imm);                  \
                 emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);            \
@@ -255,7 +256,8 @@
                  * pc} first; the C handler reads them directly.               \
                  */                                                            \
                 emit_jit_mmu_handler(state, ir->rd, temp_reg, insn_type,       \
-                                     ir->pc, unretired_after(rv, ir->pc));     \
+                                     ir->pc, jit_instruction_size(ir->opcode), \
+                                     unretired_after(rv, ir->pc));             \
                 reset_reg();                                                   \
                                                                                \
                 /* Check if trap occurred - skip load if trapped */            \
@@ -319,7 +321,8 @@
         vm_reg[0] = ra_load(state, ir->rs1);                                   \
         emit_misalign_guard(state, rv, ir->rs1, ir->imm, size,                 \
                             JIT_MISALIGN_STORE | (flags), ir->pc);             \
-        IIF(RV32_HAS(SYSTEM_MMIO))(                                            \
+        IIF(RV32_HAS(SYSTEM_MMIO))                                             \
+        (                                                                      \
             {                                                                  \
                 emit_load_imm_sext(state, temp_reg, ir->imm);                  \
                 emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);            \
@@ -343,7 +346,8 @@
                  * instead of from rv->jit_mmu staging fields.                 \
                  */                                                            \
                 emit_jit_mmu_handler(state, ir->rs2, temp_reg, insn_type,      \
-                                     ir->pc, unretired_after(rv, ir->pc));     \
+                                     ir->pc, jit_instruction_size(ir->opcode), \
+                                     unretired_after(rv, ir->pc));             \
                 reset_reg();                                                   \
                                                                                \
                 /* Check if trap occurred - skip store if trapped */           \

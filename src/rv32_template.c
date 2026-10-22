@@ -342,17 +342,36 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
  * it, and continue from what that handler leaves: counters then include both
  * the instructions before the fault and those of the trap handler.
  */
+#if RV32_HAS(JIT)
+#define MEM_CODE_BEFORE() const uint64_t generation_ = jit_code_generation(rv)
+#define MEM_CODE_AFTER()                            \
+    do {                                            \
+        if (generation_ != jit_code_generation(rv)) \
+            block_interrupted = true;               \
+    } while (0)
+#else
+#define MEM_CODE_BEFORE() ((void) 0)
+#define MEM_CODE_AFTER()                           \
+    do {                                           \
+        if (need_clear_block_map && !rv->trap_cnt) \
+            block_interrupted = true;              \
+    } while (0)
+#endif
 #define MEM_READ_CYCLES(access)           \
     __extension__({                       \
+        MEM_CODE_BEFORE();                \
         rv->csr_cycle = cycle;            \
         const uint32_t value_ = (access); \
+        MEM_CODE_AFTER();                 \
         cycle = rv->csr_cycle;            \
         value_;                           \
     })
 #define MEM_WRITE_CYCLES(access) \
     do {                         \
+        MEM_CODE_BEFORE();       \
         rv->csr_cycle = cycle;   \
         (access);                \
+        MEM_CODE_AFTER();        \
         cycle = rv->csr_cycle;   \
     } while (0)
 #if RV32_HAS(JIT)

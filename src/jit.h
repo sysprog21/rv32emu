@@ -29,6 +29,20 @@ static inline uint32_t block_unretired_after(const block_t *block, uint32_t pc)
     return n;
 }
 
+/* Length of an original opcode; fused memory members are full-width. */
+static inline uint32_t jit_instruction_size(uint16_t opcode)
+{
+    switch (opcode) {
+#define _(inst, branch, len, translatable, regs) \
+    case rv_insn_##inst:                         \
+        return len;
+        RV_INSN_LIST
+#undef _
+    default:
+        return 4;
+    }
+}
+
 /* User mode and T1-only system mode link direct branches whether or not the
  * interpreter has taken the edge yet, and record a jump whose target is not
  * compiled so that the target's translation can patch it later.
@@ -114,6 +128,7 @@ struct pending_jump {
 struct jit_state {
 #if RV32_HAS(SYSTEM)
     uint32_t priv_mode; /* context of the blocks currently being emitted */
+    uint64_t code_generation; /* retirement while a native helper is live */
 #endif
 #if defined(__x86_64__)
     bool has_bmi2; /* detected once; never emit unsupported host instructions */
@@ -145,6 +160,17 @@ struct jit_state {
 #endif
 };
 #endif /* !__EMSCRIPTEN__ */
+
+#if RV32_HAS(SYSTEM)
+#if defined(__EMSCRIPTEN__)
+uint64_t jit_code_generation(const riscv_t *rv);
+#else
+static inline uint64_t jit_code_generation(const riscv_t *rv)
+{
+    return ((const struct jit_state *) rv->jit_state)->code_generation;
+}
+#endif
+#endif
 
 struct host_reg {
     uint8_t reg_idx : 5;   /* index to the host's register file */

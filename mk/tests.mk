@@ -195,7 +195,17 @@ SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
     check-system-interrupt-dispatch-indirect \
     check-system-interrupt-dispatch-long-handler
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
-SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction
+SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction \
+    check-system-native-retire check-system-native-retire-cold \
+    check-system-native-retire-store check-system-native-retire-mmio \
+    check-system-native-retire-fused check-system-native-retire-sfence \
+    check-system-native-retire-multi-load check-system-native-retire-multi-store \
+    check-system-native-retire-cycles check-system-native-retire-amo \
+    check-system-native-retire-inner check-system-native-retire-inner-store
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_ZICSR_WORKS),yy)
+SYSTEM_ASM_CHECK_TARGETS += check-system-native-retire-rvc \
+    check-system-native-retire-rvc-store
+endif
 endif
 else
 $(info Skipping system MMU regression: $(CROSS_COMPILE)objcopy is unavailable)
@@ -347,7 +357,7 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
-# system-asm-check-target(name, march, suffix, flags): a flat supervisor kernel
+# system-asm-check-target(name, march, suffix, flags, expected): flat kernel
 # linked at 0, loaded raw, that prints EXPECTED_<name> on success.
 define system-asm-check-target
 .PHONY: check-$(1)$(3)
@@ -355,7 +365,7 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3), $(4) \
 	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
 	$$(Q)$$(CROSS_COMPILE)objcopy -O binary $$(OUT)/$(1)$(3) $$(OUT)/$(1)$(3).bin
-	$$(call check-test,-k,$$(OUT)/$(1)$(3).bin,$(1)$(3),tail -n 1,$$(EXPECTED_$(1)))
+	$$(call check-test,-k,$$(OUT)/$(1)$(3).bin,$(1)$(3),tail -n 1,$$(if $(5),$(5),$$(EXPECTED_$(1))))
 endef
 
 EXPECTED_system-decode-trap = SYSTEM decode trap OK
@@ -377,6 +387,21 @@ $(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr,-in
 $(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr,-long-handler,-DINTERRUPT_LONG_HANDLER -DINTERRUPT_INTERVAL=1 -DINTERRUPT_COUNT=8192))
 $(eval $(call system-asm-check-target,system-trap-resume,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-jit-eviction,rv32ia_zicsr_zifencei))
+EXPECTED_system-native-retire = SYSTEM native retire OK
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-cold,-DRETIRE_WARM_ITERATIONS=1))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-store,-DRETIRE_STORE))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-mmio,-DRETIRE_STORE -DRETIRE_MMIO,ZSYSTEM native retire OK))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-fused,-DRETIRE_FUSED))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-sfence,-DRETIRE_SFENCE))
+$(eval $(call system-asm-check-target,system-native-retire,rv32iac_zicsr_zifencei,-rvc,-DRETIRE_RVC))
+$(eval $(call system-asm-check-target,system-native-retire,rv32iac_zicsr_zifencei,-rvc-store,-DRETIRE_RVC -DRETIRE_STORE))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-cycles,-DRETIRE_CYCLES))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-amo,-DRETIRE_AMO))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-inner,-DRETIRE_INNER))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-inner-store,-DRETIRE_INNER -DRETIRE_STORE))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-multi-load,-DRETIRE_MULTI_LOAD))
+$(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-multi-store,-DRETIRE_MULTI_STORE -DRETIRE_STORE))
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c

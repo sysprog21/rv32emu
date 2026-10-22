@@ -717,6 +717,23 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
+static LLVMValueRef t2c_gen_code_generation(LLVMBuilderRef *builder,
+                                            LLVMValueRef start)
+{
+    LLVMTypeRef i8 = LLVMInt8Type();
+    LLVMTypeRef ptr = LLVMPointerType(i8, 0);
+    LLVMValueRef state = LLVMBuildLoad2(
+        *builder, ptr,
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, jit_state), ptr),
+        "");
+    LLVMValueRef offset = LLVMConstInt(
+        LLVMInt32Type(), offsetof(struct jit_state, code_generation), false);
+    LLVMValueRef field = LLVMBuildGEP2(*builder, i8, state, &offset, 1, "");
+    field = LLVMBuildBitCast(*builder, field,
+                             LLVMPointerType(LLVMInt64Type(), 0), "");
+    return LLVMBuildLoad2(*builder, LLVMInt64Type(), field, "");
+}
+
 /* Call the MMU helper at io_field of rv->io, as the access of the instruction
  * at pc, passing rv and the n values in args. The helper's address is loaded
  * from rv->io at run time.
@@ -734,11 +751,14 @@ static LLVMValueRef t2c_gen_mmu_call(LLVMBuilderRef *builder,
                                      LLVMValueRef *args,
                                      unsigned n,
                                      uint32_t pc,
-                                     LLVMValueRef insn_counter)
+                                     LLVMValueRef insn_counter,
+                                     LLVMValueRef *generation,
+                                     uint32_t *refund)
 {
     T2C_LLVM_GEN_STORE_IMM32(*builder, pc,
                              t2c_gen_PC_addr(start, builder, NULL));
-    uint32_t refund = t2c_publish_trap_prefix(builder, start, insn_counter, pc);
+    *refund = t2c_publish_trap_prefix(builder, start, insn_counter, pc);
+    *generation = t2c_gen_code_generation(builder, start);
     LLVMValueRef ret =
         t2c_gen_call_io_func(start, builder, io_field, ret_type, args, n);
 
@@ -768,9 +788,30 @@ static LLVMValueRef t2c_gen_mmu_call(LLVMBuilderRef *builder,
     T2C_STORE_TIMER(*builder, start, insn_counter);
     LLVMBuildRetVoid(*builder);
     LLVMPositionBuilderAtEnd(*builder, done);
+    return ret;
+}
+
+/* The callback has completed the access and the load result is in X[]. A
+ * retired region must leave before any following instruction or tail chain.
+ */
+static void t2c_finish_mmu_call(LLVMBuilderRef *builder,
+                                LLVMValueRef start,
+                                LLVMValueRef insn_counter,
+                                LLVMValueRef generation,
+                                uint32_t refund,
+                                uint32_t next_pc)
+{
+    LLVMValueRef changed =
+        LLVMBuildICmp(*builder, LLVMIntNE, generation,
+                      t2c_gen_code_generation(builder, start), "code_retired");
+    LLVMBasicBlockRef leave = LLVMAppendBasicBlock(start, "retired_region");
+    LLVMBasicBlockRef done = LLVMAppendBasicBlock(start, "live_region");
+    t2c_gen_unlikely_br(*builder, changed, leave, done);
+    LLVMPositionBuilderAtEnd(*builder, leave);
+    t2c_gen_exit(*builder, start, next_pc, insn_counter);
+    LLVMPositionBuilderAtEnd(*builder, done);
     LLVMBuildStore(*builder, LLVMConstInt(LLVMInt64Type(), refund, false),
                    insn_counter);
-    return ret;
 }
 
 /* Load through the MMU into the register at rd_addr. The instruction may be a
@@ -784,13 +825,18 @@ static void t2c_gen_mmu_load(LLVMBuilderRef *builder,
                              bool is_signed,
                              LLVMValueRef rd_addr,
                              uint32_t pc,
+                             uint32_t size,
                              LLVMValueRef insn_counter)
 {
+    LLVMValueRef generation;
+    uint32_t refund;
     LLVMValueRef ret =
         t2c_gen_mmu_call(builder, start, io_field, LLVMIntType(bits), &vaddr, 1,
-                         pc, insn_counter);
+                         pc, insn_counter, &generation, &refund);
     ret = LLVMBuildIntCast2(*builder, ret, LLVMInt32Type(), is_signed, "");
     LLVMBuildStore(*builder, ret, rd_addr);
+    t2c_finish_mmu_call(builder, start, insn_counter, generation, refund,
+                        pc + size);
 }
 
 /* Store the low bits of the register at src_addr through the MMU. */
@@ -801,12 +847,17 @@ static void t2c_gen_mmu_store(LLVMBuilderRef *builder,
                               unsigned bits,
                               LLVMValueRef src_addr,
                               uint32_t pc,
+                              uint32_t size,
                               LLVMValueRef insn_counter)
 {
     LLVMValueRef args[] = {
         vaddr, LLVMBuildLoad2(*builder, LLVMIntType(bits), src_addr, "")};
+    LLVMValueRef generation;
+    uint32_t refund;
     t2c_gen_mmu_call(builder, start, io_field, LLVMVoidType(), args, 2, pc,
-                     insn_counter);
+                     insn_counter, &generation, &refund);
+    t2c_finish_mmu_call(builder, start, insn_counter, generation, refund,
+                        pc + size);
 }
 
 /* Merge the slow path into the inline dTLB fast path, if one was emitted. */
@@ -831,32 +882,34 @@ static void t2c_mmu_join(LLVMBuilderRef *builder, LLVMBasicBlockRef fp_end)
  *   io_field: the riscv_io_t helper (mmu_read_b ... mmu_write_w)
  *   bits: the width it transfers
  */
-#define T2C_MMU_LOAD(opcode, io_field, bits, access_size, is_signed)           \
-    static void t2c_mmu_wrapper_##opcode(                                      \
-        LLVMBuilderRef *builder, LLVMValueRef start, rv_insn_t *ir,            \
-        riscv_t *rv UNUSED, uint32_t pc, LLVMValueRef insn_counter)            \
-    {                                                                          \
-        LLVMValueRef vaddr = t2c_gen_vaddr(start, builder, ir);                \
-        LLVMBasicBlockRef fp_end =                                             \
-            T2C_MMU_FASTPATH(ir, access_size, false, is_signed);               \
-        t2c_gen_mmu_load(                                                      \
-            builder, start, vaddr, offsetof(riscv_io_t, io_field), bits,       \
-            is_signed, t2c_gen_rd_addr(start, builder, ir), pc, insn_counter); \
-        t2c_mmu_join(builder, fp_end);                                         \
+#define T2C_MMU_LOAD(mnemonic, io_field, bits, access_size, is_signed)    \
+    static void t2c_mmu_wrapper_##mnemonic(                               \
+        LLVMBuilderRef *builder, LLVMValueRef start, rv_insn_t *ir,       \
+        riscv_t *rv UNUSED, uint32_t pc, LLVMValueRef insn_counter)       \
+    {                                                                     \
+        LLVMValueRef vaddr = t2c_gen_vaddr(start, builder, ir);           \
+        LLVMBasicBlockRef fp_end =                                        \
+            T2C_MMU_FASTPATH(ir, access_size, false, is_signed);          \
+        t2c_gen_mmu_load(builder, start, vaddr,                           \
+                         offsetof(riscv_io_t, io_field), bits, is_signed, \
+                         t2c_gen_rd_addr(start, builder, ir), pc,         \
+                         jit_instruction_size(ir->opcode), insn_counter); \
+        t2c_mmu_join(builder, fp_end);                                    \
     }
 
-#define T2C_MMU_STORE(opcode, io_field, bits, access_size)               \
-    static void t2c_mmu_wrapper_##opcode(                                \
-        LLVMBuilderRef *builder, LLVMValueRef start, rv_insn_t *ir,      \
-        riscv_t *rv UNUSED, uint32_t pc, LLVMValueRef insn_counter)      \
-    {                                                                    \
-        LLVMValueRef vaddr = t2c_gen_vaddr(start, builder, ir);          \
-        LLVMBasicBlockRef fp_end =                                       \
-            T2C_MMU_FASTPATH(ir, access_size, true, false);              \
-        t2c_gen_mmu_store(                                               \
-            builder, start, vaddr, offsetof(riscv_io_t, io_field), bits, \
-            t2c_gen_rs2_addr(start, builder, ir), pc, insn_counter);     \
-        t2c_mmu_join(builder, fp_end);                                   \
+#define T2C_MMU_STORE(mnemonic, io_field, bits, access_size)               \
+    static void t2c_mmu_wrapper_##mnemonic(                                \
+        LLVMBuilderRef *builder, LLVMValueRef start, rv_insn_t *ir,        \
+        riscv_t *rv UNUSED, uint32_t pc, LLVMValueRef insn_counter)        \
+    {                                                                      \
+        LLVMValueRef vaddr = t2c_gen_vaddr(start, builder, ir);            \
+        LLVMBasicBlockRef fp_end =                                         \
+            T2C_MMU_FASTPATH(ir, access_size, true, false);                \
+        t2c_gen_mmu_store(builder, start, vaddr,                           \
+                          offsetof(riscv_io_t, io_field), bits,            \
+                          t2c_gen_rs2_addr(start, builder, ir), pc,        \
+                          jit_instruction_size(ir->opcode), insn_counter); \
+        t2c_mmu_join(builder, fp_end);                                     \
     }
 
 T2C_MMU_LOAD(lb, mmu_read_b, 8, 1, true);
@@ -879,7 +932,7 @@ static void t2c_mmu_wrapper_fuse9(LLVMBuilderRef *builder,
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
     t2c_gen_mmu_load(builder, start, LLVMConstInt(LLVMInt32Type(), addr, false),
                      offsetof(riscv_io_t, mmu_read_w), 32, false,
-                     t2c_gen_rs2_addr(start, builder, ir), pc, insn_counter);
+                     t2c_gen_rs2_addr(start, builder, ir), pc, 4, insn_counter);
 }
 
 /* fuse10 (LUI + SW) stores rs1 to the absolute address imm + imm2. */
@@ -890,10 +943,10 @@ static void t2c_mmu_wrapper_fuse10(LLVMBuilderRef *builder,
                                    LLVMValueRef insn_counter)
 {
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
-    t2c_gen_mmu_store(builder, start,
-                      LLVMConstInt(LLVMInt32Type(), addr, false),
-                      offsetof(riscv_io_t, mmu_write_w), 32,
-                      t2c_gen_rs1_addr(start, builder, ir), pc, insn_counter);
+    t2c_gen_mmu_store(
+        builder, start, LLVMConstInt(LLVMInt32Type(), addr, false),
+        offsetof(riscv_io_t, mmu_write_w), 32,
+        t2c_gen_rs1_addr(start, builder, ir), pc, 4, insn_counter);
 }
 
 /* fuse11 (LW + ADDI) loads from rs1 + imm into rd, then adds imm2 to rs1. */
@@ -908,7 +961,7 @@ static void t2c_mmu_wrapper_fuse11(LLVMBuilderRef *builder,
     t2c_gen_mmu_load(builder, start,
                      T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm),
                      offsetof(riscv_io_t, mmu_read_w), 32, false,
-                     t2c_gen_rd_addr(start, builder, ir), pc, insn_counter);
+                     t2c_gen_rd_addr(start, builder, ir), pc, 4, insn_counter);
     LLVMBuildStore(*builder, T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm2),
                    addr_rs1);
 }

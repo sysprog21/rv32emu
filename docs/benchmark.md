@@ -1405,3 +1405,141 @@ before JIT entry; the 11.0.2 runner resolves that test-environment limitation.
 Native Arm hardware timing and Arm-host T2C remain uncovered. Wasm backend
 fixtures and the full Emscripten 6.0.13 W-SYS build pass; browser Linux runtime
 coverage remains open.
+
+### System active-frame retirement and live-slot follow-up (2026-10-22)
+
+The a702155 repair checkpoint prepares system live-slot support but leaves it
+disabled. The separate follow-up enables the measured candidate, which fills
+indirect slots after a target becomes compiled, using both SATP and actual
+fetch privilege. The dispatcher-established 100-cycle deadline from 06ba78a
+still bounds every external block entry. Slot lookup only patches existing
+code; it neither compiles nor reclaims code. T2C retains its existing
+tier-promotion policy.
+
+Review exposed a compatibility prerequisite: a page-fault handler can modify
+an instruction and execute FENCE.I or SFENCE.VMA while a translated memory
+helper is still on the stack. Retiring future entries alone lets that frame
+execute the obsolete suffix. The new retirement generation makes native
+helpers complete the current access once and return at the next guest PC, with
+only the executed prefix charged. Interpreter and Wasm helpers stop between
+fused members. Atomic instructions preserve the marker across all of their
+accesses. Wasm copies helper IR and fused operands before entering a handler
+that can release the module. MMIO observes the current prefix, including the
+completed access, rather than the speculative block-end count.
+
+Validation:
+
+* Native system T1C `check tests`; system interpreter and T2C under UBSan;
+  user T1C/T2C under UBSan. Guest C regressions requiring an unavailable RV32
+  libc multilib are skipped by the existing toolchain check.
+* All 24 flat system kernels on cross-built Arm64 T1C under QEMU 11.0.2
+  AArch64 user mode. This proves generated-code execution, not native Arm
+  timing or Arm-host T2C coverage.
+* Five Wasm backend fixture configurations, including retirement during a
+  helper, and the full Emscripten 6.0.13 W-SYS build. Browser Linux runtime
+  remains unverified.
+* The new retirement fixture covers hot/cold loads, stores, one MMIO byte
+  write, post-increment and multiple-access fusions, same-SATP remapping,
+  compressed accesses, AMO and an exact cycle assertion. Interpreter, T1C and
+  T2C all read `0x000f428b` at the default cycle checkpoint.
+* A long warmup alone did not prove a tier-2 fault: GDB showed the original
+  probe could still fault in `do_lw`. Inner-loop variants re-enter the hot
+  memory loop directly. GDB then showed `mmu_read_w` / `mmu_write_w` called
+  from `t2c_block` during the invalidating handler, with 603,013 / 589,846
+  actual tier-2 entries in those diagnostic runs. Both pass under UBSan.
+* The default load, store, compressed load and inner-loop load fixtures print
+  FAIL on 06ba78a and OK after this fix. The MMIO variant requires exactly
+  `ZSYSTEM native retire OK`, catching a duplicated or missing write.
+* The diagnostic tiered UBSan binary boots Linux to login (6.8407 s in one
+  validation run; this is not a performance sample).
+
+Claude's review/refine/re-review cycle found the fused-member and AMO marker
+issues; both were fixed before the clean re-review. A separate suspected
+pre-existing T2C load-to-x0 defect is tracked in TODO 0.7. Passing this matrix
+is not a claim of complete compatibility or completion of the QEMU goal.
+
+The earlier three-pair live-slot experiment used an incomplete retirement
+prototype and is excluded from acceptance. Final timing uses the normal system
+T1C release binary, without UBSan, counters or debug symbols, and the same
+prebuilt Linux image/rootfs. The baseline is 06ba78a in a detached worktree.
+QEMU is the locally installed 11.0.2 system emulator, TCG `virt`, 512 MiB,
+default firmware, with the same kernel/rootfs and console command line. Each
+complete workload run is pinned to CPU 6. Engine order rotates between
+before/after/QEMU, QEMU/after/before, and after/before/QEMU. No builds from
+this task run during sampling; unrelated host activity is uncontrolled.
+
+Final samples, host milliseconds:
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| before | 2419, 2392, 2405 | 14876, 14612, 14945 | 4698, 4668, 4704 | 8654, 8481, 8436 | 1329, 1468, 1490 |
+| after | 2507, 2494, 2523 | 10942, 10823, 10911 | 4310, 4314, 4297 | 8998, 9144, 9125 | 1524, 1510, 1515 |
+| qemu | 2900, 2913, 2886 | 12221, 12106, 12247 | 2808, 2794, 2784 | 3983, 3769, 3746 | 690, 685, 683 |
+
+Arithmetic paired percentage changes [95% Student-t interval, df=2]; positive
+means slower:
+
+| Workload | After vs 06ba78a | After vs QEMU 11.0.2 |
+| --- | ---: | ---: |
+| boot | +4.27% [+2.69%, +5.85%] | -13.50% [-15.75%, -11.26%] |
+| dhrystone | -26.46% [-27.77%, -25.14%] | -10.66% [-11.22%, -10.09%] |
+| coremark | -8.16% [-9.51%, -6.82%] | +54.08% [+52.81%, +55.35%] |
+| fork-exec | +6.65% [+0.88%, +12.43%] | +137.37% [+112.68%, +162.06%] |
+| gzip-md5 | +6.40% [-11.45%, +24.25%] | +121.04% [+119.29%, +122.79%] |
+
+The combined candidate fails the no-regression acceptance rule: boot and
+fork/exec regress beyond their paired intervals despite clear compute wins. It
+beats QEMU on these boot and Dhrystone workloads, while CoreMark, fork/exec
+and gzip remain substantially slower. The full QEMU objective remains open.
+The independent series below separates retirement-repair cost from live-slot
+lookup cost. Report: `build/system-bench-live-final.json`.
+
+SHA-256:
+
+* before: `aef5d58a9efa4b036c7aad080eb9fb177af5ca8fc2cdd5bca7397a5c6764ae5c`
+* after: `9971a5b9ed8ebb10ac0f7a6368fdcf4c9f4c87603d0d0a48fbd90d7c6daf5467`
+* QEMU system executable:
+  `3e49196e45e0815e65f90fb63e206b5c80c0c2ec01fb747912b7cc9e373b3853`
+
+#### Isolating live-slot lookup from the retirement repair
+
+The a702155 repair checkpoint leaves system live slots disabled. It includes
+all retirement-generation, memory-completion and interpreter/Wasm stop
+changes. The second series compares this compatible baseline with the same
+release candidate above. The sole source difference in the isolation worktree
+is `JIT_INDIRECT_LOOKUP` excluding SYSTEM. Both use normal system T1C
+settings. There are three interleaved pairs, before/after, after/before,
+before/after, all pinned to CPU 6 with no builds from this task during
+sampling. Here before means repair only, and after means repair + live slots.
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| repair only | 2482, 2510, 2532 | 14867, 14820, 14893 | 4730, 4711, 4701 | 8757, 8934, 9203 | 1531, 1618, 1508 |
+| repair + live slots | 2448, 2480, 2491 | 10664, 10774, 10887 | 4264, 4303, 4291 | 8748, 9141, 8940 | 1472, 1651, 1382 |
+
+Arithmetic paired percentage changes [95% Student-t interval, df=2]; positive
+means slower:
+
+* boot: -1.39% [-1.92%, -0.87%].
+* dhrystone: -27.49% [-29.24%, -25.74%].
+* coremark: -9.08% [-10.74%, -7.41%].
+* fork-exec: -0.21% [-6.65%, +6.22%].
+* gzip-md5: -3.39% [-16.34%, +9.56%].
+
+Live-slot learning passes the performance gate against the compatible repair
+baseline for Dhrystone and CoreMark: both exceed a 2% reduction with intervals
+excluding zero, and no other measured row regresses beyond its interval. The
+1.39% boot reduction is below the 2% improvement threshold. Fork/exec and gzip
+intervals include zero; they establish no improvement. This does not undo the
+combined candidate's boot/fork regression against 06ba78a, nor prove that the
+repair alone causes all of that difference: host activity and the sampling
+periods also differ. Keep both series visible and pursue the remaining costs.
+Full QEMU performance and compatibility acceptance remains open, including
+user-mode performance, the other system workloads, the x0 finding and untested
+host/runtime combinations.
+
+Report: `build/system-bench-live-isolation.json`. Repair-only binary SHA-256:
+`672509fc21966f6a9e1b5b18fb5d4b799cf547b83eb64421946f9c157dea5db7`.
+
+Live-slot candidate SHA-256 (the same `after` binary in both series):
+`9971a5b9ed8ebb10ac0f7a6368fdcf4c9f4c87603d0d0a48fbd90d7c6daf5467`.

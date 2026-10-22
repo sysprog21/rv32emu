@@ -25,6 +25,7 @@
 
 #include "cache.h"
 #include "decode.h"
+#include "em_runtime.h"
 #include "jit.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -285,6 +286,7 @@ struct jit_state {
      * so that a page flush visits only the maps that may match.
      */
     uint16_t pages[1 << WASM_PAGE_BITS];
+    uint64_t code_generation;
 #endif
     uint32_t size, offset; /* code budget and live body bytes */
     int n_blocks;          /* maps ever used since the last reset */
@@ -294,6 +296,13 @@ struct jit_state {
     bool installed;              /* some module was ever installed */
     struct wasm_profile profile; /* updated only under JIT_WASM_PROFILE */
 };
+
+#if RV32_HAS(SYSTEM)
+uint64_t jit_code_generation(const riscv_t *rv)
+{
+    return ((const struct jit_state *) rv->jit_state)->code_generation;
+}
+#endif
 
 /* A helper must not follow the interpreter's intra- or inter-block chains. Its
  * caller materializes registers and cycles before making this call. If the
@@ -317,7 +326,11 @@ static int wasm_step(riscv_t *rv, const rv_insn_t *original)
         memcpy(fuse, ir.fuse, FUSE_SLOT_SIZE);
         ir.fuse = fuse;
     }
+    rv_begin_wasm_helper();
     rv->PC = ir.pc;
+#if RV32_HAS(SYSTEM)
+    const uint64_t generation = jit_code_generation(rv);
+#endif
     const bool ok = ir.impl(rv, &ir, rv->csr_cycle, ir.pc) && !rv->next_insn;
 
     /* Generated tails chain only below the cycle limit; a halt must end the
@@ -325,7 +338,11 @@ static int wasm_step(riscv_t *rv, const rv_insn_t *original)
      */
     if (rv->halt)
         rv->wasm_jit_limit = 0;
+#if RV32_HAS(SYSTEM)
+    return ok && generation == jit_code_generation(rv);
+#else
     return ok;
+#endif
 }
 
 struct wasm_emitter {
@@ -1151,6 +1168,9 @@ static void wasm_retire(struct jit_state *state, struct wasm_map *map)
     if (state->lookup[slot] == (uintptr_t) map)
         state->lookup[slot] = 0;
     if (map->entry) {
+#if RV32_HAS(SYSTEM)
+        state->code_generation++;
+#endif
         wasm_remove(map->entry);
         map->entry = 0;
         free(map->arena);
@@ -1187,6 +1207,9 @@ void jit_wasm_retire_block(riscv_t *rv, block_t *block)
 
 static void wasm_reset(struct jit_state *state)
 {
+#if RV32_HAS(SYSTEM)
+    state->code_generation++;
+#endif
     for (int i = 0; i < state->n_blocks; i++) {
         if (state->maps[i].entry)
             wasm_remove(state->maps[i].entry);
@@ -1741,6 +1764,7 @@ void jit_flush(riscv_t *rv)
 
 void jit_retire_space(struct jit_state *state, uint32_t satp)
 {
+    state->code_generation++;
     for (int i = 0; i < state->n_blocks; i++) {
         struct wasm_map *map = &state->maps[i];
         if (map->entry && map->satp == satp)
@@ -1750,6 +1774,7 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
 
 void jit_retire_all(struct jit_state *state)
 {
+    state->code_generation++;
     for (uint32_t i = 0; i < ARRAY_SIZE(state->pages); i++) {
         while (state->pages[i])
             wasm_retire(state, &state->maps[state->pages[i] - 1]);

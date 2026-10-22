@@ -699,6 +699,7 @@ FORCE_INLINE struct offset_map *offset_map_find(struct jit_state *state,
 #if RV32_HAS(SYSTEM)
 void jit_retire_space(struct jit_state *state, uint32_t satp)
 {
+    state->code_generation++;
     T1C_COUNT(retire_calls, 1);
 #if JIT_LINK_ALL_EDGES
     /* Retired code must never be relinked, so drop every pending edge. */
@@ -722,6 +723,7 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
 
 void jit_retire_all(struct jit_state *state)
 {
+    state->code_generation++;
     T1C_COUNT(retire_calls, 1);
 #if JIT_LINK_ALL_EDGES
     T1C_COUNT(retire_pending_slots, state->n_pending);
@@ -2406,8 +2408,14 @@ static uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
     __UNREACHABLE;
 }
 
+static void jit_mmio_write_wrapper(riscv_t *rv, uint32_t addr, uint32_t val)
+{
+    MMIO_WRITE();
+}
+
 /* jit_mmu_handler()'s type argument carries the refund in its upper half. */
-#define MMU_TYPE_MASK UINT32_C(0xffff)
+#define MMU_TYPE_MASK UINT32_C(0x3fff)
+#define MMU_TYPE_RVC UINT32_C(0x4000)
 
 /* Slow-path entry from the JIT.
  *
@@ -2428,6 +2436,7 @@ static void jit_mmu_handler(riscv_t *rv,
      * never retire. Refund them before the guest handler can read a counter.
      */
     const uint32_t refund = type >> 16;
+    const uint32_t insn_size = type & MMU_TYPE_RVC ? 2 : 4;
     type &= MMU_TYPE_MASK;
 
     uint32_t addr;
@@ -2463,6 +2472,8 @@ static void jit_mmu_handler(riscv_t *rv,
      */
     rv->PC = pc;
 
+    struct jit_state *state = rv->jit_state;
+    const uint64_t generation = state->code_generation;
     rv->csr_cycle -= refund;
     if (type == rv_insn_lb || type == rv_insn_lh || type == rv_insn_lbu ||
         type == rv_insn_lhu || type == rv_insn_lw)
@@ -2481,57 +2492,59 @@ static void jit_mmu_handler(riscv_t *rv,
         rv->jit_mmu.is_mmio = 1;
         return;
     }
-    rv->csr_cycle += refund;
-
-    /* Only treat as RAM if entire access range [addr, addr+size) is within
-     * valid guest memory bounds. This prevents buffer overflow on multi-byte
-     * accesses near the memory boundary.
-     */
-    if (GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, access_size)) {
+    const bool ram = GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, access_size);
+    if (ram && generation == state->code_generation) {
+        rv->csr_cycle += refund;
         rv->jit_mmu.is_mmio = 0;
         rv->jit_mmu.paddr = addr;
         return;
     }
 
-    uint32_t val;
-    rv->jit_mmu.is_mmio = 1;
-
-    switch (type) {
-    case rv_insn_sb:
-        val = rv->X[vreg_idx] & 0xff;
-        MMIO_WRITE();
-        break;
-    case rv_insn_sh:
-        val = rv->X[vreg_idx] & 0xffff;
-        MMIO_WRITE();
-        break;
-    case rv_insn_sw:
-        val = rv->X[vreg_idx];
-        MMIO_WRITE();
-        break;
-    /* A load into x0 still reads the device, but x0 stays zero. */
-    case rv_insn_lb:
-        val = (int8_t) jit_mmio_read_wrapper(rv, addr);
-        break;
-    case rv_insn_lh:
-        val = (int16_t) jit_mmio_read_wrapper(rv, addr);
-        break;
-    case rv_insn_lw:
+    /* Complete the access once, even if its handler fenced the native frame.
+     * MMIO stores use a wrapper because MMIO_WRITE returns from its caller.
+     */
+    const bool write =
+        type == rv_insn_sb || type == rv_insn_sh || type == rv_insn_sw;
+    uint32_t val = write ? rv->X[vreg_idx] : 0;
+    if (access_size < 4)
+        val &= (UINT32_C(1) << (access_size * 8)) - 1;
+    if (ram) {
+        uint8_t *host = PRIV(rv)->mem->mem_base + addr;
+        if (write)
+            memcpy(host, &val, access_size);
+        else
+            memcpy(&val, host, access_size);
+    } else if (write) {
+        jit_mmio_write_wrapper(rv, addr, val);
+    } else {
         val = jit_mmio_read_wrapper(rv, addr);
-        break;
-    case rv_insn_lbu:
-        val = (uint8_t) jit_mmio_read_wrapper(rv, addr);
-        break;
-    case rv_insn_lhu:
-        val = (uint16_t) jit_mmio_read_wrapper(rv, addr);
-        break;
-    default:
-        assert(NULL);
-        __UNREACHABLE;
     }
-    if (type != rv_insn_sb && type != rv_insn_sh && type != rv_insn_sw &&
-        vreg_idx)
+    if (!write && vreg_idx) {
+        switch (type) {
+        case rv_insn_lb:
+            val = (int8_t) val;
+            break;
+        case rv_insn_lh:
+            val = (int16_t) val;
+            break;
+        case rv_insn_lbu:
+            val = (uint8_t) val;
+            break;
+        case rv_insn_lhu:
+            val = (uint16_t) val;
+            break;
+        default:
+            break;
+        }
         rv->X[vreg_idx] = val;
+    }
+    rv->jit_mmu.is_mmio = 1;
+    if (generation != state->code_generation) {
+        rv->PC = pc + insn_size;
+        rv->jit_mmu.abort = 1;
+    } else {
+        rv->csr_cycle += refund;
+    }
 }
 
 #if RV32_HAS(SYSTEM_MMIO)
@@ -2985,12 +2998,15 @@ static void emit_jit_mmu_handler(struct jit_state *state,
                                  int vaddr_reg,
                                  uint32_t insn_type,
                                  uint32_t insn_pc,
+                                 uint32_t insn_size,
                                  uint32_t refund)
 {
     assert(vreg_idx < 32);
     /* The handler refunds unretired instructions if the access faults. */
     assert(insn_type <= MMU_TYPE_MASK && refund <= UINT16_MAX);
     insn_type |= refund << 16;
+    if (insn_size == 2)
+        insn_type |= MMU_TYPE_RVC;
 
     emit_cycle_move(state, false);
 #if defined(__x86_64__) && defined(_WIN32)
@@ -3815,17 +3831,11 @@ static void patch_jump(struct jit_state *state,
 #endif
 }
 
-/* User-mode T1 leaves an indirect jump through guard slots, each comparing the
- * target with one PC and branching to its translation. Translation fills them
- * with the targets the interpreter profiled; a slot left empty is filled by
- * jit_indirect_target() with the first compiled target that misses the others.
- * A block compiled before its indirect targets were profiled, or whose callee
- * returns to sites compiled later, thus still chains natively. Direct chains
- * skip the dispatcher already; system mode keeps returning there, where
- * interrupts and address-space changes are checked, and keeps profiled guards
- * only.
+/* T1 indirect guards learn compiled targets that appear after translation.
+ * System sites and their targets share SATP and fetch privilege. Every native
+ * target checks the dispatch deadline before executing its first instruction.
  */
-#define JIT_INDIRECT_LOOKUP (JIT_INDIRECT_TARGETS && !RV32_HAS(SYSTEM))
+#define JIT_INDIRECT_LOOKUP JIT_INDIRECT_TARGETS
 
 #if JIT_INDIRECT_LOOKUP
 /* A block ends in at most one indirect jump, whose site shares its index. */
@@ -3852,7 +3862,8 @@ static void encode_slot_pc(uint32_t mov[2], uint32_t pc)
 static void emit_indirect_slot(struct jit_state *state,
                                struct indirect_site *site,
                                int slot,
-                               uint32_t pc)
+                               uint32_t pc,
+                               uint32_t satp)
 {
     const bool empty = pc == EMPTY_SLOT_PC;
 #if defined(__x86_64__)
@@ -3866,7 +3877,7 @@ static void emit_indirect_slot(struct jit_state *state,
     if (empty)
         emit4(state, 0);
     else
-        emit_jump_target_address(state, pc, 0);
+        emit_jump_target_address(state, pc, satp);
 #elif defined(__aarch64__)
     /* movz/movk R10, pc; cmp temp, R10; b.ne +8; b target, at fixed length so
      * that a slot can be filled in place.
@@ -3882,7 +3893,7 @@ static void emit_indirect_slot(struct jit_state *state,
     if (empty)
         emit_a64(state, UBR_B | 1); /* falls through until patched */
     else
-        emit_jmp(state, pc, 0);
+        emit_jmp(state, pc, satp);
 #endif
 }
 
@@ -3923,7 +3934,18 @@ static void indirect_site_fill(struct jit_state *state,
 static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
 {
     struct jit_state *state = rv->jit_state;
+#if RV32_HAS(SYSTEM)
+    if (site >= (uint32_t) state->n_blocks)
+        return (uintptr_t) state->buf + state->exit_loc;
+    const struct offset_map *source = &state->offset_map[site];
+    if (source->retired || source->satp != rv->csr_satp ||
+        source->priv_mode != rv->priv_mode)
+        return (uintptr_t) state->buf + state->exit_loc;
+    const struct offset_map *target =
+        offset_map_find(state, rv->PC, source->satp, source->priv_mode);
+#else
     const struct offset_map *target = offset_map_find(state, rv->PC, 0, 0);
+#endif
     if (!target)
         return (uintptr_t) state->buf + state->exit_loc;
     indirect_site_fill(state, &state->sites[site], rv->PC, target->offset);
@@ -3944,9 +3966,12 @@ static void emit_indirect_jump(struct jit_state *state,
     const uint32_t site_index = state->n_blocks - 1;
     struct indirect_site *site = &state->sites[site_index];
     site->n_used = count;
-    for (int i = 0; i < IN_JUMP_TARGETS; i++)
+    for (int i = 0; i < IN_JUMP_TARGETS; i++) {
+        const uint32_t satp = BLOCK_SATP(cur_block);
         emit_indirect_slot(state, site, i,
-                           i < count ? bt->PC[targets[i]] : EMPTY_SLOT_PC);
+                           i < count ? bt->PC[targets[i]] : EMPTY_SLOT_PC,
+                           satp);
+    }
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_load_imm(state, parameter_reg[1], site_index);
     emit_call(state, (intptr_t) &jit_indirect_target);
@@ -4302,7 +4327,7 @@ static void do_fuse9(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
      */
     emit_load_imm(state, temp_reg, addr);
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rs2, temp_reg, rv_insn_lw, ir->pc + 4,
+    emit_jit_mmu_handler(state, ir->rs2, temp_reg, rv_insn_lw, ir->pc + 4, 4,
                          unretired_after(rv, ir->pc + 4));
     reset_reg();
 
@@ -4377,7 +4402,7 @@ static void do_fuse10(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     /* Constant vaddr -> temp_reg, passed as call arg (see do_fuse9). */
     emit_load_imm(state, temp_reg, addr);
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rs1, temp_reg, rv_insn_sw, ir->pc + 4,
+    emit_jit_mmu_handler(state, ir->rs1, temp_reg, rv_insn_sw, ir->pc + 4, 4,
                          unretired_after(rv, ir->pc + 4));
     reset_reg();
 
@@ -4445,7 +4470,7 @@ static void do_fuse11(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     emit_alu32(state, ALU_OP_ADD, vm_reg[0], temp_reg);
 
     store_back(state);
-    emit_jit_mmu_handler(state, ir->rd, temp_reg, rv_insn_lw, ir->pc,
+    emit_jit_mmu_handler(state, ir->rd, temp_reg, rv_insn_lw, ir->pc, 4,
                          unretired_after(rv, ir->pc));
     reset_reg();
 
@@ -4595,6 +4620,9 @@ static void code_cache_reset(struct jit_state *state,
                              riscv_t *rv,
                              bool blocks_invalidated)
 {
+#if RV32_HAS(SYSTEM)
+    state->code_generation++;
+#endif
     should_flush = false;
     state->offset = state->org_size;
     offset_map_reset(state);
@@ -5966,6 +5994,7 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
     state->offset = 0;
 #if RV32_HAS(SYSTEM)
     state->priv_mode = UINT32_MAX;
+    state->code_generation = 0;
 #endif
     state->n_jumps = 0;
     state->size = size;

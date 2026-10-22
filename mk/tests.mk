@@ -191,11 +191,9 @@ SYSTEM_ASM_CHECK_TARGETS += check-system-decode-trap
 endif
 SYSTEM_ASM_CHECK_TARGETS += check-system-mmu-cache check-system-trap-cycles \
     check-system-trap-resume check-system-sfence-asid check-system-mmu-priv
-# Interrupts are polled between dispatches, and the interpreter chains a loop
-# without returning to the dispatcher, so only JIT builds deliver them there.
-ifeq ($(CONFIG_JIT),y)
-SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch
-endif
+SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
+    check-system-interrupt-dispatch-indirect \
+    check-system-interrupt-dispatch-long-handler
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction
 endif
@@ -349,15 +347,15 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
-# system-asm-check-target(name, march): a flat supervisor kernel linked at 0,
-# loaded as a raw kernel image, that prints EXPECTED_<name> on success.
+# system-asm-check-target(name, march, suffix, flags): a flat supervisor kernel
+# linked at 0, loaded raw, that prints EXPECTED_<name> on success.
 define system-asm-check-target
-.PHONY: check-$(1)
-check-$(1): $$(BIN) tests/$(1).S | $$(OUT)
-	$$(Q)$$(call guest-asm-build,$(1),$(2),, \
+.PHONY: check-$(1)$(3)
+check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
+	$$(Q)$$(call guest-asm-build,$(1),$(2),$(3), $(4) \
 	    -Xlinker -Ttext=0 -Xlinker --build-id=none)
-	$$(Q)$$(CROSS_COMPILE)objcopy -O binary $$(OUT)/$(1) $$(OUT)/$(1).bin
-	$$(call check-test,-k,$$(OUT)/$(1).bin,$(1),tail -n 1,$$(EXPECTED_$(1)))
+	$$(Q)$$(CROSS_COMPILE)objcopy -O binary $$(OUT)/$(1)$(3) $$(OUT)/$(1)$(3).bin
+	$$(call check-test,-k,$$(OUT)/$(1)$(3).bin,$(1)$(3),tail -n 1,$$(EXPECTED_$(1)))
 endef
 
 EXPECTED_system-decode-trap = SYSTEM decode trap OK
@@ -375,6 +373,8 @@ EXPECTED_system-jit-eviction = SYSTEM JIT eviction OK
 $(eval $(call system-asm-check-target,system-mmu-cache,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-trap-cycles,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr,-indirect,-DINTERRUPT_INDIRECT))
+$(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr,-long-handler,-DINTERRUPT_LONG_HANDLER -DINTERRUPT_INTERVAL=1 -DINTERRUPT_COUNT=8192))
 $(eval $(call system-asm-check-target,system-trap-resume,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-jit-eviction,rv32ia_zicsr_zifencei))
 

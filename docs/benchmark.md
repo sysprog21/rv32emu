@@ -1333,3 +1333,75 @@ SHA-256:
 
 * before: `f1a9dd1d11fdbb30bbdde61c872cbd72f172d689cefa8d1b1dc56c6cb6b8ee64`
 * after: `db0f479dac1e92e8e79e000e9ea6e161b20a78d79125f012b3a4b9265eb399e2`
+
+### System chain deadline correctness checkpoint
+
+The existing interrupt fixture forced a dispatcher return by reading
+`sscratch`. Removing that read made both T1C and the UBSan interpreter print
+FAIL. The fix bounds interpreter chains and native/T2C block entries using
+the existing system dispatch cycle budget. The checks occur before charging
+the next block, preserving its first unexecuted PC and the executed cycle
+prefix. A handler consuming the whole slice grants the resumed guest one
+block before yielding, preserving forward progress across short timer re-arms.
+Direct, call/return and long-handler test variants replace the forced escape.
+
+Extended diagnostic T2C runs with 2,048 interrupts passed under UBSan: direct
+chains reached 79,398 tier-2 entries; call/return chains reached 410,464. Both
+recorded exactly 2,048 supervisor timer interrupts and 2,048 nested load
+misalignment exceptions, and checked live registers plus completed-loop
+instruction effects. These counters substantiate tier-2 coverage and are not
+wall-time samples.
+
+The initial x86 T1C guard prototype was measured on CPU 6 with the same system
+workload, three interleaved pairs (before/after, after/before, before/after).
+Before is the 837a35d binary; after is the initial deadline implementation
+before the long-handler progress refinement and Arm64 load fix. Some builds
+and validation also ran on other CPUs during this diagnostic series. Treat
+these as preliminary cost measurements, not a performance acceptance series.
+The old unbounded baseline fails the no-poll interrupt regression.
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+|---|---|---|---|---|---|
+| before | 2364, 2386, 2366 | 12464, 12687, 12482 | 3454, 3456, 3560 | 8418, 8378, 8370 | 1266, 1133, 1230 |
+| after | 2503, 2754, 2490 | 15543, 14698, 14567 | 4632, 4659, 4670 | 8527, 8603, 8630 | 1503, 1419, 1332 |
+
+Arithmetic paired percentage changes, mean [95% Student-t interval, df=2];
+positive means slower:
+
+* boot: +8.85% [-5.32%, +23.02%].
+* dhrystone: +19.09% [+6.96%, +31.22%].
+* coremark: +33.36% [+28.58%, +38.15%].
+* fork-exec: +2.36% [+0.01%, +4.72%].
+* gzip-md5: +17.42% [-3.82%, +38.66%].
+
+This guard is a correctness cost, not a speed improvement. The 100-cycle
+system slice now bounds native execution that formerly ran for much longer,
+so it also increases scheduler/device refresh frequency. Do not claim that
+the QEMU objective or TODO 0.1 performance acceptance is satisfied. System
+live indirect-target patching and measured polling cadence remain follow-up
+work; stronger performance claims require an isolated final-build repeat.
+Raw report: `build/system-bench-chain-deadline.json`.
+
+SHA-256:
+
+* before: `f1a9dd1d11fdbb30bbdde61c872cbd72f172d689cefa8d1b1dc56c6cb6b8ee64`
+* after: `81b2869d68be9925e98b4af7e51a6908c2cc8e0bd2020aa71d027c108cfdc1d9`
+
+The long-handler progress refinement has a separate negative control: the
+8,192-interrupt, interval-one fixture prints FAIL on the initial guarded T1C
+binary without the grant, and OK after the fix. Its handler watchdog reports
+failure if resumed code starves, rather than hanging the test indefinitely.
+A longer 32,768-target run passed UBSan with 21,192 actual T2C entries,
+32,801 timer exceptions and 32,801 nested exceptions (the stop condition is
+checked at the end of a completed outer pass, so it can exceed the target).
+
+Arm64 validation uses a complete cross-built T1C executable, not just an
+object: all ten flat system assembly checks passed under a locally built
+QEMU 11.0.2 AArch64 user runner, including direct/indirect/long-handler
+interrupts, precise trap cycles, SFENCE, MMU privilege and eviction. The hot
+8,192-interrupt long-handler fixture also passes there. The installed QEMU
+8.2.2 user runner crashes internally in demand-paged RAM initialization
+before JIT entry; the 11.0.2 runner resolves that test-environment limitation.
+Native Arm hardware timing and Arm-host T2C remain uncovered. Wasm backend
+fixtures and the full Emscripten 6.0.13 W-SYS build pass; browser Linux runtime
+coverage remains open.

@@ -161,8 +161,10 @@ RVOP(jal, {
             /* Direct-mapped lookup: O(1) instead of O(n) linear search */     \
             const uint32_t bht_idx = (PC >> 2) & (HISTORY_SIZE - 1);           \
             struct rv_insn *target = ir->branch_table->target[bht_idx];        \
-            if (ir->branch_table->PC[bht_idx] == PC && target)                 \
+            if (ir->branch_table->PC[bht_idx] == PC && target) {               \
                 RVOP_CHAIN_TAIL(rv, target, cycle, PC);                        \
+                goto end_op; /* deadline exit needs no second lookup */        \
+            }                                                                  \
             block_t *block = block_find(&rv->block_map, rv, PC);               \
             if (block) {                                                       \
                 /* Direct replacement at computed index */                     \
@@ -173,22 +175,21 @@ RVOP(jal, {
         }                                                                      \
     }
 #else
-#define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                              \
-    IIF(RV32_HAS(SYSTEM))(if (!rv->trap_cnt && !reloc_enable_mmu), )         \
-    {                                                                        \
-        cache_lookup_t lookup =                                              \
-            cache_get_with_freq(rv->block_cache, PC, true);                  \
-        block_t *block = (block_t *) lookup.value;                           \
-        /* A block of another address space, or one a flush invalidated,     \
-         * must go back through the dispatcher to be rebuilt.                \
-         */                                                                  \
-        if (block_matches_context(rv, block)) {                              \
-            bht_record_target(ir->branch_table, PC, rv->csr_satp);           \
-            if (lookup.freq >= THRESHOLD)                                    \
-                goto end_op;                                                 \
-            MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, \
-                                                  PC);                       \
-        }                                                                    \
+#define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                          \
+    IIF(RV32_HAS(SYSTEM))(if (!rv->trap_cnt && !reloc_enable_mmu), )     \
+    {                                                                    \
+        cache_lookup_t lookup =                                          \
+            cache_get_with_freq(rv->block_cache, PC, true);              \
+        block_t *block = (block_t *) lookup.value;                       \
+        /* A block of another address space, or one a flush invalidated, \
+         * must go back through the dispatcher to be rebuilt.            \
+         */                                                              \
+        if (block_matches_context(rv, block)) {                          \
+            bht_record_target(ir->branch_table, PC, rv->csr_satp);       \
+            if (lookup.freq >= THRESHOLD)                                \
+                goto end_op;                                             \
+            RVOP_CHAIN_TAIL(rv, block->ir_head, cycle, PC);              \
+        }                                                                \
     }
 #endif
 

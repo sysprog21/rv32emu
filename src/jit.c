@@ -223,11 +223,11 @@ static uint32_t guarded_accesses(const rv_insn_t *ir)
 }
 
 /* Worst-case jump targets a block records, including 2 for a page-terminated
- * epilogue (emit_jmp + emit_exit).
+ * epilogue (emit_jmp + emit_exit), plus 2 for a SYSTEM entry guard.
  */
 static uint32_t block_jump_budget(const block_t *block)
 {
-    uint32_t n = 2;
+    uint32_t n = 2 + (RV32_HAS(SYSTEM) ? 2 : 0);
     const rv_insn_t *ir = block->ir_head;
     for (uint32_t i = 0; i < block->n_insn; i++, ir = block_next_ir(ir))
         n += JUMPS_PER_INSN + guarded_accesses(ir) * JUMPS_PER_GUARD;
@@ -2162,6 +2162,35 @@ static inline void emit_exit(struct jit_state *state)
     emit_jmp(state, TARGET_PC_EXIT, 0);
 #endif
 }
+
+#if RV32_HAS(SYSTEM)
+/* Every external block entry has the register-file ABI. Check before charging
+ * this block, so a deadline exit names its first unexecuted instruction.
+ * SYSTEM does not inline register regions or local register loops.
+ */
+static void emit_chain_deadline(struct jit_state *state, uint32_t pc)
+{
+    const uint32_t offset = offsetof(riscv_t, branch_chain_cycle_target);
+    _Static_assert(offsetof(riscv_t, branch_chain_cycle_target) % 8 == 0 &&
+                       offsetof(riscv_t, branch_chain_cycle_target) / 8 < 4096,
+                   "chain deadline must fit an Arm64 scaled load");
+#if defined(__x86_64__)
+    emit_basic_rex(state, 1, cycle_reg, parameter_reg[0]);
+    emit1(state, 0x3b); /* cmp cycle_reg, [rv + deadline] */
+    emit_modrm_and_displacement(state, cycle_reg, parameter_reg[0], offset);
+#elif defined(__aarch64__)
+    emit_a64(state, UINT32_C(0xf9400000) | ((offset / 8) << 10) |
+                        ((uint32_t) parameter_reg[0] << 5) | temp_reg);
+    emit_addsub_register(state, true, AS_SUBS, RZ, cycle_reg, temp_reg);
+#endif
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JB);
+    emit_load_imm(state, temp_reg, pc);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_exit(state);
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+}
+#endif
 
 /* Materialize a comparison without a data-dependent branch on x86.
  * Inspired by libriscv 3f06e04e's direct boolean-result lowering.
@@ -5590,6 +5619,9 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
                                                 riscv_t *rv,
                                                 block_t *block)
 {
+#if RV32_HAS(SYSTEM)
+    emit_chain_deadline(state, block->pc_start);
+#endif
     uint32_t idx;
     rv_insn_t *ir, *next, *previous = NULL;
     n_misalign_stubs = 0;

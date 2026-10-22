@@ -517,6 +517,29 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
 
     LLVMValueRef cnt =
         LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");
+#if RV32_HAS(SYSTEM)
+    /* Regions may loop or tail-call another region. Bound every block entry
+     * before charging it, publishing only the already-executed prefix.
+     */
+    LLVMValueRef cycle =
+        LLVMBuildLoad2(*builder, LLVMInt64Type(),
+                       t2c_gen_csr_cycle_addr(start, builder, NULL), "");
+    LLVMValueRef deadline = LLVMBuildLoad2(
+        *builder, LLVMInt64Type(),
+        t2c_gen_rv_field_ptr(start, builder,
+                             offsetof(riscv_t, branch_chain_cycle_target),
+                             LLVMInt64Type()),
+        "");
+    LLVMValueRef expired =
+        LLVMBuildICmp(*builder, LLVMIntUGE,
+                      LLVMBuildAdd(*builder, cycle, cnt, ""), deadline, "");
+    LLVMBasicBlockRef leave = LLVMAppendBasicBlock(start, "chain_deadline");
+    LLVMBasicBlockRef body = LLVMAppendBasicBlock(start, "chain_body");
+    t2c_gen_unlikely_br(*builder, expired, leave, body);
+    LLVMPositionBuilderAtEnd(*builder, leave);
+    t2c_gen_exit(*builder, start, block->pc_start, insn_counter);
+    LLVMPositionBuilderAtEnd(*builder, body);
+#endif
     LLVMBuildStore(*builder,
                    T2C_LLVM_GEN_ALU64_IMM(Add, cnt, block->cycle_cost),
                    insn_counter);

@@ -1162,17 +1162,11 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
     RVOP_TAIL_INTRA(rv, target, cycle, PC)
 #endif
 
-/* A conditional branch normally returns to rv_step() so that SYSTEM builds
- * can process trap state. Packed builds have no such state, so once an edge
- * has been learned, keep executing it in the existing tail-call chain. In JIT
- * builds the chain enters only blocks T1 cannot compile: any other block is
- * headed by do_enter_dispatch(), which returns to rv_step() for profiling.
- *
- * The cycle budget still bounds the chain: without it a hot loop would never
- * return to rv_step(), which is where halt and interrupt state are observed.
- * RVOP_CHAIN_TAIL follows the learned edge of a jump or compressed branch the
- * same way. Builds without packing always follow it through RVOP_TAIL_INTER,
- * which in WASM yields to the browser once the block depth runs out.
+/* Learned edges can stay in a tail-call chain until rv_step's cycle budget
+ * expires. SYSTEM follows them only outside a synchronous trap; its dispatcher
+ * must regain control to poll interrupts and devices. Packed JIT blocks that
+ * T1 can compile return through do_enter_dispatch for profiling instead.
+ * Unpacked Wasm also retains its browser-yield check in RVOP_TAIL_INTER.
  */
 #if RV32_HAS_PACKED_TAIL
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC)              \
@@ -1188,11 +1182,15 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
     do {                                               \
     } while (0)
-#define RVOP_CHAIN_TAIL(rv, target, cycle, PC)  \
-    do {                                        \
-        last_pc = (PC);                         \
-        RVOP_TAIL_INTER(rv, target, cycle, PC); \
+/* clang-format off */
+#define RVOP_CHAIN_TAIL(rv, target, cycle, PC)                       \
+    do {                                                             \
+        IIF(RV32_HAS(SYSTEM))(                                       \
+            if ((cycle) >= (rv)->branch_chain_cycle_target) break;, ) \
+        last_pc = (PC);                                              \
+        RVOP_TAIL_INTER(rv, target, cycle, PC);                      \
     } while (0)
+/* clang-format on */
 #endif
 
 #define RVOP(inst, code)                                                  \
@@ -1230,8 +1228,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
                         IIF(RV32_HAS(SYSTEM))                             \
                         (                                                 \
                             if (!rv->trap_cnt) {                          \
-                                last_pc = PC;                             \
-                                RVOP_TAIL(rv, taken, cycle, PC);          \
+                                RVOP_CHAIN_TAIL(rv, taken, cycle, PC);    \
                             },                                            \
                             {                                             \
                                 last_pc = PC;                             \
@@ -3902,8 +3899,10 @@ void rv_step(void *arg)
 
     /* A reboot starts rv_step again with the reset guest's cycle counter. */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(SYSTEM)
     rv->branch_chain_cycle_target = cycles_target;
+#endif
+#if RV32_HAS_PACKED_TAIL
 #if RV32_HAS(JIT)
     set_reset(&pc_set);
 #endif
@@ -3946,6 +3945,27 @@ void rv_step(void *arg)
 #else
         rv_check_interrupt(rv);
 #endif
+#endif
+
+#if RV32_HAS(SYSTEM)
+        /* Chains stop at the slice end, or earlier when the timer comes due,
+         * so that the next dispatch delivers the interrupt on time. A timer
+         * already pending is not a deadline: it waits for the guest to unmask
+         * it, which the slice end bounds.
+         */
+        uint64_t chain_target = cycles_target;
+#if RV32_HAS(SYSTEM_MMIO)
+        const uint64_t timer_due = attr->timer - rv->timer_offset + 1;
+        if (timer_due > rv->csr_cycle && timer_due < chain_target)
+            chain_target = timer_due;
+#endif
+        /* A synchronous interrupt handler may consume this entire slice.
+         * Still let the resumed guest execute one block, as the interpreter
+         * does, before returning to the outer scheduler.
+         */
+        if (rv->csr_cycle >= chain_target)
+            chain_target = rv->csr_cycle + 1;
+        rv->branch_chain_cycle_target = chain_target;
 #endif
 
 #ifdef __EMSCRIPTEN__
@@ -4220,24 +4240,17 @@ void rv_step(void *arg)
 
 #if RV32_HAS_PACKED_TAIL
     rv->branch_chain_cycle_target = 0;
+#endif
 
     /* Incremental memory maintenance: reclaim unused pages periodically.
-     * Native user mode takes longer step slices, so count retired cycles and
-     * keep the cadence of 65536 calls with the default 100-cycle slice.
+     * Step slices differ between builds, so count retired cycles and keep the
+     * cadence of 65536 calls with the default 100-cycle slice.
      */
     static uint64_t gc_cycle = 0;
     if (unlikely(rv->csr_cycle - gc_cycle >= UINT64_C(65536) * 100)) {
         gc_cycle = rv->csr_cycle;
         memory_gc();
     }
-#else
-    /* Incremental memory maintenance: reclaim unused pages periodically.
-     * Using a 16-bit counter, this runs every 65536 rv_step() calls.
-     */
-    static uint16_t gc_counter = 0;
-    if (unlikely(++gc_counter == 0))
-        memory_gc();
-#endif
 
 #ifdef __EMSCRIPTEN__
     if (rv_has_halted(rv)) {

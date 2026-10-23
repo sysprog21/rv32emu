@@ -161,6 +161,10 @@ define handle-sha1-result
 	    fi; \
 	    $(PRINTF) "Re-fetching prebuilt binaries from $$blob_url ...\n"; \
 	    rm -f "$(3)"; \
+	    for spec in $(6); do \
+	        checksum=$$(echo "$$spec" | cut -d: -f1); \
+	        $(call HTTP_DOWNLOAD_QUIET,"$$blob_url/$$(basename "$$checksum")","$$checksum") || exit 1; \
+	    done; \
 	    $(call HTTP_DOWNLOAD,"$$blob_url/$(5)","$(BIN_DIR)/$(5)") || exit 1; \
 	    $(if $(filter yes,$(1)),tar --strip-components=1 -zxf "$(BIN_DIR)/$(5)" -C "$(BIN_DIR)" || exit 1;) \
 	    $(PRINTF) "Re-verifying after re-fetch ... "; \

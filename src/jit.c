@@ -2579,11 +2579,10 @@ static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
  * Caller contract (set up by the GEN_LOAD / GEN_STORE macros in rv32_jit.c):
  *   - parameter_reg[0] holds rv
  *   - temp_reg holds the guest virtual address (vaddr = rs1 + imm)
- *   - The host register allocator has been reset (caller did store_back +
- *     reset_reg) and load_dest_reg is the host register the caller will
- *     subsequently bind to ir->rd via map_vm_reg.  For stores, load_dest_reg
- *     is unused; the data source is read straight from rv->X[ir->rs2] via a
- *     scratch.
+ *   - Guest registers stay allocated across the access. load_dest_reg is
+ *     the host register the caller bound to ir->rd, and store_data_reg the
+ *     one holding ir->rs2; the probe uses only scratch registers outside the
+ *     allocator (x86-64: RCX, RSI, R12; Arm64: R8, R10, R24, R25).
  *
  * The fast path bails out (falls through to where the caller emits the slow
  * path) whenever any of the following are not met, so each one keeps the
@@ -2605,9 +2604,9 @@ static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
  * emitted (caller proceeds straight to slow path).
  */
 static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
-                                      const rv_insn_t *ir,
                                       uint32_t insn_type,
                                       int load_dest_reg UNUSED,
+                                      int store_data_reg UNUSED,
                                       const memory_t *mem)
 {
     uint8_t access_size = 0;
@@ -2762,8 +2761,6 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
 
     /* Perform the access */
     if (is_store) {
-        emit_load(state, S32, R0, R10,
-                  offsetof(riscv_t, X) + 4 * (uint32_t) ir->rs2);
         a64opcode_t store_op;
         switch (access_size) {
         case 1:
@@ -2778,7 +2775,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         default:
             __UNREACHABLE;
         }
-        emit_loadstore_imm(state, store_op, R10, R25, 0);
+        emit_loadstore_imm(state, store_op, store_data_reg, R25, 0);
     } else {
         if (host_reg_maps_x0(load_dest_reg)) {
             emit_load_imm(state, load_dest_reg, 0);
@@ -2821,14 +2818,6 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
 #elif defined(__x86_64__) && !defined(_WIN32)
     /* RAM tags cover 32-bit guest addresses, including a full 4 GiB arena. */
     assert(mem->mem_size <= 0x100000000ULL);
-    /* Slow path's reset_reg + map_vm_reg(rd) deterministically returns
-     * register_map[0].reg_idx which is RAX on this ABI.  The caller passes
-     * that same value through load_dest_reg so the fast path lands the
-     * loaded value in the same host register the slow path will use.
-     */
-    if (!is_store)
-        assert(load_dest_reg == RAX);
-
     /* A tag match proves alignment, permissions, dirty state and RAM range.
      * Only whole RAM pages receive tags; partial pages and MMIO stay in C.
      * esi = ((vaddr >> 12) & TLB_MASK) * sizeof(jit_tlb_entry_t)
@@ -2840,8 +2829,8 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     emit_rex(state, 1, 1, 0, 0);
     emit1(state, 0x8d);
     emit_sib_operand(state, R12, RDI, RSI, 0, offsetof(riscv_t, jit_dtlb));
-    emit_mov32(state, RCX, RAX);
-    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, RAX,
+    emit_mov32(state, RCX, RSI);
+    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, RSI,
                      ~(RV_PG_SIZE - 1) | (access_size - 1));
     /* Privilege-keyed dispatch and links guarantee the emitted U block runs
      * in U mode; trap-capable helpers leave the block when privilege changes.
@@ -2850,94 +2839,39 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
      */
     assert(cur_block && state->priv_mode == cur_block->priv_mode);
     if (state->priv_mode != RV_PRIV_U_MODE) {
-        emit1(state, 0x0b); /* or eax, [rdi + context] */
-        emit_modrm_and_displacement(state, RAX, RDI,
+        emit1(state, 0x0b); /* or esi, [rdi + context] */
+        emit_modrm_and_displacement(state, RSI, RDI,
                                     offsetof(riscv_t, mmu_access_context));
     }
-    /* cmp eax, [r12 + read_tag/write_tag] */
+    /* cmp esi, [r12 + read_tag/write_tag] */
     emit1(state, 0x41);
     emit1(state, 0x3b);
-    emit_sib_operand(state, RAX, R12, RSP, 0,
+    emit_sib_operand(state, RSI, R12, RSP, 0,
                      is_store ? offsetof(jit_tlb_entry_t, write_tag)
                               : offsetof(jit_tlb_entry_t, read_tag));
     /* A mismatch takes the checked C slow path. */
     const uint32_t slow_branch = emit_x64_jcc32(state, 0x85);
 
-    emit_mov32(state, RCX, RAX);
-    /* add rax, [r12 + addend] */
+    emit_mov32(state, RCX, RSI);
+    /* add rsi, [r12 + addend] */
     emit1(state, 0x49);
     emit1(state, 0x03);
-    emit_sib_operand(state, RAX, R12, RSP, 0,
+    emit_sib_operand(state, RSI, R12, RSP, 0,
                      offsetof(jit_tlb_entry_t, addend));
-    emit_mov(state, RAX, R12);
 
-    /* Access */
+    /* Access through RSI, from and into the allocated guest registers. */
+    const enum operand_size size = access_size == 1   ? S8
+                                   : access_size == 2 ? S16
+                                                      : S32;
     if (is_store) {
-        /* Load rs2 from rv->X[rs2] into ESI. */
-        int32_t off = (int32_t) (offsetof(riscv_t, X) + 4 * (uint32_t) ir->rs2);
-        emit1(state, 0x8b);
-        emit_modrm_and_displacement(state, RSI, RDI, off);
-        switch (access_size) {
-        case 1:
-            /* mov [r12], sil — needs REX (sil is high reg requiring REX). */
-            emit1(state, 0x41); /* REX.B for r12 */
-            emit1(state, 0x88); /* mov r/m8, r8 */
-            emit1(state, 0x34);
-            emit1(state, 0x24);
-            break;
-        case 2:
-            emit1(state, 0x66); /* operand-size override (16-bit) */
-            emit1(state, 0x41);
-            emit1(state, 0x89);
-            emit1(state, 0x34);
-            emit1(state, 0x24);
-            break;
-        case 4:
-            emit1(state, 0x41);
-            emit1(state, 0x89);
-            emit1(state, 0x34);
-            emit1(state, 0x24);
-            break;
-        default:
-            __UNREACHABLE;
-        }
+        emit_store(state, size, store_data_reg, RSI, 0);
+    } else if (is_signed) {
+        emit_load_sext(state, size, RSI, load_dest_reg, 0);
     } else {
-        if (host_reg_maps_x0(load_dest_reg)) {
-            emit_load_imm(state, load_dest_reg, 0);
-            set_dirty(load_dest_reg, true);
-        } else {
-            /* Loads write to RAX (load_dest_reg). */
-            switch (access_size) {
-            case 1:
-                emit1(state, 0x41); /* REX.B for r12 */
-                emit1(state, 0x0f);
-                emit1(state, is_signed ? 0xbe : 0xb6);
-                emit1(state, 0x04);
-                emit1(state, 0x24);
-                break;
-            case 2:
-                emit1(state, 0x41);
-                emit1(state, 0x0f);
-                emit1(state, is_signed ? 0xbf : 0xb7);
-                emit1(state, 0x04);
-                emit1(state, 0x24);
-                break;
-            case 4:
-                emit1(state, 0x41);
-                emit1(state, 0x8b);
-                emit1(state, 0x04);
-                emit1(state, 0x24);
-                break;
-            default:
-                __UNREACHABLE;
-            }
-            /* Mark RAX dirty so store_back() later spills the loaded value to
-             * rv->X[rd]; otherwise the architectural write is lost on block
-             * exit.
-             */
-            set_dirty(load_dest_reg, true);
-        }
+        emit_load(state, size, RSI, load_dest_reg, 0);
     }
+    if (!is_store)
+        set_dirty(load_dest_reg, true);
 
     /* jmp rel32 to fastpath_end */
     emit1(state, 0xe9);
@@ -2951,16 +2885,70 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
 #else
     /* Windows x86-64 or other ABIs — fast path disabled. */
     (void) state;
-    (void) ir;
     (void) access_size;
     (void) is_store;
     (void) is_signed;
     (void) load_dest_reg;
+    (void) store_data_reg;
     (void) mem;
     return 0U;
 #endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
+
+/* A scratch register outside the allocator, free after the slow-path call. */
+#if defined(__x86_64__) && defined(_WIN32)
+static const int mmu_scratch_reg = R13;
+#elif defined(__x86_64__)
+static const int mmu_scratch_reg = RSI;
+#elif defined(__aarch64__)
+static const int mmu_scratch_reg = R10;
+#endif
+
+/* Whether a call may clobber the host register. */
+static inline bool host_reg_call_clobbered(int reg)
+{
+#if defined(__x86_64__) && defined(_WIN32)
+    return reg == RAX || reg == RCX || reg == RDX || (reg >= R8 && reg <= R11);
+#elif defined(__x86_64__)
+    return reg == RAX || reg == RCX || reg == RDX || reg == RSI || reg == RDI ||
+           (reg >= R8 && reg <= R11);
+#elif defined(__aarch64__)
+    return reg <= R18;
+#endif
+}
+
+/* The slow path of a load or store keeps the allocator's mappings, so that it
+ * merges with the fast path in one register state. Before the C call, write
+ * every dirty guest register back, leaving the allocator unchanged: the
+ * handler may raise a fault that exits with rv->X as the architectural state.
+ */
+static void emit_mmu_write_back(struct jit_state *state)
+{
+    struct host_reg saved[ARRAY_SIZE(register_map)];
+    memcpy(saved, register_map, sizeof(saved));
+    for (int i = 0; i < n_host_regs; i++) {
+        const int vm_reg_idx = register_map[i].vm_reg_idx;
+        if (vm_reg_idx > 0 && register_map[i].dirty)
+            emit_store(state, S32, register_map[i].reg_idx, parameter_reg[0],
+                       offsetof(riscv_t, X) + 4 * vm_reg_idx);
+    }
+    memcpy(register_map, saved, sizeof(saved));
+}
+
+/* After the C call, reload the mappings it may have clobbered. */
+static void emit_mmu_reload(struct jit_state *state)
+{
+    struct host_reg saved[ARRAY_SIZE(register_map)];
+    memcpy(saved, register_map, sizeof(saved));
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx >= 0 &&
+            host_reg_call_clobbered(register_map[i].reg_idx))
+            emit_load(state, S32, parameter_reg[0], register_map[i].reg_idx,
+                      offsetof(riscv_t, X) + 4 * register_map[i].vm_reg_idx);
+    }
+    memcpy(register_map, saved, sizeof(saved));
+}
 
 /* Emit the slow-path C call: jit_mmu_handler(rv, vreg_idx, vaddr, type, pc).
  *

@@ -41,7 +41,7 @@ $(HIST_BIN): $(HIST_OBJS)
 TOOLS_BIN += $(HIST_BIN)
 
 # Build Linux image
-LINUX_IMAGE_SRC = $(BUILDROOT_DATA) $(LINUX_DATA) $(SIMPLEFS_DATA)
+LINUX_IMAGE_SRC = $(BUILDROOT_DATA) $(LINUX_DATA) $(SIMPLEFS_DATA) $(UBOOT_DATA)
 build-linux-image: $(LINUX_IMAGE_SRC)
 	$(Q)git submodule update --init \
 	    ./tests/system/br_pkgs/doom_riscv \

@@ -173,3 +173,11 @@ Free combination of gzipped/ungzipped images is supported:
 ```shell
 $ build/rv32emu -k <gzipped_kernel_img_path> -i <gzipped_rootfs_img_path>
 ```
+
+## Boot with U-Boot
+Boot the guestOS via U-Boot in supervisor mode:
+```shell
+$ build/rv32emu -k build/linux-image/u-boot.bin -x vblk:build/linux-image/rootfs.ext4,rootfs
+```
+Press any key at the `Hit any key to stop autoboot:` prompt to enter the U-Boot
+shell, or let it load `/Image` from the ext4 block device and boot Linux.

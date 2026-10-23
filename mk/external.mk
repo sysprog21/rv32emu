@@ -167,6 +167,19 @@ SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_
 SIMPLEFS_DATA_SHA := f04a3044bc64195ae59cea064c4bf330132de269
 SIMPLEFS_DATA_SHA_CMD := $(SHA1SUM)
 
+# U-Boot
+UBOOT_VERSION := v2026.10
+UBOOT_DATA_DEST := /tmp
+UBOOT_DATA := $(UBOOT_DATA_DEST)/u-boot
+UBOOT_DATA_URL := git clone https://gitlab.com/u-boot/u-boot.git $(UBOOT_DATA) -b $(UBOOT_VERSION) --depth=1
+# find /tmp/u-boot -type f -not -path '*/.git/*' -print0 | \
+#	LC_ALL=C sort -z | \
+#	xargs -0 sha1sum | \
+#	LC_ALL=C sort | \
+#	sha1sum
+UBOOT_DATA_SHA := 150f49478936a838afb4a97fcfb3dff6d2df36fb
+UBOOT_DATA_SHA_CMD := $(SHA1SUM)
+
 # Download Rules Template
 
 # Generate download/extract/verify rules for each external target
@@ -184,7 +197,7 @@ $($(1)_DATA):
 endef
 
 # Generate rules for static external data (known URLs at parse time)
-EXTERNAL_DATA_STATIC := DOOM QUAKE TIMIDITY BUILDROOT SIMPLEFS
+EXTERNAL_DATA_STATIC := DOOM QUAKE TIMIDITY BUILDROOT SIMPLEFS UBOOT
 $(foreach T,$(EXTERNAL_DATA_STATIC),$(eval $(call download-extract-verify,$(T))))
 
 # Linux kernel: special rule with lazy network detection (avoids parse-time wget)

@@ -1253,6 +1253,10 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
     if (!state)
         return NULL;
     state->size = size;
+#if RV32_HAS(SYSTEM)
+    /* Zeroed IR must not look stamped for RVOP_CHAIN_NATIVE. */
+    state->code_generation = 1;
+#endif
     state->scratch = malloc(WASM_BODY_SIZE);
     if (!state->scratch) {
         free(state);

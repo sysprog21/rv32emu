@@ -200,7 +200,7 @@ SYSTEM_ASM_CHECK_TARGETS += check-system-fetch-retry \
     check-system-load-x0 check-system-load-x0-bare
 SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
     check-system-interrupt-dispatch-indirect \
-    check-system-interrupt-dispatch-long-handler
+    check-system-interrupt-dispatch-long-handler check-system-wfi
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction \
     check-system-native-retire check-system-native-retire-cold \
@@ -427,6 +427,7 @@ check-system-load-x0 check-system-load-x0-bare: $(BIN) tests/system-load-x0.S te
 EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
 EXPECTED_system-interrupt-dispatch = SYSTEM interrupt dispatch OK
+EXPECTED_system-wfi = SYSTEM WFI OK
 EXPECTED_system-trap-resume = SYSTEM trap resume OK
 EXPECTED_system-jit-eviction = SYSTEM JIT eviction OK
 
@@ -436,6 +437,7 @@ $(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr,-indirect,-DINTERRUPT_INDIRECT))
 $(eval $(call system-asm-check-target,system-interrupt-dispatch,rv32ia_zicsr,-long-handler,-DINTERRUPT_LONG_HANDLER -DINTERRUPT_INTERVAL=1 -DINTERRUPT_COUNT=8192))
 $(eval $(call system-asm-check-target,system-trap-resume,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-wfi,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-jit-eviction,rv32ia_zicsr_zifencei))
 EXPECTED_system-native-retire = SYSTEM native retire OK
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei))

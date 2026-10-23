@@ -649,7 +649,20 @@ RVOP(ebreak, {
 /* WFI: Wait for Interrupt */
 RVOP(wfi, {
     PC += 4;
-    /* FIXME: Implement */
+#if RV32_HAS(SYSTEM_MMIO)
+    /* Nothing can wake the hart before the next timer deadline or device
+     * poll, so skip the idle cycles in between instead of spinning through
+     * the guest's idle loop. The chain target is already the earlier of the
+     * slice end and the timer's due cycle; the timer derives from the cycle
+     * count, so guest time advances exactly as if the hart had waited. Wakeup
+     * ignores the global enables, as WFI does. Devices that complete on host
+     * threads, in host time, keep the idle loop: skipping would let the
+     * guest's timeouts for them expire before they could complete.
+     */
+    if (rv->priv_mode != RV_PRIV_U_MODE && !(rv->csr_sip & rv->csr_sie) &&
+        cycle < rv->branch_chain_cycle_target && !PRIV(rv)->host_paced)
+        cycle = rv->branch_chain_cycle_target;
+#endif
     goto end_op;
 })
 

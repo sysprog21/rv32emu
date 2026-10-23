@@ -1075,6 +1075,12 @@ typedef struct rv_insn {
     opcode_fuse_t *fuse;
 
     uint32_t pc;
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    /* The JIT code generation in which the block this record heads last ran
+     * native code; see RVOP_CHAIN_TAIL. It fills padding after @pc.
+     */
+    uint32_t native_gen;
+#endif
 
     /* Tail-call optimization (TCO) allows a C function to replace a function
      * call to another function or itself, followed by a simple return of the

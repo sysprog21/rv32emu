@@ -1825,6 +1825,7 @@ static bool rv_init_vsnd(vm_attr_t *attr)
         return false;
     }
 
+    attr->host_paced = true; /* worker threads play PCM in host time */
     return true;
 }
 #endif
@@ -2288,6 +2289,7 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         }
 
         attr->vnet->ram = (uint32_t *) attr->mem->mem_base;
+        attr->host_paced = true; /* the backend runs on its own threads */
     }
 #endif
 

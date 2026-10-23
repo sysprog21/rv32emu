@@ -638,6 +638,11 @@ typedef struct {
     uint32_t vrng_mmio_base_hi;
     int vrng_irq;
 
+    /* A device completes guest requests on host threads, in host time, so an
+     * idle hart must not skip ahead of it; see WFI.
+     */
+    bool host_paced;
+
 #if RV32_HAS(VIRTIO_NET)
     /* virtio-net device */
     virtio_net_state_t *vnet;

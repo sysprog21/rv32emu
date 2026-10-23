@@ -5588,7 +5588,9 @@ static uint32_t region_liveness(struct region_plan *plan,
     return live;
 }
 
-static void emit_region_edge(struct jit_state *state, riscv_t *rv, uint32_t pc)
+static void emit_region_edge(struct jit_state *state,
+                             riscv_t *rv UNUSED,
+                             uint32_t pc)
 {
     store_back_all(state);
     emit_jmp(state, pc, rv->csr_satp);
@@ -6019,7 +6021,8 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
     state->offset = 0;
 #if RV32_HAS(SYSTEM)
     state->priv_mode = UINT32_MAX;
-    state->code_generation = 0;
+    /* Zeroed IR must not look stamped for RVOP_CHAIN_NATIVE. */
+    state->code_generation = 1;
 #endif
     state->n_jumps = 0;
     state->size = size;

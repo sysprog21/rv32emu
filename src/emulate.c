@@ -1213,11 +1213,23 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 #define RVOP_NATIVE_BRANCH_TAIL(rv, target, cycle, PC) \
     do {                                               \
     } while (0)
+/* A system chain also leaves for the dispatcher at a block with live native
+ * code, which it then runs natively. Without this, a hot kernel path kept
+ * chaining through the interpreter around the blocks T1 had compiled for it,
+ * since the profiling probe samples only one transition in PROBE_INTERVAL.
+ */
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+#define RVOP_CHAIN_NATIVE(rv, target) \
+    ((target)->native_gen == (uint32_t) jit_code_generation(rv))
+#else
+#define RVOP_CHAIN_NATIVE(rv, target) false
+#endif
 /* clang-format off */
 #define RVOP_CHAIN_TAIL(rv, target, cycle, PC)                       \
     do {                                                             \
         IIF(RV32_HAS(SYSTEM))(                                       \
-            if ((cycle) >= (rv)->branch_chain_cycle_target) break;, ) \
+            if ((cycle) >= (rv)->branch_chain_cycle_target ||        \
+                RVOP_CHAIN_NATIVE(rv, target)) break;, )             \
         last_pc = (PC);                                              \
         RVOP_TAIL_INTER(rv, target, cycle, PC);                      \
     } while (0)
@@ -3962,6 +3974,14 @@ static DISABLE_UBSAN_FUNC void run_t1_block(riscv_t *rv,
 #endif
 }
 
+/* Record that a block's native code is live, for RVOP_CHAIN_TAIL. */
+#if RV32_HAS(SYSTEM)
+#define JIT_STAMP_NATIVE(rv, block) \
+    ((block)->ir_head->native_gen = (uint32_t) jit_code_generation(rv))
+#else
+#define JIT_STAMP_NATIVE(rv, block) ((void) 0)
+#endif
+
 #if RV32_HAS(T2C)
 static DISABLE_UBSAN_FUNC void run_t2c_block(riscv_t *rv, const block_t *block)
 {
@@ -4182,6 +4202,7 @@ void rv_step(void *arg)
                 prev = NULL;
                 continue;
             }
+            JIT_STAMP_NATIVE(rv, block);
             run_t2c_block(rv, block);
             settle_trap(rv);
             prev = NULL;
@@ -4229,6 +4250,7 @@ void rv_step(void *arg)
             /* Ensure instruction cache coherency before executing JIT code */
             __asm__ volatile("isb" ::: "memory");
 #endif
+            JIT_STAMP_NATIVE(rv, block);
             run_t1_block(rv, state, block);
             if (rv->jit_entry_cycles)
                 rv->csr_cycle += block->cycle_cost;
@@ -4263,6 +4285,7 @@ void rv_step(void *arg)
                 /* Ensure icache coherency before executing JIT */
                 __asm__ volatile("isb" ::: "memory");
 #endif
+                JIT_STAMP_NATIVE(rv, block);
                 run_t1_block(rv, state, block);
                 if (rv->jit_entry_cycles)
                     rv->csr_cycle += block->cycle_cost;

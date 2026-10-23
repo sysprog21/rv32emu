@@ -59,6 +59,34 @@ static inline uint32_t jit_instruction_size(uint16_t opcode)
 #define JIT_RUN_CACHED 0
 #endif
 
+/* Native T1-only system builds also compile AMOs and CSR instructions, as
+ * calls into C between native code, instead of interpreting each block that
+ * holds one: the kernel runs them in its hottest paths, such as reference
+ * counting and masking interrupts.
+ */
+#if JIT_RUN_CACHED && RV32_HAS(EXT_A) && RV32_HAS(Zicsr) && !RV32_HAS(ARCH_TEST)
+#define JIT_SYSTEM_HELPERS 1
+#else
+#define JIT_SYSTEM_HELPERS 0
+#endif
+#define JIT_SYSTEM_AMO_CASES \
+    case rv_insn_amoswapw:   \
+    case rv_insn_amoaddw:    \
+    case rv_insn_amoxorw:    \
+    case rv_insn_amoandw:    \
+    case rv_insn_amoorw:     \
+    case rv_insn_amominw:    \
+    case rv_insn_amomaxw:    \
+    case rv_insn_amominuw:   \
+    case rv_insn_amomaxuw
+#define JIT_SYSTEM_CSR_CASES \
+    case rv_insn_csrrw:      \
+    case rv_insn_csrrs:      \
+    case rv_insn_csrrc:      \
+    case rv_insn_csrrwi:     \
+    case rv_insn_csrrsi:     \
+    case rv_insn_csrrci
+
 /* Jump condition codes for branch instruction code generation.
  * Values match x86-64 Jcc opcodes; on Arm64, emit_jcc_offset() maps these
  * to equivalent condition codes. Used by both architectures as symbolic
@@ -198,6 +226,17 @@ struct host_reg {
  * the access and advanced past it.
  */
 void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags);
+
+#if JIT_SYSTEM_HELPERS
+/* Perform a CSR instruction as the interpreter does, at guest cycle count
+ * cycle, with val the value of rs1 or the immediate; return the old CSR.
+ */
+uint32_t rv_csr_insn(riscv_t *rv,
+                     uint32_t opcode,
+                     uint32_t csr,
+                     uint32_t val,
+                     uint64_t cycle);
+#endif
 
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base);
 void jit_state_exit(struct jit_state *state);

@@ -202,7 +202,8 @@ SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
     check-system-interrupt-dispatch-indirect \
     check-system-interrupt-dispatch-long-handler check-system-wfi \
     check-system-fence-stale-fetch check-system-shared-code \
-    check-system-interrupt-fault check-system-interrupt-fault-switch
+    check-system-interrupt-fault check-system-interrupt-fault-switch \
+    check-system-amo check-system-csr
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction \
     check-system-native-retire check-system-native-retire-cold \
@@ -376,6 +377,8 @@ system-asm-build = $(call guest-asm-build,$(1),$(2),$(3),$(4) \
 	$(CROSS_COMPILE)objcopy -O binary $(OUT)/$(1)$(3) $(OUT)/$(1)$(3).bin
 # Checkers that read T1C diagnostics must find them in a JIT stats build.
 T1C_REQUIRE_STATS = $(if $(filter y1,$(CONFIG_JIT)$(T1C_STATS)),--require-stats)
+# System T1C without T2C compiles AMOs and CSR instructions (JIT_SYSTEM_HELPERS).
+T1C_COMPILED_HELPERS = $(if $(filter y,$(CONFIG_JIT)),$(if $(filter y,$(CONFIG_T2C)),,--compiled-helpers))
 
 define guest-asm-check-target
 .PHONY: check-$(1)$(3)
@@ -405,7 +408,7 @@ check-system-fetch-retry-nested: FETCH_RETRY_FLAGS := -DFETCH_NESTED
 check-system-fetch-retry check-system-fetch-retry-nested: $(BIN) tests/system-fetch-retry.S tests/test-system-fetch-retry.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call system-asm-build,system-fetch-retry,rv32ia_zicsr,$(FETCH_RETRY_SUFFIX),$(FETCH_RETRY_FLAGS))
 	$(Q)python3 tests/test-system-fetch-retry.py $(BIN) $(OUT)/system-fetch-retry$(FETCH_RETRY_SUFFIX).bin \
-	    $(T1C_REQUIRE_STATS) $(if $(FETCH_RETRY_SUFFIX),--nested)
+	    $(T1C_REQUIRE_STATS) $(T1C_COMPILED_HELPERS) $(if $(FETCH_RETRY_SUFFIX),--nested)
 
 .PHONY: check-system-zba
 check-system-zba: $(BIN) tests/jit-zba.S tests/test-system-zba.py tests/jit_profile.py | $(OUT)
@@ -417,7 +420,8 @@ check-system-zba: $(BIN) tests/jit-zba.S tests/test-system-zba.py tests/jit_prof
 EXPECTED_system-load-x0 = SYSTEM load x0 OK
 # Diagnostics assert actual tier-2 entries and, in bare T2C mode, lazy fusion.
 .PHONY: check-system-load-x0 check-system-load-x0-bare
-check-system-load-x0-bare: SYSTEM_X0_COUNTERS = $(if $(filter 1,$(T1C_STATS)),--expect-csr-entries 2000000)
+# Where T1C compiles CSR instructions, the bare kernel's CSR loop runs compiled.
+check-system-load-x0-bare: SYSTEM_X0_COUNTERS = $(if $(filter 1,$(T1C_STATS)),$(if $(T1C_COMPILED_HELPERS),,--expect-csr-entries 2000000))
 check-system-load-x0-bare: SYSTEM_X0_SUFFIX := -bare
 check-system-load-x0-bare: SYSTEM_X0_FLAGS := -DLOAD_X0_BARE -DLOAD_X0_ITERATIONS=2000000
 # Only a tier-2 build needs the Sv32 run to outlast compilation.
@@ -449,6 +453,14 @@ $(eval $(call system-asm-check-target,system-fence-stale-fetch,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-shared-code,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-interrupt-fault,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-interrupt-fault,rv32ia_zicsr,-switch,-DINTERRUPT_SWITCH))
+# Diagnostics confirm that the AMO and CSR loops run compiled.
+.PHONY: check-system-amo check-system-csr
+check-system-amo: SYSTEM_HELPERS_EXPECTED := SYSTEM AMO OK
+check-system-csr: SYSTEM_HELPERS_EXPECTED := SYSTEM CSR OK
+check-system-amo check-system-csr: check-system-%: $(BIN) tests/system-%.S tests/test-system-helpers.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call system-asm-build,system-$*,rv32ia_zicsr)
+	$(Q)python3 tests/test-system-helpers.py $(BIN) $(OUT)/system-$*.bin \
+	    "$(SYSTEM_HELPERS_EXPECTED)" $(T1C_REQUIRE_STATS) $(T1C_COMPILED_HELPERS)
 $(eval $(call system-asm-check-target,system-jit-eviction,rv32ia_zicsr_zifencei))
 EXPECTED_system-native-retire = SYSTEM native retire OK
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei))

@@ -769,6 +769,29 @@ static uint32_t csr_csrrc(riscv_t *rv,
 
     return out;
 }
+
+#if JIT_SYSTEM_HELPERS
+uint32_t rv_csr_insn(riscv_t *rv,
+                     uint32_t opcode,
+                     uint32_t csr,
+                     uint32_t val,
+                     uint64_t cycle)
+{
+    switch (opcode) {
+    case rv_insn_csrrw:
+    case rv_insn_csrrwi:
+        return csr_csrrw(rv, csr, val, cycle);
+    case rv_insn_csrrs:
+    case rv_insn_csrrsi:
+        return csr_csrrs(rv, csr, val, cycle);
+    case rv_insn_csrrc:
+    case rv_insn_csrrci:
+        return csr_csrrc(rv, csr, val, cycle);
+    default:
+        __UNREACHABLE;
+    }
+}
+#endif
 #endif
 
 #if RV32_HAS(GDBSTUB)
@@ -2530,6 +2553,10 @@ FORCE_INLINE bool insn_is_translatable(uint16_t opcode)
     IIF(translatable)(case rv_insn_##inst:, )
         RV_INSN_LIST
 #undef _
+#if JIT_SYSTEM_HELPERS
+    JIT_SYSTEM_AMO_CASES:
+    JIT_SYSTEM_CSR_CASES:
+#endif
         return true;
     }
     return false;

@@ -1,7 +1,8 @@
 /* Return from the first instruction page fault without repairing its PTE;
  * the second fault repairs it. Entered through the dispatcher, each fault is
  * retried from the trap vector, and afterwards a compatible loop must still
- * compile while a CSR-containing loop must not. With FETCH_NESTED, a handler
+ * compile; a CSR-containing loop must not where T1C cannot compile CSR
+ * instructions. With FETCH_NESTED, a handler
  * the emulator runs nested calls the loops, so the faults nest too and the
  * fetch retries in place after each one.
  */

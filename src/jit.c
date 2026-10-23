@@ -2401,6 +2401,133 @@ static void jit_mmio_write_wrapper(riscv_t *rv, uint32_t addr, uint32_t val)
 #define MMU_TYPE_MASK UINT32_C(0x3fff)
 #define MMU_TYPE_RVC UINT32_C(0x4000)
 
+#if JIT_SYSTEM_HELPERS
+/* An AMO, as the interpreter's AMO_OP performs it. It translates for writing
+ * first, so any page fault is a store/AMO one, and commits nothing unless the
+ * access completes. Registers arrive written back to rv->X.
+ */
+static void jit_amo(riscv_t *rv,
+                    uint32_t rd,
+                    uint32_t rs2,
+                    uint32_t vaddr,
+                    uint32_t type,
+                    uint32_t pc,
+                    uint32_t insn_size,
+                    uint32_t refund)
+{
+    rv->PC = pc;
+    struct jit_state *state = rv->jit_state;
+    const uint64_t generation = state->code_generation;
+    rv->csr_cycle -= refund;
+    rv->jit_mmu.is_mmio = 1;
+    /* AMOs trap when misaligned, even where other accesses may be. */
+    if (vaddr & 3) {
+        rv->compressed = false;
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, STORE_MISALIGNED, vaddr);
+        rv->jit_mmu.abort = 1;
+        return;
+    }
+    const uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
+    rv->jit_mmu.abort = rv->trap_cnt || need_handle_signal;
+    if (rv->jit_mmu.abort)
+        return;
+
+    const bool ram = GUEST_RAM_CONTAINS(PRIV(rv)->mem, addr, 4);
+    uint8_t *host = ram ? PRIV(rv)->mem->mem_base + addr : NULL;
+    uint32_t value1;
+    if (ram)
+        memcpy(&value1, host, 4);
+    else
+        value1 = jit_mmio_read_wrapper(rv, addr);
+    const uint32_t value2 = rv->X[rs2];
+    uint32_t res;
+    switch (type) {
+    case rv_insn_amoswapw:
+        res = value2;
+        break;
+    case rv_insn_amoaddw:
+        res = value1 + value2;
+        break;
+    case rv_insn_amoxorw:
+        res = value1 ^ value2;
+        break;
+    case rv_insn_amoandw:
+        res = value1 & value2;
+        break;
+    case rv_insn_amoorw:
+        res = value1 | value2;
+        break;
+    case rv_insn_amominw:
+        res = (int32_t) value1 < (int32_t) value2 ? value1 : value2;
+        break;
+    case rv_insn_amomaxw:
+        res = (int32_t) value1 > (int32_t) value2 ? value1 : value2;
+        break;
+    case rv_insn_amominuw:
+        res = value1 < value2 ? value1 : value2;
+        break;
+    case rv_insn_amomaxuw:
+        res = value1 > value2 ? value1 : value2;
+        break;
+    default:
+        __UNREACHABLE;
+    }
+    if (ram)
+        memcpy(host, &res, 4);
+    else
+        jit_mmio_write_wrapper(rv, addr, res);
+    if (rd)
+        rv->X[rd] = value1;
+
+    /* As for other accesses, leave if the write retired this native frame. */
+    if (generation != state->code_generation) {
+        rv->PC = pc + insn_size;
+        rv->jit_mmu.abort = 1;
+    } else {
+        rv->csr_cycle += refund;
+    }
+}
+
+/* A CSR instruction, at the guest cycle count it runs at. It leaves the block
+ * after a SATP write, which switches the code that may run, after retiring
+ * code, and when it unmasks a pending interrupt, which the dispatcher takes.
+ */
+static void jit_csr(riscv_t *rv,
+                    uint32_t rd,
+                    uint32_t rs1,
+                    uint32_t csr,
+                    uint32_t type,
+                    uint32_t pc,
+                    uint32_t insn_size,
+                    uint32_t refund)
+{
+    rv->PC = pc;
+    struct jit_state *state = rv->jit_state;
+    const uint64_t generation = state->code_generation;
+    rv->csr_cycle -= refund;
+    const bool imm = type == rv_insn_csrrwi || type == rv_insn_csrrsi ||
+                     type == rv_insn_csrrci;
+    const uint32_t old =
+        rv_csr_insn(rv, type, csr, imm ? rs1 : rv->X[rs1], rv->csr_cycle);
+    rv->jit_mmu.is_mmio = 1;
+    rv->jit_mmu.abort = rv->trap_cnt || need_handle_signal;
+    if (rv->jit_mmu.abort)
+        return;
+    if (rd)
+        rv->X[rd] = old;
+    const bool interrupt =
+        (rv->csr_sstatus & SSTATUS_SIE || rv->priv_mode == RV_PRIV_U_MODE) &&
+        (rv->csr_sip & rv->csr_sie);
+    if ((csr & 0xfff) == CSR_SATP || interrupt ||
+        generation != state->code_generation) {
+        rv->PC = pc + insn_size;
+        rv->jit_mmu.abort = 1;
+    } else {
+        rv->csr_cycle += refund;
+    }
+}
+#endif
+
 /* Slow-path entry from the JIT.
  *
  * vaddr / type / pc / vreg_idx arrive as call arguments rather than via the
@@ -2415,13 +2542,29 @@ static void jit_mmu_handler(riscv_t *rv,
                             uint32_t type,
                             uint32_t pc)
 {
-    assert(vreg_idx < 32);
     /* The block charged its later instructions on entry; a fault means they
      * never retire. Refund them before the guest handler can read a counter.
      */
     const uint32_t refund = type >> 16;
     const uint32_t insn_size = type & MMU_TYPE_RVC ? 2 : 4;
     type &= MMU_TYPE_MASK;
+#if JIT_SYSTEM_HELPERS
+    switch (type) {
+    JIT_SYSTEM_AMO_CASES:
+        /* vreg_idx packs rd and rs2. */
+        jit_amo(rv, vreg_idx & 31, vreg_idx >> 5, vaddr, type, pc, insn_size,
+                refund);
+        return;
+    JIT_SYSTEM_CSR_CASES:
+        /* vreg_idx packs rd and rs1 (or the immediate); vaddr is the CSR. */
+        jit_csr(rv, vreg_idx & 31, vreg_idx >> 5, vaddr, type, pc, insn_size,
+                refund);
+        return;
+    default:
+        break;
+    }
+#endif
+    assert(vreg_idx < 32);
 
     uint32_t addr;
     uint32_t access_size;
@@ -2966,14 +3109,14 @@ static void emit_mmu_reload(struct jit_state *state)
  * (is_mmio, paddr) still land in rv->jit_mmu for the JIT to read back.
  */
 static void emit_jit_mmu_handler(struct jit_state *state,
-                                 uint8_t vreg_idx,
+                                 uint16_t vreg_idx,
                                  int vaddr_reg,
                                  uint32_t insn_type,
                                  uint32_t insn_pc,
                                  uint32_t insn_size,
                                  uint32_t refund)
 {
-    assert(vreg_idx < 32);
+    assert(vreg_idx < 1024); /* rd, and rs2 << 5 for an AMO */
     /* The handler refunds unretired instructions if the access faults. */
     assert(insn_type <= MMU_TYPE_MASK && refund <= UINT16_MAX);
     insn_type |= refund << 16;
@@ -3488,6 +3631,21 @@ static inline void liveness_calc(block_t *block)
             liveness[ir->rs1] = idx;
             liveness[ir->rs2] = idx;
             break;
+#if JIT_SYSTEM_HELPERS
+        JIT_SYSTEM_AMO_CASES:
+            liveness[ir->rs1] = idx;
+            liveness[ir->rs2] = idx;
+            break;
+        case rv_insn_csrrw:
+        case rv_insn_csrrs:
+        case rv_insn_csrrc:
+            liveness[ir->rs1] = idx;
+            break;
+        case rv_insn_csrrwi:
+        case rv_insn_csrrsi:
+        case rv_insn_csrrci:
+            break;
+#endif
         default:
             __UNREACHABLE;
         }
@@ -4154,6 +4312,78 @@ static void emit_guest_shift_add(struct jit_state *state,
 }
 #endif
 
+#if JIT_SYSTEM_HELPERS
+/* An AMO or CSR instruction through jit_mmu_handler(), keeping the
+ * allocator's mappings as the load and store slow paths do. args packs rd
+ * and a second register or immediate; temp_reg carries the address, or the
+ * CSR. The helper writes rd in rv->X.
+ */
+static void emit_jit_system_helper(struct jit_state *state,
+                                   riscv_t *rv,
+                                   rv_insn_t *ir,
+                                   uint16_t args,
+                                   bool rs1_address)
+{
+    if (rs1_address) {
+        vm_reg[0] = ra_load(state, ir->rs1);
+        emit_mov32(state, vm_reg[0], temp_reg);
+    } else {
+        emit_load_imm(state, temp_reg, ir->imm & 0xfff);
+    }
+    emit_mmu_write_back(state);
+    emit_jit_mmu_handler(state, args, temp_reg, ir->opcode, ir->pc,
+                         jit_instruction_size(ir->opcode),
+                         unretired_after(rv, ir->pc));
+
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.abort));
+    emit_cmp_imm32(state, temp_reg, 0);
+    uint32_t jump_trap = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    emit_mmu_reload(state);
+    /* rd's new value is in rv->X, so a mapping of it is clean. */
+    for (int i = 0; ir->rd && i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx == ir->rd)
+            emit_load(state, S32, parameter_reg[0], register_map[i].reg_idx,
+                      offsetof(riscv_t, X) + 4 * ir->rd);
+    }
+    reg_align[ir->rd] = 0;
+    uint32_t jump_normal = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    /* The helper saw the registers written back; a trap or an early exit
+     * leaves with rv->X complete.
+     */
+    emit_jump_target_offset(state, JUMP_TRAP, state->offset);
+    emit_exit(state);
+    emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
+}
+#define GEN_AMO(inst)                                                       \
+    GEN(inst, {                                                             \
+        emit_jit_system_helper(state, rv, ir, ir->rd | ir->rs2 << 5, true); \
+    })
+/* CSRRW ends its block, since it may switch the address space; after one
+ * that did not, continue at the next instruction as a page-terminated block
+ * does.
+ */
+static void emit_jit_csr(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
+{
+    emit_jit_system_helper(state, rv, ir, ir->rd | ir->rs1 << 5, false);
+    if (ir->opcode != rv_insn_csrrw)
+        return;
+    const uint32_t next_pc = ir->pc + 4;
+    store_back(state);
+    if (JIT_LINK_ALL_EDGES || ir->branch_taken)
+        emit_jmp(state, next_pc, BLOCK_SATP(cur_block));
+    emit_load_imm(state, temp_reg, next_pc);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_exit(state);
+}
+#define GEN_CSR(inst) GEN(inst, { emit_jit_csr(state, rv, ir); })
+#else
+#define GEN_AMO(inst) GEN_UNSUPPORTED(inst)
+#define GEN_CSR(inst) GEN_UNSUPPORTED(inst)
+#endif
+
 /* Keep unsupported emitters tied to the decoder's translatable flags.
  * All unsupported T1C handlers must use GEN_UNSUPPORTED, including V stubs.
  */
@@ -4175,6 +4405,8 @@ RV_INSN_LIST
 #include "rv32_jit.c"
 #undef GEN
 #undef GEN_UNSUPPORTED
+#undef GEN_AMO
+#undef GEN_CSR
 
 static void do_fuse1(struct jit_state *state, riscv_t *rv UNUSED, rv_insn_t *ir)
 {

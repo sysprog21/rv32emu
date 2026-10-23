@@ -9,8 +9,8 @@ RET=0
 
 UBOOT_BIN="build/linux-image/u-boot.bin"
 if [ ! -f "${UBOOT_BIN}" ]; then
-    print_warning "${UBOOT_BIN} not found; skipping U-Boot tests."
-    exit 0
+    print_error "${UBOOT_BIN} not found"
+    exit 1
 fi
 
 OPTS_UBOOT=" -k ${UBOOT_BIN} -x vblk:build/linux-image/rootfs.ext4,rootfs"

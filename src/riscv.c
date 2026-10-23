@@ -1692,6 +1692,9 @@ void rv_delete(riscv_t *rv)
     rv_destroy_vsnd(attr);
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    free(rv->code_maps);
+#endif
 #if !RV32_HAS(JIT)
     map_delete(attr->fd_map);
     memory_delete(attr->mem);

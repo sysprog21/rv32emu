@@ -38,6 +38,7 @@
     _(fence_i)               \
     _(fence_i_blocks)        \
     _(retire_calls)          \
+    _(shared_retires)        \
     _(retire_pending_slots)  \
     _(pending_patched)       \
     _(lazy_fused_loads)

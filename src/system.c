@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "system.h"
@@ -243,13 +244,342 @@ static inline uint32_t code_page_slot(uint32_t vpn)
 }
 #endif
 
-static void note_code_page(riscv_t *rv, uint32_t vpn)
+#if RV32_HAS(JIT)
+/* A page of decoded code and the page-table entries that mapped it: physical
+ * offsets and values of the root entry and, below a non-leaf one, the leaf.
+ * Equal entries mean the same translation and fetch permission, so code
+ * decoded through them stays valid across SFENCE.VMA; changed contents of the
+ * page itself are for FENCE.I to retire.
+ */
+struct code_map {
+    uint32_t satp, vpn;
+    uint32_t root, root_pte;
+    uint32_t leaf, leaf_pte;
+};
+#define CODE_MAP_CAPACITY 8192
+_Static_assert(CODE_MAP_CAPACITY <= UINT16_MAX, "slots hold record indexes");
+/* The records are followed by a hashed index of the latest one per page and
+ * space, then by chains of every record per page, for page fences: each
+ * bucket heads a chain through the records' next links, as index + 1.
+ */
+#define CODE_MAP_SLOT_BITS 13
+#define CODE_MAP_SLOTS (1U << CODE_MAP_SLOT_BITS)
+#define CODE_MAP_PAGE_BUCKETS 4096
+#define CODE_MAP_SIZE                                               \
+    (CODE_MAP_CAPACITY * sizeof(struct code_map) +                  \
+     (CODE_MAP_SLOTS + CODE_MAP_PAGE_BUCKETS + CODE_MAP_CAPACITY) * \
+         sizeof(uint16_t))
+HASH_FUNC_IMPL(code_map_hash, CODE_MAP_SLOT_BITS, CODE_MAP_SLOTS)
+/* rv->code_space_epochs has one slot per hash of an address space. */
+HASH_FUNC_IMPL(code_space_hash, 6, 64)
+
+static inline uint16_t *code_map_slot(riscv_t *rv, uint32_t satp, uint32_t vpn)
+{
+    uint16_t *slots = (uint16_t *) (rv->code_maps + CODE_MAP_CAPACITY);
+    return &slots[code_map_hash((rv_hash_key_t) satp << 32 | vpn)];
+}
+
+static inline uint16_t *code_map_page_heads(riscv_t *rv)
+{
+    return (uint16_t *) (rv->code_maps + CODE_MAP_CAPACITY) + CODE_MAP_SLOTS;
+}
+
+static inline uint16_t *code_map_page_next(riscv_t *rv)
+{
+    return code_map_page_heads(rv) + CODE_MAP_PAGE_BUCKETS;
+}
+
+static inline void code_map_page_link(riscv_t *rv, uint32_t idx)
+{
+    uint16_t *head = &code_map_page_heads(
+        rv)[rv->code_maps[idx].vpn % CODE_MAP_PAGE_BUCKETS];
+    code_map_page_next(rv)[idx] = *head;
+    *head = idx + 1;
+}
+
+/* Relink the chains after records moved. */
+static void code_map_page_relink(riscv_t *rv, uint32_t n)
+{
+    memset(code_map_page_heads(rv), 0,
+           CODE_MAP_PAGE_BUCKETS * sizeof(uint16_t));
+    for (uint32_t i = 0; i < n; i++)
+        code_map_page_link(rv, i);
+}
+#define CODE_MAP_NO_LEAF UINT32_MAX
+/* Accessed and dirty updates do not change a translation. */
+#define CODE_MAP_PTE_MASK (~(uint32_t) (PTE_A | PTE_D))
+/* A masked entry never has the accessed bit, so this one never matches. */
+#define CODE_MAP_STALE UINT32_MAX
+
+static uint32_t code_map_pte(const riscv_t *rv, uint32_t offset)
+{
+    return *(const uint32_t *) (PRIV(rv)->mem->mem_base + offset) &
+           CODE_MAP_PTE_MASK;
+}
+
+/* The page table at ppn, or NULL outside guest RAM. */
+static const uint32_t *code_map_table(const riscv_t *rv, uint32_t ppn)
+{
+    return ppn_is_valid((riscv_t *) rv, ppn)
+               ? (const uint32_t *) (PRIV(rv)->mem->mem_base +
+                                     (ppn << RV_PG_SHIFT))
+               : NULL;
+}
+
+/* The root entry mapping vpn in the current address space, or NULL. */
+static const uint32_t *code_map_root_entry(const riscv_t *rv, uint32_t vpn)
+{
+    if (!mmu_paging(rv, RV_PRIV_S_MODE))
+        return NULL;
+    const uint32_t *root = code_map_table(rv, rv->csr_satp & MASK(22));
+    return root ? root + (vpn >> 10) : NULL;
+}
+
+/* The offset of a record's root entry, or CODE_MAP_NO_LEAF when it has none
+ * now. A shared record names the entry of whichever space is current.
+ */
+static uint32_t code_map_root(const riscv_t *rv, const struct code_map *map)
+{
+    if (map->satp != SATP_SHARED)
+        return map->root;
+    const uint32_t *pte = code_map_root_entry(rv, map->vpn);
+    return pte ? (uint32_t) ((const uint8_t *) pte - PRIV(rv)->mem->mem_base)
+               : CODE_MAP_NO_LEAF;
+}
+
+/* Whether vpn is mapped globally in the current address space: a global
+ * root entry covers every mapping below it.
+ */
+static bool code_page_global(const riscv_t *rv, uint32_t vpn)
+{
+    const uint32_t *pte = code_map_root_entry(rv, vpn);
+    if (!pte || !(*pte & PTE_V))
+        return false;
+    if ((*pte & PTE_G) || (*pte & (PTE_R | PTE_W | PTE_X)))
+        return *pte & PTE_G;
+    const uint32_t *table = code_map_table(rv, *pte >> (RV_PG_SHIFT - 2));
+    return table && (table[vpn & MASK(10)] & PTE_G);
+}
+
+/* Whether the entries mapping the record's page still hold what they did. */
+static bool code_map_current(const riscv_t *rv, const struct code_map *map)
+{
+    const uint32_t root = code_map_root(rv, map);
+    return root != CODE_MAP_NO_LEAF &&
+           code_map_pte(rv, root) == map->root_pte &&
+           (map->leaf == CODE_MAP_NO_LEAF ||
+            code_map_pte(rv, map->leaf) == map->leaf_pte);
+}
+
+/* Record the entries mapping vpn for the address space key satp. */
+static void code_map_record(riscv_t *rv, uint32_t vpn, uint32_t satp)
+{
+    if (rv->code_maps_overflow)
+        return;
+    if (!rv->code_maps) {
+        rv->code_maps = calloc(1, CODE_MAP_SIZE);
+        if (!rv->code_maps) {
+            rv->code_maps_overflow = true;
+            return;
+        }
+    }
+    /* Each page is decoded again after every eviction of its blocks, so find
+     * its record through the index. A slot names the latest record hashed
+     * there; one that another page took merely misses, and the page is
+     * recorded again. A record whose entries have changed since does not
+     * describe this decode: were it kept alone, a later fence that restored
+     * its entries would pass the check and keep code from the other mapping.
+     * Record the page again then, unless the record already fails its check.
+     */
+    const uint32_t n = rv->n_code_maps;
+    uint16_t *slot = code_map_slot(rv, satp, vpn);
+    if (*slot < n && rv->code_maps[*slot].vpn == vpn &&
+        rv->code_maps[*slot].satp == satp &&
+        (rv->code_maps[*slot].root_pte == CODE_MAP_STALE ||
+         code_map_current(rv, &rv->code_maps[*slot])))
+        return;
+    if (n == CODE_MAP_CAPACITY) {
+        rv->code_maps_overflow = true;
+        return;
+    }
+
+    const uint8_t *base = PRIV(rv)->mem->mem_base;
+    const uint32_t *pte = code_map_root_entry(rv, vpn);
+    if (!pte) {
+        rv->code_maps_overflow = true;
+        return;
+    }
+    struct code_map *map = &rv->code_maps[n];
+    map->satp = satp;
+    map->vpn = vpn;
+    map->root = (const uint8_t *) pte - base;
+    map->root_pte = *pte & CODE_MAP_PTE_MASK;
+    map->leaf = CODE_MAP_NO_LEAF;
+    map->leaf_pte = 0;
+    if ((*pte & (PTE_V | PTE_R | PTE_W | PTE_X)) == PTE_V) {
+        const uint32_t *table = code_map_table(rv, *pte >> (RV_PG_SHIFT - 2));
+        if (!table) {
+            rv->code_maps_overflow = true;
+            return;
+        }
+        pte = table + (vpn & MASK(10));
+        map->leaf = (const uint8_t *) pte - base;
+        map->leaf_pte = *pte & CODE_MAP_PTE_MASK;
+    }
+    /* Until a fence, the fetch may have used an older translation than the
+     * page tables now hold. Unless the iTLB entry it used agrees with them,
+     * make the record fail its first check, retiring the code then.
+     */
+    const uint32_t leaf_pte =
+        map->leaf == CODE_MAP_NO_LEAF ? map->root_pte : map->leaf_pte;
+    uint32_t ppn = leaf_pte >> (RV_PG_SHIFT - 2) << RV_PG_SHIFT;
+    /* A misaligned superpage faults, as mmu_walk() decides, however the
+     * slice bits combine with its PPN.
+     */
+    bool aligned = true;
+    if (map->leaf == CODE_MAP_NO_LEAF) {
+        aligned = !(ppn & (MASK(10) << RV_PG_SHIFT));
+        ppn |= (vpn & MASK(10)) << RV_PG_SHIFT;
+    }
+    const tlb_entry_t *entry = &rv->itlb[vpn & TLB_MASK];
+    if (!(leaf_pte & PTE_V) || !aligned || !entry->valid ||
+        tlb_entry_vpn(entry) != vpn || entry->ppn != ppn ||
+        entry->perm != (leaf_pte & (PTE_R | PTE_W | PTE_X | PTE_U)))
+        map->root_pte = CODE_MAP_STALE;
+    rv->n_code_maps = n + 1;
+    *slot = n;
+    code_map_page_link(rv, n);
+}
+
+/* Drop the records of space from the first n, and return how many remain;
+ * *checked becomes how many of those came before index i.
+ */
+static uint32_t code_maps_drop_space(riscv_t *rv,
+                                     uint32_t space,
+                                     uint32_t n,
+                                     uint32_t i,
+                                     uint32_t *checked)
+{
+    struct code_map *maps = rv->code_maps;
+    uint32_t kept = 0, before = 0;
+    for (uint32_t j = 0; j < n; j++) {
+        if (maps[j].satp == space)
+            continue;
+        if (j < i)
+            before++;
+        maps[kept] = maps[j];
+        *code_map_slot(rv, maps[kept].satp, maps[kept].vpn) = kept;
+        kept++;
+    }
+    code_map_page_relink(rv, kept);
+    *checked = before;
+    return kept;
+}
+
+bool mmu_check_code_maps(riscv_t *rv,
+                         void (*stale)(riscv_t *, uint32_t),
+                         bool switched,
+                         uint32_t vpn)
+{
+    if (rv->code_maps_overflow)
+        return false;
+    /* Only the current address space and shared code can run before the next
+     * switch, so a fence checks those, and a switch checks the space entered
+     * if a fence came since its last check. A slot collision only forces a
+     * check. A fence checks every space when records run short, retiring
+     * those of exited processes, whose page tables were reused.
+     */
+    /* After a wrap, an old slot could look current; forget them all. */
+    if (!switched && !++rv->code_fence_epoch) {
+        memset(rv->code_space_epochs, 0, sizeof(rv->code_space_epochs));
+        rv->code_fence_epoch = 1;
+    }
+    const bool check_all =
+        !switched && rv->n_code_maps > CODE_MAP_CAPACITY / 4 * 3;
+    const uint32_t satp = rv->csr_satp;
+    __typeof__(rv->code_space_epochs[0]) *seen =
+        &rv->code_space_epochs[code_space_hash(satp)];
+    const bool check_current =
+        !switched || seen->satp != satp || seen->epoch != rv->code_fence_epoch;
+    seen->satp = satp;
+    seen->epoch = rv->code_fence_epoch;
+    struct code_map *maps = rv->code_maps;
+    uint32_t n = rv->n_code_maps;
+    /* A page fence, outside superpage regions holding code, follows that
+     * page's chain instead of visiting every record.
+     */
+    if (!maps)
+        return true; /* nothing was recorded, so nothing can be stale */
+    if (vpn != CODE_MAP_ALL_PAGES && !check_all &&
+        !bit_test(rv->code_superpages, vpn >> 10)) {
+    rescan:
+        for (uint32_t e = code_map_page_heads(rv)[vpn % CODE_MAP_PAGE_BUCKETS];
+             e; e = code_map_page_next(rv)[e - 1]) {
+            const struct code_map *map = &maps[e - 1];
+            if (map->vpn != vpn ||
+                (map->satp != SATP_SHARED && map->satp != satp) ||
+                code_map_current(rv, map))
+                continue;
+            const uint32_t space = map->satp;
+            uint32_t checked;
+            stale(rv, space);
+            n = code_maps_drop_space(rv, space, n, 0, &checked);
+            goto rescan;
+        }
+        rv->n_code_maps = n;
+        return true;
+    }
+    for (uint32_t i = 0; i < n;) {
+        const struct code_map *map = &maps[i];
+        if (!check_all && map->satp != SATP_SHARED &&
+            (!check_current || map->satp != satp)) {
+            i++;
+            continue;
+        }
+        /* A page fence can change that page's leaf, which for a superpage is
+         * the root entry of its whole region.
+         */
+        if (!check_all && vpn != CODE_MAP_ALL_PAGES && map->vpn != vpn &&
+            (map->leaf != CODE_MAP_NO_LEAF || map->vpn >> 10 != vpn >> 10)) {
+            i++;
+            continue;
+        }
+        if (code_map_current(rv, map)) {
+            i++;
+            continue;
+        }
+        /* Retire the whole space, and drop all its records, including the
+         * ones already checked; resume after the survivors among those.
+         */
+        const uint32_t space = map->satp;
+        stale(rv, space);
+        n = code_maps_drop_space(rv, space, n, i, &i);
+    }
+    rv->n_code_maps = n;
+    return true;
+}
+
+void mmu_forget_code_maps(riscv_t *rv)
+{
+    rv->n_code_maps = 0;
+    rv->code_maps_overflow = false;
+    if (rv->code_maps)
+        memset(code_map_page_heads(rv), 0,
+               CODE_MAP_PAGE_BUCKETS * sizeof(uint16_t));
+    memset(rv->code_space_epochs, 0, sizeof(rv->code_space_epochs));
+}
+#endif
+
+static void note_code_page(riscv_t *rv, uint32_t vpn, uint32_t satp UNUSED)
 {
 #if !RV32_HAS(JIT)
     bit_set(rv->code_pages, code_page_slot(vpn));
 #endif
     if (!mmu_paging(rv, rv->priv_mode))
         return;
+#if RV32_HAS(JIT)
+    code_map_record(rv, vpn, satp);
+#endif
     /* The fetch just filled the iTLB. Without an exact 4 KiB entry for this
      * page, assume the code came through a superpage.
      */
@@ -260,18 +590,39 @@ static void note_code_page(riscv_t *rv, uint32_t vpn)
     bit_set(rv->code_superpages, vpn >> 10);
 }
 
-void mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end)
+uint32_t mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end)
 {
     /* Visit each page of [start, end), which may wrap past the top of memory:
      * stop at the page of its last byte rather than compare page numbers.
      */
+    const uint32_t first = start >> RV_PG_SHIFT;
     const uint32_t last = (end - 1) >> RV_PG_SHIFT;
-    for (uint32_t vpn = start >> RV_PG_SHIFT;;
-         vpn = (vpn + 1) & MASK(32 - RV_PG_SHIFT)) {
-        note_code_page(rv, vpn);
+    uint32_t satp = rv->csr_satp;
+#if RV32_HAS(JIT)
+    /* Kernel code reached only through global mappings is shared by every
+     * address space, so that each process does not decode and compile the
+     * kernel's code paths again. T2C builds keep per-space code for now:
+     * shared kernel code reaches tier 2 sooner, and the extra LLVM work
+     * measured slower Linux boots there.
+     */
+    if (!RV32_HAS(T2C) && rv->priv_mode == RV_PRIV_S_MODE &&
+        mmu_paging(rv, rv->priv_mode)) {
+        bool global = true;
+        for (uint32_t vpn = first;; vpn = (vpn + 1) & MASK(32 - RV_PG_SHIFT)) {
+            global = global && code_page_global(rv, vpn);
+            if (vpn == last)
+                break;
+        }
+        if (global)
+            satp = SATP_SHARED;
+    }
+#endif
+    for (uint32_t vpn = first;; vpn = (vpn + 1) & MASK(32 - RV_PG_SHIFT)) {
+        note_code_page(rv, vpn, satp);
         if (vpn == last)
             break;
     }
+    return satp;
 }
 
 bool mmu_code_superpage(const riscv_t *rv, uint32_t vaddr)

@@ -731,6 +731,22 @@ struct riscv_internal {
      */
     uint32_t code_superpages[(1U << 10) / 32];
 
+#if RV32_HAS(JIT)
+    /* The page-table entries that mapped each page of decoded code, per
+     * address space; see mmu_check_code_maps(). Allocated on first use.
+     */
+    struct code_map *code_maps;
+    uint32_t n_code_maps;
+    bool code_maps_overflow;
+    /* Fences since startup, and the count at which each recently run address
+     * space last had its records checked; see mmu_check_code_maps().
+     */
+    uint32_t code_fence_epoch;
+    struct {
+        uint32_t satp, epoch;
+    } code_space_epochs[64];
+#endif
+
 #if !RV32_HAS(JIT)
     /* Hashed filter of pages holding interpreter blocks. A false positive only
      * costs an unneeded block map clear.
@@ -765,6 +781,15 @@ static inline void hart_unlock(riscv_t *rv, pthread_mutex_t *lock)
 void rv_reset_dispatcher_state(void);
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+/* The address-space key of S-mode code fetched only through global mappings:
+ * every address space that maps it alike shares the block, which is checked
+ * whenever SATP changes (see mmu_note_code()). Its root PPN lies outside guest
+ * RAM, so no S-mode code is ever fetched under this SATP value.
+ */
+#define SATP_SHARED UINT32_MAX
+#endif
+
 /* A cached block is usable from here only when it belongs to the address space
  * executing now. Address translation makes that a real question in system
  * mode; user mode has one space, so this folds away to a null check.
@@ -778,7 +803,8 @@ static inline bool block_matches_context(const riscv_t *rv UNUSED,
     if (!block || block->priv_mode != rv->priv_mode)
         return false;
 #if RV32_HAS(JIT)
-    return block->satp == rv->csr_satp && !block->invalidated;
+    return (block->satp == rv->csr_satp || block->satp == SATP_SHARED) &&
+           !block->invalidated;
 #else
     return true;
 #endif

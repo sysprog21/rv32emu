@@ -402,8 +402,29 @@ bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr);
 void mmu_tlb_flush_all(riscv_t *rv);
 void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr);
 
-/* Record that a block was decoded from [start, end). */
-void mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end);
+/* Record that a block was decoded from [start, end), and return the address
+ * space key it belongs to: the current SATP or, in JIT builds, SATP_SHARED for
+ * S-mode code fetched only through global mappings.
+ */
+uint32_t mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end);
+#if RV32_HAS(JIT)
+/* Compare the page-table entries recorded for decoded code with the current
+ * ones; shared code is compared with the current address space's entries.
+ * Call stale(rv, satp) once for each address space in which any of them
+ * changed, and forget that space's records. With switched, check after an
+ * address-space switch rather than a fence. A fence for one page passes its
+ * vpn, since it orders only that page's leaf entry; others pass
+ * CODE_MAP_ALL_PAGES. Return false, having called nothing, when the records
+ * overflowed and every space must be retired.
+ */
+#define CODE_MAP_ALL_PAGES UINT32_MAX
+bool mmu_check_code_maps(riscv_t *rv,
+                         void (*stale)(riscv_t *, uint32_t),
+                         bool switched,
+                         uint32_t vpn);
+/* Forget every record, once all decoded code is retired. */
+void mmu_forget_code_maps(riscv_t *rv);
+#endif
 /* Whether vaddr lies in a 4 MiB region holding code fetched through a
  * superpage, where flushing one address may remap code on another page.
  */

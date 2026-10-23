@@ -743,26 +743,15 @@ void jit_retire_all(struct jit_state *state)
     memset(state->page_index, -1, sizeof(state->page_index));
 }
 
-static bool jit_page_has_code_context(const struct jit_state *state,
-                                      uint32_t va,
-                                      uint32_t satp,
-                                      bool all_spaces)
+bool jit_page_has_code_any(const struct jit_state *state, uint32_t va)
 {
 #if !RV32_HAS(BLOCK_CHAINING)
-    /* Blocks may then span pages, so any code of the address space may hold
-     * instructions of this page.
+    /* Blocks may then span pages, so any code may hold instructions of this
+     * page.
      */
     (void) va;
-    if (all_spaces) {
-        for (uint32_t i = 0; i < ARRAY_SIZE(state->space_index); i++) {
-            if (state->space_index[i] >= 0)
-                return true;
-        }
-        return false;
-    }
-    for (int32_t i = state->space_index[space_hash(satp)]; i >= 0;
-         i = state->offset_map[i].next_in_space) {
-        if (state->offset_map[i].satp == satp)
+    for (uint32_t i = 0; i < ARRAY_SIZE(state->space_index); i++) {
+        if (state->space_index[i] >= 0)
             return true;
     }
     return false;
@@ -771,23 +760,11 @@ static bool jit_page_has_code_context(const struct jit_state *state,
     for (int32_t i = state->page_index[page_hash(va)]; i >= 0;
          i = state->offset_map[i].next_in_page) {
         const struct offset_map *entry = &state->offset_map[i];
-        if (!entry->retired && (all_spaces || entry->satp == satp) &&
-            (entry->pc & ~(RV_PG_SIZE - 1)) == page)
+        if (!entry->retired && (entry->pc & ~(RV_PG_SIZE - 1)) == page)
             return true;
     }
     return false;
 #endif
-}
-bool jit_page_has_code(const struct jit_state *state,
-                       uint32_t va,
-                       uint32_t satp)
-{
-    return jit_page_has_code_context(state, va, satp, false);
-}
-
-bool jit_page_has_code_any(const struct jit_state *state, uint32_t va)
-{
-    return jit_page_has_code_context(state, va, 0, true);
 }
 
 #endif
@@ -3943,7 +3920,8 @@ static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
     if (site >= (uint32_t) state->n_blocks)
         return (uintptr_t) state->buf + state->exit_loc;
     const struct offset_map *source = &state->offset_map[site];
-    if (source->retired || source->satp != rv->csr_satp ||
+    if (source->retired ||
+        (source->satp != rv->csr_satp && source->satp != SATP_SHARED) ||
         source->priv_mode != rv->priv_mode)
         return (uintptr_t) state->buf + state->exit_loc;
     const struct offset_map *target =
@@ -3995,7 +3973,8 @@ static void emit_indirect_jump(struct jit_state *state,
         uint32_t jump_loc_0 = state->offset;
         emit_jcc_offset(state, JCC_JNE);
 #if RV32_HAS(SYSTEM)
-        emit_jmp(state, bt->PC[idx], bt->satp[idx]);
+        /* Link in the space of the code being emitted, which may be shared. */
+        emit_jmp(state, bt->PC[idx], BLOCK_SATP(cur_block));
 #else
         emit_jmp(state, bt->PC[idx], 0);
 #endif
@@ -4598,7 +4577,9 @@ static void do_fuse13(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
  * if rd != 0, branch to PC + 4 + imm2
  * This is a branching instruction, so we must store back and exit
  */
-static void do_fuse12(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
+static void do_fuse12(struct jit_state *state,
+                      riscv_t *rv UNUSED,
+                      rv_insn_t *ir)
 {
     /* Compute rd = rs1 + imm */
     vm_reg[0] = ra_load(state, ir->rs1);
@@ -4614,14 +4595,14 @@ static void do_fuse12(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     emit_jcc_offset(state, 0x85);
     /* Untaken path: rd == 0, fall through to PC + 8 */
     if (JIT_LINK_ALL_EDGES || ir->branch_untaken)
-        emit_jmp(state, ir->pc + 8, rv->csr_satp);
+        emit_jmp(state, ir->pc + 8, BLOCK_SATP(cur_block));
     emit_load_imm(state, temp_reg, ir->pc + 8);
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_exit(state);
     /* Taken path: rd != 0, branch to PC + 4 + imm2 */
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
     if (JIT_LINK_ALL_EDGES || ir->branch_taken)
-        emit_jmp(state, ir->pc + 4 + ir->imm2, rv->csr_satp);
+        emit_jmp(state, ir->pc + 4 + ir->imm2, BLOCK_SATP(cur_block));
     emit_load_imm(state, temp_reg, ir->pc + 4 + ir->imm2);
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_exit(state);
@@ -5332,7 +5313,7 @@ static bool translate_register_loop(struct jit_state *state,
     memcpy(register_map, exit_map, sizeof(register_map));
     store_back(state);
     if (JIT_LINK_ALL_EDGES || tail->branch_untaken)
-        emit_jmp(state, exit_pc, rv->csr_satp);
+        emit_jmp(state, exit_pc, BLOCK_SATP(cur_block));
     emit_set_pc_exit(state, exit_pc);
     if (guards)
         emit_misalign_stubs(state);
@@ -5593,7 +5574,7 @@ static void emit_region_edge(struct jit_state *state,
                              uint32_t pc)
 {
     store_back_all(state);
-    emit_jmp(state, pc, rv->csr_satp);
+    emit_jmp(state, pc, BLOCK_SATP(cur_block));
     emit_set_pc_exit(state, pc);
 }
 
@@ -5724,7 +5705,7 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
         store_back(state);
         if (JIT_LINK_ALL_EDGES || block->ir_tail->branch_taken) {
             /* Fallthrough chain established - jump to next block */
-            emit_jmp(state, block->pc_end, rv->csr_satp);
+            emit_jmp(state, block->pc_end, BLOCK_SATP(cur_block));
         }
         /* Store PC and exit for un-chained path */
         emit_load_imm(state, temp_reg, block->pc_end);
@@ -5832,6 +5813,10 @@ DISABLE_UBSAN_FUNC bool jit_run_cached(riscv_t *rv)
     struct jit_state *state = rv->jit_state;
     const struct offset_map *entry =
         offset_map_find(state, rv->PC, rv->csr_satp, rv->priv_mode);
+#if RV32_HAS(SYSTEM)
+    if (!entry && rv->priv_mode == RV_PRIV_S_MODE)
+        entry = offset_map_find(state, rv->PC, SATP_SHARED, rv->priv_mode);
+#endif
     if (!entry)
         return false;
     assert(!rv->jit_entry_cycles);

@@ -104,10 +104,11 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
 
     /* Compute expected key once - used by both inline cache and jit_cache */
 #if RV32_HAS(SYSTEM)
-    LLVMValueRef satp_ptr_early = t2c_gen_rv_field_ptr(
-        start, builder, offsetof(riscv_t, csr_satp), LLVMInt32Type());
+    /* Key the target in the space of the code being compiled, which may be
+     * shared by every address space (SATP_SHARED); it runs only there.
+     */
     LLVMValueRef satp_early =
-        LLVMBuildLoad2(*builder, LLVMInt32Type(), satp_ptr_early, "");
+        LLVMConstInt(LLVMInt32Type(), t2c_current_block->satp, false);
     LLVMValueRef addr64 =
         LLVMBuildIntCast2(*builder, addr, LLVMInt64Type(), false, "");
     LLVMValueRef satp64 =

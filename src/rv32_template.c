@@ -750,24 +750,7 @@ RVOP(sfencevma, {
         /* Global flush: invalidate all TLB entries */
         mmu_tlb_flush_all(rv);
 #if RV32_HAS(JIT)
-#if RV32_HAS(T2C)
-        /* Hold cache_lock during invalidation to prevent race with T2C
-         * compilation thread. This ensures the invalidated flag and hot2 reset
-         * are seen atomically by the T2C thread.
-         */
-        hart_lock(rv, &rv->cache_lock);
-#endif
-        /* With no ASID filtering, a fence affects retained spaces too. */
-        uint32_t n_compiled UNUSED;
-        cache_invalidate_all(rv->block_cache, &n_compiled);
-        jit_retire_all(rv->jit_state);
-#if RV32_HAS(T2C)
-        if (n_compiled) {
-            jit_cache_clear(rv->jit_cache);
-            inline_cache_clear(rv->inline_cache);
-        }
-        hart_unlock(rv, &rv->cache_lock);
-#endif
+        retire_stale_code(rv);
 #endif
     } else {
         T1C_COUNT(sfence_page, 1);
@@ -792,27 +775,8 @@ RVOP(sfencevma, {
             (RV32_HAS(EXT_C) &&
              (jit_page_has_code_any(rv->jit_state, previous_page) ||
               cache_has_va_any(rv->block_cache, previous_page)));
-        if (has_code) {
-#if RV32_HAS(T2C)
-            /* Hold cache_lock during invalidation to prevent race with T2C
-             * compilation thread.
-             */
-            hart_lock(rv, &rv->cache_lock);
-#endif
-            /* Retire all spaces conservatively, including inbound links and
-             * regions that can enter the changed page from another page.
-             */
-            uint32_t n_compiled UNUSED;
-            cache_invalidate_all(rv->block_cache, &n_compiled);
-            jit_retire_all(rv->jit_state);
-#if RV32_HAS(T2C)
-            if (n_compiled) {
-                jit_cache_clear(rv->jit_cache);
-                inline_cache_clear(rv->inline_cache);
-            }
-            hart_unlock(rv, &rv->cache_lock);
-#endif
-        }
+        if (has_code)
+            retire_stale_page(rv, va);
 #endif
     }
 #endif

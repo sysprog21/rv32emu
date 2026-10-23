@@ -1110,14 +1110,22 @@ int main(void)
 
 #if RV32_HAS(SYSTEM)
     check_privilege_tail(rv);
-    rv_insn_t probe = {.opcode = rv_insn_nop};
+    rv_insn_t probe = {.opcode = rv_insn_nop}, other = {.opcode = rv_insn_nop};
     block_t probe_block = make_block(&probe, 1, 0x1000);
+    block_t other_block = make_block(&other, 1, 0x1008);
+    other_block.satp = 1;
     active = &probe_block;
     assert(jit_translate(rv, &probe_block));
-    assert(jit_page_has_code(rv->jit_state, 0x1004, 0));
+    active = &other_block;
+    assert(jit_translate(rv, &other_block));
+    assert(jit_page_has_code_any(rv->jit_state, 0x1004));
+    /* Retiring one space keeps another space's code on the same page. */
     jit_retire_space(rv->jit_state, 0);
-    assert(!jit_page_has_code(rv->jit_state, 0x1004, 0));
+    assert(jit_page_has_code_any(rv->jit_state, 0x1004));
+    jit_retire_space(rv->jit_state, 1);
+    assert(!jit_page_has_code_any(rv->jit_state, 0x1004));
     jit_wasm_retire_block(rv, &probe_block);
+    jit_wasm_retire_block(rv, &other_block);
 
     /* Modules on one page share a bucket; retiring any of them, in any order,
      * keeps the others findable.
@@ -1132,18 +1140,18 @@ int main(void)
         assert(jit_translate(rv, &chain[i]));
     }
     jit_wasm_retire_block(rv, &chain[1]); /* middle of the chain */
-    assert(jit_page_has_code(rv->jit_state, 0x3ffc, 0));
+    assert(jit_page_has_code_any(rv->jit_state, 0x3ffc));
     jit_wasm_retire_block(rv, &chain[2]); /* its head */
-    assert(jit_page_has_code(rv->jit_state, 0x3000, 0));
+    assert(jit_page_has_code_any(rv->jit_state, 0x3000));
     jit_wasm_retire_block(rv, &chain[0]);
-    assert(!jit_page_has_code(rv->jit_state, 0x3000, 0));
+    assert(!jit_page_has_code_any(rv->jit_state, 0x3000));
     /* Retiring the address space empties a bucket holding several modules. */
     for (int i = 0; i < 3; i++) {
         active = &chain[i];
         assert(jit_translate(rv, &chain[i]));
     }
     jit_retire_space(rv->jit_state, 0);
-    assert(!jit_page_has_code(rv->jit_state, 0x3000, 0));
+    assert(!jit_page_has_code_any(rv->jit_state, 0x3000));
     for (int i = 0; i < 3; i++)
         assert(!chain[i].hot);
     active = NULL;

@@ -593,10 +593,7 @@ uint32_t cache_invalidate_all(cache_t *cache, uint32_t *n_compiled)
     return count;
 }
 
-static bool cache_has_va_context(const cache_t *cache,
-                                 uint32_t va,
-                                 uint32_t satp,
-                                 bool all_spaces)
+bool cache_has_va_any(const cache_t *cache, uint32_t va)
 {
 #if RV32_HAS(BLOCK_CHAINING)
     const uint32_t va_page = va & ~(RV_PG_SIZE - 1);
@@ -605,92 +602,14 @@ static bool cache_has_va_context(const cache_t *cache,
         &cache->page_index[page_index_hash(va_page >> RV_PG_SHIFT)];
     hlist_for_each_entry (entry, head, page_node) {
         const block_t *block = entry->value;
-        if ((all_spaces || block->satp == satp) && !block->invalidated &&
+        if (!block->invalidated &&
             (block->pc_start & ~(RV_PG_SIZE - 1)) == va_page)
             return true;
     }
     return false;
 #else
-    (void) cache, (void) va, (void) satp, (void) all_spaces;
+    (void) cache, (void) va;
     return true;
 #endif
-}
-
-bool cache_has_va(const cache_t *cache, uint32_t va, uint32_t satp)
-{
-    return cache_has_va_context(cache, va, satp, false);
-}
-
-bool cache_has_va_any(const cache_t *cache, uint32_t va)
-{
-    return cache_has_va_context(cache, va, 0, true);
-}
-
-uint32_t cache_invalidate_va(cache_t *cache,
-                             uint32_t va,
-                             uint32_t satp,
-                             uint32_t *n_compiled)
-{
-    if (n_compiled)
-        *n_compiled = 0;
-    if (unlikely(!cache->capacity))
-        return 0;
-
-    uint32_t va_page = va & ~(RV_PG_SIZE - 1);
-    uint32_t count = 0, compiled = 0;
-
-#if RV32_HAS(BLOCK_CHAINING)
-    /* This API invalidates blocks starting on the requested page. The
-     * SFENCE.VMA caller also checks the preceding page for a straddling
-     * instruction and conservatively retires all retained code when needed.
-     */
-    cache_entry_t *pentry;
-    struct hlist_node *next;
-    struct hlist_head *head =
-        &cache->page_index[page_index_hash(va_page >> RV_PG_SHIFT)];
-    hlist_for_each_entry_safe (pentry, next, head, page_node) {
-        block_t *block = (block_t *) pentry->value;
-        /* Verify block belongs to this page (hash collision check) */
-        if (block->satp != satp || block->invalidated ||
-            (block->pc_start & ~(RV_PG_SIZE - 1)) != va_page)
-            continue;
-        block_invalidate(block, &compiled);
-        entry_unindex(pentry);
-        count++;
-    }
-#else
-    /* Without block chaining, blocks may span pages and no page index is
-     * kept, so scan every block.
-     */
-    cache_entry_t *entry = NULL;
-    list_for_each_entry (entry, &cache->list, list) {
-        block_t *block = (block_t *) entry->value;
-        if (!block || block->satp != satp || block->invalidated)
-            continue;
-
-        /* Check if target VA page overlaps with block's address range.
-         * A block may span multiple pages, so we check if va_page falls
-         * within [block_start_page, block_end_page].
-         *
-         * Note: pc_end is exclusive (address after last instruction), so we
-         * use (pc_end - 1) to get the page containing the last byte. This
-         * avoids false invalidation when pc_end falls exactly on a page
-         * boundary.
-         */
-        uint32_t block_start_page = block->pc_start & ~(RV_PG_SIZE - 1);
-        uint32_t last_byte = block->pc_end > block->pc_start ? block->pc_end - 1
-                                                             : block->pc_start;
-        uint32_t block_end_page = last_byte & ~(RV_PG_SIZE - 1);
-        if (va_page >= block_start_page && va_page <= block_end_page) {
-            block_invalidate(block, &compiled);
-            entry_unindex(entry);
-            count++;
-        }
-    }
-#endif /* RV32_HAS(BLOCK_CHAINING) */
-
-    if (n_compiled)
-        *n_compiled = compiled;
-    return count;
 }
 #endif /* RV32_HAS(JIT) && RV32_HAS(SYSTEM) */

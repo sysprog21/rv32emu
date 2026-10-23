@@ -257,14 +257,6 @@ void block_free_irs(riscv_t *rv, block_t *block);
  */
 void jit_retire_space(struct jit_state *state, uint32_t satp);
 
-/* Whether any code translated for address space satp starts in the page of
- * va. Such code may be the target of direct jumps from other pages, so a flush
- * of the page conservatively retires every retained address space.
- */
-bool jit_page_has_code(const struct jit_state *state,
-                       uint32_t va,
-                       uint32_t satp);
-
 /* Drop all translated code, for a FENCE.I, after which any page of any
  * address space may hold new instructions.
  */
@@ -272,6 +264,11 @@ void jit_flush(riscv_t *rv);
 
 /* Retire live native entries in every retained address space. */
 void jit_retire_all(struct jit_state *state);
+
+/* Whether live code translated for any address space starts in the page of
+ * va; retired code does not count. Without block chaining, blocks may span
+ * pages, so any live code counts whatever va is.
+ */
 bool jit_page_has_code_any(const struct jit_state *state, uint32_t va);
 #endif
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);

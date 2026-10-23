@@ -455,6 +455,10 @@ static inline void rvv_csr_write(riscv_t *rv, uint32_t csr, uint32_t val)
 }
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+static void retire_stale_shared(riscv_t *rv);
+#endif
+
 /* get a pointer to a CSR */
 static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
 {
@@ -620,6 +624,9 @@ static uint32_t csr_csrrw(riscv_t *rv,
     if (c == &rv->csr_satp && *c != old_satp) {
         T1C_COUNT(satp_writes, 1);
         mmu_tlb_flush_all(rv);
+#if RV32_HAS(JIT)
+        retire_stale_shared(rv);
+#endif
     }
 #if !RV32_HAS(JIT)
     /*
@@ -690,6 +697,9 @@ static uint32_t csr_csrrs(riscv_t *rv,
     if (c == &rv->csr_satp && *c != old_satp) {
         T1C_COUNT(satp_writes, 1);
         mmu_tlb_flush_all(rv);
+#if RV32_HAS(JIT)
+        retire_stale_shared(rv);
+#endif
 #if !RV32_HAS(JIT)
         need_clear_block_map = true;
 #endif
@@ -748,6 +758,9 @@ static uint32_t csr_csrrc(riscv_t *rv,
     if (c == &rv->csr_satp && *c != old_satp) {
         T1C_COUNT(satp_writes, 1);
         mmu_tlb_flush_all(rv);
+#if RV32_HAS(JIT)
+        retire_stale_shared(rv);
+#endif
 #if !RV32_HAS(JIT)
         need_clear_block_map = true;
 #endif
@@ -1301,6 +1314,73 @@ static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
     return true;
 }
 #endif
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+/* Code was retired, so the T2C caches must be cleared. Clear them whenever
+ * any space retires: a region may outlive the block that entered it.
+ */
+static bool retired_any;
+
+static void retire_space(riscv_t *rv, uint32_t satp)
+{
+    cache_invalidate_satp(rv->block_cache, satp, NULL);
+    jit_retire_space(rv->jit_state, satp);
+    retired_any = true;
+    if (satp == SATP_SHARED)
+        T1C_COUNT(shared_retires, 1);
+}
+
+/* SFENCE.VMA orders page-table updates before later translations. Decoded
+ * code depends only on the translations of its pages, so retire the address
+ * spaces in which one of those changed, keeping the rest: Linux fences all
+ * mappings several times per process, and the kernel's code would otherwise
+ * be decoded and compiled again each time. Native links never cross address
+ * spaces, so a space retires on its own.
+ */
+static void retire_code(riscv_t *rv, bool shared_only, uint32_t vpn)
+{
+#if RV32_HAS(T2C)
+    /* Hold cache_lock so the T2C thread sees invalidation atomically. */
+    hart_lock(rv, &rv->cache_lock);
+#endif
+    retired_any = false;
+    if (!mmu_check_code_maps(rv, retire_space, shared_only, vpn)) {
+        cache_invalidate_all(rv->block_cache, NULL);
+        jit_retire_all(rv->jit_state);
+        mmu_forget_code_maps(rv);
+        retired_any = true;
+#if !RV32_HAS(T2C)
+        T1C_COUNT(shared_retires, 1); /* shared code retires too */
+#endif
+    }
+#if RV32_HAS(T2C)
+    if (retired_any) {
+        jit_cache_clear(rv->jit_cache);
+        inline_cache_clear(rv->inline_cache);
+    }
+    hart_unlock(rv, &rv->cache_lock);
+#endif
+}
+
+static void retire_stale_code(riscv_t *rv)
+{
+    retire_code(rv, false, CODE_MAP_ALL_PAGES);
+}
+
+/* A fence for one page orders only that page's leaf entry. */
+static void retire_stale_page(riscv_t *rv, uint32_t va)
+{
+    retire_code(rv, false, va >> RV_PG_SHIFT);
+}
+
+/* Shared code is valid only while the current address space maps it alike:
+ * check it against each space switched to.
+ */
+static void retire_stale_shared(riscv_t *rv)
+{
+    retire_code(rv, true, CODE_MAP_ALL_PAGES);
+}
+#endif
+
 #include "rv32_template.c"
 
 /* An integer load into x0, which insn_handler() routes here: perform the
@@ -3603,7 +3683,7 @@ static block_t *block_find_or_translate(riscv_t *rv
     if (!next_blk)
         T1C_COUNT(lookup_cold, 1);
 #if RV32_HAS(SYSTEM)
-    else if (next_blk->satp != rv->csr_satp)
+    else if (next_blk->satp != rv->csr_satp && next_blk->satp != SATP_SHARED)
         T1C_COUNT(lookup_satp, 1);
     else if (next_blk->priv_mode != rv->priv_mode)
         T1C_COUNT(lookup_priv, 1);
@@ -3656,7 +3736,10 @@ static block_t *block_find_or_translate(riscv_t *rv
 #endif
 #endif
 #if RV32_HAS(SYSTEM)
-    mmu_note_code(rv, next_blk->pc_start, next_blk->pc_end);
+#if RV32_HAS(JIT)
+    next_blk->satp =
+#endif
+        mmu_note_code(rv, next_blk->pc_start, next_blk->pc_end);
 #endif
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
@@ -3844,7 +3927,7 @@ static block_t *block_find_or_translate(riscv_t *rv
 static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
 {
 #if RV32_HAS(SYSTEM)
-    if (block->satp != rv->csr_satp)
+    if (block->satp != rv->csr_satp && block->satp != SATP_SHARED)
         return false;
 #endif
 
@@ -4148,7 +4231,7 @@ void rv_step(void *arg)
 #endif
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-        assert(block->satp == rv->csr_satp && !block->invalidated);
+        assert(block_matches_context(rv, block));
 #endif
 
 #if !RV32_HAS(SYSTEM)
@@ -4166,6 +4249,13 @@ void rv_step(void *arg)
         if (prev
 #if RV32_HAS(SYSTEM)
             && block_matches_context(rv, prev)
+#if RV32_HAS(JIT)
+            /* Shared and per-space code retire separately, so an edge must
+             * stay within one of them, or a live block could follow it into
+             * retired code.
+             */
+            && prev->satp == block->satp
+#endif
 #endif
         ) {
             const rv_insn_t *last_ir = prev->ir_tail;

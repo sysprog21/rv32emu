@@ -1808,31 +1808,14 @@ void jit_retire_all(struct jit_state *state)
     }
 }
 
-static bool wasm_page_has_code_context(const struct jit_state *state,
-                                       uint32_t va,
-                                       uint32_t satp,
-                                       bool all_spaces)
+bool jit_page_has_code_any(const struct jit_state *state, uint32_t va)
 {
     for (uint16_t i = state->pages[wasm_page_slot(va)]; i;
          i = state->maps[i - 1].next_in_page) {
-        const struct wasm_map *map = &state->maps[i - 1];
-        if ((all_spaces || map->satp == satp) &&
-            (map->pc >> RV_PG_SHIFT) == (va >> RV_PG_SHIFT))
+        if ((state->maps[i - 1].pc >> RV_PG_SHIFT) == (va >> RV_PG_SHIFT))
             return true;
     }
     return false;
-}
-
-bool jit_page_has_code_any(const struct jit_state *state, uint32_t va)
-{
-    return wasm_page_has_code_context(state, va, 0, true);
-}
-
-bool jit_page_has_code(const struct jit_state *state,
-                       uint32_t va,
-                       uint32_t satp)
-{
-    return wasm_page_has_code_context(state, va, satp, false);
 }
 
 #endif

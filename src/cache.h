@@ -99,40 +99,16 @@ uint32_t cache_invalidate_satp(struct cache *cache,
  */
 uint32_t cache_invalidate_all(struct cache *cache, uint32_t *n_compiled);
 
-/*
- * cache_has_va - whether any valid block of address space satp starts in the
- * page of va
+/* cache_has_va_any - whether a valid block of any retained address space
+ * starts in the page of va. A block that only straddles into the page does
+ * not count.
  *
  * Only the emulator thread changes the index this reads, so that thread may
  * call it without cache_lock, to skip taking the lock for a flush that has
  * nothing to invalidate. Without block chaining there is no index, and the
  * answer is always true.
  */
-bool cache_has_va(const struct cache *cache, uint32_t va, uint32_t satp);
-
-/* cache_has_va_any - whether a valid block of any retained address space
- * starts in the page of va. A block that only straddles into the page does
- * not count. The locking rule and the answer without block chaining are those
- * of cache_has_va().
- */
 bool cache_has_va_any(const struct cache *cache, uint32_t va);
-
-/**
- * cache_invalidate_va - invalidate blocks within a VA page matching SATP
- * @cache: a pointer to target cache
- * @va: the virtual address (page will be derived)
- * @satp: the SATP value to match
- * @n_compiled: if not NULL, set to how many of them T2C compiled
- * @return: number of blocks invalidated
- *
- * Retained for future address-space-selective invalidation of code pages.
- * Uses O(1) page-indexed lookup when BLOCK_CHAINING is enabled,
- * otherwise falls back to O(n) scan.
- */
-uint32_t cache_invalidate_va(struct cache *cache,
-                             uint32_t va,
-                             uint32_t satp,
-                             uint32_t *n_compiled);
 
 #if RV32_HAS(BLOCK_CHAINING)
 /* Page index for O(1) cache invalidation by virtual address.

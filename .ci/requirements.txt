@@ -26,7 +26,7 @@ riscof @ git+https://github.com/riscv/riscof@d38859f85fe407bcacddd2efcd355ada468
 riscv-isac==0.18.0
 ruamel.yaml==0.18.10
 ruamel.yaml.clib==0.2.12
-setuptools==83.0.0
+setuptools==84.1.0
 six==1.17.0
 smmap==5.0.2
 tabledata==1.3.4

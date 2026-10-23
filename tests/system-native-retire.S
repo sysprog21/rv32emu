@@ -165,8 +165,11 @@ validate_replacement:
 #ifdef RETIRE_CYCLES
     rdcycle s7
 #if RETIRE_WARM_ITERATIONS == 100000
-    /* Exact retired prefix, shared by interpreter, T1C and T2C. */
-    li t0, 0x000f428b
+    /* Exact count, shared by interpreter, T1C and T2C. The faulting access
+     * is counted twice: once when it faults, and once when the handler's
+     * sret retries it.
+     */
+    li t0, 0x000f428c
     bne s7, t0, fail
 #endif
     li s8, 28

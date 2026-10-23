@@ -1398,8 +1398,10 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 #endif
 
 #if RV32_HAS(SYSTEM)
-    /* Not being trap */
-    rv->trap_cnt = 0;
+    /* Not being trap, nor inside an interrupt the dispatcher entered */
+    rv->chain_stop = 0;
+    rv->interrupt_entered = false;
+    rv->interrupt_grant = false;
 
     /* reset the csrs (full system emulation) */
     rv->csr_cycle = 0;

@@ -195,13 +195,14 @@ ifeq ($(CONFIG_Zba)$(GUEST_ASM_ZBA_WORKS)$(GUEST_ASM_ZICSR_WORKS),yyy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-zba
 endif
 SYSTEM_ASM_CHECK_TARGETS += check-system-fetch-retry \
-    check-system-mmu-cache check-system-trap-cycles \
+    check-system-fetch-retry-nested check-system-mmu-cache check-system-trap-cycles \
     check-system-trap-resume check-system-sfence-asid check-system-mmu-priv \
     check-system-load-x0 check-system-load-x0-bare
 SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
     check-system-interrupt-dispatch-indirect \
     check-system-interrupt-dispatch-long-handler check-system-wfi \
-    check-system-fence-stale-fetch check-system-shared-code
+    check-system-fence-stale-fetch check-system-shared-code \
+    check-system-interrupt-fault check-system-interrupt-fault-switch
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction \
     check-system-native-retire check-system-native-retire-cold \
@@ -398,11 +399,13 @@ EXPECTED_system-mmu-priv = SYSTEM MMU privilege OK
 $(eval $(call system-asm-check-target,system-mmu-priv,rv32ia_zicsr))
 EXPECTED_system-sfence-asid = SYSTEM SFENCE ASID OK
 $(eval $(call system-asm-check-target,system-sfence-asid,rv32ia_zicsr))
-.PHONY: check-system-fetch-retry
-check-system-fetch-retry: $(BIN) tests/system-fetch-retry.S tests/test-system-fetch-retry.py tests/jit_profile.py | $(OUT)
-	$(Q)$(call system-asm-build,system-fetch-retry,rv32ia_zicsr)
-	$(Q)python3 tests/test-system-fetch-retry.py $(BIN) $(OUT)/system-fetch-retry.bin \
-	    $(T1C_REQUIRE_STATS)
+.PHONY: check-system-fetch-retry check-system-fetch-retry-nested
+check-system-fetch-retry-nested: FETCH_RETRY_SUFFIX := -nested
+check-system-fetch-retry-nested: FETCH_RETRY_FLAGS := -DFETCH_NESTED
+check-system-fetch-retry check-system-fetch-retry-nested: $(BIN) tests/system-fetch-retry.S tests/test-system-fetch-retry.py tests/jit_profile.py | $(OUT)
+	$(Q)$(call system-asm-build,system-fetch-retry,rv32ia_zicsr,$(FETCH_RETRY_SUFFIX),$(FETCH_RETRY_FLAGS))
+	$(Q)python3 tests/test-system-fetch-retry.py $(BIN) $(OUT)/system-fetch-retry$(FETCH_RETRY_SUFFIX).bin \
+	    $(T1C_REQUIRE_STATS) $(if $(FETCH_RETRY_SUFFIX),--nested)
 
 .PHONY: check-system-zba
 check-system-zba: $(BIN) tests/jit-zba.S tests/test-system-zba.py tests/jit_profile.py | $(OUT)
@@ -431,6 +434,7 @@ EXPECTED_system-interrupt-dispatch = SYSTEM interrupt dispatch OK
 EXPECTED_system-wfi = SYSTEM WFI OK
 EXPECTED_system-fence-stale-fetch = SYSTEM fence stale fetch OK
 EXPECTED_system-shared-code = SYSTEM shared code OK
+EXPECTED_system-interrupt-fault = SYSTEM interrupt fault OK
 EXPECTED_system-trap-resume = SYSTEM trap resume OK
 EXPECTED_system-jit-eviction = SYSTEM JIT eviction OK
 
@@ -443,6 +447,8 @@ $(eval $(call system-asm-check-target,system-trap-resume,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-wfi,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-fence-stale-fetch,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-shared-code,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-interrupt-fault,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-interrupt-fault,rv32ia_zicsr,-switch,-DINTERRUPT_SWITCH))
 $(eval $(call system-asm-check-target,system-jit-eviction,rv32ia_zicsr_zifencei))
 EXPECTED_system-native-retire = SYSTEM native retire OK
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei))

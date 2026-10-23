@@ -497,6 +497,11 @@ struct riscv_internal {
         };
         uint64_t chain_stop;
     };
+    /* An interrupt handler entered through the dispatcher is running; the
+     * sret that ends it grants the code it resumes one dispatch before the
+     * next interrupt.
+     */
+    bool interrupt_entered, interrupt_grant;
 #endif
 
 #if !RV32_HAS(JIT)

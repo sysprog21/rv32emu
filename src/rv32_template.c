@@ -675,6 +675,17 @@ RVOP(uret, {
 /* SRET: return from traps in S-mode */
 #if RV32_HAS(SYSTEM)
 RVOP(sret, {
+    /* The return that enables interrupts again ends an interrupt the
+     * dispatcher entered, wherever it resumes, since the handler may have
+     * switched tasks. A trap taken inside the handler returns with them
+     * still disabled.
+     */
+    if (rv->interrupt_entered && !rv->trap_cnt &&
+        (!(rv->csr_sstatus & SSTATUS_SPP) ||
+         (rv->csr_sstatus & SSTATUS_SPIE))) {
+        rv->interrupt_grant = true;
+        rv->interrupt_entered = false;
+    }
     rv->priv_mode = (rv->csr_sstatus & SSTATUS_SPP) >> SSTATUS_SPP_SHIFT;
     /* Returning to U-mode leaves every trap level, since the kernel may have
      * switched tasks and not return to the outer handlers via sret. Otherwise,

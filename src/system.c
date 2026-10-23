@@ -845,6 +845,33 @@ pte_t *mmu_walk(riscv_t *rv, const uint32_t vaddr, uint32_t *level)
  * access permission else true
  */
 /* FIXME: handle access fault, addr out of range check */
+/* Whether the last page fault was entered without running its handler. */
+static bool mmu_fault_deferred;
+
+/* Outside any nested handler, a page fault is precise: the access aborts, and
+ * the dispatcher runs the guest's handler from the trap vector through cached
+ * and compiled blocks, as other code. Its sret then retries the instruction.
+ * A fault inside a handler the emulator runs nested, one instruction at a
+ * time, must nest too: that handler ends at its own sret.
+ */
+static void mmu_raise_fault(riscv_t *rv, uint32_t scause, uint32_t stval)
+{
+    if (rv->trap_cnt) {
+        SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);
+        return;
+    }
+    SET_CAUSE_AND_TVAL_THEN_ENTER(rv, scause, stval);
+    mmu_fault_deferred = true;
+}
+
+/* Consume the deferral of a failed fault check; see mmu_raise_fault(). */
+static inline bool mmu_take_deferred_fault(void)
+{
+    const bool deferred = mmu_fault_deferred;
+    mmu_fault_deferred = false;
+    return deferred;
+}
+
 #define MMU_FAULT_CHECK(op, rv, pte, vaddr, access_bits) \
     mmu_##op##_fault_check(rv, pte, vaddr, access_bits)
 #define MMU_FAULT_CHECK_IMPL(op, pgfault)                                     \
@@ -868,7 +895,7 @@ pte_t *mmu_walk(riscv_t *rv, const uint32_t vaddr, uint32_t *level)
             break;                                                            \
         }                                                                     \
         if (!pte || !(*pte & PTE_V) || !mmu_perm_ok(rv, *pte, access_bits)) { \
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, scause, stval);                  \
+            mmu_raise_fault(rv, scause, stval);                               \
             return false;                                                     \
         }                                                                     \
         /* valid PTE */                                                       \
@@ -904,6 +931,10 @@ uint32_t __attribute__((noinline)) mmu_ifetch_miss(riscv_t *rv, uint32_t vaddr)
     pte_t *pte = mmu_walk(rv, vaddr, &level);
     bool ok = MMU_FAULT_CHECK(ifetch, rv, pte, vaddr, PTE_X);
     if (unlikely(!ok)) {
+        if (mmu_take_deferred_fault()) {
+            need_handle_signal = true;
+            return 0;
+        }
         CHECK_PENDING_SIGNAL(rv, need_handle_signal);
 
         /* Retry only if the handler returned to the access and let the hart run
@@ -918,6 +949,7 @@ uint32_t __attribute__((noinline)) mmu_ifetch_miss(riscv_t *rv, uint32_t vaddr)
         pte = mmu_walk(rv, vaddr, &level);
         /* Re-validate permissions after retry */
         if (!pte || !MMU_FAULT_CHECK(ifetch, rv, pte, vaddr, PTE_X)) {
+            mmu_take_deferred_fault();
             need_retranslate = true;
             /* Also set need_handle_signal so RVOP macro returns for retry */
             need_handle_signal = true;
@@ -1107,6 +1139,10 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
     bool ok = rw ? MMU_FAULT_CHECK(read, rv, pte, vaddr, PTE_R)
                  : MMU_FAULT_CHECK(write, rv, pte, vaddr, PTE_W);
     if (unlikely(!ok)) {
+        if (mmu_take_deferred_fault()) {
+            need_handle_signal = true;
+            return 0;
+        }
         CHECK_PENDING_SIGNAL(rv, need_handle_signal);
 
         /* Retry only if the handler returned to the access and let the hart run
@@ -1125,6 +1161,7 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
         ok = rw ? MMU_FAULT_CHECK(read, rv, pte, vaddr, PTE_R)
                 : MMU_FAULT_CHECK(write, rv, pte, vaddr, PTE_W);
         if (!pte || !ok) {
+            mmu_take_deferred_fault();
             need_handle_signal = true;
             return 0;
         }

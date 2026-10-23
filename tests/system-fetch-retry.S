@@ -1,7 +1,18 @@
-/* Return from the first instruction page fault without repairing its PTE.
- * The second fault repairs it, forcing block_translate's fetch retry. A
- * compatible loop must still compile; a CSR-containing loop must not.
+/* Return from the first instruction page fault without repairing its PTE;
+ * the second fault repairs it. Entered through the dispatcher, each fault is
+ * retried from the trap vector, and afterwards a compatible loop must still
+ * compile while a CSR-containing loop must not. With FETCH_NESTED, a handler
+ * the emulator runs nested calls the loops, so the faults nest too and the
+ * fetch retries in place after each one.
  */
+#ifdef FETCH_NESTED
+#define LOOP_COUNT 16
+/* Run each loop from an illegal-instruction handler, which runs nested. */
+#define CALL_LOOP .word 0xffffffff
+#else
+#define LOOP_COUNT 65536
+#define CALL_LOOP jalr ra, s8, 0
+#endif
 .option norvc
 .option norelax
 .text
@@ -31,10 +42,10 @@ _start:
     addi s9, s9, 4
     li s10, 0x44cb          /* physical 0x11000, RX, A/D, V */
     li s11, 0
-    li s4, 65536
+    li s4, LOOP_COUNT
     li a0, 0
-    jalr ra, s8, 0
-    li t0, 65536
+    CALL_LOOP
+    li t0, LOOP_COUNT
     bne a0, t0, fail
     li t0, 2
     bne s11, t0, fail
@@ -43,10 +54,10 @@ _start:
     addi s9, s9, 4
     li s10, 0x48cb          /* physical 0x12000 */
     li s11, 0
-    li s4, 65536
+    li s4, LOOP_COUNT
     li a0, 0
-    jalr ra, s8, 0
-    li t0, 65536
+    CALL_LOOP
+    li t0, LOOP_COUNT
     bne a0, t0, fail
     li t0, 2
     bne s11, t0, fail
@@ -56,6 +67,20 @@ _start:
 .balign 4
 handler:
     csrr t0, scause
+#ifdef FETCH_NESTED
+    li t1, 2
+    bne t0, t1, 2f
+    csrr s7, sepc             /* the faults below overwrite both */
+    csrr s5, sstatus
+    mv s6, ra
+    jalr ra, s8, 0
+    mv ra, s6
+    addi s7, s7, 4
+    csrw sepc, s7
+    csrw sstatus, s5
+    sret
+2:
+#endif
     li t1, 12
     bne t0, t1, fail
     csrr t0, sepc

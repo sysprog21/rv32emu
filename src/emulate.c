@@ -3948,11 +3948,32 @@ static bool rv_has_plic_trap(riscv_t *rv)
             (rv->csr_sip & rv->csr_sie));
 }
 
+/* Interrupts are taken between blocks, where no instruction is in flight.
+ * Outside a nested handler, enter the handler without running it in place:
+ * the dispatcher then runs it from the trap vector as ordinary code.
+ */
+#define RAISE_INTERRUPT(rv, cause)                       \
+    do {                                                 \
+        if ((rv)->trap_cnt) {                            \
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, cause, 0);  \
+        } else {                                         \
+            SET_CAUSE_AND_TVAL_THEN_ENTER(rv, cause, 0); \
+            (rv)->interrupt_entered = true;              \
+        }                                                \
+    } while (0)
+
 /* Return whether an interrupt trap was taken. */
 static bool rv_check_interrupt(riscv_t *rv)
 {
     vm_attr_t *attr = PRIV(rv);
     bool trapped = false;
+    /* Resume the interrupted code for one dispatch first, so a handler
+     * re-armed to fire at once cannot starve it.
+     */
+    if (unlikely(rv->interrupt_grant)) {
+        rv->interrupt_grant = false;
+        return false;
+    }
     if (peripheral_update_ctr-- == 0) {
         peripheral_update_ctr = 64;
 #if defined(__EMSCRIPTEN__)
@@ -3988,15 +4009,15 @@ static bool rv_check_interrupt(riscv_t *rv)
         uint8_t intr_idx = ilog2(intr_applicable);
         switch (intr_idx) {
         case (SUPERVISOR_SW_INTR & 0xf):
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_SW_INTR, 0);
+            RAISE_INTERRUPT(rv, SUPERVISOR_SW_INTR);
             trapped = true;
             break;
         case (SUPERVISOR_TIMER_INTR & 0xf):
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_TIMER_INTR, 0);
+            RAISE_INTERRUPT(rv, SUPERVISOR_TIMER_INTR);
             trapped = true;
             break;
         case (SUPERVISOR_EXTERNAL_INTR & 0xf):
-            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, SUPERVISOR_EXTERNAL_INTR, 0);
+            RAISE_INTERRUPT(rv, SUPERVISOR_EXTERNAL_INTR);
             trapped = true;
 #if defined(__EMSCRIPTEN__)
             /* escape sequence has more than 1 byte */
@@ -4121,14 +4142,17 @@ void rv_step(void *arg)
 #ifdef __EMSCRIPTEN__
         /* A trap moves rv->PC to the trap vector, but a saved continuation
          * still belongs to the interrupted code. Discard it and redispatch from
-         * rv->PC instead.
+         * rv->PC instead. The interrupted block must not chain into the
+         * handler either.
          */
-        if (rv_check_interrupt(rv) && rv->next_insn) {
+        if (rv_check_interrupt(rv)) {
             rv->next_insn = NULL;
             prev = NULL;
         }
 #else
-        rv_check_interrupt(rv);
+        /* The interrupted block must not chain into the handler. */
+        if (rv_check_interrupt(rv))
+            prev = NULL;
 #endif
 #endif
 

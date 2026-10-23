@@ -1110,8 +1110,8 @@ every process decoded and compiled the kernel's code paths again.
   code instead of interpreting around it.
 * A fence retires only address spaces in which a recorded root or leaf entry
   of a code page changed. If the records cannot be kept, as when they run
-  out, it retires all code as before. A page is recorded only when the iTLB translation
-  its fetch used agrees with the page tables.
+  out, it retires all code as before. A page is recorded only when the iTLB
+  translation its fetch used agrees with the page tables.
 * S-mode code fetched only through global mappings is shared by every
   address space, and checked against each space switched to. T2C builds keep
   per-space code: there the extra tier-2 compilation slowed boots by 20%.
@@ -1119,6 +1119,30 @@ every process decoded and compiled the kernel's code paths again.
 
 After these, 24.5% of guest instructions run interpreted in blocks T1C could
 compile, down from 51%, and shared kernel code is retired once in that run.
+Delivering interrupts through the dispatcher, as faults are, was slower on its
+own; with the larger block cache below it no longer is.
+
+### Native code quality in system T1C (2026-10-23)
+
+With the kernel's code retained, the time went to the code itself and to the
+blocks still interpreted:
+
+* The TLBs hold 256 entries, and the block cache holds 32768 blocks with a
+  64 MiB code buffer, so the kernel's working set stays compiled.
+* Code records are found through a hashed index. Duplicates had filled the
+  table four times per run, and each overflow retired all code.
+* Blocks compile after 16 dispatches, or 2 for a loop; 8 and 1 compiled too
+  much cold code.
+* Loads and stores keep the register allocator's mappings: only the slow path
+  writes guest registers back. Their slow paths are emitted after the block,
+  so a dTLB hit falls through to the next instruction, and on x86-64 a hit
+  takes two instructions fewer.
+* A fence for one page checks only that page's code records, and in a
+  superpage region holding code, the region's superpage records; Linux issues
+  about 1,600 such fences per process launch.
+* AMOs and CSR instructions compile as calls into C instead of leaving each
+  block that holds one to the interpreter. A CSR helper leaves the block after
+  a SATP write and when it unmasks a pending interrupt.
 
 Five interleaved rounds of `tests/system-bench.sh` on CPU 6, system T1C,
 medians in milliseconds. QEMU 11.0.2 runs the same kernel and initramfs on
@@ -1127,15 +1151,14 @@ firmware.
 
 | Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
 |---|---:|---:|---:|---:|---:|
-| master (ffe36e0) | 2144 | 11834 | 3430 | 8181 | 1194 |
-| this series | 1891 | 8771 | 3404 | 5316 | 1119 |
-| QEMU 11.0.2 | 2489 | 12403 | 2825 | 3802 | 681 |
+| master (ffe36e0) | 2138 | 11809 | 3417 | 8093 | 1155 |
+| this series | 1570 | 5772 | 2257 | 2434 | 572 |
+| QEMU 11.0.2 | 2485 | 11880 | 2778 | 3724 | 670 |
 
-Against master: boot -11.8%, Dhrystone -25.9%, CoreMark -0.8%, fork/exec
--35.0%, gzip -6.3%. Against QEMU, boot takes 24.0% and Dhrystone 29.3% less
-time, while CoreMark takes 20.5%, fork/exec 39.8% and gzip 64.3% longer.
+Against master: boot -26.6%, Dhrystone -51.1%, CoreMark -33.9%, fork/exec
+-69.9%, gzip -50.5%. Against QEMU: boot -36.8%, Dhrystone -51.4%, CoreMark
+-18.8%, fork/exec -34.6%, gzip -14.6%. Moving the slow paths out of line alone
+saved about 10% in every workload.
 
-Not adopted: decoding trap handlers through a cache (no gain), delivering
-interrupts through the dispatcher (2.6% slower fork/exec), honoring ASIDs in
-SFENCE.VMA (Linux issued none), and a larger block cache, which compiles
-more cold code and was slower with and without shared kernel code.
+Not adopted: decoding trap handlers through a cache (no gain) and honoring
+ASIDs in SFENCE.VMA (Linux issued none).

@@ -550,6 +550,15 @@ static uint8_t reg_align[N_RV_REGS];
 #define ALU_AND 4
 #define ALU_XOR 6
 
+/* ALU opcodes for register-to-register operations (x86-64 encoding).
+ * On Arm64, emit_alu32() maps these to equivalent instructions.
+ */
+#define ALU_OP_ADD 0x01
+#define ALU_OP_SUB 0x29
+#define ALU_OP_XOR 0x31
+#define ALU_OP_OR 0x09
+#define ALU_OP_AND 0x21
+
 /* Shift and rotate operation identifiers: x86-64 ModR/M reg field values,
  * which the Arm64 emitters also accept for the shifts.
  */
@@ -1090,6 +1099,25 @@ static void emit_loadstore_imm(struct jit_state *state,
     assert(imm9 >= -256 && imm9 < 256);
     imm9 &= 0x1ff;
     emit_a64(state, imm_op_base | op | (imm9 << 12) | (rn << 5) | rt);
+}
+
+/* [ARM-A]: LDR or STR (immediate, unsigned offset) of a 32- or 64-bit field
+ * at offset from rn, which must be a multiple of the access size below 4096
+ * of them.
+ */
+static void emit_ldst_scaled(struct jit_state *state,
+                             bool load,
+                             bool is64,
+                             int rt,
+                             int rn,
+                             uint32_t offset)
+{
+    const uint32_t scale = is64 ? 8 : 4;
+    assert(offset % scale == 0 && offset / scale < 4096);
+    emit_a64(state, (is64 ? UINT32_C(0xf9000000) : UINT32_C(0xb9000000)) |
+                        (load ? UINT32_C(0x00400000) : 0) |
+                        ((offset / scale) << 10) | ((uint32_t) rn << 5) |
+                        (uint32_t) rt);
 }
 
 /* [ARM-A]: C4.1.66: Load/store register pair (offset).  */
@@ -2074,11 +2102,7 @@ static void emit_cycle_move(struct jit_state *state, bool load)
     emit1(state, load ? 0x8b : 0x89);
     emit_modrm_and_displacement(state, cycle_reg, parameter_reg[0], offset);
 #elif defined(__aarch64__)
-    /* LDR/STR Xt, [Xn, #offset], unsigned scaled offset */
-    emit_a64(state, (load ? UINT32_C(0xf9400000) : UINT32_C(0xf9000000)) |
-                        ((offset / 8) << 10) |
-                        ((uint32_t) parameter_reg[0] << 5) |
-                        (uint32_t) cycle_reg);
+    emit_ldst_scaled(state, load, true, cycle_reg, parameter_reg[0], offset);
 #endif
 }
 
@@ -2165,8 +2189,7 @@ static void emit_chain_deadline(struct jit_state *state, uint32_t pc)
     emit1(state, 0x3b); /* cmp cycle_reg, [rv + deadline] */
     emit_modrm_and_displacement(state, cycle_reg, parameter_reg[0], offset);
 #elif defined(__aarch64__)
-    emit_a64(state, UINT32_C(0xf9400000) | ((offset / 8) << 10) |
-                        ((uint32_t) parameter_reg[0] << 5) | temp_reg);
+    emit_ldst_scaled(state, true, true, temp_reg, parameter_reg[0], offset);
     emit_addsub_register(state, true, AS_SUBS, RZ, cycle_reg, temp_reg);
 #endif
     uint32_t jump_loc_0 = state->offset;
@@ -2741,16 +2764,19 @@ static uint32_t emit_x64_jcc32(struct jit_state *state, uint8_t opc)
  *
  * Aligned + same page implies no page crossing, so we do not check that.
  *
- * Returns the buf offset of the unconditional branch that the caller must
- * patch (via emit_jump_target_offset) to the "fast path end" label, i.e. the
- * common merge point after the slow path. Returns 0 when no fast path was
- * emitted (caller proceeds straight to slow path).
+ * A hit falls through past the access. The branches that take the slow path
+ * are returned in slow_branches, for the caller to patch (via
+ * emit_jump_target_offset) to it. Returns false when no fast path was
+ * emitted, and the caller proceeds straight to the slow path.
  */
-static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
-                                      uint32_t insn_type,
-                                      int load_dest_reg UNUSED,
-                                      int store_data_reg UNUSED,
-                                      const memory_t *mem)
+#define MMU_SLOW_BRANCHES 8
+static bool emit_jit_mmu_fastpath(struct jit_state *state,
+                                  uint32_t insn_type,
+                                  int load_dest_reg UNUSED,
+                                  int store_data_reg UNUSED,
+                                  const memory_t *mem,
+                                  uint32_t *slow_branches UNUSED,
+                                  int *n_slow UNUSED)
 {
     uint8_t access_size = 0;
     bool is_store = false;
@@ -2786,7 +2812,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         is_store = true;
         break;
     default:
-        return 0;
+        return false;
     }
 
     /* Small RAM images cannot satisfy multi-byte accesses in the inline fast
@@ -2794,7 +2820,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
      * the max_paddr calculation below.
      */
     if (mem->mem_size < access_size)
-        return 0;
+        return false;
 #if defined(__aarch64__)
     /* Guest RAM is capped at 4 GiB.  The exact 4 GiB case is supported:
      * mem_size itself no longer fits in uint32_t, but mem_size - access_size
@@ -2808,8 +2834,6 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
      * Maximum count:
      *   1 align + 1 vpn + 1 valid + 1 perm + 1 dirty (store) + 1 range
      */
-    uint32_t slow_branches[8];
-    int n_slow = 0;
 
     /* Alignment check (skip for byte access)
      * AND w10, w8, #(size - 1); CBNZ w10, slow
@@ -2817,7 +2841,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     if (access_size > 1) {
         emit_load_imm(state, R10, access_size - 1);
         emit_logical_register(state, false, LOG_AND, R10, R8, R10);
-        slow_branches[n_slow++] = emit_a64_cbnz(state, R10);
+        slow_branches[(*n_slow)++] = emit_a64_cbnz(state, R10);
     }
 
     /* vpn = vaddr >> 12
@@ -2852,27 +2876,29 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     /* VPN match: LDR w24,[x25,#0]; CMP w24,w10; B.NE slow */
     emit_loadstore_imm(state, LS_LDRW, R24, R25, 0);
     emit_addsub_register(state, false, AS_SUBS, RZ, R24, R10);
-    slow_branches[n_slow++] = emit_a64_bcond(state, COND_NE);
+    slow_branches[(*n_slow)++] = emit_a64_bcond(state, COND_NE);
 
     /* The valid stamp must match the current effective data context. */
     emit_loadstore_imm(state, LS_LDRB, R24, R25, offsetof(tlb_entry_t, valid));
-    emit_load_imm_sext(state, R10, offsetof(riscv_t, mmu_access_context));
-    emit_addsub_register(state, true, AS_ADD, R10, R0, R10);
-    emit_loadstore_imm(state, LS_LDRW, R10, R10, 0);
+    _Static_assert(offsetof(riscv_t, mmu_access_context) % 4 == 0 &&
+                       offsetof(riscv_t, mmu_access_context) / 4 < 4096,
+                   "access context must fit an Arm64 scaled load");
+    emit_ldst_scaled(state, true, false, R10, R0,
+                     offsetof(riscv_t, mmu_access_context));
     emit_addsub_register(state, false, AS_SUBS, RZ, R24, R10);
-    slow_branches[n_slow++] = emit_a64_bcond(state, COND_NE);
+    slow_branches[(*n_slow)++] = emit_a64_bcond(state, COND_NE);
 
     /* perm has needed bit: LDRB w24,[x25,#12]; AND with PTE_R/W */
     emit_loadstore_imm(state, LS_LDRB, R24, R25, offsetof(tlb_entry_t, perm));
     emit_load_imm(state, R10, is_store ? PTE_W : PTE_R);
     emit_logical_register(state, false, LOG_AND, R24, R24, R10);
-    slow_branches[n_slow++] = emit_a64_cbz(state, R24);
+    slow_branches[(*n_slow)++] = emit_a64_cbz(state, R24);
 
     /* For stores, dirty must be 1 (so PTE_D update stays in C) */
     if (is_store) {
         emit_loadstore_imm(state, LS_LDRB, R24, R25,
                            offsetof(tlb_entry_t, dirty));
-        slow_branches[n_slow++] = emit_a64_cbz(state, R24);
+        slow_branches[(*n_slow)++] = emit_a64_cbz(state, R24);
     }
 
     /* The exact VPN tag identifies a translated 4 KiB slice, including
@@ -2893,7 +2919,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
      * C clear, i.e. w25 < w24 (paddr exceeds the max).
      */
     emit_addsub_register(state, false, AS_SUBS, RZ, R25, R24);
-    slow_branches[n_slow++] = emit_a64_bcond(state, COND_LO);
+    slow_branches[(*n_slow)++] = emit_a64_bcond(state, COND_LO);
 
     /* host address: x25 = mem_base + paddr
      * The OR above was a 32-bit op, which zero-extends, so the high 32 bits of
@@ -2948,16 +2974,8 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
         }
     }
 
-    /* Final unconditional B; caller patches the offset to fastpath_end */
-    uint32_t fastpath_end_loc = state->offset;
-    emit_a64(state, UINT32_C(0x14000000)); /* B #0 (patched later) */
-
-    /* Slow path begins right after our emission; patch every gating branch. */
-    uint32_t slow_label = state->offset;
-    for (int i = 0; i < n_slow; i++)
-        emit_jump_target_offset(state, slow_branches[i], slow_label);
-
-    return fastpath_end_loc;
+    assert(*n_slow <= MMU_SLOW_BRANCHES);
+    return true;
 #elif defined(__x86_64__) && !defined(_WIN32)
     /* RAM tags cover 32-bit guest addresses, including a full 4 GiB arena. */
     assert(mem->mem_size <= 0x100000000ULL);
@@ -2993,38 +3011,40 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
                      is_store ? offsetof(jit_tlb_entry_t, write_tag)
                               : offsetof(jit_tlb_entry_t, read_tag));
     /* A mismatch takes the checked C slow path. */
-    const uint32_t slow_branch = emit_x64_jcc32(state, 0x85);
+    slow_branches[(*n_slow)++] = emit_x64_jcc32(state, 0x85);
 
-    emit_mov32(state, RCX, RSI);
-    /* add rsi, [r12 + addend] */
+    /* mov rsi, [r12 + addend] */
     emit1(state, 0x49);
-    emit1(state, 0x03);
+    emit1(state, 0x8b);
     emit_sib_operand(state, RSI, R12, RSP, 0,
                      offsetof(jit_tlb_entry_t, addend));
 
-    /* Access through RSI, from and into the allocated guest registers. */
+    /* Access [rsi + rcx], from and into the allocated guest registers. The
+     * address in ECX was formed by a 32-bit operation, so RCX is zero-extended.
+     */
     const enum operand_size size = access_size == 1   ? S8
                                    : access_size == 2 ? S16
                                                       : S32;
     if (is_store) {
-        emit_store(state, size, store_data_reg, RSI, 0);
-    } else if (is_signed) {
-        emit_load_sext(state, size, RSI, load_dest_reg, 0);
+        /* emit_mmu_access() zeroed x0's host register before the probe. */
+        if (size == S16)
+            emit1(state, 0x66);
+        if (store_data_reg & 8 || size == S8)
+            emit_rex(state, 0, !!(store_data_reg & 8), 0, 0);
+        emit_store_opcode(state, size);
+        emit_sib_operand(state, store_data_reg, RSI, RCX, 0, 0);
+    } else if (host_reg_maps_x0(load_dest_reg)) {
+        emit_load_imm(state, load_dest_reg, 0);
     } else {
-        emit_load(state, size, RSI, load_dest_reg, 0);
+        if (load_dest_reg & 8)
+            emit_rex(state, 0, 1, 0, 0);
+        emit_load_opcode(state, size, is_signed);
+        emit_sib_operand(state, load_dest_reg, RSI, RCX, 0, 0);
     }
     if (!is_store)
         set_dirty(load_dest_reg, true);
 
-    /* jmp rel32 to fastpath_end */
-    emit1(state, 0xe9);
-    uint32_t fastpath_end_loc = state->offset;
-    emit4(state, 0);
-
-    /* Slow path begins right after this. */
-    emit_jump_target_offset(state, slow_branch, state->offset);
-
-    return fastpath_end_loc;
+    return true;
 #else
     /* Windows x86-64 or other ABIs — fast path disabled. */
     (void) state;
@@ -3034,7 +3054,7 @@ static uint32_t emit_jit_mmu_fastpath(struct jit_state *state,
     (void) load_dest_reg;
     (void) store_data_reg;
     (void) mem;
-    return 0U;
+    return false;
 #endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
@@ -4271,13 +4291,172 @@ static void emit_misalign_guard(struct jit_state *state,
         reg_align[rs1] = mask + 1;
 }
 
-/* Emit the stubs that the block's guards branch to. translate() empties the
- * list before each block.
+#if RV32_HAS(SYSTEM_MMIO)
+/* temp_reg = base + imm, the guest address of a load or store. */
+static void emit_guest_vaddr(struct jit_state *state, int base, int32_t imm)
+{
+#if defined(__x86_64__)
+    /* lea temp_reg, [base + imm], a 32-bit result zero-extended */
+    emit_basic_rex(state, 0, temp_reg, base);
+    emit1(state, 0x8d);
+    emit_modrm_and_displacement(state, temp_reg, base, imm);
+#else
+    emit_load_imm_sext(state, temp_reg, imm);
+    emit_alu32(state, ALU_OP_ADD, base, temp_reg);
+#endif
+}
+
+/* The slow path of a load or store that the inline dTLB probe missed. It runs
+ * from the register state before the instruction, saved in map, and rejoins
+ * the hit path at merge with the access done. temp_reg holds the address.
  */
-static void emit_misalign_stubs(struct jit_state *state)
+struct mmu_stub {
+    uint32_t slow_branches[MMU_SLOW_BRANCHES];
+    int n_slow;
+    uint32_t merge;
+    uint32_t pc, insn_type, insn_size, refund;
+    uint8_t vreg_idx; /* rd for a load, rs2 for a store */
+    int reg;          /* the host register holding it */
+    enum operand_size size;
+    bool store, sext;
+    struct host_reg map[ARRAY_SIZE(register_map)];
+};
+#define MAX_MMU_STUBS 256
+static struct mmu_stub mmu_stubs[MAX_MMU_STUBS];
+static int n_mmu_stubs;
+
+/* Call the handler, leave on a trap, and complete a RAM access it translated;
+ * the handler performs MMIO itself.
+ */
+static void emit_mmu_slow_path(struct jit_state *state,
+                               riscv_t *rv,
+                               const struct mmu_stub *stub)
+{
+    const memory_t *m = PRIV(rv)->mem;
+    emit_mmu_write_back(state);
+    emit_jit_mmu_handler(state, stub->vreg_idx, temp_reg, stub->insn_type,
+                         stub->pc, stub->insn_size, stub->refund);
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.abort));
+    emit_cmp_imm32(state, temp_reg, 0);
+    uint32_t jump_trap = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    emit_mmu_reload(state);
+
+    emit_load(state, S8, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.is_mmio));
+    emit_cmp_imm32(state, temp_reg, 0);
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    emit_load(state, S32, parameter_reg[0], temp_reg,
+              offsetof(riscv_t, jit_mmu.paddr));
+    emit_load_imm_sext(state, mmu_scratch_reg, (intptr_t) m->mem_base);
+    emit_alu64(state, ALU_OP_ADD, temp_reg, mmu_scratch_reg);
+    if (stub->store)
+        emit_store(state, stub->size, stub->reg, mmu_scratch_reg, 0);
+    else if (stub->sext)
+        emit_load_sext(state, stub->size, mmu_scratch_reg, stub->reg, 0);
+    else
+        emit_load(state, stub->size, mmu_scratch_reg, stub->reg, 0);
+    uint32_t jump_loc_1 = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    /* MMIO: the handler wrote a load's result to rv->X. */
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+    if (!stub->store)
+        emit_load(state, S32, parameter_reg[0], stub->reg,
+                  offsetof(riscv_t, X) + 4 * stub->vreg_idx);
+    emit_jump_target_offset(state, JUMP_LOC_1, state->offset);
+    uint32_t jump_normal = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    /* The registers were written back before the handler trapped. */
+    emit_jump_target_offset(state, JUMP_TRAP, state->offset);
+    emit_exit(state);
+    emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
+}
+
+static void emit_mmu_stub(struct jit_state *state,
+                          riscv_t *rv,
+                          const struct mmu_stub *stub)
+{
+    for (int i = 0; i < stub->n_slow; i++)
+        emit_jump_target_offset(state, stub->slow_branches[i], state->offset);
+    memcpy(register_map, stub->map, sizeof(register_map));
+    emit_mmu_slow_path(state, rv, stub);
+    uint32_t jump_normal = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    emit_jump_target_offset(state, JUMP_NORMAL, stub->merge);
+}
+
+/* A load or store in system mode, at temp_reg = X[rs1] + imm. Guest registers
+ * stay allocated across it. A dTLB hit performs it inline and falls through;
+ * the slow path, emitted after the block, starts from the register state
+ * before the instruction, so a fault leaves the old rd.
+ */
+static void emit_mmu_access(struct jit_state *state,
+                            riscv_t *rv,
+                            const rv_insn_t *ir,
+                            uint32_t insn_type,
+                            enum operand_size size,
+                            bool sext,
+                            bool store)
+{
+    struct mmu_stub stub = {
+        .pc = ir->pc,
+        .insn_type = insn_type,
+        .insn_size = jit_instruction_size(ir->opcode),
+        .refund = unretired_after(rv, ir->pc),
+        .vreg_idx = store ? ir->rs2 : ir->rd,
+        .size = size,
+        .store = store,
+        .sext = sext,
+    };
+    stub.reg = store ? ra_load(state, ir->rs2) : map_vm_reg(state, ir->rd);
+    /* x0's host register may hold scratch; every path stores zero. */
+    if (store && host_reg_maps_x0(stub.reg))
+        emit_load_imm(state, stub.reg, 0);
+    memcpy(stub.map, register_map, sizeof(stub.map));
+    const bool fast = emit_jit_mmu_fastpath(
+        state, insn_type, store ? -1 : stub.reg, store ? stub.reg : -1,
+        PRIV(rv)->mem, stub.slow_branches, &stub.n_slow);
+    if (!fast) {
+        emit_mmu_slow_path(state, rv, &stub);
+    } else if (n_mmu_stubs < MAX_MMU_STUBS) {
+        stub.merge = state->offset;
+        mmu_stubs[n_mmu_stubs++] = stub;
+    } else {
+        /* Out of stub slots: emit this one inline and branch around it. */
+        struct host_reg hit_map[ARRAY_SIZE(register_map)];
+        memcpy(hit_map, register_map, sizeof(hit_map));
+        uint32_t jump_normal = state->offset;
+        emit_jcc_offset(state, JCC_JMP);
+        for (int i = 0; i < stub.n_slow; i++)
+            emit_jump_target_offset(state, stub.slow_branches[i],
+                                    state->offset);
+        memcpy(register_map, stub.map, sizeof(register_map));
+        emit_mmu_slow_path(state, rv, &stub);
+        memcpy(register_map, hit_map, sizeof(register_map));
+        emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
+    }
+    if (!store) {
+        set_dirty(stub.reg, true);
+        /* The hit path loads into x0's host register as well. */
+        if (ir->rd == rv_reg_zero)
+            emit_load_imm(state, stub.reg, 0);
+    }
+}
+#endif
+
+/* Emit the stubs that the block's guards and dTLB probes branch to.
+ * translate() empties the lists before each block.
+ */
+static void emit_misalign_stubs(struct jit_state *state, riscv_t *rv UNUSED)
 {
     for (int i = 0; i < n_misalign_stubs; i++)
         emit_misalign_stub(state, &misalign_stubs[i]);
+#if RV32_HAS(SYSTEM_MMIO)
+    for (int i = 0; i < n_mmu_stubs; i++)
+        emit_mmu_stub(state, rv, &mmu_stubs[i]);
+#endif
 }
 
 /* Timer increment removed: timer is now derived from cycle counter at
@@ -4330,7 +4509,11 @@ static void emit_jit_system_helper(struct jit_state *state,
     } else {
         emit_load_imm(state, temp_reg, ir->imm & 0xfff);
     }
-    emit_mmu_write_back(state);
+    /* No other path merges here, so unlike a load or store slow path, leave
+     * the written-back registers clean: later write-backs, such as CSRRW's
+     * before its exit, need not repeat them.
+     */
+    store_back_all(state);
     emit_jit_mmu_handler(state, args, temp_reg, ir->opcode, ir->pc,
                          jit_instruction_size(ir->opcode),
                          unretired_after(rv, ir->pc));
@@ -5543,7 +5726,7 @@ static bool translate_register_loop(struct jit_state *state,
         emit_jmp(state, exit_pc, BLOCK_SATP(cur_block));
     emit_set_pc_exit(state, exit_pc);
     if (guards)
-        emit_misalign_stubs(state);
+        emit_misalign_stubs(state, rv);
 #if defined(__x86_64__)
     if (rotating && !should_flush) {
         emit_jump_target_offset(state, rotate_guard, state->offset);
@@ -5888,6 +6071,9 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
     uint32_t idx;
     rv_insn_t *ir, *next, *previous = NULL;
     n_misalign_stubs = 0;
+#if RV32_HAS(SYSTEM_MMIO)
+    n_mmu_stubs = 0;
+#endif
     cur_block = block;
 #if JIT_REGISTER_LOOP
     if (translate_register_loop(state, rv, block, true))
@@ -5908,7 +6094,7 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
         translate_region(state, rv, &plan, 0);
         spill_live_regs = UINT32_MAX;
         if (!should_flush)
-            emit_misalign_stubs(state);
+            emit_misalign_stubs(state, rv);
         return;
     }
 #endif
@@ -5942,7 +6128,7 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
     }
 #endif
     if (!should_flush)
-        emit_misalign_stubs(state);
+        emit_misalign_stubs(state, rv);
 }
 
 #if JIT_LINK_ALL_EDGES

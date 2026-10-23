@@ -78,26 +78,21 @@ void clear_cache_hot(const struct cache *cache, clear_func_t func);
  * cache_invalidate_satp - invalidate all blocks matching the given SATP
  * @cache: a pointer to target cache
  * @satp: the SATP value to match
- * @n_compiled: if not NULL, set to how many of them T2C compiled
  * @return: number of blocks invalidated
  *
- * Retained for future ASID-selective invalidation. Current SFENCE.VMA
- * conservatively invalidates code across every retained address space.
+ * Used when SFENCE.VMA retires one address space whose code mapping moved.
  */
-uint32_t cache_invalidate_satp(struct cache *cache,
-                               uint32_t satp,
-                               uint32_t *n_compiled);
+uint32_t cache_invalidate_satp(struct cache *cache, uint32_t satp);
 
 /*
  * cache_invalidate_all - invalidate every block, in every address space
  * @cache: a pointer to target cache
- * @n_compiled: if not NULL, receives the number with T2C functions
  * @return: number of blocks invalidated
  *
- * Used by FENCE.I and conservative SFENCE.VMA code retirement. The compiled
- * count lets SFENCE skip execution-cache clears when none held T2C code.
+ * Used by FENCE.I, and by SFENCE.VMA when the code maps cannot tell which
+ * spaces changed.
  */
-uint32_t cache_invalidate_all(struct cache *cache, uint32_t *n_compiled);
+uint32_t cache_invalidate_all(struct cache *cache);
 
 /* cache_has_va_any - whether a valid block of any retained address space
  * starts in the page of va. A block that only straddles into the page does

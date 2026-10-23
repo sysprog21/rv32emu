@@ -832,7 +832,7 @@ RVOP(fencei, {
      * block and drop all translated code, which also empties the T2C caches.
      * The guest issues it rarely, when it loads or patches code.
      */
-    uint32_t n_invalidated UNUSED = cache_invalidate_all(rv->block_cache, NULL);
+    uint32_t n_invalidated UNUSED = cache_invalidate_all(rv->block_cache);
     T1C_COUNT(fence_i_blocks, n_invalidated);
     jit_flush(rv);
 #if RV32_HAS(T2C)

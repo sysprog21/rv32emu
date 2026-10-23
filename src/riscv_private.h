@@ -797,6 +797,12 @@ void rv_reset_dispatcher_state(void);
  * RAM, so no S-mode code is ever fetched under this SATP value.
  */
 #define SATP_SHARED UINT32_MAX
+
+/* Whether code keyed by satp may run in the current address space */
+static inline bool satp_in_context(const riscv_t *rv, uint32_t satp)
+{
+    return satp == rv->csr_satp || satp == SATP_SHARED;
+}
 #endif
 
 /* A cached block is usable from here only when it belongs to the address space
@@ -812,8 +818,7 @@ static inline bool block_matches_context(const riscv_t *rv UNUSED,
     if (!block || block->priv_mode != rv->priv_mode)
         return false;
 #if RV32_HAS(JIT)
-    return (block->satp == rv->csr_satp || block->satp == SATP_SHARED) &&
-           !block->invalidated;
+    return satp_in_context(rv, block->satp) && !block->invalidated;
 #else
     return true;
 #endif
@@ -821,6 +826,15 @@ static inline bool block_matches_context(const riscv_t *rv UNUSED,
     return block;
 #endif
 }
+
+#if RV32_HAS(SYSTEM_MMIO)
+/* Whether a pending supervisor interrupt is enabled and can be taken now. */
+static inline bool rv_has_plic_trap(const riscv_t *rv)
+{
+    return ((rv->csr_sstatus & SSTATUS_SIE || !rv->priv_mode) &&
+            (rv->csr_sip & rv->csr_sie));
+}
+#endif
 
 /* sign extend a 16 bit value */
 FORCE_INLINE uint32_t sign_extend_h(const uint32_t x)

@@ -2173,6 +2173,14 @@ static inline void emit_exit(struct jit_state *state)
 #endif
 }
 
+/* Store pc as the guest PC and leave generated code. */
+static void emit_set_pc_exit(struct jit_state *state, uint32_t pc)
+{
+    emit_load_imm(state, temp_reg, pc);
+    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
+    emit_exit(state);
+}
+
 #if RV32_HAS(SYSTEM)
 /* Every external block entry has the register-file ABI. Check before charging
  * this block, so a deadline exit names its first unexecuted instruction.
@@ -2194,9 +2202,7 @@ static void emit_chain_deadline(struct jit_state *state, uint32_t pc)
 #endif
     uint32_t jump_loc_0 = state->offset;
     emit_jcc_offset(state, JCC_JB);
-    emit_load_imm(state, temp_reg, pc);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_set_pc_exit(state, pc);
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
 }
 #endif
@@ -2530,6 +2536,7 @@ static void jit_csr(riscv_t *rv,
     rv->csr_cycle -= refund;
     const bool imm = type == rv_insn_csrrwi || type == rv_insn_csrrsi ||
                      type == rv_insn_csrrci;
+    const uint32_t satp = rv->csr_satp;
     const uint32_t old =
         rv_csr_insn(rv, type, csr, imm ? rs1 : rv->X[rs1], rv->csr_cycle);
     rv->jit_mmu.is_mmio = 1;
@@ -2538,10 +2545,8 @@ static void jit_csr(riscv_t *rv,
         return;
     if (rd)
         rv->X[rd] = old;
-    const bool interrupt =
-        (rv->csr_sstatus & SSTATUS_SIE || rv->priv_mode == RV_PRIV_U_MODE) &&
-        (rv->csr_sip & rv->csr_sie);
-    if ((csr & 0xfff) == CSR_SATP || interrupt ||
+    /* Reads and unchanged writes of SATP switch nothing. */
+    if (rv->csr_satp != satp || rv_has_plic_trap(rv) ||
         generation != state->code_generation) {
         rv->PC = pc + insn_size;
         rv->jit_mmu.abort = 1;
@@ -3086,16 +3091,13 @@ static inline bool host_reg_call_clobbered(int reg)
  * every dirty guest register back, leaving the allocator unchanged: the
  * handler may raise a fault that exits with rv->X as the architectural state.
  */
+static void store_back_all(struct jit_state *state);
+
 static void emit_mmu_write_back(struct jit_state *state)
 {
     struct host_reg saved[ARRAY_SIZE(register_map)];
     memcpy(saved, register_map, sizeof(saved));
-    for (int i = 0; i < n_host_regs; i++) {
-        const int vm_reg_idx = register_map[i].vm_reg_idx;
-        if (vm_reg_idx > 0 && register_map[i].dirty)
-            emit_store(state, S32, register_map[i].reg_idx, parameter_reg[0],
-                       offsetof(riscv_t, X) + 4 * vm_reg_idx);
-    }
+    store_back_all(state);
     memcpy(register_map, saved, sizeof(saved));
 }
 
@@ -4093,8 +4095,7 @@ static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
     if (site >= (uint32_t) state->n_blocks)
         return (uintptr_t) state->buf + state->exit_loc;
     const struct offset_map *source = &state->offset_map[site];
-    if (source->retired ||
-        (source->satp != rv->csr_satp && source->satp != SATP_SHARED) ||
+    if (source->retired || !satp_in_context(rv, source->satp) ||
         source->priv_mode != rv->priv_mode)
         return (uintptr_t) state->buf + state->exit_loc;
     const struct offset_map *target =
@@ -4557,9 +4558,7 @@ static void emit_jit_csr(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
     store_back(state);
     if (JIT_LINK_ALL_EDGES || ir->branch_taken)
         emit_jmp(state, next_pc, BLOCK_SATP(cur_block));
-    emit_load_imm(state, temp_reg, next_pc);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_set_pc_exit(state, next_pc);
 }
 #define GEN_CSR(inst) GEN(inst, { emit_jit_csr(state, rv, ir); })
 #else
@@ -5006,16 +5005,12 @@ static void do_fuse12(struct jit_state *state,
     /* Untaken path: rd == 0, fall through to PC + 8 */
     if (JIT_LINK_ALL_EDGES || ir->branch_untaken)
         emit_jmp(state, ir->pc + 8, BLOCK_SATP(cur_block));
-    emit_load_imm(state, temp_reg, ir->pc + 8);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_set_pc_exit(state, ir->pc + 8);
     /* Taken path: rd != 0, branch to PC + 4 + imm2 */
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
     if (JIT_LINK_ALL_EDGES || ir->branch_taken)
         emit_jmp(state, ir->pc + 4 + ir->imm2, BLOCK_SATP(cur_block));
-    emit_load_imm(state, temp_reg, ir->pc + 4 + ir->imm2);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
+    emit_set_pc_exit(state, ir->pc + 4 + ir->imm2);
 }
 
 /* clang-format off */
@@ -5186,14 +5181,6 @@ static void translate_record(struct jit_state *state,
 
 #if JIT_REGISTER_LOOP
 #define LOOP_REG(r) (1U << (r))
-
-/* Store pc as the guest PC and leave generated code. */
-static void emit_set_pc_exit(struct jit_state *state, uint32_t pc)
-{
-    emit_load_imm(state, temp_reg, pc);
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
-}
 
 /* Conditional codes form complementary pairs whose x86-64 encodings differ
  * only in bit 0; emit_jcc_offset() maps either member on Arm64.
@@ -5979,9 +5966,7 @@ static uint32_t region_liveness(struct region_plan *plan,
     return live;
 }
 
-static void emit_region_edge(struct jit_state *state,
-                             riscv_t *rv UNUSED,
-                             uint32_t pc)
+static void emit_region_edge(struct jit_state *state, uint32_t pc)
 {
     store_back_all(state);
     emit_jmp(state, pc, BLOCK_SATP(cur_block));
@@ -6013,7 +5998,7 @@ static void translate_region(struct jit_state *state,
     regs_refresh(idx);
     spill_live_regs = plan->live[node->live_offset + idx];
     if (node->known_return && region_returns(tail, node->known_link)) {
-        emit_region_edge(state, rv, node->known_return);
+        emit_region_edge(state, node->known_return);
         return;
     }
     if (node->child[0] < 0 && node->child[1] < 0) {
@@ -6041,7 +6026,7 @@ static void translate_region(struct jit_state *state,
     if (node->child[1] >= 0)
         translate_region(state, rv, plan, node->child[1]);
     else
-        emit_region_edge(state, rv, flow.br.other_pc);
+        emit_region_edge(state, flow.br.other_pc);
     if (should_flush)
         return;
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
@@ -6050,7 +6035,7 @@ static void translate_region(struct jit_state *state,
     if (node->child[0] >= 0)
         translate_region(state, rv, plan, node->child[0]);
     else
-        emit_region_edge(state, rv, flow.br.target);
+        emit_region_edge(state, flow.br.target);
 }
 #endif
 
@@ -6121,10 +6106,7 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
             emit_jmp(state, block->pc_end, BLOCK_SATP(cur_block));
         }
         /* Store PC and exit for un-chained path */
-        emit_load_imm(state, temp_reg, block->pc_end);
-        emit_store(state, S32, temp_reg, parameter_reg[0],
-                   offsetof(riscv_t, PC));
-        emit_exit(state);
+        emit_set_pc_exit(state, block->pc_end);
     }
 #endif
     if (!should_flush)

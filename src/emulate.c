@@ -459,6 +459,14 @@ static inline void rvv_csr_write(riscv_t *rv, uint32_t csr, uint32_t val)
 static void retire_stale_shared(riscv_t *rv);
 #endif
 
+#if RV32_HAS(SYSTEM)
+/* Copy the bits sstatus shares with mstatus from src into *dst. */
+static inline void status_copy_visible(uint32_t *dst, uint32_t src)
+{
+    *dst = (*dst & ~SSTATUS_VISIBLE_MASK) | (src & SSTATUS_VISIBLE_MASK);
+}
+#endif
+
 /* get a pointer to a CSR */
 static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
 {
@@ -466,8 +474,7 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
     switch (csr & 0xFFF) {
     case CSR_MSTATUS: /* Machine Status: sstatus is the shared view. */
 #if RV32_HAS(SYSTEM)
-        rv->csr_mstatus = (rv->csr_mstatus & ~SSTATUS_VISIBLE_MASK) |
-                          (rv->csr_sstatus & SSTATUS_VISIBLE_MASK);
+        status_copy_visible(&rv->csr_mstatus, rv->csr_sstatus);
 #endif
         return (uint32_t *) (&rv->csr_mstatus);
     case CSR_MTVEC: /* Machine Trap Handler */
@@ -563,17 +570,45 @@ static void csr_status_written(riscv_t *rv, uint32_t *csr)
     if (csr == &rv->csr_mstatus) {
         if ((rv->csr_mstatus & MSTATUS_MPP) == (2U << MSTATUS_MPP_SHIFT))
             rv->csr_mstatus &= ~MSTATUS_MPP;
-        rv->csr_sstatus = (rv->csr_sstatus & ~SSTATUS_VISIBLE_MASK) |
-                          (rv->csr_mstatus & SSTATUS_VISIBLE_MASK);
+        status_copy_visible(&rv->csr_sstatus, rv->csr_mstatus);
     } else if (csr == &rv->csr_sstatus) {
-        rv->csr_mstatus = (rv->csr_mstatus & ~SSTATUS_VISIBLE_MASK) |
-                          (rv->csr_sstatus & SSTATUS_VISIBLE_MASK);
+        status_copy_visible(&rv->csr_mstatus, rv->csr_sstatus);
     } else {
         return;
     }
     mmu_access_context_changed(rv);
 }
 #endif
+
+/* Apply the side effects of writing CSR c, which held old. A write that
+ * leaves the value unchanged has none: a status view is already in sync.
+ * A changed SATP switches address space: flush the TLB and retire what the
+ * old mappings decoded. The interpreter's block map is cleared after the
+ * instruction, since its code may still use the IR.
+ */
+static void csr_written(riscv_t *rv UNUSED,
+                        uint32_t *c UNUSED,
+                        uint32_t old UNUSED)
+{
+#if RV32_HAS(SYSTEM)
+    if (*c == old)
+        return;
+    csr_status_written(rv, c);
+    if (c == &rv->csr_satp) {
+        T1C_COUNT(satp_writes, 1);
+        mmu_tlb_flush_all(rv);
+#if RV32_HAS(JIT)
+        retire_stale_shared(rv);
+        /* Only CSRRW ends a block. Chain edges were learned in the old
+         * space, so stop here rather than follow one after CSRRS or CSRRC.
+         */
+        rv->block_interrupted = true;
+#else
+        need_clear_block_map = true;
+#endif
+    }
+#endif
+}
 
 /* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
@@ -611,37 +646,9 @@ static uint32_t csr_csrrw(riscv_t *rv,
         out &= FFLAG_MASK;
 #endif
 
-#if RV32_HAS(SYSTEM)
-    uint32_t old_satp = *c;
-#endif
+    const uint32_t old = *c;
     *c = val;
-#if RV32_HAS(SYSTEM)
-    csr_status_written(rv, c);
-#endif
-
-#if RV32_HAS(SYSTEM)
-    /* Flush TLB when SATP actually changes: address space changed */
-    if (c == &rv->csr_satp && *c != old_satp) {
-        T1C_COUNT(satp_writes, 1);
-        mmu_tlb_flush_all(rv);
-#if RV32_HAS(JIT)
-        retire_stale_shared(rv);
-#endif
-    }
-#if !RV32_HAS(JIT)
-    /*
-     * guestOS's process might have same VA, so block map cannot be reused
-     *
-     * Instead of calling block_map_clear() directly here,
-     * a flag is set to indicate that the block map should be cleared,
-     * and the clearing occurs after the corresponding 'code' of RVOP
-     * has executed. This prevents the 'code' of RVOP from potentially
-     * accessing a NULL ir.
-     */
-    if (c == &rv->csr_satp && *c != old_satp)
-        need_clear_block_map = true;
-#endif
-#endif
+    csr_written(rv, c, old);
 
     return out;
 }
@@ -682,29 +689,9 @@ static uint32_t csr_csrrs(riscv_t *rv,
         out &= FFLAG_MASK;
 #endif
 
-#if RV32_HAS(SYSTEM)
-    uint32_t old_satp = *c;
-#endif
+    const uint32_t old = *c;
     *c |= val;
-#if RV32_HAS(SYSTEM)
-    csr_status_written(rv, c);
-#endif
-
-#if RV32_HAS(SYSTEM)
-    /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB
-     * and, in the interpreter, the blocks decoded under the old mappings.
-     */
-    if (c == &rv->csr_satp && *c != old_satp) {
-        T1C_COUNT(satp_writes, 1);
-        mmu_tlb_flush_all(rv);
-#if RV32_HAS(JIT)
-        retire_stale_shared(rv);
-#endif
-#if !RV32_HAS(JIT)
-        need_clear_block_map = true;
-#endif
-    }
-#endif
+    csr_written(rv, c, old);
 
     return out;
 }
@@ -743,29 +730,9 @@ static uint32_t csr_csrrc(riscv_t *rv,
         out &= FFLAG_MASK;
 #endif
 
-#if RV32_HAS(SYSTEM)
-    uint32_t old_satp = *c;
-#endif
+    const uint32_t old = *c;
     *c &= ~val;
-#if RV32_HAS(SYSTEM)
-    csr_status_written(rv, c);
-#endif
-
-#if RV32_HAS(SYSTEM)
-    /* A changed SATP switches address space, as in csr_csrrw(): flush the TLB
-     * and, in the interpreter, the blocks decoded under the old mappings.
-     */
-    if (c == &rv->csr_satp && *c != old_satp) {
-        T1C_COUNT(satp_writes, 1);
-        mmu_tlb_flush_all(rv);
-#if RV32_HAS(JIT)
-        retire_stale_shared(rv);
-#endif
-#if !RV32_HAS(JIT)
-        need_clear_block_map = true;
-#endif
-    }
-#endif
+    csr_written(rv, c, old);
 
     return out;
 }
@@ -1345,7 +1312,7 @@ static bool retired_any;
 
 static void retire_space(riscv_t *rv, uint32_t satp)
 {
-    cache_invalidate_satp(rv->block_cache, satp, NULL);
+    cache_invalidate_satp(rv->block_cache, satp);
     jit_retire_space(rv->jit_state, satp);
     retired_any = true;
     if (satp == SATP_SHARED)
@@ -1359,15 +1326,15 @@ static void retire_space(riscv_t *rv, uint32_t satp)
  * be decoded and compiled again each time. Native links never cross address
  * spaces, so a space retires on its own.
  */
-static void retire_code(riscv_t *rv, bool shared_only, uint32_t vpn)
+static void retire_code(riscv_t *rv, bool switched, uint32_t vpn)
 {
 #if RV32_HAS(T2C)
     /* Hold cache_lock so the T2C thread sees invalidation atomically. */
     hart_lock(rv, &rv->cache_lock);
 #endif
     retired_any = false;
-    if (!mmu_check_code_maps(rv, retire_space, shared_only, vpn)) {
-        cache_invalidate_all(rv->block_cache, NULL);
+    if (!mmu_check_code_maps(rv, retire_space, switched, vpn)) {
+        cache_invalidate_all(rv->block_cache);
         jit_retire_all(rv->jit_state);
         mmu_forget_code_maps(rv);
         retired_any = true;
@@ -3710,7 +3677,7 @@ static block_t *block_find_or_translate(riscv_t *rv
     if (!next_blk)
         T1C_COUNT(lookup_cold, 1);
 #if RV32_HAS(SYSTEM)
-    else if (next_blk->satp != rv->csr_satp && next_blk->satp != SATP_SHARED)
+    else if (!satp_in_context(rv, next_blk->satp))
         T1C_COUNT(lookup_satp, 1);
     else if (next_blk->priv_mode != rv->priv_mode)
         T1C_COUNT(lookup_priv, 1);
@@ -3954,7 +3921,7 @@ static block_t *block_find_or_translate(riscv_t *rv
 static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
 {
 #if RV32_HAS(SYSTEM)
-    if (block->satp != rv->csr_satp && block->satp != SATP_SHARED)
+    if (!satp_in_context(rv, block->satp))
         return false;
 #endif
 
@@ -3969,11 +3936,6 @@ static bool runtime_profiler(riscv_t *rv UNUSED, block_t *block, uint32_t freq)
 #endif
 
 #if RV32_HAS(SYSTEM_MMIO)
-static bool rv_has_plic_trap(riscv_t *rv)
-{
-    return ((rv->csr_sstatus & SSTATUS_SIE || !rv->priv_mode) &&
-            (rv->csr_sip & rv->csr_sie));
-}
 
 /* Interrupts are taken between blocks, where no instruction is in flight.
  * Outside a nested handler, enter the handler without running it in place:

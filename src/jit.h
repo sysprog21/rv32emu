@@ -362,7 +362,7 @@ static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
  *
  * Invalidation: Inline cache entries are cleared on:
  * - Block eviction (inline_cache_clear_key in emulate.c)
- * - SFENCE.VMA (inline_cache_clear in rv32_template.c)
+ * - SFENCE.VMA code retirement (inline_cache_clear in emulate.c)
  * - FENCE.I / code_cache_flush (inline_cache_clear in jit.c)
  *
  * On cache hit, ISB is skipped on ARM64 since we already executed this target
@@ -413,7 +413,6 @@ struct inline_cache *inline_cache_init(void);
 void inline_cache_exit(struct inline_cache *cache);
 void inline_cache_clear(struct inline_cache *cache);
 void inline_cache_clear_key(struct inline_cache *cache, uint64_t key);
-void inline_cache_clear_satp(struct inline_cache *cache, uint32_t satp);
 
 /* jit_cache entry for T2C compiled code lookup.
  * Thread safety: Uses seqlock pattern for lock-free readers.
@@ -467,7 +466,6 @@ void jit_cache_update(struct jit_cache *cache,
                       void *entry,
                       uint32_t priv_mode);
 void jit_cache_clear(struct jit_cache *cache);
-void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp);
 
 /* Hand an evicted block's LLVM engine to the T2C thread, which disposes it in
  * t2c_reap_engines().

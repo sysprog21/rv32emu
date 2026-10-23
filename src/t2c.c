@@ -1159,19 +1159,6 @@ void inline_cache_clear(struct inline_cache *cache)
     memset(cache, 0, N_INLINE_CACHE_ENTRIES * sizeof(struct inline_cache));
 }
 
-/* Clear the inline cache entries of one address space, on a flush of it. No
- * seqlock needed - only main thread reads/writes inline cache.
- */
-void inline_cache_clear_satp(struct inline_cache *cache, uint32_t satp)
-{
-    for (uint32_t i = 0; i < N_INLINE_CACHE_ENTRIES; i++) {
-        if (cache[i].key && (uint32_t) (cache[i].key >> 32) == satp) {
-            cache[i].key = 0;
-            cache[i].entry = NULL;
-        }
-    }
-}
-
 /* Clear the inline cache entry for a specific key, which can only be in its
  * own slot. Used when evicting a block to prevent stale entry pointers; this
  * runs for every evicted block, so it must not scan the table.
@@ -1281,28 +1268,6 @@ void jit_cache_clear(struct jit_cache *cache)
 {
     /* Clear all entries using seqlock pattern for thread-safe invalidation. */
     for (uint32_t i = 0; i < N_JIT_CACHE_ENTRIES; i++) {
-        uint32_t seq = ATOMIC_LOAD(&cache[i].seq, ATOMIC_RELAXED);
-        ATOMIC_STORE(&cache[i].seq, seq + 1,
-                     ATOMIC_RELEASE); /* odd = writing */
-        ATOMIC_STORE(&cache[i].entry, NULL, ATOMIC_RELEASE);
-        ATOMIC_STORE(&cache[i].key, 0, ATOMIC_RELEASE);
-        ATOMIC_STORE(&cache[i].seq, seq + 2, ATOMIC_RELEASE); /* even = done */
-    }
-}
-
-/* Clear the entries of one address space, on a flush of it: blocks of other
- * address spaces stay valid, and so do their entries. The caller holds
- * cache_lock, which excludes the T2C thread's jit_cache_update(); the seqlock
- * only keeps readers in generated code from seeing a torn entry.
- */
-void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp)
-{
-    for (uint32_t i = 0; i < N_JIT_CACHE_ENTRIES; i++) {
-        uint64_t key = ATOMIC_LOAD(&cache[i].key, ATOMIC_RELAXED);
-        if (!key || (uint32_t) (key >> 32) != satp)
-            continue;
-
-        /* Clear using seqlock pattern */
         uint32_t seq = ATOMIC_LOAD(&cache[i].seq, ATOMIC_RELAXED);
         ATOMIC_STORE(&cache[i].seq, seq + 1,
                      ATOMIC_RELEASE); /* odd = writing */

@@ -509,15 +509,11 @@ static void page_index_insert(cache_t *cache, cache_entry_t *entry)
 
 HASH_FUNC_IMPL(satp_index_hash, SATP_INDEX_BITS, SATP_INDEX_SIZE)
 
-/* Mark a block invalidated, counting it in *compiled when T2C compiled code for
- * it: only then can the T2C caches hold entries to clear.
- */
-static inline void block_invalidate(block_t *block, uint32_t *compiled UNUSED)
+/* Mark a block invalidated, so that no dispatch or tier-2 entry reaches it. */
+static inline void block_invalidate(block_t *block)
 {
     block->invalidated = true;
 #if RV32_HAS(T2C)
-    if (block->func)
-        (*compiled)++;
     /* Reset hot2 to prevent T2C execution of invalidated blocks, so that
      * rv_step() falls through to re-translation.
      */
@@ -546,35 +542,29 @@ static void satp_index_insert(cache_t *cache, cache_entry_t *entry)
                    &cache->satp_index[satp_index_hash(block->satp)]);
 }
 
-uint32_t cache_invalidate_satp(cache_t *cache,
-                               uint32_t satp,
-                               uint32_t *n_compiled)
+uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
 {
-    if (n_compiled)
-        *n_compiled = 0;
     if (unlikely(!cache->capacity))
         return 0;
 
-    uint32_t count = 0, compiled = 0;
+    uint32_t count = 0;
     cache_entry_t *entry = NULL;
     struct hlist_node *next;
     struct hlist_head *head = &cache->satp_index[satp_index_hash(satp)];
     hlist_for_each_entry_safe (entry, next, head, satp_node) {
         block_t *block = (block_t *) entry->value;
         if (block->satp == satp && !block->invalidated) {
-            block_invalidate(block, &compiled);
+            block_invalidate(block);
             entry_unindex(entry);
             count++;
         }
     }
-    if (n_compiled)
-        *n_compiled = compiled;
     return count;
 }
 
-uint32_t cache_invalidate_all(cache_t *cache, uint32_t *n_compiled)
+uint32_t cache_invalidate_all(cache_t *cache)
 {
-    uint32_t count = 0, compiled = 0;
+    uint32_t count = 0;
     /* Invalidated entries leave the live indexes. Repeated fences visit only
      * blocks decoded since the previous fence, never the whole cache list.
      */
@@ -583,13 +573,11 @@ uint32_t cache_invalidate_all(cache_t *cache, uint32_t *n_compiled)
         struct hlist_node *next;
         hlist_for_each_entry_safe (entry, next, &cache->satp_index[i],
                                    satp_node) {
-            block_invalidate(entry->value, &compiled);
+            block_invalidate(entry->value);
             entry_unindex(entry);
             count++;
         }
     }
-    if (n_compiled)
-        *n_compiled = compiled;
     return count;
 }
 

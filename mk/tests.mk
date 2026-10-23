@@ -377,6 +377,8 @@ system-asm-build = $(call guest-asm-build,$(1),$(2),$(3),$(4) \
 	$(CROSS_COMPILE)objcopy -O binary $(OUT)/$(1)$(3) $(OUT)/$(1)$(3).bin
 # Checkers that read T1C diagnostics must find them in a JIT stats build.
 T1C_REQUIRE_STATS = $(if $(filter y1,$(CONFIG_JIT)$(T1C_STATS)),--require-stats)
+# Checkers that count T2C entries must find them in a T2C stats build.
+T2C_REQUIRE_ENTRIES = $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
 # System T1C without T2C compiles AMOs and CSR instructions (JIT_SYSTEM_HELPERS).
 T1C_COMPILED_HELPERS = $(if $(filter y,$(CONFIG_JIT)),$(if $(filter y,$(CONFIG_T2C)),,--compiled-helpers))
 
@@ -415,7 +417,7 @@ check-system-zba: $(BIN) tests/jit-zba.S tests/test-system-zba.py tests/jit_prof
 	$(Q)$(call system-asm-build,jit-zba,rv32i_zba_zicsr,-system,-DSYSTEM_MODE)
 	$(Q)python3 tests/test-system-zba.py $(BIN) $(OUT)/jit-zba-system.bin \
 	    $(T1C_REQUIRE_STATS) \
-	    $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
+	    $(T2C_REQUIRE_ENTRIES)
 
 EXPECTED_system-load-x0 = SYSTEM load x0 OK
 # Diagnostics assert actual tier-2 entries and, in bare T2C mode, lazy fusion.
@@ -430,7 +432,7 @@ check-system-load-x0-bare: SYSTEM_X0_FUSION = $(if $(filter yy1,$(CONFIG_MOP_FUS
 check-system-load-x0 check-system-load-x0-bare: $(BIN) tests/system-load-x0.S tests/test-system-load-x0.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call system-asm-build,system-load-x0,rv32ia_zicsr,$(SYSTEM_X0_SUFFIX),$(SYSTEM_X0_FLAGS))
 	$(Q)python3 tests/test-system-load-x0.py $(BIN) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin \
-	    $(SYSTEM_X0_FUSION) $(SYSTEM_X0_COUNTERS) $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
+	    $(SYSTEM_X0_FUSION) $(SYSTEM_X0_COUNTERS) $(T2C_REQUIRE_ENTRIES)
 
 EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK

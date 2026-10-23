@@ -149,8 +149,9 @@ check-sentinels = $(and $(wildcard $(1)),$(if $(foreach f,$(2),$(if $(wildcard $
 define handle-sha1-result
 	$(Q)if [ "$$(cat "$(2)" 2>/dev/null || echo 0)" = "1" ]; then \
 	    $(call warn, SHA-1 verification failed!); \
+	    tag="$(LATEST_RELEASE)"; \
 	    blob_url="$(PREBUILT_BLOB_URL)"; \
-	    if [ -z "$(LATEST_RELEASE)" ]; then \
+	    if [ -z "$$tag" ]; then \
 	        echo "Attempting to recover by fetching latest tag for $(4)..."; \
 	        tag=$$($(call FETCH_TAG_CMD,$(4))); \
 	        if [ -z "$$tag" ]; then \
@@ -178,7 +179,7 @@ define handle-sha1-result
 	    done; \
 	    if [ "$$reverify_ok" = "1" ]; then \
 	        $(call notice, [OK]); \
-	        touch "$(3)"; \
+	        printf '%s\n' "$$tag" > "$(3)"; \
 	    else \
 	        echo "FAILED" >&2; \
 	        echo "Error: Re-fetch succeeded but verification still fails." >&2; \
@@ -187,17 +188,25 @@ define handle-sha1-result
 	    fi; \
 	else \
 	    $(call notice, [OK]); \
-	    touch "$(3)"; \
+	    if [ -n "$(LATEST_RELEASE)" ]; then \
+	        printf '%s\n' "$(LATEST_RELEASE)" > "$(3)"; \
+	    else \
+	        touch "$(3)"; \
+	    fi; \
 	fi; \
 	rm -f "$(2)"
 endef
 
-# Fetch checksum files if any are missing or empty
+# Fetch checksum files if any are missing, empty, or from a different release tag
 # Handles edge case where checksums exist but are empty (fetch tag if needed)
 # $(1): checksum file(s) to download (space-separated base names)
 # $(2): tag pattern for recovery fetch
+# $(3): stamp file recording the release tag of cached checksums
 define fetch-checksum-files
 	$(Q)missing=0; \
+	if [ -n "$(LATEST_RELEASE)" ] && [ "$$(cat "$(3)" 2>/dev/null)" != "$(LATEST_RELEASE)" ]; then \
+	    missing=1; \
+	fi; \
 	for f in $(1); do \
 	    if [ ! -s "$(BIN_DIR)/$$f" ]; then missing=1; break; fi; \
 	done; \
@@ -328,7 +337,7 @@ endif
 fetch-checksum:
 ifeq ($(call has, PREBUILT), 1)
 	$(Q)$(PRINTF) "Fetching checksum files ... "
-	$(call fetch-checksum-files,$(ACTIVE_CHECKSUMS),$(ACTIVE_TAG))
+	$(call fetch-checksum-files,$(ACTIVE_CHECKSUMS),$(ACTIVE_TAG),$(ACTIVE_STAMP))
 endif
 
 # File-level entry points for the Linux image payload produced by `artifact`.

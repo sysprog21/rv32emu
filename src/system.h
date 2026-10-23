@@ -403,8 +403,8 @@ void mmu_tlb_flush_all(riscv_t *rv);
 void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr);
 
 /* Record that a block was decoded from [start, end), and return the address
- * space key it belongs to: the current SATP or, in JIT builds, SATP_SHARED for
- * S-mode code fetched only through global mappings.
+ * space key it belongs to: the current SATP or, in JIT builds without T2C,
+ * SATP_SHARED for S-mode code fetched only through global mappings.
  */
 uint32_t mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end);
 #if RV32_HAS(JIT)

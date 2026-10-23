@@ -55,7 +55,14 @@
 #endif
 #include "cache.h"
 #include "jit.h"
+/* System mode keeps a larger block cache compiled; see riscv.h. Arm64 direct
+ * branches reach 128 MiB, so the buffer stays within one branch's range.
+ */
+#if BLOCK_CACHE_LARGE
+#define CODE_CACHE_SIZE (64 * 1024 * 1024)
+#else
 #define CODE_CACHE_SIZE (4 * 1024 * 1024)
+#endif
 #endif
 
 static const char *insn_name_table[] = {

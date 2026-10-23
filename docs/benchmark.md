@@ -971,8 +971,8 @@ requires.
   a compiled loop, live registers, SPP, and a nested exception leaving SIE
   clear. Interrupts are polled only between dispatches. This check first ran
   only in JIT builds, because the system interpreter chained a running loop
-  without returning there; since the chain deadline checkpoint below, every
-  system build runs it.
+  without returning there; since chains end at the timer deadline (see
+  System performance below), every system build runs it.
 
 These pass in T1C, T2C, interpreter and UBSan system builds. The Arm64 system
 build cross-compiles, but QEMU-user 8.2.2 crashes on demand-paged RAM with both
@@ -1109,7 +1109,8 @@ every process decoded and compiled the kernel's code paths again.
 * Interpreter chains leave for the dispatcher at a block with live native
   code instead of interpreting around it.
 * A fence retires only address spaces in which a recorded root or leaf entry
-  of a code page changed. A page is recorded only when the iTLB translation
+  of a code page changed. If the records cannot be kept, as when they run
+  out, it retires all code as before. A page is recorded only when the iTLB translation
   its fetch used agrees with the page tables.
 * S-mode code fetched only through global mappings is shared by every
   address space, and checked against each space switched to. T2C builds keep

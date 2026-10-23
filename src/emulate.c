@@ -3903,18 +3903,18 @@ static block_t *block_find_or_translate(riscv_t *rv
  */
 #if RV32_HAS(JIT) && !RV32_HAS(ARCH_TEST)
 /* A block that loops is compiled once it has been dispatched this many times.
- * Compiled code belongs to one address space, and a guest OS discards its
- * blocks at every full SFENCE.VMA, which Linux issues several times in the life
- * of each process. Compiling a loop the second time it runs then costs more
- * than it saves whenever many short processes run, as shell scripts start;
- * waiting a little longer keeps the compiler for loops that last. Native
- * T1-only system builds link successors compiled later, so eight loop
- * dispatches or 64 ordinary ones amortize translation; T2C and WebAssembly
- * keep their profiling policy.
+ * Compiled code belongs to one address space, or is shared kernel code, and a
+ * fence retires only the spaces whose code mappings changed, so even a short
+ * process keeps what it compiles for its life. Native T1-only system builds
+ * link successors compiled later, so two loop dispatches or 16 ordinary ones
+ * amortize translation: across 300 process launches, these start processes
+ * 5% faster than 8 and 64 did. Lower ones compile too much cold code: 8
+ * ordinary dispatches start them 5% slower than 16, and 1 and 4 19% slower.
+ * T2C and WebAssembly keep their profiling policy.
  */
 #if RV32_HAS(SYSTEM) && !RV32_HAS(T2C) && !defined(__EMSCRIPTEN__)
-#define LOOP_THRESHOLD 8
-#define BLOCK_THRESHOLD 64
+#define LOOP_THRESHOLD 2
+#define BLOCK_THRESHOLD 16
 #elif RV32_HAS(SYSTEM)
 #define LOOP_THRESHOLD 64
 #else

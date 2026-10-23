@@ -192,8 +192,8 @@ load_words(const volatile uint32_t *p, uint32_t n)
     return skipped;
 }
 
-/* Exit via the Linux exit syscall (nr=93). The kernel's user_exit lies on a
- * supervisor page, which user code cannot execute.
+/* Exit via the Linux exit syscall (nr=93). The kernel's _exit in setup.S
+ * lies on a supervisor page, which user code cannot execute.
  */
 static void SECTION_TEXT_MAIN user_exit(int status)
 {

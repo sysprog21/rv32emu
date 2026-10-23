@@ -110,7 +110,12 @@ struct offset_map {
 #endif
 };
 
-#define OFFSET_INDEX_BITS 14 /* at least twice MAX_BLOCKS entries */
+/* at least twice MAX_BLOCKS entries */
+#if BLOCK_CACHE_LARGE
+#define OFFSET_INDEX_BITS 17
+#else
+#define OFFSET_INDEX_BITS 14
+#endif
 #define SPACE_INDEX_BITS 8
 #define PAGE_INDEX_BITS_JIT 12
 

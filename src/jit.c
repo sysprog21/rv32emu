@@ -135,7 +135,14 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
  * discarded when code retires.
  */
 #define MAX_PENDING_JUMPS 65536
+/* A full offset map flushes all native code; system mode compiles from a
+ * larger block cache (see riscv.h).
+ */
+#if BLOCK_CACHE_LARGE
+#define MAX_BLOCKS 65536
+#else
 #define MAX_BLOCKS 8192
+#endif
 #define IN_JUMP_THRESHOLD 256
 /* Bound both guard overhead and speculative expansion of the code cache. */
 #define IN_JUMP_TARGETS 2

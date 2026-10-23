@@ -329,14 +329,16 @@ typedef struct {
  *
  * TLB design:
  * - Direct-mapped cache indexed by VPN lower bits
- * - 64 entries for ~256KB working set coverage
+ * - 256 entries for ~1MB working set coverage
  * - Each entry caches: VPN, PPN, permissions, and page level
  * - Separate dTLB (data) and iTLB (instruction) for better hit rates
  * - Superpages tracked via level field for selective SFENCE.VMA
  * - Invalidated on SFENCE.VMA or SATP changes
  */
-#define TLB_SIZE 64
+#define TLB_SIZE 256
 #define TLB_MASK (TLB_SIZE - 1)
+_Static_assert(2 * TLB_SIZE <= UINT16_MAX,
+               "tlb_super_slices counts the slots of both TLBs");
 
 /* Sv32 page levels: 1 = 4MB superpage, 2 = 4KB page */
 #define TLB_PAGE_LEVEL_SUPER 1
@@ -721,13 +723,15 @@ struct riscv_internal {
 #if RV32_HAS(SYSTEM)
     /* Cached slices of each 4 MiB superpage region in both TLBs, so a
      * selective SFENCE.VMA scans the TLBs only when its region has any.
+     * Every slot of both TLBs can hold a slice of one region.
      */
-    uint8_t tlb_super_slices[1U << 10];
+    uint16_t tlb_super_slices[1U << 10];
 
     /* dTLB slots stamped for U pages while S-mode data accesses had SUM set.
      * The S context ignores SUM, so these are parked when that window closes.
      */
-    uint64_t sum_user_slots;
+    uint64_t sum_user_slots[(TLB_SIZE + 63) / 64];
+    bool sum_user_any;
 
     /* 4 MiB regions holding blocks whose code may have been fetched through
      * a superpage leaf. Flushing any address there may remap that code, so it

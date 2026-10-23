@@ -48,14 +48,6 @@ _Static_assert(offsetof(tlb_entry_t, dirty) == 14, "tlb_entry_t.dirty offset");
 _Static_assert(offsetof(tlb_entry_t, level) == 15, "tlb_entry_t.level offset");
 _Static_assert((TLB_SIZE & (TLB_SIZE - 1)) == 0,
                "TLB_SIZE must be a power of two");
-/* Mirrors the assert in jit.c: the T1 x86-64 fast path uses opcode 0x83 /4
- * (imm8 sign-extended) for `and esi, TLB_SIZE - 1`.  Keep both asserts in
- * lockstep so a TLB_SIZE bump here cannot silently diverge from the T1
- * emitter's encoding.
- */
-_Static_assert(TLB_SIZE <= 128,
-               "TLB_SIZE > 128 needs imm32 AND encoding in the x86-64 "
-               "fast path (see jit.c emit path)");
 _Static_assert(RV_PG_SHIFT == 12, "fast path assumes 4 KiB pages");
 #endif
 

@@ -120,8 +120,10 @@ static inline bool mmu_sum_window(const riscv_t *rv)
 /* Record a dTLB slot stamped for a U page in S mode; see sum_user_slots. */
 static inline void mmu_note_stamp(riscv_t *rv, uint32_t idx, uint8_t perm)
 {
-    if ((perm & PTE_U) && mmu_data_priv(rv) == RV_PRIV_S_MODE)
-        rv->sum_user_slots |= UINT64_C(1) << idx;
+    if ((perm & PTE_U) && mmu_data_priv(rv) == RV_PRIV_S_MODE) {
+        rv->sum_user_slots[idx / 64] |= UINT64_C(1) << (idx % 64);
+        rv->sum_user_any = true;
+    }
 }
 
 void mmu_access_context_changed(riscv_t *rv)
@@ -134,25 +136,28 @@ void mmu_access_context_changed(riscv_t *rv)
     /* The S stamps of U pages were valid only while SUM was set. Park them:
      * the C lookup rechecks permission live, and refreshes the stamp.
      */
-    if (rv->sum_user_slots && !mmu_sum_window(rv)) {
-        _Static_assert(TLB_SIZE <= 64, "sum_user_slots holds one bit per slot");
-        for (uint32_t idx = 0; idx < TLB_SIZE; idx++) {
-            if (!(rv->sum_user_slots >> idx & 1))
-                continue;
-            if (rv->dtlb[idx].valid)
-                rv->dtlb[idx].valid = MMU_CONTEXT_PARKED;
+    if (rv->sum_user_any && !mmu_sum_window(rv)) {
+        for (uint32_t word = 0; word < ARRAY_SIZE(rv->sum_user_slots); word++) {
+            for (uint64_t bits = rv->sum_user_slots[word]; bits;
+                 bits &= bits - 1) {
+                const uint32_t idx = word * 64 + __builtin_ctzll(bits);
+                if (rv->dtlb[idx].valid)
+                    rv->dtlb[idx].valid = MMU_CONTEXT_PARKED;
 #if RV32_HAS(JIT)
-            rv->jit_dtlb[idx].read_tag = UINT32_MAX;
-            rv->jit_dtlb[idx].write_tag = UINT32_MAX;
+                rv->jit_dtlb[idx].read_tag = UINT32_MAX;
+                rv->jit_dtlb[idx].write_tag = UINT32_MAX;
 #endif
+            }
+            rv->sum_user_slots[word] = 0;
         }
-        rv->sum_user_slots = 0;
+        rv->sum_user_any = false;
     }
 }
 
 void mmu_tlb_flush_all(riscv_t *rv)
 {
-    rv->sum_user_slots = 0;
+    memset(rv->sum_user_slots, 0, sizeof(rv->sum_user_slots));
+    rv->sum_user_any = false;
     mmu_access_context_changed(rv);
     memset(rv->dtlb, 0, sizeof(rv->dtlb));
 #if RV32_HAS(JIT)

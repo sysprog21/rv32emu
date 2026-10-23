@@ -416,7 +416,9 @@ EXPECTED_system-load-x0 = SYSTEM load x0 OK
 check-system-load-x0-bare: SYSTEM_X0_COUNTERS = $(if $(filter 1,$(T1C_STATS)),--expect-csr-entries 2000000)
 check-system-load-x0-bare: SYSTEM_X0_SUFFIX := -bare
 check-system-load-x0-bare: SYSTEM_X0_FLAGS := -DLOAD_X0_BARE -DLOAD_X0_ITERATIONS=2000000
-check-system-load-x0-bare: SYSTEM_X0_FUSION = $(if $(filter yy,$(CONFIG_MOP_FUSION)$(CONFIG_T2C)),--expect-fusion)
+# Only a tier-2 build needs the Sv32 run to outlast compilation.
+check-system-load-x0: SYSTEM_X0_FLAGS := $(if $(filter y,$(CONFIG_T2C)),,-DLOAD_X0_ITERATIONS=1000000)
+check-system-load-x0-bare: SYSTEM_X0_FUSION = $(if $(filter yy1,$(CONFIG_MOP_FUSION)$(CONFIG_T2C)$(T1C_STATS)),--expect-fusion)
 check-system-load-x0 check-system-load-x0-bare: $(BIN) tests/system-load-x0.S tests/test-system-load-x0.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call system-asm-build,system-load-x0,rv32ia_zicsr,$(SYSTEM_X0_SUFFIX),$(SYSTEM_X0_FLAGS))
 	$(Q)python3 tests/test-system-load-x0.py $(BIN) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin \

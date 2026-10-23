@@ -483,8 +483,20 @@ struct riscv_internal {
      * outer handler instead of ending trap handling. Non-zero means trapped.
      *
      * trap_cnt must be within 256-byte offset for ARM64 JIT access
+     *
+     * block_interrupted: a guest handler ran, or code was retired, during the
+     * current instruction, so its block must stop after it, and an exception
+     * fixup may not have run the terminal branch. It is clear whenever an
+     * instruction starts. Sharing a word with trap_cnt lets each interpreted
+     * instruction test both with one load.
      */
-    uint32_t trap_cnt;
+    union {
+        struct {
+            uint32_t trap_cnt;
+            uint32_t block_interrupted;
+        };
+        uint64_t chain_stop;
+    };
 #endif
 
 #if !RV32_HAS(JIT)

@@ -1,6 +1,7 @@
 /* Loads into x0 must keep their accesses while discarding every result.
  * Long runs allow asynchronous tier-2 compilation, checked separately with
- * diagnostics. Sv32 covers scalar/absolute/post-increment loads. Bare mode
+ * diagnostics. Sv32 covers scalar/absolute/post-increment loads, and its final
+ * pass loads into x0 from an unmapped page, which must still fault. Bare mode
  * starts with a multi-load block so it also reaches lazy fusion.
  */
 #ifndef LOAD_X0_ITERATIONS
@@ -24,6 +25,9 @@ _start:
     or t0, t0, t1
     csrw satp, t0
     sfence.vma
+    la t0, fault_handler
+    csrw stvec, t0
+    li s5, 0
 #endif
     la s1, words
     la s2, scratch
@@ -69,14 +73,43 @@ loop:
     addi s1, s1, 4
     addi s1, s1, -4
     bne zero, s4, fail
+#ifndef LOAD_X0_BARE
+    /* Branch-free, so the compiled loop issues the faulting load itself: only
+     * the final pass adds 4 MiB, past the identity megapage.
+     */
+    addi t0, s0, -1
+    seqz t0, t0
+    slli t0, t0, 22
+    add t0, t0, s1
+    lw zero, 0(t0)
+    bne zero, s4, fail
+#endif
     addi s0, s0, -1
 #ifdef LOAD_X0_BARE
     bnez s0, outer
 #else
     bnez s0, loop
+    li t0, 1
+    bne s5, t0, fail
 #endif
     la a0, success
     j print
+#ifndef LOAD_X0_BARE
+    .balign 4
+fault_handler:
+    csrr t0, scause
+    li t1, 13              /* load page fault */
+    bne t0, t1, fail
+    csrr t0, stval
+    li t1, 0x400000
+    add t1, t1, s1
+    bne t0, t1, fail
+    addi s5, s5, 1
+    csrr t0, sepc
+    addi t0, t0, 4
+    csrw sepc, t0
+    sret
+#endif
 #include "system-exit.inc"
 success: .asciz "SYSTEM load x0 OK\n"
 failure: .asciz "SYSTEM load x0 FAIL\n"

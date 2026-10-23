@@ -347,14 +347,14 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
 #define MEM_CODE_AFTER()                            \
     do {                                            \
         if (generation_ != jit_code_generation(rv)) \
-            block_interrupted = true;               \
+            rv->block_interrupted = true;           \
     } while (0)
 #else
 #define MEM_CODE_BEFORE() ((void) 0)
 #define MEM_CODE_AFTER()                           \
     do {                                           \
         if (need_clear_block_map && !rv->trap_cnt) \
-            block_interrupted = true;              \
+            rv->block_interrupted = true;          \
     } while (0)
 #endif
 #define MEM_READ_CYCLES(access)           \

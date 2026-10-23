@@ -326,7 +326,7 @@ static int wasm_step(riscv_t *rv, const rv_insn_t *original)
         memcpy(fuse, ir.fuse, FUSE_SLOT_SIZE);
         ir.fuse = fuse;
     }
-    rv_begin_wasm_helper();
+    rv_begin_wasm_helper(rv);
     rv->PC = ir.pc;
 #if RV32_HAS(SYSTEM)
     const uint64_t generation = jit_code_generation(rv);

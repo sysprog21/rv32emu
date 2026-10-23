@@ -58,8 +58,6 @@ static uint32_t reloc_enable_mmu_jalr_addr;
 static bool reloc_enable_mmu = false;
 bool need_retranslate = false;
 bool need_handle_signal = false;
-/* An exception fixup did not execute the block's terminal branch. */
-static bool block_interrupted;
 #endif
 
 /* Call the usual instruction-fetch target directly while keeping replacement
@@ -962,13 +960,12 @@ enum {
 #define RVOP_NEXT_IR(ir) ((ir)->next)
 #define RVOP_NEXT_IMPL(ir) ((ir)->next->impl)
 #if RV32_HAS(GDBSTUB)
-#define RVOP_NO_NEXT(ir)                               \
-    (!ir->next | rv->debug_mode IIF(RV32_HAS(SYSTEM))( \
-                     | (rv->trap_cnt != 0) | block_interrupted, ))
+#define RVOP_NO_NEXT(ir) \
+    (!ir->next |         \
+     rv->debug_mode IIF(RV32_HAS(SYSTEM))(| (rv->chain_stop != 0), ))
 #else
-#define RVOP_NO_NEXT(ir)              \
-    (!ir->next IIF(RV32_HAS(SYSTEM))( \
-        | (rv->trap_cnt != 0) | block_interrupted, ))
+#define RVOP_NO_NEXT(ir) \
+    (!ir->next IIF(RV32_HAS(SYSTEM))(| (rv->chain_stop != 0), ))
 #endif
 #endif
 
@@ -1022,10 +1019,10 @@ void rv_reset_dispatcher_state(void)
  * interruption scope without clearing a marker between an AMO's accesses.
  */
 #if defined(__EMSCRIPTEN__)
-void rv_begin_wasm_helper(void)
+void rv_begin_wasm_helper(riscv_t *rv UNUSED)
 {
 #if RV32_HAS(SYSTEM)
-    block_interrupted = false;
+    rv->block_interrupted = false;
 #endif
 }
 
@@ -1237,7 +1234,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
         IIF(RV32_HAS(SYSTEM))(                                            \
             if (need_handle_signal) {                                     \
                 need_handle_signal = false;                               \
-                block_interrupted = true;                                 \
+                rv->block_interrupted = true;                             \
                 return true;                                              \
             }, ) nextop : PC += __rv_insn_##inst##_len;                   \
         RVOP_RETIRE_PENDING();                                            \
@@ -1258,7 +1255,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
                     struct rv_insn *taken = ir->branch_taken;             \
                     if (taken) {                                          \
                         IIF(RV32_HAS(SYSTEM))(                            \
-                            if (!rv->trap_cnt && !block_interrupted) {    \
+                            if (!rv->chain_stop) {                        \
                                 RVOP_CHAIN_TAIL(rv, taken, cycle, PC);    \
                             },                                            \
                             {                                             \
@@ -1456,7 +1453,7 @@ static PRESERVE_NONE bool fuse_next_or_stop(riscv_t *rv,
 #if RV32_HAS(SYSTEM)
     if (need_handle_signal) {
         need_handle_signal = false;
-        block_interrupted = true;
+        rv->block_interrupted = true;
         /* Match RVOP: return without saving cycle/PC. The signal handler
          * will determine the appropriate PC from rv->PC (unchanged).
          */
@@ -1536,7 +1533,7 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
 #endif
         PC += 4;
 #if RV32_HAS(SYSTEM)
-        if (block_interrupted)
+        if (rv->block_interrupted)
             break;
 #endif
     }
@@ -1566,7 +1563,7 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
             rv->X[fuse[i].rd] = value;
         PC += 4;
 #if RV32_HAS(SYSTEM)
-        if (block_interrupted)
+        if (rv->block_interrupted)
             break;
 #endif
     }
@@ -1808,7 +1805,7 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
     const uint32_t value = MEM_READ_W(rv, addr);
     PC += 4;
 #if RV32_HAS(SYSTEM)
-    if (block_interrupted) {
+    if (rv->block_interrupted) {
         if (!MEM_ACCESS_FAULTED() && ir->rd)
             rv->X[ir->rd] = value;
         return fuse_next_or_stop(rv, ir, cycle, PC);
@@ -4292,7 +4289,7 @@ void rv_step(void *arg)
         const rv_insn_impl_t impl = ir->impl;
 #endif
 #if RV32_HAS(SYSTEM)
-        block_interrupted = false;
+        rv->block_interrupted = false;
 #endif
         if (unlikely(!impl(rv, ir, cycle, rv->PC))) {
             /* block should not be extended if exception handler invoked */
@@ -4307,7 +4304,7 @@ void rv_step(void *arg)
         /* Exception-table fixups may resume inside this block. They are not
          * the terminal branch and must never train one of its chain edges.
          */
-        prev = block_interrupted ? NULL : block;
+        prev = rv->block_interrupted ? NULL : block;
 #else
         prev = block;
 #endif

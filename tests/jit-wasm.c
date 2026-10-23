@@ -22,7 +22,7 @@ static struct block *find_block(uint32_t pc);
 #include "jit_wasm.c"
 
 /* This fixture supplies detached implementations, without interpreter state. */
-void rv_begin_wasm_helper(void) {}
+void rv_begin_wasm_helper(riscv_t *rv UNUSED) {}
 
 static block_t *known_block;
 static struct block *find_block(uint32_t pc)

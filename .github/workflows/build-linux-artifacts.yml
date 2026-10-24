@@ -1,13 +1,14 @@
 name: Build Linux artifact
 
 on:
-  push:
-    branches:
-      - master
+  workflow_call:
+    outputs:
+      built:
+        value: ${{ jobs.detect-file-change.outputs.has_changed_linux_image_version }}
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: build-linux-artifact-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -54,7 +55,19 @@ jobs:
           make artifact ENABLE_PREBUILT=0
       - name: Create tarball
         run: tar -zcf /tmp/rv32emu-linux-image-prebuilt.tar.gz -C /tmp rv32emu-linux-image-prebuilt
+      - name: Upload Linux image artifact
+        if: github.event_name != 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-image-prebuilt
+          path: |
+            /tmp/rv32emu-linux-image-prebuilt.tar.gz
+            /tmp/sha1sum-linux-image
       - name: Create GitHub Release
+        if: >-
+          github.repository == 'sysprog21/rv32emu' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/master') ||
+           github.event_name == 'workflow_dispatch')
         env:
           GH_TOKEN: ${{ secrets.RV32EMU_PREBUILT_TOKEN }}
         working-directory: /tmp

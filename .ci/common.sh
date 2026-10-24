@@ -341,7 +341,11 @@ fetch_artifact()
         max_retries=3
     fi
 
-    release_tag=$(fetch_latest_release "$artifact_type") || return 1
+    if [ "$artifact_type" = "Linux-Image" ] && [ -n "${LINUX_IMAGE_PREBUILT_DIR:-}" ]; then
+        release_tag="local"
+    else
+        release_tag=$(fetch_latest_release "$artifact_type") || return 1
+    fi
 
     # Use C-style loop (Bash builtin) instead of 'seq' for portability
     for ((attempt = 1; attempt <= max_retries; attempt++)); do

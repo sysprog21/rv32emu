@@ -203,7 +203,8 @@ SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
     check-system-interrupt-dispatch-long-handler check-system-wfi \
     check-system-fence-stale-fetch check-system-shared-code \
     check-system-interrupt-fault check-system-interrupt-fault-switch \
-    check-system-amo check-system-csr
+    check-system-amo check-system-csr check-system-priv \
+    check-system-misalign-page
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
 SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction \
     check-system-native-retire check-system-native-retire-cold \
@@ -389,13 +390,14 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
-# system-asm-check-target(name, march, suffix, flags, expected): flat kernel
-# linked at 0, loaded raw, that prints EXPECTED_<name> on success.
+# system-asm-check-target(name, march, suffix, flags, expected, options): flat
+# kernel linked at 0, loaded raw with optional emulator options, that prints
+# EXPECTED_<name> on success.
 define system-asm-check-target
 .PHONY: check-$(1)$(3)
 check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(Q)$$(call system-asm-build,$(1),$(2),$(3),$(4))
-	$$(call check-test,-k,$$(OUT)/$(1)$(3).bin,$(1)$(3),tail -n 1,$$(if $(5),$(5),$$(EXPECTED_$(1))))
+	$$(call check-test,$(6) -k,$$(OUT)/$(1)$(3).bin,$(1)$(3),tail -n 1,$$(if $(5),$(5),$$(EXPECTED_$(1))))
 endef
 
 EXPECTED_system-decode-trap = SYSTEM decode trap OK
@@ -443,6 +445,8 @@ EXPECTED_system-shared-code = SYSTEM shared code OK
 EXPECTED_system-interrupt-fault = SYSTEM interrupt fault OK
 EXPECTED_system-trap-resume = SYSTEM trap resume OK
 EXPECTED_system-jit-eviction = SYSTEM JIT eviction OK
+EXPECTED_system-priv = SYSTEM privilege OK
+EXPECTED_system-misalign-page = SYSTEM misaligned page crossing OK
 
 $(eval $(call system-asm-check-target,system-mmu-cache,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-trap-cycles,rv32ia_zicsr))
@@ -480,6 +484,8 @@ $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-x0-mmio,-DRETIRE_INNER -DRETIRE_X0_MMIO,ZSYSTEM native retire OK))
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-multi-load,-DRETIRE_MULTI_LOAD))
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-multi-store,-DRETIRE_MULTI_STORE -DRETIRE_STORE))
+$(eval $(call system-asm-check-target,system-priv,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-misalign-page,rv32ia_zicsr,,,,-m))
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c

@@ -230,6 +230,9 @@ enum TRAP_CODE {
     LOAD_MISALIGNED = 4,                       /* Load address misaligned */
     STORE_MISALIGNED = 6,                      /* Store/AMO address misaligned */
 #if RV32_HAS(SYSTEM)
+    INSN_ACCESS_FAULT = 1,                     /* Instruction access fault */
+    LOAD_ACCESS_FAULT = 5,                     /* Load access fault */
+    STORE_ACCESS_FAULT = 7,                    /* Store/AMO access fault */
     PAGEFAULT_INSN = 12,                       /* Instruction page fault */
     PAGEFAULT_LOAD = 13,                       /* Load page fault */
     PAGEFAULT_STORE = 15,                      /* Store page fault */

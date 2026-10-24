@@ -179,8 +179,8 @@ jobs:
             # space switches, retiring decoded code, counters across traps,
             # fault retry, code eviction and timer interrupts returning into
             # chained loops, interpreted and T1.
-            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch $PARALLEL
-            make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch $PARALLEL
+            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch check-system-priv check-system-misalign-page $PARALLEL
+            make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch check-system-priv check-system-misalign-page $PARALLEL
             # Prove fetch retries, in place inside nested handlers too, and
             # restored native eligibility, while the unsupported CSR payload
             # still falls back to interpretation, and that Sv32 Zba probes run

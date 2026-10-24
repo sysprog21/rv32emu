@@ -877,6 +877,14 @@ static inline bool mmu_take_deferred_fault(void)
     return deferred;
 }
 
+/* The access fault of the same access as a page fault cause. */
+static inline uint32_t mmu_access_fault(uint32_t page_fault)
+{
+    return page_fault == PAGEFAULT_INSN    ? INSN_ACCESS_FAULT
+           : page_fault == PAGEFAULT_STORE ? STORE_ACCESS_FAULT
+                                           : LOAD_ACCESS_FAULT;
+}
+
 #define MMU_FAULT_CHECK(op, rv, pte, vaddr, access_bits) \
     mmu_##op##_fault_check(rv, pte, vaddr, access_bits)
 #define MMU_FAULT_CHECK_IMPL(op, pgfault)                                     \
@@ -903,7 +911,11 @@ static inline bool mmu_take_deferred_fault(void)
             mmu_raise_fault(rv, scause, stval);                               \
             return false;                                                     \
         }                                                                     \
-        /* valid PTE */                                                       \
+        /* A leaf beyond the 32-bit physical space RAM and MMIO live in */    \
+        if (*pte >> (RV_PG_SHIFT - 2) >= UINT32_C(1) << (32 - RV_PG_SHIFT)) { \
+            mmu_raise_fault(rv, mmu_access_fault(scause), stval);             \
+            return false;                                                     \
+        }                                                                     \
         return true;                                                          \
     }
 
@@ -980,8 +992,45 @@ uint32_t rv_mmu_ifetch(riscv_t *rv, uint32_t vaddr)
     return mmu_ifetch(rv, vaddr);
 }
 
+/* A misaligned access, which only -m allows, may span two pages that map to
+ * unrelated physical pages: translate each part on its own.
+ */
+static inline bool mmu_crosses_page(uint32_t vaddr, uint32_t size)
+{
+    return (vaddr & MASK(RV_PG_SHIFT)) > RV_PG_SIZE - size;
+}
+
+static uint32_t mmu_read_split(riscv_t *rv, uint32_t vaddr, uint32_t size)
+{
+    uint32_t val = 0;
+    for (uint32_t i = 0; i < size; i++) {
+        val |= (uint32_t) mmu_read_b(rv, vaddr + i) << (8 * i);
+        if (need_handle_signal)
+            return 0;
+    }
+    return val;
+}
+
+/* Both pages must accept the store before any byte is written. */
+static void mmu_write_split(riscv_t *rv,
+                            uint32_t vaddr,
+                            uint32_t size,
+                            uint32_t val)
+{
+    rv->io.mem_translate(rv, vaddr, W);
+    if (need_handle_signal)
+        return;
+    rv->io.mem_translate(rv, (vaddr | MASK(RV_PG_SHIFT)) + 1, W);
+    if (need_handle_signal)
+        return;
+    for (uint32_t i = 0; i < size; i++)
+        mmu_write_b(rv, vaddr + i, val >> (8 * i));
+}
+
 uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
 {
+    if (unlikely(mmu_crosses_page(vaddr, 4)))
+        return mmu_read_split(rv, vaddr, 4);
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
     if (need_handle_signal)
@@ -999,6 +1048,8 @@ uint32_t mmu_read_w(riscv_t *rv, const uint32_t vaddr)
 
 uint16_t mmu_read_s(riscv_t *rv, const uint32_t vaddr)
 {
+    if (unlikely(mmu_crosses_page(vaddr, 2)))
+        return mmu_read_split(rv, vaddr, 2);
     uint32_t addr = rv->io.mem_translate(rv, vaddr, R);
 
     if (need_handle_signal)
@@ -1033,6 +1084,10 @@ uint8_t mmu_read_b(riscv_t *rv, const uint32_t vaddr)
 
 void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
 {
+    if (unlikely(mmu_crosses_page(vaddr, 4))) {
+        mmu_write_split(rv, vaddr, 4, val);
+        return;
+    }
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
     if (need_handle_signal)
@@ -1052,6 +1107,10 @@ void mmu_write_w(riscv_t *rv, const uint32_t vaddr, const uint32_t val)
 
 void mmu_write_s(riscv_t *rv, const uint32_t vaddr, const uint16_t val)
 {
+    if (unlikely(mmu_crosses_page(vaddr, 2))) {
+        mmu_write_split(rv, vaddr, 2, val);
+        return;
+    }
     uint32_t addr = rv->io.mem_translate(rv, vaddr, W);
 
     if (need_handle_signal)

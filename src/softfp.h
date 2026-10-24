@@ -24,6 +24,9 @@ enum {
     FFLAG_OVERFLOW    = 0b00000000000000000000000000000100,
     FFLAG_UNDERFLOW   = 0b00000000000000000000000000000010,
     FFLAG_INEXACT     = 0b00000000000000000000000000000001,
+    FCSR_MASK         = 0b00000000000000000000000011111111,
+    FRM_MASK          = 0b00000000000000000000000000000111,
+    FRM_SHIFT         = 5,
     //                    ....xxxx....xxxx....xxxx....xxxx
     RV_NAN            = 0b01111111110000000000000000000000
 };
@@ -103,7 +106,7 @@ static inline void set_fflag(riscv_t *rv)
 
 static inline void set_rounding_mode(riscv_t *rv, uint8_t rm)
 {
-    const uint32_t frm = (rv->csr_fcsr >> 5) & (~(1 << 3));
+    const uint32_t frm = (rv->csr_fcsr >> FRM_SHIFT) & FRM_MASK;
 
     if (likely(rm == 0b111))
         rm = frm;

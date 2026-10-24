@@ -69,15 +69,6 @@ MODE_SYSTEM_SENTINEL   := $(BIN_DIR)/linux-image/Image
 MODE_SYSTEM_EXTRACT    := yes
 MODE_SYSTEM_VERIFY     := $(BIN_DIR)/sha1sum-linux-image:$(BIN_DIR)/
 
-# ARCH_TEST mode (RISC-V compliance tests)
-MODE_ARCH_TAG          := sail
-MODE_ARCH_STAMP        := $(BIN_DIR)/.stamp-sail
-MODE_ARCH_CHECKSUMS    := rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha
-MODE_ARCH_TARBALL      := rv32emu-prebuilt-sail-$(HOST_PLATFORM)
-MODE_ARCH_SENTINEL     := $(BIN_DIR)/riscv_sim_RV32
-MODE_ARCH_EXTRACT      := no
-MODE_ARCH_VERIFY       := $(BIN_DIR)/rv32emu-prebuilt-sail-$(HOST_PLATFORM).sha:$(BIN_DIR)/
-
 # ELF mode (default prebuilt binaries)
 MODE_ELF_TAG           := ELF
 MODE_ELF_STAMP         := $(BIN_DIR)/.stamp-prebuilt
@@ -96,14 +87,6 @@ ifeq ($(call has, SYSTEM), 1)
     ACTIVE_SENTINEL  := $(MODE_SYSTEM_SENTINEL)
     ACTIVE_EXTRACT   := $(MODE_SYSTEM_EXTRACT)
     ACTIVE_VERIFY    := $(MODE_SYSTEM_VERIFY)
-else ifeq ($(call has, ARCH_TEST), 1)
-    ACTIVE_TAG       := $(MODE_ARCH_TAG)
-    ACTIVE_STAMP     := $(MODE_ARCH_STAMP)
-    ACTIVE_CHECKSUMS := $(MODE_ARCH_CHECKSUMS)
-    ACTIVE_TARBALL   := $(MODE_ARCH_TARBALL)
-    ACTIVE_SENTINEL  := $(MODE_ARCH_SENTINEL)
-    ACTIVE_EXTRACT   := $(MODE_ARCH_EXTRACT)
-    ACTIVE_VERIFY    := $(MODE_ARCH_VERIFY)
 else
     ACTIVE_TAG       := $(MODE_ELF_TAG)
     ACTIVE_STAMP     := $(MODE_ELF_STAMP)
@@ -121,7 +104,7 @@ endif
 FETCH_TAG_CMD = $(call HTTP_GET,$(GITHUB_API_URL)) | grep '"tag_name"' | grep "$(1)" | head -n 1 | sed -E 's/.*"tag_name": "([^"]+)".*/\1/'
 
 # Fetch the latest release tag from GitHub API (parse-time)
-# $(1): tag pattern to match (e.g., "ELF", "Linux-Image", "sail")
+# $(1): tag pattern to match (e.g., "ELF", "Linux-Image")
 define fetch-releases-tag
     $(eval LATEST_RELEASE := $(shell $(call FETCH_TAG_CMD,$(1)))) \
     $(if $(LATEST_RELEASE),, \
@@ -232,7 +215,7 @@ LATEST_RELEASE ?=
 # Only fetch releases when artifact-related targets are requested.
 # This prevents network calls during unrelated targets like 'make defconfig'.
 ARTIFACT_TARGETS := artifact fetch-checksum scimark2 ieeelib \
-                    check misalign doom quake arch-test system gdbstub-test
+                    check misalign doom quake system gdbstub-test
 
 ifneq ($(filter $(ARTIFACT_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(call has, PREBUILT), 1)

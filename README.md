@@ -77,7 +77,7 @@ button that switches directly to the other.
 | System emulation: boot Linux, virtio block devices, bootargs | [docs/system.md](docs/system.md) |
 | WebAssembly build for the browser | [docs/wasm.md](docs/wasm.md) |
 | GDB remote debugging and register JSON dump | [docs/gdbstub.md](docs/gdbstub.md) |
-| RISCOF / RISC-V architecture tests | [docs/riscof.md](docs/riscof.md) |
+| ACT4 / RISC-V architecture tests | [docs/arch-test.md](docs/arch-test.md) |
 | Benchmarks and continuous benchmarking | [docs/benchmark.md](docs/benchmark.md) |
 | Static analysis tools (rv_histogram, rv_profiler) | [docs/tools.md](docs/tools.md) |
 | Docker image | [docs/docker.md](docs/docker.md) |

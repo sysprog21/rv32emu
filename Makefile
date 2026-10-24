@@ -84,16 +84,23 @@ $(call set-features, SDL SDL_MIXER GDBSTUB JIT LINK_ZLIB ROOTFS_EXT4)
 ifeq ($(CONFIG_EXT_F),y)
 AR := ar
 ifeq ("$(CC_IS_CLANG)", "1")
-    ifeq ($(UNAME_S),Darwin)
-        # macOS: system ar is sufficient
-    else
-        # Match llvm-ar to the same install as the LLVM we'd compile against.
-        # Honor an explicit LLVM_CONFIG=/path/to/llvm-config override first,
-        # then fall back to auto-detection from mk/toolchain.mk. Without this,
-        # hosts with multiple LLVM majors can leave the unversioned `llvm-ar`
-        # pointing at an older install, and a newer clang's LTO bitcode .o
-        # files fail to archive (e.g. clang-20 bitcode + llvm-ar-18 ->
-        # "Invalid attribute group entry" on `ar crs`).
+    # Archive LTO bitcode with the llvm-ar installed beside the clang that
+    # produced it. An older archiver cannot read newer bitcode (clang-20
+    # objects + llvm-ar-18 -> "Invalid attribute group entry" on `ar crs`),
+    # and the macOS system ranlib indexes bitcode only up to Xcode's LLVM,
+    # leaving a newer Homebrew clang's archive without usable symbols.
+    # Ask clang for its resource directory (<prefix>/lib/clang/<N>), which
+    # also works through wrappers such as "ccache clang", and take llvm-ar
+    # from <prefix>/bin: /usr/lib/llvm-N/bin behind clang-N, or Homebrew's
+    # Cellar behind its clang.
+    CC_RESOURCE_DIR := $(shell $(CC) -print-resource-dir 2>/dev/null)
+    CC_LLVM_AR := $(if $(CC_RESOURCE_DIR),$(realpath $(CC_RESOURCE_DIR)/../../../bin/llvm-ar))
+    ifneq ($(CC_LLVM_AR),)
+        AR := $(CC_LLVM_AR)
+    else ifneq ($(UNAME_S),Darwin)
+        # No llvm-ar beside clang: use the one of the LLVM T2C would build
+        # against, honoring an explicit LLVM_CONFIG override, or llvm-ar on
+        # PATH. Apple clang on macOS has none and keeps the system ar.
         LLVM_CONFIG_FOR_AR := $(if $(LLVM_CONFIG),$(LLVM_CONFIG),$(call detect-llvm-config))
         ifneq ($(LLVM_CONFIG_FOR_AR),)
             LLVM_BINDIR_FOR_AR := $(shell $(LLVM_CONFIG_FOR_AR) --bindir 2>/dev/null)
@@ -235,12 +242,10 @@ ifeq ($(CONFIG_JIT),y)
                 OBJS_EXT += t2c.o
                 CFLAGS += -g $(call llvm-cflags,$(LLVM_CONFIG))
                 LDFLAGS += $(call llvm-libfiles,$(LLVM_CONFIG))
-                # Add Homebrew library path if needed
-                HOMEBREW_LLVM_PREFIX := $(call detect-homebrew-llvm-prefix)
-                ifneq ($(HOMEBREW_LLVM_PREFIX),)
-                ifneq ($(findstring $(HOMEBREW_LLVM_PREFIX),$(LLVM_CONFIG)),)
-                    LDFLAGS += -L$(HOMEBREW_LLVM_PREFIX)/lib
-                endif
+                # Homebrew's LLVM is keg-only, so name its library directory.
+                # Ask the chosen llvm-config instead of guessing a formula.
+                ifeq ($(UNAME_S),Darwin)
+                    LDFLAGS += -L$(shell $(LLVM_CONFIG) --libdir)
                 endif
             else
                 $(warning LLVM $(LLVM_VERSION) libraries not found. T2C disabled.)
@@ -258,13 +263,13 @@ ifeq ($(CONFIG_JIT),y)
     endif
 $(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MP -MF $@.d $<
 # T2C optimization level from Kconfig (0-3, default 3)
 T2C_OPT_LEVEL ?= $(or $(CONFIG_T2C_OPT_LEVEL),3)
 $(OUT)/t2c.o: src/t2c.c src/t2c_template.c $(CONFIG_HEADER) \
               $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -DCONFIG_T2C_OPT_LEVEL=$(T2C_OPT_LEVEL) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) -DCONFIG_T2C_OPT_LEVEL=$(T2C_OPT_LEVEL) -c -MMD -MP -MF $@.d $<
 else
     CFLAGS += -DRV32_FEATURE_T2C=0
 endif
@@ -301,6 +306,11 @@ OBJS += em_runtime.o
 endif
 OBJS += emulate.o riscv.o log.o elf.o cache.o mpool.o coro.o $(OBJS_EXT) main.o
 OBJS := $(addprefix $(OUT)/, $(OBJS))
+
+# Every object some configuration builds from src/, so clean also removes
+# the ones the current configuration does not list, such as a t2c.o whose
+# dependency file still names the headers of a since-replaced LLVM.
+SRC_OBJS_ALL := $(patsubst src/%.c,$(OUT)/%.o,$(wildcard src/*.c))
 deps += $(OBJS:%.o=%.o.d)
 
 EFFECTIVE_CONFIG_VARS := \
@@ -397,7 +407,7 @@ check-decoder: $(DECODER_DESC) $(DECODER_GEN) $(DECODER_VERIFY) | $(OUT)
 $(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(Q)mkdir -p $(dir $@)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MP -MF $@.d $<
 
 $(OUT):
 	$(Q)mkdir -p $@
@@ -421,6 +431,7 @@ tool: $(TOOLS_BIN)
 clean:
 	$(VECHO) "Cleaning... "
 	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) \
+	    $(SRC_OBJS_ALL) $(SRC_OBJS_ALL:%=%.d) \
 	    $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) \
 	    $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP) $(VIRTIO_NET_CLEAN_FILES)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)

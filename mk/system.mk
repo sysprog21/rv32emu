@@ -55,7 +55,7 @@ $(DEV_OUT):
 
 $(DEV_OUT)/%.o: $(DEV_SRC)/%.c $(EFFECTIVE_CONFIG_STAMP) | $(DEV_OUT)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MP -MF $@.d $<
 
 DEV_OBJS_ALL := $(patsubst $(DEV_SRC)/%.c, $(DEV_OUT)/%.o, $(wildcard $(DEV_SRC)/*.c))
 DEV_OBJS := $(DEV_OBJS_ALL)

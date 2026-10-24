@@ -127,10 +127,39 @@ static inline bool retire_pending_blocks(riscv_t *rv)
 #define MISALIGN_PART_FAULTED() false
 #endif
 
-/* Emulate misaligned load operation.
+/* Read a misaligned word for the integer and floating-point loads.
  * Fast-path: Use halfword operations for 2-byte aligned word accesses.
  * Slow-path: Fall back to byte-level operations for odd addresses.
  */
+static uint32_t misaligned_read_w(riscv_t *rv, uint32_t addr)
+{
+    uint32_t value = 0;
+
+    if ((addr & 1) == 0) {
+        value = (uint32_t) rv->io.mem_read_s(rv, addr);
+        if (!MISALIGN_PART_FAULTED())
+            value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
+    } else {
+        for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
+            value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
+    }
+    return value;
+}
+
+/* Write a misaligned word, splitting it the same way as misaligned_read_w */
+static void misaligned_write_w(riscv_t *rv, uint32_t addr, uint32_t value)
+{
+    if ((addr & 1) == 0) {
+        rv->io.mem_write_s(rv, addr, value & 0xFFFF);
+        if (!MISALIGN_PART_FAULTED())
+            rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
+    } else {
+        for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
+            rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
+    }
+}
+
+/* Emulate misaligned load operation. */
 static bool emulate_misaligned_load(riscv_t *rv,
                                     const rv_insn_t *ir,
                                     uint32_t addr)
@@ -143,27 +172,28 @@ static bool emulate_misaligned_load(riscv_t *rv,
     case rv_insn_clw:
     case rv_insn_clwsp:
 #endif
-        /* Load word: fast-path for 2-byte aligned, slow-path for odd */
-        if ((addr & 1) == 0) {
-            /* 2-byte aligned: use two halfword reads */
-            value = (uint32_t) rv->io.mem_read_s(rv, addr);
-            if (!MISALIGN_PART_FAULTED())
-                value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
-        } else {
-            /* Odd address: use four byte reads */
-            for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
-                value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
-                         << (i * 8);
-        }
-        if (!MISALIGN_PART_FAULTED())
+        value = misaligned_read_w(rv, addr);
+        if (!MISALIGN_PART_FAULTED() && ir->rd)
             rv->X[ir->rd] = value;
         break;
+
+#if RV32_HAS(EXT_F)
+    case rv_insn_flw:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cflw:
+    case rv_insn_cflwsp:
+#endif
+        value = misaligned_read_w(rv, addr);
+        if (!MISALIGN_PART_FAULTED())
+            rv->F[ir->rd].v = value;
+        break;
+#endif
 
     case rv_insn_lh:
         /* Load halfword (signed): 2 bytes - always use byte reads for odd */
         for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
-        if (!MISALIGN_PART_FAULTED())
+        if (!MISALIGN_PART_FAULTED() && ir->rd)
             rv->X[ir->rd] = sign_extend_h(value);
         break;
 
@@ -171,7 +201,7 @@ static bool emulate_misaligned_load(riscv_t *rv,
         /* Load halfword unsigned: 2 bytes - always use byte reads for odd */
         for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
-        if (!MISALIGN_PART_FAULTED())
+        if (!MISALIGN_PART_FAULTED() && ir->rd)
             rv->X[ir->rd] = value;
         break;
 
@@ -182,10 +212,7 @@ static bool emulate_misaligned_load(riscv_t *rv,
     return true;
 }
 
-/* Emulate misaligned store operation.
- * Fast-path: Use halfword operations for 2-byte aligned word accesses.
- * Slow-path: Fall back to byte-level operations for odd addresses.
- */
+/* Emulate misaligned store operation. */
 static bool emulate_misaligned_store(riscv_t *rv,
                                      const rv_insn_t *ir,
                                      uint32_t addr)
@@ -198,19 +225,18 @@ static bool emulate_misaligned_store(riscv_t *rv,
     case rv_insn_csw:
     case rv_insn_cswsp:
 #endif
-        /* Store word: fast-path for 2-byte aligned, slow-path for odd */
-        value = rv->X[ir->rs2];
-        if ((addr & 1) == 0) {
-            /* 2-byte aligned: use two halfword writes */
-            rv->io.mem_write_s(rv, addr, value & 0xFFFF);
-            if (!MISALIGN_PART_FAULTED())
-                rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
-        } else {
-            /* Odd address: use four byte writes */
-            for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
-                rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
-        }
+        misaligned_write_w(rv, addr, rv->X[ir->rs2]);
         break;
+
+#if RV32_HAS(EXT_F)
+    case rv_insn_fsw:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cfsw:
+    case rv_insn_cfswsp:
+#endif
+        misaligned_write_w(rv, addr, rv->F[ir->rs2].v);
+        break;
+#endif
 
     case rv_insn_sh:
         /* Store halfword: 2 bytes - always use byte writes for odd */
@@ -309,9 +335,12 @@ static inline void check_tohost_write(riscv_t *rv,
     if (rv->tohost_addr && addr == rv->tohost_addr && value != 0) {
         /* Non-zero write to tohost means test wants to exit */
         rv->halt = true;
-        /* Extract exit code from tohost value (value >> 1) */
+
+        /* Only 1 denotes success. Returning the test number directly can turn
+         * failures into shell success when its low eight bits are zero.
+         */
         vm_attr_t *attr = PRIV(rv);
-        attr->exit_code = (value >> 1);
+        attr->exit_code = value == 1 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 }
 #endif /* RV32_HAS(ARCH_TEST) */
@@ -515,12 +544,6 @@ static uint32_t *csr_get_ptr(riscv_t *rv, uint32_t csr)
         return (uint32_t *) (&rv->csr_cycle);
     case CSR_INSTRETH: /* Upper 32 bits of instructions retired */
         return &((uint32_t *) &rv->csr_cycle)[1];
-#if RV32_HAS(EXT_F)
-    case CSR_FFLAGS:
-        return (uint32_t *) (&rv->csr_fcsr);
-    case CSR_FCSR:
-        return (uint32_t *) (&rv->csr_fcsr);
-#endif
     case CSR_SSTATUS:
         return (uint32_t *) (&rv->csr_sstatus);
     case CSR_SIE:
@@ -610,6 +633,48 @@ static void csr_written(riscv_t *rv UNUSED,
 #endif
 }
 
+#if RV32_HAS(EXT_F)
+/* fflags and frm are fields of fcsr, so all three bypass csr_get_ptr(). */
+static inline bool csr_is_fcsr(uint32_t csr)
+{
+    return csr == CSR_FFLAGS || csr == CSR_FRM || csr == CSR_FCSR;
+}
+
+static inline uint32_t fcsr_read(riscv_t *rv, uint32_t csr)
+{
+    switch (csr) {
+    case CSR_FFLAGS:
+        return rv->csr_fcsr & FFLAG_MASK;
+    case CSR_FRM:
+        return (rv->csr_fcsr >> FRM_SHIFT) & FRM_MASK;
+    case CSR_FCSR:
+        return rv->csr_fcsr & FCSR_MASK;
+    default:
+        __UNREACHABLE;
+        return 0;
+    }
+}
+
+static inline void fcsr_write(riscv_t *rv, uint32_t csr, uint32_t val)
+{
+    switch (csr) {
+    case CSR_FFLAGS:
+        rv->csr_fcsr = (rv->csr_fcsr & ~FFLAG_MASK) | (val & FFLAG_MASK);
+        break;
+    case CSR_FRM:
+        rv->csr_fcsr = (rv->csr_fcsr & ~(FRM_MASK << FRM_SHIFT)) |
+                       ((val & FRM_MASK) << FRM_SHIFT);
+        break;
+    case CSR_FCSR:
+        rv->csr_fcsr = val & FCSR_MASK;
+        break;
+    default:
+        __UNREACHABLE;
+        break;
+    }
+}
+#endif
+
 /* CSRRW (Atomic Read/Write CSR) instruction atomically swaps values in the
  * CSRs and integer registers. CSRRW reads the old value of the CSR,
  * zero-extends the value to XLEN bits, and then writes it to register rd.
@@ -636,21 +701,22 @@ static uint32_t csr_csrrw(riscv_t *rv,
         return rvv_out;
     }
 #endif
+#if RV32_HAS(EXT_F)
+    if (csr_is_fcsr(csr)) {
+        const uint32_t out = fcsr_read(rv, csr);
+        fcsr_write(rv, csr, val);
+        return out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
 
     const uint32_t old = *c;
     *c = val;
     csr_written(rv, c, old);
 
-    return out;
+    return old;
 }
 
 /* perform csrrs (atomic read and set) */
@@ -679,21 +745,23 @@ static uint32_t csr_csrrs(riscv_t *rv,
         return rvv_out;
     }
 #endif
+#if RV32_HAS(EXT_F)
+    if (csr_is_fcsr(csr)) {
+        const uint32_t out = fcsr_read(rv, csr);
+        if (val) /* rs1 = x0 reads without writing, as for V above */
+            fcsr_write(rv, csr, out | val);
+        return out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
 
     const uint32_t old = *c;
     *c |= val;
     csr_written(rv, c, old);
 
-    return out;
+    return old;
 }
 
 /* perform csrrc (atomic read and clear)
@@ -720,21 +788,23 @@ static uint32_t csr_csrrc(riscv_t *rv,
         return rvv_out;
     }
 #endif
+#if RV32_HAS(EXT_F)
+    if (csr_is_fcsr(csr)) {
+        const uint32_t out = fcsr_read(rv, csr);
+        if (val) /* rs1 = x0 reads without writing, as for V above */
+            fcsr_write(rv, csr, out & ~val);
+        return out;
+    }
+#endif
     uint32_t *c = csr_get_ptr(rv, csr);
     if (!c)
         return 0;
-
-    uint32_t out = *c;
-#if RV32_HAS(EXT_F)
-    if (csr == CSR_FFLAGS)
-        out &= FFLAG_MASK;
-#endif
 
     const uint32_t old = *c;
     *c &= ~val;
     csr_written(rv, c, old);
 
-    return out;
+    return old;
 }
 
 #if JIT_SYSTEM_HELPERS
@@ -972,8 +1042,10 @@ enum {
 #endif
 #endif
 
-/* record whether the branch is taken or not during emulation */
-static bool is_branch_taken = false;
+/* record whether the branch is taken or not during emulation. Only block
+ * chaining and fusion read it, so other configurations only set it.
+ */
+static bool is_branch_taken UNUSED = false;
 
 /* record the program counter of the previous block */
 static uint32_t last_pc = 0;
@@ -1306,9 +1378,10 @@ static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
 #endif
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
 /* Code was retired, so the T2C caches must be cleared. Clear them whenever
- * any space retires: a region may outlive the block that entered it.
+ * any space retires: a region may outlive the block that entered it. Without
+ * T2C there are no such caches, and nothing reads the flag.
  */
-static bool retired_any;
+static bool retired_any UNUSED;
 
 static void retire_space(riscv_t *rv, uint32_t satp)
 {
@@ -4117,6 +4190,18 @@ void rv_step(void *arg)
 
     /* loop until hitting the cycle target or hart is halted */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
+#if RV32_HAS(ARCH_TEST) && RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
+        /* Native stores bypass the interpreter's tohost write hook. Observe
+         * their result before dispatching the next block of a self-checking
+         * test, which otherwise spins forever after reporting completion.
+         */
+        if (rv->tohost_addr) {
+            check_tohost_write(rv, rv->tohost_addr,
+                               rv->io.mem_read_w(rv, rv->tohost_addr));
+            if (rv->halt)
+                break;
+        }
+#endif
         T1C_COUNT(dispatches, 1);
 #if defined(__EMSCRIPTEN__)
         if (rv->csr_cycle - wasm_clock_cycle >= (1U << 15) ||

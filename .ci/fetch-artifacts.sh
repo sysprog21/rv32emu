@@ -4,7 +4,7 @@
 # jobs stop each spelling out their own slightly different sequence.
 #
 # Usage:
-#   .ci/fetch-artifacts.sh <elf|linux-image|sail|doom>...
+#   .ci/fetch-artifacts.sh <elf|linux-image|doom>...
 #
 # Environment:
 #   GH_TOKEN: raises the GitHub API rate limit used to resolve release tags.
@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -e -u -o pipefail
 
 if [ "$#" -eq 0 ]; then
-    echo "Usage: $0 <elf|linux-image|sail|doom>..." >&2
+    echo "Usage: $0 <elf|linux-image|doom>..." >&2
     exit 2
 fi
 
@@ -36,10 +36,6 @@ for artifact in "$@"; do
 
             # ENABLE_SYSTEM=1 leaves a system configuration behind; drop it so
             # the next request, and the job's first build, start clean.
-            rm -f .config build/.config
-            ;;
-        sail)
-            fetch_artifact sail ENABLE_ARCH_TEST=1
             rm -f .config build/.config
             ;;
         doom)

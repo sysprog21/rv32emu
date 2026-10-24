@@ -107,25 +107,28 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     /* Key the target in the space of the code being compiled, where alone it
      * runs; T2C builds never share code across spaces.
      */
-    LLVMValueRef satp_early =
-        LLVMConstInt(LLVMInt32Type(), t2c_current_block->satp, false);
-    LLVMValueRef addr64 =
-        LLVMBuildIntCast2(*builder, addr, LLVMInt64Type(), false, "");
-    LLVMValueRef satp64 =
-        LLVMBuildIntCast2(*builder, satp_early, LLVMInt64Type(), false, "");
+    LLVMValueRef satp_early = LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                                           t2c_current_block->satp, false);
+    LLVMValueRef addr64 = LLVMBuildIntCast2(
+        *builder, addr, LLVMInt64TypeInContext(t2c_ctx), false, "");
+    LLVMValueRef satp64 = LLVMBuildIntCast2(
+        *builder, satp_early, LLVMInt64TypeInContext(t2c_ctx), false, "");
     LLVMValueRef satp_shifted = LLVMBuildShl(
-        *builder, satp64, LLVMConstInt(LLVMInt64Type(), 32, false), "");
+        *builder, satp64,
+        LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx), 32, false), "");
     LLVMValueRef expected_key =
         LLVMBuildAdd(*builder, addr64, satp_shifted, "expected_key");
 #else
     LLVMValueRef expected_key = LLVMBuildIntCast2(
-        *builder, addr, LLVMInt64Type(), false, "expected_key");
+        *builder, addr, LLVMInt64TypeInContext(t2c_ctx), false, "expected_key");
 #endif
 
 #if RV32_HAS(SYSTEM)
-    LLVMValueRef priv_ptr = t2c_gen_rv_field_ptr(
-        start, builder, offsetof(riscv_t, priv_mode), LLVMInt32Type());
-    LLVMValueRef priv = LLVMBuildLoad2(*builder, LLVMInt32Type(), priv_ptr, "");
+    LLVMValueRef priv_ptr =
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, priv_mode),
+                             LLVMInt32TypeInContext(t2c_ctx));
+    LLVMValueRef priv =
+        LLVMBuildLoad2(*builder, LLVMInt32TypeInContext(t2c_ctx), priv_ptr, "");
 #endif
 
     /* === INLINE CACHE FAST PATH === */
@@ -140,36 +143,42 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     /* Compute inline cache index; must match inline_cache_slot(), which
      * evictions use to find the one slot a key can occupy. */
     LLVMValueRef ic_addr_high = LLVMBuildLShr(
-        *builder, addr, LLVMConstInt(LLVMInt32Type(), 12, false), "");
+        *builder, addr,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 12, false), "");
     LLVMValueRef ic_addr_mixed = LLVMBuildXor(*builder, addr, ic_addr_high, "");
 #if RV32_HAS(SYSTEM)
     LLVMValueRef ic_hash_xor =
         LLVMBuildXor(*builder, ic_addr_mixed, satp_early, "");
-    LLVMValueRef ic_hash = LLVMBuildAnd(
-        *builder, ic_hash_xor,
-        LLVMConstInt(LLVMInt32Type(), N_INLINE_CACHE_ENTRIES - 1, false), "");
+    LLVMValueRef ic_hash =
+        LLVMBuildAnd(*builder, ic_hash_xor,
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                                  N_INLINE_CACHE_ENTRIES - 1, false),
+                     "");
 #else
-    LLVMValueRef ic_hash = LLVMBuildAnd(
-        *builder, ic_addr_mixed,
-        LLVMConstInt(LLVMInt32Type(), N_INLINE_CACHE_ENTRIES - 1, false), "");
+    LLVMValueRef ic_hash =
+        LLVMBuildAnd(*builder, ic_addr_mixed,
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                                  N_INLINE_CACHE_ENTRIES - 1, false),
+                     "");
 #endif
 
     /* Get inline cache element pointer */
-    LLVMValueRef ic_idx =
-        LLVMBuildIntCast2(*builder, ic_hash, LLVMInt64Type(), false, "");
+    LLVMValueRef ic_idx = LLVMBuildIntCast2(
+        *builder, ic_hash, LLVMInt64TypeInContext(t2c_ctx), false, "");
     LLVMValueRef ic_element_ptr = LLVMBuildInBoundsGEP2(
         *builder, t2c_inline_cache_struct_type, ic_base, &ic_idx, 1, "");
 
     /* Load cached key and entry from inline cache */
     LLVMValueRef ic_key_ptr = LLVMBuildStructGEP2(
         *builder, t2c_inline_cache_struct_type, ic_element_ptr, 0, "");
-    LLVMValueRef ic_key =
-        LLVMBuildLoad2(*builder, LLVMInt64Type(), ic_key_ptr, "ic_key");
+    LLVMValueRef ic_key = LLVMBuildLoad2(
+        *builder, LLVMInt64TypeInContext(t2c_ctx), ic_key_ptr, "ic_key");
 
     LLVMValueRef ic_entry_ptr = LLVMBuildStructGEP2(
         *builder, t2c_inline_cache_struct_type, ic_element_ptr, 1, "");
     LLVMValueRef ic_entry = LLVMBuildLoad2(
-        *builder, LLVMPointerType(LLVMVoidType(), 0), ic_entry_ptr, "ic_entry");
+        *builder, LLVMPointerType(LLVMVoidTypeInContext(t2c_ctx), 0),
+        ic_entry_ptr, "ic_entry");
 
     /* Check if inline cache hit: key matches AND entry is not NULL */
     LLVMValueRef ic_key_match =
@@ -181,20 +190,22 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
 #if RV32_HAS(SYSTEM)
     LLVMValueRef ic_priv_ptr = LLVMBuildStructGEP2(
         *builder, t2c_inline_cache_struct_type, ic_element_ptr, 2, "");
-    LLVMValueRef ic_priv =
-        LLVMBuildLoad2(*builder, LLVMInt32Type(), ic_priv_ptr, "ic_priv");
+    LLVMValueRef ic_priv = LLVMBuildLoad2(
+        *builder, LLVMInt32TypeInContext(t2c_ctx), ic_priv_ptr, "ic_priv");
     LLVMValueRef ic_priv_match =
         LLVMBuildICmp(*builder, LLVMIntEQ, ic_priv, priv, "");
     ic_hit = LLVMBuildAnd(*builder, ic_hit, ic_priv_match, "ic_context_hit");
 #endif
 
     /* Create basic blocks for inline cache hit and miss paths */
-    LLVMBasicBlockRef ic_hit_block = LLVMAppendBasicBlock(start, "ic_hit");
-    LLVMBuilderRef ic_hit_builder = LLVMCreateBuilder();
+    LLVMBasicBlockRef ic_hit_block =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "ic_hit");
+    LLVMBuilderRef ic_hit_builder = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(ic_hit_builder, ic_hit_block);
 
-    LLVMBasicBlockRef ic_miss_block = LLVMAppendBasicBlock(start, "ic_miss");
-    LLVMBuilderRef ic_miss_builder = LLVMCreateBuilder();
+    LLVMBasicBlockRef ic_miss_block =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "ic_miss");
+    LLVMBuilderRef ic_miss_builder = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(ic_miss_builder, ic_miss_block);
 
     LLVMBuildCondBr(*builder, ic_hit, ic_hit_block, ic_miss_block);
@@ -208,20 +219,24 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
 
     /* === INLINE CACHE MISS PATH (slow - use seqlock jit_cache) === */
 
-    LLVMBasicBlockRef seq_even = LLVMAppendBasicBlock(start, "seq_even");
-    LLVMBuilderRef seq_even_builder = LLVMCreateBuilder();
+    LLVMBasicBlockRef seq_even =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "seq_even");
+    LLVMBuilderRef seq_even_builder = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(seq_even_builder, seq_even);
 
-    LLVMBasicBlockRef key_match = LLVMAppendBasicBlock(start, "key_match");
-    LLVMBuilderRef key_match_builder = LLVMCreateBuilder();
+    LLVMBasicBlockRef key_match =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "key_match");
+    LLVMBuilderRef key_match_builder = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(key_match_builder, key_match);
 
-    LLVMBasicBlockRef call_jit = LLVMAppendBasicBlock(start, "call_jit");
-    LLVMBuilderRef call_builder = LLVMCreateBuilder();
+    LLVMBasicBlockRef call_jit =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "call_jit");
+    LLVMBuilderRef call_builder = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(call_builder, call_jit);
 
-    LLVMBasicBlockRef fallback = LLVMAppendBasicBlock(start, "fallback");
-    LLVMBuilderRef fallback_builder = LLVMCreateBuilder();
+    LLVMBasicBlockRef fallback =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fallback");
+    LLVMBuilderRef fallback_builder = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(fallback_builder, fallback);
 
     /* Load jit_cache base address */
@@ -234,45 +249,51 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
 
     /* Compute jit_cache index; must match jit_cache_slot() */
     LLVMValueRef addr_high = LLVMBuildLShr(
-        ic_miss_builder, addr, LLVMConstInt(LLVMInt32Type(), 12, false), "");
+        ic_miss_builder, addr,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 12, false), "");
     LLVMValueRef addr_mixed =
         LLVMBuildXor(ic_miss_builder, addr, addr_high, "");
 #if RV32_HAS(SYSTEM)
     LLVMValueRef hash_xor =
         LLVMBuildXor(ic_miss_builder, addr_mixed, satp_early, "");
-    LLVMValueRef hash = LLVMBuildAnd(
-        ic_miss_builder, hash_xor,
-        LLVMConstInt(LLVMInt32Type(), N_JIT_CACHE_ENTRIES - 1, false), "");
+    LLVMValueRef hash =
+        LLVMBuildAnd(ic_miss_builder, hash_xor,
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                                  N_JIT_CACHE_ENTRIES - 1, false),
+                     "");
 #else
-    LLVMValueRef hash = LLVMBuildAnd(
-        ic_miss_builder, addr_mixed,
-        LLVMConstInt(LLVMInt32Type(), N_JIT_CACHE_ENTRIES - 1, false), "");
+    LLVMValueRef hash =
+        LLVMBuildAnd(ic_miss_builder, addr_mixed,
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                                  N_JIT_CACHE_ENTRIES - 1, false),
+                     "");
 #endif
 
     /* Get jit_cache element pointer */
-    LLVMValueRef cast =
-        LLVMBuildIntCast2(ic_miss_builder, hash, LLVMInt64Type(), false, "");
+    LLVMValueRef cast = LLVMBuildIntCast2(
+        ic_miss_builder, hash, LLVMInt64TypeInContext(t2c_ctx), false, "");
     LLVMValueRef element_ptr = LLVMBuildInBoundsGEP2(
         ic_miss_builder, t2c_jit_cache_struct_type, base, &cast, 1, "");
 
     /* Step 1: Load seq1 (acquire). Odd value means write in progress. */
     LLVMValueRef seq_ptr = LLVMBuildStructGEP2(
         ic_miss_builder, t2c_jit_cache_struct_type, element_ptr, 0, "");
-    LLVMValueRef seq1 =
-        LLVMBuildLoad2(ic_miss_builder, LLVMInt32Type(), seq_ptr, "");
+    LLVMValueRef seq1 = LLVMBuildLoad2(
+        ic_miss_builder, LLVMInt32TypeInContext(t2c_ctx), seq_ptr, "");
     LLVMSetOrdering(seq1, LLVMAtomicOrderingAcquire);
     LLVMValueRef seq_odd = LLVMBuildAnd(
-        ic_miss_builder, seq1, LLVMConstInt(LLVMInt32Type(), 1, false), "");
-    LLVMValueRef is_even =
-        LLVMBuildICmp(ic_miss_builder, LLVMIntEQ, seq_odd,
-                      LLVMConstInt(LLVMInt32Type(), 0, false), "");
+        ic_miss_builder, seq1,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, false), "");
+    LLVMValueRef is_even = LLVMBuildICmp(
+        ic_miss_builder, LLVMIntEQ, seq_odd,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, false), "");
     LLVMBuildCondBr(ic_miss_builder, is_even, seq_even, fallback);
 
     /* Step 2: Load key (acquire) and compare with expected. */
     LLVMValueRef jc_key_ptr = LLVMBuildStructGEP2(
         seq_even_builder, t2c_jit_cache_struct_type, element_ptr, 2, "");
-    LLVMValueRef jc_key =
-        LLVMBuildLoad2(seq_even_builder, LLVMInt64Type(), jc_key_ptr, "");
+    LLVMValueRef jc_key = LLVMBuildLoad2(
+        seq_even_builder, LLVMInt64TypeInContext(t2c_ctx), jc_key_ptr, "");
     LLVMSetOrdering(jc_key, LLVMAtomicOrderingAcquire);
     LLVMSetAlignment(jc_key, 8);
 
@@ -283,9 +304,9 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     /* Step 3: Load entry (acquire). */
     LLVMValueRef jc_entry_ptr = LLVMBuildStructGEP2(
         key_match_builder, t2c_jit_cache_struct_type, element_ptr, 3, "");
-    LLVMValueRef entry =
-        LLVMBuildLoad2(key_match_builder, LLVMPointerType(LLVMVoidType(), 0),
-                       jc_entry_ptr, "");
+    LLVMValueRef entry = LLVMBuildLoad2(
+        key_match_builder, LLVMPointerType(LLVMVoidTypeInContext(t2c_ctx), 0),
+        jc_entry_ptr, "");
     LLVMSetOrdering(entry, LLVMAtomicOrderingAcquire);
     LLVMSetAlignment(entry, 8);
 
@@ -293,16 +314,17 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     /* Privilege belongs to the same seqlock snapshot as key and entry. */
     LLVMValueRef jc_priv_ptr = LLVMBuildStructGEP2(
         key_match_builder, t2c_jit_cache_struct_type, element_ptr, 1, "");
-    LLVMValueRef jc_priv = LLVMBuildLoad2(key_match_builder, LLVMInt32Type(),
-                                          jc_priv_ptr, "jc_priv");
+    LLVMValueRef jc_priv =
+        LLVMBuildLoad2(key_match_builder, LLVMInt32TypeInContext(t2c_ctx),
+                       jc_priv_ptr, "jc_priv");
     LLVMSetOrdering(jc_priv, LLVMAtomicOrderingAcquire);
     LLVMValueRef jc_priv_match =
         LLVMBuildICmp(key_match_builder, LLVMIntEQ, jc_priv, priv, "");
 #endif
 
     /* Step 4: Load seq2 (monotonic), check seq1 == seq2 AND entry != NULL. */
-    LLVMValueRef seq2 =
-        LLVMBuildLoad2(key_match_builder, LLVMInt32Type(), seq_ptr, "");
+    LLVMValueRef seq2 = LLVMBuildLoad2(
+        key_match_builder, LLVMInt32TypeInContext(t2c_ctx), seq_ptr, "");
     LLVMSetOrdering(seq2, LLVMAtomicOrderingMonotonic);
 
     LLVMValueRef seq_cmp =
@@ -331,7 +353,8 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
      * The inline cache hit path skips ISB because we already executed the
      * target successfully, so icache was coherent at that time.
      */
-    LLVMTypeRef isb_func_type = LLVMFunctionType(LLVMVoidType(), NULL, 0, 0);
+    LLVMTypeRef isb_func_type =
+        LLVMFunctionType(LLVMVoidTypeInContext(t2c_ctx), NULL, 0, 0);
     LLVMValueRef isb_asm =
         LLVMGetInlineAsm(isb_func_type, "isb", 3, "", 0, true, false,
                          LLVMInlineAsmDialectATT, 0);
@@ -412,16 +435,19 @@ static void t2c_indirect_jump(LLVMBuilderRef *builder,
         return;
     }
     LLVMValueRef hit = LLVMBuildICmp(
-        *builder, LLVMIntEQ, addr, LLVMConstInt(LLVMInt32Type(), target, false),
+        *builder, LLVMIntEQ, addr,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), target, false),
         "predicted");
-    LLVMBasicBlockRef hit_bb = LLVMAppendBasicBlock(start, "predicted");
-    LLVMBasicBlockRef miss_bb = LLVMAppendBasicBlock(start, "mispredicted");
+    LLVMBasicBlockRef hit_bb =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "predicted");
+    LLVMBasicBlockRef miss_bb =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "mispredicted");
     LLVMBuildCondBr(*builder, hit, hit_bb, miss_bb);
-    LLVMBuilderRef miss = LLVMCreateBuilder();
+    LLVMBuilderRef miss = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(miss, miss_bb);
     t2c_jit_cache_helper(&miss, start, addr, rv, block, ir, insn_counter);
     LLVMDisposeBuilder(miss);
-    *taken_builder = LLVMCreateBuilder();
+    *taken_builder = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(*taken_builder, hit_bb);
     t2c_predicted_pc = target;
 }
@@ -442,34 +468,36 @@ T2C_OP(jalr, {
                       taken_builder);
 })
 
-#define BRANCH_FUNC(type, cond)                                             \
-    T2C_OP(type, {                                                          \
-        T2C_LLVM_GEN_LOAD_VMREG(rs1, 32,                                    \
-                                t2c_gen_rs1_addr(start, builder, ir));      \
-        T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,                                    \
-                                t2c_gen_rs2_addr(start, builder, ir));      \
-        T2C_LLVM_GEN_CMP(cond, val_rs1, val_rs2);                           \
-        LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");     \
-        LLVMBuilderRef builder2 = LLVMCreateBuilder();                      \
-        LLVMPositionBuilderAtEnd(builder2, taken);                          \
-        if (ir->branch_taken &&                                             \
-            t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {         \
-            *taken_builder = builder2;                                      \
-        } else {                                                            \
-            t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter);  \
-            LLVMDisposeBuilder(builder2);                                   \
-        }                                                                   \
-        LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken"); \
-        LLVMBuilderRef builder3 = LLVMCreateBuilder();                      \
-        LLVMPositionBuilderAtEnd(builder3, untaken);                        \
-        if (ir->branch_untaken &&                                           \
-            t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {       \
-            *untaken_builder = builder3;                                    \
-        } else {                                                            \
-            t2c_gen_exit(builder3, start, ir->pc + 4, insn_counter);        \
-            LLVMDisposeBuilder(builder3);                                   \
-        }                                                                   \
-        LLVMBuildCondBr(*builder, cmp, taken, untaken);                     \
+#define BRANCH_FUNC(type, cond)                                            \
+    T2C_OP(type, {                                                         \
+        T2C_LLVM_GEN_LOAD_VMREG(rs1, 32,                                   \
+                                t2c_gen_rs1_addr(start, builder, ir));     \
+        T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,                                   \
+                                t2c_gen_rs2_addr(start, builder, ir));     \
+        T2C_LLVM_GEN_CMP(cond, val_rs1, val_rs2);                          \
+        LLVMBasicBlockRef taken =                                          \
+            LLVMAppendBasicBlockInContext(t2c_ctx, start, "taken");        \
+        LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_ctx);     \
+        LLVMPositionBuilderAtEnd(builder2, taken);                         \
+        if (ir->branch_taken &&                                            \
+            t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {        \
+            *taken_builder = builder2;                                     \
+        } else {                                                           \
+            t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter); \
+            LLVMDisposeBuilder(builder2);                                  \
+        }                                                                  \
+        LLVMBasicBlockRef untaken =                                        \
+            LLVMAppendBasicBlockInContext(t2c_ctx, start, "untaken");      \
+        LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_ctx);     \
+        LLVMPositionBuilderAtEnd(builder3, untaken);                       \
+        if (ir->branch_untaken &&                                          \
+            t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {      \
+            *untaken_builder = builder3;                                   \
+        } else {                                                           \
+            t2c_gen_exit(builder3, start, ir->pc + 4, insn_counter);       \
+            LLVMDisposeBuilder(builder3);                                  \
+        }                                                                  \
+        LLVMBuildCondBr(*builder, cmp, taken, untaken);                    \
     })
 
 BRANCH_FUNC(beq, EQ)
@@ -526,9 +554,9 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     if (mem->mem_size < access_size)
         return NULL;
 
-    LLVMTypeRef i8 = LLVMInt8Type();
-    LLVMTypeRef i32 = LLVMInt32Type();
-    LLVMTypeRef i64 = LLVMInt64Type();
+    LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_ctx);
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_ctx);
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(t2c_ctx);
     LLVMTypeRef i32p = LLVMPointerType(i32, 0);
     LLVMValueRef zero8 = LLVMConstInt(i8, 0, false);
     LLVMValueRef zero32 = LLVMConstInt(i32, 0, false);
@@ -540,8 +568,10 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
         LLVMBuildLoad2(*builder, i32, t2c_gen_rs1_addr(start, builder, ir), "");
     LLVMValueRef vaddr = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);
 
-    LLVMBasicBlockRef slow_bb = LLVMAppendBasicBlock(start, "fp_slow");
-    LLVMBasicBlockRef end_bb = LLVMAppendBasicBlock(start, "fp_end");
+    LLVMBasicBlockRef slow_bb =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_slow");
+    LLVMBasicBlockRef end_bb =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_end");
 
     /* Alignment check. */
     if (access_size > 1) {
@@ -549,7 +579,8 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
             *builder, vaddr, LLVMConstInt(i32, access_size - 1, false), "");
         LLVMValueRef align_ok =
             LLVMBuildICmp(*builder, LLVMIntEQ, low_bits, zero32, "");
-        LLVMBasicBlockRef next = LLVMAppendBasicBlock(start, "fp_align_ok");
+        LLVMBasicBlockRef next =
+            LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_align_ok");
         LLVMBuildCondBr(*builder, align_ok, next, slow_bb);
         LLVMPositionBuilderAtEnd(*builder, next);
     }
@@ -585,7 +616,8 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     LLVMValueRef entry_vpn = LLVMBuildLoad2(*builder, i32, vpn_field_ptr, "");
     LLVMValueRef vpn_ok =
         LLVMBuildICmp(*builder, LLVMIntEQ, entry_vpn, vpn, "");
-    LLVMBasicBlockRef after_vpn = LLVMAppendBasicBlock(start, "fp_vpn_ok");
+    LLVMBasicBlockRef after_vpn =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_vpn_ok");
     LLVMBuildCondBr(*builder, vpn_ok, after_vpn, slow_bb);
     LLVMPositionBuilderAtEnd(*builder, after_vpn);
 
@@ -601,7 +633,8 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     LLVMValueRef valid32 = LLVMBuildZExt(*builder, valid_val, i32, "");
     LLVMValueRef valid_ok =
         LLVMBuildICmp(*builder, LLVMIntEQ, valid32, context, "");
-    LLVMBasicBlockRef after_valid = LLVMAppendBasicBlock(start, "fp_valid_ok");
+    LLVMBasicBlockRef after_valid =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_valid_ok");
     LLVMBuildCondBr(*builder, valid_ok, after_valid, slow_bb);
     LLVMPositionBuilderAtEnd(*builder, after_valid);
 
@@ -616,7 +649,8 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     LLVMValueRef perm_and = LLVMBuildAnd(*builder, perm_val, needed_mask, "");
     LLVMValueRef perm_ok =
         LLVMBuildICmp(*builder, LLVMIntNE, perm_and, zero8, "");
-    LLVMBasicBlockRef after_perm = LLVMAppendBasicBlock(start, "fp_perm_ok");
+    LLVMBasicBlockRef after_perm =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_perm_ok");
     LLVMBuildCondBr(*builder, perm_ok, after_perm, slow_bb);
     LLVMPositionBuilderAtEnd(*builder, after_perm);
 
@@ -630,7 +664,7 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
         LLVMValueRef dirty_ok =
             LLVMBuildICmp(*builder, LLVMIntNE, dirty_val, zero8, "");
         LLVMBasicBlockRef after_dirty =
-            LLVMAppendBasicBlock(start, "fp_dirty_ok");
+            LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_dirty_ok");
         LLVMBuildCondBr(*builder, dirty_ok, after_dirty, slow_bb);
         LLVMPositionBuilderAtEnd(*builder, after_dirty);
     }
@@ -650,7 +684,8 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     LLVMValueRef level_ok =
         LLVMBuildICmp(*builder, LLVMIntEQ, level_val,
                       LLVMConstInt(i8, TLB_PAGE_LEVEL_4K, false), "");
-    LLVMBasicBlockRef after_level = LLVMAppendBasicBlock(start, "fp_level_ok");
+    LLVMBasicBlockRef after_level =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_level_ok");
     LLVMBuildCondBr(*builder, level_ok, after_level, slow_bb);
     LLVMPositionBuilderAtEnd(*builder, after_level);
 
@@ -668,7 +703,8 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     uint32_t max_paddr = (uint32_t) (mem->mem_size - access_size);
     LLVMValueRef range_ok = LLVMBuildICmp(
         *builder, LLVMIntULE, paddr32, LLVMConstInt(i32, max_paddr, false), "");
-    LLVMBasicBlockRef after_range = LLVMAppendBasicBlock(start, "fp_range_ok");
+    LLVMBasicBlockRef after_range =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_range_ok");
     LLVMBuildCondBr(*builder, range_ok, after_range, slow_bb);
     LLVMPositionBuilderAtEnd(*builder, after_range);
 
@@ -682,13 +718,13 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
     LLVMTypeRef val_type;
     switch (access_size) {
     case 1:
-        val_type = LLVMInt8Type();
+        val_type = LLVMInt8TypeInContext(t2c_ctx);
         break;
     case 2:
-        val_type = LLVMInt16Type();
+        val_type = LLVMInt16TypeInContext(t2c_ctx);
         break;
     case 4:
-        val_type = LLVMInt32Type();
+        val_type = LLVMInt32TypeInContext(t2c_ctx);
         break;
     default:
         __UNREACHABLE;
@@ -720,18 +756,20 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
 static LLVMValueRef t2c_gen_code_generation(LLVMBuilderRef *builder,
                                             LLVMValueRef start)
 {
-    LLVMTypeRef i8 = LLVMInt8Type();
+    LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_ctx);
     LLVMTypeRef ptr = LLVMPointerType(i8, 0);
     LLVMValueRef state = LLVMBuildLoad2(
         *builder, ptr,
         t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, jit_state), ptr),
         "");
-    LLVMValueRef offset = LLVMConstInt(
-        LLVMInt32Type(), offsetof(struct jit_state, code_generation), false);
+    LLVMValueRef offset =
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                     offsetof(struct jit_state, code_generation), false);
     LLVMValueRef field = LLVMBuildGEP2(*builder, i8, state, &offset, 1, "");
-    field = LLVMBuildBitCast(*builder, field,
-                             LLVMPointerType(LLVMInt64Type(), 0), "");
-    return LLVMBuildLoad2(*builder, LLVMInt64Type(), field, "");
+    field = LLVMBuildBitCast(
+        *builder, field, LLVMPointerType(LLVMInt64TypeInContext(t2c_ctx), 0),
+        "");
+    return LLVMBuildLoad2(*builder, LLVMInt64TypeInContext(t2c_ctx), field, "");
 }
 
 /* Call the MMU helper at io_field of rv->io, as the access of the instruction
@@ -762,15 +800,15 @@ static LLVMValueRef t2c_gen_mmu_call(LLVMBuilderRef *builder,
     LLVMValueRef ret =
         t2c_gen_call_io_func(start, builder, io_field, ret_type, args, n);
 
-    LLVMTypeRef i8 = LLVMInt8Type();
-    LLVMTypeRef i32 = LLVMInt32Type();
+    LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_ctx);
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_ctx);
     LLVMValueRef trap_cnt = LLVMBuildLoad2(
         *builder, i32,
         t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, trap_cnt), i32),
         "");
     LLVMValueRef signal = LLVMBuildLoad2(
         *builder, i8,
-        LLVMConstIntToPtr(LLVMConstInt(LLVMInt64Type(),
+        LLVMConstIntToPtr(LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
                                        (uintptr_t) &need_handle_signal, false),
                           LLVMPointerType(i8, 0)),
         "");
@@ -781,8 +819,10 @@ static LLVMValueRef t2c_gen_mmu_call(LLVMBuilderRef *builder,
                     LLVMBuildICmp(*builder, LLVMIntNE, signal,
                                   LLVMConstInt(i8, 0, false), ""),
                     "faulted");
-    LLVMBasicBlockRef fault = LLVMAppendBasicBlock(start, "mmu_fault");
-    LLVMBasicBlockRef done = LLVMAppendBasicBlock(start, "mmu_done");
+    LLVMBasicBlockRef fault =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "mmu_fault");
+    LLVMBasicBlockRef done =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "mmu_done");
     t2c_gen_unlikely_br(*builder, faulted, fault, done);
     LLVMPositionBuilderAtEnd(*builder, fault);
     T2C_STORE_TIMER(*builder, start, insn_counter);
@@ -804,13 +844,16 @@ static void t2c_finish_mmu_call(LLVMBuilderRef *builder,
     LLVMValueRef changed =
         LLVMBuildICmp(*builder, LLVMIntNE, generation,
                       t2c_gen_code_generation(builder, start), "code_retired");
-    LLVMBasicBlockRef leave = LLVMAppendBasicBlock(start, "retired_region");
-    LLVMBasicBlockRef done = LLVMAppendBasicBlock(start, "live_region");
+    LLVMBasicBlockRef leave =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "retired_region");
+    LLVMBasicBlockRef done =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "live_region");
     t2c_gen_unlikely_br(*builder, changed, leave, done);
     LLVMPositionBuilderAtEnd(*builder, leave);
     t2c_gen_exit(*builder, start, next_pc, insn_counter);
     LLVMPositionBuilderAtEnd(*builder, done);
-    LLVMBuildStore(*builder, LLVMConstInt(LLVMInt64Type(), refund, false),
+    LLVMBuildStore(*builder,
+                   LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx), refund, false),
                    insn_counter);
 }
 
@@ -830,9 +873,9 @@ static void t2c_gen_mmu_load(LLVMBuilderRef *builder,
 {
     LLVMValueRef generation;
     uint32_t refund;
-    LLVMValueRef ret =
-        t2c_gen_mmu_call(builder, start, io_field, LLVMIntType(bits), &vaddr, 1,
-                         pc, insn_counter, &generation, &refund);
+    LLVMValueRef ret = t2c_gen_mmu_call(
+        builder, start, io_field, LLVMIntTypeInContext(t2c_ctx, bits), &vaddr,
+        1, pc, insn_counter, &generation, &refund);
     t2c_gen_load_result(builder, ret, rd_addr, is_signed);
     t2c_finish_mmu_call(builder, start, insn_counter, generation, refund,
                         pc + size);
@@ -850,11 +893,12 @@ static void t2c_gen_mmu_store(LLVMBuilderRef *builder,
                               LLVMValueRef insn_counter)
 {
     LLVMValueRef args[] = {
-        vaddr, LLVMBuildLoad2(*builder, LLVMIntType(bits), src_addr, "")};
+        vaddr, LLVMBuildLoad2(*builder, LLVMIntTypeInContext(t2c_ctx, bits),
+                              src_addr, "")};
     LLVMValueRef generation;
     uint32_t refund;
-    t2c_gen_mmu_call(builder, start, io_field, LLVMVoidType(), args, 2, pc,
-                     insn_counter, &generation, &refund);
+    t2c_gen_mmu_call(builder, start, io_field, LLVMVoidTypeInContext(t2c_ctx),
+                     args, 2, pc, insn_counter, &generation, &refund);
     t2c_finish_mmu_call(builder, start, insn_counter, generation, refund,
                         pc + size);
 }
@@ -929,7 +973,8 @@ static void t2c_mmu_wrapper_fuse9(LLVMBuilderRef *builder,
                                   LLVMValueRef insn_counter)
 {
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
-    t2c_gen_mmu_load(builder, start, LLVMConstInt(LLVMInt32Type(), addr, false),
+    t2c_gen_mmu_load(builder, start,
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), addr, false),
                      offsetof(riscv_io_t, mmu_read_w), 32, false,
                      ir->rs2 ? t2c_gen_rs2_addr(start, builder, ir) : NULL, pc,
                      4, insn_counter);
@@ -944,7 +989,8 @@ static void t2c_mmu_wrapper_fuse10(LLVMBuilderRef *builder,
 {
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
     t2c_gen_mmu_store(
-        builder, start, LLVMConstInt(LLVMInt32Type(), addr, false),
+        builder, start,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), addr, false),
         offsetof(riscv_io_t, mmu_write_w), 32,
         t2c_gen_rs1_addr(start, builder, ir), pc, 4, insn_counter);
 }
@@ -974,8 +1020,8 @@ T2C_OP(lb, {
         {
             LLVMValueRef mem_loc =
                 t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef value =
-                LLVMBuildLoad2(*builder, LLVMInt8Type(), mem_loc, "");
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt8TypeInContext(t2c_ctx), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir), true);
         });
@@ -988,8 +1034,8 @@ T2C_OP(lh, {
         {
             LLVMValueRef mem_loc =
                 t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef value =
-                LLVMBuildLoad2(*builder, LLVMInt16Type(), mem_loc, "");
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt16TypeInContext(t2c_ctx), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir), true);
         });
@@ -1002,8 +1048,8 @@ T2C_OP(lw, {
         {
             LLVMValueRef mem_loc =
                 t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef value =
-                LLVMBuildLoad2(*builder, LLVMInt32Type(), mem_loc, "");
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_ctx), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir),
                                 false);
@@ -1016,8 +1062,8 @@ T2C_OP(lbu, {
         {
             LLVMValueRef mem_loc =
                 t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef value =
-                LLVMBuildLoad2(*builder, LLVMInt8Type(), mem_loc, "");
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt8TypeInContext(t2c_ctx), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir),
                                 false);
@@ -1031,8 +1077,8 @@ T2C_OP(lhu, {
         {
             LLVMValueRef mem_loc =
                 t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef value =
-                LLVMBuildLoad2(*builder, LLVMInt16Type(), mem_loc, "");
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt16TypeInContext(t2c_ctx), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir),
                                 false);
@@ -1087,9 +1133,9 @@ T2C_OP(slti, {
     LLVMValueRef addr_rd = t2c_gen_rd_addr(start, builder, ir);
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(SLT, val_rs1, ir->imm);
-    LLVMValueRef res =
-        LLVMBuildSelect(*builder, cmp, LLVMConstInt(LLVMInt32Type(), 1, true),
-                        LLVMConstInt(LLVMInt32Type(), 0, true), "");
+    LLVMValueRef res = LLVMBuildSelect(
+        *builder, cmp, LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, true), "");
     LLVMBuildStore(*builder, res, addr_rd);
 })
 
@@ -1097,9 +1143,9 @@ T2C_OP(sltiu, {
     LLVMValueRef addr_rd = t2c_gen_rd_addr(start, builder, ir);
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(ULT, val_rs1, ir->imm);
-    LLVMValueRef res =
-        LLVMBuildSelect(*builder, cmp, LLVMConstInt(LLVMInt32Type(), 1, true),
-                        LLVMConstInt(LLVMInt32Type(), 0, true), "");
+    LLVMValueRef res = LLVMBuildSelect(
+        *builder, cmp, LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, true), "");
     LLVMBuildStore(*builder, res, addr_rd);
 })
 
@@ -1166,9 +1212,9 @@ T2C_OP(slt, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP(SLT, val_rs1, val_rs2);
-    LLVMValueRef res =
-        LLVMBuildSelect(*builder, cmp, LLVMConstInt(LLVMInt32Type(), 1, true),
-                        LLVMConstInt(LLVMInt32Type(), 0, true), "");
+    LLVMValueRef res = LLVMBuildSelect(
+        *builder, cmp, LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, true), "");
     LLVMBuildStore(*builder, res, addr_rd);
 })
 
@@ -1177,9 +1223,9 @@ T2C_OP(sltu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP(ULT, val_rs1, val_rs2);
-    LLVMValueRef res =
-        LLVMBuildSelect(*builder, cmp, LLVMConstInt(LLVMInt32Type(), 1, true),
-                        LLVMConstInt(LLVMInt32Type(), 0, true), "");
+    LLVMValueRef res = LLVMBuildSelect(
+        *builder, cmp, LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, true), "");
     LLVMBuildStore(*builder, res, addr_rd);
 })
 
@@ -1230,7 +1276,7 @@ T2C_OP(ecall, {
      */
     T2C_STORE_TIMER(*builder, start, insn_counter);
     t2c_gen_call_io_func(start, builder, offsetof(riscv_io_t, on_ecall),
-                         LLVMVoidType(), NULL, 0);
+                         LLVMVoidTypeInContext(t2c_ctx), NULL, 0);
     LLVMBuildRetVoid(*builder);
 })
 
@@ -1242,7 +1288,7 @@ T2C_OP(ebreak, {
      */
     T2C_STORE_TIMER(*builder, start, insn_counter);
     t2c_gen_call_io_func(start, builder, offsetof(riscv_io_t, on_ebreak),
-                         LLVMVoidType(), NULL, 0);
+                         LLVMVoidTypeInContext(t2c_ctx), NULL, 0);
     LLVMBuildRetVoid(*builder);
 })
 
@@ -1282,44 +1328,56 @@ T2C_OP(csrrci, { __UNREACHABLE; })
 T2C_OP(mul, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64Type(), "sextrs1to64");
-    val_rs2 = LLVMBuildSExt(*builder, val_rs2, LLVMInt64Type(), "sextrs2to64");
+    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64TypeInContext(t2c_ctx),
+                            "sextrs1to64");
+    val_rs2 = LLVMBuildSExt(*builder, val_rs2, LLVMInt64TypeInContext(t2c_ctx),
+                            "sextrs2to64");
     LLVMValueRef res = LLVMBuildMul(*builder, val_rs1, val_rs2, "mul");
     res = T2C_LLVM_GEN_ALU64_IMM(And, res, 0xFFFFFFFF);
-    res = LLVMBuildTrunc(*builder, res, LLVMInt32Type(), "sextresto32");
+    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_ctx),
+                         "sextresto32");
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
 T2C_OP(mulh, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64Type(), "sextrs1to64");
-    val_rs2 = LLVMBuildSExt(*builder, val_rs2, LLVMInt64Type(), "sextrs2to64");
+    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64TypeInContext(t2c_ctx),
+                            "sextrs1to64");
+    val_rs2 = LLVMBuildSExt(*builder, val_rs2, LLVMInt64TypeInContext(t2c_ctx),
+                            "sextrs2to64");
     LLVMValueRef res = LLVMBuildMul(*builder, val_rs1, val_rs2, "mul");
     res = T2C_LLVM_GEN_ALU64_IMM(LShr, res, 32);
-    res = LLVMBuildTrunc(*builder, res, LLVMInt32Type(), "sextresto32");
+    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_ctx),
+                         "sextresto32");
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
 T2C_OP(mulhsu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64Type(), "sextrs1to64");
-    val_rs2 = LLVMBuildZExt(*builder, val_rs2, LLVMInt64Type(), "zextrs2to64");
+    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64TypeInContext(t2c_ctx),
+                            "sextrs1to64");
+    val_rs2 = LLVMBuildZExt(*builder, val_rs2, LLVMInt64TypeInContext(t2c_ctx),
+                            "zextrs2to64");
     LLVMValueRef res = LLVMBuildMul(*builder, val_rs1, val_rs2, "mul");
     res = T2C_LLVM_GEN_ALU64_IMM(LShr, res, 32);
-    res = LLVMBuildTrunc(*builder, res, LLVMInt32Type(), "sextresto32");
+    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_ctx),
+                         "sextresto32");
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
 T2C_OP(mulhu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    val_rs1 = LLVMBuildZExt(*builder, val_rs1, LLVMInt64Type(), "sextrs1to64");
-    val_rs2 = LLVMBuildZExt(*builder, val_rs2, LLVMInt64Type(), "zextrs2to64");
+    val_rs1 = LLVMBuildZExt(*builder, val_rs1, LLVMInt64TypeInContext(t2c_ctx),
+                            "sextrs1to64");
+    val_rs2 = LLVMBuildZExt(*builder, val_rs2, LLVMInt64TypeInContext(t2c_ctx),
+                            "zextrs2to64");
     LLVMValueRef res = LLVMBuildMul(*builder, val_rs1, val_rs2, "mul");
     res = T2C_LLVM_GEN_ALU64_IMM(LShr, res, 32);
-    res = LLVMBuildTrunc(*builder, res, LLVMInt32Type(), "sextresto32");
+    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_ctx),
+                         "sextresto32");
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
@@ -1443,8 +1501,8 @@ T2C_OP(clw, {
         {
             LLVMValueRef mem_loc =
                 t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef res =
-                LLVMBuildLoad2(*builder, LLVMInt32Type(), mem_loc, "res");
+            LLVMValueRef res = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_ctx), mem_loc, "res");
             LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
         });
 })
@@ -1559,8 +1617,9 @@ T2C_OP(cj, {
 T2C_OP(cbeqz, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(EQ, val_rs1, 0);
-    LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");
-    LLVMBuilderRef builder2 = LLVMCreateBuilder();
+    LLVMBasicBlockRef taken =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "taken");
+    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(builder2, taken);
     if (ir->branch_taken &&
         t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
@@ -1570,8 +1629,9 @@ T2C_OP(cbeqz, {
         LLVMDisposeBuilder(builder2);
     }
 
-    LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken");
-    LLVMBuilderRef builder3 = LLVMCreateBuilder();
+    LLVMBasicBlockRef untaken =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "untaken");
+    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(builder3, untaken);
     if (ir->branch_untaken &&
         t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
@@ -1586,8 +1646,9 @@ T2C_OP(cbeqz, {
 T2C_OP(cbnez, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(NE, val_rs1, 0);
-    LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");
-    LLVMBuilderRef builder2 = LLVMCreateBuilder();
+    LLVMBasicBlockRef taken =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "taken");
+    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(builder2, taken);
     if (ir->branch_taken &&
         t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
@@ -1597,8 +1658,9 @@ T2C_OP(cbnez, {
         LLVMDisposeBuilder(builder2);
     }
 
-    LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken");
-    LLVMBuilderRef builder3 = LLVMCreateBuilder();
+    LLVMBasicBlockRef untaken =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "untaken");
+    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(builder3, untaken);
     if (ir->branch_untaken &&
         t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
@@ -1625,17 +1687,19 @@ T2C_OP(clwsp, {
         {
             LLVMValueRef val_sp = LLVMBuildZExt(
                 *builder,
-                LLVMBuildLoad2(*builder, LLVMInt32Type(),
+                LLVMBuildLoad2(*builder, LLVMInt32TypeInContext(t2c_ctx),
                                t2c_gen_sp_addr(start, builder, ir), "val_sp"),
-                LLVMInt64Type(), "zext32to64");
-            LLVMValueRef addr = LLVMBuildAdd(
-                *builder, val_sp,
-                LLVMConstInt(LLVMInt64Type(), ir->imm + mem_base, true),
-                "addr");
+                LLVMInt64TypeInContext(t2c_ctx), "zext32to64");
+            LLVMValueRef addr =
+                LLVMBuildAdd(*builder, val_sp,
+                             LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
+                                          ir->imm + mem_base, true),
+                             "addr");
             LLVMValueRef cast_addr = LLVMBuildIntToPtr(
-                *builder, addr, LLVMPointerType(LLVMInt32Type(), 0), "cast");
-            LLVMValueRef res =
-                LLVMBuildLoad2(*builder, LLVMInt32Type(), cast_addr, "res");
+                *builder, addr,
+                LLVMPointerType(LLVMInt32TypeInContext(t2c_ctx), 0), "cast");
+            LLVMValueRef res = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_ctx), cast_addr, "res");
             LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
         });
 })
@@ -1660,7 +1724,7 @@ T2C_OP(cebreak, {
      */
     T2C_STORE_TIMER(*builder, start, insn_counter);
     t2c_gen_call_io_func(start, builder, offsetof(riscv_io_t, on_ebreak),
-                         LLVMVoidType(), NULL, 0);
+                         LLVMVoidTypeInContext(t2c_ctx), NULL, 0);
     LLVMBuildRetVoid(*builder);
 })
 
@@ -1693,16 +1757,18 @@ T2C_OP(cswsp, {
             LLVMValueRef addr_rs2 = t2c_gen_rs2_addr(start, builder, ir);
             LLVMValueRef val_sp = LLVMBuildZExt(
                 *builder,
-                LLVMBuildLoad2(*builder, LLVMInt32Type(),
+                LLVMBuildLoad2(*builder, LLVMInt32TypeInContext(t2c_ctx),
                                t2c_gen_sp_addr(start, builder, ir), "val_sp"),
-                LLVMInt64Type(), "zext32to64");
+                LLVMInt64TypeInContext(t2c_ctx), "zext32to64");
             T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, addr_rs2);
-            LLVMValueRef addr = LLVMBuildAdd(
-                *builder, val_sp,
-                LLVMConstInt(LLVMInt64Type(), ir->imm + mem_base, true),
-                "addr");
+            LLVMValueRef addr =
+                LLVMBuildAdd(*builder, val_sp,
+                             LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
+                                          ir->imm + mem_base, true),
+                             "addr");
             LLVMValueRef cast_addr = LLVMBuildIntToPtr(
-                *builder, addr, LLVMPointerType(LLVMInt32Type(), 0), "cast");
+                *builder, addr,
+                LLVMPointerType(LLVMInt32TypeInContext(t2c_ctx), 0), "cast");
             LLVMBuildStore(*builder, val_rs2, cast_addr);
         });
 })
@@ -1803,14 +1869,15 @@ T2C_OP(fuse1, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         LLVMValueRef rd_offset =
-            LLVMConstInt(LLVMInt32Type(),
+            LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
                          offsetof(riscv_t, X) / sizeof(int) + fuse[i].rd, true);
-        LLVMValueRef addr_rd = LLVMBuildInBoundsGEP2(*builder, LLVMInt32Type(),
-                                                     LLVMGetParam(start, 0),
-                                                     &rd_offset, 1, "addr_rd");
-        LLVMBuildStore(*builder,
-                       LLVMConstInt(LLVMInt32Type(), fuse[i].imm, true),
-                       addr_rd);
+        LLVMValueRef addr_rd = LLVMBuildInBoundsGEP2(
+            *builder, LLVMInt32TypeInContext(t2c_ctx), LLVMGetParam(start, 0),
+            &rd_offset, 1, "addr_rd");
+        LLVMBuildStore(
+            *builder,
+            LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), fuse[i].imm, true),
+            addr_rd);
     }
 })
 
@@ -1855,8 +1922,8 @@ T2C_OP(fuse4, {
             {
                 LLVMValueRef mem_loc = t2c_gen_mem_loc(
                     start, builder, (rv_insn_t *) (&fuse[i]), mem_base);
-                LLVMValueRef res =
-                    LLVMBuildLoad2(*builder, LLVMInt32Type(), mem_loc, "res");
+                LLVMValueRef res = LLVMBuildLoad2(
+                    *builder, LLVMInt32TypeInContext(t2c_ctx), mem_loc, "res");
                 t2c_gen_load_result(
                     builder, res,
                     t2c_gen_load_rd_addr(start, builder,
@@ -1899,12 +1966,14 @@ T2C_OP(fuse5, {
 #if !RV32_HAS(RV32E)
 T2C_OP(fuse6, {
     /* Store syscall number (imm) to a7 register */
-    LLVMValueRef a7_offset = LLVMConstInt(
-        LLVMInt32Type(), offsetof(riscv_t, X) / sizeof(int) + rv_reg_a7, true);
+    LLVMValueRef a7_offset =
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                     offsetof(riscv_t, X) / sizeof(int) + rv_reg_a7, true);
     LLVMValueRef addr_a7 =
-        LLVMBuildInBoundsGEP2(*builder, LLVMInt32Type(), LLVMGetParam(start, 0),
-                              &a7_offset, 1, "addr_a7");
-    LLVMBuildStore(*builder, LLVMConstInt(LLVMInt32Type(), ir->imm, true),
+        LLVMBuildInBoundsGEP2(*builder, LLVMInt32TypeInContext(t2c_ctx),
+                              LLVMGetParam(start, 0), &a7_offset, 1, "addr_a7");
+    LLVMBuildStore(*builder,
+                   LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), ir->imm, true),
                    addr_a7);
     /* Store PC and call ecall handler.
      * ECALL is at ir->pc + 4 (second instruction in fused pair).
@@ -1914,7 +1983,7 @@ T2C_OP(fuse6, {
                              t2c_gen_PC_addr(start, builder, ir));
     T2C_STORE_TIMER(*builder, start, insn_counter);
     t2c_gen_call_io_func(start, builder, offsetof(riscv_io_t, on_ecall),
-                         LLVMVoidType(), NULL, 0);
+                         LLVMVoidTypeInContext(t2c_ctx), NULL, 0);
     LLVMBuildRetVoid(*builder);
 })
 #else
@@ -1933,22 +2002,23 @@ T2C_OP(fuse7, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         LLVMValueRef rs1_offset = LLVMConstInt(
-            LLVMInt32Type(), offsetof(riscv_t, X) / sizeof(int) + fuse[i].rs1,
-            true);
+            LLVMInt32TypeInContext(t2c_ctx),
+            offsetof(riscv_t, X) / sizeof(int) + fuse[i].rs1, true);
         LLVMValueRef addr_rs1 = LLVMBuildInBoundsGEP2(
-            *builder, LLVMInt32Type(), LLVMGetParam(start, 0), &rs1_offset, 1,
-            "addr_rs1");
-        LLVMValueRef val_rs1 =
-            LLVMBuildLoad2(*builder, LLVMInt32Type(), addr_rs1, "val_rs1");
+            *builder, LLVMInt32TypeInContext(t2c_ctx), LLVMGetParam(start, 0),
+            &rs1_offset, 1, "addr_rs1");
+        LLVMValueRef val_rs1 = LLVMBuildLoad2(
+            *builder, LLVMInt32TypeInContext(t2c_ctx), addr_rs1, "val_rs1");
         LLVMValueRef res = LLVMBuildAdd(
-            *builder, val_rs1, LLVMConstInt(LLVMInt32Type(), fuse[i].imm, true),
+            *builder, val_rs1,
+            LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), fuse[i].imm, true),
             "add");
         LLVMValueRef rd_offset =
-            LLVMConstInt(LLVMInt32Type(),
+            LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
                          offsetof(riscv_t, X) / sizeof(int) + fuse[i].rd, true);
-        LLVMValueRef addr_rd = LLVMBuildInBoundsGEP2(*builder, LLVMInt32Type(),
-                                                     LLVMGetParam(start, 0),
-                                                     &rd_offset, 1, "addr_rd");
+        LLVMValueRef addr_rd = LLVMBuildInBoundsGEP2(
+            *builder, LLVMInt32TypeInContext(t2c_ctx), LLVMGetParam(start, 0),
+            &rd_offset, 1, "addr_rd");
         LLVMBuildStore(*builder, res, addr_rd);
     }
 })
@@ -1961,13 +2031,16 @@ T2C_OP(fuse8, {
      * Cast to uint32_t to avoid signed overflow UB.
      */
     uint32_t combined_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
-    LLVMValueRef rd_offset = LLVMConstInt(
-        LLVMInt32Type(), offsetof(riscv_t, X) / sizeof(int) + ir->rd, true);
+    LLVMValueRef rd_offset =
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                     offsetof(riscv_t, X) / sizeof(int) + ir->rd, true);
     LLVMValueRef addr_rd =
-        LLVMBuildInBoundsGEP2(*builder, LLVMInt32Type(), LLVMGetParam(start, 0),
-                              &rd_offset, 1, "addr_rd");
-    LLVMBuildStore(*builder, LLVMConstInt(LLVMInt32Type(), combined_imm, true),
-                   addr_rd);
+        LLVMBuildInBoundsGEP2(*builder, LLVMInt32TypeInContext(t2c_ctx),
+                              LLVMGetParam(start, 0), &rd_offset, 1, "addr_rd");
+    LLVMBuildStore(
+        *builder,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), combined_imm, true),
+        addr_rd);
 })
 
 /* fused LUI + LW: absolute address load
@@ -1984,12 +2057,14 @@ T2C_OP(fuse9, {
         },
         {
             uint32_t addr_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
-            LLVMValueRef addr = LLVMConstInt(
-                LLVMInt64Type(), (uint64_t) addr_imm + mem_base, false);
+            LLVMValueRef addr =
+                LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
+                             (uint64_t) addr_imm + mem_base, false);
             LLVMValueRef cast_addr = LLVMBuildIntToPtr(
-                *builder, addr, LLVMPointerType(LLVMInt32Type(), 0), "cast");
-            LLVMValueRef res =
-                LLVMBuildLoad2(*builder, LLVMInt32Type(), cast_addr, "res");
+                *builder, addr,
+                LLVMPointerType(LLVMInt32TypeInContext(t2c_ctx), 0), "cast");
+            LLVMValueRef res = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_ctx), cast_addr, "res");
             t2c_gen_load_result(
                 builder, res,
                 ir->rs2 ? t2c_gen_rs2_addr(start, builder, ir) : NULL, false);
@@ -2011,10 +2086,12 @@ T2C_OP(fuse10, {
         },
         {
             uint32_t addr_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
-            LLVMValueRef addr = LLVMConstInt(
-                LLVMInt64Type(), (uint64_t) addr_imm + mem_base, false);
+            LLVMValueRef addr =
+                LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
+                             (uint64_t) addr_imm + mem_base, false);
             LLVMValueRef cast_addr = LLVMBuildIntToPtr(
-                *builder, addr, LLVMPointerType(LLVMInt32Type(), 0), "cast");
+                *builder, addr,
+                LLVMPointerType(LLVMInt32TypeInContext(t2c_ctx), 0), "cast");
             T2C_LLVM_GEN_LOAD_VMREG(rs1, 32,
                                     t2c_gen_rs1_addr(start, builder, ir));
             LLVMBuildStore(*builder, val_rs1, cast_addr);
@@ -2040,8 +2117,8 @@ T2C_OP(fuse11, {
             /* Compute address and load */
             LLVMValueRef mem_loc =
                 t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef res =
-                LLVMBuildLoad2(*builder, LLVMInt32Type(), mem_loc, "res");
+            LLVMValueRef res = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_ctx), mem_loc, "res");
             t2c_gen_load_result(
                 builder, res, t2c_gen_load_rd_addr(start, builder, ir), false);
             /* Increment rs1 by imm2 (rd != rs1 guaranteed by fusion constraint)
@@ -2061,9 +2138,10 @@ T2C_OP(fuse13, {
      * represented by this node as well, so RDCYCLE agrees with interpreter and
      * tier-1 JIT execution.
      */
-    LLVMValueRef cnt =
-        LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");
-    cnt = LLVMBuildAdd(*builder, cnt, LLVMConstInt(LLVMInt64Type(), 1, false),
+    LLVMValueRef cnt = LLVMBuildLoad2(*builder, LLVMInt64TypeInContext(t2c_ctx),
+                                      insn_counter, "");
+    cnt = LLVMBuildAdd(*builder, cnt,
+                       LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx), 1, false),
                        "");
     LLVMBuildStore(*builder, cnt, insn_counter);
     IIF(RV32_HAS(SYSTEM))(
@@ -2095,8 +2173,9 @@ T2C_OP(fuse12, {
     /* Compare rd with 0 */
     T2C_LLVM_GEN_CMP_IMM32(NE, res, 0);
     /* Create taken and untaken branches */
-    LLVMBasicBlockRef taken = LLVMAppendBasicBlock(start, "taken");
-    LLVMBuilderRef builder2 = LLVMCreateBuilder();
+    LLVMBasicBlockRef taken =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "taken");
+    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(builder2, taken);
     if (ir->branch_taken &&
         t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
@@ -2106,8 +2185,9 @@ T2C_OP(fuse12, {
         t2c_gen_exit(builder2, start, ir->pc + 4 + ir->imm2, insn_counter);
         LLVMDisposeBuilder(builder2);
     }
-    LLVMBasicBlockRef untaken = LLVMAppendBasicBlock(start, "untaken");
-    LLVMBuilderRef builder3 = LLVMCreateBuilder();
+    LLVMBasicBlockRef untaken =
+        LLVMAppendBasicBlockInContext(t2c_ctx, start, "untaken");
+    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_ctx);
     LLVMPositionBuilderAtEnd(builder3, untaken);
     if (ir->branch_untaken &&
         t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {

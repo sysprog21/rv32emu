@@ -115,8 +115,8 @@ as a guaranteed tail call when it finds it in the jit-cache, and otherwise
 returns to the dispatcher. `jit_cache_slot()` in `src/jit.h` defines the slot
 for both the C code that fills the cache and the IR that probes it.
 
-Tier-2 compilation requires LLVM 18-21 (LLVM 20+ is the validated default
-exercised by CI on macOS arm64 and Ubuntu 24.04 x86-64). The Makefile
+Tier-2 compilation requires LLVM 19-23 (CI builds with LLVM 23 on macOS
+arm64 and Ubuntu 24.04 x86-64). The Makefile
 auto-detects `llvm-config` in `$PATH` (preferring the newest supported
 version) and the matching Homebrew prefix; override with
 `make LLVM_CONFIG=/path/to/llvm-config` to pin a specific install. Enable

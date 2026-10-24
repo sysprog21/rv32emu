@@ -241,7 +241,7 @@ check_url()
 # Fetch latest release tag from rv32emu-prebuilt repository
 # Usage: fetch_latest_release <artifact_type> [max_retries]
 # Arguments:
-#   artifact_type: One of "ELF", "Linux-Image", or "sail"
+#   artifact_type: One of "ELF" or "Linux-Image"
 #   max_retries: Maximum retry attempts (default: 3, must be >= 1)
 # Environment:
 #   GH_TOKEN: GitHub token for authenticated API access (optional but recommended)
@@ -250,9 +250,7 @@ fetch_latest_release()
 {
     local artifact_type="$1"
     local max_retries="${2:-3}"
-    # The API lists 30 releases per page by default. ELF and Linux image
-    # releases are published far more often than sail, whose only release
-    # fell off the first page once enough of them had accumulated.
+    # Search beyond the default first 30 releases for the requested artifact.
     local api_url="https://api.github.com/repos/sysprog21/rv32emu-prebuilt/releases?per_page=100"
     local release_tag
     local api_response
@@ -261,9 +259,9 @@ fetch_latest_release()
 
     # Validate artifact type
     case "$artifact_type" in
-        ELF | Linux-Image | sail) ;;
+        ELF | Linux-Image) ;;
         *)
-            print_error "Invalid artifact type: $artifact_type (expected: ELF, Linux-Image, or sail)" >&2
+            print_error "Invalid artifact type: $artifact_type (expected: ELF or Linux-Image)" >&2
             return 1
             ;;
     esac
@@ -317,7 +315,7 @@ fetch_latest_release()
 
 # Fetch and build artifact with automatic release tag resolution Usage:
 # fetch_artifact <artifact_type> [make_options...] Arguments:
-#   artifact_type: One of "ELF", "Linux-Image", or "sail"
+#   artifact_type: One of "ELF" or "Linux-Image"
 #   make_options: Additional options to pass to make (e.g., ENABLE_SYSTEM=1)
 # Environment:
 #   GH_TOKEN: GitHub token for authenticated API access (optional but recommended)

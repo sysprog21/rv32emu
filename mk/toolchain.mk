@@ -94,6 +94,8 @@ endif
 # RISC-V Cross-Compiler Detection
 
 TOOLCHAIN_LIST := riscv-none-elf- \
+                  riscv32-elf- \
+                  riscv64-elf- \
                   riscv32-unknown-elf- \
                   riscv64-unknown-elf- \
                   riscv-none-embed-
@@ -191,14 +193,14 @@ endif
 
 # LLVM Detection for T2C (Tier-2 Compiler)
 #
-# Supports LLVM 18-21. Detection is deferred until CONFIG_T2C is enabled
+# Supports LLVM 19-23. Detection is deferred until CONFIG_T2C is enabled
 # to avoid expensive shell calls in most builds.
 #
 # User can override: make LLVM_CONFIG=/path/to/llvm-config
 
 # Supported LLVM version range
-LLVM_MIN_VERSION := 18
-LLVM_MAX_VERSION := 21
+LLVM_MIN_VERSION := 19
+LLVM_MAX_VERSION := 23
 
 # Check if a versioned llvm-config exists in PATH
 # Usage: $(call llvm-config-path,VERSION)
@@ -212,39 +214,44 @@ define llvm-homebrew-config
 $(shell brew --prefix llvm@$(1) 2>/dev/null | xargs -I{} sh -c 'test -x {}/bin/llvm-config && echo {}/bin/llvm-config' 2>/dev/null)
 endef
 
+# Echo an llvm-config path only if it reports a supported major version
+# Usage: $(call llvm-config-supported,PATH)
+define llvm-config-supported
+$(shell test -x '$(1)' && ver=$$('$(1)' --version 2>/dev/null | cut -d. -f1) && [ "$$ver" -ge $(LLVM_MIN_VERSION) ] && [ "$$ver" -le $(LLVM_MAX_VERSION) ] && echo '$(1)')
+endef
+
 # Check generic llvm-config with version validation
-# Usage: $(call llvm-config-generic,MIN,MAX)
+# Usage: $(call llvm-config-generic)
 define llvm-config-generic
-$(shell which llvm-config 2>/dev/null | xargs -I{} sh -c 'ver=$$({} --version 2>/dev/null | cut -d. -f1); [ "$$ver" -ge $(1) ] && [ "$$ver" -le $(2) ] && echo {}' 2>/dev/null)
+$(call llvm-config-supported,$(shell which llvm-config 2>/dev/null))
+endef
+
+# Check Homebrew's unversioned llvm, which tracks the newest release and so
+# must be version-checked like a generic llvm-config.
+define llvm-homebrew-latest-config
+$(call llvm-config-supported,$(shell brew --prefix llvm 2>/dev/null)/bin/llvm-config)
 endef
 
 # Auto-detect LLVM configuration
-# Priority: newest supported version first (LLVM 20 is the validated default;
-# 18 and 19 stay in the fallback list for hosts that haven't upgraded yet).
+# Priority: newest supported version first (LLVM 23 is the validated default
+# CI builds with; older releases down to 19 stay accepted).
 # Override with LLVM_CONFIG=/path/to/llvm-config to pin a specific install.
 define detect-llvm-config
 $(strip $(or \
+    $(call llvm-config-path,23),\
+    $(call llvm-config-path,22),\
     $(call llvm-config-path,21),\
     $(call llvm-config-path,20),\
     $(call llvm-config-path,19),\
-    $(call llvm-config-path,18),\
+    $(call llvm-homebrew-config,23),\
+    $(call llvm-homebrew-latest-config),\
+    $(call llvm-homebrew-config,22),\
     $(call llvm-homebrew-config,21),\
     $(call llvm-homebrew-config,20),\
     $(call llvm-homebrew-config,19),\
-    $(call llvm-homebrew-config,18),\
-    $(shell brew --prefix llvm 2>/dev/null | xargs -I{} sh -c 'test -x {}/bin/llvm-config && echo {}/bin/llvm-config' 2>/dev/null),\
-    $(call llvm-config-generic,$(LLVM_MIN_VERSION),$(LLVM_MAX_VERSION))))
+    $(call llvm-config-generic)))
 endef
 
-# Detect Homebrew LLVM prefix for library path (matches detect-llvm-config order)
-define detect-homebrew-llvm-prefix
-$(strip $(or \
-    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@21 2>/dev/null),\
-    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@20 2>/dev/null),\
-    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@19 2>/dev/null),\
-    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm@18 2>/dev/null),\
-    $(shell which brew >/dev/null 2>&1 && brew --prefix llvm 2>/dev/null)))
-endef
 
 # Get LLVM version major number
 # Usage: $(call llvm-version,LLVM_CONFIG_PATH)

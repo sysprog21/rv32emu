@@ -12,7 +12,7 @@
  * if the feature flag is not set by the build system.
  *
  * Kconfig Constraints (invalid combinations are prevented at config time):
- *   - T2C requires JIT && LLVM18 (enforced below and in Kconfig)
+ *   - T2C requires JIT && LLVM (enforced below and in Kconfig)
  *   - Emscripten supports T1C; T2C requires a native host
  *   - GDBSTUB is incompatible with Emscripten
  *   - SDL requires SDL2 library or Emscripten

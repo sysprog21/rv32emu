@@ -131,7 +131,7 @@ define compile-rule
 $$($(1))/%.o: $(2)/%.c $(4) $$(CONFIG_HEADER) | $$($(1))
 	$$(Q)mkdir -p $$(dir $$@)
 	$$(VECHO) "  CC\t$$@\n"
-	$$(Q)$$(CC) -o $$@ $$(CFLAGS) $(3) -c -MMD -MF $$@.d $$<
+	$$(Q)$$(CC) -o $$@ $$(CFLAGS) $(3) -c -MMD -MP -MF $$@.d $$<
 endef
 
 # Test Framework Templates
@@ -162,7 +162,7 @@ $$($(1)_TEST_OUTDIR) $(4):
 $$($(1)_TEST_OUTDIR)/%.o: $$($(1)_TEST_SRCDIR)/%.c $$(CONFIG_HEADER) \
                           $$(EFFECTIVE_CONFIG_STAMP) | $$($(1)_TEST_OUTDIR) $(4)
 	$$(VECHO) "  CC\t$$@\n"
-	$$(Q)$$(CC) -o $$@ $$(CFLAGS) -I./src -c -MMD -MF $$@.d $$<
+	$$(Q)$$(CC) -o $$@ $$(CFLAGS) -I./src -c -MMD -MP -MF $$@.d $$<
 
 # Link test binary
 $$($(1)_TEST_TARGET): $$($(1)_TEST_OBJS)
@@ -214,15 +214,16 @@ run-test-$(1): $$($(1)_TEST_OUT)
 endef
 
 # The clang-format the project pins, shared by the format target, the
-# decoder generation rule and the decoder freshness check.  Reading
-# .ci/llvm-version keeps this from silently drifting after an LLVM bump,
-# which is the same reason .ci/check-format.sh reads it.
+# decoder generation rule and the decoder freshness check.  It is pinned in
+# .ci/clang-format-version, apart from the LLVM that T2C builds against, so
+# an LLVM bump does not reformat the tree; .ci/check-format.sh reads the
+# same file.
 #
 # The version is read with ":=" right here: $(MAKEFILE_LIST) keeps growing
 # as later makefiles and the generated .o.d files are included, so a
 # deferred expansion would resolve the path against $(OUT) instead of this
 # directory.
-CLANG_FORMAT_VERSION := $(shell cat $(dir $(lastword $(MAKEFILE_LIST)))../.ci/llvm-version)
+CLANG_FORMAT_VERSION := $(shell cat $(dir $(lastword $(MAKEFILE_LIST)))../.ci/clang-format-version)
 CLANG_FORMAT ?= clang-format-$(CLANG_FORMAT_VERSION)
 
 # Feature Extension Templates

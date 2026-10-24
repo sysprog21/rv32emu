@@ -1,3 +1,5 @@
 # CI configuration with architecture tests
 # CONFIG_LTO is not set
+# CONFIG_MOP_FUSION is not set
+# CONFIG_BLOCK_CHAINING is not set
 CONFIG_ARCH_TEST=y

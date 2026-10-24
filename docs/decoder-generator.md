@@ -357,7 +357,7 @@ The `src/decode.c` rule in the Makefile regenerates the decoder when
 The output is written to a temporary file and moved into place only
 after the generator and the formatter both succeed, so a failed run
 never leaves a truncated `src/decode.c` behind.  Formatting uses the
-clang-format version the project pins in `.ci/llvm-version` and is
+clang-format version the project pins in `.ci/clang-format-version` and is
 skipped when that version is not installed; `make format` and the CI
 format check remain the enforcement points.
 

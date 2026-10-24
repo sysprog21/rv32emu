@@ -1,65 +1,95 @@
-# RISC-V Architecture Compliance Testing
-#
-# Uses riscof framework to run official RISC-V architecture tests.
+# ACT4-based RISC-V architectural tests.
 
 ifndef _MK_RISCV_ARCH_TEST_INCLUDED
 _MK_RISCV_ARCH_TEST_INCLUDED := 1
 
-riscof-check:
-	$(Q)if [ "$(shell pip show riscof 2>&1 | head -n 1 | cut -d' ' -f1)" = "WARNING:" ]; then \
-		$(PRINTF) "Run 'pip3 install -r requirements.txt' to install dependencies.\n"; \
-		exit 1; \
-	fi
-
 ARCH_TEST_DIR ?= tests/riscv-arch-test
-ARCH_TEST_SUITE ?= $(ARCH_TEST_DIR)/riscv-test-suite
-export RISCV_TARGET := tests/arch-test-target
-# Use built-in CURDIR instead of $(shell pwd) to avoid shell invocation
-export TARGETDIR := $(CURDIR)
-export RISCV_DEVICE ?= IMACFZicsrZifencei
-# Use device-specific work directory to enable parallel arch-test execution
-export WORK := $(TARGETDIR)/build/arch-test-$(RISCV_DEVICE)
+ARCH_TEST_DEFAULT_CONFIG := tests/arch-test-target/rv32emu-rv32imafc/test_config.yaml
+ARCH_TEST_CONFIG ?= $(ARCH_TEST_DEFAULT_CONFIG)
+ARCH_TEST_NAME ?= $(notdir $(patsubst %/,%,$(dir $(ARCH_TEST_CONFIG))))
+ARCH_TEST_WORKDIR ?= $(OUT)/arch-test
+# An empty filter lets ACT4 select every test applicable to the DUT config.
+ARCH_TEST_EXTENSIONS ?=
+ARCH_TEST_SAIL_BIN_DIR ?= $(OUT)/act-tools/sail-riscv-Linux-$(UNAME_M)/bin
 
-# SKIP_PREREQ=1 skips artifact/git/copy steps (used when pre-fetched for parallel execution)
-SKIP_PREREQ ?= 0
-
-ifeq ($(RISCV_DEVICE),FCZicsr)
-ARCH_TEST_SUITE := tests/rv32fc-test-suite
+# The bundled profile must describe the emulator being tested. Custom DUT
+# configurations may select a different extension set.
+ifeq ($(abspath $(ARCH_TEST_CONFIG)),$(abspath $(ARCH_TEST_DEFAULT_CONFIG)))
+ARCH_TEST_REQUIRED_FEATURES := RV32I EXT_M EXT_A EXT_F EXT_C Zicsr Zifencei Zba Zbb Zbc Zbs
+ARCH_TEST_MISSING_FEATURES := $(foreach feature,$(ARCH_TEST_REQUIRED_FEATURES),$(if $(filter y,$(CONFIG_$(feature))),,$(feature)))
 endif
 
-# Dependencies for arch-test (skipped when SKIP_PREREQ=1 for parallel execution)
-# When SKIP_PREREQ=1, we don't depend on $(BIN) to avoid race conditions in parallel make.
-# The binary must already be built - we verify it exists in the recipe.
-ifeq ($(SKIP_PREREQ),1)
-ARCH_TEST_DEPS := riscof-check
-else
-ARCH_TEST_DEPS := riscof-check $(BIN) artifact
+# Keep cached reference signatures, but replace the executable selection so
+# tests removed by a suite upgrade or extension filter cannot run as stale ELFs.
+arch-test-elfs:
+	$(Q)git submodule update --init $(ARCH_TEST_DIR)
+	$(Q)compiler=$$(sed -n "s/^compiler_exe:[[:space:]]*[\"']\{0,1\}\([^\"'#[:space:]]*\).*/\1/p" \
+	    $(ARCH_TEST_CONFIG)); \
+	[ -z "$$compiler" ] || command -v "$$compiler" > /dev/null || { \
+	    echo "ACT4 builds with $$compiler (compiler_exe in $(ARCH_TEST_CONFIG)); put it on PATH." >&2; \
+	    exit 1; }
+	$(Q)$(RM) -r -- "$(ARCH_TEST_WORKDIR)/$(ARCH_TEST_NAME)/elfs"
+	$(Q)PATH="$(abspath $(ARCH_TEST_SAIL_BIN_DIR)):$$PATH" $(MAKE) -C $(ARCH_TEST_DIR) \
+		CONFIG_FILES=$(abspath $(ARCH_TEST_CONFIG)) \
+		WORKDIR=$(abspath $(ARCH_TEST_WORKDIR)) \
+		EXTENSIONS=$(ARCH_TEST_EXTENSIONS)
+
+arch-test-check-config:
+ifeq ($(CONFIG_SYSTEM),y)
+	$(Q)echo "arch-test requires a user-mode build. Run 'make cleanconfig && make ci_defconfig && make' first." >&2
+	$(Q)exit 1
+endif
+ifneq ($(CONFIG_ARCH_TEST),y)
+	$(Q)echo "arch-test requires CONFIG_ARCH_TEST=y so rv32emu can detect tohost writes. Run 'make cleanconfig && make ci_defconfig && make' first." >&2
+	$(Q)exit 1
+endif
+ifneq ($(strip $(ARCH_TEST_MISSING_FEATURES)),)
+	$(Q)echo "The bundled ACT4 profile requires enabled features: $(strip $(ARCH_TEST_MISSING_FEATURES)). Use ci_defconfig or select a matching ARCH_TEST_CONFIG." >&2
+	$(Q)exit 1
 endif
 
-arch-test: $(ARCH_TEST_DEPS)
+arch-test: arch-test-check-config
+	$(Q)$(MAKE) CC="$(CC)" $(BIN) arch-test-elfs
+	$(Q)tools/run-arch-test-elfs.sh $(BIN) $(ARCH_TEST_WORKDIR)/$(ARCH_TEST_NAME)/elfs $(ARCH_TEST_EXTENSIONS)
+
+.PHONY: arch-test-elfs arch-test arch-test-check-config
+
+arch-test-check-toolchain:
 ifeq ($(CROSS_COMPILE),)
-	$(error GNU Toolchain for RISC-V is required to build architecture tests. Please check package installation)
+	$(Q)echo "The ACT4 regressions need a RISC-V cross compiler. Install one or set CROSS_COMPILE." >&2
+	$(Q)exit 1
 endif
-ifeq ($(SKIP_PREREQ),1)
-	$(Q)test -x $(BIN) || \
-		{ echo "Error: SKIP_PREREQ=1 requires pre-built binary. Run 'make' first."; exit 1; }
-	$(Q)test -x tests/arch-test-target/sail_cSim/riscv_sim_RV32 || \
-		{ echo "Error: SKIP_PREREQ=1 requires pre-fetched sail binary. Run 'make artifact' first."; exit 1; }
-	$(Q)test -d $(ARCH_TEST_DIR) || \
-		{ echo "Error: SKIP_PREREQ=1 requires submodule. Run 'git submodule update --init tests/riscv-arch-test/' first."; exit 1; }
-else
-	git submodule update --init $(dir $(ARCH_TEST_DIR))
-	$(Q)cp $(OUT)/rv32emu-prebuilt-sail-$(HOST_PLATFORM) tests/arch-test-target/sail_cSim/riscv_sim_RV32
-	$(Q)chmod +x tests/arch-test-target/sail_cSim/riscv_sim_RV32
-endif
-	$(Q)python3 -B $(RISCV_TARGET)/setup.py --riscv_device=$(RISCV_DEVICE) --hw_data_misaligned_support=$(hw_data_misaligned_support) --work_dir=$(WORK)
-	$(Q)grep -q '^\[RISCOF\]' $(WORK)/config.ini || \
-		{ echo "Error: config.ini missing RISCOF section. Contents:"; cat $(WORK)/config.ini; exit 1; }
-	$(Q)riscof run --no-clean --work-dir=$(WORK) \
-			--config=$(WORK)/config.ini \
-			--suite=$(ARCH_TEST_SUITE) \
-			--env=$(ARCH_TEST_DIR)/riscv-test-suite/env
 
-.PHONY: riscof-check arch-test
+.PHONY: arch-test-check-toolchain
+
+check-arch-test-runner:
+	$(Q)python3 tests/arch-test-target/test-runner.py
+
+.PHONY: check-arch-test-runner
+
+check-arch-test-tohost: arch-test-check-config arch-test-check-toolchain $(BIN) | $(OUT)
+	$(Q)set -eu; for result in 1 3 513; do \
+	    $(CROSS_COMPILE)gcc -march=rv32i -mabi=ilp32 -nostdlib -static \
+	        -DTEST_RESULT=$$result tests/arch-test-target/regressions/tohost.S -o $(OUT)/act-tohost.elf; \
+	    status=0; \
+	    timeout --kill-after=5 10 $(BIN) -q -a $(OUT)/act-tohost.signature \
+	        $(OUT)/act-tohost.elf || status=$$?; \
+	    expected=1; test $$result -ne 1 || expected=0; \
+	    test $$status -eq $$expected || exit 1; \
+	done
+
+.PHONY: check-arch-test-tohost
+
+check-arch-test-misalign: arch-test-check-config arch-test-check-toolchain $(BIN) | $(OUT)
+ifeq ($(CONFIG_EXT_F)$(CONFIG_EXT_C),yy)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32ifc -mabi=ilp32 -nostdlib -static \
+	    tests/arch-test-target/regressions/misalign.S -o $(OUT)/act-misalign.elf
+	$(Q)timeout --kill-after=5 10 $(BIN) -q -a $(OUT)/act-misalign.signature \
+	    $(OUT)/act-misalign.elf
+else
+	$(error check-arch-test-misalign requires CONFIG_EXT_F=y and CONFIG_EXT_C=y)
+endif
+
+.PHONY: check-arch-test-misalign
 
 endif # _MK_RISCV_ARCH_TEST_INCLUDED

@@ -7,14 +7,14 @@ options.
 ## Tiered JIT compilation
 
 The tier-2 JIT compiler in `rv32emu` leverages LLVM for powerful optimization.
-The target system must have [`LLVM`](https://llvm.org/) installed; versions 18
-through 21 are accepted, and LLVM 20+ is the validated default exercised by
-CI on both macOS (arm64, Homebrew) and Linux (x86-64, Ubuntu 24.04). If `LLVM`
+The target system must have [`LLVM`](https://llvm.org/) installed; versions 19
+through 23 are accepted, and LLVM 23 is the version CI builds with on both
+macOS (arm64, Homebrew) and Linux (x86-64, Ubuntu 24.04). If `LLVM`
 is not installed, only the tier-1 JIT compiler will be used for performance
 enhancement.
 
-* macOS: `brew install llvm@20` (LLVM 18, 19, and 21 are also accepted)
-* Ubuntu Linux / Debian: `sudo apt-get install llvm-20-dev clang-20 lld-20` — the `-dev` package is required because T2C builds against `<llvm-c/*.h>` and links via `llvm-config`. On releases that don't ship LLVM 20 in the base repos (Ubuntu 24.04 caps at llvm-18), add [apt.llvm.org](https://apt.llvm.org/) first. LLVM 18, 19, and 21 are also accepted.
+* macOS: `brew install llvm` (currently LLVM 23; `llvm@19` through `llvm@22` are also accepted)
+* Ubuntu Linux / Debian: `sudo apt-get install llvm-23-dev clang-23 lld-23` — the `-dev` package is required because T2C builds against `<llvm-c/*.h>` and links via `llvm-config`. On releases that don't ship a supported LLVM in the base repos (Ubuntu 24.04 caps at llvm-18), add [apt.llvm.org](https://apt.llvm.org/) first. LLVM 19 through 22 are also accepted.
 
 The Makefile auto-detects `llvm-config` in `$PATH` (preferring the newest
 supported version) and the matching Homebrew prefix; override with
@@ -90,7 +90,7 @@ $ make ENABLE_SDL=0       # Build without SDL support
 * `ENABLE_GDBSTUB`: GDB remote debugging support
 * `ENABLE_SDL`: Display and Event System Calls for running video games
 * `ENABLE_JIT`: Tier-1 (template) JIT for hot basic blocks. Wired through `mk/compat.mk` so command-line override is supported.
-* `ENABLE_T2C`: Tier-2 LLVM JIT layered on top of `JIT`. Auto-selected by `jit_defconfig` when a supported LLVM is detected (18-21, LLVM 20+ validated). Set `ENABLE_T2C=0` (or disable in `make config`) to stay on Tier-1 only.
+* `ENABLE_T2C`: Tier-2 LLVM JIT layered on top of `JIT`. Auto-selected by `jit_defconfig` when a supported LLVM is detected (19-23; CI builds with 23). Set `ENABLE_T2C=0` (or disable in `make config`) to stay on Tier-1 only.
 * `T2C_OPT_LEVEL`: LLVM optimization level for the tier-2 JIT (0-3, default 3). Visible only when `T2C=y`.
 * `ENABLE_SYSTEM`: System emulation for booting the RV32 Linux kernel (MMU, UART, virtio, timer).
 * `ENABLE_GOLDFISH_RTC`: Goldfish RTC peripheral; selectable only when `SYSTEM=y` and `ELF_LOADER=n`.
@@ -100,6 +100,6 @@ $ make ENABLE_SDL=0       # Build without SDL support
 * `ENABLE_BLOCK_CHAINING`: Chain translated blocks to bypass the dispatcher (default on).
 * `ENABLE_LTO`: Link-time optimization (default on; requires GCC or Clang).
 * `ENABLE_UBSAN`: Build with `-fsanitize=undefined` to surface UB at runtime.
-* `ENABLE_ARCH_TEST`: Build the RISCOF-driven arch-test harness; see [riscof.md](riscof.md).
+* `ENABLE_ARCH_TEST`: Enable architectural-test exit reporting for the ACT4 harness; see [arch-test.md](arch-test.md).
 * `INITRD_SIZE`: System mode only — initrd reservation in MiB. `mk/system.mk` auto-sizes from the on-disk `rootfs.cpio` (file size + 2 MiB) when present, otherwise defaults to 32 MiB. Override on the make line, e.g. `make system ENABLE_SYSTEM=1 INITRD_SIZE=64` for SDL workloads that bundle larger assets.
 * `VLEN`: V extension vector length in bits (default 128). Override on the make line, e.g. `make VLEN=256`. See `EXT_V` above for enabling vector support.

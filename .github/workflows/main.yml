@@ -259,20 +259,22 @@ jobs:
       uses: ./.github/actions/setup-build
       with:
         compiler: gcc
-        llvm: 'false'
-        riscv-toolchain: 'true'
-        # No artifact prefetch: riscv-tests.sh starts with "make distclean",
-        # so anything cached under build/ would be thrown away unread.
-
-    - name: Set up Python
-      uses: actions/setup-python@v7
-      with:
-        python-version: '3.12'
-        cache: 'pip'
-        cache-dependency-path: .ci/requirements.txt
+        llvm: 'true'
+        arch-test: 'true'
+        # ACT4 downloads its required Sail version directly.
 
     - name: Architecture test
       run: .ci/riscv-tests.sh
+
+    - name: Upload ACT4 results
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: act4-results
+        path: |
+          build/arch-test/results/
+          build/arch-test/*/test_list.md
+          build/arch-test/*/extensions.txt
 
   # Boot tests are the long pole of the workflow, so each configuration gets
   # its own runner. T2C is clang only because it goes through LLVM.

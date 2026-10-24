@@ -335,9 +335,12 @@ static inline void check_tohost_write(riscv_t *rv,
     if (rv->tohost_addr && addr == rv->tohost_addr && value != 0) {
         /* Non-zero write to tohost means test wants to exit */
         rv->halt = true;
-        /* Extract exit code from tohost value (value >> 1) */
+
+        /* Only 1 denotes success. Returning the test number directly can turn
+         * failures into shell success when its low eight bits are zero.
+         */
         vm_attr_t *attr = PRIV(rv);
-        attr->exit_code = (value >> 1);
+        attr->exit_code = value == 1 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 }
 #endif /* RV32_HAS(ARCH_TEST) */

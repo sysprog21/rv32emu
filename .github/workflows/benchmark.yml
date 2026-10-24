@@ -73,8 +73,8 @@ jobs:
             flags: ENABLE_T2C=0
             llvm: 'false'
             parallel: 2
-          # Each T2C emulator also runs an LLVM compile thread, so its pairs
-          # take the runner's four CPUs one benchmark at a time.
+          # Collect and compile T2C artifacts before timed runs. Legacy
+          # baselines retain their runtime compiler in paired comparisons.
           - mode: T2C
             label: T2C
             defconfig: jit_defconfig
@@ -121,11 +121,29 @@ jobs:
             for tree in "${trees[@]}"; do
               make -C "${tree}" cleanconfig
               make -C "${tree}" ${{ matrix.defconfig }}
-              make -C "${tree}" ENABLE_SDL=0 ${{ matrix.flags }} "${PARALLEL}"
+              llvm_flags=()
+              if [ "${{ matrix.mode }}" = "T2C" ]; then
+                version=$(cat .ci/llvm-version)
+                llvm_flags=("LLVM_CONFIG=/usr/lib/llvm-${version}/bin/llvm-config")
+              fi
+              make -C "${tree}" ENABLE_SDL=0 ${{ matrix.flags }} "${llvm_flags[@]}" "${PARALLEL}"
               if [ "${{ matrix.mode }}" = "T2C" ] && [ ! -f "${tree}/build/t2c.o" ]; then
                 echo "ERROR: T2C disabled in ${tree} (build/t2c.o missing)"
                 exit 1
               fi
+            done
+
+      - name: Prepare offline AOT benchmarks
+        if: matrix.mode == 'T2C'
+        run: |
+            trees=(.)
+            [ "${COMPARE}" = true ] && trees+=(baseline)
+            for tree in "${trees[@]}"; do
+              version=$(cat .ci/llvm-version)
+              python3 .ci/prepare-aot-bench.py \
+                --emulator "${tree}/build/rv32emu" \
+                --output "${tree}/build/rv32emu-bench" \
+                --llvm-config "/usr/lib/llvm-${version}/bin/llvm-config"
             done
 
       - name: Compare with baseline
@@ -139,10 +157,12 @@ jobs:
             # Name both sides, so the table cannot be mistaken for a
             # comparison with an earlier push of the same pull request.
             BASE_SHA=$(git rev-parse HEAD^1)
+            BENCH_EMU=rv32emu
+            [ "${{ matrix.mode }}" != T2C ] || BENCH_EMU=rv32emu-bench
             python3 tests/bench.py --quiet --runs 6 \
                 --parallel ${{ matrix.parallel }} --max-seconds 900 \
                 --label ${{ matrix.mode }} \
-                --emu build/rv32emu --baseline baseline/build/rv32emu \
+                --emu "build/${BENCH_EMU}" --baseline "baseline/build/${BENCH_EMU}" \
                 --baseline-name "Previous: ${BASE_REF} ${BASE_SHA:0:7}" \
                 --candidate-name "Current: ${HEAD_SHA:0:7}" \
                 --markdown "compare-${{ matrix.mode }}.md" \
@@ -155,7 +175,9 @@ jobs:
       - name: Record
         if: env.COMPARE != 'true'
         run: |
-            python3 tests/bench.py --quiet --label "${{ matrix.label }}" \
+            BENCH_EMU=rv32emu
+            [ "${{ matrix.mode }}" != T2C ] || BENCH_EMU=rv32emu-bench
+            python3 tests/bench.py --emu "build/${BENCH_EMU}" --quiet --label "${{ matrix.label }}" \
                 --json "bench-${{ matrix.mode }}.json"
 
       - uses: actions/upload-artifact@v7

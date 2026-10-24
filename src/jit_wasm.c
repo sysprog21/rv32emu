@@ -1799,6 +1799,16 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
     }
 }
 
+void jit_retire_unshared(struct jit_state *state)
+{
+    state->code_generation++;
+    for (int i = 0; i < state->n_blocks; i++) {
+        struct wasm_map *map = &state->maps[i];
+        if (map->entry && map->satp != SATP_SHARED)
+            wasm_retire(state, map);
+    }
+}
+
 void jit_retire_all(struct jit_state *state)
 {
     state->code_generation++;

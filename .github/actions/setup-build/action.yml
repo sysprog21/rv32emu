@@ -22,6 +22,9 @@ inputs:
       separating it there would save nothing. On macOS this input governs only
       whether its bin directory goes on PATH.
     default: 'true'
+  llvm-version:
+    description: LLVM major override for compatibility testing; empty uses .ci/llvm-version.
+    default: ''
   riscv-toolchain:
     description: Install the RISC-V cross toolchain, needed by the gdbstub and architecture tests.
     default: 'false'
@@ -45,7 +48,7 @@ outputs:
       setup-cpp-compiler. Empty when no compiler was requested.
     value: ${{ steps.export-cc.outputs.cc }}
   llvm-version:
-    description: LLVM major version pinned in .ci/llvm-version.
+    description: Selected LLVM major version.
     value: ${{ steps.llvm-version.outputs.version }}
 
 runs:
@@ -54,7 +57,14 @@ runs:
     - name: Read LLVM version
       id: llvm-version
       shell: bash
-      run: echo "version=$(cat .ci/llvm-version)" >> "$GITHUB_OUTPUT"
+      run: |
+        LLVM_VERSION='${{ inputs.llvm-version }}'
+        if [ -z "$LLVM_VERSION" ]; then LLVM_VERSION=$(cat .ci/llvm-version); fi
+        case "$LLVM_VERSION" in
+          18|19|20|21|22|23) ;;
+          *) echo "Unsupported LLVM version: $LLVM_VERSION" >&2; exit 1 ;;
+        esac
+        echo "version=$LLVM_VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Install packages (Linux)
       if: runner.os == 'Linux'
@@ -74,6 +84,8 @@ runs:
     - name: Install packages (macOS)
       if: runner.os == 'macOS'
       shell: bash
+      env:
+        LLVM_VERSION: ${{ steps.llvm-version.outputs.version }}
       run: .ci/brew-install.sh
 
     - name: Cache LLVM
@@ -81,8 +93,13 @@ runs:
       id: cache-llvm
       uses: actions/cache@v6
       with:
-        path: /usr/lib/llvm-${{ steps.llvm-version.outputs.version }}
-        key: ${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.llvm-version.outputs.version }}
+        path: |
+          /usr/lib/llvm-${{ steps.llvm-version.outputs.version }}
+          /usr/lib/x86_64-linux-gnu/libLLVM*.so*
+          /usr/lib/x86_64-linux-gnu/libclang*.so*
+          /usr/lib/aarch64-linux-gnu/libLLVM*.so*
+          /usr/lib/aarch64-linux-gnu/libclang*.so*
+        key: ${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.llvm-version.outputs.version }}-shared-v3
 
     - name: Install LLVM
       if: runner.os == 'Linux' && inputs.llvm == 'true' && steps.cache-llvm.outputs.cache-hit != 'true'
@@ -95,7 +112,7 @@ runs:
         sudo .ci/install-llvm.sh "${VER}"
         sudo apt-get install -y -q=2 \
             "llvm-${VER}" "llvm-${VER}-dev" "llvm-${VER}-runtime" \
-            "clang-${VER}" "lld-${VER}"
+            "clang-${VER}" "lld-${VER}" "libclang-rt-${VER}-dev"
 
     - name: Set up LLVM PATH
       if: inputs.llvm == 'true'

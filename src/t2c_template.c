@@ -1,10 +1,4 @@
-/* This file maps each custom IR to the corresponding LLVM IRs and builds LLVM
- * IR through LLVM-C API. The built LLVM IR is offloaded to the LLVM backend,
- * where it undergoes optimization through several selected LLVM passes.
- * Subsequently, the optimized LLVM IR is passed to the LLVM execution engine,
- * which compiles the optimized LLVM IR and returns a function pointer to the
- * generated machine code.
- */
+/* Lower custom IR to relocatable LLVM bitcode for offline compilation. */
 
 /* Raise the misaligned-access exception for insn's rs1 + imm, as the
  * interpreter does; see t2c_gen_misalign_guard().
@@ -27,33 +21,82 @@ T2C_OP(auipc, {
 })
 
 /* The block at pc if a region may continue into it, or NULL. */
-static block_t *t2c_check_valid_blk(riscv_t *rv,
+static block_t *t2c_check_valid_blk(riscv_t *rv UNUSED,
                                     block_t *block UNUSED,
                                     uint32_t pc)
 {
+    /* Entering libc exit changes host syscall policy in rv_step(). Preserve
+     * that dispatcher boundary even when a larger AOT region reaches it.
+     */
+#if !RV32_HAS(SYSTEM)
+    if (PRIV(rv)->exit_addr && pc == PRIV(rv)->exit_addr)
+        return NULL;
+#else
+    if ((pc ^ block->pc_start) & ~(RV_PG_SIZE - 1))
+        return NULL;
+#endif
+#if RV32_HAS(SYSTEM)
+    block_t *blk = t2c_page_blocks[(pc & (RV_PG_SIZE - 1)) / 2];
+#else
     block_t *blk = cache_get(rv->block_cache, pc, false);
-    if (!blk || !blk->translatable)
+#endif
+    if (!blk || !blk->aot_translatable)
         return NULL;
 
 #if RV32_HAS(SYSTEM)
-    /* A block a flush invalidated may hold instructions that no longer
-     * exist, so it must not join the region.
+    /* Offline graphs are keyed by complete page contents. A translation
+     * flush does not prevent grouping IR with the same recorded fingerprint.
      */
     if (blk->satp != block->satp || blk->priv_mode != block->priv_mode ||
-        blk->invalidated)
+        blk->aot_page_hash != block->aot_page_hash)
         return NULL;
 #endif
 
     return blk;
 }
 
+/* Offline system graphs know direct targets independently of the interpreter's
+ * ephemeral edge links, which reclamation deliberately removes. User traces
+ * retain their observed-edge policy and libc-exit dispatcher boundary.
+ */
+static bool t2c_has_direct_target(riscv_t *rv,
+                                  block_t *block,
+                                  const rv_insn_t *edge UNUSED,
+                                  uint32_t pc UNUSED)
+{
+#if RV32_HAS(SYSTEM)
+    return t2c_check_valid_blk(rv, block, pc) != NULL;
+#else
+    /* User traces follow observed edges, and unobserved ones into blocks the
+     * region already holds or T1C compiled as hot: T1C runs such edges
+     * natively, so the interpreter never links them. Other code would only
+     * enlarge the region and hinder its register promotion.
+     */
+    if (edge)
+        return t2c_check_valid_blk(rv, block, edge->pc) != NULL;
+    const block_t *blk = t2c_check_valid_blk(rv, block, pc);
+    return blk && (blk->hot || set_has(t2c_region_set, pc));
+#endif
+}
+
+/* Record the return point of a call, which links ra, for the region's return
+ * switch.
+ */
+static inline void t2c_note_call(bool call UNUSED, uint32_t return_pc UNUSED)
+{
+#if !RV32_HAS(SYSTEM)
+    if (call && t2c_n_returns < T2C_MAX_RETURNS)
+        t2c_return_pcs[t2c_n_returns++] = return_pc;
+#endif
+}
+
 T2C_OP(jal, {
+    t2c_note_call(ir->rd == rv_reg_ra, ir->pc + 4);
     if (ir->rd)
         T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 4,
                                  t2c_gen_rd_addr(start, builder, ir));
 
-    if (ir->branch_taken &&
-        t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
+    if (t2c_has_direct_target(rv, block, ir->branch_taken, ir->pc + ir->imm)) {
         *taken_builder = *builder;
     } else {
         t2c_gen_exit(*builder, start, ir->pc + ir->imm, insn_counter);
@@ -68,9 +111,10 @@ static void t2c_gen_tail_jump(LLVMBuilderRef builder,
                               LLVMValueRef fn,
                               LLVMValueRef rv_param)
 {
-    LLVMSetTailCallKind(
-        LLVMBuildCall2(builder, t2c_jit_cache_func_type, fn, &rv_param, 1, ""),
-        LLVMTailCallKindMustTail);
+    LLVMValueRef call =
+        LLVMBuildCall2(builder, t2c_jit_cache_func_type, fn, &rv_param, 1, "");
+    LLVMSetInstructionCallConv(call, T2C_CALL_CONV);
+    LLVMSetTailCallKind(call, LLVMTailCallKindMustTail);
     LLVMBuildRetVoid(builder);
 }
 
@@ -104,31 +148,58 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
 
     /* Compute expected key once - used by both inline cache and jit_cache */
 #if RV32_HAS(SYSTEM)
-    /* Key the target in the space of the code being compiled, where alone it
-     * runs; T2C builds never share code across spaces.
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_context);
+    /* Entries also record the fetch privilege they were bound under. */
+    LLVMValueRef priv = LLVMBuildLoad2(
+        *builder, i32,
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, priv_mode), i32),
+        "priv");
+    /* An artifact serves every run, so the address space is read at run
+     * time. Kernel code reached through global mappings is bound once for
+     * every address space, under SATP_SHARED, so a kernel graph looks its
+     * targets up there while S-mode paging is on, once the guest has shown it
+     * maps its kernel globally. The dispatcher finds the rest.
      */
-    LLVMValueRef satp_early = LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
-                                           t2c_current_block->satp, false);
+    LLVMValueRef satp_early = LLVMBuildLoad2(
+        *builder, i32,
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, csr_satp), i32),
+        "");
+    if (!t2c_user_graph) {
+        LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_context);
+        LLVMValueRef shared = LLVMBuildLoad2(
+            *builder, i8,
+            t2c_gen_rv_field_ptr(start, builder,
+                                 offsetof(riscv_t, aot_kernel_shared), i8),
+            "");
+        LLVMValueRef use_shared = LLVMBuildAnd(
+            *builder,
+            LLVMBuildAnd(
+                *builder,
+                LLVMBuildICmp(*builder, LLVMIntSLT, satp_early,
+                              LLVMConstInt(i32, 0, false), ""),
+                LLVMBuildICmp(*builder, LLVMIntEQ, priv,
+                              LLVMConstInt(i32, RV_PRIV_S_MODE, false), ""),
+                ""),
+            LLVMBuildICmp(*builder, LLVMIntNE, shared,
+                          LLVMConstInt(i8, 0, false), ""),
+            "");
+        satp_early = LLVMBuildSelect(*builder, use_shared,
+                                     LLVMConstInt(i32, SATP_SHARED, false),
+                                     satp_early, "space");
+    }
     LLVMValueRef addr64 = LLVMBuildIntCast2(
-        *builder, addr, LLVMInt64TypeInContext(t2c_ctx), false, "");
+        *builder, addr, LLVMInt64TypeInContext(t2c_context), false, "");
     LLVMValueRef satp64 = LLVMBuildIntCast2(
-        *builder, satp_early, LLVMInt64TypeInContext(t2c_ctx), false, "");
+        *builder, satp_early, LLVMInt64TypeInContext(t2c_context), false, "");
     LLVMValueRef satp_shifted = LLVMBuildShl(
         *builder, satp64,
-        LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx), 32, false), "");
+        LLVMConstInt(LLVMInt64TypeInContext(t2c_context), 32, false), "");
     LLVMValueRef expected_key =
         LLVMBuildAdd(*builder, addr64, satp_shifted, "expected_key");
 #else
-    LLVMValueRef expected_key = LLVMBuildIntCast2(
-        *builder, addr, LLVMInt64TypeInContext(t2c_ctx), false, "expected_key");
-#endif
-
-#if RV32_HAS(SYSTEM)
-    LLVMValueRef priv_ptr =
-        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, priv_mode),
-                             LLVMInt32TypeInContext(t2c_ctx));
-    LLVMValueRef priv =
-        LLVMBuildLoad2(*builder, LLVMInt32TypeInContext(t2c_ctx), priv_ptr, "");
+    LLVMValueRef expected_key =
+        LLVMBuildIntCast2(*builder, addr, LLVMInt64TypeInContext(t2c_context),
+                          false, "expected_key");
 #endif
 
     /* === INLINE CACHE FAST PATH === */
@@ -144,27 +215,27 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
      * evictions use to find the one slot a key can occupy. */
     LLVMValueRef ic_addr_high = LLVMBuildLShr(
         *builder, addr,
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 12, false), "");
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 12, false), "");
     LLVMValueRef ic_addr_mixed = LLVMBuildXor(*builder, addr, ic_addr_high, "");
 #if RV32_HAS(SYSTEM)
     LLVMValueRef ic_hash_xor =
         LLVMBuildXor(*builder, ic_addr_mixed, satp_early, "");
     LLVMValueRef ic_hash =
         LLVMBuildAnd(*builder, ic_hash_xor,
-                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
                                   N_INLINE_CACHE_ENTRIES - 1, false),
                      "");
 #else
     LLVMValueRef ic_hash =
         LLVMBuildAnd(*builder, ic_addr_mixed,
-                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
                                   N_INLINE_CACHE_ENTRIES - 1, false),
                      "");
 #endif
 
     /* Get inline cache element pointer */
     LLVMValueRef ic_idx = LLVMBuildIntCast2(
-        *builder, ic_hash, LLVMInt64TypeInContext(t2c_ctx), false, "");
+        *builder, ic_hash, LLVMInt64TypeInContext(t2c_context), false, "");
     LLVMValueRef ic_element_ptr = LLVMBuildInBoundsGEP2(
         *builder, t2c_inline_cache_struct_type, ic_base, &ic_idx, 1, "");
 
@@ -172,12 +243,12 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     LLVMValueRef ic_key_ptr = LLVMBuildStructGEP2(
         *builder, t2c_inline_cache_struct_type, ic_element_ptr, 0, "");
     LLVMValueRef ic_key = LLVMBuildLoad2(
-        *builder, LLVMInt64TypeInContext(t2c_ctx), ic_key_ptr, "ic_key");
+        *builder, LLVMInt64TypeInContext(t2c_context), ic_key_ptr, "ic_key");
 
     LLVMValueRef ic_entry_ptr = LLVMBuildStructGEP2(
         *builder, t2c_inline_cache_struct_type, ic_element_ptr, 1, "");
     LLVMValueRef ic_entry = LLVMBuildLoad2(
-        *builder, LLVMPointerType(LLVMVoidTypeInContext(t2c_ctx), 0),
+        *builder, LLVMPointerType(LLVMVoidTypeInContext(t2c_context), 0),
         ic_entry_ptr, "ic_entry");
 
     /* Check if inline cache hit: key matches AND entry is not NULL */
@@ -186,26 +257,25 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     LLVMValueRef ic_entry_valid = LLVMBuildIsNotNull(*builder, ic_entry, "");
     LLVMValueRef ic_hit =
         LLVMBuildAnd(*builder, ic_key_match, ic_entry_valid, "ic_hit");
-
 #if RV32_HAS(SYSTEM)
     LLVMValueRef ic_priv_ptr = LLVMBuildStructGEP2(
         *builder, t2c_inline_cache_struct_type, ic_element_ptr, 2, "");
     LLVMValueRef ic_priv = LLVMBuildLoad2(
-        *builder, LLVMInt32TypeInContext(t2c_ctx), ic_priv_ptr, "ic_priv");
-    LLVMValueRef ic_priv_match =
-        LLVMBuildICmp(*builder, LLVMIntEQ, ic_priv, priv, "");
-    ic_hit = LLVMBuildAnd(*builder, ic_hit, ic_priv_match, "ic_context_hit");
+        *builder, LLVMInt32TypeInContext(t2c_context), ic_priv_ptr, "ic_priv");
+    ic_hit = LLVMBuildAnd(*builder, ic_hit,
+                          LLVMBuildICmp(*builder, LLVMIntEQ, ic_priv, priv, ""),
+                          "ic_context_hit");
 #endif
 
     /* Create basic blocks for inline cache hit and miss paths */
     LLVMBasicBlockRef ic_hit_block =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "ic_hit");
-    LLVMBuilderRef ic_hit_builder = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "ic_hit");
+    LLVMBuilderRef ic_hit_builder = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(ic_hit_builder, ic_hit_block);
 
     LLVMBasicBlockRef ic_miss_block =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "ic_miss");
-    LLVMBuilderRef ic_miss_builder = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "ic_miss");
+    LLVMBuilderRef ic_miss_builder = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(ic_miss_builder, ic_miss_block);
 
     LLVMBuildCondBr(*builder, ic_hit, ic_hit_block, ic_miss_block);
@@ -214,29 +284,31 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
      * No ISB needed - we already executed this target successfully before.
      * The instruction cache was coherent at that time.
      */
+    LLVMBuildStore(ic_hit_builder, addr,
+                   t2c_gen_PC_addr(start, &ic_hit_builder, ir));
     T2C_STORE_TIMER(ic_hit_builder, start, insn_counter);
     t2c_gen_tail_jump(ic_hit_builder, ic_entry, rv_param);
 
     /* === INLINE CACHE MISS PATH (slow - use seqlock jit_cache) === */
 
     LLVMBasicBlockRef seq_even =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "seq_even");
-    LLVMBuilderRef seq_even_builder = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "seq_even");
+    LLVMBuilderRef seq_even_builder = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(seq_even_builder, seq_even);
 
     LLVMBasicBlockRef key_match =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "key_match");
-    LLVMBuilderRef key_match_builder = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "key_match");
+    LLVMBuilderRef key_match_builder = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(key_match_builder, key_match);
 
     LLVMBasicBlockRef call_jit =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "call_jit");
-    LLVMBuilderRef call_builder = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "call_jit");
+    LLVMBuilderRef call_builder = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(call_builder, call_jit);
 
     LLVMBasicBlockRef fallback =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fallback");
-    LLVMBuilderRef fallback_builder = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "fallback");
+    LLVMBuilderRef fallback_builder = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(fallback_builder, fallback);
 
     /* Load jit_cache base address */
@@ -248,30 +320,34 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
         jit_cache_ptr, "");
 
     /* Compute jit_cache index; must match jit_cache_slot() */
+#if RV32_HAS(SYSTEM)
+    LLVMValueRef hash_xor = LLVMBuildXor(ic_miss_builder, addr, satp_early, "");
+    LLVMValueRef product =
+        LLVMBuildMul(ic_miss_builder, hash_xor,
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
+                                  JIT_CACHE_HASH_MULTIPLIER, false),
+                     "");
+    LLVMValueRef hash =
+        LLVMBuildLShr(ic_miss_builder, product,
+                      LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
+                                   32 - JIT_CACHE_INDEX_BITS, false),
+                      "");
+#else
     LLVMValueRef addr_high = LLVMBuildLShr(
         ic_miss_builder, addr,
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 12, false), "");
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 12, false), "");
     LLVMValueRef addr_mixed =
         LLVMBuildXor(ic_miss_builder, addr, addr_high, "");
-#if RV32_HAS(SYSTEM)
-    LLVMValueRef hash_xor =
-        LLVMBuildXor(ic_miss_builder, addr_mixed, satp_early, "");
-    LLVMValueRef hash =
-        LLVMBuildAnd(ic_miss_builder, hash_xor,
-                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
-                                  N_JIT_CACHE_ENTRIES - 1, false),
-                     "");
-#else
     LLVMValueRef hash =
         LLVMBuildAnd(ic_miss_builder, addr_mixed,
-                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+                     LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
                                   N_JIT_CACHE_ENTRIES - 1, false),
                      "");
 #endif
 
     /* Get jit_cache element pointer */
     LLVMValueRef cast = LLVMBuildIntCast2(
-        ic_miss_builder, hash, LLVMInt64TypeInContext(t2c_ctx), false, "");
+        ic_miss_builder, hash, LLVMInt64TypeInContext(t2c_context), false, "");
     LLVMValueRef element_ptr = LLVMBuildInBoundsGEP2(
         ic_miss_builder, t2c_jit_cache_struct_type, base, &cast, 1, "");
 
@@ -279,21 +355,21 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     LLVMValueRef seq_ptr = LLVMBuildStructGEP2(
         ic_miss_builder, t2c_jit_cache_struct_type, element_ptr, 0, "");
     LLVMValueRef seq1 = LLVMBuildLoad2(
-        ic_miss_builder, LLVMInt32TypeInContext(t2c_ctx), seq_ptr, "");
+        ic_miss_builder, LLVMInt32TypeInContext(t2c_context), seq_ptr, "");
     LLVMSetOrdering(seq1, LLVMAtomicOrderingAcquire);
     LLVMValueRef seq_odd = LLVMBuildAnd(
         ic_miss_builder, seq1,
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, false), "");
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 1, false), "");
     LLVMValueRef is_even = LLVMBuildICmp(
         ic_miss_builder, LLVMIntEQ, seq_odd,
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, false), "");
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 0, false), "");
     LLVMBuildCondBr(ic_miss_builder, is_even, seq_even, fallback);
 
     /* Step 2: Load key (acquire) and compare with expected. */
     LLVMValueRef jc_key_ptr = LLVMBuildStructGEP2(
         seq_even_builder, t2c_jit_cache_struct_type, element_ptr, 2, "");
     LLVMValueRef jc_key = LLVMBuildLoad2(
-        seq_even_builder, LLVMInt64TypeInContext(t2c_ctx), jc_key_ptr, "");
+        seq_even_builder, LLVMInt64TypeInContext(t2c_context), jc_key_ptr, "");
     LLVMSetOrdering(jc_key, LLVMAtomicOrderingAcquire);
     LLVMSetAlignment(jc_key, 8);
 
@@ -304,27 +380,16 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     /* Step 3: Load entry (acquire). */
     LLVMValueRef jc_entry_ptr = LLVMBuildStructGEP2(
         key_match_builder, t2c_jit_cache_struct_type, element_ptr, 3, "");
-    LLVMValueRef entry = LLVMBuildLoad2(
-        key_match_builder, LLVMPointerType(LLVMVoidTypeInContext(t2c_ctx), 0),
-        jc_entry_ptr, "");
+    LLVMValueRef entry =
+        LLVMBuildLoad2(key_match_builder,
+                       LLVMPointerType(LLVMVoidTypeInContext(t2c_context), 0),
+                       jc_entry_ptr, "");
     LLVMSetOrdering(entry, LLVMAtomicOrderingAcquire);
     LLVMSetAlignment(entry, 8);
 
-#if RV32_HAS(SYSTEM)
-    /* Privilege belongs to the same seqlock snapshot as key and entry. */
-    LLVMValueRef jc_priv_ptr = LLVMBuildStructGEP2(
-        key_match_builder, t2c_jit_cache_struct_type, element_ptr, 1, "");
-    LLVMValueRef jc_priv =
-        LLVMBuildLoad2(key_match_builder, LLVMInt32TypeInContext(t2c_ctx),
-                       jc_priv_ptr, "jc_priv");
-    LLVMSetOrdering(jc_priv, LLVMAtomicOrderingAcquire);
-    LLVMValueRef jc_priv_match =
-        LLVMBuildICmp(key_match_builder, LLVMIntEQ, jc_priv, priv, "");
-#endif
-
     /* Step 4: Load seq2 (monotonic), check seq1 == seq2 AND entry != NULL. */
     LLVMValueRef seq2 = LLVMBuildLoad2(
-        key_match_builder, LLVMInt32TypeInContext(t2c_ctx), seq_ptr, "");
+        key_match_builder, LLVMInt32TypeInContext(t2c_context), seq_ptr, "");
     LLVMSetOrdering(seq2, LLVMAtomicOrderingMonotonic);
 
     LLVMValueRef seq_cmp =
@@ -334,7 +399,16 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
     LLVMValueRef valid =
         LLVMBuildAnd(key_match_builder, seq_cmp, entry_not_null, "");
 #if RV32_HAS(SYSTEM)
-    valid = LLVMBuildAnd(key_match_builder, valid, jc_priv_match, "");
+    /* Privilege belongs to the same seqlock snapshot as key and entry. */
+    LLVMValueRef jc_priv = LLVMBuildLoad2(
+        key_match_builder, LLVMInt32TypeInContext(t2c_context),
+        LLVMBuildStructGEP2(key_match_builder, t2c_jit_cache_struct_type,
+                            element_ptr, 1, ""),
+        "jc_priv");
+    LLVMSetOrdering(jc_priv, LLVMAtomicOrderingAcquire);
+    valid = LLVMBuildAnd(
+        key_match_builder, valid,
+        LLVMBuildICmp(key_match_builder, LLVMIntEQ, jc_priv, priv, ""), "");
 #endif
     LLVMBuildCondBr(key_match_builder, valid, call_jit, fallback);
 
@@ -354,13 +428,15 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
      * target successfully, so icache was coherent at that time.
      */
     LLVMTypeRef isb_func_type =
-        LLVMFunctionType(LLVMVoidTypeInContext(t2c_ctx), NULL, 0, 0);
+        LLVMFunctionType(LLVMVoidTypeInContext(t2c_context), NULL, 0, 0);
     LLVMValueRef isb_asm =
         LLVMGetInlineAsm(isb_func_type, "isb", 3, "", 0, true, false,
                          LLVMInlineAsmDialectATT, 0);
     LLVMBuildCall2(call_builder, isb_func_type, isb_asm, NULL, 0, "");
 #endif
 
+    LLVMBuildStore(call_builder, addr,
+                   t2c_gen_PC_addr(start, &call_builder, ir));
     T2C_STORE_TIMER(call_builder, start, insn_counter);
     t2c_gen_tail_jump(call_builder, entry, rv_param);
 
@@ -381,24 +457,27 @@ FORCE_INLINE void t2c_jit_cache_helper(LLVMBuilderRef *builder,
 
 /* The target an indirect jump takes, when it takes one target at least
  * T2C_PREDICT_PERCENT of the time. The interpreter records targets in the
- * jump's branch history table while the block runs there. Outside system mode
- * only: a region built along predicted returns can loop through several guest
- * functions, and in system mode that would delay timer interrupts, which are
- * taken only between regions.
+ * jump's branch history table while it runs. System targets must share the
+ * recorded SATP and page graph, whose entry/backedge budget checks bound
+ * interrupt latency even when a predicted return stays inside native code.
  */
 #define T2C_PREDICT_PERCENT 90
 #define T2C_PREDICT_MIN_HITS 16
-static uint32_t t2c_predicted_target(riscv_t *rv, block_t *block, rv_insn_t *ir)
+static UNUSED uint32_t t2c_predicted_target(riscv_t *rv,
+                                            block_t *block,
+                                            rv_insn_t *ir)
 {
-    if (RV32_HAS(SYSTEM))
-        return 0;
     const branch_history_table_t *bt = ir->branch_table;
     if (!bt || t2c_region_insns >= T2C_REGION_BUDGET)
         return 0;
     uint64_t total = 0;
     uint32_t best = 0, best_times = 0;
     for (int i = 0; i < HISTORY_SIZE; i++) {
-        /* The emulator thread keeps counting while this one reads. */
+#if RV32_HAS(SYSTEM)
+        if (bt->satp[i] != block->satp)
+            continue;
+#endif
+        /* Collection and execution are serialized on the hart thread. */
         uint32_t pc = ATOMIC_LOAD(&bt->PC[i], ATOMIC_RELAXED);
         uint32_t times = ATOMIC_LOAD(&bt->times[i], ATOMIC_RELAXED);
         if (pc == UINT32_MAX || !times)
@@ -416,6 +495,35 @@ static uint32_t t2c_predicted_target(riscv_t *rv, block_t *block, rv_insn_t *ir)
     return best;
 }
 
+#if !RV32_HAS(SYSTEM)
+/* Return to addr through the region's return switch, created on first use. */
+static void t2c_gen_return(LLVMBuilderRef *builder,
+                           LLVMValueRef start,
+                           LLVMValueRef addr,
+                           LLVMValueRef insn_counter)
+{
+    if (!t2c_return_dispatch) {
+        t2c_return_dispatch = LLVMAppendBasicBlockInContext(t2c_context, start,
+                                                            "return_dispatch");
+        LLVMBuilderRef dispatch = LLVMCreateBuilderInContext(t2c_context);
+        LLVMPositionBuilderAtEnd(dispatch, t2c_return_dispatch);
+        t2c_return_pc = LLVMBuildPhi(
+            dispatch, LLVMInt32TypeInContext(t2c_context), "return_pc");
+        LLVMBasicBlockRef other =
+            LLVMAppendBasicBlockInContext(t2c_context, start, "return_other");
+        t2c_return_switch =
+            LLVMBuildSwitch(dispatch, t2c_return_pc, other, T2C_MAX_RETURNS);
+        LLVMPositionBuilderAtEnd(dispatch, other);
+        t2c_jit_cache_helper(&dispatch, start, t2c_return_pc, NULL, NULL, NULL,
+                             insn_counter);
+        LLVMDisposeBuilder(dispatch);
+    }
+    LLVMBasicBlockRef from = LLVMGetInsertBlock(*builder);
+    LLVMAddIncoming(t2c_return_pc, &addr, &from, 1);
+    LLVMBuildBr(*builder, t2c_return_dispatch);
+}
+#endif
+
 /* Jump to addr. When the jump has a dominant target, compare against it and
  * leave the matching path to t2c_trace_ebb() to continue into, so the region
  * keeps going instead of leaving through the jit-cache.
@@ -423,33 +531,81 @@ static uint32_t t2c_predicted_target(riscv_t *rv, block_t *block, rv_insn_t *ir)
 static void t2c_indirect_jump(LLVMBuilderRef *builder,
                               LLVMValueRef start,
                               LLVMValueRef addr,
-                              riscv_t *rv,
-                              block_t *block,
-                              rv_insn_t *ir,
+                              riscv_t *rv UNUSED,
+                              block_t *block UNUSED,
+                              rv_insn_t *ir UNUSED,
                               LLVMValueRef insn_counter,
-                              LLVMBuilderRef *taken_builder)
+                              LLVMBuilderRef *taken_builder UNUSED)
 {
+#if RV32_HAS(SYSTEM)
+    /* Calls and returns within a verified page share a single local dispatch.
+     * Its cases use the same budget gates as external entries, without
+     * publishing/reloading all registers or leaving this native function.
+     */
+    if (!t2c_local_indirect) {
+        t2c_local_indirect =
+            LLVMAppendBasicBlockInContext(t2c_context, start, "local_indirect");
+        LLVMBuilderRef local = LLVMCreateBuilderInContext(t2c_context);
+        LLVMPositionBuilderAtEnd(local, t2c_local_indirect);
+        t2c_local_indirect_pc = LLVMBuildPhi(
+            local, LLVMInt32TypeInContext(t2c_context), "indirect_pc");
+        LLVMBasicBlockRef outside =
+            LLVMAppendBasicBlockInContext(t2c_context, start, "outside_page");
+        t2c_local_indirect_switch = LLVMBuildSwitch(
+            local, t2c_local_indirect_pc, outside, RV_PG_SIZE / 2);
+        LLVMPositionBuilderAtEnd(local, outside);
+        t2c_jit_cache_helper(&local, start, t2c_local_indirect_pc, NULL, NULL,
+                             NULL, insn_counter);
+        LLVMDisposeBuilder(local);
+    }
+    LLVMBasicBlockRef from = LLVMGetInsertBlock(*builder);
+    LLVMAddIncoming(t2c_local_indirect_pc, &addr, &from, 1);
+    LLVMBuildBr(*builder, t2c_local_indirect);
+    return;
+#else
+    const bool is_return = (ir->opcode == rv_insn_jalr && !ir->rd &&
+                            ir->rs1 == rv_reg_ra && !ir->imm)
+        IIF(RV32_HAS(EXT_C))(
+            || (ir->opcode == rv_insn_cjr && ir->rs1 == rv_reg_ra), );
     uint32_t target = t2c_predicted_target(rv, block, ir);
     if (!target) {
-        t2c_jit_cache_helper(builder, start, addr, rv, block, ir, insn_counter);
+        if (is_return)
+            t2c_gen_return(builder, start, addr, insn_counter);
+        else
+            t2c_jit_cache_helper(builder, start, addr, rv, block, ir,
+                                 insn_counter);
         return;
     }
     LLVMValueRef hit = LLVMBuildICmp(
         *builder, LLVMIntEQ, addr,
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), target, false),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), target, false),
         "predicted");
     LLVMBasicBlockRef hit_bb =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "predicted");
+        LLVMAppendBasicBlockInContext(t2c_context, start, "predicted");
     LLVMBasicBlockRef miss_bb =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "mispredicted");
-    LLVMBuildCondBr(*builder, hit, hit_bb, miss_bb);
-    LLVMBuilderRef miss = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "mispredicted");
+    LLVMValueRef branch = LLVMBuildCondBr(*builder, hit, hit_bb, miss_bb);
+    LLVMMetadataRef weights[] = {
+        LLVMMDStringInContext2(t2c_context, "branch_weights", 14),
+        LLVMValueAsMetadata(
+            LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 90, false)),
+        LLVMValueAsMetadata(
+            LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 10, false))};
+    LLVMSetMetadata(
+        branch, LLVMGetMDKindIDInContext(t2c_context, "prof", 4),
+        LLVMMetadataAsValue(t2c_context,
+                            LLVMMDNodeInContext2(t2c_context, weights, 3)));
+    /* A rare miss leaves through the jit-cache: joining the return switch
+     * there would add edges that only hinder register promotion.
+     */
+    LLVMBuilderRef miss = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(miss, miss_bb);
     t2c_jit_cache_helper(&miss, start, addr, rv, block, ir, insn_counter);
     LLVMDisposeBuilder(miss);
-    *taken_builder = LLVMCreateBuilderInContext(t2c_ctx);
+    *taken_builder = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(*taken_builder, hit_bb);
     t2c_predicted_pc = target;
+#endif
 }
 
 T2C_OP(jalr, {
@@ -460,6 +616,7 @@ T2C_OP(jalr, {
     val_rs1 = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);
     val_rs1 = T2C_LLVM_GEN_ALU32_IMM(And, val_rs1, ~1U);
 
+    t2c_note_call(ir->rd == rv_reg_ra, ir->pc + 4);
     if (ir->rd)
         T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 4,
                                  t2c_gen_rd_addr(start, builder, ir));
@@ -476,22 +633,22 @@ T2C_OP(jalr, {
                                 t2c_gen_rs2_addr(start, builder, ir));     \
         T2C_LLVM_GEN_CMP(cond, val_rs1, val_rs2);                          \
         LLVMBasicBlockRef taken =                                          \
-            LLVMAppendBasicBlockInContext(t2c_ctx, start, "taken");        \
-        LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_ctx);     \
+            LLVMAppendBasicBlockInContext(t2c_context, start, "taken");    \
+        LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_context); \
         LLVMPositionBuilderAtEnd(builder2, taken);                         \
-        if (ir->branch_taken &&                                            \
-            t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {        \
+        if (t2c_has_direct_target(rv, block, ir->branch_taken,             \
+                                  ir->pc + ir->imm)) {                     \
             *taken_builder = builder2;                                     \
         } else {                                                           \
             t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter); \
             LLVMDisposeBuilder(builder2);                                  \
         }                                                                  \
         LLVMBasicBlockRef untaken =                                        \
-            LLVMAppendBasicBlockInContext(t2c_ctx, start, "untaken");      \
-        LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_ctx);     \
+            LLVMAppendBasicBlockInContext(t2c_context, start, "untaken");  \
+        LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_context); \
         LLVMPositionBuilderAtEnd(builder3, untaken);                       \
-        if (ir->branch_untaken &&                                          \
-            t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {      \
+        if (t2c_has_direct_target(rv, block, ir->branch_untaken,           \
+                                  block->pc_end)) {                        \
             *untaken_builder = builder3;                                   \
         } else {                                                           \
             t2c_gen_exit(builder3, start, ir->pc + 4, insn_counter);       \
@@ -530,201 +687,105 @@ BRANCH_FUNC(bgeu, UGE)
  *   - Caller should finish with LLVMBuildBr(*builder, end_bb) and then
  *     LLVMPositionBuilderAtEnd(*builder, end_bb) before resuming emission.
  *
- * mem_base and mem_size are baked in as 64-bit/32-bit constants from the JIT
- * compile-time view of guest memory, matching the T1 fast path behavior.
+ * The host address comes from the current VM's tags, so the artifact embeds
+ * neither the RAM base nor its size.
  */
 static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
                                                LLVMValueRef start,
-                                               rv_insn_t *ir,
+                                               LLVMValueRef vaddr,
+                                               LLVMValueRef data_addr,
                                                uint8_t access_size,
                                                bool is_store,
-                                               bool is_signed,
-                                               const memory_t *mem)
+                                               bool is_signed)
 {
-    /* Guest RAM is capped at 4 GiB.  The exact 4 GiB case is supported:
-     * mem_size itself no longer fits in uint32_t, but mem_size - access_size
-     * still does for every load/store width emitted by this helper.
-     */
-    assert(mem->mem_size <= 0x100000000ULL);
-
-    /* Small RAM images cannot satisfy multi-byte accesses in the inline fast
-     * path. Keep them on the checked slow path and avoid unsigned underflow in
-     * the max_paddr calculation below.
-     */
-    if (mem->mem_size < access_size)
-        return NULL;
-
-    LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_ctx);
-    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_ctx);
-    LLVMTypeRef i64 = LLVMInt64TypeInContext(t2c_ctx);
-    LLVMTypeRef i32p = LLVMPointerType(i32, 0);
-    LLVMValueRef zero8 = LLVMConstInt(i8, 0, false);
-    LLVMValueRef zero32 = LLVMConstInt(i32, 0, false);
-
-    /* Recompute vaddr inside the helper (LLVM's CSE folds it with the
-     * caller's identical computation).
-     */
-    LLVMValueRef val_rs1 =
-        LLVMBuildLoad2(*builder, i32, t2c_gen_rs1_addr(start, builder, ir), "");
-    LLVMValueRef vaddr = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);
+    LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_context);
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_context);
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(t2c_context);
 
     LLVMBasicBlockRef slow_bb =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_slow");
+        LLVMAppendBasicBlockInContext(t2c_context, start, "fp_slow");
     LLVMBasicBlockRef end_bb =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_end");
+        LLVMAppendBasicBlockInContext(t2c_context, start, "fp_end");
+    LLVMBasicBlockRef hit_bb =
+        LLVMAppendBasicBlockInContext(t2c_context, start, "fp_hit");
 
-    /* Alignment check. */
-    if (access_size > 1) {
-        LLVMValueRef low_bits = LLVMBuildAnd(
-            *builder, vaddr, LLVMConstInt(i32, access_size - 1, false), "");
-        LLVMValueRef align_ok =
-            LLVMBuildICmp(*builder, LLVMIntEQ, low_bits, zero32, "");
-        LLVMBasicBlockRef next =
-            LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_align_ok");
-        LLVMBuildCondBr(*builder, align_ok, next, slow_bb);
-        LLVMPositionBuilderAtEnd(*builder, next);
-    }
-
-    /* vpn = vaddr >> 12; idx = vpn & (TLB_SIZE - 1). */
-    LLVMValueRef vpn =
-        LLVMBuildLShr(*builder, vaddr, LLVMConstInt(i32, 12, false), "");
-    LLVMValueRef idx32 =
-        LLVMBuildAnd(*builder, vpn, LLVMConstInt(i32, TLB_SIZE - 1, false), "");
-
-    /* entry_ptr = (i8 *) rv + offsetof(dtlb) + idx*16.
-     *
-     * The T2C entry function takes a synthetic prefix of riscv_t that stops at
-     * rv->io, so byte-addressing past that prefix must not use inbounds GEP
-     * relative to the truncated struct type.
+    /* The RAM tags of the T1 probe: a tag equals the page base plus the
+     * current RAM tag context only where the effective privilege may make
+     * this access, the page is whole RAM reached through the default
+     * callbacks, and for a store the PTE is dirty. Bare translation fills tags
+     * as well. Keeping the low address bits of the access size in the compared
+     * value also proves alignment.
      */
-    LLVMValueRef idx64 = LLVMBuildZExt(*builder, idx32, i64, "");
+    LLVMValueRef idx =
+        LLVMBuildAnd(*builder,
+                     LLVMBuildLShr(*builder, vaddr,
+                                   LLVMConstInt(i32, RV_PG_SHIFT, false), ""),
+                     LLVMConstInt(i32, TLB_SIZE - 1, false), "");
     LLVMValueRef byte_off =
-        LLVMBuildShl(*builder, idx64, LLVMConstInt(i64, 4, false), "");
-
-    /* Form the table's base at a constant offset first, so that rv is only ever
-     * offset by constants and guest register promotion can tell these accesses
-     * from rv->X.
+        LLVMBuildMul(*builder, LLVMBuildZExt(*builder, idx, i64, ""),
+                     LLVMConstInt(i64, sizeof(jit_tlb_entry_t), false), "");
+    /* rv is only ever offset by constants first, so that guest register
+     * promotion can tell these accesses from rv->X.
      */
-    LLVMValueRef dtlb =
-        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, dtlb), i8);
+    LLVMValueRef tags =
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, jit_dtlb), i8);
     LLVMValueRef entry_ptr =
-        LLVMBuildGEP2(*builder, i8, dtlb, &byte_off, 1, "");
-
-    /* VPN match: vpn == *((u32 *) entry_ptr). */
-    LLVMValueRef vpn_field_ptr =
-        LLVMBuildBitCast(*builder, entry_ptr, i32p, "");
-    LLVMValueRef entry_vpn = LLVMBuildLoad2(*builder, i32, vpn_field_ptr, "");
-    LLVMValueRef vpn_ok =
-        LLVMBuildICmp(*builder, LLVMIntEQ, entry_vpn, vpn, "");
-    LLVMBasicBlockRef after_vpn =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_vpn_ok");
-    LLVMBuildCondBr(*builder, vpn_ok, after_vpn, slow_bb);
-    LLVMPositionBuilderAtEnd(*builder, after_vpn);
-
-    /* The valid stamp must match the current effective data context. */
-    LLVMValueRef valid_field_off =
-        LLVMConstInt(i64, offsetof(tlb_entry_t, valid), false);
-    LLVMValueRef valid_ptr =
-        LLVMBuildGEP2(*builder, i8, entry_ptr, &valid_field_off, 1, "");
-    LLVMValueRef valid_val = LLVMBuildLoad2(*builder, i8, valid_ptr, "");
-    LLVMValueRef context_ptr = t2c_gen_rv_field_ptr(
-        start, builder, offsetof(riscv_t, mmu_access_context), i32);
-    LLVMValueRef context = LLVMBuildLoad2(*builder, i32, context_ptr, "");
-    LLVMValueRef valid32 = LLVMBuildZExt(*builder, valid_val, i32, "");
-    LLVMValueRef valid_ok =
-        LLVMBuildICmp(*builder, LLVMIntEQ, valid32, context, "");
-    LLVMBasicBlockRef after_valid =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_valid_ok");
-    LLVMBuildCondBr(*builder, valid_ok, after_valid, slow_bb);
-    LLVMPositionBuilderAtEnd(*builder, after_valid);
-
-    /* perm has PTE_R / PTE_W. */
-    LLVMValueRef perm_field_off =
-        LLVMConstInt(i64, offsetof(tlb_entry_t, perm), false);
-    LLVMValueRef perm_ptr =
-        LLVMBuildGEP2(*builder, i8, entry_ptr, &perm_field_off, 1, "");
-    LLVMValueRef perm_val = LLVMBuildLoad2(*builder, i8, perm_ptr, "");
-    LLVMValueRef needed_mask =
-        LLVMConstInt(i8, is_store ? PTE_W : PTE_R, false);
-    LLVMValueRef perm_and = LLVMBuildAnd(*builder, perm_val, needed_mask, "");
-    LLVMValueRef perm_ok =
-        LLVMBuildICmp(*builder, LLVMIntNE, perm_and, zero8, "");
-    LLVMBasicBlockRef after_perm =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_perm_ok");
-    LLVMBuildCondBr(*builder, perm_ok, after_perm, slow_bb);
-    LLVMPositionBuilderAtEnd(*builder, after_perm);
-
-    /* For stores: dirty == 1 (so PTE_D update stays in C). */
-    if (is_store) {
-        LLVMValueRef dirty_field_off =
-            LLVMConstInt(i64, offsetof(tlb_entry_t, dirty), false);
-        LLVMValueRef dirty_ptr =
-            LLVMBuildGEP2(*builder, i8, entry_ptr, &dirty_field_off, 1, "");
-        LLVMValueRef dirty_val = LLVMBuildLoad2(*builder, i8, dirty_ptr, "");
-        LLVMValueRef dirty_ok =
-            LLVMBuildICmp(*builder, LLVMIntNE, dirty_val, zero8, "");
-        LLVMBasicBlockRef after_dirty =
-            LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_dirty_ok");
-        LLVMBuildCondBr(*builder, dirty_ok, after_dirty, slow_bb);
-        LLVMPositionBuilderAtEnd(*builder, after_dirty);
-    }
-
-    /* level == TLB_PAGE_LEVEL_4K.  T2C keeps the original bail-on-superpage
-     * behaviour: the T1 superpage path is the measurable win, and an earlier
-     * select-based T2C variant showed a rare (~1-in-8) crash pattern in
-     * gzip after T2C compiled a block — likely an LLVM-IR / register-alloc
-     * interaction I couldn't pin down.  Falling back to slow path here only
-     * matters for hot blocks that actually reach T2C, so the gap is small.
+        LLVMBuildGEP2(*builder, i8, tags, &byte_off, 1, "");
+    /* mmu_ram_tag_context(): zero in U-mode, the access context otherwise.
+     * The graph's entry checked its privilege class, as T1 relies on its
+     * block's privilege.
      */
-    LLVMValueRef level_field_off =
-        LLVMConstInt(i64, offsetof(tlb_entry_t, level), false);
-    LLVMValueRef level_ptr =
-        LLVMBuildGEP2(*builder, i8, entry_ptr, &level_field_off, 1, "");
-    LLVMValueRef level_val = LLVMBuildLoad2(*builder, i8, level_ptr, "");
-    LLVMValueRef level_ok =
-        LLVMBuildICmp(*builder, LLVMIntEQ, level_val,
-                      LLVMConstInt(i8, TLB_PAGE_LEVEL_4K, false), "");
-    LLVMBasicBlockRef after_level =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_level_ok");
-    LLVMBuildCondBr(*builder, level_ok, after_level, slow_bb);
-    LLVMPositionBuilderAtEnd(*builder, after_level);
+    LLVMValueRef context =
+        t2c_user_graph
+            ? LLVMConstInt(i32, 0, false)
+            : LLVMBuildLoad2(*builder, i32,
+                             t2c_gen_rv_field_ptr(
+                                 start, builder,
+                                 offsetof(riscv_t, mmu_access_context), i32),
+                             "tag_context");
+    LLVMValueRef tag_off =
+        LLVMConstInt(i64,
+                     is_store ? offsetof(jit_tlb_entry_t, write_tag)
+                              : offsetof(jit_tlb_entry_t, read_tag),
+                     false);
+    LLVMValueRef tag = LLVMBuildLoad2(
+        *builder, i32, LLVMBuildGEP2(*builder, i8, entry_ptr, &tag_off, 1, ""),
+        "tag");
+    LLVMValueRef wanted = LLVMBuildOr(
+        *builder,
+        LLVMBuildAnd(
+            *builder, vaddr,
+            LLVMConstInt(i32, ~(uint32_t) (RV_PG_SIZE - 1) | (access_size - 1),
+                         false),
+            ""),
+        context, "");
+    /* A miss calls the MMU helper. Keeping that path out of line keeps the
+     * hit path of a page graph dense in the instruction cache.
+     */
+    t2c_gen_unlikely_br(*builder,
+                        LLVMBuildICmp(*builder, LLVMIntNE, tag, wanted, ""),
+                        slow_bb, hit_bb);
+    LLVMPositionBuilderAtEnd(*builder, hit_bb);
 
-    /* paddr = entry.ppn | (vaddr & 0xFFF). */
-    LLVMValueRef ppn_field_off = LLVMConstInt(i64, 4, false);
-    LLVMValueRef ppn_ptr =
-        LLVMBuildGEP2(*builder, i8, entry_ptr, &ppn_field_off, 1, "");
-    LLVMValueRef ppn_val = LLVMBuildLoad2(
-        *builder, i32, LLVMBuildBitCast(*builder, ppn_ptr, i32p, ""), "");
-    LLVMValueRef page_off =
-        LLVMBuildAnd(*builder, vaddr, LLVMConstInt(i32, 0xFFF, false), "");
-    LLVMValueRef paddr32 = LLVMBuildOr(*builder, ppn_val, page_off, "");
-
-    /* Range check: paddr <= mem_size - access_size. */
-    uint32_t max_paddr = (uint32_t) (mem->mem_size - access_size);
-    LLVMValueRef range_ok = LLVMBuildICmp(
-        *builder, LLVMIntULE, paddr32, LLVMConstInt(i32, max_paddr, false), "");
-    LLVMBasicBlockRef after_range =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "fp_range_ok");
-    LLVMBuildCondBr(*builder, range_ok, after_range, slow_bb);
-    LLVMPositionBuilderAtEnd(*builder, after_range);
-
-    /* host_addr = mem_base + paddr. */
-    LLVMValueRef paddr64 = LLVMBuildZExt(*builder, paddr32, i64, "");
-    LLVMValueRef mem_base_val =
-        LLVMConstInt(i64, (uint64_t) (uintptr_t) mem->mem_base, false);
-    LLVMValueRef host_addr_int =
-        LLVMBuildAdd(*builder, mem_base_val, paddr64, "");
+    /* host_addr = addend + vaddr. */
+    LLVMValueRef addend_off =
+        LLVMConstInt(i64, offsetof(jit_tlb_entry_t, addend), false);
+    LLVMValueRef addend = LLVMBuildLoad2(
+        *builder, i64,
+        LLVMBuildGEP2(*builder, i8, entry_ptr, &addend_off, 1, ""), "addend");
+    LLVMValueRef host_addr_int = LLVMBuildAdd(
+        *builder, addend, LLVMBuildZExt(*builder, vaddr, i64, ""), "");
 
     LLVMTypeRef val_type;
     switch (access_size) {
     case 1:
-        val_type = LLVMInt8TypeInContext(t2c_ctx);
+        val_type = LLVMInt8TypeInContext(t2c_context);
         break;
     case 2:
-        val_type = LLVMInt16TypeInContext(t2c_ctx);
+        val_type = LLVMInt16TypeInContext(t2c_context);
         break;
     case 4:
-        val_type = LLVMInt32TypeInContext(t2c_ctx);
+        val_type = LLVMInt32TypeInContext(t2c_context);
         break;
     default:
         __UNREACHABLE;
@@ -733,16 +794,14 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
         *builder, host_addr_int, LLVMPointerType(val_type, 0), "");
 
     if (is_store) {
-        LLVMValueRef val_rs2 = LLVMBuildLoad2(
-            *builder, i32, t2c_gen_rs2_addr(start, builder, ir), "");
+        LLVMValueRef val_rs2 = LLVMBuildLoad2(*builder, i32, data_addr, "");
         LLVMValueRef store_val =
             LLVMBuildIntCast2(*builder, val_rs2, val_type, false, "");
         LLVMBuildStore(*builder, store_val, host_addr_ptr);
     } else {
         LLVMValueRef raw =
             LLVMBuildLoad2(*builder, val_type, host_addr_ptr, "");
-        t2c_gen_load_result(
-            builder, raw, t2c_gen_load_rd_addr(start, builder, ir), is_signed);
+        t2c_gen_load_result(builder, raw, data_addr, is_signed);
     }
 
     LLVMBuildBr(*builder, end_bb);
@@ -753,109 +812,235 @@ static LLVMBasicBlockRef t2c_emit_mmu_fastpath(LLVMBuilderRef *builder,
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 
-static LLVMValueRef t2c_gen_code_generation(LLVMBuilderRef *builder,
-                                            LLVMValueRef start)
+/* Load a 64-bit riscv_t field. */
+static LLVMValueRef t2c_load_rv_u64(LLVMBuilderRef *builder,
+                                    LLVMValueRef start,
+                                    size_t offset)
 {
-    LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_ctx);
-    LLVMTypeRef ptr = LLVMPointerType(i8, 0);
-    LLVMValueRef state = LLVMBuildLoad2(
-        *builder, ptr,
-        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, jit_state), ptr),
-        "");
-    LLVMValueRef offset =
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
-                     offsetof(struct jit_state, code_generation), false);
-    LLVMValueRef field = LLVMBuildGEP2(*builder, i8, state, &offset, 1, "");
-    field = LLVMBuildBitCast(
-        *builder, field, LLVMPointerType(LLVMInt64TypeInContext(t2c_ctx), 0),
-        "");
-    return LLVMBuildLoad2(*builder, LLVMInt64TypeInContext(t2c_ctx), field, "");
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(t2c_context);
+    return LLVMBuildLoad2(
+        *builder, i64, t2c_gen_rv_field_ptr(start, builder, offset, i64), "");
 }
 
-/* Call the MMU helper at io_field of rv->io, as the access of the instruction
- * at pc, passing rv and the n values in args. The helper's address is loaded
- * from rv->io at run time.
- *
- * On a page fault the helper runs the guest's trap handler before it returns,
- * and the handler takes rv->PC as the exception pc, so pc is stored first. If
- * the access then did not complete, either because the handler resumed
- * somewhere else (need_handle_signal) or because a trap is still pending,
- * rv->PC already names where to go, and the region is left without touching it.
+/* Instructions of the current block after the one at pc. */
+static unsigned t2c_trailing_insns(uint32_t pc)
+{
+    return t2c_current_block->cycle_cost - t2c_retired_prefix(pc) - 1;
+}
+
+/* Publish the retired prefix before slow MMU/MMIO helpers can run a guest
+ * trap handler. Inline RAM hits continue in native code. *code_epoch gets the
+ * code epoch seen before the call, for t2c_mmu_access_exit().
  */
 static LLVMValueRef t2c_gen_mmu_call(LLVMBuilderRef *builder,
                                      LLVMValueRef start,
-                                     size_t io_field,
+                                     size_t function_offset,
                                      LLVMTypeRef ret_type,
                                      LLVMValueRef *args,
                                      unsigned n,
                                      uint32_t pc,
                                      LLVMValueRef insn_counter,
-                                     LLVMValueRef *generation,
-                                     uint32_t *refund)
+                                     LLVMValueRef *code_epoch)
 {
+    /* Publish exactly through this access before a helper can run a guest
+     * trap handler. The rest of this block has not executed yet.
+     */
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(t2c_context);
+    unsigned trailing = t2c_trailing_insns(pc);
+    LLVMValueRef count = LLVMBuildLoad2(*builder, i64, insn_counter, "");
+    LLVMBuildStore(
+        *builder,
+        LLVMBuildSub(*builder, count, LLVMConstInt(i64, trailing, false), ""),
+        insn_counter);
+    T2C_STORE_TIMER(*builder, start, insn_counter);
+    LLVMBuildStore(*builder, LLVMConstInt(i64, 0, false), insn_counter);
     T2C_LLVM_GEN_STORE_IMM32(*builder, pc,
                              t2c_gen_PC_addr(start, builder, NULL));
-    *refund = t2c_publish_trap_prefix(builder, start, insn_counter, pc);
-    *generation = t2c_gen_code_generation(builder, start);
+    LLVMValueRef old_trap_epoch =
+        t2c_load_rv_u64(builder, start, offsetof(riscv_t, aot_trap_epoch));
+    *code_epoch =
+        t2c_load_rv_u64(builder, start, offsetof(riscv_t, aot_code_epoch));
+    t2c_add_stat(*builder, start, offsetof(riscv_t, aot_slow_calls),
+                 LLVMConstInt(i64, 1, false));
     LLVMValueRef ret =
-        t2c_gen_call_io_func(start, builder, io_field, ret_type, args, n);
-
-    LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_ctx);
-    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_ctx);
-    LLVMValueRef trap_cnt = LLVMBuildLoad2(
-        *builder, i32,
-        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, trap_cnt), i32),
+        t2c_gen_call_func(start, builder, function_offset, ret_type, args, n);
+    LLVMTypeRef i8 = LLVMInt8TypeInContext(t2c_context);
+    LLVMValueRef traps =
+        t2c_load_rv_u64(builder, start, offsetof(riscv_t, aot_trap_epoch));
+    LLVMValueRef signal_ptr = LLVMBuildLoad2(
+        *builder, LLVMPointerType(i8, 0),
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, aot_signal),
+                             LLVMPointerType(i8, 0)),
         "");
-    LLVMValueRef signal = LLVMBuildLoad2(
-        *builder, i8,
-        LLVMConstIntToPtr(LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
-                                       (uintptr_t) &need_handle_signal, false),
-                          LLVMPointerType(i8, 0)),
+    LLVMValueRef signal = LLVMBuildLoad2(*builder, i8, signal_ptr, "");
+    LLVMValueRef faulted = LLVMBuildOr(
+        *builder, LLVMBuildICmp(*builder, LLVMIntNE, traps, old_trap_epoch, ""),
+        LLVMBuildICmp(*builder, LLVMIntNE, signal, LLVMConstInt(i8, 0, false),
+                      ""),
         "");
-    LLVMValueRef faulted =
-        LLVMBuildOr(*builder,
-                    LLVMBuildICmp(*builder, LLVMIntNE, trap_cnt,
-                                  LLVMConstInt(i32, 0, false), ""),
-                    LLVMBuildICmp(*builder, LLVMIntNE, signal,
-                                  LLVMConstInt(i8, 0, false), ""),
-                    "faulted");
     LLVMBasicBlockRef fault =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "mmu_fault");
+        LLVMAppendBasicBlockInContext(t2c_context, start, "mmu_fault");
     LLVMBasicBlockRef done =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "mmu_done");
+        LLVMAppendBasicBlockInContext(t2c_context, start, "mmu_done");
     t2c_gen_unlikely_br(*builder, faulted, fault, done);
     LLVMPositionBuilderAtEnd(*builder, fault);
-    T2C_STORE_TIMER(*builder, start, insn_counter);
     LLVMBuildRetVoid(*builder);
     LLVMPositionBuilderAtEnd(*builder, done);
     return ret;
 }
 
-/* The callback has completed the access and the load result is in X[]. A
- * retired region must leave before any following instruction or tail chain.
+/* Successful helpers can continue in native code. Publish the completed
+ * access before an invalidation exit, so MMIO is never executed twice.
  */
-static void t2c_finish_mmu_call(LLVMBuilderRef *builder,
+static void t2c_mmu_access_exit(LLVMBuilderRef *builder,
                                 LLVMValueRef start,
+                                uint32_t pc,
                                 LLVMValueRef insn_counter,
-                                LLVMValueRef generation,
-                                uint32_t refund,
-                                uint32_t next_pc)
+                                LLVMValueRef old_code_epoch)
 {
-    LLVMValueRef changed =
-        LLVMBuildICmp(*builder, LLVMIntNE, generation,
-                      t2c_gen_code_generation(builder, start), "code_retired");
-    LLVMBasicBlockRef leave =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "retired_region");
-    LLVMBasicBlockRef done =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "live_region");
-    t2c_gen_unlikely_br(*builder, changed, leave, done);
-    LLVMPositionBuilderAtEnd(*builder, leave);
-    t2c_gen_exit(*builder, start, next_pc, insn_counter);
-    LLVMPositionBuilderAtEnd(*builder, done);
-    LLVMBuildStore(*builder,
-                   LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx), refund, false),
+    const block_t *block = t2c_current_block;
+    unsigned halfword = (pc - block->pc_start) / 2 + 1;
+    bool short_insn =
+        pc + 2 == block->pc_end ||
+        (halfword < 2048 &&
+         ((block->aot_insn_starts[halfword / 64] >> (halfword % 64)) & 1));
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(t2c_context);
+    LLVMValueRef epoch =
+        t2c_load_rv_u64(builder, start, offsetof(riscv_t, aot_code_epoch));
+    LLVMBasicBlockRef exit =
+        LLVMAppendBasicBlockInContext(t2c_context, start, "mmu_invalidated");
+    LLVMBasicBlockRef resume =
+        LLVMAppendBasicBlockInContext(t2c_context, start, "mmu_resume");
+    t2c_gen_unlikely_br(
+        *builder, LLVMBuildICmp(*builder, LLVMIntNE, epoch, old_code_epoch, ""),
+        exit, resume);
+    LLVMPositionBuilderAtEnd(*builder, exit);
+    t2c_gen_exit_raw(*builder, start, pc + (short_insn ? 2 : 4), insn_counter);
+    LLVMPositionBuilderAtEnd(*builder, resume);
+    t2c_add_stat(*builder, start, offsetof(riscv_t, aot_slow_resumes),
+                 LLVMConstInt(i64, 1, false));
+    LLVMBuildStore(*builder, LLVMConstInt(i64, t2c_trailing_insns(pc), false),
                    insn_counter);
 }
+
+/* Outline uncommon semantic operations inside a native page graph, retaining
+ * precise faults and the interpreter's LR/SC reservation rules. CSR writes
+ * return to the dispatcher so newly enabled interrupts are polled immediately.
+ */
+/* Unused when neither EXT_A nor Zicsr is built. */
+static UNUSED void t2c_gen_outlined_insn(LLVMBuilderRef *builder,
+                                         LLVMValueRef start,
+                                         rv_insn_t *ir,
+                                         LLVMValueRef insn_counter)
+{
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_context);
+    bool status_write = false;
+#if RV32_HAS(Zicsr)
+    status_write =
+        (ir->imm & 0xfff) == CSR_SSTATUS &&
+        (ir->opcode == rv_insn_csrrw || ir->opcode == rv_insn_csrrwi ||
+         ((ir->opcode == rv_insn_csrrs || ir->opcode == rv_insn_csrrc ||
+           ir->opcode == rv_insn_csrrsi || ir->opcode == rv_insn_csrrci) &&
+          ir->rs1));
+#endif
+    LLVMValueRef status_ptr = NULL, old_status = NULL;
+    if (status_write) {
+        status_ptr = t2c_gen_rv_field_ptr(start, builder,
+                                          offsetof(riscv_t, csr_sstatus), i32);
+        old_status = LLVMBuildLoad2(*builder, i32, status_ptr, "status.before");
+    }
+    uint32_t operation =
+        ir->opcode | (ir->rd << 16) | (ir->rs1 << 21) | (ir->rs2 << 26);
+    LLVMValueRef args[] = {LLVMConstInt(i32, operation, false),
+                           LLVMConstInt(i32, ir->imm, false)};
+    LLVMValueRef code_epoch;
+    t2c_gen_mmu_call(builder, start, offsetof(riscv_t, aot_insn),
+                     LLVMVoidTypeInContext(t2c_context), args, 2, ir->pc,
+                     insn_counter, &code_epoch);
+    if (status_write) {
+        /* In S-mode, changing only SIE while leaving it clear cannot make
+         * an interrupt deliverable. Retain dispatcher boundaries when enabling
+         * interrupts, changing other status bits (including FS/SUM/MXR), or
+         * executing outside S-mode. Fault/epoch guards still apply below.
+         */
+        LLVMValueRef status =
+            LLVMBuildLoad2(*builder, i32, status_ptr, "status.after");
+        LLVMValueRef changed =
+            LLVMBuildXor(*builder, status, old_status, "status.changed");
+        LLVMValueRef other_changes = LLVMBuildAnd(
+            *builder, changed, LLVMConstInt(i32, ~SSTATUS_SIE, false), "");
+        LLVMValueRef enabled = LLVMBuildAnd(
+            *builder, status, LLVMConstInt(i32, SSTATUS_SIE, false), "");
+        LLVMValueRef dispatch_bits =
+            LLVMBuildOr(*builder, other_changes, enabled, "");
+        LLVMValueRef dispatch =
+            LLVMBuildICmp(*builder, LLVMIntNE, dispatch_bits,
+                          LLVMConstInt(i32, 0, false), "");
+        LLVMValueRef mode = LLVMBuildLoad2(
+            *builder, i32,
+            t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, priv_mode),
+                                 i32),
+            "");
+        dispatch = LLVMBuildOr(
+            *builder, dispatch,
+            LLVMBuildICmp(*builder, LLVMIntNE, mode,
+                          LLVMConstInt(i32, RV_PRIV_S_MODE, false), ""),
+            "");
+        LLVMBasicBlockRef exit = LLVMAppendBasicBlockInContext(
+            t2c_context, start, "status.dispatch");
+        LLVMBasicBlockRef resume = LLVMAppendBasicBlockInContext(
+            t2c_context, start, "status.disabled");
+        t2c_gen_unlikely_br(*builder, dispatch, exit, resume);
+        LLVMPositionBuilderAtEnd(*builder, exit);
+        t2c_gen_exit_raw(*builder, start, ir->pc + 4, insn_counter);
+        LLVMPositionBuilderAtEnd(*builder, resume);
+    }
+    t2c_mmu_access_exit(builder, start, ir->pc, insn_counter, code_epoch);
+}
+
+#if RV32_HAS(Zicsr)
+/* Clearing only SIE in S-mode is a raw, nonfaulting CSR read/modify/write.
+ * It does not synchronize time, alter memory permissions, or enable an IRQ.
+ * Keep other privilege modes on the existing semantic helper path.
+ */
+static void t2c_gen_sstatus_clear(LLVMBuilderRef *builder,
+                                  LLVMValueRef start,
+                                  rv_insn_t *ir,
+                                  LLVMValueRef insn_counter)
+{
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_context);
+    LLVMValueRef mode = LLVMBuildLoad2(
+        *builder, i32,
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, priv_mode), i32),
+        "");
+    LLVMValueRef fallback =
+        LLVMBuildICmp(*builder, LLVMIntNE, mode,
+                      LLVMConstInt(i32, RV_PRIV_S_MODE, false), "");
+    LLVMBasicBlockRef fast =
+        LLVMAppendBasicBlockInContext(t2c_context, start, "status.clear");
+    LLVMBasicBlockRef slow =
+        LLVMAppendBasicBlockInContext(t2c_context, start, "status.helper");
+    LLVMBasicBlockRef merge =
+        LLVMAppendBasicBlockInContext(t2c_context, start, "status.merge");
+    t2c_gen_unlikely_br(*builder, fallback, slow, fast);
+    LLVMPositionBuilderAtEnd(*builder, fast);
+    LLVMValueRef pointer = t2c_gen_rv_field_ptr(
+        start, builder, offsetof(riscv_t, csr_sstatus), i32);
+    LLVMValueRef old = LLVMBuildLoad2(*builder, i32, pointer, "status.old");
+    LLVMBuildStore(
+        *builder,
+        LLVMBuildAnd(*builder, old, LLVMConstInt(i32, ~SSTATUS_SIE, false), ""),
+        pointer);
+    if (ir->rd)
+        LLVMBuildStore(*builder, old, t2c_gen_rd_addr(start, builder, ir));
+    LLVMBuildBr(*builder, merge);
+    LLVMPositionBuilderAtEnd(*builder, slow);
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+    LLVMBuildBr(*builder, merge);
+    LLVMPositionBuilderAtEnd(*builder, merge);
+}
+
+#endif
 
 /* Load through the MMU into the register at rd_addr. The instruction may be a
  * fused entry cast to rv_insn_t, whose pc is not valid, so pc comes apart.
@@ -868,17 +1053,15 @@ static void t2c_gen_mmu_load(LLVMBuilderRef *builder,
                              bool is_signed,
                              LLVMValueRef rd_addr,
                              uint32_t pc,
-                             uint32_t size,
                              LLVMValueRef insn_counter)
 {
-    LLVMValueRef generation;
-    uint32_t refund;
-    LLVMValueRef ret = t2c_gen_mmu_call(
-        builder, start, io_field, LLVMIntTypeInContext(t2c_ctx, bits), &vaddr,
-        1, pc, insn_counter, &generation, &refund);
+    LLVMValueRef code_epoch;
+    LLVMValueRef ret =
+        t2c_gen_mmu_call(builder, start, offsetof(riscv_t, io) + io_field,
+                         LLVMIntTypeInContext(t2c_context, bits), &vaddr, 1, pc,
+                         insn_counter, &code_epoch);
     t2c_gen_load_result(builder, ret, rd_addr, is_signed);
-    t2c_finish_mmu_call(builder, start, insn_counter, generation, refund,
-                        pc + size);
+    t2c_mmu_access_exit(builder, start, pc, insn_counter, code_epoch);
 }
 
 /* Store the low bits of the register at src_addr through the MMU. */
@@ -889,18 +1072,23 @@ static void t2c_gen_mmu_store(LLVMBuilderRef *builder,
                               unsigned bits,
                               LLVMValueRef src_addr,
                               uint32_t pc,
-                              uint32_t size,
                               LLVMValueRef insn_counter)
 {
-    LLVMValueRef args[] = {
-        vaddr, LLVMBuildLoad2(*builder, LLVMIntTypeInContext(t2c_ctx, bits),
-                              src_addr, "")};
-    LLVMValueRef generation;
-    uint32_t refund;
-    t2c_gen_mmu_call(builder, start, io_field, LLVMVoidTypeInContext(t2c_ctx),
-                     args, 2, pc, insn_counter, &generation, &refund);
-    t2c_finish_mmu_call(builder, start, insn_counter, generation, refund,
-                        pc + size);
+    /* Pass the value zero-extended to 32 bits: the C helpers take uint8_t or
+     * uint16_t, whose upper register bits a clang-built callee assumes clear.
+     */
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_context);
+    LLVMValueRef value = LLVMBuildLoad2(*builder, i32, src_addr, "");
+    if (bits < 32)
+        value = LLVMBuildAnd(
+            *builder, value,
+            LLVMConstInt(i32, (UINT32_C(1) << bits) - 1, false), "");
+    LLVMValueRef args[] = {vaddr, value};
+    LLVMValueRef code_epoch;
+    t2c_gen_mmu_call(builder, start, offsetof(riscv_t, io) + io_field,
+                     LLVMVoidTypeInContext(t2c_context), args, 2, pc,
+                     insn_counter, &code_epoch);
+    t2c_mmu_access_exit(builder, start, pc, insn_counter, code_epoch);
 }
 
 /* Merge the slow path into the inline dTLB fast path, if one was emitted. */
@@ -913,20 +1101,24 @@ static void t2c_mmu_join(LLVMBuilderRef *builder, LLVMBasicBlockRef fp_end)
 }
 
 #if RV32_HAS(SYSTEM_MMIO)
-#define T2C_MMU_FASTPATH(ir, size, is_store, is_signed)                  \
-    t2c_emit_mmu_fastpath(builder, start, ir, size, is_store, is_signed, \
-                          (memory_t *) PRIV(rv)->mem)
+#define T2C_MMU_FASTPATH_ADDR(addr, data, size, is_store, is_signed) \
+    t2c_emit_mmu_fastpath(builder, start, addr, data, size, is_store, is_signed)
 #else
-#define T2C_MMU_FASTPATH(ir, size, is_store, is_signed) NULL
+#define T2C_MMU_FASTPATH_ADDR(addr, data, size, is_store, is_signed) NULL
 #endif
+#define T2C_MMU_FASTPATH(ir, size, is_store, is_signed)                        \
+    T2C_MMU_FASTPATH_ADDR(t2c_gen_vaddr(start, builder, ir),                   \
+                          is_store ? t2c_gen_rs2_addr(start, builder, ir)      \
+                                   : t2c_gen_load_rd_addr(start, builder, ir), \
+                          size, is_store, is_signed)
 
 /* T2C_MMU_LOAD / T2C_MMU_STORE: a load or store at rs1 + imm through the MMU,
  * behind the inline dTLB fast path where there is one.
  *   io_field: the riscv_io_t helper (mmu_read_b ... mmu_write_w)
  *   bits: the width it transfers
  */
-#define T2C_MMU_LOAD(mnemonic, io_field, bits, access_size, is_signed)    \
-    static void t2c_mmu_wrapper_##mnemonic(                               \
+#define T2C_MMU_LOAD(opcode, io_field, bits, access_size, is_signed)      \
+    static void t2c_mmu_wrapper_##opcode(                                 \
         LLVMBuilderRef *builder, LLVMValueRef start, rv_insn_t *ir,       \
         riscv_t *rv UNUSED, uint32_t pc, LLVMValueRef insn_counter)       \
     {                                                                     \
@@ -936,23 +1128,22 @@ static void t2c_mmu_join(LLVMBuilderRef *builder, LLVMBasicBlockRef fp_end)
         t2c_gen_mmu_load(builder, start, vaddr,                           \
                          offsetof(riscv_io_t, io_field), bits, is_signed, \
                          t2c_gen_load_rd_addr(start, builder, ir), pc,    \
-                         jit_instruction_size(ir->opcode), insn_counter); \
+                         insn_counter);                                   \
         t2c_mmu_join(builder, fp_end);                                    \
     }
 
-#define T2C_MMU_STORE(mnemonic, io_field, bits, access_size)               \
-    static void t2c_mmu_wrapper_##mnemonic(                                \
-        LLVMBuilderRef *builder, LLVMValueRef start, rv_insn_t *ir,        \
-        riscv_t *rv UNUSED, uint32_t pc, LLVMValueRef insn_counter)        \
-    {                                                                      \
-        LLVMValueRef vaddr = t2c_gen_vaddr(start, builder, ir);            \
-        LLVMBasicBlockRef fp_end =                                         \
-            T2C_MMU_FASTPATH(ir, access_size, true, false);                \
-        t2c_gen_mmu_store(builder, start, vaddr,                           \
-                          offsetof(riscv_io_t, io_field), bits,            \
-                          t2c_gen_rs2_addr(start, builder, ir), pc,        \
-                          jit_instruction_size(ir->opcode), insn_counter); \
-        t2c_mmu_join(builder, fp_end);                                     \
+#define T2C_MMU_STORE(opcode, io_field, bits, access_size)               \
+    static void t2c_mmu_wrapper_##opcode(                                \
+        LLVMBuilderRef *builder, LLVMValueRef start, rv_insn_t *ir,      \
+        riscv_t *rv UNUSED, uint32_t pc, LLVMValueRef insn_counter)      \
+    {                                                                    \
+        LLVMValueRef vaddr = t2c_gen_vaddr(start, builder, ir);          \
+        LLVMBasicBlockRef fp_end =                                       \
+            T2C_MMU_FASTPATH(ir, access_size, true, false);              \
+        t2c_gen_mmu_store(                                               \
+            builder, start, vaddr, offsetof(riscv_io_t, io_field), bits, \
+            t2c_gen_rs2_addr(start, builder, ir), pc, insn_counter);     \
+        t2c_mmu_join(builder, fp_end);                                   \
     }
 
 T2C_MMU_LOAD(lb, mmu_read_b, 8, 1, true);
@@ -969,45 +1160,57 @@ T2C_MMU_STORE(sw, mmu_write_w, 32, 4);
 static void t2c_mmu_wrapper_fuse9(LLVMBuilderRef *builder,
                                   LLVMValueRef start,
                                   rv_insn_t *ir,
+                                  riscv_t *rv UNUSED,
                                   uint32_t pc,
                                   LLVMValueRef insn_counter)
 {
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
-    t2c_gen_mmu_load(builder, start,
-                     LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), addr, false),
-                     offsetof(riscv_io_t, mmu_read_w), 32, false,
-                     ir->rs2 ? t2c_gen_rs2_addr(start, builder, ir) : NULL, pc,
-                     4, insn_counter);
+    LLVMValueRef vaddr =
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), addr, false);
+    LLVMValueRef data = ir->rs2 ? t2c_gen_rs2_addr(start, builder, ir) : NULL;
+    LLVMBasicBlockRef fp_end =
+        T2C_MMU_FASTPATH_ADDR(vaddr, data, 4, false, false);
+    t2c_gen_mmu_load(builder, start, vaddr, offsetof(riscv_io_t, mmu_read_w),
+                     32, false, data, pc, insn_counter);
+    t2c_mmu_join(builder, fp_end);
 }
 
 /* fuse10 (LUI + SW) stores rs1 to the absolute address imm + imm2. */
 static void t2c_mmu_wrapper_fuse10(LLVMBuilderRef *builder,
                                    LLVMValueRef start,
                                    rv_insn_t *ir,
+                                   riscv_t *rv UNUSED,
                                    uint32_t pc,
                                    LLVMValueRef insn_counter)
 {
     uint32_t addr = (uint32_t) ir->imm + (uint32_t) ir->imm2;
-    t2c_gen_mmu_store(
-        builder, start,
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), addr, false),
-        offsetof(riscv_io_t, mmu_write_w), 32,
-        t2c_gen_rs1_addr(start, builder, ir), pc, 4, insn_counter);
+    LLVMValueRef vaddr =
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), addr, false);
+    LLVMValueRef data = t2c_gen_rs1_addr(start, builder, ir);
+    LLVMBasicBlockRef fp_end =
+        T2C_MMU_FASTPATH_ADDR(vaddr, data, 4, true, false);
+    t2c_gen_mmu_store(builder, start, vaddr, offsetof(riscv_io_t, mmu_write_w),
+                      32, data, pc, insn_counter);
+    t2c_mmu_join(builder, fp_end);
 }
 
 /* fuse11 (LW + ADDI) loads from rs1 + imm into rd, then adds imm2 to rs1. */
 static void t2c_mmu_wrapper_fuse11(LLVMBuilderRef *builder,
                                    LLVMValueRef start,
                                    rv_insn_t *ir,
+                                   riscv_t *rv UNUSED,
                                    uint32_t pc,
                                    LLVMValueRef insn_counter)
 {
     LLVMValueRef addr_rs1 = t2c_gen_rs1_addr(start, builder, ir);
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, addr_rs1);
-    t2c_gen_mmu_load(
-        builder, start, T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm),
-        offsetof(riscv_io_t, mmu_read_w), 32, false,
-        t2c_gen_load_rd_addr(start, builder, ir), pc, 4, insn_counter);
+    LLVMValueRef vaddr = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);
+    LLVMValueRef rd_addr = t2c_gen_load_rd_addr(start, builder, ir);
+    LLVMBasicBlockRef fp_end =
+        T2C_MMU_FASTPATH_ADDR(vaddr, rd_addr, 4, false, false);
+    t2c_gen_mmu_load(builder, start, vaddr, offsetof(riscv_io_t, mmu_read_w),
+                     32, false, rd_addr, pc, insn_counter);
+    t2c_mmu_join(builder, fp_end);
     LLVMBuildStore(*builder, T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm2),
                    addr_rs1);
 }
@@ -1019,9 +1222,9 @@ T2C_OP(lb, {
         { t2c_mmu_wrapper(lb)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             LLVMValueRef value = LLVMBuildLoad2(
-                *builder, LLVMInt8TypeInContext(t2c_ctx), mem_loc, "");
+                *builder, LLVMInt8TypeInContext(t2c_context), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir), true);
         });
@@ -1033,13 +1236,14 @@ T2C_OP(lh, {
         { t2c_mmu_wrapper(lh)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             LLVMValueRef value = LLVMBuildLoad2(
-                *builder, LLVMInt16TypeInContext(t2c_ctx), mem_loc, "");
+                *builder, LLVMInt16TypeInContext(t2c_context), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir), true);
         });
 })
+
 
 T2C_OP(lw, {
     T2C_MISALIGN_GUARD(ir, 4, 0, ir->pc);
@@ -1047,9 +1251,9 @@ T2C_OP(lw, {
         { t2c_mmu_wrapper(lw)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             LLVMValueRef value = LLVMBuildLoad2(
-                *builder, LLVMInt32TypeInContext(t2c_ctx), mem_loc, "");
+                *builder, LLVMInt32TypeInContext(t2c_context), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir),
                                 false);
@@ -1061,9 +1265,9 @@ T2C_OP(lbu, {
         { t2c_mmu_wrapper(lbu)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             LLVMValueRef value = LLVMBuildLoad2(
-                *builder, LLVMInt8TypeInContext(t2c_ctx), mem_loc, "");
+                *builder, LLVMInt8TypeInContext(t2c_context), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir),
                                 false);
@@ -1076,9 +1280,9 @@ T2C_OP(lhu, {
         { t2c_mmu_wrapper(lhu)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             LLVMValueRef value = LLVMBuildLoad2(
-                *builder, LLVMInt16TypeInContext(t2c_ctx), mem_loc, "");
+                *builder, LLVMInt16TypeInContext(t2c_context), mem_loc, "");
             t2c_gen_load_result(builder, value,
                                 t2c_gen_load_rd_addr(start, builder, ir),
                                 false);
@@ -1090,7 +1294,7 @@ T2C_OP(sb, {
         { t2c_mmu_wrapper(sb)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             T2C_LLVM_GEN_LOAD_VMREG(rs2, 8,
                                     t2c_gen_rs2_addr(start, builder, ir));
             LLVMBuildStore(*builder, val_rs2, mem_loc);
@@ -1103,7 +1307,7 @@ T2C_OP(sh, {
         { t2c_mmu_wrapper(sh)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             T2C_LLVM_GEN_LOAD_VMREG(rs2, 16,
                                     t2c_gen_rs2_addr(start, builder, ir));
             LLVMBuildStore(*builder, val_rs2, mem_loc);
@@ -1116,7 +1320,7 @@ T2C_OP(sw, {
         { t2c_mmu_wrapper(sw)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,
                                     t2c_gen_rs2_addr(start, builder, ir));
             LLVMBuildStore(*builder, val_rs2, mem_loc);
@@ -1134,8 +1338,9 @@ T2C_OP(slti, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(SLT, val_rs1, ir->imm);
     LLVMValueRef res = LLVMBuildSelect(
-        *builder, cmp, LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, true),
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, true), "");
+        *builder, cmp,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 1, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 0, true), "");
     LLVMBuildStore(*builder, res, addr_rd);
 })
 
@@ -1144,8 +1349,9 @@ T2C_OP(sltiu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(ULT, val_rs1, ir->imm);
     LLVMValueRef res = LLVMBuildSelect(
-        *builder, cmp, LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, true),
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, true), "");
+        *builder, cmp,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 1, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 0, true), "");
     LLVMBuildStore(*builder, res, addr_rd);
 })
 
@@ -1213,8 +1419,9 @@ T2C_OP(slt, {
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP(SLT, val_rs1, val_rs2);
     LLVMValueRef res = LLVMBuildSelect(
-        *builder, cmp, LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, true),
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, true), "");
+        *builder, cmp,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 1, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 0, true), "");
     LLVMBuildStore(*builder, res, addr_rd);
 })
 
@@ -1224,8 +1431,9 @@ T2C_OP(sltu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP(ULT, val_rs1, val_rs2);
     LLVMValueRef res = LLVMBuildSelect(
-        *builder, cmp, LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 1, true),
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), 0, true), "");
+        *builder, cmp,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 1, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), 0, true), "");
     LLVMBuildStore(*builder, res, addr_rd);
 })
 
@@ -1269,6 +1477,10 @@ T2C_OP(and, {
 T2C_OP(fence, { __UNREACHABLE; })
 
 T2C_OP(ecall, {
+    LLVMBuildStore(
+        *builder, LLVMConstInt(LLVMInt8TypeInContext(t2c_context), 0, false),
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, compressed),
+                             LLVMInt8TypeInContext(t2c_context)));
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc,
                              t2c_gen_PC_addr(start, builder, ir));
     /* Use offsetof() to compute proper byte offset for on_ecall.
@@ -1276,11 +1488,15 @@ T2C_OP(ecall, {
      */
     T2C_STORE_TIMER(*builder, start, insn_counter);
     t2c_gen_call_io_func(start, builder, offsetof(riscv_io_t, on_ecall),
-                         LLVMVoidTypeInContext(t2c_ctx), NULL, 0);
+                         LLVMVoidTypeInContext(t2c_context), NULL, 0);
     LLVMBuildRetVoid(*builder);
 })
 
 T2C_OP(ebreak, {
+    LLVMBuildStore(
+        *builder, LLVMConstInt(LLVMInt8TypeInContext(t2c_context), 0, false),
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, compressed),
+                             LLVMInt8TypeInContext(t2c_context)));
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc,
                              t2c_gen_PC_addr(start, builder, ir));
     /* Use offsetof() to compute proper byte offset for on_ebreak.
@@ -1288,7 +1504,7 @@ T2C_OP(ebreak, {
      */
     T2C_STORE_TIMER(*builder, start, insn_counter);
     t2c_gen_call_io_func(start, builder, offsetof(riscv_io_t, on_ebreak),
-                         LLVMVoidTypeInContext(t2c_ctx), NULL, 0);
+                         LLVMVoidTypeInContext(t2c_context), NULL, 0);
     LLVMBuildRetVoid(*builder);
 })
 
@@ -1311,30 +1527,126 @@ T2C_OP(fencei, { __UNREACHABLE; })
 #endif
 
 #if RV32_HAS(Zicsr)
-T2C_OP(csrrw, { __UNREACHABLE; })
+#if RV32_HAS(SYSTEM)
+static void t2c_gen_counter_read(LLVMBuilderRef *builder,
+                                 LLVMValueRef start,
+                                 rv_insn_t *ir,
+                                 LLVMValueRef insn_counter)
+{
+    assert(t2c_counter_read(ir));
+    LLVMTypeRef i64 = LLVMInt64TypeInContext(t2c_context);
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_context);
+    LLVMValueRef retired = LLVMBuildLoad2(*builder, i64, insn_counter, "");
+    unsigned remaining = t2c_trailing_insns(ir->pc);
+    LLVMValueRef cycle = LLVMBuildLoad2(
+        *builder, i64, t2c_gen_csr_cycle_addr(start, builder, NULL), "");
+    LLVMValueRef value =
+        LLVMBuildAdd(*builder, cycle,
+                     LLVMBuildSub(*builder, retired,
+                                  LLVMConstInt(i64, remaining, false), ""),
+                     "");
+    unsigned csr = ir->imm & 0xfff;
+    if (csr == CSR_TIME || csr == CSR_TIMEH) {
+        LLVMValueRef offset =
+            t2c_load_rv_u64(builder, start, offsetof(riscv_t, timer_offset));
+        value = LLVMBuildAdd(*builder, value, offset, "");
+        LLVMBuildStore(*builder, value,
+                       t2c_gen_rv_field_ptr(start, builder,
+                                            offsetof(riscv_t, timer), i64));
+        LLVMBuildStore(
+            *builder, LLVMBuildTrunc(*builder, value, i32, ""),
+            t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, csr_time[0]),
+                                 i32));
+        LLVMBuildStore(
+            *builder,
+            LLVMBuildTrunc(*builder,
+                           LLVMBuildLShr(*builder, value,
+                                         LLVMConstInt(i64, 32, false), ""),
+                           i32, ""),
+            t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, csr_time[1]),
+                                 i32));
+    }
+    if (csr & 0x80)
+        value =
+            LLVMBuildLShr(*builder, value, LLVMConstInt(i64, 32, false), "");
+    if (ir->rd)
+        LLVMBuildStore(*builder, LLVMBuildTrunc(*builder, value, i32, ""),
+                       t2c_gen_rd_addr(start, builder, ir));
+}
+#define T2C_COUNTER_READ() \
+    t2c_gen_counter_read(builder, start, ir, insn_counter)
+#else
+#define T2C_COUNTER_READ() __UNREACHABLE
+#endif
 
-T2C_OP(csrrs, { __UNREACHABLE; })
+T2C_OP(csrrw, {
+#if RV32_HAS(SYSTEM)
+    if (t2c_outlined_insn(ir))
+        t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+    else
+#endif
+        T2C_COUNTER_READ();
+})
 
-T2C_OP(csrrc, { __UNREACHABLE; })
+T2C_OP(csrrs, {
+#if RV32_HAS(SYSTEM)
+    if (t2c_outlined_insn(ir))
+        t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+    else
+#endif
+        T2C_COUNTER_READ();
+})
 
-T2C_OP(csrrwi, { __UNREACHABLE; })
+T2C_OP(csrrc, {
+#if RV32_HAS(SYSTEM)
+    if (t2c_outlined_insn(ir))
+        t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+    else
+#endif
+        T2C_COUNTER_READ();
+})
 
-T2C_OP(csrrsi, { __UNREACHABLE; })
+T2C_OP(csrrwi, {
+#if RV32_HAS(SYSTEM)
+    if (t2c_outlined_insn(ir))
+        t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+    else
+#endif
+        T2C_COUNTER_READ();
+})
 
-T2C_OP(csrrci, { __UNREACHABLE; })
+T2C_OP(csrrsi, {
+#if RV32_HAS(SYSTEM)
+    if (t2c_outlined_insn(ir))
+        t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+    else
+#endif
+        T2C_COUNTER_READ();
+})
+
+T2C_OP(csrrci, {
+#if RV32_HAS(SYSTEM)
+    if ((ir->imm & 0xfff) == CSR_SSTATUS && ir->rs1 == SSTATUS_SIE)
+        t2c_gen_sstatus_clear(builder, start, ir, insn_counter);
+    else if (t2c_outlined_insn(ir))
+        t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+    else
+#endif
+        T2C_COUNTER_READ();
+})
 #endif
 
 #if RV32_HAS(EXT_M)
 T2C_OP(mul, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64TypeInContext(t2c_ctx),
-                            "sextrs1to64");
-    val_rs2 = LLVMBuildSExt(*builder, val_rs2, LLVMInt64TypeInContext(t2c_ctx),
-                            "sextrs2to64");
+    val_rs1 = LLVMBuildSExt(*builder, val_rs1,
+                            LLVMInt64TypeInContext(t2c_context), "sextrs1to64");
+    val_rs2 = LLVMBuildSExt(*builder, val_rs2,
+                            LLVMInt64TypeInContext(t2c_context), "sextrs2to64");
     LLVMValueRef res = LLVMBuildMul(*builder, val_rs1, val_rs2, "mul");
     res = T2C_LLVM_GEN_ALU64_IMM(And, res, 0xFFFFFFFF);
-    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_ctx),
+    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_context),
                          "sextresto32");
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
@@ -1342,13 +1654,13 @@ T2C_OP(mul, {
 T2C_OP(mulh, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64TypeInContext(t2c_ctx),
-                            "sextrs1to64");
-    val_rs2 = LLVMBuildSExt(*builder, val_rs2, LLVMInt64TypeInContext(t2c_ctx),
-                            "sextrs2to64");
+    val_rs1 = LLVMBuildSExt(*builder, val_rs1,
+                            LLVMInt64TypeInContext(t2c_context), "sextrs1to64");
+    val_rs2 = LLVMBuildSExt(*builder, val_rs2,
+                            LLVMInt64TypeInContext(t2c_context), "sextrs2to64");
     LLVMValueRef res = LLVMBuildMul(*builder, val_rs1, val_rs2, "mul");
     res = T2C_LLVM_GEN_ALU64_IMM(LShr, res, 32);
-    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_ctx),
+    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_context),
                          "sextresto32");
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
@@ -1356,13 +1668,13 @@ T2C_OP(mulh, {
 T2C_OP(mulhsu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    val_rs1 = LLVMBuildSExt(*builder, val_rs1, LLVMInt64TypeInContext(t2c_ctx),
-                            "sextrs1to64");
-    val_rs2 = LLVMBuildZExt(*builder, val_rs2, LLVMInt64TypeInContext(t2c_ctx),
-                            "zextrs2to64");
+    val_rs1 = LLVMBuildSExt(*builder, val_rs1,
+                            LLVMInt64TypeInContext(t2c_context), "sextrs1to64");
+    val_rs2 = LLVMBuildZExt(*builder, val_rs2,
+                            LLVMInt64TypeInContext(t2c_context), "zextrs2to64");
     LLVMValueRef res = LLVMBuildMul(*builder, val_rs1, val_rs2, "mul");
     res = T2C_LLVM_GEN_ALU64_IMM(LShr, res, 32);
-    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_ctx),
+    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_context),
                          "sextresto32");
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
@@ -1370,68 +1682,196 @@ T2C_OP(mulhsu, {
 T2C_OP(mulhu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    val_rs1 = LLVMBuildZExt(*builder, val_rs1, LLVMInt64TypeInContext(t2c_ctx),
-                            "sextrs1to64");
-    val_rs2 = LLVMBuildZExt(*builder, val_rs2, LLVMInt64TypeInContext(t2c_ctx),
-                            "zextrs2to64");
+    val_rs1 = LLVMBuildZExt(*builder, val_rs1,
+                            LLVMInt64TypeInContext(t2c_context), "sextrs1to64");
+    val_rs2 = LLVMBuildZExt(*builder, val_rs2,
+                            LLVMInt64TypeInContext(t2c_context), "zextrs2to64");
     LLVMValueRef res = LLVMBuildMul(*builder, val_rs1, val_rs2, "mul");
     res = T2C_LLVM_GEN_ALU64_IMM(LShr, res, 32);
-    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_ctx),
+    res = LLVMBuildTrunc(*builder, res, LLVMInt32TypeInContext(t2c_context),
                          "sextresto32");
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
+/* Guard the operations themselves: LLVM division is undefined for zero
+ * divisors and signed overflow. A rare branch leaves the common divisor
+ * unchanged, avoiding a dependency through a select before hardware division.
+ */
+static LLVMValueRef t2c_gen_divrem(LLVMBuilderRef builder,
+                                   LLVMValueRef dividend,
+                                   LLVMValueRef divisor,
+                                   bool is_signed,
+                                   bool remainder)
+{
+    LLVMTypeRef type = LLVMInt32TypeInContext(t2c_context);
+    LLVMValueRef zero = LLVMConstInt(type, 0, false);
+    LLVMValueRef one = LLVMConstInt(type, 1, false);
+    LLVMValueRef is_zero =
+        LLVMBuildICmp(builder, LLVMIntEQ, divisor, zero, "div.zero");
+    LLVMValueRef special = is_zero;
+    if (is_signed) {
+        LLVMValueRef next = LLVMBuildAdd(builder, divisor, one, "div.next");
+        special = LLVMBuildICmp(builder, LLVMIntULE, next, one, "div.special");
+    }
+    LLVMValueRef function =
+        LLVMGetBasicBlockParent(LLVMGetInsertBlock(builder));
+    LLVMBasicBlockRef normal_bb =
+        LLVMAppendBasicBlockInContext(t2c_context, function, "div.normal");
+    LLVMBasicBlockRef special_bb =
+        LLVMAppendBasicBlockInContext(t2c_context, function, "div.exception");
+    LLVMBasicBlockRef merge =
+        LLVMAppendBasicBlockInContext(t2c_context, function, "div.merge");
+    t2c_gen_unlikely_br(builder, special, special_bb, normal_bb);
+    LLVMPositionBuilderAtEnd(builder, normal_bb);
+    LLVMValueRef normal;
+    if (is_signed)
+        normal = remainder ? LLVMBuildSRem(builder, dividend, divisor, "srem")
+                           : LLVMBuildSDiv(builder, dividend, divisor, "sdiv");
+    else
+        normal = remainder ? LLVMBuildURem(builder, dividend, divisor, "urem")
+                           : LLVMBuildUDiv(builder, dividend, divisor, "udiv");
+    LLVMBuildBr(builder, merge);
+    LLVMPositionBuilderAtEnd(builder, special_bb);
+    LLVMValueRef exceptional;
+    if (remainder)
+        exceptional = is_signed ? LLVMBuildSelect(builder, is_zero, dividend,
+                                                  zero, "rem.exception")
+                                : dividend;
+    else {
+        LLVMValueRef minus_one = LLVMConstInt(type, UINT32_MAX, false);
+        exceptional =
+            is_signed ? LLVMBuildSelect(
+                            builder, is_zero, minus_one,
+                            LLVMBuildSub(builder, zero, dividend, "div.neg"),
+                            "div.exception")
+                      : minus_one;
+    }
+    LLVMBuildBr(builder, merge);
+    LLVMPositionBuilderAtEnd(builder, merge);
+    LLVMValueRef result = LLVMBuildPhi(builder, type, "div.result");
+    LLVMValueRef values[] = {normal, exceptional};
+    LLVMBasicBlockRef blocks[] = {normal_bb, special_bb};
+    LLVMAddIncoming(result, values, blocks, 2);
+    return result;
+}
+
 T2C_OP(div, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    LLVMValueRef res = LLVMBuildSDiv(*builder, val_rs1, val_rs2, "sdiv");
+    LLVMValueRef res = t2c_gen_divrem(*builder, val_rs1, val_rs2, true, false);
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
 T2C_OP(divu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    LLVMValueRef res = LLVMBuildUDiv(*builder, val_rs1, val_rs2, "udiv");
+    LLVMValueRef res = t2c_gen_divrem(*builder, val_rs1, val_rs2, false, false);
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
 T2C_OP(rem, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    LLVMValueRef res = LLVMBuildSRem(*builder, val_rs1, val_rs2, "srem");
+    LLVMValueRef res = t2c_gen_divrem(*builder, val_rs1, val_rs2, true, true);
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 
 T2C_OP(remu, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, t2c_gen_rs2_addr(start, builder, ir));
-    LLVMValueRef res = LLVMBuildURem(*builder, val_rs1, val_rs2, "urem");
+    LLVMValueRef res = t2c_gen_divrem(*builder, val_rs1, val_rs2, false, true);
     LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
 })
 #endif
 
 #if RV32_HAS(EXT_A)
-T2C_OP(lrw, { __UNREACHABLE; })
+T2C_OP(lrw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(scw, { __UNREACHABLE; })
+T2C_OP(scw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amoswapw, { __UNREACHABLE; })
+T2C_OP(amoswapw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amoaddw, { __UNREACHABLE; })
+T2C_OP(amoaddw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amoxorw, { __UNREACHABLE; })
+T2C_OP(amoxorw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amoandw, { __UNREACHABLE; })
+T2C_OP(amoandw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amoorw, { __UNREACHABLE; })
+T2C_OP(amoorw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amominw, { __UNREACHABLE; })
+T2C_OP(amominw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amomaxw, { __UNREACHABLE; })
+T2C_OP(amomaxw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amominuw, { __UNREACHABLE; })
+T2C_OP(amominuw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 
-T2C_OP(amomaxuw, { __UNREACHABLE; })
+T2C_OP(amomaxuw, {
+#if RV32_HAS(SYSTEM)
+    t2c_gen_outlined_insn(builder, start, ir, insn_counter);
+#else
+    __UNREACHABLE;
+#endif
+})
 #endif
 
 #if RV32_HAS(EXT_F)
@@ -1500,10 +1940,12 @@ T2C_OP(clw, {
         { t2c_mmu_wrapper(lw)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef res = LLVMBuildLoad2(
-                *builder, LLVMInt32TypeInContext(t2c_ctx), mem_loc, "res");
-            LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_context), mem_loc, "");
+            t2c_gen_load_result(builder, value,
+                                t2c_gen_load_rd_addr(start, builder, ir),
+                                false);
         });
 })
 
@@ -1514,7 +1956,7 @@ T2C_OP(csw, {
         { t2c_mmu_wrapper(sw)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,
                                     t2c_gen_rs2_addr(start, builder, ir));
             LLVMBuildStore(*builder, val_rs2, mem_loc);
@@ -1531,9 +1973,10 @@ T2C_OP(caddi, {
 })
 
 T2C_OP(cjal, {
+    t2c_note_call(true, ir->pc + 2);
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 2,
                              t2c_gen_ra_addr(start, builder, ir));
-    if (ir->branch_taken)
+    if (t2c_has_direct_target(rv, block, ir->branch_taken, ir->pc + ir->imm))
         *taken_builder = *builder;
     else {
         t2c_gen_exit(*builder, start, ir->pc + ir->imm, insn_counter);
@@ -1607,7 +2050,7 @@ T2C_OP(cand, {
 })
 
 T2C_OP(cj, {
-    if (ir->branch_taken)
+    if (t2c_has_direct_target(rv, block, ir->branch_taken, ir->pc + ir->imm))
         *taken_builder = *builder;
     else {
         t2c_gen_exit(*builder, start, ir->pc + ir->imm, insn_counter);
@@ -1618,11 +2061,10 @@ T2C_OP(cbeqz, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(EQ, val_rs1, 0);
     LLVMBasicBlockRef taken =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "taken");
-    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "taken");
+    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(builder2, taken);
-    if (ir->branch_taken &&
-        t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
+    if (t2c_has_direct_target(rv, block, ir->branch_taken, ir->pc + ir->imm)) {
         *taken_builder = builder2;
     } else {
         t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter);
@@ -1630,11 +2072,10 @@ T2C_OP(cbeqz, {
     }
 
     LLVMBasicBlockRef untaken =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "untaken");
-    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "untaken");
+    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(builder3, untaken);
-    if (ir->branch_untaken &&
-        t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
+    if (t2c_has_direct_target(rv, block, ir->branch_untaken, block->pc_end)) {
         *untaken_builder = builder3;
     } else {
         t2c_gen_exit(builder3, start, ir->pc + 2, insn_counter);
@@ -1647,11 +2088,10 @@ T2C_OP(cbnez, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     T2C_LLVM_GEN_CMP_IMM32(NE, val_rs1, 0);
     LLVMBasicBlockRef taken =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "taken");
-    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "taken");
+    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(builder2, taken);
-    if (ir->branch_taken &&
-        t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
+    if (t2c_has_direct_target(rv, block, ir->branch_taken, ir->pc + ir->imm)) {
         *taken_builder = builder2;
     } else {
         t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter);
@@ -1659,11 +2099,10 @@ T2C_OP(cbnez, {
     }
 
     LLVMBasicBlockRef untaken =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "untaken");
-    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "untaken");
+    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(builder3, untaken);
-    if (ir->branch_untaken &&
-        t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
+    if (t2c_has_direct_target(rv, block, ir->branch_untaken, block->pc_end)) {
         *untaken_builder = builder3;
     } else {
         t2c_gen_exit(builder3, start, ir->pc + 2, insn_counter);
@@ -1685,22 +2124,13 @@ T2C_OP(clwsp, {
     IIF(RV32_HAS(SYSTEM))(
         { t2c_mmu_wrapper(lw)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
-            LLVMValueRef val_sp = LLVMBuildZExt(
-                *builder,
-                LLVMBuildLoad2(*builder, LLVMInt32TypeInContext(t2c_ctx),
-                               t2c_gen_sp_addr(start, builder, ir), "val_sp"),
-                LLVMInt64TypeInContext(t2c_ctx), "zext32to64");
-            LLVMValueRef addr =
-                LLVMBuildAdd(*builder, val_sp,
-                             LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
-                                          ir->imm + mem_base, true),
-                             "addr");
-            LLVMValueRef cast_addr = LLVMBuildIntToPtr(
-                *builder, addr,
-                LLVMPointerType(LLVMInt32TypeInContext(t2c_ctx), 0), "cast");
-            LLVMValueRef res = LLVMBuildLoad2(
-                *builder, LLVMInt32TypeInContext(t2c_ctx), cast_addr, "res");
-            LLVMBuildStore(*builder, res, t2c_gen_rd_addr(start, builder, ir));
+            LLVMValueRef cast_addr =
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_context), cast_addr, "");
+            t2c_gen_load_result(builder, value,
+                                t2c_gen_load_rd_addr(start, builder, ir),
+                                false);
         });
 })
 
@@ -1717,6 +2147,10 @@ T2C_OP(cmv, {
 })
 
 T2C_OP(cebreak, {
+    LLVMBuildStore(
+        *builder, LLVMConstInt(LLVMInt8TypeInContext(t2c_context), 1, false),
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, compressed),
+                             LLVMInt8TypeInContext(t2c_context)));
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc,
                              t2c_gen_PC_addr(start, builder, ir));
     /* Use offsetof() to compute proper byte offset for on_ebreak.
@@ -1724,7 +2158,7 @@ T2C_OP(cebreak, {
      */
     T2C_STORE_TIMER(*builder, start, insn_counter);
     t2c_gen_call_io_func(start, builder, offsetof(riscv_io_t, on_ebreak),
-                         LLVMVoidTypeInContext(t2c_ctx), NULL, 0);
+                         LLVMVoidTypeInContext(t2c_context), NULL, 0);
     LLVMBuildRetVoid(*builder);
 })
 
@@ -1734,6 +2168,7 @@ T2C_OP(cjalr, {
      */
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     val_rs1 = T2C_LLVM_GEN_ALU32_IMM(And, val_rs1, ~1U);
+    t2c_note_call(true, ir->pc + 2);
     T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 2,
                              t2c_gen_ra_addr(start, builder, ir));
     t2c_indirect_jump(builder, start, val_rs1, rv, block, ir, insn_counter,
@@ -1755,20 +2190,10 @@ T2C_OP(cswsp, {
         { t2c_mmu_wrapper(sw)(builder, start, ir, rv, ir->pc, insn_counter); },
         {
             LLVMValueRef addr_rs2 = t2c_gen_rs2_addr(start, builder, ir);
-            LLVMValueRef val_sp = LLVMBuildZExt(
-                *builder,
-                LLVMBuildLoad2(*builder, LLVMInt32TypeInContext(t2c_ctx),
-                               t2c_gen_sp_addr(start, builder, ir), "val_sp"),
-                LLVMInt64TypeInContext(t2c_ctx), "zext32to64");
+
             T2C_LLVM_GEN_LOAD_VMREG(rs2, 32, addr_rs2);
-            LLVMValueRef addr =
-                LLVMBuildAdd(*builder, val_sp,
-                             LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
-                                          ir->imm + mem_base, true),
-                             "addr");
-            LLVMValueRef cast_addr = LLVMBuildIntToPtr(
-                *builder, addr,
-                LLVMPointerType(LLVMInt32TypeInContext(t2c_ctx), 0), "cast");
+            LLVMValueRef cast_addr =
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             LLVMBuildStore(*builder, val_rs2, cast_addr);
         });
 })
@@ -1869,15 +2294,15 @@ T2C_OP(fuse1, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         LLVMValueRef rd_offset =
-            LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+            LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
                          offsetof(riscv_t, X) / sizeof(int) + fuse[i].rd, true);
         LLVMValueRef addr_rd = LLVMBuildInBoundsGEP2(
-            *builder, LLVMInt32TypeInContext(t2c_ctx), LLVMGetParam(start, 0),
-            &rd_offset, 1, "addr_rd");
-        LLVMBuildStore(
-            *builder,
-            LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), fuse[i].imm, true),
-            addr_rd);
+            *builder, LLVMInt32TypeInContext(t2c_context),
+            LLVMGetParam(start, 0), &rd_offset, 1, "addr_rd");
+        LLVMBuildStore(*builder,
+                       LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
+                                    fuse[i].imm, true),
+                       addr_rd);
     }
 })
 
@@ -1900,8 +2325,9 @@ T2C_OP(fuse3, {
                                     rv, ir->pc + 4 * i, insn_counter);
             },
             {
-                LLVMValueRef mem_loc = t2c_gen_mem_loc(
-                    start, builder, (rv_insn_t *) (&fuse[i]), mem_base);
+                LLVMValueRef mem_loc =
+                    t2c_gen_mem_loc(start, builder, (rv_insn_t *) (&fuse[i]),
+                                    insn_counter, ir->pc + 4 * i);
                 T2C_LLVM_GEN_LOAD_VMREG(
                     rs2, 32,
                     t2c_gen_rs2_addr(start, builder, (rv_insn_t *) (&fuse[i])));
@@ -1920,12 +2346,13 @@ T2C_OP(fuse4, {
                                     rv, ir->pc + 4 * i, insn_counter);
             },
             {
-                LLVMValueRef mem_loc = t2c_gen_mem_loc(
-                    start, builder, (rv_insn_t *) (&fuse[i]), mem_base);
-                LLVMValueRef res = LLVMBuildLoad2(
-                    *builder, LLVMInt32TypeInContext(t2c_ctx), mem_loc, "res");
+                LLVMValueRef mem_loc =
+                    t2c_gen_mem_loc(start, builder, (rv_insn_t *) (&fuse[i]),
+                                    insn_counter, ir->pc + 4 * i);
+                LLVMValueRef value = LLVMBuildLoad2(
+                    *builder, LLVMInt32TypeInContext(t2c_context), mem_loc, "");
                 t2c_gen_load_result(
-                    builder, res,
+                    builder, value,
                     t2c_gen_load_rd_addr(start, builder,
                                          (rv_insn_t *) (&fuse[i])),
                     false);
@@ -1965,16 +2392,21 @@ T2C_OP(fuse5, {
  */
 #if !RV32_HAS(RV32E)
 T2C_OP(fuse6, {
+    LLVMBuildStore(
+        *builder, LLVMConstInt(LLVMInt8TypeInContext(t2c_context), 0, false),
+        t2c_gen_rv_field_ptr(start, builder, offsetof(riscv_t, compressed),
+                             LLVMInt8TypeInContext(t2c_context)));
     /* Store syscall number (imm) to a7 register */
     LLVMValueRef a7_offset =
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
                      offsetof(riscv_t, X) / sizeof(int) + rv_reg_a7, true);
     LLVMValueRef addr_a7 =
-        LLVMBuildInBoundsGEP2(*builder, LLVMInt32TypeInContext(t2c_ctx),
+        LLVMBuildInBoundsGEP2(*builder, LLVMInt32TypeInContext(t2c_context),
                               LLVMGetParam(start, 0), &a7_offset, 1, "addr_a7");
-    LLVMBuildStore(*builder,
-                   LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), ir->imm, true),
-                   addr_a7);
+    LLVMBuildStore(
+        *builder,
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), ir->imm, true),
+        addr_a7);
     /* Store PC and call ecall handler.
      * ECALL is at ir->pc + 4 (second instruction in fused pair).
      * Use offsetof() to compute proper byte offset for on_ecall.
@@ -1983,7 +2415,7 @@ T2C_OP(fuse6, {
                              t2c_gen_PC_addr(start, builder, ir));
     T2C_STORE_TIMER(*builder, start, insn_counter);
     t2c_gen_call_io_func(start, builder, offsetof(riscv_io_t, on_ecall),
-                         LLVMVoidTypeInContext(t2c_ctx), NULL, 0);
+                         LLVMVoidTypeInContext(t2c_context), NULL, 0);
     LLVMBuildRetVoid(*builder);
 })
 #else
@@ -2002,23 +2434,24 @@ T2C_OP(fuse7, {
     opcode_fuse_t *fuse = ir->fuse;
     for (int i = 0; i < ir->imm2; i++) {
         LLVMValueRef rs1_offset = LLVMConstInt(
-            LLVMInt32TypeInContext(t2c_ctx),
+            LLVMInt32TypeInContext(t2c_context),
             offsetof(riscv_t, X) / sizeof(int) + fuse[i].rs1, true);
         LLVMValueRef addr_rs1 = LLVMBuildInBoundsGEP2(
-            *builder, LLVMInt32TypeInContext(t2c_ctx), LLVMGetParam(start, 0),
-            &rs1_offset, 1, "addr_rs1");
+            *builder, LLVMInt32TypeInContext(t2c_context),
+            LLVMGetParam(start, 0), &rs1_offset, 1, "addr_rs1");
         LLVMValueRef val_rs1 = LLVMBuildLoad2(
-            *builder, LLVMInt32TypeInContext(t2c_ctx), addr_rs1, "val_rs1");
-        LLVMValueRef res = LLVMBuildAdd(
-            *builder, val_rs1,
-            LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), fuse[i].imm, true),
-            "add");
+            *builder, LLVMInt32TypeInContext(t2c_context), addr_rs1, "val_rs1");
+        LLVMValueRef res =
+            LLVMBuildAdd(*builder, val_rs1,
+                         LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
+                                      fuse[i].imm, true),
+                         "add");
         LLVMValueRef rd_offset =
-            LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+            LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
                          offsetof(riscv_t, X) / sizeof(int) + fuse[i].rd, true);
         LLVMValueRef addr_rd = LLVMBuildInBoundsGEP2(
-            *builder, LLVMInt32TypeInContext(t2c_ctx), LLVMGetParam(start, 0),
-            &rd_offset, 1, "addr_rd");
+            *builder, LLVMInt32TypeInContext(t2c_context),
+            LLVMGetParam(start, 0), &rd_offset, 1, "addr_rd");
         LLVMBuildStore(*builder, res, addr_rd);
     }
 })
@@ -2032,14 +2465,14 @@ T2C_OP(fuse8, {
      */
     uint32_t combined_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
     LLVMValueRef rd_offset =
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context),
                      offsetof(riscv_t, X) / sizeof(int) + ir->rd, true);
     LLVMValueRef addr_rd =
-        LLVMBuildInBoundsGEP2(*builder, LLVMInt32TypeInContext(t2c_ctx),
+        LLVMBuildInBoundsGEP2(*builder, LLVMInt32TypeInContext(t2c_context),
                               LLVMGetParam(start, 0), &rd_offset, 1, "addr_rd");
     LLVMBuildStore(
         *builder,
-        LLVMConstInt(LLVMInt32TypeInContext(t2c_ctx), combined_imm, true),
+        LLVMConstInt(LLVMInt32TypeInContext(t2c_context), combined_imm, true),
         addr_rd);
 })
 
@@ -2053,20 +2486,24 @@ T2C_OP(fuse9, {
                              t2c_gen_rd_addr(start, builder, ir));
     IIF(RV32_HAS(SYSTEM))(
         {
-            t2c_mmu_wrapper_fuse9(builder, start, ir, ir->pc + 4, insn_counter);
+            t2c_mmu_wrapper_fuse9(builder, start, ir, rv, ir->pc + 4,
+                                  insn_counter);
         },
         {
             uint32_t addr_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
             LLVMValueRef addr =
-                LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
-                             (uint64_t) addr_imm + mem_base, false);
+                LLVMBuildAdd(*builder, t2c_gen_ram_base(start, builder),
+                             LLVMConstInt(LLVMInt64TypeInContext(t2c_context),
+                                          addr_imm, false),
+                             "");
             LLVMValueRef cast_addr = LLVMBuildIntToPtr(
                 *builder, addr,
-                LLVMPointerType(LLVMInt32TypeInContext(t2c_ctx), 0), "cast");
-            LLVMValueRef res = LLVMBuildLoad2(
-                *builder, LLVMInt32TypeInContext(t2c_ctx), cast_addr, "res");
+                LLVMPointerType(LLVMInt32TypeInContext(t2c_context), 0),
+                "cast");
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_context), cast_addr, "");
             t2c_gen_load_result(
-                builder, res,
+                builder, value,
                 ir->rs2 ? t2c_gen_rs2_addr(start, builder, ir) : NULL, false);
         });
 })
@@ -2081,17 +2518,20 @@ T2C_OP(fuse10, {
                              t2c_gen_rd_addr(start, builder, ir));
     IIF(RV32_HAS(SYSTEM))(
         {
-            t2c_mmu_wrapper_fuse10(builder, start, ir, ir->pc + 4,
+            t2c_mmu_wrapper_fuse10(builder, start, ir, rv, ir->pc + 4,
                                    insn_counter);
         },
         {
             uint32_t addr_imm = (uint32_t) ir->imm + (uint32_t) ir->imm2;
             LLVMValueRef addr =
-                LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx),
-                             (uint64_t) addr_imm + mem_base, false);
+                LLVMBuildAdd(*builder, t2c_gen_ram_base(start, builder),
+                             LLVMConstInt(LLVMInt64TypeInContext(t2c_context),
+                                          addr_imm, false),
+                             "");
             LLVMValueRef cast_addr = LLVMBuildIntToPtr(
                 *builder, addr,
-                LLVMPointerType(LLVMInt32TypeInContext(t2c_ctx), 0), "cast");
+                LLVMPointerType(LLVMInt32TypeInContext(t2c_context), 0),
+                "cast");
             T2C_LLVM_GEN_LOAD_VMREG(rs1, 32,
                                     t2c_gen_rs1_addr(start, builder, ir));
             LLVMBuildStore(*builder, val_rs1, cast_addr);
@@ -2110,17 +2550,21 @@ T2C_OP(fuse10, {
 T2C_OP(fuse11, {
     T2C_MISALIGN_GUARD(ir, 4, 0, ir->pc);
     IIF(RV32_HAS(SYSTEM))(
-        { t2c_mmu_wrapper_fuse11(builder, start, ir, ir->pc, insn_counter); },
+        {
+            t2c_mmu_wrapper_fuse11(builder, start, ir, rv, ir->pc,
+                                   insn_counter);
+        },
         {
             LLVMValueRef addr_rs1 = t2c_gen_rs1_addr(start, builder, ir);
             T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, addr_rs1);
             /* Compute address and load */
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
-            LLVMValueRef res = LLVMBuildLoad2(
-                *builder, LLVMInt32TypeInContext(t2c_ctx), mem_loc, "res");
-            t2c_gen_load_result(
-                builder, res, t2c_gen_load_rd_addr(start, builder, ir), false);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
+            LLVMValueRef value = LLVMBuildLoad2(
+                *builder, LLVMInt32TypeInContext(t2c_context), mem_loc, "");
+            t2c_gen_load_result(builder, value,
+                                t2c_gen_load_rd_addr(start, builder, ir),
+                                false);
             /* Increment rs1 by imm2 (rd != rs1 guaranteed by fusion constraint)
              */
             LLVMValueRef inc_val =
@@ -2134,16 +2578,7 @@ T2C_OP(fuse11, {
  * original instruction ordering without eliding an MMIO/fault boundary.
  */
 T2C_OP(fuse13, {
-    /* T2C_OP accounts for the fused IR node once. Account for the ADDI
-     * represented by this node as well, so RDCYCLE agrees with interpreter and
-     * tier-1 JIT execution.
-     */
-    LLVMValueRef cnt = LLVMBuildLoad2(*builder, LLVMInt64TypeInContext(t2c_ctx),
-                                      insn_counter, "");
-    cnt = LLVMBuildAdd(*builder, cnt,
-                       LLVMConstInt(LLVMInt64TypeInContext(t2c_ctx), 1, false),
-                       "");
-    LLVMBuildStore(*builder, cnt, insn_counter);
+    /* The block cost already counts the ADDI: it is set before fusion. */
     IIF(RV32_HAS(SYSTEM))(
         { __UNREACHABLE; },
         {
@@ -2153,7 +2588,7 @@ T2C_OP(fuse13, {
             T2C_LLVM_GEN_LOAD_VMREG(rs2, 32,
                                     t2c_gen_rs2_addr(start, builder, ir));
             LLVMValueRef mem_loc =
-                t2c_gen_mem_loc(start, builder, ir, mem_base);
+                t2c_gen_mem_loc(start, builder, ir, insn_counter, ir->pc);
             LLVMBuildStore(*builder, val_rs2, mem_loc);
             LLVMValueRef inc_val =
                 T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm2);
@@ -2174,11 +2609,11 @@ T2C_OP(fuse12, {
     T2C_LLVM_GEN_CMP_IMM32(NE, res, 0);
     /* Create taken and untaken branches */
     LLVMBasicBlockRef taken =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "taken");
-    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "taken");
+    LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(builder2, taken);
-    if (ir->branch_taken &&
-        t2c_check_valid_blk(rv, block, ir->branch_taken->pc)) {
+    if (t2c_has_direct_target(rv, block, ir->branch_taken,
+                              ir->pc + 4 + ir->imm2)) {
         *taken_builder = builder2;
     } else {
         /* PC = ir->pc + 4 + ir->imm2 (ADDI is 4 bytes, then branch offset) */
@@ -2186,11 +2621,10 @@ T2C_OP(fuse12, {
         LLVMDisposeBuilder(builder2);
     }
     LLVMBasicBlockRef untaken =
-        LLVMAppendBasicBlockInContext(t2c_ctx, start, "untaken");
-    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_ctx);
+        LLVMAppendBasicBlockInContext(t2c_context, start, "untaken");
+    LLVMBuilderRef builder3 = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(builder3, untaken);
-    if (ir->branch_untaken &&
-        t2c_check_valid_blk(rv, block, ir->branch_untaken->pc)) {
+    if (t2c_has_direct_target(rv, block, ir->branch_untaken, block->pc_end)) {
         *untaken_builder = builder3;
     } else {
         /* PC = ir->pc + 8 (skip both ADDI and BNE, each 4 bytes) */

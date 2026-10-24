@@ -11,6 +11,38 @@ _MK_TESTS_INCLUDED := 1
 # Extra subdir needed for lfu outputs
 $(eval $(call test-framework,cache,test-cache.o,$(OUT)/cache.o $(OUT)/mpool.o,$(OUT)/cache/lfu))
 
+ifeq ($(T2C_ENABLED),1)
+# Native binding side index: replacement and scoped invalidation
+.PHONY: run-test-aot-cache
+$(eval $(call test-framework,aot-cache,test-aot-cache.o,$(OUT)/aot_cache.o,))
+$(eval $(call run-test-simple,aot-cache))
+tests: run-test-aot-cache
+ifeq ($(call has,SYSTEM),1)
+# Test a whole emulator source file in isolation: compile it with one section
+# per function and let the linker drop what the test does not reach.
+# $(1): test name, $(2): source file, $(3): extra objects and prerequisites,
+# $(4): extra compiler flags
+define isolated-source-test
+.PHONY: run-test-$(1)
+$$(eval $$(call test-framework,$(1),test-$(1).o,$$(OUT)/$(1)-impl.o $(filter %.o,$(3)),))
+$$(OUT)/$(1)-impl.o: $(2) $$(CONFIG_HEADER) $(filter-out %.o,$(3)) | $$(OUT)
+	$$(Q)$$(CC) $$(CFLAGS) $(4) -ffunction-sections -fdata-sections \
+	    -MMD -MF $$@.d -c $$< -o $$@
+ifeq ($$(UNAME_S),Darwin)
+$$(OUT)/$(1)/test-$(1): LDFLAGS += -Wl,-dead_strip
+else
+$$(OUT)/$(1)/test-$(1): LDFLAGS += -Wl,--gc-sections
+endif
+$$(eval $$(call run-test-simple,$(1)))
+tests: run-test-$(1)
+endef
+
+# Exercise the actual lookup with controlled mappings and artifact entries.
+$(eval $(call isolated-source-test,aot-lookup,src/aot.c,$(OUT)/aot_hash.o $(OUT)/aot-abi.h,-include $(OUT)/aot-abi.h))
+$(eval $(call isolated-source-test,mmu-code,src/system.c,,))
+endif
+endif
+
 # Block-edge test: verifies predecessor ownership and target-first unlinking
 $(eval $(call test-framework,block-edge,test-block-edge.o,,))
 
@@ -203,9 +235,10 @@ SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
     check-system-interrupt-dispatch-long-handler check-system-wfi \
     check-system-fence-stale-fetch check-system-shared-code \
     check-system-interrupt-fault check-system-interrupt-fault-switch \
-    check-system-amo check-system-csr
+    check-system-amo check-system-csr check-system-priv \
+    check-system-misalign-page
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
-SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction \
+SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction check-system-fence-shared \
     check-system-native-retire check-system-native-retire-cold \
     check-system-native-retire-store check-system-native-retire-mmio \
     check-system-native-retire-fused check-system-native-retire-sfence \
@@ -238,10 +271,9 @@ ifeq ($(CONFIG_JIT)$(T1C_STATS)$(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),y1yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-blocker-stats check-jit-blocker-stats-load \
 	check-jit-blocker-stats-store
 endif
-# Short loops reach T1 through loop detection only where T1 uses packed IR,
-# which T2C builds do not.
+# Short loops reach T1 through loop detection, which needs the profiler.
 ifeq ($(CONFIG_JIT),y)
-ifeq ($(CONFIG_T2C)$(CONFIG_ARCH_TEST),)
+ifneq ($(CONFIG_ARCH_TEST),y)
 GUEST_ASM_CHECK_TARGETS += check-jit-loop-profile
 endif
 endif
@@ -377,10 +409,8 @@ system-asm-build = $(call guest-asm-build,$(1),$(2),$(3),$(4) \
 	$(CROSS_COMPILE)objcopy -O binary $(OUT)/$(1)$(3) $(OUT)/$(1)$(3).bin
 # Checkers that read T1C diagnostics must find them in a JIT stats build.
 T1C_REQUIRE_STATS = $(if $(filter y1,$(CONFIG_JIT)$(T1C_STATS)),--require-stats)
-# Checkers that count T2C entries must find them in a T2C stats build.
-T2C_REQUIRE_ENTRIES = $(if $(filter y1,$(CONFIG_T2C)$(T1C_STATS)),--require-t2c)
-# System T1C without T2C compiles AMOs and CSR instructions (JIT_SYSTEM_HELPERS).
-T1C_COMPILED_HELPERS = $(if $(filter y,$(CONFIG_JIT)),$(if $(filter y,$(CONFIG_T2C)),,--compiled-helpers))
+# System T1C compiles AMOs and CSR instructions (JIT_SYSTEM_HELPERS).
+T1C_COMPILED_HELPERS = $(if $(filter y,$(CONFIG_JIT)),--compiled-helpers)
 
 define guest-asm-check-target
 .PHONY: check-$(1)$(3)
@@ -389,13 +419,14 @@ check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(call check-test, , $$(OUT)/$(1)$(3), $(1)$(3), tail -n 1,$$(EXPECTED_$(1)))
 endef
 
-# system-asm-check-target(name, march, suffix, flags, expected): flat kernel
-# linked at 0, loaded raw, that prints EXPECTED_<name> on success.
+# system-asm-check-target(name, march, suffix, flags, expected, options): flat
+# kernel linked at 0, loaded raw with optional emulator options, that prints
+# EXPECTED_<name> on success.
 define system-asm-check-target
 .PHONY: check-$(1)$(3)
 check-$(1)$(3): $$(BIN) tests/$(1).S | $$(OUT)
 	$$(Q)$$(call system-asm-build,$(1),$(2),$(3),$(4))
-	$$(call check-test,-k,$$(OUT)/$(1)$(3).bin,$(1)$(3),tail -n 1,$$(if $(5),$(5),$$(EXPECTED_$(1))))
+	$$(call check-test,$(6) -k,$$(OUT)/$(1)$(3).bin,$(1)$(3),tail -n 1,$$(if $(5),$(5),$$(EXPECTED_$(1))))
 endef
 
 EXPECTED_system-decode-trap = SYSTEM decode trap OK
@@ -416,23 +447,19 @@ check-system-fetch-retry check-system-fetch-retry-nested: $(BIN) tests/system-fe
 check-system-zba: $(BIN) tests/jit-zba.S tests/test-system-zba.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call system-asm-build,jit-zba,rv32i_zba_zicsr,-system,-DSYSTEM_MODE)
 	$(Q)python3 tests/test-system-zba.py $(BIN) $(OUT)/jit-zba-system.bin \
-	    $(T1C_REQUIRE_STATS) \
-	    $(T2C_REQUIRE_ENTRIES)
+	    $(T1C_REQUIRE_STATS)
 
 EXPECTED_system-load-x0 = SYSTEM load x0 OK
-# Diagnostics assert actual tier-2 entries and, in bare T2C mode, lazy fusion.
 .PHONY: check-system-load-x0 check-system-load-x0-bare
 # Where T1C compiles CSR instructions, the bare kernel's CSR loop runs compiled.
 check-system-load-x0-bare: SYSTEM_X0_COUNTERS = $(if $(filter 1,$(T1C_STATS)),$(if $(T1C_COMPILED_HELPERS),,--expect-csr-entries 2000000))
 check-system-load-x0-bare: SYSTEM_X0_SUFFIX := -bare
 check-system-load-x0-bare: SYSTEM_X0_FLAGS := -DLOAD_X0_BARE -DLOAD_X0_ITERATIONS=2000000
-# Only a tier-2 build needs the Sv32 run to outlast compilation.
-check-system-load-x0: SYSTEM_X0_FLAGS := $(if $(filter y,$(CONFIG_T2C)),,-DLOAD_X0_ITERATIONS=1000000)
-check-system-load-x0-bare: SYSTEM_X0_FUSION = $(if $(filter yy1,$(CONFIG_MOP_FUSION)$(CONFIG_T2C)$(T1C_STATS)),--expect-fusion)
+check-system-load-x0: SYSTEM_X0_FLAGS := -DLOAD_X0_ITERATIONS=1000000
 check-system-load-x0 check-system-load-x0-bare: $(BIN) tests/system-load-x0.S tests/test-system-load-x0.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call system-asm-build,system-load-x0,rv32ia_zicsr,$(SYSTEM_X0_SUFFIX),$(SYSTEM_X0_FLAGS))
 	$(Q)python3 tests/test-system-load-x0.py $(BIN) $(OUT)/system-load-x0$(SYSTEM_X0_SUFFIX).bin \
-	    $(SYSTEM_X0_FUSION) $(SYSTEM_X0_COUNTERS) $(T2C_REQUIRE_ENTRIES)
+	    $(SYSTEM_X0_COUNTERS)
 
 EXPECTED_system-mmu-cache = SYSTEM MMU cache OK
 EXPECTED_system-trap-cycles = SYSTEM trap cycles OK
@@ -440,9 +467,12 @@ EXPECTED_system-interrupt-dispatch = SYSTEM interrupt dispatch OK
 EXPECTED_system-wfi = SYSTEM WFI OK
 EXPECTED_system-fence-stale-fetch = SYSTEM fence stale fetch OK
 EXPECTED_system-shared-code = SYSTEM shared code OK
+EXPECTED_system-fence-shared = SYSTEM fence shared OK
 EXPECTED_system-interrupt-fault = SYSTEM interrupt fault OK
 EXPECTED_system-trap-resume = SYSTEM trap resume OK
 EXPECTED_system-jit-eviction = SYSTEM JIT eviction OK
+EXPECTED_system-priv = SYSTEM privilege OK
+EXPECTED_system-misalign-page = SYSTEM misaligned page crossing OK
 
 $(eval $(call system-asm-check-target,system-mmu-cache,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-trap-cycles,rv32ia_zicsr))
@@ -453,6 +483,7 @@ $(eval $(call system-asm-check-target,system-trap-resume,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-wfi,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-fence-stale-fetch,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-shared-code,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-fence-shared,rv32ia_zicsr_zifencei))
 $(eval $(call system-asm-check-target,system-interrupt-fault,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-interrupt-fault,rv32ia_zicsr,-switch,-DINTERRUPT_SWITCH))
 # Diagnostics confirm that the AMO and CSR loops run compiled.
@@ -480,6 +511,8 @@ $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-x0-mmio,-DRETIRE_INNER -DRETIRE_X0_MMIO,ZSYSTEM native retire OK))
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-multi-load,-DRETIRE_MULTI_LOAD))
 $(eval $(call system-asm-check-target,system-native-retire,rv32ia_zicsr_zifencei,-multi-store,-DRETIRE_MULTI_STORE -DRETIRE_STORE))
+$(eval $(call system-asm-check-target,system-priv,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-misalign-page,rv32ia_zicsr,,,,-m))
 
 define guest-check-target
 check-$(1): $(BIN) tests/$(1).c
@@ -553,7 +586,8 @@ check-jit-spill-loop-zba check-jit-spill-loop-region-zba: $(BIN) tests/jit-spill
 .PHONY: check-jit-zba
 check-jit-zba: $(BIN) tests/jit-zba.S tests/test-jit-zba.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call guest-asm-build,jit-zba,rv32i_zba)
-	$(Q)python3 tests/test-jit-zba.py $(BIN) $(OUT)/jit-zba $(CROSS_COMPILE)nm
+	$(Q)python3 tests/test-jit-zba.py $(BIN) $(OUT)/jit-zba $(CROSS_COMPILE)nm \
+	    $(if $(filter 1,$(T2C_ENABLED)),--aot $(LLVM_CONFIG))
 
 .PHONY: check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-store
 check-jit-blocker-stats-load: BLOCKER_STATS_SUFFIX = -load
@@ -568,12 +602,11 @@ check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-sto
 	    $(if $(BLOCKER_STATS_HEAD),--fused-head $(BLOCKER_STATS_HEAD) $(if $(filter y,$(CONFIG_MOP_FUSION)),--expect-fusion))
 
 .PHONY: check-t2c-load-x0
-# Only a tier-2 build needs the run to outlast compilation; see the guest.
 check-t2c-load-x0: $(BIN) tests/t2c-load-x0.S tests/test-t2c-load-x0.py tests/jit_profile.py | $(OUT)
-	$(Q)$(call guest-asm-build,t2c-load-x0,rv32i,,$(if $(filter y,$(CONFIG_T2C)),,-DLOAD_X0_ITERATIONS=1000000))
-ifeq ($(CONFIG_T2C),y)
+	$(Q)$(call guest-asm-build,t2c-load-x0,rv32i,,-DLOAD_X0_ITERATIONS=1000000)
+ifeq ($(T2C_ENABLED),1)
 	$(Q)python3 tests/test-t2c-load-x0.py $(BIN) $(OUT)/t2c-load-x0 $(CROSS_COMPILE)nm \
-	    $(if $(filter y,$(CONFIG_MOP_FUSION)),--expect-fusion)
+	    --aot $(LLVM_CONFIG)
 else
 	$(call check-test, , $(OUT)/t2c-load-x0, t2c-load-x0, tail -n 1,tiered load into x0 OK)
 endif
@@ -710,5 +743,35 @@ check-jit-wasm: | $(OUT)
 	$(call jit-wasm-check,-mmu,-DRV32_FEATURE_EXT_C=1 \
 	    -DRV32_FEATURE_SYSTEM=1 -DRV32_FEATURE_ELF_LOADER=0)
 	$(call jit-wasm-check,-profile,-DRV32_FEATURE_EXT_C=1 -DJIT_WASM_PROFILE)
+
+# AOT needs a complete collect/compile/replay cycle in addition to host checks.
+# AOT_TEST_FLAGS passes extra options, such as --native-pgo, to test-aot.py.
+ifeq ($(T2C_ENABLED)$(RUN_USER_ELF),1y)
+.PHONY: check-aot
+check-aot: $(BIN)
+	$(Q)python3 tests/test-aot-tools.py --llvm-config $(LLVM_CONFIG)
+	$(Q)python3 tests/test-aot.py --emulator $(BIN) \
+	    --cc $(CROSS_COMPILE)gcc --llvm-config $(LLVM_CONFIG) $(AOT_TEST_FLAGS)
+# The guest programs use RV32IMC, Zicsr, and FENCE.I.
+ifeq ($(CONFIG_EXT_M)$(CONFIG_EXT_C)$(CONFIG_Zicsr)$(CONFIG_Zifencei)$(GUEST_ASM_MC_WORKS),yyyyy)
+check: check-aot
+endif
+endif
+
+ifeq ($(T2C_ENABLED)$(CONFIG_SYSTEM),1y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+.PHONY: check-system-aot
+check-system-aot: $(BIN)
+	$(Q)python3 tests/test-aot-tools.py --llvm-config $(LLVM_CONFIG)
+	$(Q)python3 tests/test-system-aot.py --emulator $(BIN) \
+	    --cc $(CROSS_COMPILE)gcc --objcopy $(CROSS_COMPILE)objcopy \
+	    $(if $(filter y,$(CONFIG_EXT_C)),--rvc,) \
+	    --llvm-config $(LLVM_CONFIG)
+# The guest programs use atomics, CSRs, and FENCE.I.
+ifeq ($(CONFIG_EXT_A)$(CONFIG_Zicsr)$(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_WORKS),yyyy)
+check: check-system-aot
+endif
+endif
+endif
 
 endif # _MK_TESTS_INCLUDED

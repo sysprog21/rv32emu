@@ -119,6 +119,9 @@ static int rv_write_mem(void *args, size_t addr, size_t len, void *val)
         uint32_t paddr;
         uint32_t span = rv_debug_ram_span(rv, addr, len, &paddr);
         memory_write(PRIV(rv)->mem, paddr, buf, span);
+#if RV32_HAS(SYSTEM) && RV32_HAS(JIT)
+        mmu_note_guest_write(rv, paddr, span);
+#endif
         addr += span;
         buf += span;
         len -= span;

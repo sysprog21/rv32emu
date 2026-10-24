@@ -280,3 +280,22 @@ void virtio_net_refresh_queue(virtio_net_state_t *vnet);
 
 void virtio_net_reset(virtio_net_state_t *vnet);
 #endif /* RV32_HAS(VIRTIO_NET) */
+
+#if RV32_HAS(JIT)
+/* Report a device write to guest RAM at [addr, addr + len): payloads, status
+ * bytes and used rings alike; see mmu_note_guest_write().
+ */
+void virtio_guest_written(uint32_t addr, uint32_t len);
+#else
+static inline void virtio_guest_written(uint32_t addr, uint32_t len)
+{
+    (void) addr;
+    (void) len;
+}
+#endif
+
+/* Report words written at word index index of guest RAM, as rings use. */
+static inline void virtio_used_written(uint32_t index, uint32_t words)
+{
+    virtio_guest_written(index * 4, words * 4);
+}

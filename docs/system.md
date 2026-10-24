@@ -24,12 +24,14 @@ fast as the interpreter; hosts the JIT does not support fall back to the
 interpreter. Two other configurations cover the remaining modes:
 ```shell
 $ make system_interpreter_defconfig # without the JIT
-$ make system_jit_defconfig         # tier-1 JIT plus the LLVM-based T2C
+$ make system_jit_defconfig         # tier-1 JIT plus T2C AOT
 $ make system
 ```
 
-T2C runs compute-bound guests faster still; see
-[benchmark.md](benchmark.md#system-emulation) for measurements.
+With an artifact compiled offline from an earlier boot (see
+[build.md](build.md)), T2C boots Linux in about a fifth less time than the
+tier-1 JIT; [benchmark.md](benchmark.md#system-emulation) compares the engines
+across workloads.
 
 ## Rootfs: ext4 disk or initrd
 

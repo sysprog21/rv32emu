@@ -8,25 +8,30 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "aot_entry.h"
 #include "riscv_private.h"
 #include "utils.h"
 
 /* Instructions charged at block entry that follow a trapping instruction.
  * Fused records can contain several independently faulting instructions.
  * Their members are all 4 bytes: trace fusion, the only form that mixes
- * widths, is disabled in JIT builds.
+ * widths, is disabled in JIT builds. Offsets from the block start keep the
+ * order of a block whose addresses wrap past the top of the RV32 space.
  */
 static inline uint32_t block_unretired_after(const block_t *block, uint32_t pc)
 {
+    const uint32_t at = pc - block->pc_start;
     uint32_t n = 0;
     for (const rv_insn_t *ir = block->ir_head, *next; ir; ir = next) {
         next = ir == block->ir_tail ? NULL : block_next_ir(ir);
-        const uint32_t end = next ? next->pc : block->pc_end;
-        const uint32_t count = end - ir->pc > 4 ? (end - ir->pc) / 4 : 1;
-        if (pc < ir->pc)
+        const uint32_t start = ir->pc - block->pc_start;
+        const uint32_t end =
+            (next ? next->pc : block->pc_end) - block->pc_start;
+        const uint32_t count = end - start > 4 ? (end - start) / 4 : 1;
+        if (at < start)
             n += count;
-        else if (pc < end && count > 1)
-            n += count - 1 - (pc - ir->pc) / 4;
+        else if (at < end && count > 1)
+            n += count - 1 - (at - start) / 4;
     }
     return n;
 }
@@ -45,21 +50,23 @@ static inline uint32_t jit_instruction_size(uint16_t opcode)
     }
 }
 
-/* User mode and T1-only system mode link direct branches whether or not the
- * interpreter has taken the edge yet, and record a jump whose target is not
- * compiled so that the target's translation can patch it later.
+/* T1 links direct branches whether or not the interpreter has taken the edge
+ * yet, and records a jump whose target is not compiled so that the target's
+ * translation can patch it later. A target with an offline-compiled entry is
+ * never patched, so its jump returns to the dispatcher, which prefers AOT.
  */
-#define JIT_LINK_ALL_EDGES (!RV32_HAS(SYSTEM) || !RV32_HAS(T2C))
+#define JIT_LINK_ALL_EDGES 1
 
-/* T1-only system builds dispatch straight to live native code. */
-#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(JIT) && !RV32_HAS(T2C) && \
-    !defined(__EMSCRIPTEN__)
+/* Native system builds dispatch straight to live T1 code, after any bound
+ * AOT entry.
+ */
+#if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(JIT) && !defined(__EMSCRIPTEN__)
 #define JIT_RUN_CACHED 1
 #else
 #define JIT_RUN_CACHED 0
 #endif
 
-/* Native T1-only system builds also compile AMOs and CSR instructions, as
+/* Native system builds also compile AMOs and CSR instructions, as
  * calls into C between native code, instead of interpreting each block that
  * holds one: the kernel runs them in its hottest paths, such as reference
  * counting and masking interrupts.
@@ -86,6 +93,68 @@ static inline uint32_t jit_instruction_size(uint16_t opcode)
     case rv_insn_csrrwi:     \
     case rv_insn_csrrsi:     \
     case rv_insn_csrrci
+
+#if RV32_HAS(T2C)
+static inline bool t2c_counter_read(const rv_insn_t *ir)
+{
+#if RV32_HAS(SYSTEM) && RV32_HAS(Zicsr)
+    if (ir->rs1 ||
+        (ir->opcode != rv_insn_csrrs && ir->opcode != rv_insn_csrrc &&
+         ir->opcode != rv_insn_csrrsi && ir->opcode != rv_insn_csrrci))
+        return false;
+    switch (ir->imm & 0xfff) {
+    case CSR_CYCLE:
+    case CSR_CYCLEH:
+    case CSR_INSTRET:
+    case CSR_INSTRETH:
+    case CSR_TIME:
+    case CSR_TIMEH:
+        return true;
+    }
+#else
+    (void) ir;
+#endif
+    return false;
+}
+#if RV32_HAS(SYSTEM)
+/* ir is unused when neither extension is built. */
+static inline bool t2c_outlined_insn(const rv_insn_t *ir UNUSED)
+{
+#if RV32_HAS(EXT_A)
+    switch (ir->opcode) {
+    case rv_insn_lrw:
+    case rv_insn_scw:
+    case rv_insn_amoswapw:
+    case rv_insn_amoaddw:
+    case rv_insn_amoxorw:
+    case rv_insn_amoandw:
+    case rv_insn_amoorw:
+    case rv_insn_amominw:
+    case rv_insn_amomaxw:
+    case rv_insn_amominuw:
+    case rv_insn_amomaxuw:
+        return true;
+    }
+#endif
+#if RV32_HAS(Zicsr)
+    if ((ir->imm & 0xfff) == CSR_SSTATUS) {
+        switch (ir->opcode) {
+        case rv_insn_csrrw:
+        case rv_insn_csrrs:
+        case rv_insn_csrrc:
+        case rv_insn_csrrwi:
+        case rv_insn_csrrsi:
+        case rv_insn_csrrci:
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+void t2c_run_outlined_insn(riscv_t *, uint32_t, uint32_t);
+#endif
+
+#endif
 
 /* Jump condition codes for branch instruction code generation.
  * Values match x86-64 Jcc opcodes; on Arm64, emit_jcc_offset() maps these
@@ -219,6 +288,14 @@ struct host_reg {
 #define JIT_MISALIGN_STORE 1U
 #define JIT_MISALIGN_COMPRESSED 2U
 
+#if RV32_HAS(T2C) && !RV32_HAS(SYSTEM)
+/* The user AOT slow callback also resumes a wrapping address in the
+ * interpreter, without adding a flag test to normal native dispatch.
+ */
+#define AOT_USER_INTERPRET (1U << 31)
+void t2c_interpret_block(riscv_t *rv);
+#endif
+
 /* Raise the exception the interpreter raises for a misaligned load or store.
  * Both JIT tiers call this with rv->PC set to the faulting instruction and
  * every guest register in rv->X, then leave the block: the trap handler has
@@ -308,6 +385,7 @@ void jit_flush(riscv_t *rv);
 
 /* Retire live native entries in every retained address space. */
 void jit_retire_all(struct jit_state *state);
+void jit_retire_unshared(struct jit_state *state);
 
 /* Whether live code translated for any address space starts in the page of
  * va; retired code does not count. Without block chaining, blocks may span
@@ -318,7 +396,20 @@ bool jit_page_has_code_any(const struct jit_state *state, uint32_t va);
 typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 
 #if RV32_HAS(T2C)
-void t2c_compile(riscv_t *, block_t *, pthread_mutex_t *);
+#define T2C_PROFILE_THRESHOLD 64
+bool t2c_compile(riscv_t *, block_t *, const char *);
+bool t2c_aot_init(riscv_t *);
+void t2c_aot_bind(riscv_t *, block_t *);
+void t2c_aot_exit(riscv_t *);
+void t2c_aot_checkpoint(riscv_t *);
+#if RV32_HAS(SYSTEM)
+struct aot_entry;
+const struct aot_entry *t2c_aot_has_pc(riscv_t *);
+void *t2c_aot_lookup(riscv_t *, const struct aot_entry *);
+uint64_t t2c_aot_page_hash(riscv_t *, block_t *);
+#endif
+void t2c_aot_collect_block(riscv_t *, block_t *);
+void t2c_aot_invalidate(riscv_t *, bool keep_shared);
 typedef void (*exec_t2c_func_t)(riscv_t *);
 
 /* The jit-cache records the program counters and the entries of executable
@@ -329,7 +420,9 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
 /* The size of jit-cache table should be the power of 2, thus, we can easily
  * access the element by masking the program counter.
  */
-#define N_JIT_CACHE_ENTRIES (1 << 12)
+#define JIT_CACHE_INDEX_BITS 12
+#define N_JIT_CACHE_ENTRIES (1 << JIT_CACHE_INDEX_BITS)
+#define JIT_CACHE_HASH_MULTIPLIER UINT32_C(2654435761)
 
 /* Slot of the jit-cache entry for pc in address space satp (0 outside system
  * mode). t2c_jit_cache_helper() computes the same index in LLVM IR for the
@@ -339,7 +432,15 @@ typedef void (*exec_t2c_func_t)(riscv_t *);
  */
 static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
 {
+#if RV32_HAS(SYSTEM)
+    /* Use high product bits: masking a folded PC leaves recurring kernel
+     * entry pairs in the same slot even with a substantially larger table.
+     */
+    return ((pc ^ satp) * JIT_CACHE_HASH_MULTIPLIER) >>
+           (32 - JIT_CACHE_INDEX_BITS);
+#else
     return (pc ^ (pc >> 12) ^ satp) & (N_JIT_CACHE_ENTRIES - 1);
+#endif
 }
 
 /* Inline cache for fast-path indirect jump resolution.
@@ -348,22 +449,25 @@ static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
  *
  * Thread model: The inline cache is per-riscv_t instance and accessed only
  * by the main execution thread. No synchronization needed - single writer/
- * reader pattern. The T2C compiler thread updates jit_cache (protected by
- * seqlock) but never accesses inline caches.
+ * reader pattern. Artifact binding also runs on that execution thread.
  *
  * Memory model: Non-atomic loads/stores are used because:
  * 1. Single-threaded access within each riscv_t instance
  * 2. T2C requires 64-bit host (static_assert below) ensuring atomic 64-bit
  *    loads - no torn reads possible for the key field
  *
- * satp stability: In system mode, the key includes satp. This is safe because
- * satp changes only via CSR writes which are serialized with execution - the
- * inline cache is always checked with the current satp value.
+ * satp stability: In system mode, the key includes the address space whose
+ * code map records the page: the current satp, or SATP_SHARED for kernel code
+ * reached through global mappings, which kernel graphs look up directly.
+ * satp changes only via CSR writes, which are serialized with execution.
  *
- * Invalidation: Inline cache entries are cleared on:
- * - Block eviction (inline_cache_clear_key in emulate.c)
- * - SFENCE.VMA code retirement (inline_cache_clear in emulate.c)
- * - FENCE.I / code_cache_flush (inline_cache_clear in jit.c)
+ * Native binding lifetime:
+ * - SFENCE.VMA code retirement clears the entries of the retired address
+ *   spaces, and all entries when every space retires (emulate.c).
+ * - Decoded block eviction retains validated native bindings.
+ * - FENCE.I clears the entries outside SATP_SHARED, and all entries once
+ *   shared code was written (rv32_template.c); a code-cache flush clears all
+ *   entries (jit.c).
  *
  * On cache hit, ISB is skipped on ARM64 since we already executed this target
  * successfully - the instruction cache was coherent at that time.
@@ -412,15 +516,11 @@ static_assert(sizeof(struct inline_cache) == 16, "user inline cache ABI");
 struct inline_cache *inline_cache_init(void);
 void inline_cache_exit(struct inline_cache *cache);
 void inline_cache_clear(struct inline_cache *cache);
-void inline_cache_clear_key(struct inline_cache *cache, uint64_t key);
 
 /* jit_cache entry for T2C compiled code lookup.
- * Thread safety: Uses seqlock pattern for lock-free readers.
- * - Writers (under cache_lock): increment seq to odd, write
- * entry+key+privilege, increment seq to even
- * - Lock-free readers (LLVM-generated): read seq1, if odd retry; read
- *   entry+key; read seq2; if seq1 != seq2 retry Seqlock ensures readers see
- *   consistent (key, entry, privilege) snapshots without ABA problems.
+ * The hart thread alone writes and reads it. Writes still follow a seqlock
+ * pattern (seq odd while key, entry and privilege change) that generated
+ * code checks, which keeps the artifact ABI unchanged.
  */
 struct jit_cache {
     uint32_t seq; /* sequence counter: odd = write in progress, even = stable */
@@ -466,14 +566,13 @@ void jit_cache_update(struct jit_cache *cache,
                       void *entry,
                       uint32_t priv_mode);
 void jit_cache_clear(struct jit_cache *cache);
-
-/* Hand an evicted block's LLVM engine to the T2C thread, which disposes it in
- * t2c_reap_engines().
- */
-void t2c_retire_engine(riscv_t *rv, void *engine);
-void t2c_free_orphans(riscv_t *rv);
-void t2c_reap_engines(riscv_t *rv);
-
-/* Wrapper for cache cleanup - disposes LLVM engine from a block */
-void t2c_dispose_block_engine(void *block);
+#if RV32_HAS(SYSTEM)
+/* Drop the bindings recorded under address space satp. */
+void jit_cache_retire_space(struct jit_cache *cache,
+                            struct inline_cache *inline_cache,
+                            uint32_t satp);
+/* Drop every binding outside SATP_SHARED. */
+void jit_cache_retire_unshared(struct jit_cache *cache,
+                               struct inline_cache *inline_cache);
+#endif
 #endif

@@ -5,8 +5,8 @@
 set -u -o pipefail
 
 # Track the same clang-format .ci/install-formatters.sh installs; hardcoding a
-# version here makes the check silently skip itself after an LLVM bump.
-CLANG_FORMAT=clang-format-$(cat "$(dirname "${BASH_SOURCE[0]}")/llvm-version")
+# version here makes the check silently skip itself after a formatter bump.
+CLANG_FORMAT=clang-format-$(cat "$(dirname "${BASH_SOURCE[0]}")/clang-format-version")
 
 # Use git ls-files to exclude submodules and untracked files
 C_SOURCES=()

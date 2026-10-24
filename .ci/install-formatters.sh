@@ -4,18 +4,20 @@
 #
 # clang-format is pulled from apt.llvm.org through install-llvm.sh so the
 # signing key is fingerprint-checked rather than trusted blind, and so the
-# version tracks .ci/llvm-version instead of drifting on its own.
+# version tracks .ci/clang-format-version instead of drifting on its own.
+# That pin is separate from .ci/llvm-version so moving T2C to a newer LLVM
+# does not reformat the tree.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 set -e -u -o pipefail
 
-LLVM_VERSION=$(cat "${SCRIPT_DIR}/llvm-version")
+CLANG_FORMAT_VERSION=$(cat "${SCRIPT_DIR}/clang-format-version")
 DTSFMT_VERSION=v0.8.0
 
 "${SCRIPT_DIR}/apt-install.sh" curl wget lsb-release gnupg
-sudo "${SCRIPT_DIR}/install-llvm.sh" "${LLVM_VERSION}"
-sudo apt-get install -y -q=2 "clang-format-${LLVM_VERSION}" shfmt python3-pip
+sudo "${SCRIPT_DIR}/install-llvm.sh" "${CLANG_FORMAT_VERSION}"
+sudo apt-get install -y -q=2 "clang-format-${CLANG_FORMAT_VERSION}" shfmt python3-pip
 
 pip3 install --break-system-packages black==25.1.0
 

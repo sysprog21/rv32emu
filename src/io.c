@@ -11,6 +11,7 @@
 #include <string.h>
 
 #if HAVE_MMAP
+#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -56,6 +57,25 @@ static uint32_t gc_scan_idx;
  * safety) */
 static atomic_uint_fast32_t active_chunks;
 static atomic_uint_fast32_t peak_chunks;
+
+/* A full 4 GiB arena wraps like the RV32 address space: the page after its end
+ * maps guest page 0 and the page before its start the last guest page, so a
+ * native base register plus a 12-bit displacement that crosses either end
+ * reaches the address the guest computes modulo 2^32. The two end chunks live
+ * in a shared memory object, mapped in place and again as these mirrors; they
+ * stay resident and outside the demand paging below. A mirror is one host
+ * page, which may be larger than 4 KiB, so that the arena stays page aligned.
+ */
+static bool memory_mirrored;
+
+/* The size of each mirror for an arena of @size bytes, or 0 for none. */
+static size_t memory_mirror_size(uint64_t size)
+{
+    if (size != 0x100000000ULL)
+        return 0;
+    const long page = sysconf(_SC_PAGESIZE);
+    return page > 0 && page <= (long) CHUNK_SIZE ? (size_t) page : 0;
+}
 
 /* Previous signal handlers to chain */
 static struct sigaction prev_sigsegv_handler;
@@ -160,6 +180,52 @@ static void memory_fault_handler(int sig, siginfo_t *si, void *context UNUSED)
     }
 }
 
+/* An anonymous shared memory object for the first and the last chunk of guest
+ * RAM: POSIX shared memory whose name is removed at once.
+ */
+static int memory_shared_fd(void)
+{
+    static unsigned serial;
+    char name[64];
+    snprintf(name, sizeof(name), "/rv32emu-%ld-%u", (long) getpid(), serial++);
+    int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+    if (fd >= 0)
+        shm_unlink(name);
+    return fd;
+}
+
+/* Replace the end chunks of the reserved 4 GiB arena with the shared object
+ * and map their @mirror bytes long mirrors next to it; see memory_mirrored.
+ */
+static bool memory_map_mirrors(size_t mirror)
+{
+    if (!mirror)
+        return false;
+    int fd = memory_shared_fd();
+    if (fd < 0)
+        return false;
+    uint8_t *base = data_memory_base;
+    const uint64_t last = data_memory_size - CHUNK_SIZE;
+    const int prot = PROT_READ | PROT_WRITE;
+    const int flags = MAP_SHARED | MAP_FIXED;
+    bool ok = !ftruncate(fd, 2 * CHUNK_SIZE) &&
+              mmap(base, CHUNK_SIZE, prot, flags, fd, 0) == base &&
+              mmap(base + last, CHUNK_SIZE, prot, flags, fd, CHUNK_SIZE) ==
+                  base + last &&
+              mmap(base + data_memory_size, mirror, prot, flags, fd, 0) ==
+                  base + data_memory_size &&
+              mmap(base - mirror, mirror, prot, flags, fd,
+                   2 * CHUNK_SIZE - mirror) == base - mirror;
+    close(fd);
+    if (!ok)
+        return false;
+    bitmap_set(0);
+    bitmap_set(last >> CHUNK_SHIFT);
+    atomic_store_explicit(&active_chunks, 2, memory_order_relaxed);
+    atomic_store_explicit(&peak_chunks, 2, memory_order_relaxed);
+    return true;
+}
+
 static bool install_signal_handlers(void)
 {
     struct sigaction sa;
@@ -218,19 +284,25 @@ memory_t *memory_new(uint64_t size)
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
 #endif
-    data_memory_base = mmap(NULL, size, PROT_NONE,
-                            MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
-    if (data_memory_base == MAP_FAILED) {
+    const size_t guard = memory_mirror_size(size);
+    uint8_t *reserved =
+        mmap(NULL, size + 2 * guard, PROT_NONE,
+             MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
+    if (reserved == MAP_FAILED) {
         restore_signal_handlers();
         free(mem);
         return NULL;
     }
+    data_memory_base = reserved + guard;
 
     data_memory_size = size;
     memset(chunk_bitmap, 0, sizeof(chunk_bitmap));
     gc_scan_idx = 0;
     atomic_store_explicit(&active_chunks, 0, memory_order_relaxed);
     atomic_store_explicit(&peak_chunks, 0, memory_order_relaxed);
+    memory_mirrored = memory_map_mirrors(guard);
+    if (guard && !memory_mirrored)
+        rv_log_warn("Guest addresses will not wrap at 4 GiB in native code");
 #else
     /* Fallback for systems without mmap (e.g., Windows, Emscripten).
      * Cannot use demand paging - physical memory is allocated upfront.
@@ -290,7 +362,9 @@ void memory_delete(memory_t *mem)
 #if HAVE_MMAP
     /* Restore handlers first to prevent use-after-free in signal handler */
     restore_signal_handlers();
-    munmap(mem->mem_base, mem->mem_size);
+    const size_t guard = memory_mirror_size(mem->mem_size);
+    munmap(mem->mem_base - guard, mem->mem_size + 2 * guard);
+    memory_mirrored = false;
 #else
     free(mem->mem_base);
 #endif
@@ -341,8 +415,9 @@ void memory_gc(void)
     sigaddset(&block_set, SIGBUS);
     sigprocmask(SIG_BLOCK, &block_set, &old_set);
 
-    /* Check if this chunk is activated */
-    if (bitmap_test(idx)) {
+    /* Check if this chunk is activated; mirrored end chunks stay resident */
+    if (bitmap_test(idx) &&
+        !(memory_mirrored && (!idx || idx == max_idx - 1))) {
         uint8_t *chunk_ptr =
             data_memory_base + ((uintptr_t) idx << CHUNK_SHIFT);
 

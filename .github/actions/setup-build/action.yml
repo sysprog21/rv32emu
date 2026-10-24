@@ -24,6 +24,9 @@ inputs:
   riscv-toolchain:
     description: Install the RISC-V cross toolchain, needed by the gdbstub and architecture tests.
     default: 'false'
+  arch-test:
+    description: Install ACT4 Python, Ruby/UDB and Sail tools; also installs the RISC-V compiler.
+    default: 'false'
   artifacts:
     description: Prebuilt artifacts to fetch, as accepted by .ci/fetch-artifacts.sh.
     default: ''
@@ -104,7 +107,7 @@ runs:
         fi
 
     - name: Cache RISC-V toolchain
-      if: inputs.riscv-toolchain == 'true'
+      if: inputs.riscv-toolchain == 'true' || inputs.arch-test == 'true'
       id: cache-toolchain
       uses: actions/cache@v6
       with:
@@ -112,17 +115,17 @@ runs:
         key: ${{ runner.os }}-${{ runner.arch }}-riscv-toolchain-${{ hashFiles('.ci/riscv-toolchain-install.sh') }}
 
     - name: Install RISC-V toolchain
-      if: inputs.riscv-toolchain == 'true' && steps.cache-toolchain.outputs.cache-hit != 'true'
+      if: (inputs.riscv-toolchain == 'true' || inputs.arch-test == 'true') && steps.cache-toolchain.outputs.cache-hit != 'true'
       shell: bash
       run: .ci/riscv-toolchain-install.sh
 
     - name: Set up RISC-V toolchain PATH
-      if: inputs.riscv-toolchain == 'true'
+      if: inputs.riscv-toolchain == 'true' || inputs.arch-test == 'true'
       shell: bash
       run: echo "${{ github.workspace }}/toolchain/bin" >> "$GITHUB_PATH"
 
     - name: Set up Python
-      if: runner.os == 'macOS'
+      if: runner.os == 'macOS' || inputs.arch-test == 'true'
       uses: actions/setup-python@v7
       with:
         python-version: '3.12'
@@ -160,6 +163,34 @@ runs:
           echo "CC=${SELECTED_CC}" >> "$GITHUB_ENV"
         fi
         echo "cc=${SELECTED_CC}" >> "$GITHUB_OUTPUT"
+
+    - name: Read ACT4 tool versions
+      if: inputs.arch-test == 'true'
+      id: act4-versions
+      shell: bash
+      run: |
+        python3 - <<'PYTHON' >> "$GITHUB_OUTPUT"
+        import tomllib
+        from pathlib import Path
+        tools = tomllib.loads(Path("tests/riscv-arch-test/.mise.toml").read_text())["tools"]
+        print(f"ruby={tools['ruby']}")
+        print(f"uv={tools['uv']}")
+        PYTHON
+
+    - name: Set up Ruby for ACT4 UDB
+      if: inputs.arch-test == 'true'
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ steps.act4-versions.outputs.ruby }}
+
+    - name: Install ACT4 dependencies
+      if: inputs.arch-test == 'true'
+      shell: bash
+      env:
+        UV_VERSION: ${{ steps.act4-versions.outputs.uv }}
+      run: |
+        python3 -m pip install "uv==$UV_VERSION"
+        bash .ci/arch-test-setup.sh
 
     - name: Cache build artifacts
       if: inputs.artifacts != ''

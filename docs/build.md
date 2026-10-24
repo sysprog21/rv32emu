@@ -100,6 +100,6 @@ $ make ENABLE_SDL=0       # Build without SDL support
 * `ENABLE_BLOCK_CHAINING`: Chain translated blocks to bypass the dispatcher (default on).
 * `ENABLE_LTO`: Link-time optimization (default on; requires GCC or Clang).
 * `ENABLE_UBSAN`: Build with `-fsanitize=undefined` to surface UB at runtime.
-* `ENABLE_ARCH_TEST`: Build the RISCOF-driven arch-test harness; see [riscof.md](riscof.md).
+* `ENABLE_ARCH_TEST`: Enable architectural-test exit reporting for the ACT4 harness; see [arch-test.md](arch-test.md).
 * `INITRD_SIZE`: System mode only — initrd reservation in MiB. `mk/system.mk` auto-sizes from the on-disk `rootfs.cpio` (file size + 2 MiB) when present, otherwise defaults to 32 MiB. Override on the make line, e.g. `make system ENABLE_SYSTEM=1 INITRD_SIZE=64` for SDL workloads that bundle larger assets.
 * `VLEN`: V extension vector length in bits (default 128). Override on the make line, e.g. `make VLEN=256`. See `EXT_V` above for enabling vector support.

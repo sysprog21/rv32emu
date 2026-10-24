@@ -18,7 +18,11 @@ perf.data.old
 .config
 .config.old
 build/rv32emu
+build/act-tools/
+build/act-tohost.*
+build/act-misalign.*
 build/arch-test
+build/arch-test-runners/
 build/mini-gdbstub
 build/softfloat
 build/cache/

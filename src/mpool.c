@@ -17,8 +17,8 @@
 #include "feature.h"
 #include "mpool.h"
 
-/* A pool has a single user, the emulator thread; the T2C thread hands back the
- * blocks it would otherwise free (see t2c_free_orphans), so no lock is needed.
+/* The emulator thread owns each pool. AOT lifting reads completed IR only
+ * after guest execution, so it needs no concurrent allocation or reclamation.
  */
 
 /* Chunk layout: [memchunk_t next-pointer][user data] */

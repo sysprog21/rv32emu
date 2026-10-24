@@ -769,9 +769,8 @@ RVOP(sfencevma, {
         uint32_t va = rv->X[ir->rs1];
         mmu_tlb_flush(rv, va);
 #if RV32_HAS(JIT)
-        /* Linux flushes data pages far more often than code, so first check,
-         * without cache_lock, whether the page holds any block or translated
-         * code: only this thread changes the indexes that answer that.
+        /* Linux flushes data pages far more often than code, so first check
+         * whether the page holds any block or translated code.
          */
         const uint32_t previous_page = (va & ~(RV_PG_SIZE - 1)) - RV_PG_SIZE;
         /* A C-enabled block starting at the previous page's last halfword
@@ -779,8 +778,12 @@ RVOP(sfencevma, {
          * Conservatively retire when either indexed start page holds code,
          * across all tiers.
          */
+        /* Artifact bindings need no decoded block, but their pages are
+         * recorded, and checking one page's records is cheap.
+         */
         const bool has_code =
-            jit_page_has_code_any(rv->jit_state, va) ||
+            IIF(RV32_HAS(T2C))(rv->aot_index ||, )
+                jit_page_has_code_any(rv->jit_state, va) ||
             mmu_code_superpage(rv, va) ||
             cache_has_va_any(rv->block_cache, va) ||
             (RV32_HAS(EXT_C) &&
@@ -820,13 +823,13 @@ RVOP(sfencevma, {
 RVOP(fencei, {
     T1C_COUNT(fence_i, 1);
     PC += 4;
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
 #if RV32_HAS(T2C)
-    /* Hold cache_lock during invalidation to prevent race with T2C
-     * compilation thread. Same locking protocol as SFENCE.VMA.
-     */
-    hart_lock(rv, &rv->cache_lock);
+    if (aot_enabled(rv)) {
+        rv->aot_fences++;
+        t2c_aot_invalidate(rv);
+    }
 #endif
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
     /* FENCE.I is a global instruction cache barrier: any page of any address
      * space, kernel text included, may hold new instructions. Invalidate every
      * block and drop all translated code, which also empties the T2C caches.
@@ -835,9 +838,6 @@ RVOP(fencei, {
     uint32_t n_invalidated UNUSED = cache_invalidate_all(rv->block_cache);
     T1C_COUNT(fence_i_blocks, n_invalidated);
     jit_flush(rv);
-#if RV32_HAS(T2C)
-    hart_unlock(rv, &rv->cache_lock);
-#endif
 #endif
 /* User JIT invalidation is unsupported; see docs/fencei.md. */
 #if !RV32_HAS(JIT)

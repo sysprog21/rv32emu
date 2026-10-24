@@ -133,6 +133,11 @@ typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompassed */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
     uint32_t cycle_cost;       /**< cycle cost for block-level counting */
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+    /* Original instruction starts, retained across macro-op fusion. */
+    uint64_t aot_insn_starts[32];
+    uint8_t aot_page_digest[32]; /**< SHA-256 of the block's code page */
+#endif
 #if RV32_T1C_STATS_ENABLED
     /* First unsupported opcode, or a T1C_* attribution reason. */
     unsigned stats_blocker;
@@ -145,7 +150,7 @@ typedef struct block {
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
 
 #if RV32_HAS(BLOCK_CHAINING)
-    bool page_terminated; /**< Block ended at page boundary (not a branch) */
+    bool page_terminated; /**< Fallthrough boundary (page or explicit yield) */
 #endif
 
 #if RV32_HAS(SYSTEM_MMIO) && RV32_HAS(MOP_FUSION)
@@ -163,7 +168,7 @@ typedef struct block {
     rv_insn_impl_t head_impl;
 #endif
     bool hot;          /**< Determine the block is potential hotspot or not */
-    bool hot2;         /**< Determine the block is strong hotspot or not */
+    bool hot2;         /**< The block is bound to an AOT region */
     bool translatable; /**< Determine the block has RV32AF or not */
     bool has_loops;    /**< Determine the block has loop or not */
 #if RV32_HAS(SYSTEM)
@@ -172,16 +177,14 @@ typedef struct block {
                        */
 #endif
 #if RV32_HAS(T2C)
-    bool compiled;     /**< The T2C request is enqueued or not */
-    bool is_compiling; /**< T2C thread is currently processing this block */
-    bool should_free;  /**< Block was evicted while compiling, freed by T2C */
+    bool compiled; /**< AOT symbol lookup has been attempted */
+    bool aot_saved;
+    bool aot_translatable;
+    uint64_t aot_page_hash;
 #endif
     uint32_t offset;   /**< The machine code offset in T1 code cache */
     uint32_t n_invoke; /**< The invoking times of T1 machine code */
     void *func;        /**< The function pointer of T2 machine code */
-#if RV32_HAS(T2C)
-    void *llvm_engine; /**< LLVM execution engine (keeps func memory alive) */
-#endif
     struct list_head list;
 #if RV32_HAS(BLOCK_CHAINING)
     struct list_head incoming_edges; /**< edges ending at this block */
@@ -204,10 +207,7 @@ static inline rv_insn_t **block_chain_slot(block_t *source, bool taken)
 #endif
 
 #if RV32_HAS(JIT) && RV32_HAS(BLOCK_CHAINING)
-/* Edge lists are owned by the emulator thread alone. The T2C thread signals a
- * block it can no longer reach through should_free and never touches an edge
- * itself, so none of this needs cache_lock.
- */
+/* The emulator thread owns edge lists; AOT lifting runs after execution. */
 static inline void block_init_edge_lists(block_t *block)
 {
     INIT_LIST_HEAD(&block->incoming_edges);
@@ -255,13 +255,7 @@ static inline void block_link_edge(block_t *source, bool taken, block_t *target)
 
     block_edge_t *edge = taken ? &source->taken_edge : &source->untaken_edge;
     assert(!edge->target);
-    /* The T2C thread reads this slot while tracing, and chaining runs on the
-     * emulator thread without cache_lock. Publish it atomically so that read
-     * is not a data race: a tracer sees either no edge or this one, and both
-     * describe a block it may legitimately compile. Relaxed is enough -
-     * nothing downstream of the pointer is published by this store.
-     */
-    ATOMIC_STORE(slot, target->ir_head, ATOMIC_RELAXED);
+    *slot = target->ir_head;
     edge->target = target;
     list_add(&edge->target_link, &target->incoming_edges);
 }
@@ -310,17 +304,6 @@ static inline void block_link_edge(block_t *source, bool taken, block_t *target)
     if (!*slot)
         *slot = target->ir_head;
 }
-#endif
-
-/* T2C implies JIT (enforced by Kconfig and feature.h) */
-#if RV32_HAS(T2C)
-typedef struct {
-    uint64_t key; /**< cache key (PC or PC|SATP) to look up block */
-#if RV32_HAS(SYSTEM)
-    uint32_t priv_mode; /* context of the queued block */
-#endif
-    struct list_head list;
-} queue_entry_t;
 #endif
 
 #if RV32_HAS(SYSTEM)
@@ -464,9 +447,7 @@ struct riscv_internal {
      * load and store.
      */
     bool allow_misalign;
-#if !RV32_HAS(SYSTEM)
     uint8_t *ram_base;
-#endif
 
     uint64_t timer; /**< strictly increment timer */
 
@@ -604,21 +585,42 @@ struct riscv_internal {
     struct cache *block_cache;
     struct list_head block_list; /**< list of all translated blocks */
 #if RV32_HAS(T2C)
-    struct list_head wait_queue;
-    pthread_mutex_t wait_queue_lock, cache_lock;
-    uint32_t hart_locks_held; /**< counted by hart_lock()/hart_unlock() */
-    pthread_cond_t wait_queue_cond;
-    bool quit; /**< termination flag, protected by wait_queue_lock */
-    /* Engines of evicted blocks, for the T2C thread to dispose; protected by
-     * cache_lock. See t2c_retire_engine().
-     */
-    struct t2c_retired_engine *retired_engines;
-
-    /* Blocks evicted while the T2C thread compiled them, which it hands back
-     * for this thread to free: the memory pools then have a single user and
-     * need no lock. Protected by cache_lock. See t2c_free_orphans().
-     */
-    struct list_head orphan_blocks;
+    void *aot_handle;
+    void *aot_collector;
+    bool (*aot_lift)(riscv_t *, block_t *, const char *);
+    void (*aot_insn)(riscv_t *, uint32_t, uint32_t);
+    uint64_t aot_calls, aot_collected;
+    uint64_t aot_trap_epoch, aot_code_epoch;
+    uint64_t aot_native_insns, aot_slow_calls, aot_slow_resumes;
+    uint64_t aot_hash_hits, aot_hash_misses, aot_bindings;
+    uint64_t aot_fences, aot_hash_rechecks, aot_hash_reuses;
+    uint64_t aot_t1_flushes;
+#if RV32_HAS(SYSTEM)
+    uint64_t aot_dispatches;
+#endif
+    bool aot_error;
+    const struct aot_entry *aot_index;
+    uint32_t aot_index_mask;
+#if RV32_HAS(SYSTEM)
+    /* Immutable artifact PC misses survive address-space and code changes. */
+    uint32_t aot_absent_pc[1024];
+    uint64_t aot_absent_valid[16];
+    uint64_t aot_lookup_calls, aot_absent_hits, aot_lookup_absent;
+    uint64_t aot_lookup_mismatches, aot_lookup_unmapped;
+    uint64_t aot_hash_epoch;
+    uint8_t *aot_page_snapshots;
+    struct {
+        uint32_t physical;
+        uint64_t hash, epoch;
+        uint8_t digest[32];
+    } aot_page_hashes[4096];
+    bool *aot_signal;
+    bool aot_fallback;
+#endif
+    void (*aot_misaligned_trap)(riscv_t *, uint32_t, uint32_t);
+    bool aot_disabled; /**< Guest FENCE.I prevents artifact reuse */
+    uint64_t aot_identity[6];
+    uint32_t aot_producer_llvm, aot_call_conv;
 #endif
     void *jit_state;
     void *jit_cache;
@@ -763,25 +765,28 @@ struct riscv_internal {
     uint32_t code_pages[CODE_PAGE_FILTER_BITS / 32];
 #endif
 #endif
+#if RV32_HAS(T2C)
+    /* The artifact's entry trampoline, when its regions use preserve_none. */
+    void (*aot_enter)(riscv_t *, void *);
+#endif
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+    /* One bit per virtual page holding an artifact entry. Most dispatcher
+     * misses are for pages the artifact does not cover, and this 128 KiB map
+     * answers them without probing the much larger entry index.
+     */
+    uint64_t *aot_pages;
+    /* Whether kernel code has been bound under SATP_SHARED, which tells
+     * kernel graphs to look their targets up there.
+     */
+    bool aot_kernel_shared;
+#endif
 };
 
 #if RV32_HAS(T2C)
-/* Lock and unlock on the hart thread. A guest reboot abandons the hart stack
- * (see syscall_restart_hart()), so the hart counts the locks it holds and a
- * reboot refuses to go ahead while any is held. The T2C thread uses the plain
- * pthread calls.
- */
-static inline void hart_lock(riscv_t *rv, pthread_mutex_t *lock)
+/* Whether this run collects an AOT profile or replays an AOT artifact. */
+static inline bool aot_enabled(const riscv_t *rv)
 {
-    pthread_mutex_lock(lock);
-    rv->hart_locks_held++;
-}
-
-static inline void hart_unlock(riscv_t *rv, pthread_mutex_t *lock)
-{
-    assert(rv->hart_locks_held);
-    rv->hart_locks_held--;
-    pthread_mutex_unlock(lock);
+    return PRIV(rv)->aot_collect || PRIV(rv)->aot_library;
 }
 #endif
 

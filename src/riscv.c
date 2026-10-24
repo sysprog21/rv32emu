@@ -324,99 +324,16 @@ IO_HANDLER_IMPL(byte, write_b, W)
 #endif
 
 #if RV32_HAS(T2C)
-static pthread_t t2c_thread;
-static void *t2c_runloop(void *arg)
-{
-    riscv_t *rv = (riscv_t *) arg;
-    pthread_mutex_lock(&rv->wait_queue_lock);
-    while (!rv->quit) {
-        /* Wait for work or quit signal */
-        while (list_empty(&rv->wait_queue) && !rv->quit)
-            pthread_cond_wait(&rv->wait_queue_cond, &rv->wait_queue_lock);
-
-        if (rv->quit)
-            break;
-
-        /* Extract work item while holding the lock */
-        queue_entry_t *entry =
-            list_last_entry(&rv->wait_queue, queue_entry_t, list);
-        list_del_init(&entry->list);
-        pthread_mutex_unlock(&rv->wait_queue_lock);
-
-        /* Only this thread runs LLVM, so evicted engines are disposed here */
-        t2c_reap_engines(rv);
-
-        /* Perform compilation with minimal lock contention.
-         *
-         * Lock strategy: Hold cache_lock only when accessing shared data:
-         * 1. Initial lookup and validation (short)
-         * 2. Final jit_cache update (short)
-         *
-         * The expensive LLVM compilation runs without holding cache_lock,
-         * allowing SFENCE.VMA/FENCE.I to proceed with minimal latency.
-         * If the block is invalidated during compilation, we detect this
-         * via the invalidated flag and discard the compiled result.
-         */
-        pthread_mutex_lock(&rv->cache_lock);
-        /* Look up block from cache using the key (might have been evicted) */
-        uint32_t pc = (uint32_t) entry->key;
-        block_t *block = (block_t *) cache_get(rv->block_cache, pc, false);
-#if RV32_HAS(SYSTEM)
-        /* Verify SATP matches (for system mode) */
-        uint32_t satp = (uint32_t) (entry->key >> 32);
-        if (block &&
-            (block->satp != satp || block->priv_mode != entry->priv_mode))
-            block = NULL;
-#endif
-        /* Compile only if block still exists in cache */
-        if (block)
-            t2c_compile(rv, block, &rv->cache_lock);
-        else
-            pthread_mutex_unlock(&rv->cache_lock);
-        free(entry);
-
-        pthread_mutex_lock(&rv->wait_queue_lock);
-    }
-    pthread_mutex_unlock(&rv->wait_queue_lock);
-    return NULL;
-}
-
 static bool rv_spawn_t2c(riscv_t *rv)
 {
     rv->jit_cache = jit_cache_init();
-    if (!rv->jit_cache) {
-        rv_log_fatal("Failed to initialize JIT cache");
-        goto fail_jit_cache;
-    }
     rv->inline_cache = inline_cache_init();
-    if (!rv->inline_cache) {
-        rv_log_fatal("Failed to initialize inline cache");
-        goto fail_inline_cache;
-    }
-
-    rv->quit = false;
-    /* prepare wait queue. */
-    pthread_mutex_init(&rv->wait_queue_lock, NULL);
-    pthread_mutex_init(&rv->cache_lock, NULL);
-    pthread_cond_init(&rv->wait_queue_cond, NULL);
-    INIT_LIST_HEAD(&rv->wait_queue);
-    INIT_LIST_HEAD(&rv->orphan_blocks);
-    /* Activate the background compilation thread.
-     * Use larger stack (8MB) to handle deep recursion in t2c_trace_ebb
-     * and LLVM's internal stack usage during compilation.
-     */
-    pthread_attr_t t2c_attr;
-    pthread_attr_init(&t2c_attr);
-    pthread_attr_setstacksize(&t2c_attr, 8 * 1024 * 1024); /* 8MB stack */
-    pthread_create(&t2c_thread, &t2c_attr, t2c_runloop, rv);
-    pthread_attr_destroy(&t2c_attr);
-
-    return true;
-
-fail_inline_cache:
+    if (rv->jit_cache && rv->inline_cache && t2c_aot_init(rv))
+        return true;
     jit_cache_exit(rv->jit_cache);
     rv->jit_cache = NULL;
-fail_jit_cache:
+    inline_cache_exit(rv->inline_cache);
+    rv->inline_cache = NULL;
     cache_free(rv->block_cache);
     rv->block_cache = NULL;
     return false;
@@ -424,31 +341,9 @@ fail_jit_cache:
 
 static void rv_destroy_t2c(riscv_t *rv)
 {
-    /* Signal the thread to quit */
-    pthread_mutex_lock(&rv->wait_queue_lock);
-    rv->quit = true;
-    pthread_cond_signal(&rv->wait_queue_cond);
-    pthread_mutex_unlock(&rv->wait_queue_lock);
-
-    pthread_join(t2c_thread, NULL);
-    t2c_reap_engines(rv);
-    t2c_free_orphans(rv);
-
-    /* Clean up any remaining entries in wait queue */
-    queue_entry_t *entry, *safe;
-    list_for_each_entry_safe (entry, safe, &rv->wait_queue, list) {
-        list_del(&entry->list);
-        free(entry);
-    }
-
-    pthread_mutex_destroy(&rv->wait_queue_lock);
-    pthread_mutex_destroy(&rv->cache_lock);
-    pthread_cond_destroy(&rv->wait_queue_cond);
+    t2c_aot_exit(rv);
     jit_cache_exit(rv->jit_cache);
     inline_cache_exit(rv->inline_cache);
-
-    /* Dispose LLVM engines for all remaining blocks before freeing cache */
-    clear_cache_hot(rv->block_cache, t2c_dispose_block_engine);
 }
 #endif
 
@@ -1849,10 +1744,12 @@ static bool rv_init_vsnd(vm_attr_t *attr)
  */
 static bool rv_init_jit(riscv_t *rv)
 {
-    /* Clean up existing JIT state if present for reboot */
-    if (rv->jit_state) {
+    /* Keep the collector and native library alive across a warm reboot. */
+    bool reboot = rv->jit_state != NULL;
+    if (reboot) {
 #if RV32_HAS(T2C)
-        rv_destroy_t2c(rv);
+        t2c_aot_checkpoint(rv);
+        t2c_aot_invalidate(rv);
 #endif
         block_list_clear(rv);
 
@@ -1872,16 +1769,19 @@ static bool rv_init_jit(riscv_t *rv)
         return false;
     }
 
-    rv->block_cache = cache_create(BLOCK_CACHE_CAPACITY_BITS);
+    unsigned cache_bits = PRIV(rv)->block_cache_bits
+                              ? PRIV(rv)->block_cache_bits
+                              : BLOCK_CACHE_CAPACITY_BITS;
+    rv->block_cache = cache_create(cache_bits);
     if (!rv->block_cache) {
         rv_log_fatal("Failed to create block cache");
         goto fail_jit_state;
     }
 
 #if RV32_HAS(T2C)
-    /* Spawn new T2C thread */
-    if (!rv_spawn_t2c(rv)) {
-        rv_log_fatal("Spawn T2C failed");
+    /* Initialize AOT artifact state. */
+    if (!reboot && !rv_spawn_t2c(rv)) {
+        rv_log_fatal("Initialize T2C AOT failed");
         goto fail_jit_state;
     }
 #endif
@@ -1984,9 +1884,7 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         assert(!(((uintptr_t) attr->mem) & 0b11));
     }
     rv->allow_misalign = attr->allow_misalign;
-#if !RV32_HAS(SYSTEM)
     rv->ram_base = attr->mem->mem_base;
-#endif
 
     /* Reset hart state (general purpose registers, CSRs, PC, argc/argv, etc.)
      */
@@ -2468,10 +2366,11 @@ void rv_profile(riscv_t *rv, char *out_file_path)
             "# indirect_history lists interpreter-observed PC:count "
             "(PC@SATP:count in system mode), not compiled executions.\n");
 #if RV32_HAS(T2C)
-    fprintf(f,
-            "# T1 indirect guards are disabled in tiered builds, so "
-            "indirect_history feeds no compiled guard.\n");
-    fprintf(f, "# t2c marks blocks whose T2C code was published by exit.\n");
+    if (PRIV(rv)->aot_collect)
+        fprintf(f,
+                "# T1 indirect guards are disabled during AOT collection, "
+                "so indirect_history feeds no compiled guard.\n");
+    fprintf(f, "# t2c marks blocks bound to an offline AOT region.\n");
 #endif
     fprintf(f, "PC start |PC end  | frequency |  hot  | loop  | ");
 #if RV32_HAS(T2C)
@@ -2482,16 +2381,7 @@ void rv_profile(riscv_t *rv, char *out_file_path)
     fprintf(f, "predecessors | ");
 #endif
     fprintf(f, "untaken | taken | IR list | indirect_history\n");
-#if RV32_HAS(T2C)
-    /* The compiler thread publishes block->func and hot2 under this lock;
-     * take it so a report cannot catch a block mid-publication.
-     */
-    pthread_mutex_lock(&rv->cache_lock);
-#endif
     cache_profile(rv->block_cache, f, profile);
-#if RV32_HAS(T2C)
-    pthread_mutex_unlock(&rv->cache_lock);
-#endif
 #else
     fprintf(f, "PC start |PC end  | untaken | taken  | IR list \n");
     block_map_t *map = &rv->block_map;

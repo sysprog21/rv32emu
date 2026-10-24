@@ -100,7 +100,7 @@
 #define RV32_FEATURE_JIT 0
 #endif
 
-/* Experimental tier-2 just-in-time compiler */
+/* Tier-2 ahead-of-time compiler */
 #ifndef RV32_FEATURE_T2C
 #define RV32_FEATURE_T2C 0
 #endif
@@ -117,6 +117,11 @@
 /* System */
 #ifndef RV32_FEATURE_SYSTEM
 #define RV32_FEATURE_SYSTEM 0
+#endif
+
+/* AOT collection and artifact loading currently require a Linux host. */
+#if RV32_FEATURE_T2C && !defined(__linux__)
+#error "T2C AOT requires a Linux host"
 #endif
 
 /* Use ELF loader */
@@ -257,12 +262,8 @@
  * blocks out as packed IR, chain learned branch edges and take longer step
  * slices. Packed IR keeps the full rv_insn_t payload and the existing
  * must-tail handler ABI. JIT builds chain only into blocks T1 cannot compile.
- * T2C builds keep the linked path: with packed IR, T1 compiled some blocks
- * before their branch edges had been learned, which T2C regions then lacked,
- * and miniz measured slower.
  */
-#if !RV32_HAS(SYSTEM) && !RV32_HAS(T2C) && !RV32_HAS(GDBSTUB) && \
-    !defined(__EMSCRIPTEN__)
+#if !RV32_HAS(SYSTEM) && !RV32_HAS(GDBSTUB) && !defined(__EMSCRIPTEN__)
 #define RV32_HAS_PACKED_TAIL 1
 #else
 #define RV32_HAS_PACKED_TAIL 0

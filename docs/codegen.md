@@ -1,7 +1,7 @@
 # Code Generation
 
 ## Overview
-rv32emu employs a tiered execution strategy with an interpreter and a two-tier JIT compiler.
+rv32emu combines an interpreter, tier-1 JIT, and tier-2 AOT compiler.
 The interpreter provides baseline execution while the JIT compiler generates native machine code for hot paths,
 significantly improving performance for compute-intensive workloads.
 
@@ -12,10 +12,11 @@ an abstraction layer that maps common operations to architecture-specific instru
 The emulator uses three execution tiers:
 1. Interpreter: Direct execution of RISC-V instructions via tail-call threaded dispatch
 2. Tier-1 JIT: Template-based native code generation for basic blocks
-3. Tier-2 JIT: LLVM-based compilation for frequently executed hot paths
+3. Tier-2 AOT: LLVM-based compilation for frequently executed hot paths
 
 When a basic block reaches a configurable execution threshold, it gets promoted from interpreter to Tier-1 JIT.
-Blocks that continue to execute frequently may be further compiled by the Tier-2 LLVM backend for additional optimizations.
+Observed blocks can be collected as LLVM bitcode, compiled offline, and loaded
+on subsequent executions for additional optimization.
 
 ## Source File Organization
 
@@ -27,8 +28,10 @@ Blocks that continue to execute frequently may be further compiled by the Tier-2
 | `src/rv32_constopt.c` | IR-level constant folding and optimization |
 | `src/rv32_v_constopt.c` | Constant-folding hooks for the V extension |
 | `src/jit.c` | Tier-1 JIT infrastructure, emit_* API, and fused instruction handlers |
-| `src/t2c.c` | Tier-2 JIT driver (includes t2c_template.c) |
-| `src/t2c_template.c` | Tier-2 JIT instruction handlers using T2C_OP macro |
+| `src/aot.c` | Runtime artifact loading, compatibility, and bitcode collection |
+| `src/aot_cache.c` | Native binding caches: replacement and invalidation |
+| `src/t2c.c` | LLVM bitcode collector (includes t2c_template.c) |
+| `src/t2c_template.c` | Tier-2 AOT instruction handlers using T2C_OP macro |
 | `src/emulate.c` | Main execution loop, tail-call dispatch, and macro-op fusion |
 
 ## Interpreter Implementation
@@ -83,8 +86,10 @@ Register allocation is performed dynamically.
 When a RISC-V register value is needed,
 the allocator either returns an already-mapped host register or loads the value from memory into an available host register.
 
-## Tier-2 JIT Compilation
-The Tier-2 JIT uses LLVM to compile frequently executed blocks into highly optimized native code.
+## Tier-2 AOT Compilation
+Tier-2 collects LLVM IR during a training run. `tools/aot.py` applies LLVM
+optimization and native code generation offline; `-A` loads the resulting
+library without loading LLVM.
 Instruction handlers are defined in `src/t2c_template.c` using the `T2C_OP` macro:
 ```c
 T2C_OP(name, { body })
@@ -94,19 +99,46 @@ Each handler translates the RISC-V instruction semantics into LLVM IR using the 
 LLVM then applies its optimization passes and register allocation,
 producing native code that typically outperforms Tier-1 for hot paths.
 
-Tier-2 compiles a region: the hot block plus the blocks its branches lead to,
-traced through `t2c_trace_ebb()`. Within a region:
+Tier-2 collects user traces through `t2c_trace_ebb()`. In system mode,
+it forms shared graphs per virtual code page and content fingerprint. Multiple
+entry PCs share the same native function and each decoded block is emitted
+once in that graph, so joins and indirect targets do not require overlapping
+root traces. Collection materializes graphs before IR reclamation and at
+shutdown or reboot checkpoints, after successors have been observed. Entry-set
+coverage retains additional variants when a later snapshot contributes a new
+entry; offline selection merges their union and drops redundant graphs. Cold
+privileged startup code is collected, while user processes must execute a
+repeated T1 region before becoming collection roots, avoiding huge profiles
+of one-shot ASLR mappings.
+Within a region:
 
-- Guest registers live in local variables that LLVM keeps in host registers.
-  `t2c_promote_guest_regs()` fills them from `rv->X` on entry, writes back the
-  ones the region changes before any call or return, and refills them after a
-  call that comes back, since callees and the dispatcher read and write
-  `rv->X`. A function that reaches `rv->X` any other way is left unpromoted.
-- An indirect jump, such as a function return, whose branch history shows one
+- In user traces, guest registers live in local variables that LLVM keeps in
+  host registers. `t2c_promote_guest_regs()` fills them from `rv->X` on entry,
+  writes back the ones the region changes before any call or return, and
+  refills them after a call that comes back, since callees and the dispatcher
+  read and write `rv->X`. A function that reaches `rv->X` any other way is
+  left unpromoted. System page graphs keep guest registers in `rv->X`: they
+  have many exits, and writing promoted registers back at each one doubled the
+  Linux artifact.
+- In user traces, an indirect jump, such as a function return, whose branch history shows one
   target at least 90% of the time is compared against that target, and the
-  region continues there. This lets a loop that calls and returns through
-  several functions compile as one loop. Prediction is off in system mode,
-  where timer interrupts are taken only between regions.
+  region continues there. A return without such a target branches to a
+  switch over the return points of every call the region traced, so a callee
+  shared by several call sites returns into the region rather than leaving
+  it on every call: qsort, whose comparator returns to several sites, runs
+  twice as fast. Together these let a loop that calls and returns through
+  several functions compile as one loop.
+- User traces follow the direct edges the interpreter observed, and also
+  edges into blocks the region already holds or T1C compiled as hot, which
+  T1C ran natively so the interpreter never linked them. Other unobserved
+  code stays out: pulling it in enlarged regions and hindered their register
+  promotion.
+- System graphs rebuild direct targets from instruction PCs, independently of
+  interpreter links that eviction removes. A shared local switch handles
+  observed indirect targets and statically known call-return addresses in the
+  same verified page. Its cases pass through budget gates. Unobserved targets and cross-page jumps use the native
+  cache or dispatcher. Limiting local cases avoids artificial CFG edges and
+  excessive SSA/register pressure.
 - After `T2C_REGION_BUDGET` traced instructions, successors are no longer
   traced; the region jumps to their compiled code instead.
 
@@ -115,14 +147,82 @@ as a guaranteed tail call when it finds it in the jit-cache, and otherwise
 returns to the dispatcher. `jit_cache_slot()` in `src/jit.h` defines the slot
 for both the C code that fills the cache and the IR that probes it.
 
-Tier-2 compilation requires LLVM 19-23 (CI builds with LLVM 23 on macOS
-arm64 and Ubuntu 24.04 x86-64). The Makefile
-auto-detects `llvm-config` in `$PATH` (preferring the newest supported
-version) and the matching Homebrew prefix; override with
-`make LLVM_CONFIG=/path/to/llvm-config` to pin a specific install. Enable
-T2C via `make jit_defconfig` (which selects both `CONFIG_JIT` and
-`CONFIG_T2C`), through `make config`, or with the legacy `ENABLE_JIT=1`
-shim. See [build.md](build.md) for the full configuration matrix.
+Tier-2 collection uses the LLVM C API and supports LLVM 19–23 on Linux
+hosts. Each collected region owns an LLVM context, so types, builders, and
+metadata do not use the deprecated global context. The Makefile prefers the
+newest supported `llvm-config`; override with
+`make LLVM_CONFIG=/path/to/llvm-config`. Use the matching installation with
+`tools/aot.py --llvm-config`. Enable user collection with `jit_defconfig`, or
+Linux system collection with `system_jit_defconfig`. See [build.md](build.md)
+for collection, deployment, compatibility, and test commands.
+
+System region symbols include a code-page fingerprint. FENCE.I and
+code-affecting SFENCE.VMA invalidation discard bindings; the dispatcher binds
+only matching page contents in the current address space. FNV is only a fast
+candidate key; a complete SHA-256 digest must also match before binding. A
+4,096-slot physical-page fingerprint cache avoids hashing the same page again
+for each binding. SFENCE.VMA discards bindings while retaining physical hashes;
+FENCE.I marks physical hashes stale. When an artifact is loaded, an optional
+16 MiB page-snapshot cache permits lazy, exact byte comparisons before reusing
+an unchanged page's SHA-256 digest. Changed pages are hashed again; allocation
+failure falls back to recomputing hashes. T1 code-cache recycling retains
+native bindings. Bindings follow the code retirement of the other tiers: a
+pinned binding records its page's mapping as decoded code does, under the same
+address space key: the current SATP, or SATP_SHARED for kernel code reached
+only through global mappings, which is bound once for every process. Kernel
+graphs look up targets under SATP_SHARED while S-mode paging is on and the
+guest has bound kernel code there, and under the current SATP otherwise; the
+dispatcher probes both keys. When a SFENCE.VMA finds
+that the mapping of a recorded code page changed, the bindings of that address
+space are cleared and rebound on their next entry. FENCE.I clears them all.
+The offline compiler also emits an entry index and
+the emulator a bitmap of the virtual pages it covers, which answers most
+misses without probing the index. The dispatcher validates instruction-fetch
+permission before publishing a new native binding, which records the fetch
+privilege as T2C entries do. A missing entry uses T1 or interpreter fallback. Native entries
+survive decoded IR eviction because their lifetime belongs to verified mappings
+and the loaded library; fences still invalidate them.
+Cross-page tail calls resolve through the runtime cache. User regions on
+x86-64 use the preserve_none calling convention, so these tail calls save and
+restore no registers; the collector records the convention in its manifest,
+and tools/aot.py then adds a trampoline through which the emulator enters
+them. System regions keep the C
+convention: they call C helpers on every slow path, around which preserve_none
+code must save its live values. Native memory accesses
+require a valid dTLB RAM hit or a range-checked bare-mode RAM address. Slow
+accesses, deadline yields and other exits are marked unlikely, so LLVM lays
+them out after the hot path of a page graph. Slow accesses publish the
+precise prefix through the memory instruction before invoking MMU/MMIO
+helpers. Successful helpers resume native execution after restoring the
+unexecuted suffix count. Monotonic trap and code epochs prevent continuation
+through a trap, reboot, or code invalidation, even when nested traps restore
+the original depth. Completed MMIO accesses are never retried.
+The collector retains original instruction starts across fusion so helper calls
+and trap exits publish precisely the retired prefix. Pure reads of CYCLE,
+INSTRET, and TIME (including their high halves) can also execute in system AOT
+regions. Their values use that exact instruction prefix; TIME includes the VM
+timer offset. T1 eligibility stays separate, so its unsupported CSR handlers are
+never used. Atomic instructions, LR/SC, and SSTATUS operations can use an
+outlined semantic helper within a native page graph. This retains existing
+reservation and fault behavior; SSTATUS writes yield for interrupt polling.
+These operations are outlined calls, not LLVM atomic instructions.
+Misaligned traps use a one-shot fallback that prevents repeatedly
+entering the same AOT guard. System regions check the dispatcher's chain
+deadline at entry and on edges to previously visited blocks, so timer
+interrupts arrive on time. Every cycle crosses such an edge;
+acyclic paths stay within one code page. Native execution therefore yields
+without adding a budget branch to each instruction in a linear trap path.
+
+Trap handlers run through the dispatcher, so their code is collected and
+replayed like any other. Runtime policy is explicit and shared by every tier:
+`-B` selects the block cache capacity and `-s` the dispatch instruction budget.
+Loading an artifact does not silently change these settings. Native
+diagnostics report charged instructions, native function entries including
+tail entries, successful slow-path continuations, hash activity and bindings.
+The offline object cache uses stable hash buckets so adding one page does not
+reshuffle every later compilation unit.
+LLVM alias metadata distinguishes VM state from bounds-checked guest RAM,
+while guest RAM accesses retain their mutual aliasing.
 
 ## IR Optimization
 Before execution or JIT compilation,
@@ -198,7 +298,7 @@ For example, a lui followed by addi to construct a 32-bit constant can be fused 
 The fused instructions are then handled by dedicated handlers in each tier:
 - Interpreter: `do_fuse*` functions in `src/emulate.c`
 - Tier-1 JIT: `do_fuse*` functions in `src/jit.c`
-- Tier-2 JIT: `T2C_OP(fuse*, ...)` handlers in `src/t2c_template.c`
+- Tier-2 AOT: `T2C_OP(fuse*, ...)` handlers in `src/t2c_template.c`
 
 Macro-op fusion is controlled by the `ENABLE_MOP_FUSION` configuration option.
 
@@ -249,3 +349,6 @@ the host instructions of tier-1 code. `tests/jit-misalign.S` covers the plain,
 compressed, and fused forms with and without a guest trap vector. Its
 `-nocsr` build uses no privileged state, and its `-nohandler` build only reads
 the trap CSRs, which must keep the checks in place.
+
+See [AOT profiling](aot-profiling.md) for function tracing, native sampling,
+and the runtime costs that guided subsequent optimizations.

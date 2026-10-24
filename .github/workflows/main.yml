@@ -277,12 +277,12 @@ jobs:
           build/arch-test/*/extensions.txt
 
   # Boot tests are the long pole of the workflow, so each configuration gets
-  # its own runner. T2C is clang only because it goes through LLVM.
+  # its own runner. AOT has a separate LLVM compatibility and Linux boot matrix.
   boot-tests-x64:
     name: x64 ${{ matrix.compiler }} boot (${{ matrix.boot_type }})
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
-    timeout-minutes: 45  # T2C boot ~30min + build ~3min + setup ~3min
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -307,11 +307,6 @@ jobs:
             defconfig: system_defconfig
             make_flags: "ENABLE_MOP_FUSION=0"
             timeout: 120
-          - compiler: clang
-            boot_type: t2c
-            defconfig: system_jit_defconfig
-            make_flags: "ENABLE_MOP_FUSION=0"
-            timeout: 150
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -332,12 +327,7 @@ jobs:
       env:
         BOOT_TIMEOUT: ${{ matrix.timeout }}
       run: |
-            # A stale object would mask a failed LLVM detection below.
-            rm -f build/t2c.o
             make distclean && make ${{ matrix.defconfig }} && make INITRD_SIZE=32 ${{ matrix.make_flags }} $PARALLEL && make artifact $PARALLEL
-            if [ "${{ matrix.boot_type }}" = "t2c" ]; then
-              test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM $(cat .ci/llvm-version) detection failed"; exit 1; }
-            fi
             .ci/boot-linux-test.sh
     - name: boot Linux kernel test (initrd rootfs) (${{ matrix.boot_type }})
       # Run even when the ext4 boot failed, so one rootfs does not hide the other.
@@ -345,12 +335,7 @@ jobs:
       env:
         BOOT_TIMEOUT: ${{ matrix.timeout }}
       run: |
-            # A stale object would mask a failed LLVM detection below.
-            rm -f build/t2c.o
             make distclean && make ${{ matrix.defconfig }} && make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ${{ matrix.make_flags }} $PARALLEL && make artifact $PARALLEL
-            if [ "${{ matrix.boot_type }}" = "t2c" ]; then
-              test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM $(cat .ci/llvm-version) detection failed"; exit 1; }
-            fi
             .ci/boot-linux-test.sh "initrd"
 
   # A guest reboot abandons the hart coroutine stack and restarts it. Run the
@@ -441,26 +426,18 @@ jobs:
               make ENABLE_JIT=1 clean && make ${ext}=0 ENABLE_JIT=1 check $PARALLEL
             done
 
-    - name: boot Linux kernel test (ext4 rootfs) (T2C)
+    - name: boot Linux kernel test (ext4 rootfs) (T1C)
       env:
-        BOOT_TIMEOUT: 120  # T2C with O1 optimization (via defconfig) is faster than O3
+        BOOT_TIMEOUT: 120
       run: |
-            # A stale object would mask a failed LLVM detection below.
-            rm -f build/t2c.o
-            # system_jit_defconfig uses T2C_OPT_LEVEL=1 for ~50% faster LLVM compilation
             make distclean && make system_jit_defconfig && make INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
-            test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM ${{ steps.setup.outputs.llvm-version }} detection failed"; exit 1; }
             .ci/boot-linux-test.sh
 
-    - name: boot Linux kernel test (initrd rootfs) (T2C)
+    - name: boot Linux kernel test (initrd rootfs) (T1C)
       env:
-        BOOT_TIMEOUT: 120  # T2C with O1 optimization (via defconfig) is faster than O3
+        BOOT_TIMEOUT: 120
       run: |
-            # A stale object would mask a failed LLVM detection below.
-            rm -f build/t2c.o
-            # system_jit_defconfig uses T2C_OPT_LEVEL=1 for ~50% faster LLVM compilation
             make distclean && make system_jit_defconfig && make ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ENABLE_MOP_FUSION=0 $PARALLEL && make artifact $PARALLEL
-            test -f build/t2c.o || { echo "ERROR: T2C disabled (build/t2c.o missing) - LLVM ${{ steps.setup.outputs.llvm-version }} detection failed"; exit 1; }
             .ci/boot-linux-test.sh "initrd"
 
   macOS-arm64:
@@ -617,6 +594,72 @@ jobs:
     # and does not pull in the Kconfiglib clone.
     - name: decoder matches ISA descriptor
       run: make check-decoder
+
+  llvm-c-aot:
+    env:
+      LLVM_CONFIG: /usr/lib/llvm-${{ matrix.llvm }}/bin/llvm-config
+      # Six concurrent runners fetch release artifacts; authenticate the API.
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        llvm: [19, 20, 21, 22, 23]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: 'true'
+      - uses: ./.github/actions/setup-build
+        with:
+          cc: gcc
+          llvm-version: ${{ matrix.llvm }}
+          riscv-toolchain: 'true'
+          artifacts: 'elf linux-image'
+          cache-suffix: aot-llvm-${{ matrix.llvm }}
+      - name: Read the default LLVM version
+        id: default-llvm
+        run: echo "version=$(cat .ci/llvm-version)" >> "$GITHUB_OUTPUT"
+      # cleanconfig keeps the fetched artifacts but drops objects and their
+      # dependency files, which another configuration (the artifact fetch, or
+      # the previous step) left behind.
+      - name: Check user AOT
+        run: |
+          make cleanconfig
+          make jit_defconfig
+          make -j4 ENABLE_SDL=0
+          make ENABLE_SDL=0 check-aot
+      # Every LLVM version must build and run the AOT suites; native PGO and
+      # the full Linux collection, compilation, and timed boot run on the
+      # default. The user build above serves the PGO suite, and the Linux boot
+      # needs the system build below, so the order matters.
+      - name: Check user AOT with native PGO
+        if: matrix.llvm == steps.default-llvm.outputs.version
+        run: make ENABLE_SDL=0 AOT_TEST_FLAGS=--native-pgo check-aot
+      - name: Check system AOT and precise traps
+        run: |
+          make cleanconfig
+          make system_jit_defconfig
+          make -j4 ENABLE_SDL=0 ENABLE_VIRTIO_NET=0 ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32
+          make ENABLE_SDL=0 ENABLE_VIRTIO_NET=0 ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 check-system-aot
+          # Unit tests that only build with system T2C, such as mmu-code and
+          # aot-lookup, run in no other lane.
+          make ENABLE_SDL=0 ENABLE_VIRTIO_NET=0 ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 tests
+      - name: Collect, compile, and boot Linux with AOT
+        if: matrix.llvm == steps.default-llvm.outputs.version
+        run: |
+          python3 .ci/boot-aot.py --emulator build/rv32emu \
+            --llvm-config /usr/lib/llvm-${{ matrix.llvm }}/bin/llvm-config \
+            --output build/linux-aot-results --runs 3 --min-speedup 0
+      - uses: actions/upload-artifact@v7
+        if: always() && matrix.llvm == steps.default-llvm.outputs.version
+        with:
+          name: linux-aot-llvm-${{ matrix.llvm }}
+          path: |
+            build/linux-aot-results/*.log
+            build/linux-aot-results/results.json
 
   static-analysis:
     needs: [detect-code-related-file-changes]

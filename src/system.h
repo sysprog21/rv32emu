@@ -395,6 +395,12 @@ static inline uint32_t mmu_ifetch(riscv_t *rv, uint32_t vaddr)
     return (low & UINT32_C(0xffff)) | (high << 16);
 }
 bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr);
+#if RV32_HAS(T2C)
+/* Side-effect-free translation through the iTLB entry the last instruction
+ * fetch from this page filled. Fails when there is none, e.g. after SFENCE.
+ */
+bool mmu_code_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr);
+#endif
 
 /*
  * TLB management functions for SFENCE.VMA and SATP changes.
@@ -403,8 +409,8 @@ void mmu_tlb_flush_all(riscv_t *rv);
 void mmu_tlb_flush(riscv_t *rv, uint32_t vaddr);
 
 /* Record that a block was decoded from [start, end), and return the address
- * space key it belongs to: the current SATP or, in JIT builds without T2C,
- * SATP_SHARED for S-mode code fetched only through global mappings.
+ * space key it belongs to: the current SATP or, in JIT builds, SATP_SHARED for
+ * S-mode code fetched only through global mappings.
  */
 uint32_t mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end);
 #if RV32_HAS(JIT)

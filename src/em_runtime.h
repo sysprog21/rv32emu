@@ -23,6 +23,9 @@ int indirect_rv_stop_requested(void);
 /* Reset static interpreter state between VM lifecycles. */
 void reset_rv_run_state(void);
 
+/* Begin a detached interpreter helper with fresh interruption bookkeeping. */
+void rv_begin_wasm_helper(struct riscv_internal *rv);
+
 #if RV32_HAS(SYSTEM_MMIO)
 /* To bridge xterm.js terminal with UART */
 extern uint8_t input_buf_size;

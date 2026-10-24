@@ -1,15 +1,14 @@
 /*
  * Self-modifying code made visible by FENCE.I.
  *
- * f returns a constant. It is called often enough to be compiled, then its
- * first instruction is rewritten to return another constant and FENCE.I is
+ * f returns a constant. It is called often enough to be cached and, in JIT
+ * builds, compiled. Its first instruction is then rewritten to return another constant and FENCE.I is
  * issued: every later call must see the new instruction. An emulator that
  * kept the decoded block, or rebuilt it but reused the code translated from
  * the old instruction, returns the old constant.
  *
- * Only system JIT builds honor FENCE.I, so this runs as a directly loaded
- * system program, without paging. The system interpreter keeps its decoded
- * blocks across FENCE.I.
+ * Run in both interpreters and the system JIT, without paging. System
+ * builds need ELF loading. User JIT code invalidation remains unsupported.
  */
     .text
     .global _start

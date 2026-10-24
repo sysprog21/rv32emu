@@ -55,10 +55,30 @@
 #endif
 #include "cache.h"
 #include "jit.h"
+/* System mode keeps a larger block cache compiled; see riscv.h. Arm64 direct
+ * branches reach 128 MiB, so the buffer stays within one branch's range.
+ */
+#if BLOCK_CACHE_LARGE
+#define CODE_CACHE_SIZE (64 * 1024 * 1024)
+#else
 #define CODE_CACHE_SIZE (4 * 1024 * 1024)
 #endif
+#endif
+
+static const char *insn_name_table[] = {
+#define _(inst, can_branch, insn_len, translatable, reg_mask) \
+    [rv_insn_##inst] = #inst,
+    RV_INSN_LIST
+#undef _
+#define _(inst) [rv_insn_##inst] = #inst,
+        FUSE_INSN_LIST
+#undef _
+};
 
 #if RV32_T1C_STATS_ENABLED
+uint64_t rv_t1c_blockers_decoded[T1C_STATS_REASONS];
+uint64_t rv_t1c_blockers_entries[T1C_STATS_REASONS];
+uint64_t rv_t1c_blockers_insns[T1C_STATS_REASONS];
 struct t1c_stats rv_t1c_stats;
 static void t1c_print_array(const char *name, const uint64_t *v, unsigned n)
 {
@@ -82,7 +102,26 @@ void rv_t1c_stats_report(uint64_t guest_cycles)
                     ARRAY_SIZE(rv_t1c_stats.traps));
     t1c_print_array("trap_insns", rv_t1c_stats.trap_insns,
                     ARRAY_SIZE(rv_t1c_stats.trap_insns));
-    fputs("}\n", stderr);
+    fputs(",\"blockers\":{", stderr);
+    static const char *other_reasons[] = {"translatable_interpreted", "context",
+                                          "wasm"};
+    _Static_assert(ARRAY_SIZE(other_reasons) == T1C_STATS_REASONS - N_RV_INSNS,
+                   "Every non-opcode attribution reason needs a label");
+    const char *separator = "";
+    for (unsigned op = 0; op < ARRAY_SIZE(rv_t1c_blockers_entries); op++) {
+        if (!rv_t1c_blockers_decoded[op] && !rv_t1c_blockers_entries[op])
+            continue;
+        fprintf(stderr,
+                "%s\"%s\":{\"decoded\":%" PRIu64 ",\"entries\":%" PRIu64
+                ",\"insns\":%" PRIu64 "}",
+                separator,
+                op < N_RV_INSNS ? insn_name_table[op]
+                                : other_reasons[op - N_RV_INSNS],
+                rv_t1c_blockers_decoded[op], rv_t1c_blockers_entries[op],
+                rv_t1c_blockers_insns[op]);
+        separator = ",";
+    }
+    fputs("}}\n", stderr);
 }
 #endif
 
@@ -325,7 +364,8 @@ static void *t2c_runloop(void *arg)
 #if RV32_HAS(SYSTEM)
         /* Verify SATP matches (for system mode) */
         uint32_t satp = (uint32_t) (entry->key >> 32);
-        if (block && block->satp != satp)
+        if (block &&
+            (block->satp != satp || block->priv_mode != entry->priv_mode))
             block = NULL;
 #endif
         /* Compile only if block still exists in cache */
@@ -1120,6 +1160,9 @@ riscv_t *rv_create(riscv_user_t rv_attr)
 #if RV32_T1C_STATS_ENABLED
     /* Each instance reports its own counters once. */
     memset(&rv_t1c_stats, 0, sizeof(rv_t1c_stats));
+    memset(rv_t1c_blockers_decoded, 0, sizeof(rv_t1c_blockers_decoded));
+    memset(rv_t1c_blockers_entries, 0, sizeof(rv_t1c_blockers_entries));
+    memset(rv_t1c_blockers_insns, 0, sizeof(rv_t1c_blockers_insns));
 #endif
 
 #if RV32_HAS(SYSTEM_MMIO)
@@ -1362,8 +1405,10 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 #endif
 
 #if RV32_HAS(SYSTEM)
-    /* Not being trap */
-    rv->trap_cnt = 0;
+    /* Not being trap, nor inside an interrupt the dispatcher entered */
+    rv->chain_stop = 0;
+    rv->interrupt_entered = false;
+    rv->interrupt_grant = false;
 
     /* reset the csrs (full system emulation) */
     rv->csr_cycle = 0;
@@ -1656,6 +1701,9 @@ void rv_delete(riscv_t *rv)
     rv_destroy_vsnd(attr);
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    free(rv->code_maps);
+#endif
 #if !RV32_HAS(JIT)
     map_delete(attr->fd_map);
     memory_delete(attr->mem);
@@ -1789,6 +1837,7 @@ static bool rv_init_vsnd(vm_attr_t *attr)
         return false;
     }
 
+    attr->host_paced = true; /* worker threads play PCM in host time */
     return true;
 }
 #endif
@@ -1997,8 +2046,9 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
 #if RV32_HAS(JIT)
     rv->jit_elide_align_checks = rv->jit_elide_align_checks ||
                                  !elf_has_insn(elf, insn_uses_privileged_state);
-    rv->jit_entry_cycles =
-        JIT_ENTRY_CYCLES && !elf_has_insn(elf, insn_reads_counter);
+    /* System chains end at a cycle deadline, which needs per-block counts. */
+    rv->jit_entry_cycles = JIT_ENTRY_CYCLES && !RV32_HAS(SYSTEM) &&
+                           !elf_has_insn(elf, insn_reads_counter);
 #endif
 #endif
 
@@ -2251,6 +2301,7 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         }
 
         attr->vnet->ram = (uint32_t *) attr->mem->mem_base;
+        attr->host_paced = true; /* the backend runs on its own threads */
     }
 #endif
 
@@ -2341,16 +2392,6 @@ fail_mpool:
     return false;
 }
 
-static const char *insn_name_table[] = {
-#define _(inst, can_branch, insn_len, translatable, reg_mask) \
-    [rv_insn_##inst] = #inst,
-    RV_INSN_LIST
-#undef _
-#define _(inst) [rv_insn_##inst] = #inst,
-        FUSE_INSN_LIST
-#undef _
-};
-
 #if RV32_HAS(JIT)
 /* A prof_func_t, so that cache_profile() calls it through its own type. */
 static void profile(void *entry, uint32_t freq, FILE *output_file)
@@ -2418,6 +2459,11 @@ void rv_profile(riscv_t *rv, char *out_file_path)
             "# t1_reentries counts dispatcher entries to already-hot T1 "
             "code; initial compilation entries and internal chains are "
             "excluded.\n");
+#if JIT_RUN_CACHED
+    fprintf(f,
+            "# Cached native entries bypass blocks and are excluded too; "
+            "a T1C_STATS=1 build counts them as cached_native_entries.\n");
+#endif
     fprintf(f,
             "# indirect_history lists interpreter-observed PC:count "
             "(PC@SATP:count in system mode), not compiled executions.\n");

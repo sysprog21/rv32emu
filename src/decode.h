@@ -100,9 +100,9 @@ enum op_field {
     )                                                  \
     /* RV32 Zba Standard Extension */                  \
     IIF(RV32_HAS(Zba))(                                \
-        _(sh1add, 0, 4, 0, ENC(rs1, rs2, rd))          \
-        _(sh2add, 0, 4, 0, ENC(rs1, rs2, rd))          \
-        _(sh3add, 0, 4, 0, ENC(rs1, rs2, rd))          \
+        _(sh1add, 0, 4, 1, ENC(rs1, rs2, rd))          \
+        _(sh2add, 0, 4, 1, ENC(rs1, rs2, rd))          \
+        _(sh3add, 0, 4, 1, ENC(rs1, rs2, rd))          \
     )                                                  \
     /* RV32 Zbb Standard Extension */                  \
     IIF(RV32_HAS(Zbb))(                                \
@@ -227,10 +227,10 @@ enum op_field {
         _(cswsp, 0, 2, 1, ENC(rs2))                    \
         /* RV32FC Instruction */                       \
         IIF(RV32_HAS(EXT_F))(                          \
-            _(cflwsp, 0, 2, 1, ENC(rd))                \
-            _(cfswsp, 0, 2, 1, ENC(rs2))               \
-            _(cflw, 0, 2, 1, ENC(rs1, rd))             \
-            _(cfsw, 0, 2, 1, ENC(rs1, rs2))            \
+            _(cflwsp, 0, 2, 0, ENC(rd))                \
+            _(cfswsp, 0, 2, 0, ENC(rs2))               \
+            _(cflw, 0, 2, 0, ENC(rs1, rd))             \
+            _(cfsw, 0, 2, 0, ENC(rs1, rs2))            \
         )                                              \
     )                                                  \
     /* Vector Extension */                             \
@@ -882,6 +882,16 @@ enum {
 };
 /* clang-format on */
 
+#if RV32_T1C_STATS_ENABLED
+/* Base opcodes precede these reasons; their values may alias fused opcodes. */
+enum {
+    T1C_INTERPRETED_TRANSLATABLE = N_RV_INSNS,
+    T1C_BLOCKER_CONTEXT,
+    T1C_BLOCKER_WASM,
+    T1C_STATS_REASONS
+};
+#endif
+
 /* clang-format off */
 /* instruction decode masks */
 enum {
@@ -1065,6 +1075,12 @@ typedef struct rv_insn {
     opcode_fuse_t *fuse;
 
     uint32_t pc;
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    /* The JIT code generation in which the block this record heads last ran
+     * native code; see RVOP_CHAIN_TAIL. It fills padding after @pc.
+     */
+    uint32_t native_gen;
+#endif
 
     /* Tail-call optimization (TCO) allows a C function to replace a function
      * call to another function or itself, followed by a simple return of the

@@ -330,9 +330,21 @@ static bool parse_args(int argc, char **args)
          * argument, so hand each one a copy. opt_prog_name in particular is
          * still needed intact to open the ELF.
          */
+        const char *prog_name = opt_prog_name;
+#if RV32_HAS(SYSTEM_MMIO)
+        /* A kernel run has no program argument; name the report after the
+         * kernel image instead.
+         */
+        if (!prog_name)
+            prog_name = opt_kernel_img;
+#endif
+        if (!prog_name) {
+            rv_log_error("Profiling needs a program or kernel image to name");
+            return false;
+        }
         char emu_path[PATH_MAX], prog_path[PATH_MAX];
         snprintf(emu_path, sizeof(emu_path), "%s", args[0]);
-        snprintf(prog_path, sizeof(prog_path), "%s", opt_prog_name);
+        snprintf(prog_path, sizeof(prog_path), "%s", prog_name);
 
         const char *emu_dir = dirname(emu_path);
         const char *prog_basename = basename(prog_path);
@@ -393,11 +405,14 @@ static bool dump_test_signature(const char UNUSED *prog_name)
 
 /* CYCLE_PER_STEP shall be defined on different runtime */
 #ifndef CYCLE_PER_STEP
-#if RV32_HAS_PACKED_TAIL
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(SYSTEM)
 /* Packed user mode has no interrupt or browser-yield boundary, and its JIT
  * builds profile every block T1 can compile in rv_step(). A larger slice
  * amortizes rv_step() and lets learned branch edges remain in the tail-call
- * chain longer without changing retired guest cycles. */
+ * chain longer without changing retired guest cycles. System chains end at
+ * the slice or the next timer deadline, so the slice bounds only the latency
+ * of other interrupts, and a 100-cycle slice broke hot chains too often.
+ */
 #define CYCLE_PER_STEP 1000
 #else
 #define CYCLE_PER_STEP 100

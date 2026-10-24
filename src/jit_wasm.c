@@ -25,6 +25,7 @@
 
 #include "cache.h"
 #include "decode.h"
+#include "em_runtime.h"
 #include "jit.h"
 #include "riscv.h"
 #include "riscv_private.h"
@@ -83,7 +84,6 @@ _Static_assert(WASM_MAX_BLOCKS <= UINT16_MAX + 1, "free_maps holds uint16_t");
 #define WASM_SLOT_SHIFT_LO 1
 #define WASM_SLOT_SHIFT_HI 11
 #define WASM_PAGE_BITS 10
-#define WASM_SATP_MIX 0x9e3779b1U /* golden-ratio multiplier */
 
 /* WebAssembly opcodes and types used by the emitter. */
 enum {
@@ -268,6 +268,7 @@ struct wasm_map {
     void *arena;    /* records of the other blocks compiled into it */
 #if RV32_HAS(SYSTEM)
     uint32_t satp;
+    uint32_t priv_mode;
     uint16_t next_in_page; /* one-based index of the next map in its bucket */
 #endif
 };
@@ -285,6 +286,7 @@ struct jit_state {
      * so that a page flush visits only the maps that may match.
      */
     uint16_t pages[1 << WASM_PAGE_BITS];
+    uint64_t code_generation;
 #endif
     uint32_t size, offset; /* code budget and live body bytes */
     int n_blocks;          /* maps ever used since the last reset */
@@ -294,6 +296,13 @@ struct jit_state {
     bool installed;              /* some module was ever installed */
     struct wasm_profile profile; /* updated only under JIT_WASM_PROFILE */
 };
+
+#if RV32_HAS(SYSTEM)
+uint64_t jit_code_generation(const riscv_t *rv)
+{
+    return ((const struct jit_state *) rv->jit_state)->code_generation;
+}
+#endif
 
 /* A helper must not follow the interpreter's intra- or inter-block chains. Its
  * caller materializes registers and cycles before making this call. If the
@@ -317,7 +326,11 @@ static int wasm_step(riscv_t *rv, const rv_insn_t *original)
         memcpy(fuse, ir.fuse, FUSE_SLOT_SIZE);
         ir.fuse = fuse;
     }
+    rv_begin_wasm_helper(rv);
     rv->PC = ir.pc;
+#if RV32_HAS(SYSTEM)
+    const uint64_t generation = jit_code_generation(rv);
+#endif
     const bool ok = ir.impl(rv, &ir, rv->csr_cycle, ir.pc) && !rv->next_insn;
 
     /* Generated tails chain only below the cycle limit; a halt must end the
@@ -325,7 +338,11 @@ static int wasm_step(riscv_t *rv, const rv_insn_t *original)
      */
     if (rv->halt)
         rv->wasm_jit_limit = 0;
+#if RV32_HAS(SYSTEM)
+    return ok && generation == jit_code_generation(rv);
+#else
     return ok;
+#endif
 }
 
 struct wasm_emitter {
@@ -651,7 +668,8 @@ static void wasm_ram_guard(struct wasm_emitter *e,
     wasm_byte(e, W_I32_ADD);
     wasm_ltee(e, WASM_TLB);
     wasm_mem(e, W_I32_LOAD8_U, offsetof(tlb_entry_t, valid));
-    wasm_byte(e, W_I32_EQZ);
+    wasm_rv_load(e, W_I32_LOAD, offsetof(riscv_t, mmu_access_context));
+    wasm_byte(e, W_I32_NE);
     wasm_lget(e, WASM_TLB);
     wasm_mem(e, W_I32_LOAD, offsetof(tlb_entry_t, vpn));
     wasm_lget(e, WASM_VPN);
@@ -947,6 +965,21 @@ static bool wasm_lower(struct wasm_emitter *e, const rv_insn_t *ir)
         ALU(slli, W_I32_SHL, true);
         ALU(srli, W_I32_SHR_U, true);
         ALU(srai, W_I32_SHR_S, true);
+#if RV32_HAS(Zba)
+#define SHIFT_ADD(inst, shift)   \
+    case rv_insn_##inst:         \
+        wasm_get(e, ir->rs1);    \
+        wasm_const(e, shift);    \
+        wasm_byte(e, W_I32_SHL); \
+        wasm_get(e, ir->rs2);    \
+        wasm_byte(e, W_I32_ADD); \
+        wasm_set(e, ir->rd);     \
+        break
+        SHIFT_ADD(sh1add, 1);
+        SHIFT_ADD(sh2add, 2);
+        SHIFT_ADD(sh3add, 3);
+#undef SHIFT_ADD
+#endif
 #if RV32_HAS(EXT_M)
         ALU(mul, W_I32_MUL, false);
     case rv_insn_div:
@@ -1129,11 +1162,9 @@ static uint32_t wasm_slot(uint32_t pc, uint32_t satp)
 }
 
 #if RV32_HAS(SYSTEM)
-static uint32_t wasm_page_slot(uint32_t va, uint32_t satp)
+static uint32_t wasm_page_slot(uint32_t va)
 {
-    return ((va >> RV_PG_SHIFT) ^
-            ((satp * WASM_SATP_MIX) >> (32 - WASM_PAGE_BITS))) &
-           ((1 << WASM_PAGE_BITS) - 1);
+    return (va >> RV_PG_SHIFT) & ((1 << WASM_PAGE_BITS) - 1);
 }
 #endif
 
@@ -1152,6 +1183,9 @@ static void wasm_retire(struct jit_state *state, struct wasm_map *map)
     if (state->lookup[slot] == (uintptr_t) map)
         state->lookup[slot] = 0;
     if (map->entry) {
+#if RV32_HAS(SYSTEM)
+        state->code_generation++;
+#endif
         wasm_remove(map->entry);
         map->entry = 0;
         free(map->arena);
@@ -1160,7 +1194,7 @@ static void wasm_retire(struct jit_state *state, struct wasm_map *map)
         const uint16_t index = map - state->maps + 1;
         state->free_maps[state->n_free++] = index - 1;
 #if RV32_HAS(SYSTEM)
-        uint16_t *link = &state->pages[wasm_page_slot(map->pc, map->satp)];
+        uint16_t *link = &state->pages[wasm_page_slot(map->pc)];
         while (*link != index) {
             assert(*link); /* every live map is in its bucket */
             link = &state->maps[*link - 1].next_in_page;
@@ -1188,6 +1222,9 @@ void jit_wasm_retire_block(riscv_t *rv, block_t *block)
 
 static void wasm_reset(struct jit_state *state)
 {
+#if RV32_HAS(SYSTEM)
+    state->code_generation++;
+#endif
     for (int i = 0; i < state->n_blocks; i++) {
         if (state->maps[i].entry)
             wasm_remove(state->maps[i].entry);
@@ -1216,6 +1253,10 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
     if (!state)
         return NULL;
     state->size = size;
+#if RV32_HAS(SYSTEM)
+    /* Zeroed IR must not look stamped for RVOP_CHAIN_NATIVE. */
+    state->code_generation = 1;
+#endif
     state->scratch = malloc(WASM_BODY_SIZE);
     if (!state->scratch) {
         free(state);
@@ -1238,6 +1279,7 @@ void jit_wasm_run(riscv_t *rv, const block_t *block)
     struct jit_state *state = rv->jit_state;
     struct wasm_map *map = &state->maps[block->offset - 1];
     assert(map->owner == block && map->entry);
+    assert(block_matches_context(rv, block));
 
     /* A hash collision returns to rv_step, which refills the entry here.
      * Generated edges chain until the guest cycle count reaches the limit.
@@ -1334,6 +1376,11 @@ static void wasm_tail(struct wasm_emitter *e, struct jit_state *state)
     wasm_lget(e, WASM_TAIL_MAP);
     wasm_mem(e, W_I32_LOAD, offsetof(struct wasm_map, satp));
     wasm_lget(e, WASM_TAIL_SATP);
+    wasm_byte(e, W_I32_EQ);
+    wasm_byte(e, W_I32_AND);
+    wasm_lget(e, WASM_TAIL_MAP);
+    wasm_mem(e, W_I32_LOAD, offsetof(struct wasm_map, priv_mode));
+    wasm_rv_load(e, W_I32_LOAD, offsetof(riscv_t, priv_mode));
     wasm_byte(e, W_I32_EQ);
     wasm_byte(e, W_I32_AND);
 #endif
@@ -1677,6 +1724,10 @@ retry:;
     }
     if (too_big) {
         block->translatable = false;
+#if RV32_T1C_STATS_ENABLED
+        if (block->stats_blocker == T1C_INTERPRETED_TRANSLATABLE)
+            block->stats_blocker = T1C_BLOCKER_WASM;
+#endif
         return false;
     }
     if ((state->n_blocks == WASM_MAX_BLOCKS && !state->n_free) ||
@@ -1703,6 +1754,10 @@ retry:;
         if (!state->installed)
             state->disabled = true;
         block->translatable = false;
+#if RV32_T1C_STATS_ENABLED
+        if (block->stats_blocker == T1C_INTERPRETED_TRANSLATABLE)
+            block->stats_blocker = T1C_BLOCKER_WASM;
+#endif
         return false;
     }
     state->installed = true;
@@ -1716,7 +1771,8 @@ retry:;
                               .arena = region.arena};
 #if RV32_HAS(SYSTEM)
     map->satp = block->satp;
-    uint16_t *head = &state->pages[wasm_page_slot(map->pc, map->satp)];
+    map->priv_mode = block->priv_mode;
+    uint16_t *head = &state->pages[wasm_page_slot(map->pc)];
     map->next_in_page = *head;
     *head = index + 1;
 #endif
@@ -1735,6 +1791,7 @@ void jit_flush(riscv_t *rv)
 
 void jit_retire_space(struct jit_state *state, uint32_t satp)
 {
+    state->code_generation++;
     for (int i = 0; i < state->n_blocks; i++) {
         struct wasm_map *map = &state->maps[i];
         if (map->entry && map->satp == satp)
@@ -1742,17 +1799,23 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
     }
 }
 
-bool jit_page_has_code(const struct jit_state *state,
-                       uint32_t va,
-                       uint32_t satp)
+void jit_retire_all(struct jit_state *state)
 {
-    for (uint16_t i = state->pages[wasm_page_slot(va, satp)]; i;
+    state->code_generation++;
+    for (uint32_t i = 0; i < ARRAY_SIZE(state->pages); i++) {
+        while (state->pages[i])
+            wasm_retire(state, &state->maps[state->pages[i] - 1]);
+    }
+}
+
+bool jit_page_has_code_any(const struct jit_state *state, uint32_t va)
+{
+    for (uint16_t i = state->pages[wasm_page_slot(va)]; i;
          i = state->maps[i - 1].next_in_page) {
-        const struct wasm_map *map = &state->maps[i - 1];
-        if (map->satp == satp &&
-            (map->pc >> RV_PG_SHIFT) == (va >> RV_PG_SHIFT))
+        if ((state->maps[i - 1].pc >> RV_PG_SHIFT) == (va >> RV_PG_SHIFT))
             return true;
     }
     return false;
 }
+
 #endif

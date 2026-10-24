@@ -169,6 +169,9 @@ enum {
 #define SSTATUS_SPP MSTATUS_SPP
 #define SSTATUS_SUM MSTATUS_SUM
 #define SSTATUS_MXR MSTATUS_MXR
+#define SSTATUS_VISIBLE_MASK                                                \
+    (SSTATUS_SIE | SSTATUS_SPIE | SSTATUS_UBE | SSTATUS_SPP | SSTATUS_SUM | \
+     SSTATUS_MXR | UINT32_C(0x8001e000)) /* SD, XS and FS */
 #define SIP_SSIP_SHIFT 1
 #define SIP_STIP_SHIFT 5
 #define SIP_SEIP_SHIFT 9
@@ -257,6 +260,15 @@ enum TRAP_CODE {
          * FIXME: ECALL_U cannot be trap directly to __trap_handler            \
          */                                                                    \
         IIF(RV32_HAS(SYSTEM))(if (cause != ECALL_U) rv->trap_cnt++;, );      \
+        SET_CAUSE_AND_TVAL_THEN_ENTER(rv, cause, tval);                        \
+    }
+
+/* Enter the trap without nesting its handler: with trap_cnt unchanged, the
+ * trap handler only redirects to the trap vector, and the dispatcher runs
+ * the guest's handler as ordinary code.
+ */
+#define SET_CAUSE_AND_TVAL_THEN_ENTER(rv, cause, tval)                         \
+    {                                                                          \
         /* A trap may switch tasks, so no reservation may survive it. */       \
         RV_RESERVE_CLEAR(rv);                                                  \
         if (RV_PRIV_IS_U_OR_S_MODE()) {                                        \
@@ -318,14 +330,21 @@ enum TRAP_CODE {
 #define BLOCK_MAP_CAPACITY_BITS 10
 
 /* The JIT's block cache holds more blocks under a guest OS, whose kernel and
- * processes share it: at the default size, starting processes in a loop evicts
- * and rebuilds blocks faster than the interpreter runs them. Twice this size
- * starts processes slower on both x86-64 and Arm64 while executing the same
- * instructions: the least recently used block it evicts is older and colder,
- * so freeing its IR and unlinking its edges miss in the CPU caches, and the
- * larger working set stalls the rest of the dispatcher too.
+ * processes share it. The kernel's fork/exec paths alone exceed 4096 blocks,
+ * which were evicted and decoded again for each process. A larger cache helps
+ * only together with room for the code it lets compile (CODE_CACHE_SIZE and
+ * MAX_BLOCKS in jit.c); otherwise the native cache fills and is flushed whole.
+ * The browser build keeps the smaller cache, whose Wasm modules it bounds, and
+ * so does T2C, which then compiled more and ran Linux workloads slower.
  */
-#if RV32_HAS(SYSTEM)
+#if RV32_HAS(SYSTEM) && !RV32_HAS(T2C) && !defined(__EMSCRIPTEN__)
+#define BLOCK_CACHE_LARGE 1
+#else
+#define BLOCK_CACHE_LARGE 0
+#endif
+#if BLOCK_CACHE_LARGE
+#define BLOCK_CACHE_CAPACITY_BITS 15
+#elif RV32_HAS(SYSTEM)
 #define BLOCK_CACHE_CAPACITY_BITS 12
 #else
 #define BLOCK_CACHE_CAPACITY_BITS BLOCK_MAP_CAPACITY_BITS
@@ -634,6 +653,11 @@ typedef struct {
     virtio_rng_state_t *vrng;
     uint32_t vrng_mmio_base_hi;
     int vrng_irq;
+
+    /* A device completes guest requests on host threads, in host time, so an
+     * idle hart must not skip ahead of it; see WFI.
+     */
+    bool host_paced;
 
 #if RV32_HAS(VIRTIO_NET)
     /* virtio-net device */

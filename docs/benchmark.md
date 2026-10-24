@@ -170,10 +170,11 @@ runs interpreted. Both tiers still come out slightly ahead of the interpreter
 there: in system builds a looping block compiles after 64 dispatches
 (`LOOP_THRESHOLD`), the interpreter profiles one chained branch in 32
 (`PROBE_INTERVAL`), the cache keeps 4096 blocks (`BLOCK_CACHE_CAPACITY_BITS`),
-and neither evicting a block, flushing a page without compiled code, nor
-flushing an address space scans the whole cache or the JIT's tables. Keying
-compiled code by physical page, so that a mapping flush keeps code whose page
-did not change, would turn this case into a clear gain.
+and those measurements used indexed per-address-space retirement. The
+SFENCE.VMA correctness follow-up below broadens retirement to every retained
+address space; these earlier measurements predate that change. Execution
+cache tables are cleared when compiled blocks were invalidated. Sharing
+compiled code by physical page remains a separate experiment.
 
 ## Continuous benchmarking
 
@@ -931,11 +932,11 @@ python3 tests/system-boot.py --emulator stats=build/rv32emu \
 make -j8 ENABLE_ROOTFS_EXT4=0 T1C_STATS=0
 ```
 
-The diagnostic build prints a `T1C_STATS` JSON object on serial-monitor exit
-or hart deletion, and the boot runner records it outside the measured
-interval. The counts are taken shortly after login, and OS boot work and
-interrupt counts vary between runs. Timing comparisons use `T1C_STATS=0`,
-which removes the counters and diagnostic IR-owner pointers.
+User and system JIT diagnostic builds print a `T1C_STATS` JSON object on hart
+deletion (also on system serial-monitor exit), and the boot runner records it
+outside the measured interval. The counts are taken shortly after login, and
+OS boot work and interrupt counts vary between runs. Timing comparisons use
+`T1C_STATS=0`, which removes the counters and diagnostic IR-owner pointers.
 
 A boot before native dispatch recorded 10.29 million block lookups and 9,347
 compilation requests; after it, 3.01 million lookups and about 5,200 requests,
@@ -968,14 +969,14 @@ requires.
   with FENCE.I after IR eviction.
 * `system-interrupt-dispatch.S` checks repeated timer interrupts returning into
   a compiled loop, live registers, SPP, and a nested exception leaving SIE
-  clear. Interrupts are polled only between dispatches, and the system
-  interpreter chains a running loop without returning there, so this check runs
-  only in JIT builds.
+  clear. Interrupts are polled only between dispatches. This check first ran
+  only in JIT builds, because the system interpreter chained a running loop
+  without returning there; since chains end at the timer deadline (see
+  System performance below), every system build runs it.
 
-These pass in T1C, T2C and UBSan system builds; the interpreter build runs all
-but the interrupt check. The Arm64 system build cross-compiles, but QEMU-user
-8.2.2 crashes on demand-paged RAM with both the original and changed binaries,
-so it was not run.
+These pass in T1C, T2C, interpreter and UBSan system builds. The Arm64 system
+build cross-compiles, but QEMU-user 8.2.2 crashes on demand-paged RAM with both
+the original and changed binaries, so it was not run.
 
 One run of each `tests/system-bench.sh` workload, original / optimized T1C.
 These are smoke checks for gross regressions, not statistical comparisons:
@@ -986,3 +987,178 @@ These are smoke checks for gross regressions, not statistical comparisons:
 | CoreMark | 4.897 / 3.685 s |
 | 300 fork/execs | 9.498 / 8.523 s |
 | gzip/MD5 pipeline | 1.721 / 1.177 s |
+
+
+## System JIT correctness and Zba (2026-10)
+
+This series fixes compatibility defects in the system JIT and compiles the
+Zba shift-add instructions. Most changes are correctness repairs; each has a
+flat supervisor or user regression that fails before its fix. Only the
+representative measurements are kept here.
+
+Correctness changes:
+
+* **Address spaces.** SFENCE.VMA retires decoded and native code in every
+  retained address space, including native entries whose IR was evicted, and
+  unchanged SATP writes no longer clear the interpreter block map.
+* **Privilege.** Page walks, TLB hits and block entry enforce U, SUM and MXR,
+  and MPRV selects the data context. Fetch privilege is part of iTLB tags,
+  block lookup, native link keys and T2C caches. Decode faults are precise,
+  including instructions that straddle a page.
+* **Interrupts.** Interpreter and native chains stop at the dispatch
+  deadline, so a hot loop can no longer starve timer interrupts. A handler
+  that consumes the whole slice still lets the resumed guest run one block.
+* **Code retirement during an access.** A page-fault handler may rewrite code
+  and fence while a memory helper is on the stack. The helper completes the
+  current access once and returns at the next guest PC, charging only the
+  executed prefix.
+* **Loads into x0.** T2C discarded load results into x0 by writing them;
+  it now keeps the access (volatile RAM read or MMU callback) and drops the
+  result. Lazy fusion mutates IR under the compiler's cache lock.
+* **Zero-count rotations.** rol, ror and rori no longer shift a 32-bit value
+  by 32 when the amount masks to zero.
+* **Fetch retries.** A retried fetch restores JIT eligibility for compatible
+  blocks.
+
+Diagnostics: T1C_STATS=1 attributes interpreted block entries to the first
+opcode that blocked translation. On rebuilt CoreMark this put 78.9% of
+weighted instructions behind sh1add/sh2add/sh3add, which motivated the Zba
+lowering. The counters are estimates, not retired-instruction counts, and
+T1C_STATS=0 builds contain none of them.
+
+### Zba lowering
+
+sh1add, sh2add and sh3add compile in x86 and Arm64 T1C (LEA, or ADD with a
+shifted source), in LLVM T2C and in Wasm. The fixtures force dispatch for
+every alias and source form and require native or tier-2 entries for each.
+The Sv32 variant adds an index with bit 30 set to a high virtual base, so a
+64-bit shift/add would fault.
+
+User throughput on CPU 6, rebuilt with `-march=rv32imafc_zba_zbb_zbs`, five
+interleaved runs; positive means faster, with paired 95% intervals:
+
+| Configuration | Workload | vs baseline | vs QEMU 11.0.2 |
+| --- | --- | --- | --- |
+| T1C | CoreMark | +212.99% [+197.93%, +228.81%] | +36.24% [+34.13%, +38.39%] |
+| T1C | SciMark2 | +18.65% [+18.06%, +19.24%] | +199.37% [+196.89%, +201.86%] |
+| T2C | CoreMark | +257.32% [+250.93%, +263.82%] | +18.31% [+16.30%, +20.35%] |
+| T2C | SciMark2 | +13.37% [+7.22%, +19.89%] | -15.48% [-15.95%, -15.01%] |
+
+The prebuilt CoreMark and Dhrystone contain no Zba, and showed no
+significant change. Guests were rebuilt with xPack GCC 15.2.0-1:
+
+```sh
+ZBA_CC=/path/to/toolchain/bin/riscv-none-elf-gcc
+make -C /path/to/scimark2 CC="$ZBA_CC" \
+    CFLAGS='-march=rv32imafc_zba_zbb_zbs -mabi=ilp32 -O2' \
+    LDFLAGS=-lsemihost
+"$ZBA_CC" -std=c99 -march=rv32imafc_zba_zbb_zbs -mabi=ilp32 -O2 \
+    -Wno-implicit-function-declaration -Itests/ansibench/coremark/include \
+    -DPERFORMANCE_RUN=1 -DMULTITHREAD=1 -DDUMMY_NO_MULTITHREAD \
+    -DUINTPTR_TYPE -DITERATIONS=1000 \
+    '-DFLAGS_STR="rv32imafc_zba_zbb_zbs -O2"' \
+    tests/ansibench/coremark/src/core_main.c \
+    tests/ansibench/coremark/src/core_matrix.c \
+    tests/ansibench/coremark/src/core_list_join.c \
+    tests/ansibench/coremark/src/core_state.c \
+    tests/ansibench/coremark/src/core_util.c \
+    tests/ansibench/coremark/src/core_portme.c \
+    -lm -lsemihost -o build/coremark-zba
+```
+
+CoreMark's source fixes 80,000 iterations regardless of ITERATIONS, so it is
+compared by wall-clock throughput; no official CoreMark score is claimed.
+
+### System performance
+
+The correctness changes first cost system time: per-commit timing traced it
+to three causes, each now fixed.
+
+* Chains stopped at the 100-cycle system slice, returning hot code to the
+  dispatcher every hundred instructions. Chains now end at the slice or when
+  the cycle-derived timer comes due, and the slice is 1000 cycles.
+* SUM was part of dTLB stamps and RAM tags, so the SUM toggles around each
+  user copy refilled kernel entries. The S context now ignores SUM; slots
+  stamped for U pages while SUM was set are parked when it clears.
+* An interrupted-block flag added a second load to every interpreted
+  instruction; it now shares a 64-bit word with trap_cnt.
+
+Live indirect slots, enabled for system T1C in this series, account for most
+of the Dhrystone gain. Five interleaved rounds of `tests/system-bench.sh` on
+CPU 6, system T1C, medians in milliseconds, against master (ffe36e0):
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+|---|---|---|---|---|---|
+| master | 2129 | 11801 | 3403 | 8021 | 1115 |
+| before the fixes | 2375 (+11.6%) | 10594 (-10.2%) | 4232 (+24.4%) | 8695 (+8.4%) | 1409 (+26.4%) |
+| this series | 2186 (+2.7%) | 8708 (-26.2%) | 3327 (-2.2%) | 8239 (+2.7%) | 1214 (+8.9%) |
+
+Five rounds on a shared host are a small sample, and gzip varies by about
+10% between rounds. QEMU 11.0.2 remains faster on CoreMark, fork/exec and
+gzip.
+
+### Trap, fence and address-space paths (2026-10-23)
+
+Over boot plus 1000 fork/execs, page-fault handlers ran a third of guest
+instructions one at a time, decoded afresh outside the block cache; each of
+about ten global SFENCE.VMAs per fork/exec retired all compiled code; and
+every process decoded and compiled the kernel's code paths again.
+
+* Outside a nested handler, a page fault aborts its access, the dispatcher
+  runs the handler as ordinary code, and its sret retries the instruction.
+* Interpreter chains leave for the dispatcher at a block with live native
+  code instead of interpreting around it.
+* A fence retires only address spaces in which a recorded root or leaf entry
+  of a code page changed. If the records cannot be kept, as when they run
+  out, it retires all code as before. A page is recorded only when the iTLB
+  translation its fetch used agrees with the page tables.
+* S-mode code fetched only through global mappings is shared by every
+  address space, and checked against each space switched to. T2C builds keep
+  per-space code: there the extra tier-2 compilation slowed boots by 20%.
+* WFI skips to the next timer deadline or device poll.
+
+After these, 24.5% of guest instructions run interpreted in blocks T1C could
+compile, down from 51%, and shared kernel code is retired once in that run.
+Delivering interrupts through the dispatcher, as faults are, was slower on its
+own; with the larger block cache below it no longer is.
+
+### Native code quality in system T1C (2026-10-23)
+
+With the kernel's code retained, the time went to the code itself and to the
+blocks still interpreted:
+
+* The TLBs hold 256 entries, and the block cache holds 32768 blocks with a
+  64 MiB code buffer, so the kernel's working set stays compiled.
+* Code records are found through a hashed index. Duplicates had filled the
+  table four times per run, and each overflow retired all code.
+* Blocks compile after 16 dispatches, or 2 for a loop; 8 and 1 compiled too
+  much cold code.
+* Loads and stores keep the register allocator's mappings: only the slow path
+  writes guest registers back. Their slow paths are emitted after the block,
+  so a dTLB hit falls through to the next instruction, and on x86-64 a hit
+  takes two instructions fewer.
+* A fence for one page checks only that page's code records, and in a
+  superpage region holding code, the region's superpage records; Linux issues
+  about 1,600 such fences per process launch.
+* AMOs and CSR instructions compile as calls into C instead of leaving each
+  block that holds one to the interpreter. A CSR helper leaves the block after
+  a SATP write and when it unmasks a pending interrupt.
+
+Five interleaved rounds of `tests/system-bench.sh` on CPU 6, system T1C,
+medians in milliseconds. QEMU 11.0.2 runs the same kernel and initramfs on
+`virt` with OpenSBI (`-M virt -accel tcg -m 512M`), so its boot also covers
+firmware.
+
+| Binary | Boot | Dhrystone | CoreMark | Fork/exec | Gzip/MD5 |
+|---|---:|---:|---:|---:|---:|
+| master (ffe36e0) | 2138 | 11809 | 3417 | 8093 | 1155 |
+| this series | 1570 | 5772 | 2257 | 2434 | 572 |
+| QEMU 11.0.2 | 2485 | 11880 | 2778 | 3724 | 670 |
+
+Against master: boot -26.6%, Dhrystone -51.1%, CoreMark -33.9%, fork/exec
+-69.9%, gzip -50.5%. Against QEMU: boot -36.8%, Dhrystone -51.4%, CoreMark
+-18.8%, fork/exec -34.6%, gzip -14.6%. Moving the slow paths out of line alone
+saved about 10% in every workload.
+
+Not adopted: decoding trap handlers through a cache (no gain) and honoring
+ASIDs in SFENCE.VMA (Linux issued none).

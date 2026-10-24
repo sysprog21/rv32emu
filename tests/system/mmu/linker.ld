@@ -6,7 +6,7 @@ ENTRY(_start)
  *
  * 0x00000000 - User code (.text.main) - intentionally unmapped at boot
  *              to trigger instruction fetch page fault
- * 0x00001000 - User data (.mystring, .data.main, .bss.main)
+ * 0x00001000 - User data (.mystring, .rodata.main, .data.main, .bss.main)
  * 0x00400000 - FREE_FRAME_BASE (see vm_setup.c) - page allocation pool
  * 0x00800000 - Kernel/supervisor code (.text.setup, .text.vm_setup)
  *              Mapped to VA 0x80000000 via mega page in l1pt[512]
@@ -25,6 +25,8 @@ SECTIONS
   .text.main : { *(.text.main) }
   . = ALIGN(0x1000);
   .mystring : { *(.mystring) }
+  /* User code copies its string literals, so they stay on user pages. */
+  .rodata.main : { main.o(.rodata .rodata.*) }
   .data.main : { *(.data.main) }
   .bss.main : { *(.bss.main) }
 

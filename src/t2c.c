@@ -48,14 +48,6 @@ _Static_assert(offsetof(tlb_entry_t, dirty) == 14, "tlb_entry_t.dirty offset");
 _Static_assert(offsetof(tlb_entry_t, level) == 15, "tlb_entry_t.level offset");
 _Static_assert((TLB_SIZE & (TLB_SIZE - 1)) == 0,
                "TLB_SIZE must be a power of two");
-/* Mirrors the assert in jit.c: the T1 x86-64 fast path uses opcode 0x83 /4
- * (imm8 sign-extended) for `and esi, TLB_SIZE - 1`.  Keep both asserts in
- * lockstep so a TLB_SIZE bump here cannot silently diverge from the T1
- * emitter's encoding.
- */
-_Static_assert(TLB_SIZE <= 128,
-               "TLB_SIZE > 128 needs imm32 AND encoding in the x86-64 "
-               "fast path (see jit.c emit path)");
 _Static_assert(RV_PG_SHIFT == 12, "fast path assumes 4 KiB pages");
 #endif
 
@@ -135,6 +127,31 @@ FORCE_INLINE LLVMBasicBlockRef t2c_block_map_search(struct LLVM_block_map *map,
 T2C_LLVM_GEN_ADDR(rs1, X, ir->rs1);
 T2C_LLVM_GEN_ADDR(rs2, X, ir->rs2);
 T2C_LLVM_GEN_ADDR(rd, X, ir->rd);
+
+/* Preserve a discarded guest access when LLVM has no register result to
+ * store. Direct RAM loads stay volatile; MMU callback calls already carry
+ * their own observable side effects.
+ */
+static void t2c_gen_load_result(LLVMBuilderRef *builder,
+                                LLVMValueRef value,
+                                LLVMValueRef destination,
+                                bool is_signed)
+{
+    if (!destination) {
+        if (LLVMIsALoadInst(value))
+            LLVMSetVolatile(value, true);
+        return;
+    }
+    value = LLVMBuildIntCast2(*builder, value, LLVMInt32Type(), is_signed, "");
+    LLVMBuildStore(*builder, value, destination);
+}
+
+static LLVMValueRef t2c_gen_load_rd_addr(LLVMValueRef start,
+                                         LLVMBuilderRef *builder,
+                                         rv_insn_t *ir)
+{
+    return ir->rd ? t2c_gen_rd_addr(start, builder, ir) : NULL;
+}
 #if RV32_HAS(EXT_C)
 T2C_LLVM_GEN_ADDR(ra, X, rv_reg_ra);
 T2C_LLVM_GEN_ADDR(sp, X, rv_reg_sp);
@@ -246,6 +263,29 @@ static void t2c_gen_unlikely_br(LLVMBuilderRef builder,
         LLVMMetadataAsValue(ctx, LLVMMDNodeInContext2(ctx, weights, 3)));
 }
 
+/* The decoder block currently being emitted, including fused memory members. */
+static const block_t *t2c_current_block;
+
+/* Publish only the executed prefix before a helper can run a guest handler.
+ * A successful MMU access restores the suffix to the local counter; an early
+ * exit leaves it uncharged. Prior region blocks are published at the same time.
+ */
+static uint32_t t2c_publish_trap_prefix(LLVMBuilderRef *builder,
+                                        LLVMValueRef start,
+                                        LLVMValueRef insn_counter,
+                                        uint32_t pc)
+{
+    uint32_t refund = block_unretired_after(t2c_current_block, pc);
+    LLVMValueRef count =
+        LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");
+    LLVMBuildStore(*builder, T2C_LLVM_GEN_ALU64_IMM(Sub, count, refund),
+                   insn_counter);
+    T2C_STORE_TIMER(*builder, start, insn_counter);
+    LLVMBuildStore(*builder, LLVMConstInt(LLVMInt64Type(), 0, false),
+                   insn_counter);
+    return refund;
+}
+
 /* Tier-2 counterpart of emit_misalign_guard() in jit.c: when a halfword or word
  * access at vaddr is misaligned, and misaligned accesses are not allowed, store
  * the faulting pc, raise the exception through jit_misaligned_trap(), and
@@ -286,8 +326,8 @@ static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
         LLVMPointerType(fn_type, 0));
     LLVMValueRef args[] = {LLVMGetParam(start, 0), vaddr,
                            LLVMConstInt(LLVMInt32Type(), flags, false)};
+    t2c_publish_trap_prefix(builder, start, insn_counter, pc);
     LLVMBuildCall2(*builder, fn_type, fn, args, 3, "");
-    T2C_STORE_TIMER(*builder, start, insn_counter);
     LLVMBuildRetVoid(*builder);
 
     LLVMPositionBuilderAtEnd(*builder, aligned);
@@ -494,6 +534,29 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
 
     LLVMValueRef cnt =
         LLVMBuildLoad2(*builder, LLVMInt64Type(), insn_counter, "");
+#if RV32_HAS(SYSTEM)
+    /* Regions may loop or tail-call another region. Bound every block entry
+     * before charging it, publishing only the already-executed prefix.
+     */
+    LLVMValueRef cycle =
+        LLVMBuildLoad2(*builder, LLVMInt64Type(),
+                       t2c_gen_csr_cycle_addr(start, builder, NULL), "");
+    LLVMValueRef deadline = LLVMBuildLoad2(
+        *builder, LLVMInt64Type(),
+        t2c_gen_rv_field_ptr(start, builder,
+                             offsetof(riscv_t, branch_chain_cycle_target),
+                             LLVMInt64Type()),
+        "");
+    LLVMValueRef expired =
+        LLVMBuildICmp(*builder, LLVMIntUGE,
+                      LLVMBuildAdd(*builder, cycle, cnt, ""), deadline, "");
+    LLVMBasicBlockRef leave = LLVMAppendBasicBlock(start, "chain_deadline");
+    LLVMBasicBlockRef body = LLVMAppendBasicBlock(start, "chain_body");
+    t2c_gen_unlikely_br(*builder, expired, leave, body);
+    LLVMPositionBuilderAtEnd(*builder, leave);
+    t2c_gen_exit(*builder, start, block->pc_start, insn_counter);
+    LLVMPositionBuilderAtEnd(*builder, body);
+#endif
     LLVMBuildStore(*builder,
                    T2C_LLVM_GEN_ALU64_IMM(Add, cnt, block->cycle_cost),
                    insn_counter);
@@ -504,6 +567,7 @@ static void t2c_trace_ebb(LLVMBuilderRef *builder,
 
     while (1) {
         t2c_region_insns++;
+        t2c_current_block = block;
         ((t2c_codegen_block_func_t) dispatch_table[ir->opcode])(
             builder, param_types, start, entry, &tk, &utk, rv, mem_base, block,
             ir, insn_counter);
@@ -667,8 +731,8 @@ static void t2c_promote_guest_regs(LLVMValueRef fn, LLVMBasicBlockRef entry)
         if (t2c_may_alias_x(user, rv_arg))
             goto keep_in_memory;
 
-        /* x0 stays in memory: it must read zero, whatever a handler stores
-         * there. A promoted address must only be loaded from or stored to.
+        /* x0 stays in memory; load emitters discard its results so that it
+         * remains zero. A promoted address must only be loaded or stored.
          */
         int r = t2c_guest_reg(user, rv_arg);
         if (r <= 0)
@@ -810,21 +874,26 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     t2c_jit_cache_func_type =
         LLVMFunctionType(LLVMVoidType(), t2c_args, 1, false);
 
-    /* jit_cache struct: { uint32_t seq, [pad], uint64_t key, void *entry }
-     * C struct has 4 bytes padding after seq for 8-byte alignment of key.
-     * LLVM doesn't add this padding automatically, so we add explicit i32 pad.
-     * Field indices: 0=seq, 1=pad, 2=key, 3=entry */
+    /* jit_cache struct: { uint32_t seq, priv_or_pad, uint64_t key, void *entry
+     * } SYSTEM uses the alignment word after seq for fetch privilege. LLVM
+     * doesn't add this padding automatically, so we add explicit i32 pad. Field
+     * indices: 0=seq, 1=priv_or_pad, 2=key, 3=entry */
     LLVMTypeRef jit_cache_memb[4] = {LLVMInt32Type(), LLVMInt32Type(),
                                      LLVMInt64Type(),
                                      LLVMPointerType(LLVMVoidType(), 0)};
     t2c_jit_cache_struct_type = LLVMStructType(jit_cache_memb, 4, false);
 
-    /* inline_cache struct: { uint64_t key, void *entry }
-     * Field indices: 0=key, 1=entry
-     * No padding needed - already naturally aligned. */
-    LLVMTypeRef inline_cache_memb[2] = {LLVMInt64Type(),
-                                        LLVMPointerType(LLVMVoidType(), 0)};
-    t2c_inline_cache_struct_type = LLVMStructType(inline_cache_memb, 2, false);
+    /* inline_cache: { key, entry [, priv_mode] }. LLVM GEPs derive the
+     * stride from this type (16 bytes user, 24 bytes SYSTEM). */
+    LLVMTypeRef inline_cache_memb[] = {
+        LLVMInt64Type(),
+        LLVMPointerType(LLVMVoidType(), 0),
+#if RV32_HAS(SYSTEM)
+        LLVMInt32Type(),
+#endif
+    };
+    t2c_inline_cache_struct_type =
+        LLVMStructType(inline_cache_memb, ARRAY_SIZE(inline_cache_memb), false);
 
     LLVMBasicBlockRef first_block = LLVMAppendBasicBlock(start, "first_block");
     LLVMBuilderRef first_builder = LLVMCreateBuilder();
@@ -833,7 +902,8 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     /* Create instruction counter alloca in entry block for mem2reg promotion.
      * LLVM's mem2reg pass promotes allocas in the entry block to SSA registers,
      * eliminating per-instruction memory traffic. The counter is initialized to
-     * 0 and incremented by each T2C_OP. Timer is updated only at block exits.
+     * 0 and charged at each block entry. It is published at region exits and
+     * before helpers that can enter a synchronous guest trap handler.
      */
     LLVMValueRef insn_counter =
         LLVMBuildAlloca(first_builder, LLVMInt64Type(), "insn_counter");
@@ -1039,7 +1109,7 @@ void t2c_compile(riscv_t *rv, block_t *block, pthread_mutex_t *cache_lock)
     block->func = func;
     block->llvm_engine = engine;
 
-    jit_cache_update(rv->jit_cache, key, block->func);
+    jit_cache_update(rv->jit_cache, key, block->func, BLOCK_PRIV(block));
 
     /* Atomic store-release ensures all writes to block->func and jit_cache
      * are visible to other threads before they observe hot2=true.
@@ -1087,19 +1157,6 @@ void inline_cache_exit(struct inline_cache *cache)
 void inline_cache_clear(struct inline_cache *cache)
 {
     memset(cache, 0, N_INLINE_CACHE_ENTRIES * sizeof(struct inline_cache));
-}
-
-/* Clear the inline cache entries of one address space, on a flush of it. No
- * seqlock needed - only main thread reads/writes inline cache.
- */
-void inline_cache_clear_satp(struct inline_cache *cache, uint32_t satp)
-{
-    for (uint32_t i = 0; i < N_INLINE_CACHE_ENTRIES; i++) {
-        if (cache[i].key && (uint32_t) (cache[i].key >> 32) == satp) {
-            cache[i].key = 0;
-            cache[i].entry = NULL;
-        }
-    }
 }
 
 /* Clear the inline cache entry for a specific key, which can only be in its
@@ -1181,7 +1238,10 @@ void t2c_dispose_block_engine(void *block)
     }
 }
 
-void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry)
+void jit_cache_update(struct jit_cache *cache,
+                      uint64_t key,
+                      void *entry,
+                      uint32_t priv_mode UNUSED)
 {
     /* The key packs satp above pc. Mixing satp into the slot spreads entries
      * from different address spaces across the table.
@@ -1198,6 +1258,9 @@ void jit_cache_update(struct jit_cache *cache, uint64_t key, void *entry)
     ATOMIC_STORE(&cache[pos].seq, seq + 1, ATOMIC_RELEASE); /* odd = writing */
     ATOMIC_STORE(&cache[pos].entry, entry, ATOMIC_RELEASE);
     ATOMIC_STORE(&cache[pos].key, key, ATOMIC_RELEASE);
+#if RV32_HAS(SYSTEM)
+    ATOMIC_STORE(&cache[pos].priv_mode, priv_mode, ATOMIC_RELEASE);
+#endif
     ATOMIC_STORE(&cache[pos].seq, seq + 2, ATOMIC_RELEASE); /* even = done */
 }
 
@@ -1205,28 +1268,6 @@ void jit_cache_clear(struct jit_cache *cache)
 {
     /* Clear all entries using seqlock pattern for thread-safe invalidation. */
     for (uint32_t i = 0; i < N_JIT_CACHE_ENTRIES; i++) {
-        uint32_t seq = ATOMIC_LOAD(&cache[i].seq, ATOMIC_RELAXED);
-        ATOMIC_STORE(&cache[i].seq, seq + 1,
-                     ATOMIC_RELEASE); /* odd = writing */
-        ATOMIC_STORE(&cache[i].entry, NULL, ATOMIC_RELEASE);
-        ATOMIC_STORE(&cache[i].key, 0, ATOMIC_RELEASE);
-        ATOMIC_STORE(&cache[i].seq, seq + 2, ATOMIC_RELEASE); /* even = done */
-    }
-}
-
-/* Clear the entries of one address space, on a flush of it: blocks of other
- * address spaces stay valid, and so do their entries. The caller holds
- * cache_lock, which excludes the T2C thread's jit_cache_update(); the seqlock
- * only keeps readers in generated code from seeing a torn entry.
- */
-void jit_cache_clear_satp(struct jit_cache *cache, uint32_t satp)
-{
-    for (uint32_t i = 0; i < N_JIT_CACHE_ENTRIES; i++) {
-        uint64_t key = ATOMIC_LOAD(&cache[i].key, ATOMIC_RELAXED);
-        if (!key || (uint32_t) (key >> 32) != satp)
-            continue;
-
-        /* Clear using seqlock pattern */
         uint32_t seq = ATOMIC_LOAD(&cache[i].seq, ATOMIC_RELAXED);
         ATOMIC_STORE(&cache[i].seq, seq + 1,
                      ATOMIC_RELEASE); /* odd = writing */

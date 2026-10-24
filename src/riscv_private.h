@@ -133,6 +133,14 @@ typedef struct block {
     uint32_t n_insn;           /**< number of instructions encompassed */
     uint32_t pc_start, pc_end; /**< address range of the basic block */
     uint32_t cycle_cost;       /**< cycle cost for block-level counting */
+#if RV32_T1C_STATS_ENABLED
+    /* First unsupported opcode, or a T1C_* attribution reason. */
+    unsigned stats_blocker;
+#endif
+#if RV32_HAS(SYSTEM)
+    uint32_t
+        priv_mode; /* privilege whose fetch permissions decoded the block */
+#endif
 
     rv_insn_t *ir_head, *ir_tail; /**< the first and last ir for this block */
 
@@ -308,6 +316,9 @@ static inline void block_link_edge(block_t *source, bool taken, block_t *target)
 #if RV32_HAS(T2C)
 typedef struct {
     uint64_t key; /**< cache key (PC or PC|SATP) to look up block */
+#if RV32_HAS(SYSTEM)
+    uint32_t priv_mode; /* context of the queued block */
+#endif
     struct list_head list;
 } queue_entry_t;
 #endif
@@ -318,14 +329,16 @@ typedef struct {
  *
  * TLB design:
  * - Direct-mapped cache indexed by VPN lower bits
- * - 64 entries for ~256KB working set coverage
+ * - 256 entries for ~1MB working set coverage
  * - Each entry caches: VPN, PPN, permissions, and page level
  * - Separate dTLB (data) and iTLB (instruction) for better hit rates
  * - Superpages tracked via level field for selective SFENCE.VMA
  * - Invalidated on SFENCE.VMA or SATP changes
  */
-#define TLB_SIZE 64
+#define TLB_SIZE 256
 #define TLB_MASK (TLB_SIZE - 1)
+_Static_assert(2 * TLB_SIZE <= UINT16_MAX,
+               "tlb_super_slices counts the slots of both TLBs");
 
 /* Sv32 page levels: 1 = 4MB superpage, 2 = 4KB page */
 #define TLB_PAGE_LEVEL_SUPER 1
@@ -335,6 +348,8 @@ typedef struct {
  * into the comparison key. Invalidation must clear this tag as well.
  */
 #define ITLB_EXEC_TAG (UINT32_C(1) << (32 - RV_PG_SHIFT))
+#define ITLB_PRIV_SHIFT (33 - RV_PG_SHIFT)
+#define ITLB_VPN_MASK MASK(32 - RV_PG_SHIFT)
 
 #define CODE_PAGE_FILTER_BITS 8192
 
@@ -342,8 +357,8 @@ typedef struct {
     uint32_t vpn;      /* Virtual address >> 12; iTLB includes ITLB_EXEC_TAG */
     uint32_t ppn;      /* Translated 4 KiB physical page base */
     uint32_t pte_addr; /* Physical address of PTE for A/D bit updates */
-    uint8_t perm;      /* Permission bits: R(1), W(2), X(4), U(16) */
-    uint8_t valid;     /* Entry validity flag */
+    uint8_t perm;      /* Raw PTE permission bits: R(2), W(4), X(8), U(16) */
+    uint8_t valid;     /* nonzero access-context stamp; zero means invalid */
     uint8_t dirty;     /* Cached dirty bit state (avoid repeated PTE writes) */
     uint8_t level;     /* Page level: 1=superpage (4MB), 2=4KB page */
 } tlb_entry_t;
@@ -470,8 +485,25 @@ struct riscv_internal {
      * outer handler instead of ending trap handling. Non-zero means trapped.
      *
      * trap_cnt must be within 256-byte offset for ARM64 JIT access
+     *
+     * block_interrupted: a guest handler ran, or code was retired, during the
+     * current instruction, so its block must stop after it, and an exception
+     * fixup may not have run the terminal branch. It is clear whenever an
+     * instruction starts. Sharing a word with trap_cnt lets each interpreted
+     * instruction test both with one load.
      */
-    uint32_t trap_cnt;
+    union {
+        struct {
+            uint32_t trap_cnt;
+            uint32_t block_interrupted;
+        };
+        uint64_t chain_stop;
+    };
+    /* An interrupt handler entered through the dispatcher is running; the
+     * sret that ends it grants the code it resumes one dispatch before the
+     * next interrupt.
+     */
+    bool interrupt_entered, interrupt_grant;
 #endif
 
 #if !RV32_HAS(JIT)
@@ -509,8 +541,8 @@ struct riscv_internal {
     uint32_t csr_fcsr;
 #endif
 
-#if RV32_HAS_PACKED_TAIL
-    /* Exclusive rv_step() cycle limit while native branch chaining is live. */
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(SYSTEM)
+    /* Exclusive rv_step() cycle limit for interpreter and compiled chains. */
     uint64_t branch_chain_cycle_target;
 #endif
 
@@ -545,6 +577,9 @@ struct riscv_internal {
     uint32_t csr_satp;       /* supervisor address translation and protection */
 
     uint32_t priv_mode; /* U-mode or S-mode or M-mode */
+#if RV32_HAS(SYSTEM)
+    uint32_t mmu_access_context; /* nonzero dTLB context stamp in bits 4..7 */
+#endif
 
     bool compressed; /**< current instruction is compressed or not */
 
@@ -639,7 +674,8 @@ struct riscv_internal {
      */
     tlb_entry_t dtlb[TLB_SIZE];
 #if RV32_HAS(JIT)
-    /* Exact RAM tags fold permissions and dirty state into the hit test.
+    /* Exact RAM tags fold permissions, access context and dirty state into
+     * the hit test. Context occupies bits 4..7; alignment occupies bits 0..1.
      * An all-ones tag cannot equal a page base plus alignment bits. */
     jit_tlb_entry_t jit_dtlb[TLB_SIZE];
 #endif
@@ -687,8 +723,15 @@ struct riscv_internal {
 #if RV32_HAS(SYSTEM)
     /* Cached slices of each 4 MiB superpage region in both TLBs, so a
      * selective SFENCE.VMA scans the TLBs only when its region has any.
+     * Every slot of both TLBs can hold a slice of one region.
      */
-    uint8_t tlb_super_slices[1U << 10];
+    uint16_t tlb_super_slices[1U << 10];
+
+    /* dTLB slots stamped for U pages while S-mode data accesses had SUM set.
+     * The S context ignores SUM, so these are parked when that window closes.
+     */
+    uint64_t sum_user_slots[(TLB_SIZE + 63) / 64];
+    bool sum_user_any;
 
     /* 4 MiB regions holding blocks whose code may have been fetched through
      * a superpage leaf. Flushing any address there may remap that code, so it
@@ -696,6 +739,22 @@ struct riscv_internal {
      * blocks of other address spaces may still hold such code.
      */
     uint32_t code_superpages[(1U << 10) / 32];
+
+#if RV32_HAS(JIT)
+    /* The page-table entries that mapped each page of decoded code, per
+     * address space; see mmu_check_code_maps(). Allocated on first use.
+     */
+    struct code_map *code_maps;
+    uint32_t n_code_maps;
+    bool code_maps_overflow;
+    /* Fences since startup, and the count at which each recently run address
+     * space last had its records checked; see mmu_check_code_maps().
+     */
+    uint32_t code_fence_epoch;
+    struct {
+        uint32_t satp, epoch;
+    } code_space_epochs[64];
+#endif
 
 #if !RV32_HAS(JIT)
     /* Hashed filter of pages holding interpreter blocks. A false positive only
@@ -731,6 +790,21 @@ static inline void hart_unlock(riscv_t *rv, pthread_mutex_t *lock)
 void rv_reset_dispatcher_state(void);
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+/* The address-space key of S-mode code fetched only through global mappings:
+ * every address space that maps it alike shares the block, which is checked
+ * whenever SATP changes (see mmu_note_code()). Its root PPN lies outside guest
+ * RAM, so no S-mode code is ever fetched under this SATP value.
+ */
+#define SATP_SHARED UINT32_MAX
+
+/* Whether code keyed by satp may run in the current address space */
+static inline bool satp_in_context(const riscv_t *rv, uint32_t satp)
+{
+    return satp == rv->csr_satp || satp == SATP_SHARED;
+}
+#endif
+
 /* A cached block is usable from here only when it belongs to the address space
  * executing now. Address translation makes that a real question in system
  * mode; user mode has one space, so this folds away to a null check.
@@ -738,15 +812,29 @@ void rv_reset_dispatcher_state(void);
 static inline bool block_matches_context(const riscv_t *rv UNUSED,
                                          const block_t *block)
 {
-    /* satp and invalidated only exist where the JIT caches blocks across
-     * address spaces; elsewhere there is nothing to disambiguate.
-     */
-#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-    return block && block->satp == rv->csr_satp && !block->invalidated;
+    /* Every system engine checks fetch privilege; JIT engines additionally
+     * retain blocks across SATP changes and mapping fences. */
+#if RV32_HAS(SYSTEM)
+    if (!block || block->priv_mode != rv->priv_mode)
+        return false;
+#if RV32_HAS(JIT)
+    return satp_in_context(rv, block->satp) && !block->invalidated;
+#else
+    return true;
+#endif
 #else
     return block;
 #endif
 }
+
+#if RV32_HAS(SYSTEM_MMIO)
+/* Whether a pending supervisor interrupt is enabled and can be taken now. */
+static inline bool rv_has_plic_trap(const riscv_t *rv)
+{
+    return ((rv->csr_sstatus & SSTATUS_SIE || !rv->priv_mode) &&
+            (rv->csr_sip & rv->csr_sie));
+}
+#endif
 
 /* sign extend a 16 bit value */
 FORCE_INLINE uint32_t sign_extend_h(const uint32_t x)

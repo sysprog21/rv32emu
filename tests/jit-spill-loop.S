@@ -1,4 +1,5 @@
-/* More temporaries than host registers, but only five loop inputs.
+/* More temporaries than host registers, but only five loop inputs (six with
+ * USE_ZBA).
  * A misaligned load before any temporary definitions checks that a trap sees
  * their previous-iteration values while carried values stay current.
  */
@@ -13,6 +14,16 @@
     .option norvc
     .text
     .global _start
+    .macro next_temp dst, src
+#ifdef USE_ZBA
+    sh1add \dst, s8, \src
+    sh2add \dst, s8, \dst
+    sh3add \dst, s8, \dst
+    addi \dst, \dst, -13
+#else
+    addi \dst, \src, 1
+#endif
+    .endm
     .macro check_temporaries
     addi t0, s1, 0
     bne a0, t0, fail
@@ -57,6 +68,10 @@ _start:
     la s3, data
     la s5, scratch
     li s4, 0
+#ifdef USE_ZBA
+    la s8, zba_index
+    lw s8, 0(s8)
+#endif
 #ifdef REGION_BRANCH
     li s6, 0
 #endif
@@ -71,21 +86,21 @@ loop:
 1:
 #endif
     lhu t0, 0(s3)
-    addi a0, s1, 1
-    addi a1, a0, 1
-    addi a2, a1, 1
-    addi a3, a2, 1
-    addi a4, a3, 1
-    addi a5, a4, 1
-    addi a6, a5, 1
-    addi a7, a6, 1
-    addi t1, a7, 1
-    addi t2, t1, 1
-    addi t3, t2, 1
-    addi t4, t3, 1
-    addi t5, t4, 1
-    addi t6, t5, 1
-    addi ra, t6, 1
+    next_temp a0, s1
+    next_temp a1, a0
+    next_temp a2, a1
+    next_temp a3, a2
+    next_temp a4, a3
+    next_temp a5, a4
+    next_temp a6, a5
+    next_temp a7, a6
+    next_temp t1, a7
+    next_temp t2, t1
+    next_temp t3, t2
+    next_temp t4, t3
+    next_temp t5, t4
+    next_temp t6, t5
+    next_temp ra, t6
     sw a7, 0(s5)
     lw a7, 0(s5)
 #ifdef USE_MULDIV
@@ -168,6 +183,11 @@ seed:
     .balign 2
 data:
     .byte 0x11, 0x11, 0x11
+#ifdef USE_ZBA
+    .balign 4
+zba_index:
+    .word 1
+#endif
     .section .bss
     .balign 4
 scratch:

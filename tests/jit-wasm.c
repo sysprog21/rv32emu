@@ -21,6 +21,9 @@ static struct block *find_block(uint32_t pc);
 #define WASM_FIND_BLOCK(rv, pc) ((void) (rv), (block_t *) find_block(pc))
 #include "jit_wasm.c"
 
+/* This fixture supplies detached implementations, without interpreter state. */
+void rv_begin_wasm_helper(riscv_t *rv UNUSED) {}
+
 static block_t *known_block;
 static struct block *find_block(uint32_t pc)
 {
@@ -40,6 +43,9 @@ void clear_cache_hot(const struct cache *cache, clear_func_t clear)
 
 static int helper_calls;
 static bool helper_exit;
+#if RV32_HAS(SYSTEM)
+static unsigned helper_retire;
+#endif
 static bool memory_helper(riscv_t *rv,
                           const rv_insn_t *ir,
                           uint64_t cycle,
@@ -51,6 +57,12 @@ static bool memory_helper(riscv_t *rv,
     rv->csr_cycle = cycle + 1;
     rv->PC = helper_exit ? 0x9000 : pc + 4;
     helper_calls++;
+#if RV32_HAS(SYSTEM)
+    if (helper_retire == 1)
+        jit_flush(rv);
+    else if (helper_retire == 2)
+        jit_retire_all(rv->jit_state);
+#endif
     return true;
 }
 
@@ -116,20 +128,30 @@ static block_t make_block(rv_insn_t *irs, unsigned n, uint32_t pc)
                       .translatable = true};
 }
 
-static void run(riscv_t *rv, rv_insn_t *irs, unsigned n)
+static void translate(riscv_t *rv, block_t *block)
 {
-    block_t block = make_block(irs, n, 0x1000);
-    active = &block;
-    assert(jit_translate(rv, &block));
-    assert(block.hot && !((struct jit_state *) rv->jit_state)->disabled);
+    active = block;
+    assert(jit_translate(rv, block));
+    assert(block->hot && !((struct jit_state *) rv->jit_state)->disabled);
     static bool grown;
     if (!grown) {
         assert(emscripten_resize_heap(emscripten_get_heap_size() + 65536));
         grown = true;
     }
-    jit_wasm_run(rv, &block);
-    jit_wasm_retire_block(rv, &block);
+}
+
+static void retire(riscv_t *rv, block_t *block)
+{
+    jit_wasm_retire_block(rv, block);
     active = NULL;
+}
+
+static void run(riscv_t *rv, rv_insn_t *irs, unsigned n)
+{
+    block_t block = make_block(irs, n, 0x1000);
+    translate(rv, &block);
+    jit_wasm_run(rv, &block);
+    retire(rv, &block);
 }
 
 /* An independent model of each register operation, written from the ISA rather
@@ -173,6 +195,14 @@ static uint32_t reference(unsigned op, uint32_t a, uint32_t b, int32_t imm)
     case rv_insn_add:
         C_CASE(cadd)
         return a + b;
+#if RV32_HAS(Zba)
+    case rv_insn_sh1add:
+        return (a << 1) + b;
+    case rv_insn_sh2add:
+        return (a << 2) + b;
+    case rv_insn_sh3add:
+        return (a << 3) + b;
+#endif
     case rv_insn_sub:
         C_CASE(csub)
         return a - b;
@@ -279,6 +309,9 @@ static void check_register_ops(riscv_t *rv)
         rv_insn_srli,      rv_insn_srai,      rv_insn_add,    rv_insn_sub,
         rv_insn_xor,       rv_insn_or,        rv_insn_and,    rv_insn_slt,
         rv_insn_sltu,      rv_insn_sll,       rv_insn_srl,    rv_insn_sra,
+#if RV32_HAS(Zba)
+        rv_insn_sh1add,    rv_insn_sh2add,    rv_insn_sh3add,
+#endif
 #if RV32_HAS(EXT_M)
         rv_insn_mul,       rv_insn_mulh,      rv_insn_mulhsu, rv_insn_mulhu,
 #endif
@@ -327,6 +360,45 @@ static void check_register_ops(riscv_t *rv)
     assert(rv->X[10] == 0x12346000);
     assert(checked > 500);
 }
+
+#if RV32_HAS(Zba)
+static void check_zba_aliases(riscv_t *rv)
+{
+    static const uint32_t values[] = {
+        0, 1, UINT32_MAX, 0x80000000, 0x40000000, 0x20000001, 0x12345678};
+    static const unsigned ops[] = {rv_insn_sh1add, rv_insn_sh2add,
+                                   rv_insn_sh3add};
+    /* rd, rs1, rs2: distinct, either alias, shared sources, all shared, x0. */
+    static const unsigned regs[][3] = {{10, 11, 12}, {11, 11, 12}, {12, 11, 12},
+                                       {10, 11, 11}, {11, 11, 11}, {0, 11, 12},
+                                       {10, 0, 12},  {10, 11, 0},  {10, 0, 0}};
+    /* A module depends only on its instructions: translate each form once. */
+    for (unsigned o = 0; o < ARRAY_SIZE(ops); o++)
+        for (unsigned r = 0; r < ARRAY_SIZE(regs); r++) {
+            rv_insn_t ir = {.opcode = ops[o],
+                            .rd = regs[r][0],
+                            .rs1 = regs[r][1],
+                            .rs2 = regs[r][2]};
+            block_t block = make_block(&ir, 1, 0x1000);
+            translate(rv, &block);
+            for (unsigned a = 0; a < ARRAY_SIZE(values); a++)
+                for (unsigned b = 0; b < ARRAY_SIZE(values); b++) {
+                    rv->X[0] = 0;
+                    rv->X[11] = values[a];
+                    rv->X[12] = values[b];
+                    const uint32_t expected =
+                        ir.rd ? reference(ir.opcode, rv->X[ir.rs1],
+                                          rv->X[ir.rs2], 0)
+                              : 0;
+                    const uint64_t before = rv->csr_cycle;
+                    jit_wasm_run(rv, &block);
+                    assert(rv->X[ir.rd] == expected && !rv->X[0]);
+                    assert(rv->csr_cycle == before + 1);
+                }
+            retire(rv, &block);
+        }
+}
+#endif
 
 /* Each conditional branch, taken and not, and the compressed jumps. */
 static void check_control_flow(riscv_t *rv)
@@ -692,6 +764,7 @@ static void check_user_memory(riscv_t *rv)
 /* Single and grouped accesses through the dTLB guard. */
 static void check_system_memory(riscv_t *rv)
 {
+    rv->mmu_access_context = 0x20; /* U-mode, MXR=0 */
     struct test_ram ram;
     attach_ram(rv, &ram);
     rv->X[5] = 42;
@@ -699,8 +772,11 @@ static void check_system_memory(riscv_t *rv)
     memcpy(ram.bytes + 4, &value, 4);
     const uint32_t va = 0x40001004;
     tlb_entry_t *mapping = &rv->dtlb[(va >> 12) & TLB_MASK];
-    *mapping = (tlb_entry_t) {
-        .vpn = va >> 12, .ppn = 0, .valid = 1, .dirty = 1, .perm = 6};
+    *mapping = (tlb_entry_t) {.vpn = va >> 12,
+                              .ppn = 0,
+                              .valid = rv->mmu_access_context,
+                              .dirty = 1,
+                              .perm = 22};
     rv_insn_t load = {
         .opcode = rv_insn_lw, .rd = 6, .rs1 = 8, .impl = memory_helper};
     rv->X[8] = va;
@@ -710,9 +786,12 @@ static void check_system_memory(riscv_t *rv)
     assert(rv->X[6] == value && helper_calls == before && rv->csr_cycle == 1);
     /* Every gating condition must take the original instruction's slow path. */
     helper_exit = false;
-    for (unsigned condition = 0; condition < 6; condition++) {
-        *mapping = (tlb_entry_t) {
-            .vpn = va >> 12, .ppn = 0, .valid = 1, .dirty = 1, .perm = 6};
+    for (unsigned condition = 0; condition < 7; condition++) {
+        *mapping = (tlb_entry_t) {.vpn = va >> 12,
+                                  .ppn = 0,
+                                  .valid = rv->mmu_access_context,
+                                  .dirty = 1,
+                                  .perm = 22};
         rv->X[8] = va;
         load.opcode = rv_insn_lw;
         if (condition == 0)
@@ -730,6 +809,8 @@ static void check_system_memory(riscv_t *rv)
             load.rs2 = 5;
             mapping->dirty = 0;
         }
+        if (condition == 6)
+            mapping->valid ^= 0x10; /* another privilege/status context */
         run(rv, &load, 1);
         assert(helper_calls == before + (int) condition + 1);
     }
@@ -737,8 +818,11 @@ static void check_system_memory(riscv_t *rv)
     /* Grouped accesses use the same guard. */
     const uint32_t group_va = 0x40002020;
     mapping = &rv->dtlb[(group_va >> 12) & TLB_MASK];
-    *mapping = (tlb_entry_t) {
-        .vpn = group_va >> 12, .ppn = 0, .valid = 1, .dirty = 1, .perm = 6};
+    *mapping = (tlb_entry_t) {.vpn = group_va >> 12,
+                              .ppn = 0,
+                              .valid = rv->mmu_access_context,
+                              .dirty = 1,
+                              .perm = 22};
     group_base = rv->X[11] = group_va;
     rv->X[12] = 0x11111111;
     opcode_fuse_t stores[] = {
@@ -763,12 +847,46 @@ static void check_system_memory(riscv_t *rv)
 }
 #endif
 
+#if RV32_HAS(SYSTEM)
+/* A published S-mode target cannot be reached by a U-mode Wasm tail call. */
+static void check_privilege_tail(riscv_t *rv)
+{
+    uint32_t saved_priv = rv->priv_mode;
+    rv_insn_t target_ir = {.opcode = rv_insn_addi, .rd = 7, .rs1 = 7, .imm = 1};
+    block_t target = make_block(&target_ir, 1, 0x210100);
+    target.priv_mode = RV_PRIV_S_MODE;
+    rv->priv_mode = RV_PRIV_S_MODE;
+    active = &target;
+    assert(jit_translate(rv, &target));
+    rv->X[7] = 0;
+    jit_wasm_run(rv, &target);
+    assert(rv->X[7] == 1);
+
+    rv_insn_t jump = {.opcode = rv_insn_jal, .imm = 0x100};
+    block_t caller = make_block(&jump, 1, 0x210000);
+    caller.priv_mode = RV_PRIV_U_MODE;
+    rv->priv_mode = RV_PRIV_U_MODE;
+    active = &caller;
+    assert(jit_translate(rv, &caller));
+    jit_wasm_run(rv, &caller);
+    assert(rv->PC == target.pc_start && rv->X[7] == 1);
+    jit_wasm_retire_block(rv, &caller);
+    jit_wasm_retire_block(rv, &target);
+    rv->priv_mode = saved_priv;
+    active = NULL;
+}
+#endif
+
 int main(void)
 {
     riscv_t *rv = calloc(1, sizeof(*rv));
     assert(rv);
     rv->jit_state = jit_state_init(4 * 1024 * 1024, 0);
     assert(rv->jit_state);
+
+#if RV32_HAS(Zba)
+    check_zba_aliases(rv);
+#endif
 
     /* Source/destination aliasing, wrapping arithmetic, signed comparisons,
      * zero-register writes, shift masking, and precise 64-bit cycle carries.
@@ -965,6 +1083,21 @@ int main(void)
     assert(helper_calls == 2 && rv->X[7] == 123 && rv->PC == 0x9000);
     assert(rv->csr_cycle == 2);
 
+#if RV32_HAS(SYSTEM)
+    /* Retirement may free this module's IR arena inside its own helper. The
+     * completed load stays visible, but the stale ADDI must not execute.
+     */
+    helper_exit = false;
+    for (helper_retire = 1; helper_retire <= 2; helper_retire++) {
+        rv->X[7] = 123;
+        rv->csr_cycle = 0;
+        run(rv, memory, 3);
+        assert(rv->X[6] == 43 && rv->X[7] == 123);
+        assert(rv->PC == 0x1008 && rv->csr_cycle == 2);
+    }
+    helper_retire = 0;
+#endif
+
 
     check_register_ops(rv);
     check_control_flow(rv);
@@ -976,14 +1109,23 @@ int main(void)
 #endif
 
 #if RV32_HAS(SYSTEM)
-    rv_insn_t probe = {.opcode = rv_insn_nop};
+    check_privilege_tail(rv);
+    rv_insn_t probe = {.opcode = rv_insn_nop}, other = {.opcode = rv_insn_nop};
     block_t probe_block = make_block(&probe, 1, 0x1000);
+    block_t other_block = make_block(&other, 1, 0x1008);
+    other_block.satp = 1;
     active = &probe_block;
     assert(jit_translate(rv, &probe_block));
-    assert(jit_page_has_code(rv->jit_state, 0x1004, 0));
+    active = &other_block;
+    assert(jit_translate(rv, &other_block));
+    assert(jit_page_has_code_any(rv->jit_state, 0x1004));
+    /* Retiring one space keeps another space's code on the same page. */
     jit_retire_space(rv->jit_state, 0);
-    assert(!jit_page_has_code(rv->jit_state, 0x1004, 0));
+    assert(jit_page_has_code_any(rv->jit_state, 0x1004));
+    jit_retire_space(rv->jit_state, 1);
+    assert(!jit_page_has_code_any(rv->jit_state, 0x1004));
     jit_wasm_retire_block(rv, &probe_block);
+    jit_wasm_retire_block(rv, &other_block);
 
     /* Modules on one page share a bucket; retiring any of them, in any order,
      * keeps the others findable.
@@ -998,18 +1140,18 @@ int main(void)
         assert(jit_translate(rv, &chain[i]));
     }
     jit_wasm_retire_block(rv, &chain[1]); /* middle of the chain */
-    assert(jit_page_has_code(rv->jit_state, 0x3ffc, 0));
+    assert(jit_page_has_code_any(rv->jit_state, 0x3ffc));
     jit_wasm_retire_block(rv, &chain[2]); /* its head */
-    assert(jit_page_has_code(rv->jit_state, 0x3000, 0));
+    assert(jit_page_has_code_any(rv->jit_state, 0x3000));
     jit_wasm_retire_block(rv, &chain[0]);
-    assert(!jit_page_has_code(rv->jit_state, 0x3000, 0));
+    assert(!jit_page_has_code_any(rv->jit_state, 0x3000));
     /* Retiring the address space empties a bucket holding several modules. */
     for (int i = 0; i < 3; i++) {
         active = &chain[i];
         assert(jit_translate(rv, &chain[i]));
     }
     jit_retire_space(rv->jit_state, 0);
-    assert(!jit_page_has_code(rv->jit_state, 0x3000, 0));
+    assert(!jit_page_has_code_any(rv->jit_state, 0x3000));
     for (int i = 0; i < 3; i++)
         assert(!chain[i].hot);
     active = NULL;

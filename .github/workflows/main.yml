@@ -162,6 +162,12 @@ jobs:
             make -C tests/system/alignment/
             make distclean && make system_interpreter_defconfig && make ENABLE_ELF_LOADER=1 ENABLE_EXT_C=0 misalign-in-blk-emu $PARALLEL
 
+    - name: JIT blocked-opcode diagnostics
+      run: |
+            make defconfig
+            # Zba under register pressure must also run compiled, not just correctly.
+            make OUT=build/blocker-stats T1C_STATS=1 check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-store check-jit-spill-loop-zba check-jit-spill-loop-region-zba $PARALLEL
+
     - name: MMU test
       run: |
             make -C tests/system/mmu/
@@ -171,11 +177,15 @@ jobs:
             make distclean && make system_defconfig && make ENABLE_ELF_LOADER=1 mmu-test check-insn-page-fault check-misalign-page-fault check-fused-page-fault check-amo-page-fault $PARALLEL
             # Flat supervisor kernels: TLB caching, superpage flushes, address
             # space switches, retiring decoded code, counters across traps,
-            # fault retry, and code eviction, interpreted and T1. Interrupts
-            # are polled between dispatches, and the interpreter never leaves
-            # a chained loop to poll, so the interrupt check runs on T1 only.
-            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction $PARALLEL
+            # fault retry, code eviction and timer interrupts returning into
+            # chained loops, interpreted and T1.
+            make distclean && make system_interpreter_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch $PARALLEL
             make distclean && make system_defconfig && make ENABLE_ROOTFS_EXT4=0 check-system-mmu-cache check-system-trap-cycles check-system-trap-resume check-system-jit-eviction check-system-interrupt-dispatch $PARALLEL
+            # Prove fetch retries, in place inside nested handlers too, and
+            # restored native eligibility, while the unsupported CSR payload
+            # still falls back to interpretation, and that Sv32 Zba probes run
+            # compiled rather than interpreted.
+            make OUT=build/system-stats T1C_STATS=1 ENABLE_ROOTFS_EXT4=0 check-system-fetch-retry check-system-fetch-retry-nested check-system-zba check-system-amo check-system-csr $PARALLEL
 
     - name: gdbstub test
       run: make distclean && make interpreter_defconfig && make ENABLE_GDBSTUB=1 gdbstub-test $PARALLEL

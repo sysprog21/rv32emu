@@ -161,9 +161,11 @@ RVOP(jal, {
             /* Direct-mapped lookup: O(1) instead of O(n) linear search */     \
             const uint32_t bht_idx = (PC >> 2) & (HISTORY_SIZE - 1);           \
             struct rv_insn *target = ir->branch_table->target[bht_idx];        \
-            if (ir->branch_table->PC[bht_idx] == PC && target)                 \
+            if (ir->branch_table->PC[bht_idx] == PC && target) {               \
                 RVOP_CHAIN_TAIL(rv, target, cycle, PC);                        \
-            block_t *block = block_find(&rv->block_map, PC);                   \
+                goto end_op; /* deadline exit needs no second lookup */        \
+            }                                                                  \
+            block_t *block = block_find(&rv->block_map, rv, PC);               \
             if (block) {                                                       \
                 /* Direct replacement at computed index */                     \
                 ir->branch_table->PC[bht_idx] = PC;                            \
@@ -173,22 +175,21 @@ RVOP(jal, {
         }                                                                      \
     }
 #else
-#define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                              \
-    IIF(RV32_HAS(SYSTEM))(if (!rv->trap_cnt && !reloc_enable_mmu), )         \
-    {                                                                        \
-        cache_lookup_t lookup =                                              \
-            cache_get_with_freq(rv->block_cache, PC, true);                  \
-        block_t *block = (block_t *) lookup.value;                           \
-        /* A block of another address space, or one a flush invalidated,     \
-         * must go back through the dispatcher to be rebuilt.                \
-         */                                                                  \
-        if (block_matches_context(rv, block)) {                              \
-            bht_record_target(ir->branch_table, PC, rv->csr_satp);           \
-            if (lookup.freq >= THRESHOLD)                                    \
-                goto end_op;                                                 \
-            MUST_TAIL return block->ir_head->impl(rv, block->ir_head, cycle, \
-                                                  PC);                       \
-        }                                                                    \
+#define LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE()                          \
+    IIF(RV32_HAS(SYSTEM))(if (!rv->trap_cnt && !reloc_enable_mmu), )     \
+    {                                                                    \
+        cache_lookup_t lookup =                                          \
+            cache_get_with_freq(rv->block_cache, PC, true);              \
+        block_t *block = (block_t *) lookup.value;                       \
+        /* A block of another address space, or one a flush invalidated, \
+         * must go back through the dispatcher to be rebuilt.            \
+         */                                                              \
+        if (block_matches_context(rv, block)) {                          \
+            bht_record_target(ir->branch_table, PC, rv->csr_satp);       \
+            if (lookup.freq >= THRESHOLD)                                \
+                goto end_op;                                             \
+            RVOP_CHAIN_TAIL(rv, block->ir_head, cycle, PC);              \
+        }                                                                \
     }
 #endif
 
@@ -341,17 +342,36 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
  * it, and continue from what that handler leaves: counters then include both
  * the instructions before the fault and those of the trap handler.
  */
+#if RV32_HAS(JIT)
+#define MEM_CODE_BEFORE() const uint64_t generation_ = jit_code_generation(rv)
+#define MEM_CODE_AFTER()                            \
+    do {                                            \
+        if (generation_ != jit_code_generation(rv)) \
+            rv->block_interrupted = true;           \
+    } while (0)
+#else
+#define MEM_CODE_BEFORE() ((void) 0)
+#define MEM_CODE_AFTER()                           \
+    do {                                           \
+        if (need_clear_block_map && !rv->trap_cnt) \
+            rv->block_interrupted = true;          \
+    } while (0)
+#endif
 #define MEM_READ_CYCLES(access)           \
     __extension__({                       \
+        MEM_CODE_BEFORE();                \
         rv->csr_cycle = cycle;            \
         const uint32_t value_ = (access); \
+        MEM_CODE_AFTER();                 \
         cycle = rv->csr_cycle;            \
         value_;                           \
     })
 #define MEM_WRITE_CYCLES(access) \
     do {                         \
+        MEM_CODE_BEFORE();       \
         rv->csr_cycle = cycle;   \
         (access);                \
+        MEM_CODE_AFTER();        \
         cycle = rv->csr_cycle;   \
     } while (0)
 #if RV32_HAS(JIT)
@@ -366,7 +386,8 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
         uint32_t addr_ = (addr);                                            \
         uint32_t idx_ = (addr_ >> RV_PG_SHIFT) & TLB_MASK;                  \
         type value_;                                                        \
-        if (MEM_SYSTEM_TAG(addr_, type) == (rv)->jit_dtlb[idx_].read_tag) { \
+        if ((MEM_SYSTEM_TAG(addr_, type) | mmu_ram_tag_context(rv)) ==      \
+            (rv)->jit_dtlb[idx_].read_tag) {                                \
             memcpy(&value_, (void *) ((rv)->jit_dtlb[idx_].addend + addr_), \
                    sizeof(value_));                                         \
         } else {                                                            \
@@ -374,17 +395,18 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
         }                                                                   \
         value_;                                                             \
     })
-#define MEM_SYSTEM_WRITE(rv, addr, val, type, fn)                            \
-    do {                                                                     \
-        uint32_t addr_ = (addr);                                             \
-        uint32_t idx_ = (addr_ >> RV_PG_SHIFT) & TLB_MASK;                   \
-        type value_ = (val);                                                 \
-        if (MEM_SYSTEM_TAG(addr_, type) == (rv)->jit_dtlb[idx_].write_tag) { \
-            memcpy((void *) ((rv)->jit_dtlb[idx_].addend + addr_), &value_,  \
-                   sizeof(value_));                                          \
-        } else {                                                             \
-            MEM_WRITE_CYCLES((rv)->io.mem_##fn(rv, addr_, value_));          \
-        }                                                                    \
+#define MEM_SYSTEM_WRITE(rv, addr, val, type, fn)                           \
+    do {                                                                    \
+        uint32_t addr_ = (addr);                                            \
+        uint32_t idx_ = (addr_ >> RV_PG_SHIFT) & TLB_MASK;                  \
+        type value_ = (val);                                                \
+        if ((MEM_SYSTEM_TAG(addr_, type) | mmu_ram_tag_context(rv)) ==      \
+            (rv)->jit_dtlb[idx_].write_tag) {                               \
+            memcpy((void *) ((rv)->jit_dtlb[idx_].addend + addr_), &value_, \
+                   sizeof(value_));                                         \
+        } else {                                                            \
+            MEM_WRITE_CYCLES((rv)->io.mem_##fn(rv, addr_, value_));         \
+        }                                                                   \
     } while (0)
 #define MEM_READ_W(rv, addr) MEM_SYSTEM_READ(rv, addr, uint32_t, read_w)
 #define MEM_READ_S(rv, addr) MEM_SYSTEM_READ(rv, addr, uint16_t, read_s)
@@ -627,7 +649,20 @@ RVOP(ebreak, {
 /* WFI: Wait for Interrupt */
 RVOP(wfi, {
     PC += 4;
-    /* FIXME: Implement */
+#if RV32_HAS(SYSTEM_MMIO)
+    /* Nothing can wake the hart before the next timer deadline or device
+     * poll, so skip the idle cycles in between instead of spinning through
+     * the guest's idle loop. The chain target is already the earlier of the
+     * slice end and the timer's due cycle; the timer derives from the cycle
+     * count, so guest time advances exactly as if the hart had waited. Wakeup
+     * ignores the global enables, as WFI does. Devices that complete on host
+     * threads, in host time, keep the idle loop: skipping would let the
+     * guest's timeouts for them expire before they could complete.
+     */
+    if (rv->priv_mode != RV_PRIV_U_MODE && !(rv->csr_sip & rv->csr_sie) &&
+        cycle < rv->branch_chain_cycle_target && !PRIV(rv)->host_paced)
+        cycle = rv->branch_chain_cycle_target;
+#endif
     goto end_op;
 })
 
@@ -640,6 +675,17 @@ RVOP(uret, {
 /* SRET: return from traps in S-mode */
 #if RV32_HAS(SYSTEM)
 RVOP(sret, {
+    /* The return that enables interrupts again ends an interrupt the
+     * dispatcher entered, wherever it resumes, since the handler may have
+     * switched tasks. A trap taken inside the handler returns with them
+     * still disabled.
+     */
+    if (rv->interrupt_entered && !rv->trap_cnt &&
+        (!(rv->csr_sstatus & SSTATUS_SPP) ||
+         (rv->csr_sstatus & SSTATUS_SPIE))) {
+        rv->interrupt_grant = true;
+        rv->interrupt_entered = false;
+    }
     rv->priv_mode = (rv->csr_sstatus & SSTATUS_SPP) >> SSTATUS_SPP_SHIFT;
     /* Returning to U-mode leaves every trap level, since the kernel may have
      * switched tasks and not return to the outer handlers via sret. Otherwise,
@@ -658,6 +704,8 @@ RVOP(sret, {
     rv->csr_sstatus |= (sstatus_spie << SSTATUS_SIE_SHIFT);
     rv->csr_sstatus |= SSTATUS_SPIE;
 
+    rv->csr_mstatus &= ~MSTATUS_MPRV;
+    mmu_access_context_changed(rv);
     rv->PC = rv->csr_sepc;
 
     return true;
@@ -682,6 +730,11 @@ RVOP(mret, {
     rv->csr_mstatus |= (mstatus_mpie << MSTATUS_MIE_SHIFT);
     rv->csr_mstatus |= MSTATUS_MPIE;
 
+#if RV32_HAS(SYSTEM)
+    if (rv->priv_mode != RV_PRIV_M_MODE)
+        rv->csr_mstatus &= ~MSTATUS_MPRV;
+    mmu_access_context_changed(rv);
+#endif
     rv->PC = rv->csr_mepc;
     return true;
 })
@@ -708,32 +761,7 @@ RVOP(sfencevma, {
         /* Global flush: invalidate all TLB entries */
         mmu_tlb_flush_all(rv);
 #if RV32_HAS(JIT)
-#if RV32_HAS(T2C)
-        /* Hold cache_lock during invalidation to prevent race with T2C
-         * compilation thread. This ensures the invalidated flag and hot2 reset
-         * are seen atomically by the T2C thread.
-         */
-        hart_lock(rv, &rv->cache_lock);
-#endif
-        /* Invalidate JIT blocks with current SATP, and stop reusing the code
-         * translated for it: a block rebuilt from the new mappings must not
-         * pick up what was translated from the old ones.
-         */
-        uint32_t n_compiled UNUSED;
-        cache_invalidate_satp(rv->block_cache, rv->csr_satp, &n_compiled);
-        jit_retire_space(rv->jit_state, rv->csr_satp);
-#if RV32_HAS(T2C)
-        /* Only this address space's blocks were invalidated, so only its
-         * entries go, and only T2C-compiled blocks have any: clearing every
-         * entry would also drop the compiled code of other processes, and
-         * Linux issues this flush several times in the life of each process.
-         */
-        if (n_compiled) {
-            jit_cache_clear_satp(rv->jit_cache, rv->csr_satp);
-            inline_cache_clear_satp(rv->inline_cache, rv->csr_satp);
-        }
-        hart_unlock(rv, &rv->cache_lock);
-#endif
+        retire_stale_code(rv);
 #endif
     } else {
         T1C_COUNT(sfence_page, 1);
@@ -745,38 +773,21 @@ RVOP(sfencevma, {
          * without cache_lock, whether the page holds any block or translated
          * code: only this thread changes the indexes that answer that.
          */
+        const uint32_t previous_page = (va & ~(RV_PG_SIZE - 1)) - RV_PG_SIZE;
+        /* A C-enabled block starting at the previous page's last halfword
+         * can depend on this page for its upper instruction half.
+         * Conservatively retire when either indexed start page holds code,
+         * across all tiers.
+         */
         const bool has_code =
-            jit_page_has_code(rv->jit_state, va, rv->csr_satp) ||
-            mmu_code_superpage(rv, va);
-        if (has_code || cache_has_va(rv->block_cache, va, rv->csr_satp)) {
-#if RV32_HAS(T2C)
-            /* Hold cache_lock during invalidation to prevent race with T2C
-             * compilation thread.
-             */
-            hart_lock(rv, &rv->cache_lock);
-#endif
-            uint32_t n_invalidated =
-                cache_invalidate_va(rv->block_cache, va, rv->csr_satp, NULL);
-            /* Blocks of other pages may still reach this page's old
-             * instructions: translated code through direct jumps, a T2C
-             * region spanning pages, and the interpreter through its links
-             * to the blocks it chains to. So when the page held any block or
-             * code, the whole address space goes. So does a flush in a 4 MiB
-             * region whose code came through a superpage: its leaf also maps
-             * the other pages.
-             */
-            if (has_code || n_invalidated) {
-                cache_invalidate_satp(rv->block_cache, rv->csr_satp, NULL);
-                jit_retire_space(rv->jit_state, rv->csr_satp);
-#if RV32_HAS(T2C)
-                jit_cache_clear_satp(rv->jit_cache, rv->csr_satp);
-                inline_cache_clear_satp(rv->inline_cache, rv->csr_satp);
-#endif
-            }
-#if RV32_HAS(T2C)
-            hart_unlock(rv, &rv->cache_lock);
-#endif
-        }
+            jit_page_has_code_any(rv->jit_state, va) ||
+            mmu_code_superpage(rv, va) ||
+            cache_has_va_any(rv->block_cache, va) ||
+            (RV32_HAS(EXT_C) &&
+             (jit_page_has_code_any(rv->jit_state, previous_page) ||
+              cache_has_va_any(rv->block_cache, previous_page)));
+        if (has_code)
+            retire_stale_page(rv, va);
 #endif
     }
 #endif
@@ -828,10 +839,13 @@ RVOP(fencei, {
     hart_unlock(rv, &rv->cache_lock);
 #endif
 #endif
-    /* Note: In non-system JIT mode, self-modifying code is rare and blocks
-     * will be naturally evicted. Full cache invalidation is not implemented
-     * for this case as it would require additional infrastructure.
+/* User JIT invalidation is unsupported; see docs/fencei.md. */
+#if !RV32_HAS(JIT)
+    /* The active handler still owns its IR. Let the dispatcher retire it
+     * before fetching another block, after any synchronous trap unwinds.
      */
+    need_clear_block_map = true;
+#endif
     rv->csr_cycle = cycle;
     rv->PC = PC;
     return true;
@@ -1760,21 +1774,21 @@ RVOP(zexth, { rv->X[ir->rd] = rv->X[ir->rs1] & 0x0000ffff; })
 RVOP(rol, {
     const unsigned int shamt = rv->X[ir->rs2] & 0b11111;
     rv->X[ir->rd] =
-        (rv->X[ir->rs1] << shamt) | (rv->X[ir->rs1] >> (32 - shamt));
+        (rv->X[ir->rs1] << shamt) | (rv->X[ir->rs1] >> ((32 - shamt) & 31));
 })
 
 /* ROR */
 RVOP(ror, {
     const unsigned int shamt = rv->X[ir->rs2] & 0b11111;
     rv->X[ir->rd] =
-        (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << (32 - shamt));
+        (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << ((32 - shamt) & 31));
 })
 
 /* RORI */
 RVOP(rori, {
     const unsigned int shamt = ir->imm & 0b11111;
     rv->X[ir->rd] =
-        (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << (32 - shamt));
+        (rv->X[ir->rs1] >> shamt) | (rv->X[ir->rs1] << ((32 - shamt) & 31));
 })
 
 /* ORCB */

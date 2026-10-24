@@ -1,10 +1,12 @@
-/* Timer handlers may run through the dispatcher and T1. Verify repeated
- * returns to a compiled loop, live registers, and a synchronous nested trap.
- * Interrupts are polled only between dispatches, and neither the interpreter
- * nor T1 leaves a chained loop to poll them, so each outer pass reads a CSR,
- * which ends the native run and lets a pending timer interrupt in. The loop
- * stops after enough interrupts, or fails once its pass limit is reached.
- * This flat supervisor kernel needs no guest libc or firmware. */
+/* Repeated timer delivery must interrupt learned/compiled chains without a
+ * CSR or helper forcing dispatch. Check live registers and nested traps.
+ */
+#ifndef INTERRUPT_COUNT
+#define INTERRUPT_COUNT 128
+#endif
+#ifndef INTERRUPT_INTERVAL
+#define INTERRUPT_INTERVAL 16384
+#endif
 .option norvc
 .option norelax
 .section .text
@@ -12,7 +14,7 @@
 _start:
     la t0, handler
     csrw stvec, t0
-    li s1, 100000             /* outer pass limit */
+    li s1, INTERRUPT_COUNT * 256 /* outer pass limit scales with long runs */
     li s2, 0                  /* timer entries */
     li s3, 0                  /* nested exceptions */
     li s4, 0                  /* interrupted loop iterations */
@@ -31,19 +33,23 @@ _start:
 main_loop:
     li t2, 64
 inner_loop:
+#ifdef INTERRUPT_INDIRECT
+    jal ra, increment
+#else
     addi s4, s4, 1
+#endif
     addi t2, t2, -1
     bnez t2, inner_loop
     addi s7, s7, 1
-    csrr t0, sscratch         /* return to the dispatcher */
-    li t0, 6
-    bgeu s2, t0, loop_done
+    nop                       /* no forced dispatch boundary */
+    li t3, INTERRUPT_COUNT
+    bgeu s2, t3, loop_done
     addi s1, s1, -1
     bnez s1, main_loop
     j fail                    /* interrupts never reached the loop */
 loop_done:
-    li t0, 2
-    csrc sstatus, t0
+    li t3, 2
+    csrc sstatus, t3
     slli t0, s7, 6
     bne s4, t0, fail          /* every inner pass ran exactly 64 times */
     li t0, 0x12345678
@@ -51,6 +57,11 @@ loop_done:
     bne s2, s3, fail
     la a0, success
     j print
+#ifdef INTERRUPT_INDIRECT
+increment:
+    addi s4, s4, 1
+    ret
+#endif
 .balign 4
 handler:
     csrr t0, scause
@@ -59,6 +70,9 @@ handler:
     li t1, 0x80000005
     bne t0, t1, fail
     addi s2, s2, 1
+    /* A resumed-code starvation regression must fail, not trap forever. */
+    li t0, INTERRUPT_COUNT * 2 + 256
+    bgtu s2, t0, fail
     csrr s8, sepc
     csrr s9, sstatus
     andi t0, s9, 0x100
@@ -69,11 +83,20 @@ nested_access:
     csrr t0, sstatus
     andi t0, t0, 2
     bnez t0, fail             /* nested SRET must leave SIE clear */
+#ifdef INTERRUPT_LONG_HANDLER
+    /* Exceed a dispatch slice, then re-arm so the next poll traps again.
+     * The resumed guest must still retire a block between handler entries.
+     */
+    .rept 256
+    nop
+    .endr
+#endif
     csrw sepc, s8
     csrw sstatus, s9
     rdtime a0
     rdtimeh a1
-    addi t0, a0, 512
+    li t0, INTERRUPT_INTERVAL
+    add t0, a0, t0
     sltu t1, t0, a0
     add a1, a1, t1
     mv a0, t0

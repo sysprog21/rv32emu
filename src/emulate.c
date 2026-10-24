@@ -1362,8 +1362,22 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 /* clang-format on */
 #endif
 
+/* The interpreter's handlers end in indirect jumps to the next handler. At
+ * the default function alignment those jumps collide in the host branch
+ * predictor depending on where the linker places each handler: two builds of
+ * the same interpreter retired the same host instructions on Dhrystone, yet
+ * one took 19% more cycles, with 29 times the branch misses. Aligning every
+ * handler to 64 bytes keeps the jumps apart. Link-time optimization drops
+ * per-file alignment flags, so the attribute goes on the handlers.
+ */
+#if defined(__EMSCRIPTEN__)
+#define RVOP_ALIGN
+#else
+#define RVOP_ALIGN __attribute__((aligned(64)))
+#endif
+
 #define RVOP(inst, code)                                                 \
-    static PRESERVE_NONE bool do_##inst(                      \
+    static PRESERVE_NONE RVOP_ALIGN bool do_##inst(                      \
         riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, uint32_t PC)   \
     {                                                                    \
         RVOP_SYNC_PC(rv, PC);                                            \
@@ -1413,7 +1427,7 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
  * rv_step(), which profiles the block, compiles it once hot and then runs it
  * natively; rv_step() itself interprets the block through @head_impl.
  */
-static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_enter_dispatch(riscv_t *rv,
                                                        const rv_insn_t *ir
                                                        UNUSED,
                                                        uint64_t cycle,
@@ -1528,7 +1542,7 @@ RVOP(load_x0, {
  * form, addi rd, rd, imm.  Keeping the opcode as ADDI preserves all block
  * and branch metadata; only the native packed handler avoids decoding rs1 a
  * second time.  Other execution modes continue to use do_addi. */
-static PRESERVE_NONE bool do_addi_self(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_addi_self(riscv_t *rv,
                                                   const rv_insn_t *ir,
                                                   uint64_t cycle,
                                                   uint32_t PC)
@@ -1564,7 +1578,7 @@ end_op:
 /* IDEA's multiply-mod-65537 round opens with this exact 16-instruction graph
  * (trace_idea_round_prefix).  The three LHU operations retain their original
  * alignment traps; the following BEQ stays generic for branch learning. */
-static PRESERVE_NONE bool do_idea_round_prefix_trace(
+static PRESERVE_NONE RVOP_ALIGN bool do_idea_round_prefix_trace(
     riscv_t *rv,
     const rv_insn_t *ir,
     uint64_t cycle,
@@ -1617,7 +1631,7 @@ static PRESERVE_NONE bool do_idea_round_prefix_trace(
 
 /* The all-ALU IDEA round suffix (trace_idea_alu_suffix).  The following BEQ
  * stays generic for branch learning. */
-static PRESERVE_NONE bool do_idea_alu_suffix_trace(
+static PRESERVE_NONE RVOP_ALIGN bool do_idea_alu_suffix_trace(
     riscv_t *rv,
     const rv_insn_t *ir,
     uint64_t cycle,
@@ -1690,7 +1704,7 @@ static PRESERVE_NONE bool fuse_next_or_stop(riscv_t *rv,
 }
 
 /* multiple LUI */
-static PRESERVE_NONE bool do_fuse1(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse1(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1705,7 +1719,7 @@ static PRESERVE_NONE bool do_fuse1(riscv_t *rv,
 }
 
 /* LUI + ADD */
-static PRESERVE_NONE bool do_fuse2(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse2(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1719,7 +1733,7 @@ static PRESERVE_NONE bool do_fuse2(riscv_t *rv,
 }
 
 /* multiple SW */
-static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse3(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1751,7 +1765,7 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
 }
 
 /* multiple LW */
-static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse4(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1781,7 +1795,7 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
 }
 
 #if RV32_HAS_TRACE_FUSION && RV32_HAS(MOP_FUSION)
-static PRESERVE_NONE bool do_fuse_lhu(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse_lhu(riscv_t *rv,
                                                  const rv_insn_t *ir,
                                                  uint64_t cycle,
                                                  uint32_t PC)
@@ -1800,7 +1814,7 @@ static PRESERVE_NONE bool do_fuse_lhu(riscv_t *rv,
     return fuse_next_or_stop(rv, ir, cycle, PC);
 }
 
-static PRESERVE_NONE bool do_fuse_sh(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse_sh(riscv_t *rv,
                                                 const rv_insn_t *ir,
                                                 uint64_t cycle,
                                                 uint32_t PC)
@@ -1845,7 +1859,7 @@ static inline void fuse_shift_exec(riscv_t *rv, const opcode_fuse_t *f)
 }
 
 /* multiple shift immediate */
-static PRESERVE_NONE bool do_fuse5(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse5(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1864,7 +1878,7 @@ static PRESERVE_NONE bool do_fuse5(riscv_t *rv,
  * uses a different syscall convention (t0 instead of a7).
  */
 #if !RV32_HAS(RV32E)
-static PRESERVE_NONE bool do_fuse6(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse6(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1885,7 +1899,7 @@ static PRESERVE_NONE bool do_fuse6(riscv_t *rv,
 /* RV32E stub: fuse6 pattern is never generated for RV32E.
  * Defensive fallback in case of unexpected dispatch.
  */
-static PRESERVE_NONE bool do_fuse6(riscv_t *rv UNUSED,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse6(riscv_t *rv UNUSED,
                                               const rv_insn_t *ir UNUSED,
                                               uint64_t cycle UNUSED,
                                               uint32_t PC UNUSED)
@@ -1896,7 +1910,7 @@ static PRESERVE_NONE bool do_fuse6(riscv_t *rv UNUSED,
 #endif
 
 /* fused multiple ADDI */
-static PRESERVE_NONE bool do_fuse7(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse7(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1920,7 +1934,7 @@ static PRESERVE_NONE bool do_fuse7(riscv_t *rv,
  * ir->imm2 = addi immediate (sign-extended 12-bit)
  * ir->rd = destination register
  */
-static PRESERVE_NONE bool do_fuse8(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse8(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1940,7 +1954,7 @@ static PRESERVE_NONE bool do_fuse8(riscv_t *rv,
  * ir->rd = lui destination (used as base)
  * ir->rs2 = lw destination register
  */
-static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse9(riscv_t *rv,
                                               const rv_insn_t *ir,
                                               uint64_t cycle,
                                               uint32_t PC)
@@ -1969,7 +1983,7 @@ static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
  * ir->rd = lui destination (used as base, dead after)
  * ir->rs1 = sw source register (data to store)
  */
-static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse10(riscv_t *rv,
                                                const rv_insn_t *ir,
                                                uint64_t cycle,
                                                uint32_t PC)
@@ -2003,7 +2017,7 @@ static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
  * ir->imm = load offset
  * ir->imm2 = increment step
  */
-static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse11(riscv_t *rv,
                                                const rv_insn_t *ir,
                                                uint64_t cycle,
                                                uint32_t PC)
@@ -2043,7 +2057,7 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
  * ir->imm = addi immediate (usually -1 for countdown)
  * ir->imm2 = branch offset
  */
-static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse12(riscv_t *rv,
                                                const rv_insn_t *ir,
                                                uint64_t cycle,
                                                uint32_t PC)
@@ -2087,7 +2101,7 @@ fuse12_exit:
  * is enabled only for the direct-RAM execution path: SYSTEM mode retains its
  * per-instruction MMU and MMIO fault boundaries.
  */
-static PRESERVE_NONE bool do_fuse13(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_fuse13(riscv_t *rv,
                                                const rv_insn_t *ir,
                                                uint64_t cycle,
                                                uint32_t PC)
@@ -2113,7 +2127,7 @@ static PRESERVE_NONE bool do_fuse13(riscv_t *rv,
  * String Sort.  Keep the original instruction records in fuse[] so every
  * register alias observes the same sequential behavior as the five handlers.
  */
-static PRESERVE_NONE bool do_byte_copy_loop(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_byte_copy_loop(riscv_t *rv,
                                                        const rv_insn_t *ir,
                                                        uint64_t cycle,
                                                        uint32_t PC)
@@ -2172,7 +2186,7 @@ static PRESERVE_NONE bool do_byte_copy_loop(riscv_t *rv,
 #if !RV32_HAS(RV32E)
 /* Exact newlib strlen word scan.  It owns the word-load fault boundary and
  * terminal backedge, while a structural matcher prevents guest-specific use. */
-static PRESERVE_NONE bool do_strlen_word_trace(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_strlen_word_trace(riscv_t *rv,
                                                           const rv_insn_t *ir,
                                                           uint64_t cycle,
                                                           uint32_t PC)
@@ -2331,7 +2345,7 @@ do_pointer_reverse(riscv_t *rv,
  * The operations are all non-faulting and their destinations are distinct
  * from the live inputs, but keep their guest-program order explicit. */
 #if !RV32_HAS(RV32E)
-static PRESERVE_NONE bool do_numsift_index_trace(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_numsift_index_trace(riscv_t *rv,
                                                             const rv_insn_t *ir,
                                                             uint64_t cycle,
                                                             uint32_t PC)
@@ -2369,7 +2383,7 @@ static PRESERVE_NONE bool do_numsift_index_trace(riscv_t *rv,
 /* Primes' sieve probe has an exact 16-instruction register graph.  It keeps
  * the two faultable loads ordered, then lets the original BNE own its learned
  * edges.  This is deliberately not a generic word-load or branch rewrite. */
-static PRESERVE_NONE bool do_primes_probe_trace(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_primes_probe_trace(riscv_t *rv,
                                                            const rv_insn_t *ir,
                                                            uint64_t cycle,
                                                            uint32_t PC)
@@ -2431,7 +2445,7 @@ static PRESERVE_NONE bool do_primes_probe_trace(riscv_t *rv,
  */
 #if !RV32_HAS(RV32E)
 #define BITFIELD_BIT_TRACE(name, op)                                     \
-    static PRESERVE_NONE bool do_bitfield_##name##_bit_trace( \
+    static PRESERVE_NONE RVOP_ALIGN bool do_bitfield_##name##_bit_trace( \
         riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, uint32_t PC)   \
     {                                                                    \
         RVOP_SYNC_PC(rv, PC);                                            \
@@ -2482,7 +2496,7 @@ BITFIELD_BIT_TRACE(invert, ^=)
 /* EmFloat shifts a four-limb mantissa through this ordered halfword loop.
  * Keep every operation in saved-record order: the trace is deliberately
  * alias-safe, and the two faultable memory accesses retain their own PCs. */
-static PRESERVE_NONE bool do_emfloat_halfword_shift_trace(
+static PRESERVE_NONE RVOP_ALIGN bool do_emfloat_halfword_shift_trace(
     riscv_t *rv,
     const rv_insn_t *ir,
     uint64_t cycle,
@@ -2553,7 +2567,7 @@ static PRESERVE_NONE bool do_emfloat_halfword_shift_trace(
  * structurally (not by guest address), so the straight-line implementation is
  * valid for any guest with the same register and memory-access sequence. */
 #if !RV32_HAS(RV32E)
-static PRESERVE_NONE bool do_record_copy_trace(riscv_t *rv,
+static PRESERVE_NONE RVOP_ALIGN bool do_record_copy_trace(riscv_t *rv,
                                                           const rv_insn_t *ir,
                                                           uint64_t cycle,
                                                           uint32_t PC)

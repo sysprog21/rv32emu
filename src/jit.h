@@ -385,6 +385,7 @@ void jit_flush(riscv_t *rv);
 
 /* Retire live native entries in every retained address space. */
 void jit_retire_all(struct jit_state *state);
+void jit_retire_unshared(struct jit_state *state);
 
 /* Whether live code translated for any address space starts in the page of
  * va; retired code does not count. Without block chaining, blocks may span
@@ -408,7 +409,7 @@ void *t2c_aot_lookup(riscv_t *, const struct aot_entry *);
 uint64_t t2c_aot_page_hash(riscv_t *, block_t *);
 #endif
 void t2c_aot_collect_block(riscv_t *, block_t *);
-void t2c_aot_invalidate(riscv_t *);
+void t2c_aot_invalidate(riscv_t *, bool keep_shared);
 typedef void (*exec_t2c_func_t)(riscv_t *);
 
 /* The jit-cache records the program counters and the entries of executable
@@ -464,7 +465,9 @@ static inline uint32_t jit_cache_slot(uint32_t pc, uint32_t satp)
  * - SFENCE.VMA code retirement clears the entries of the retired address
  *   spaces, and all entries when every space retires (emulate.c).
  * - Decoded block eviction retains validated native bindings.
- * - FENCE.I / code-cache flush clears all entries (jit.c).
+ * - FENCE.I clears the entries outside SATP_SHARED, and all entries once
+ *   shared code was written (rv32_template.c); a code-cache flush clears all
+ *   entries (jit.c).
  *
  * On cache hit, ISB is skipped on ARM64 since we already executed this target
  * successfully - the instruction cache was coherent at that time.
@@ -568,5 +571,8 @@ void jit_cache_clear(struct jit_cache *cache);
 void jit_cache_retire_space(struct jit_cache *cache,
                             struct inline_cache *inline_cache,
                             uint32_t satp);
+/* Drop every binding outside SATP_SHARED. */
+void jit_cache_retire_unshared(struct jit_cache *cache,
+                               struct inline_cache *inline_cache);
 #endif
 #endif

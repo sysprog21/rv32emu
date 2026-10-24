@@ -466,7 +466,7 @@ void t2c_aot_collect_block(riscv_t *rv, block_t *block)
         rv->aot_collected++;
 }
 
-void t2c_aot_invalidate(riscv_t *rv)
+void t2c_aot_invalidate(riscv_t *rv, bool keep_shared UNUSED)
 {
     rv->aot_code_epoch++;
 #if !RV32_HAS(SYSTEM)
@@ -475,10 +475,17 @@ void t2c_aot_invalidate(riscv_t *rv)
     if (!++rv->aot_hash_epoch)
         memset(rv->aot_page_hashes, 0, sizeof(rv->aot_page_hashes));
 #endif
+#if RV32_HAS(SYSTEM)
+    if (keep_shared) {
+        jit_cache_retire_unshared(rv->jit_cache, rv->inline_cache);
+    } else {
+        jit_cache_clear(rv->jit_cache);
+        inline_cache_clear(rv->inline_cache);
+        rv->aot_kernel_shared = false;
+    }
+#else
     jit_cache_clear(rv->jit_cache);
     inline_cache_clear(rv->inline_cache);
-#if RV32_HAS(SYSTEM)
-    rv->aot_kernel_shared = false;
 #endif
 #if !RV32_HAS(SYSTEM)
     /* User blocks survive FENCE.I, so unbind them here. System callers
@@ -565,7 +572,7 @@ void t2c_aot_exit(riscv_t *rv)
                 rv->aot_lookup_absent, rv->aot_lookup_mismatches,
                 rv->aot_lookup_unmapped, rv->aot_dispatches);
 #endif
-    t2c_aot_invalidate(rv);
+    t2c_aot_invalidate(rv, false);
 #if RV32_HAS(SYSTEM)
     free(rv->aot_page_snapshots);
     rv->aot_page_snapshots = NULL;

@@ -167,6 +167,16 @@ static void virtio_blk_read_handler(virtio_blk_state_t *vblk,
     const void *src =
         (void *) ((uintptr_t) vblk->disk + sector * DISK_BLK_SIZE);
     memcpy(dest, src, len);
+    virtio_guest_written(desc_addr, len);
+}
+
+/* Write a request's status byte, at guest address addr. */
+static void vblk_set_status(virtio_blk_state_t *vblk,
+                            uint32_t addr,
+                            uint8_t value)
+{
+    *(uint8_t *) ((uintptr_t) vblk->ram + addr) = value;
+    virtio_guest_written(addr, 1);
 }
 
 static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
@@ -224,7 +234,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     }
 
     /* The header and the status byte must be in bounds before either is
-     * touched: reporting an error through *status is only safe once the
+     * touched: reporting an error through the status byte is only safe once the
      * status descriptor itself has been validated. Only the fields up to
      * "status" are read out of the header descriptor.
      */
@@ -242,7 +252,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
         (struct vblk_req_header *) ((uintptr_t) vblk->ram + vq_desc[0].addr);
     uint32_t type = header->type;
     uint64_t sector = header->sector;
-    uint8_t *status = (uint8_t *) ((uintptr_t) vblk->ram + vq_desc[2].addr);
+    const uint32_t status = vq_desc[2].addr;
 
     /* Check sector index is valid. Written as ">=" rather than
      * "> capacity - 1" because capacity is deliberately left at 0 when no
@@ -251,7 +261,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
      */
     const uint64_t capacity = vblk->capacity;
     if (!capacity || sector >= capacity) {
-        *status = VIRTIO_BLK_S_IOERR;
+        vblk_set_status(vblk, status, VIRTIO_BLK_S_IOERR);
         return -1;
     }
 
@@ -262,7 +272,7 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     const uint64_t offset = sector * DISK_BLK_SIZE;
     if (!vblk_ram_range_ok(vq_desc[1].addr, vq_desc[1].len) ||
         offset >= disk_size || vq_desc[1].len > disk_size - offset) {
-        *status = VIRTIO_BLK_S_IOERR;
+        vblk_set_status(vblk, status, VIRTIO_BLK_S_IOERR);
         return -1;
     }
 
@@ -274,19 +284,19 @@ static int virtio_blk_desc_handler(virtio_blk_state_t *vblk,
     case VIRTIO_BLK_T_OUT:
         if (vblk->device_features & VIRTIO_BLK_F_RO) { /* readonly */
             rv_log_error("Fail to write on a read only block device");
-            *status = VIRTIO_BLK_S_IOERR;
+            vblk_set_status(vblk, status, VIRTIO_BLK_S_IOERR);
             return -1;
         }
         virtio_blk_write_handler(vblk, sector, vq_desc[1].addr, vq_desc[1].len);
         break;
     default:
         rv_log_error("Unsupported virtio-blk operation");
-        *status = VIRTIO_BLK_S_UNSUPP;
+        vblk_set_status(vblk, status, VIRTIO_BLK_S_UNSUPP);
         return -1;
     }
 
     /* Return the device status */
-    *status = VIRTIO_BLK_S_OK;
+    vblk_set_status(vblk, status, VIRTIO_BLK_S_OK);
     *plen = vq_desc[1].len;
 
     return 0;
@@ -344,6 +354,7 @@ static void virtio_queue_notify_handler(virtio_blk_state_t *vblk, int index)
             queue->queue_used + 1 + (new_used % queue->queue_num) * 2;
         ram[vq_used_addr] = buffer_idx; /* virtq_used_elem.id  (le32) */
         ram[vq_used_addr + 1] = len;    /* virtq_used_elem.len (le32) */
+        virtio_used_written(vq_used_addr, 2);
         queue->last_avail++;
         new_used++;
     }
@@ -351,6 +362,7 @@ static void virtio_queue_notify_handler(virtio_blk_state_t *vblk, int index)
     /* Check le32 len field of `struct virtq_used_elem` on the spec  */
     vblk->ram[queue->queue_used] &= MASK(16); /* Reset low 16 bits to zero */
     vblk->ram[queue->queue_used] |= ((uint32_t) new_used) << 16; /* len */
+    virtio_used_written(queue->queue_used, 1);
 
     /* Send interrupt, unless VIRTQ_AVAIL_F_NO_INTERRUPT is set */
     if (!(ram[queue->queue_avail] & 1))

@@ -503,8 +503,20 @@ static bool vnet_put_used_elem(virtio_net_state_t *vnet,
 
     vnet->ram[used_addr] = buffer_idx;
     vnet->ram[used_addr + 1] = len;
+    virtio_used_written(used_addr, 2);
 
     return true;
+}
+
+/* Report the buffers a receive wrote, from the vectors before writing. */
+static void vnet_report_rx(const virtio_net_state_t *vnet,
+                           const struct iovec *iovs,
+                           size_t niovs)
+{
+    for (size_t i = 0; i < niovs; i++)
+        virtio_guest_written(
+            (uint32_t) ((uintptr_t) iovs[i].iov_base - (uintptr_t) vnet->ram),
+            (uint32_t) iovs[i].iov_len);
 }
 
 static void virtio_net_try_rx(virtio_net_state_t *vnet)
@@ -555,6 +567,9 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
 
         if (!vnet_build_iovs(vnet, queue, buffer_idx, true, iovs, &niovs))
             return;
+        /* Writing advances the vectors; keep the buffers to report them. */
+        struct iovec filled[VNET_QUEUE_NUM_MAX];
+        memcpy(filled, iovs, niovs * sizeof(iovs[0]));
 
         struct iovec *cursor = iovs;
         size_t ncursor = niovs;
@@ -565,6 +580,7 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
 
         if (vnet_iovec_write(&cursor, &ncursor, virtio_header,
                              sizeof(virtio_header))) {
+            vnet_report_rx(vnet, filled, niovs);
             rv_log_error("virtio-net: RX buffer too small for virtio header");
             return virtio_net_set_fail(vnet);
         }
@@ -572,6 +588,7 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
         bool dropped = false;
         ssize_t plen = vnet_handle_read(vnet, &vnet->peer, queue, cursor,
                                         ncursor, &dropped);
+        vnet_report_rx(vnet, filled, niovs);
 
         if (plen <= 0 && !dropped)
             break;
@@ -590,6 +607,7 @@ static void virtio_net_try_rx(virtio_net_state_t *vnet)
         return;
     ram[queue->queue_used] &= MASK(16);
     ram[queue->queue_used] |= ((uint32_t) new_used) << 16;
+    virtio_used_written(queue->queue_used, 1);
 
     if (!(ram[queue->queue_avail] & 1))
         vnet->interrupt_status |= VIRTIO_INT_USED_RING;
@@ -671,6 +689,7 @@ static void virtio_net_try_tx(virtio_net_state_t *vnet)
         return;
     ram[queue->queue_used] &= MASK(16);
     ram[queue->queue_used] |= ((uint32_t) new_used) << 16;
+    virtio_used_written(queue->queue_used, 1);
 
     if (!(ram[queue->queue_avail] & 1))
         vnet->interrupt_status |= VIRTIO_INT_USED_RING;

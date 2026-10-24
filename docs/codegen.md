@@ -174,8 +174,9 @@ graphs look up targets under SATP_SHARED while S-mode paging is on and the
 guest has bound kernel code there, and under the current SATP otherwise; the
 dispatcher probes both keys. When a SFENCE.VMA finds
 that the mapping of a recorded code page changed, the bindings of that address
-space are cleared and rebound on their next entry. FENCE.I clears them all.
-The offline compiler also emits an entry index and
+space are cleared and rebound on their next entry. FENCE.I clears the other
+spaces' bindings, and the shared ones only when shared code was written (see
+[fencei.md](fencei.md)). The offline compiler also emits an entry index and
 the emulator a bitmap of the virtual pages it covers, which answers most
 misses without probing the index. The dispatcher validates instruction-fetch
 permission before publishing a new native binding, which records the fetch

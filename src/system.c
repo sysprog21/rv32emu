@@ -575,6 +575,117 @@ void mmu_forget_code_maps(riscv_t *rv)
 }
 #endif
 
+#if RV32_HAS(JIT)
+/* FENCE.I keeps the kernel's shared code unless something wrote to it. Stores
+ * reach those pages only through the C store path: their dTLB entries are
+ * never dirty and get no write tag, so every native store path, which needs
+ * one or the other, calls mmu_translate() too. Page-table A/D updates, device
+ * DMA and debugger writes report themselves. The guest kernel never writes its
+ * text once running, so FENCE.I, which Linux issues for every program it
+ * starts, leaves the kernel's decoded and compiled code in place. The written
+ * flag is atomic because the sound device writes guest RAM from its own
+ * thread.
+ */
+static riscv_t *code_hart; /* the hart device writes report to */
+
+/* Release pairs with the acquire in FENCE.I: a device that publishes its
+ * used ring after reporting is seen to have written before the fence.
+ */
+static inline void shared_code_set_written(riscv_t *rv)
+{
+    ATOMIC_STORE(&rv->shared_code_written, true, ATOMIC_RELEASE);
+}
+
+static inline bool shared_code_page(const riscv_t *rv, uint32_t paddr)
+{
+    const uint32_t page = paddr >> RV_PG_SHIFT;
+    return rv->shared_code_pages &&
+           page < PRIV(rv)->mem->mem_size / RV_PG_SIZE &&
+           ((rv->shared_code_pages[page / 64] >> (page % 64)) & 1);
+}
+
+/* Record that the physical page at paddr holds shared code. */
+static void shared_code_add(riscv_t *rv, uint32_t paddr)
+{
+    const uint32_t pages = PRIV(rv)->mem->mem_size / RV_PG_SIZE;
+    const uint32_t page = paddr >> RV_PG_SHIFT;
+    if (!rv->shared_code_pages) {
+        rv->shared_code_pages = calloc((pages + 63) / 64, sizeof(uint64_t));
+        code_hart = rv;
+    }
+    if (!rv->shared_code_pages || page >= pages) {
+        shared_code_set_written(rv); /* untracked: flush on FENCE.I */
+        return;
+    }
+    const uint64_t bit = UINT64_C(1) << (page % 64);
+    if (rv->shared_code_pages[page / 64] & bit)
+        return;
+    rv->shared_code_pages[page / 64] |= bit;
+    /* A dirty entry or write tag issued before the page held code would
+     * bypass the C path. Kernel code pages are rarely new once booted, so
+     * drop them all.
+     */
+    for (uint32_t idx = 0; idx < TLB_SIZE; idx++) {
+        rv->dtlb[idx].dirty = 0;
+        rv->jit_dtlb[idx].write_tag = UINT32_MAX;
+    }
+}
+
+static inline void mmu_note_store(riscv_t *rv, uint32_t paddr)
+{
+    if (unlikely(shared_code_page(rv, paddr)))
+        shared_code_set_written(rv);
+}
+
+void mmu_note_guest_write(riscv_t *rv, uint32_t paddr, uint32_t len)
+{
+    if (!rv || !rv->shared_code_pages || !len)
+        return;
+    const uint32_t last = (uint32_t) (((uint64_t) paddr + len - 1) >> 12);
+    for (uint32_t page = paddr >> RV_PG_SHIFT; page <= last; page++) {
+        if (shared_code_page(rv, page << RV_PG_SHIFT)) {
+            shared_code_set_written(rv);
+            return;
+        }
+    }
+}
+
+void virtio_guest_written(uint32_t addr, uint32_t len)
+{
+    mmu_note_guest_write(code_hart, addr, len);
+}
+
+void mmu_forget_shared_code(riscv_t *rv)
+{
+    if (rv->shared_code_pages)
+        memset(rv->shared_code_pages, 0,
+               (PRIV(rv)->mem->mem_size / RV_PG_SIZE + 63) / 64 *
+                   sizeof(uint64_t));
+    ATOMIC_STORE(&rv->shared_code_written, false, ATOMIC_RELAXED);
+}
+
+void mmu_release_shared_code(riscv_t *rv)
+{
+    if (code_hart == rv)
+        code_hart = NULL;
+    free(rv->shared_code_pages);
+    rv->shared_code_pages = NULL;
+}
+#endif
+
+/* Set A or D bits of a PTE, reporting the write when it changes anything. */
+static inline void mmu_set_pte_bits(riscv_t *rv, pte_t *pte, uint32_t bits)
+{
+    if ((*pte & bits) == bits)
+        return;
+    *pte |= bits;
+#if RV32_HAS(JIT)
+    mmu_note_store(rv, (uint32_t) ((uint8_t *) pte - PRIV(rv)->mem->mem_base));
+#else
+    (void) rv;
+#endif
+}
+
 static void note_code_page(riscv_t *rv, uint32_t vpn, uint32_t satp UNUSED)
 {
 #if !RV32_HAS(JIT)
@@ -584,6 +695,14 @@ static void note_code_page(riscv_t *rv, uint32_t vpn, uint32_t satp UNUSED)
         return;
 #if RV32_HAS(JIT)
     code_map_record(rv, vpn, satp);
+    if (satp == SATP_SHARED) {
+        /* The fetch left an exact 4 KiB iTLB entry, superpages included. */
+        uint32_t paddr;
+        if (mmu_code_translate(rv, vpn << RV_PG_SHIFT, &paddr))
+            shared_code_add(rv, paddr);
+        else
+            shared_code_set_written(rv);
+    }
 #endif
     /* The fetch just filled the iTLB. Without an exact 4 KiB entry for this
      * page, assume the code came through a superpage.
@@ -681,7 +800,8 @@ static inline void jit_dtlb_fill(riscv_t *rv,
     rv->jit_dtlb[idx].write_tag = ram &&
                                           (!mmu_paging(rv, mmu_data_priv(rv)) ||
                                            mmu_perm_ok(rv, perm, PTE_W)) &&
-                                          dirty
+                                          dirty &&
+                                          !shared_code_page(rv, pa_page)
                                       ? va_page | context
                                       : UINT32_MAX;
     rv->jit_dtlb[idx].addend = (uintptr_t) mem->mem_base + pa_page - va_page;
@@ -713,8 +833,13 @@ static inline uint32_t dtlb_lookup(riscv_t *rv,
             /* Update PTE dirty bit in memory */
             vm_attr_t *attr = PRIV(rv);
             pte_t *pte = (pte_t *) (attr->mem->mem_base + entry->pte_addr);
-            *pte |= PTE_D;
+            mmu_set_pte_bits(rv, pte, PTE_D);
+#if RV32_HAS(JIT)
+            /* Stores to shared code keep taking this path; see above. */
+            entry->dirty = !shared_code_page(rv, entry->ppn);
+#else
             entry->dirty = 1;
+#endif
         }
         entry->valid = rv->mmu_access_context;
         mmu_note_stamp(rv, idx, entry->perm);
@@ -767,6 +892,8 @@ static inline void dtlb_populate(riscv_t *rv,
     tlb_fill(rv, entry, vaddr, pte, level);
     mmu_note_stamp(rv, idx, entry->perm);
 #if RV32_HAS(JIT)
+    if (entry->dirty && shared_code_page(rv, entry->ppn))
+        entry->dirty = 0;
     jit_dtlb_fill(rv, vaddr, entry->ppn, entry->perm, entry->dirty);
 #endif
 }
@@ -972,8 +1099,7 @@ uint32_t __attribute__((noinline)) mmu_ifetch_miss(riscv_t *rv, uint32_t vaddr)
     }
 
     /* Update Accessed bit per RISC-V Sv32 spec */
-    if (!(*pte & PTE_A))
-        *pte |= PTE_A;
+    mmu_set_pte_bits(rv, pte, PTE_A);
 
     /* Populate iTLB for future accesses */
     itlb_populate(rv, vaddr, pte, level);
@@ -1175,7 +1301,7 @@ bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr)
     return true;
 }
 
-#if RV32_HAS(T2C)
+#if RV32_HAS(JIT)
 bool mmu_code_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr)
 {
     if (!mmu_paging(rv, rv->priv_mode)) {
@@ -1207,6 +1333,8 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
     if (!mmu_paging(rv, mmu_data_priv(rv))) {
 #if RV32_HAS(JIT)
         jit_dtlb_fill(rv, vaddr, vaddr, PTE_R | PTE_W, true);
+        if (!rw)
+            mmu_note_store(rv, vaddr);
 #endif
         return vaddr;
     }
@@ -1214,8 +1342,13 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
     /* Try dTLB first for fast path */
     bool hit;
     uint32_t paddr = dtlb_lookup(rv, vaddr, !rw, &hit);
-    if (hit)
+    if (hit) {
+#if RV32_HAS(JIT)
+        if (!rw)
+            mmu_note_store(rv, paddr);
+#endif
         return paddr;
+    }
 
     /* TLB miss - do full page walk */
     uint32_t level;
@@ -1251,16 +1384,17 @@ uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
         }
     }
 
-    /* Update A/D bits per RISC-V Sv32 spec */
-    if (!(*pte & PTE_A))
-        *pte |= PTE_A;
-    if (!rw && !(*pte & PTE_D)) /* Write access needs Dirty bit */
-        *pte |= PTE_D;
+    /* Update A/D bits per RISC-V Sv32 spec; a write needs the dirty bit. */
+    mmu_set_pte_bits(rv, pte, rw ? PTE_A : PTE_A | PTE_D);
 
     /* Populate dTLB for future accesses */
     dtlb_populate(rv, vaddr, pte, level);
 
     get_ppn_and_offset();
+#if RV32_HAS(JIT)
+    if (!rw)
+        mmu_note_store(rv, ppn | offset);
+#endif
     return ppn | offset;
 }
 

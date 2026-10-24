@@ -1598,6 +1598,7 @@ void rv_delete(riscv_t *rv)
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
     free(rv->code_maps);
+    mmu_release_shared_code(rv);
 #endif
 #if !RV32_HAS(JIT)
     map_delete(attr->fd_map);
@@ -1749,7 +1750,10 @@ static bool rv_init_jit(riscv_t *rv)
     if (reboot) {
 #if RV32_HAS(T2C)
         t2c_aot_checkpoint(rv);
-        t2c_aot_invalidate(rv);
+        t2c_aot_invalidate(rv, false);
+#endif
+#if RV32_HAS(SYSTEM)
+        mmu_forget_shared_code(rv);
 #endif
         block_list_clear(rv);
 

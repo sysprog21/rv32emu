@@ -507,6 +507,16 @@ static void page_index_insert(cache_t *cache, cache_entry_t *entry)
 
 HASH_FUNC_IMPL(satp_index_hash, SATP_INDEX_BITS, SATP_INDEX_SIZE)
 
+/* The index bucket of address space satp. Shared kernel code has bucket 0 to
+ * itself, so that a FENCE.I which keeps it skips that bucket whole.
+ */
+static inline uint32_t satp_bucket(uint32_t satp)
+{
+    return satp == SATP_SHARED
+               ? 0
+               : 1 + satp_index_hash(satp) % (SATP_INDEX_SIZE - 1);
+}
+
 /* Mark a block invalidated, so that no dispatch or tier-2 entry reaches it. */
 static inline void block_invalidate(block_t *block)
 {
@@ -537,7 +547,7 @@ static void satp_index_insert(cache_t *cache, cache_entry_t *entry)
 {
     const block_t *block = entry->value;
     hlist_add_head(&entry->satp_node,
-                   &cache->satp_index[satp_index_hash(block->satp)]);
+                   &cache->satp_index[satp_bucket(block->satp)]);
 }
 
 uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
@@ -548,7 +558,7 @@ uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
     uint32_t count = 0;
     cache_entry_t *entry = NULL;
     struct hlist_node *next;
-    struct hlist_head *head = &cache->satp_index[satp_index_hash(satp)];
+    struct hlist_head *head = &cache->satp_index[satp_bucket(satp)];
     hlist_for_each_entry_safe (entry, next, head, satp_node) {
         block_t *block = (block_t *) entry->value;
         if (block->satp == satp && !block->invalidated) {
@@ -560,13 +570,14 @@ uint32_t cache_invalidate_satp(cache_t *cache, uint32_t satp)
     return count;
 }
 
-uint32_t cache_invalidate_all(cache_t *cache)
+/* Invalidate the blocks of the index buckets from first on. */
+static uint32_t cache_invalidate_buckets(cache_t *cache, uint32_t first)
 {
     uint32_t count = 0;
     /* Invalidated entries leave the live indexes. Repeated fences visit only
      * blocks decoded since the previous fence, never the whole cache list.
      */
-    for (uint32_t i = 0; i < SATP_INDEX_SIZE; i++) {
+    for (uint32_t i = first; i < SATP_INDEX_SIZE; i++) {
         cache_entry_t *entry;
         struct hlist_node *next;
         hlist_for_each_entry_safe (entry, next, &cache->satp_index[i],
@@ -577,6 +588,16 @@ uint32_t cache_invalidate_all(cache_t *cache)
         }
     }
     return count;
+}
+
+uint32_t cache_invalidate_all(cache_t *cache)
+{
+    return cache_invalidate_buckets(cache, 0);
+}
+
+uint32_t cache_invalidate_unshared(cache_t *cache)
+{
+    return cache_invalidate_buckets(cache, 1);
 }
 
 bool cache_has_va_any(const cache_t *cache, uint32_t va)

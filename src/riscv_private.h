@@ -756,6 +756,12 @@ struct riscv_internal {
     struct {
         uint32_t satp, epoch;
     } code_space_epochs[64];
+    /* One bit per physical page holding shared kernel code, and whether a
+     * store or device write reached one of them since the last FENCE.I; see
+     * mmu_note_store(). Allocated on first use.
+     */
+    uint64_t *shared_code_pages;
+    bool shared_code_written;
 #endif
 
 #if !RV32_HAS(JIT)

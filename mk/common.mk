@@ -131,7 +131,7 @@ define compile-rule
 $$($(1))/%.o: $(2)/%.c $(4) $$(CONFIG_HEADER) | $$($(1))
 	$$(Q)mkdir -p $$(dir $$@)
 	$$(VECHO) "  CC\t$$@\n"
-	$$(Q)$$(CC) -o $$@ $$(CFLAGS) $(3) -c -MMD -MF $$@.d $$<
+	$$(Q)$$(CC) -o $$@ $$(CFLAGS) $(3) -c -MMD -MP -MF $$@.d $$<
 endef
 
 # Test Framework Templates
@@ -162,7 +162,7 @@ $$($(1)_TEST_OUTDIR) $(4):
 $$($(1)_TEST_OUTDIR)/%.o: $$($(1)_TEST_SRCDIR)/%.c $$(CONFIG_HEADER) \
                           $$(EFFECTIVE_CONFIG_STAMP) | $$($(1)_TEST_OUTDIR) $(4)
 	$$(VECHO) "  CC\t$$@\n"
-	$$(Q)$$(CC) -o $$@ $$(CFLAGS) -I./src -c -MMD -MF $$@.d $$<
+	$$(Q)$$(CC) -o $$@ $$(CFLAGS) -I./src -c -MMD -MP -MF $$@.d $$<
 
 # Link test binary
 $$($(1)_TEST_TARGET): $$($(1)_TEST_OBJS)

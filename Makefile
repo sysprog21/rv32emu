@@ -258,13 +258,13 @@ ifeq ($(CONFIG_JIT),y)
     endif
 $(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MP -MF $@.d $<
 # T2C optimization level from Kconfig (0-3, default 3)
 T2C_OPT_LEVEL ?= $(or $(CONFIG_T2C_OPT_LEVEL),3)
 $(OUT)/t2c.o: src/t2c.c src/t2c_template.c $(CONFIG_HEADER) \
               $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -DCONFIG_T2C_OPT_LEVEL=$(T2C_OPT_LEVEL) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) -DCONFIG_T2C_OPT_LEVEL=$(T2C_OPT_LEVEL) -c -MMD -MP -MF $@.d $<
 else
     CFLAGS += -DRV32_FEATURE_T2C=0
 endif
@@ -301,6 +301,11 @@ OBJS += em_runtime.o
 endif
 OBJS += emulate.o riscv.o log.o elf.o cache.o mpool.o coro.o $(OBJS_EXT) main.o
 OBJS := $(addprefix $(OUT)/, $(OBJS))
+
+# Every object some configuration builds from src/, so clean also removes
+# the ones the current configuration does not list, such as a t2c.o whose
+# dependency file still names the headers of a since-replaced LLVM.
+SRC_OBJS_ALL := $(patsubst src/%.c,$(OUT)/%.o,$(wildcard src/*.c))
 deps += $(OBJS:%.o=%.o.d)
 
 EFFECTIVE_CONFIG_VARS := \
@@ -397,7 +402,7 @@ check-decoder: $(DECODER_DESC) $(DECODER_GEN) $(DECODER_VERIFY) | $(OUT)
 $(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)
 	$(Q)mkdir -p $(dir $@)
 	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MF $@.d $<
+	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_emcc) -c -MMD -MP -MF $@.d $<
 
 $(OUT):
 	$(Q)mkdir -p $@
@@ -421,6 +426,7 @@ tool: $(TOOLS_BIN)
 clean:
 	$(VECHO) "Cleaning... "
 	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) \
+	    $(SRC_OBJS_ALL) $(SRC_OBJS_ALL:%=%.d) \
 	    $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) \
 	    $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP) $(VIRTIO_NET_CLEAN_FILES)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)

@@ -1,6 +1,8 @@
 # Prebuilt Binaries
 
-The prebuilt binaries for [rv32emu](https://github.com/sysprog21/rv32emu) are prepared primarily because the [RISC-V Sail Model](https://github.com/riscv/sail-riscv) executable is required for the [RISC-V Architecture Test](https://github.com/riscv-non-isa/riscv-arch-test), and selected RISC-V ELF files are useful for ISA simulation validation and testing.
+Prebuilt rv32emu guest and host executables support testing and benchmarks.
+ACT4 uses official versioned Sail binaries installed by
+`.ci/arch-test-setup.sh`, independently of the prebuilt ELF artifacts.
 Some of these prebuilt binaries are stored in [rv32emu-prebuilt](https://github.com/sysprog21/rv32emu-prebuilt).
 During testing or benchmarking, these binaries are automatically downloaded into the `build/linux-x86-softfp/` and `build/riscv32/` directories by default.
 The RISC-V binaries are compiled using the [xPack RISC-V GCC toolchain](https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack) with the options `-march=rv32im -mabi=ilp32`.

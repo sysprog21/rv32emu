@@ -2630,11 +2630,47 @@ static void jit_mmu_handler(riscv_t *rv,
     struct jit_state *state = rv->jit_state;
     const uint64_t generation = state->code_generation;
     rv->csr_cycle -= refund;
-    if (type == rv_insn_lb || type == rv_insn_lh || type == rv_insn_lbu ||
-        type == rv_insn_lhu || type == rv_insn_lw)
-        addr = rv->io.mem_translate(rv, vaddr, R);
-    else
-        addr = rv->io.mem_translate(rv, vaddr, W);
+    const bool is_load = type == rv_insn_lb || type == rv_insn_lh ||
+                         type == rv_insn_lbu || type == rv_insn_lhu ||
+                         type == rv_insn_lw;
+    /* An access spanning two pages, which only -m allows, goes through the
+     * memory callbacks: they translate each page on its own. Report it as
+     * MMIO, so that no direct access follows.
+     */
+    if (unlikely((vaddr & MASK(RV_PG_SHIFT)) > RV_PG_SIZE - access_size)) {
+        uint32_t val = 0;
+        switch (type) {
+        case rv_insn_lh:
+            val = (int16_t) rv->io.mem_read_s(rv, vaddr);
+            break;
+        case rv_insn_lhu:
+            val = rv->io.mem_read_s(rv, vaddr);
+            break;
+        case rv_insn_lw:
+            val = rv->io.mem_read_w(rv, vaddr);
+            break;
+        case rv_insn_sh:
+            rv->io.mem_write_s(rv, vaddr, rv->X[vreg_idx]);
+            break;
+        default:
+            rv->io.mem_write_w(rv, vaddr, rv->X[vreg_idx]);
+            break;
+        }
+        rv->jit_mmu.is_mmio = 1;
+        rv->jit_mmu.abort = rv->trap_cnt || need_handle_signal;
+        if (rv->jit_mmu.abort)
+            return;
+        if (is_load && vreg_idx)
+            rv->X[vreg_idx] = val;
+        if (generation != state->code_generation) {
+            rv->PC = pc + insn_size;
+            rv->jit_mmu.abort = 1;
+        } else {
+            rv->csr_cycle += refund;
+        }
+        return;
+    }
+    addr = rv->io.mem_translate(rv, vaddr, is_load ? R : W);
 
     /* A page fault in mem_translate may leave a trap pending (trap_cnt), or
      * its handler may have run already and resumed somewhere else

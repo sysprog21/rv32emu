@@ -823,21 +823,38 @@ RVOP(sfencevma, {
 RVOP(fencei, {
     T1C_COUNT(fence_i, 1);
     PC += 4;
+#if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
+    /* FENCE.I is a global instruction cache barrier: any page of any address
+     * space may hold new instructions. Linux issues it for every program it
+     * starts, though, and its own text never changes: unless a write reached
+     * a page of shared kernel code (see mmu_note_store()), retire every other
+     * address space and keep the kernel's decoded, compiled and bound code.
+     * AOT collection still flushes: decoding the kernel's pages again yields
+     * page graphs that make process creation 3% faster on replay.
+     */
+    const bool keep_shared UNUSED =
+        !ATOMIC_LOAD(&rv->shared_code_written, ATOMIC_ACQUIRE) &&
+        !IIF(RV32_HAS(T2C))(PRIV(rv)->aot_collect, false);
+#else
+    const bool keep_shared UNUSED = false;
+#endif
 #if RV32_HAS(T2C)
     if (aot_enabled(rv)) {
         rv->aot_fences++;
-        t2c_aot_invalidate(rv);
+        t2c_aot_invalidate(rv, keep_shared);
     }
 #endif
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-    /* FENCE.I is a global instruction cache barrier: any page of any address
-     * space, kernel text included, may hold new instructions. Invalidate every
-     * block and drop all translated code, which also empties the T2C caches.
-     * The guest issues it rarely, when it loads or patches code.
-     */
-    uint32_t n_invalidated UNUSED = cache_invalidate_all(rv->block_cache);
+    uint32_t n_invalidated UNUSED;
+    if (keep_shared) {
+        n_invalidated = cache_invalidate_unshared(rv->block_cache);
+        jit_retire_unshared(rv->jit_state);
+    } else {
+        n_invalidated = cache_invalidate_all(rv->block_cache);
+        jit_flush(rv);
+        mmu_forget_shared_code(rv);
+    }
     T1C_COUNT(fence_i_blocks, n_invalidated);
-    jit_flush(rv);
 #endif
 /* User JIT invalidation is unsupported; see docs/fencei.md. */
 #if !RV32_HAS(JIT)

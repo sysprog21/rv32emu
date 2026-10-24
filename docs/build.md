@@ -62,7 +62,8 @@ turns off AOT and makes collection fail. System artifacts identify regions by
 virtual PC, a fast hash key, and a complete SHA-256 digest of their code page. Regions stay within that
 page, and normal `FENCE.I`/`SFENCE.VMA` invalidation forces fresh translation
 and binding; kernel code on global mappings is bound once for every address
-space. Missing pages, new
+space and keeps its bindings across `FENCE.I` unless its pages were written
+(see [fencei.md](fencei.md)). Missing pages, new
 processes, and changed code fall back to T1C/interpreter. Native RAM hits stay
 in the region, including bare mode and superpages. Slow accesses publish the
 precise retired prefix before calling MMU/MMIO helpers. Successful helpers

@@ -95,4 +95,18 @@ void jit_cache_retire_space(struct jit_cache *cache,
             inline_cache[i] = (struct inline_cache) {0};
     }
 }
+
+void jit_cache_retire_unshared(struct jit_cache *cache,
+                               struct inline_cache *inline_cache)
+{
+    for (uint32_t i = 0; i < N_JIT_CACHE_ENTRIES; i++) {
+        if (cache[i].entry && (uint32_t) (cache[i].key >> 32) != SATP_SHARED)
+            jit_cache_store(&cache[i], 0, NULL, 0);
+    }
+    for (uint32_t i = 0; i < N_INLINE_CACHE_ENTRIES; i++) {
+        if (inline_cache[i].entry &&
+            (uint32_t) (inline_cache[i].key >> 32) != SATP_SHARED)
+            inline_cache[i] = (struct inline_cache) {0};
+    }
+}
 #endif

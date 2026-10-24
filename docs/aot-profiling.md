@@ -62,6 +62,8 @@ Approaches measured and not kept:
 * A 16,384-slot binding cache, a larger cache of PCs absent from the
   artifact, a longer dispatch slice (`-s 4096`), and running T1C code before
   a bound AOT entry: none moved any workload beyond run-to-run noise.
+* Keeping the kernel's code across FENCE.I during collection, as replay does:
+  the artifact it produced made process creation 3% slower.
 * Select-based safe division: 3–4% slower than a rare exception branch.
 
 ## Profiling

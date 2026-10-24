@@ -238,7 +238,7 @@ SYSTEM_ASM_CHECK_TARGETS += check-system-interrupt-dispatch \
     check-system-amo check-system-csr check-system-priv \
     check-system-misalign-page
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_FENCEI_WORKS),yy)
-SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction \
+SYSTEM_ASM_CHECK_TARGETS += check-system-jit-eviction check-system-fence-shared \
     check-system-native-retire check-system-native-retire-cold \
     check-system-native-retire-store check-system-native-retire-mmio \
     check-system-native-retire-fused check-system-native-retire-sfence \
@@ -467,6 +467,7 @@ EXPECTED_system-interrupt-dispatch = SYSTEM interrupt dispatch OK
 EXPECTED_system-wfi = SYSTEM WFI OK
 EXPECTED_system-fence-stale-fetch = SYSTEM fence stale fetch OK
 EXPECTED_system-shared-code = SYSTEM shared code OK
+EXPECTED_system-fence-shared = SYSTEM fence shared OK
 EXPECTED_system-interrupt-fault = SYSTEM interrupt fault OK
 EXPECTED_system-trap-resume = SYSTEM trap resume OK
 EXPECTED_system-jit-eviction = SYSTEM JIT eviction OK
@@ -482,6 +483,7 @@ $(eval $(call system-asm-check-target,system-trap-resume,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-wfi,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-fence-stale-fetch,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-shared-code,rv32ia_zicsr))
+$(eval $(call system-asm-check-target,system-fence-shared,rv32ia_zicsr_zifencei))
 $(eval $(call system-asm-check-target,system-interrupt-fault,rv32ia_zicsr))
 $(eval $(call system-asm-check-target,system-interrupt-fault,rv32ia_zicsr,-switch,-DINTERRUPT_SWITCH))
 # Diagnostics confirm that the AMO and CSR loops run compiled.

@@ -611,9 +611,14 @@ static inline uint32_t offset_hash(uint32_t pc, uint32_t satp)
 }
 
 #if RV32_HAS(SYSTEM)
+/* Shared kernel code has bucket 0 to itself, so that a FENCE.I which keeps
+ * it skips that bucket whole.
+ */
 static inline uint32_t space_hash(uint32_t satp)
 {
-    return index_hash(satp, SPACE_INDEX_BITS);
+    return satp == SATP_SHARED ? 0
+                               : 1 + index_hash(satp, SPACE_INDEX_BITS) %
+                                         ((1U << SPACE_INDEX_BITS) - 1);
 }
 
 static inline uint32_t page_hash(uint32_t va)
@@ -728,7 +733,8 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
     }
 }
 
-void jit_retire_all(struct jit_state *state)
+/* Retire the address spaces of the index buckets from first on. */
+static void jit_retire_buckets(struct jit_state *state, uint32_t first)
 {
     state->code_generation++;
     T1C_COUNT(retire_calls, 1);
@@ -736,7 +742,7 @@ void jit_retire_all(struct jit_state *state)
     T1C_COUNT(retire_pending_slots, state->n_pending);
     pending_reset(state, false);
 #endif
-    for (uint32_t i = 0; i < ARRAY_SIZE(state->space_index); i++) {
+    for (uint32_t i = first; i < ARRAY_SIZE(state->space_index); i++) {
         int32_t *link = &state->space_index[i];
         while (*link >= 0) {
             struct offset_map *entry = &state->offset_map[*link];
@@ -744,6 +750,16 @@ void jit_retire_all(struct jit_state *state)
             *link = entry->next_in_space;
         }
     }
+}
+
+void jit_retire_unshared(struct jit_state *state)
+{
+    jit_retire_buckets(state, 1);
+}
+
+void jit_retire_all(struct jit_state *state)
+{
+    jit_retire_buckets(state, 0);
     /* Every indexed native entry is now retired; do not accumulate dead
      * entries in cross-space page probes between native-buffer flushes.
      */

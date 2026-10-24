@@ -155,7 +155,7 @@ static bool emulate_misaligned_load(riscv_t *rv,
                 value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
                          << (i * 8);
         }
-        if (!MISALIGN_PART_FAULTED())
+        if (!MISALIGN_PART_FAULTED() && ir->rd)
             rv->X[ir->rd] = value;
         break;
 
@@ -163,7 +163,7 @@ static bool emulate_misaligned_load(riscv_t *rv,
         /* Load halfword (signed): 2 bytes - always use byte reads for odd */
         for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
-        if (!MISALIGN_PART_FAULTED())
+        if (!MISALIGN_PART_FAULTED() && ir->rd)
             rv->X[ir->rd] = sign_extend_h(value);
         break;
 
@@ -171,7 +171,7 @@ static bool emulate_misaligned_load(riscv_t *rv,
         /* Load halfword unsigned: 2 bytes - always use byte reads for odd */
         for (int i = 0; i < 2 && !MISALIGN_PART_FAULTED(); i++)
             value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
-        if (!MISALIGN_PART_FAULTED())
+        if (!MISALIGN_PART_FAULTED() && ir->rd)
             rv->X[ir->rd] = value;
         break;
 

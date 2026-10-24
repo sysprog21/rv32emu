@@ -359,8 +359,10 @@ endif
 
 ieeelib:
 ifeq ($(call has, PREBUILT), 0)
+ifeq ($(call has, SYSTEM), 0)
 	git submodule update --init ./src/ieeelib
 	$(Q)$(MAKE) -C ./src/ieeelib CC=$(CC) CFLAGS="$(CFLAGS)" BINDIR=$(BIN_DIR)
+endif
 endif
 
 endif # _MK_ARTIFACT_INCLUDED

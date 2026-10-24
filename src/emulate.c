@@ -1042,8 +1042,10 @@ enum {
 #endif
 #endif
 
-/* record whether the branch is taken or not during emulation */
-static bool is_branch_taken = false;
+/* record whether the branch is taken or not during emulation. Only block
+ * chaining and fusion read it, so other configurations only set it.
+ */
+static bool is_branch_taken UNUSED = false;
 
 /* record the program counter of the previous block */
 static uint32_t last_pc = 0;
@@ -1376,9 +1378,10 @@ static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
 #endif
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
 /* Code was retired, so the T2C caches must be cleared. Clear them whenever
- * any space retires: a region may outlive the block that entered it.
+ * any space retires: a region may outlive the block that entered it. Without
+ * T2C there are no such caches, and nothing reads the flag.
  */
-static bool retired_any;
+static bool retired_any UNUSED;
 
 static void retire_space(riscv_t *rv, uint32_t satp)
 {

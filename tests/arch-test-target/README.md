@@ -94,8 +94,9 @@ are outside this user-mode configuration; passing these tests does not
 establish compatibility for those features.
 
 At ACT4 revision `70907fc6710829794739d48ae7a8be861360263f`, all 216
-selected ELFs pass in all five execution modes with GCC 15.2, LLVM 20, and
-Sail 0.16. A passing tiered build does not prove every test reached LLVM
+selected ELFs pass in all five execution modes with GCC 15.2, LLVM 23 (the
+suggested version; LLVM 20 is also supported), and Sail 0.16. A passing
+tiered build does not prove every test reached LLVM
 code. The focused regressions also cover floating-point misalignment and
 failure exit reporting. Generated test selection is recorded in
 `build/arch-test/rv32emu-rv32imafc/test_list.md`.

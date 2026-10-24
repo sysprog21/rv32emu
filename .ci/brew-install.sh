@@ -14,7 +14,12 @@ set -e -u -o pipefail
 
 LLVM_VERSION=$(cat "${SCRIPT_DIR}/llvm-version")
 
-brew install make dtc expect sdl2 bc e2fsprogs p7zip "llvm@${LLVM_VERSION}" dcfldd pkgconf portaudio
+# Homebrew names its newest LLVM plain "llvm" and keeps older majors as
+# llvm@N, so the pinned version can live under either name.
+LLVM_FORMULA="llvm@${LLVM_VERSION}"
+brew info "${LLVM_FORMULA}" > /dev/null 2>&1 || LLVM_FORMULA=llvm
+
+brew install make dtc expect sdl2 bc e2fsprogs p7zip "${LLVM_FORMULA}" dcfldd pkgconf portaudio
 
 # SDL_mixer only gates the audio tests, so a bottle outage should not take the
 # whole job down with it.
@@ -34,5 +39,11 @@ for tool in dtc expect bc pkg-config; do
 done
 if [ -n "${MISSING}" ]; then
     echo "ERROR: not found in PATH after install:${MISSING}" >&2
+    exit 1
+fi
+
+LLVM_MAJOR=$("$(brew --prefix "${LLVM_FORMULA}")/bin/llvm-config" --version | cut -d. -f1)
+if [ "${LLVM_MAJOR}" != "${LLVM_VERSION}" ]; then
+    echo "ERROR: ${LLVM_FORMULA} is LLVM ${LLVM_MAJOR}, but .ci/llvm-version pins ${LLVM_VERSION}" >&2
     exit 1
 fi

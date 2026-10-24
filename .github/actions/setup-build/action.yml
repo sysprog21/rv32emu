@@ -17,9 +17,10 @@ inputs:
   llvm:
     description: >
       Install LLVM at the version pinned in .ci/llvm-version. Linux only: the
-      macOS dependency set always includes llvm@<version>, because the JIT needs
-      it and separating it there would save nothing. On macOS this input governs
-      only whether its bin directory goes on PATH.
+      macOS dependency set always includes the pinned LLVM (llvm@<version>, or
+      llvm when that is Homebrew's newest), because the JIT needs it and
+      separating it there would save nothing. On macOS this input governs only
+      whether its bin directory goes on PATH.
     default: 'true'
   riscv-toolchain:
     description: Install the RISC-V cross toolchain, needed by the gdbstub and architecture tests.
@@ -101,7 +102,11 @@ runs:
       shell: bash
       run: |
         if [ "${RUNNER_OS}" = "macOS" ]; then
-          echo "$(brew --prefix llvm@${{ steps.llvm-version.outputs.version }})/bin" >> "$GITHUB_PATH"
+          # .ci/brew-install.sh falls back to the unversioned formula when the
+          # pinned major is Homebrew's newest LLVM.
+          prefix=$(brew --prefix "llvm@${{ steps.llvm-version.outputs.version }}" 2> /dev/null \
+            || brew --prefix llvm)
+          echo "${prefix}/bin" >> "$GITHUB_PATH"
         else
           echo "/usr/lib/llvm-${{ steps.llvm-version.outputs.version }}/bin" >> "$GITHUB_PATH"
         fi

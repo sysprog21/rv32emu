@@ -9,7 +9,7 @@ manifests for each image.
 | Image | Purpose | Recipe |
 | ----- | ------- | ------ |
 | `sysprog21/rv32emu-gcc` | RISC-V cross-compiler for building target binaries | [`docker/Dockerfile-gcc`](../docker/Dockerfile-gcc) |
-| `sysprog21/rv32emu-sail` | RISC-V SAIL reference simulator used by RISCOF | [`docker/Dockerfile-sail`](../docker/Dockerfile-sail) |
+| `sysprog21/rv32emu-sail` | RISC-V Sail reference simulator used by ACT4 | [`docker/Dockerfile-sail`](../docker/Dockerfile-sail) |
 
 Both images share `ubuntu:24.04` as the base layer.
 
@@ -45,21 +45,11 @@ To bump GCC, change the `git checkout tags/2024.04.12` line in
 
 ### SAIL reference simulator
 
-`docker/Dockerfile-sail` installs SAIL via opam:
-
-* OCaml base compiler: `5.2.0`
-* `sail`: `0.17.1`
-* `sail-riscv`: cloned from
-  [`riscv/sail-riscv`](https://github.com/riscv/sail-riscv) and pinned to
-  commit `0e9850fed5bee44346e583f334c6e2a6a25d5cd3`, then built against
-  the installed SAIL with `ARCH=RV32 make`.
-
-System dependencies installed in the image: `opam`, `zlib1g-dev`,
-`pkg-config`, `libgmp-dev`, `z3`, and `device-tree-compiler`.
-
-The final stage copies `sail-riscv/c_emulator/riscv_sim_RV32` into the
-output image. That binary is the reference signature generator used by
-RISCOF (see [riscof.md](riscof.md)).
+`docker/Dockerfile-sail` installs the official Sail RISC-V 0.16 binary for
+x86-64 or aarch64, matching the pinned ACT4 framework. It exports
+`/opt/sail-riscv/bin` on `PATH`; the executable is `sail_riscv_sim`.
+The build verifies the executable version. See the
+[architecture-test guide](arch-test.md) for the complete ACT4 environment.
 
 ## Rebuilding and publishing
 

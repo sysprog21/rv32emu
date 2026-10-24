@@ -1,27 +1,25 @@
 FROM ubuntu:24.04 AS base
-
-# The upstream reference emulator is built for x86-64, and the releases are pretty out of date
-# Thus, we build it ourselves for both x86-64 and aarch64
-# 
-# The following dockerfile commands are modified from references [1][2]
-# Dependencies are pinned at certain versions. Within pinning, the build won't be reproducible
-# [1] https://riscof.readthedocs.io/en/stable/installation.html#install-plugin-models
-# [2] https://github.com/riscv/sail-riscv/blob/master/.github/workflows/compile.yml
+ARG TARGETARCH
+ARG SAIL_VERSION=0.16
+# Release asset digests for SAIL_VERSION; update them together, and keep
+# them in step with .ci/arch-test-setup.sh.
+ARG SAIL_SHA256_X86_64=f9bb8a32b8f3eddbdf69b3a29d96dff4ba1e77f45877165e0478418367da6bee
+ARG SAIL_SHA256_AARCH64=92163c1b02b416ae6a031283e0b2085674daed5dfa2d79b1c929ef23da51da73
 RUN apt-get update && \
-    apt install -y opam zlib1g-dev pkg-config libgmp-dev z3 device-tree-compiler && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
     rm -rf /var/lib/apt/lists/*
-RUN opam init --disable-sandboxing -y
-RUN opam switch create ocaml-base-compiler.5.2.0 # opam switch list-available
-RUN opam search sail
-RUN opam install -y sail.0.17.1
-RUN git clone https://github.com/riscv/sail-riscv
-RUN cd sail-riscv && \
-    git checkout 0e9850fed5bee44346e583f334c6e2a6a25d5cd3 && \
-    eval $(opam env) && \
-    make && \
-    ARCH=RV32 make 
+RUN case "$TARGETARCH" in \
+        amd64) sail_arch=x86_64 sail_sha256=$SAIL_SHA256_X86_64 ;; \
+        arm64) sail_arch=aarch64 sail_sha256=$SAIL_SHA256_AARCH64 ;; \
+        *) exit 1 ;; \
+    esac && \
+    curl --fail --location --retry 3 \
+        "https://github.com/riscv/sail-riscv/releases/download/${SAIL_VERSION}/sail-riscv-Linux-${sail_arch}.tar.gz" \
+        -o /tmp/sail.tar.gz && \
+    echo "$sail_sha256  /tmp/sail.tar.gz" | sha256sum -c - && \
+    mkdir /sail && tar -xzf /tmp/sail.tar.gz --strip-components=1 -C /sail && \
+    test "$(/sail/bin/sail_riscv_sim --version)" = "$SAIL_VERSION"
 
 FROM ubuntu:24.04 AS final
-
-# keep the emulator only
-COPY --from=base /sail-riscv/c_emulator/riscv_sim_RV32 /home/root/riscv_sim_RV32
+COPY --from=base /sail/ /opt/sail-riscv/
+ENV PATH="/opt/sail-riscv/bin:${PATH}"

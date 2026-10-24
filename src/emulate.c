@@ -127,10 +127,39 @@ static inline bool retire_pending_blocks(riscv_t *rv)
 #define MISALIGN_PART_FAULTED() false
 #endif
 
-/* Emulate misaligned load operation.
+/* Read a misaligned word for the integer and floating-point loads.
  * Fast-path: Use halfword operations for 2-byte aligned word accesses.
  * Slow-path: Fall back to byte-level operations for odd addresses.
  */
+static uint32_t misaligned_read_w(riscv_t *rv, uint32_t addr)
+{
+    uint32_t value = 0;
+
+    if ((addr & 1) == 0) {
+        value = (uint32_t) rv->io.mem_read_s(rv, addr);
+        if (!MISALIGN_PART_FAULTED())
+            value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
+    } else {
+        for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
+            value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i)) << (i * 8);
+    }
+    return value;
+}
+
+/* Write a misaligned word, splitting it the same way as misaligned_read_w */
+static void misaligned_write_w(riscv_t *rv, uint32_t addr, uint32_t value)
+{
+    if ((addr & 1) == 0) {
+        rv->io.mem_write_s(rv, addr, value & 0xFFFF);
+        if (!MISALIGN_PART_FAULTED())
+            rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
+    } else {
+        for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
+            rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
+    }
+}
+
+/* Emulate misaligned load operation. */
 static bool emulate_misaligned_load(riscv_t *rv,
                                     const rv_insn_t *ir,
                                     uint32_t addr)
@@ -143,21 +172,22 @@ static bool emulate_misaligned_load(riscv_t *rv,
     case rv_insn_clw:
     case rv_insn_clwsp:
 #endif
-        /* Load word: fast-path for 2-byte aligned, slow-path for odd */
-        if ((addr & 1) == 0) {
-            /* 2-byte aligned: use two halfword reads */
-            value = (uint32_t) rv->io.mem_read_s(rv, addr);
-            if (!MISALIGN_PART_FAULTED())
-                value |= ((uint32_t) rv->io.mem_read_s(rv, addr + 2)) << 16;
-        } else {
-            /* Odd address: use four byte reads */
-            for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
-                value |= ((uint32_t) rv->io.mem_read_b(rv, addr + i))
-                         << (i * 8);
-        }
+        value = misaligned_read_w(rv, addr);
         if (!MISALIGN_PART_FAULTED() && ir->rd)
             rv->X[ir->rd] = value;
         break;
+
+#if RV32_HAS(EXT_F)
+    case rv_insn_flw:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cflw:
+    case rv_insn_cflwsp:
+#endif
+        value = misaligned_read_w(rv, addr);
+        if (!MISALIGN_PART_FAULTED())
+            rv->F[ir->rd].v = value;
+        break;
+#endif
 
     case rv_insn_lh:
         /* Load halfword (signed): 2 bytes - always use byte reads for odd */
@@ -182,10 +212,7 @@ static bool emulate_misaligned_load(riscv_t *rv,
     return true;
 }
 
-/* Emulate misaligned store operation.
- * Fast-path: Use halfword operations for 2-byte aligned word accesses.
- * Slow-path: Fall back to byte-level operations for odd addresses.
- */
+/* Emulate misaligned store operation. */
 static bool emulate_misaligned_store(riscv_t *rv,
                                      const rv_insn_t *ir,
                                      uint32_t addr)
@@ -198,19 +225,18 @@ static bool emulate_misaligned_store(riscv_t *rv,
     case rv_insn_csw:
     case rv_insn_cswsp:
 #endif
-        /* Store word: fast-path for 2-byte aligned, slow-path for odd */
-        value = rv->X[ir->rs2];
-        if ((addr & 1) == 0) {
-            /* 2-byte aligned: use two halfword writes */
-            rv->io.mem_write_s(rv, addr, value & 0xFFFF);
-            if (!MISALIGN_PART_FAULTED())
-                rv->io.mem_write_s(rv, addr + 2, (value >> 16) & 0xFFFF);
-        } else {
-            /* Odd address: use four byte writes */
-            for (int i = 0; i < 4 && !MISALIGN_PART_FAULTED(); i++)
-                rv->io.mem_write_b(rv, addr + i, (value >> (i * 8)) & 0xFF);
-        }
+        misaligned_write_w(rv, addr, rv->X[ir->rs2]);
         break;
+
+#if RV32_HAS(EXT_F)
+    case rv_insn_fsw:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cfsw:
+    case rv_insn_cfswsp:
+#endif
+        misaligned_write_w(rv, addr, rv->F[ir->rs2].v);
+        break;
+#endif
 
     case rv_insn_sh:
         /* Store halfword: 2 bytes - always use byte writes for odd */

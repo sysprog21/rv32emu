@@ -34,26 +34,30 @@ jobs:
             tests/system/br_pkgs/rtc/*.c
       - name: Set alias
         id: has_changed_files
+        env:
+          ANY_MODIFIED: ${{ steps.test-linux-image-version-change.outputs.any_modified }}
+          CHANGED_FILES: ${{ steps.test-linux-image-version-change.outputs.all_changed_files }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if [[ ${{ steps.test-linux-image-version-change.outputs.any_modified }} == true ]]; then
-            # Determine if the changes are from the Buildroot patching or the Buildroot or the Linux version
-            # Others file changes need to trigger the rebuilt via workflow_dispatch event
-            echo -n $(git --no-pager diff HEAD^ HEAD | grep \
-                        -e "assets/system/configs/" \
-                        -e "tools/build-linux-image.sh" \
-                        -e "tests/system/br_pkgs/rtc/" \
-                        -e "+BUILDROOT_VERSION" \
-                        -e "+LINUX_VERSION" \
-                        -e "+LINUX_PATCHLEVEL" \
-                        -e "+UBOOT_VERSION" \
-                     ) >> linux-image-version-change
-            if [[ -s linux-image-version-change ]]; then
-                echo "has_changed_linux_image_version=true" >> $GITHUB_OUTPUT
-            else
-                echo "has_changed_linux_image_version=false" >> $GITHUB_OUTPUT
+          if [ "$ANY_MODIFIED" != "true" ]; then
+            echo "has_changed_linux_image_version=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          for file in $CHANGED_FILES; do
+            if [ "$file" != "mk/external.mk" ]; then
+              echo "has_changed_linux_image_version=true" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
+          done
+          base="$BASE_SHA"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="HEAD^"
+          fi
+          if git --no-pager diff "$base" HEAD -- mk/external.mk | \
+             grep -qE '^[+-][A-Z0-9_]+_(VERSION|PATCHLEVEL)\b'; then
+            echo "has_changed_linux_image_version=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_changed_linux_image_version=false" >> $GITHUB_OUTPUT
+            echo "has_changed_linux_image_version=false" >> "$GITHUB_OUTPUT"
           fi
 
   build-linux-image-artifact:

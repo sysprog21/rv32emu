@@ -87,6 +87,10 @@ ifeq ($(call has, SYSTEM), 1)
     ACTIVE_SENTINEL  := $(MODE_SYSTEM_SENTINEL)
     ACTIVE_EXTRACT   := $(MODE_SYSTEM_EXTRACT)
     ACTIVE_VERIFY    := $(MODE_SYSTEM_VERIFY)
+    ifneq ($(LINUX_IMAGE_PREBUILT_DIR),)
+        override LATEST_RELEASE := local-$(firstword $(shell $(SHA1SUM) "$(LINUX_IMAGE_PREBUILT_DIR)/$(MODE_SYSTEM_CHECKSUMS)" 2>/dev/null))
+        PREBUILT_BLOB_URL := file://$(abspath $(LINUX_IMAGE_PREBUILT_DIR))
+    endif
 else
     ACTIVE_TAG       := $(MODE_ELF_TAG)
     ACTIVE_STAMP     := $(MODE_ELF_STAMP)
@@ -233,7 +237,7 @@ endif
 endif
 
 ifeq ($(call has, PREBUILT), 1)
-    PREBUILT_BLOB_URL = $(call prebuilt-url,$(LATEST_RELEASE))
+    PREBUILT_BLOB_URL ?= $(call prebuilt-url,$(LATEST_RELEASE))
 else
     # Build from source: disable hardware floating-point for x86 compatibility
     CFLAGS := -m32 -mno-sse -mno-sse2 -msoft-float -O2 -Wno-unused-result -L$(BIN_DIR)

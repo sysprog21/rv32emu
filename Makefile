@@ -242,12 +242,10 @@ ifeq ($(CONFIG_JIT),y)
                 OBJS_EXT += t2c.o
                 CFLAGS += -g $(call llvm-cflags,$(LLVM_CONFIG))
                 LDFLAGS += $(call llvm-libfiles,$(LLVM_CONFIG))
-                # Add Homebrew library path if needed
-                HOMEBREW_LLVM_PREFIX := $(call detect-homebrew-llvm-prefix)
-                ifneq ($(HOMEBREW_LLVM_PREFIX),)
-                ifneq ($(findstring $(HOMEBREW_LLVM_PREFIX),$(LLVM_CONFIG)),)
-                    LDFLAGS += -L$(HOMEBREW_LLVM_PREFIX)/lib
-                endif
+                # Homebrew's LLVM is keg-only, so name its library directory.
+                # Ask the chosen llvm-config instead of guessing a formula.
+                ifeq ($(UNAME_S),Darwin)
+                    LDFLAGS += -L$(shell $(LLVM_CONFIG) --libdir)
                 endif
             else
                 $(warning LLVM $(LLVM_VERSION) libraries not found. T2C disabled.)

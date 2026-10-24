@@ -84,16 +84,23 @@ $(call set-features, SDL SDL_MIXER GDBSTUB JIT LINK_ZLIB ROOTFS_EXT4)
 ifeq ($(CONFIG_EXT_F),y)
 AR := ar
 ifeq ("$(CC_IS_CLANG)", "1")
-    ifeq ($(UNAME_S),Darwin)
-        # macOS: system ar is sufficient
-    else
-        # Match llvm-ar to the same install as the LLVM we'd compile against.
-        # Honor an explicit LLVM_CONFIG=/path/to/llvm-config override first,
-        # then fall back to auto-detection from mk/toolchain.mk. Without this,
-        # hosts with multiple LLVM majors can leave the unversioned `llvm-ar`
-        # pointing at an older install, and a newer clang's LTO bitcode .o
-        # files fail to archive (e.g. clang-20 bitcode + llvm-ar-18 ->
-        # "Invalid attribute group entry" on `ar crs`).
+    # Archive LTO bitcode with the llvm-ar installed beside the clang that
+    # produced it. An older archiver cannot read newer bitcode (clang-20
+    # objects + llvm-ar-18 -> "Invalid attribute group entry" on `ar crs`),
+    # and the macOS system ranlib indexes bitcode only up to Xcode's LLVM,
+    # leaving a newer Homebrew clang's archive without usable symbols.
+    # Ask clang for its resource directory (<prefix>/lib/clang/<N>), which
+    # also works through wrappers such as "ccache clang", and take llvm-ar
+    # from <prefix>/bin: /usr/lib/llvm-N/bin behind clang-N, or Homebrew's
+    # Cellar behind its clang.
+    CC_RESOURCE_DIR := $(shell $(CC) -print-resource-dir 2>/dev/null)
+    CC_LLVM_AR := $(if $(CC_RESOURCE_DIR),$(realpath $(CC_RESOURCE_DIR)/../../../bin/llvm-ar))
+    ifneq ($(CC_LLVM_AR),)
+        AR := $(CC_LLVM_AR)
+    else ifneq ($(UNAME_S),Darwin)
+        # No llvm-ar beside clang: use the one of the LLVM T2C would build
+        # against, honoring an explicit LLVM_CONFIG override, or llvm-ar on
+        # PATH. Apple clang on macOS has none and keeps the system ar.
         LLVM_CONFIG_FOR_AR := $(if $(LLVM_CONFIG),$(LLVM_CONFIG),$(call detect-llvm-config))
         ifneq ($(LLVM_CONFIG_FOR_AR),)
             LLVM_BINDIR_FOR_AR := $(shell $(LLVM_CONFIG_FOR_AR) --bindir 2>/dev/null)

@@ -17,7 +17,7 @@ jobs:
   detect-file-change:
     runs-on: ubuntu-24.04
     outputs:
-      has_changed_linux_image_version: ${{ steps.has_changed_files.outputs.has_changed_linux_image_version }}
+      has_changed_linux_image_version: ${{ steps.test-linux-image-version-change.outputs.any_modified }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -27,34 +27,13 @@ jobs:
         id: test-linux-image-version-change
         uses: tj-actions/changed-files@v47
         with:
+          fetch_additional_submodule_history: 'true'
           files: |
-            assets/system/configs/*
-            tools/build-linux-image.sh
+            assets/system/**
             mk/external.mk
-            tests/system/br_pkgs/rtc/*.c
-      - name: Set alias
-        id: has_changed_files
-        run: |
-          if [[ ${{ steps.test-linux-image-version-change.outputs.any_modified }} == true ]]; then
-            # Determine if the changes are from the Buildroot patching or the Buildroot or the Linux version
-            # Others file changes need to trigger the rebuilt via workflow_dispatch event
-            echo -n $(git --no-pager diff HEAD^ HEAD | grep \
-                        -e "assets/system/configs/" \
-                        -e "tools/build-linux-image.sh" \
-                        -e "tests/system/br_pkgs/rtc/" \
-                        -e "+BUILDROOT_VERSION" \
-                        -e "+LINUX_VERSION" \
-                        -e "+LINUX_PATCHLEVEL" \
-                        -e "+UBOOT_VERSION" \
-                     ) >> linux-image-version-change
-            if [[ -s linux-image-version-change ]]; then
-                echo "has_changed_linux_image_version=true" >> $GITHUB_OUTPUT
-            else
-                echo "has_changed_linux_image_version=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "has_changed_linux_image_version=false" >> $GITHUB_OUTPUT
-          fi
+            mk/tools.mk
+            tests/system/br_pkgs/**
+            tools/build-linux-image.sh
 
   build-linux-image-artifact:
     needs: [detect-file-change]

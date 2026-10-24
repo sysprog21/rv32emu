@@ -236,10 +236,10 @@ ifeq ($(call has, PREBUILT), 1)
     PREBUILT_BLOB_URL = $(call prebuilt-url,$(LATEST_RELEASE))
 else
     # Build from source: disable hardware floating-point for x86 compatibility
-    CFLAGS := -m32 -mno-sse -mno-sse2 -msoft-float -O2 -Wno-unused-result -L$(BIN_DIR)
+    CFLAGS := -std=gnu11 -m32 -mno-sse -mno-sse2 -msoft-float -O2 -Wno-unused-result -L$(BIN_DIR)
     LDFLAGS := -lsoft-fp -lm
 
-    CFLAGS_CROSS := -march=rv32im -mabi=ilp32 -O2 -Wno-implicit-function-declaration
+    CFLAGS_CROSS := -std=gnu11 -march=rv32im -mabi=ilp32 -O2 -Wno-implicit-function-declaration
     LDFLAGS_CROSS := -lm -lsemihost
 endif
 

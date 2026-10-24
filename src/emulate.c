@@ -73,6 +73,57 @@ static inline uint32_t fetch_instruction(riscv_t *rv, uint32_t pc)
     return rv->io.mem_ifetch(rv, pc);
 }
 
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+/* Return the native entry for PC, binding it from the artifact on a cache
+ * miss. Binding fetches the instruction before hashing the page: the fetch
+ * validates execute permission, and any fault handler it runs has settled the
+ * mapping. Sets *fault when that fetch traps without resolving.
+ */
+static void *aot_native_entry(riscv_t *rv, bool *fault)
+{
+    *fault = false;
+    const struct jit_cache *cache = rv->jit_cache;
+    /* Kernel bindings on global pages serve every address space. */
+    if (rv->aot_kernel_shared && rv->priv_mode == RV_PRIV_S_MODE &&
+        (rv->csr_satp >> 31)) {
+        const uint64_t key = rv->PC | ((uint64_t) SATP_SHARED << 32);
+        const struct jit_cache *slot =
+            &cache[jit_cache_slot(rv->PC, SATP_SHARED)];
+        if (slot->key == key && slot->entry && slot->priv_mode == rv->priv_mode)
+            return slot->entry;
+    }
+    uint64_t key = rv->PC | ((uint64_t) rv->csr_satp << 32);
+    const struct jit_cache *slot = &cache[jit_cache_slot(rv->PC, rv->csr_satp)];
+    if (slot->key == key && slot->entry && slot->priv_mode == rv->priv_mode)
+        return slot->entry;
+    const struct aot_entry *first = t2c_aot_has_pc(rv);
+    if (!first)
+        return NULL;
+    /* Zero is also a fetched (illegal) instruction; only a trap is a fault.
+     * The interpreter path decodes it and raises the exception.
+     */
+    const uint64_t traps = rv->aot_trap_epoch;
+    if (!fetch_instruction(rv, rv->PC)) {
+        *fault = rv->aot_trap_epoch != traps;
+        return NULL;
+    }
+    void *entry = t2c_aot_lookup(rv, first);
+    if (entry) {
+        /* A fault handler run by the fetch may have switched SATP. Record the
+         * page under the address space it belongs to, the current one or
+         * SATP_SHARED, and bind it there, so that a fence remapping the page
+         * retires the binding.
+         */
+        const uint32_t space = mmu_note_code(rv, rv->PC, rv->PC + 2);
+        key = rv->PC | ((uint64_t) space << 32);
+        if (space == SATP_SHARED)
+            rv->aot_kernel_shared = true;
+        jit_cache_update(rv->jit_cache, key, entry, rv->priv_mode);
+    }
+    return entry;
+}
+#endif
+
 #if !RV32_HAS(JIT)
 /* Retire blocks left pending by an instruction fence once no trap handler
  * is running their instructions. Returns true if it cleared the map.
@@ -905,9 +956,9 @@ static void block_reset(block_t *block)
 #endif
 #if RV32_HAS(T2C)
     block->compiled = false;
-    block->is_compiling = false;
-    block->should_free = false;
-    block->llvm_engine = NULL;
+    block->aot_saved = false;
+    block->aot_translatable = true;
+    block->aot_page_hash = 0;
 #endif
 #endif
 }
@@ -1311,50 +1362,50 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
 /* clang-format on */
 #endif
 
-#define RVOP(inst, code)                                                  \
-    static PRESERVE_NONE bool do_##inst(riscv_t *rv, const rv_insn_t *ir, \
-                                        uint64_t cycle, uint32_t PC)      \
-    {                                                                     \
-        RVOP_SYNC_PC(rv, PC);                                             \
-        cycle++;                                                          \
-        code;                                                             \
-        IIF(RV32_HAS(SYSTEM))(                                            \
-            if (need_handle_signal) {                                     \
-                need_handle_signal = false;                               \
-                rv->block_interrupted = true;                             \
-                return true;                                              \
-            }, ) nextop : PC += __rv_insn_##inst##_len;                   \
-        RVOP_RETIRE_PENDING();                                            \
-        if (unlikely(RVOP_NO_NEXT(ir)))                                   \
-            goto end_op;                                                  \
-        const rv_insn_t *next = RVOP_NEXT_IR(ir);                         \
-        RVOP_TAIL_INTRA_IMPL(rv, RVOP_NEXT_IMPL(ir), next, cycle, PC);    \
-        /* Fast path: intra-block */                                      \
-    end_op:                                                               \
-        IIF(RV32_HAS(BLOCK_CHAINING))(                                    \
-            {                                                             \
-                /* Page-terminated block fallthrough: if branch_taken is  \
-                 * set AND this is NOT a branch instruction, tail-call    \
-                 * to next block. Branch instructions use branch_taken    \
-                 * for the taken path, not fallthrough.                   \
-                 */                                                       \
-                if (!insn_is_branch(ir->opcode)) {                        \
-                    struct rv_insn *taken = ir->branch_taken;             \
-                    if (taken) {                                          \
-                        IIF(RV32_HAS(SYSTEM))(                            \
-                            if (!rv->chain_stop) {                        \
-                                RVOP_CHAIN_TAIL(rv, taken, cycle, PC);    \
-                            },                                            \
-                            {                                             \
-                                last_pc = PC;                             \
-                                RVOP_TAIL(rv, taken, cycle, PC);          \
-                            });                                           \
-                    }                                                     \
-                }                                                         \
-            }, );                                                         \
-        rv->csr_cycle = cycle;                                            \
-        rv->PC = PC;                                                      \
-        return true;                                                      \
+#define RVOP(inst, code)                                                 \
+    static PRESERVE_NONE bool do_##inst(                      \
+        riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, uint32_t PC)   \
+    {                                                                    \
+        RVOP_SYNC_PC(rv, PC);                                            \
+        cycle++;                                                         \
+        code;                                                            \
+        IIF(RV32_HAS(SYSTEM))(                                           \
+            if (need_handle_signal) {                                    \
+                need_handle_signal = false;                              \
+                rv->block_interrupted = true;                            \
+                return true;                                             \
+            }, ) nextop : PC += __rv_insn_##inst##_len;                  \
+        RVOP_RETIRE_PENDING();                                           \
+        if (unlikely(RVOP_NO_NEXT(ir)))                                  \
+            goto end_op;                                                 \
+        const rv_insn_t *next = RVOP_NEXT_IR(ir);                        \
+        RVOP_TAIL_INTRA_IMPL(rv, RVOP_NEXT_IMPL(ir), next, cycle, PC);   \
+        /* Fast path: intra-block */                                     \
+    end_op:                                                              \
+        IIF(RV32_HAS(BLOCK_CHAINING))(                                   \
+            {                                                            \
+                /* Page-terminated block fallthrough: if branch_taken is \
+                 * set AND this is NOT a branch instruction, tail-call   \
+                 * to next block. Branch instructions use branch_taken   \
+                 * for the taken path, not fallthrough.                  \
+                 */                                                      \
+                if (!insn_is_branch(ir->opcode)) {                       \
+                    struct rv_insn *taken = ir->branch_taken;            \
+                    if (taken) {                                         \
+                        IIF(RV32_HAS(SYSTEM))(                           \
+                            if (!rv->chain_stop) {                       \
+                                RVOP_CHAIN_TAIL(rv, taken, cycle, PC);   \
+                            },                                           \
+                            {                                            \
+                                last_pc = PC;                            \
+                                RVOP_TAIL(rv, taken, cycle, PC);         \
+                            });                                          \
+                    }                                                    \
+                }                                                        \
+            }, );                                                        \
+        rv->csr_cycle = cycle;                                           \
+        rv->PC = PC;                                                     \
+        return true;                                                     \
     }
 
 #if RV32_HAS(JIT) && RV32_HAS_PACKED_TAIL
@@ -1363,9 +1414,10 @@ FORCE_INLINE bool insn_is_branch(uint16_t opcode)
  * natively; rv_step() itself interprets the block through @head_impl.
  */
 static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
-                                            const rv_insn_t *ir UNUSED,
-                                            uint64_t cycle,
-                                            uint32_t PC)
+                                                       const rv_insn_t *ir
+                                                       UNUSED,
+                                                       uint64_t cycle,
+                                                       uint32_t PC)
 {
     /* The chain set last_pc to this block, which has not run. Clear it so
      * rv_step() links no edge: the one that led here already exists.
@@ -1377,9 +1429,8 @@ static PRESERVE_NONE bool do_enter_dispatch(riscv_t *rv,
 }
 #endif
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
-/* Code was retired, so the T2C caches must be cleared. Clear them whenever
- * any space retires: a region may outlive the block that entered it. Without
- * T2C there are no such caches, and nothing reads the flag.
+/* Whether code was retired, so native code that called into the MMU must
+ * leave and revalidate its bindings. Without T2C nothing reads the flag.
  */
 static bool retired_any UNUSED;
 
@@ -1388,6 +1439,10 @@ static void retire_space(riscv_t *rv, uint32_t satp)
     cache_invalidate_satp(rv->block_cache, satp);
     jit_retire_space(rv->jit_state, satp);
     retired_any = true;
+#if RV32_HAS(T2C)
+    /* Bindings record the address space whose code map holds their page. */
+    jit_cache_retire_space(rv->jit_cache, rv->inline_cache, satp);
+#endif
     if (satp == SATP_SHARED)
         T1C_COUNT(shared_retires, 1);
 }
@@ -1401,26 +1456,24 @@ static void retire_space(riscv_t *rv, uint32_t satp)
  */
 static void retire_code(riscv_t *rv, bool switched, uint32_t vpn)
 {
-#if RV32_HAS(T2C)
-    /* Hold cache_lock so the T2C thread sees invalidation atomically. */
-    hart_lock(rv, &rv->cache_lock);
-#endif
     retired_any = false;
     if (!mmu_check_code_maps(rv, retire_space, switched, vpn)) {
         cache_invalidate_all(rv->block_cache);
         jit_retire_all(rv->jit_state);
         mmu_forget_code_maps(rv);
         retired_any = true;
-#if !RV32_HAS(T2C)
         T1C_COUNT(shared_retires, 1); /* shared code retires too */
+#if RV32_HAS(T2C)
+        jit_cache_clear(rv->jit_cache);
+        inline_cache_clear(rv->inline_cache);
 #endif
     }
 #if RV32_HAS(T2C)
-    if (retired_any) {
-        jit_cache_clear(rv->jit_cache);
-        inline_cache_clear(rv->inline_cache);
-    }
-    hart_unlock(rv, &rv->cache_lock);
+    /* Native code that called into the MMU leaves at its next instruction
+     * once the epoch moves, and its bindings are verified again on entry.
+     */
+    if (retired_any)
+        rv->aot_code_epoch++;
 #endif
 }
 
@@ -1476,9 +1529,9 @@ RVOP(load_x0, {
  * and branch metadata; only the native packed handler avoids decoding rs1 a
  * second time.  Other execution modes continue to use do_addi. */
 static PRESERVE_NONE bool do_addi_self(riscv_t *rv,
-                                       const rv_insn_t *ir,
-                                       uint64_t cycle,
-                                       uint32_t PC)
+                                                  const rv_insn_t *ir,
+                                                  uint64_t cycle,
+                                                  uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle++;
@@ -1511,10 +1564,11 @@ end_op:
 /* IDEA's multiply-mod-65537 round opens with this exact 16-instruction graph
  * (trace_idea_round_prefix).  The three LHU operations retain their original
  * alignment traps; the following BEQ stays generic for branch learning. */
-static PRESERVE_NONE bool do_idea_round_prefix_trace(riscv_t *rv,
-                                                     const rv_insn_t *ir,
-                                                     uint64_t cycle,
-                                                     uint32_t PC)
+static PRESERVE_NONE bool do_idea_round_prefix_trace(
+    riscv_t *rv,
+    const rv_insn_t *ir,
+    uint64_t cycle,
+    uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
 
@@ -1563,10 +1617,11 @@ static PRESERVE_NONE bool do_idea_round_prefix_trace(riscv_t *rv,
 
 /* The all-ALU IDEA round suffix (trace_idea_alu_suffix).  The following BEQ
  * stays generic for branch learning. */
-static PRESERVE_NONE bool do_idea_alu_suffix_trace(riscv_t *rv,
-                                                   const rv_insn_t *ir,
-                                                   uint64_t cycle,
-                                                   uint32_t PC)
+static PRESERVE_NONE bool do_idea_alu_suffix_trace(
+    riscv_t *rv,
+    const rv_insn_t *ir,
+    uint64_t cycle,
+    uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
 
@@ -1636,9 +1691,9 @@ static PRESERVE_NONE bool fuse_next_or_stop(riscv_t *rv,
 
 /* multiple LUI */
 static PRESERVE_NONE bool do_fuse1(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle += ir->imm2;
@@ -1651,9 +1706,9 @@ static PRESERVE_NONE bool do_fuse1(riscv_t *rv,
 
 /* LUI + ADD */
 static PRESERVE_NONE bool do_fuse2(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle += 2;
@@ -1665,9 +1720,9 @@ static PRESERVE_NONE bool do_fuse2(riscv_t *rv,
 
 /* multiple SW */
 static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     opcode_fuse_t *fuse = ir->fuse;
@@ -1697,9 +1752,9 @@ static PRESERVE_NONE bool do_fuse3(riscv_t *rv,
 
 /* multiple LW */
 static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     opcode_fuse_t *fuse = ir->fuse;
@@ -1727,9 +1782,9 @@ static PRESERVE_NONE bool do_fuse4(riscv_t *rv,
 
 #if RV32_HAS_TRACE_FUSION && RV32_HAS(MOP_FUSION)
 static PRESERVE_NONE bool do_fuse_lhu(riscv_t *rv,
-                                      const rv_insn_t *ir,
-                                      uint64_t cycle,
-                                      uint32_t PC)
+                                                 const rv_insn_t *ir,
+                                                 uint64_t cycle,
+                                                 uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     opcode_fuse_t *fuse = ir->fuse;
@@ -1746,9 +1801,9 @@ static PRESERVE_NONE bool do_fuse_lhu(riscv_t *rv,
 }
 
 static PRESERVE_NONE bool do_fuse_sh(riscv_t *rv,
-                                     const rv_insn_t *ir,
-                                     uint64_t cycle,
-                                     uint32_t PC)
+                                                const rv_insn_t *ir,
+                                                uint64_t cycle,
+                                                uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     opcode_fuse_t *fuse = ir->fuse;
@@ -1791,9 +1846,9 @@ static inline void fuse_shift_exec(riscv_t *rv, const opcode_fuse_t *f)
 
 /* multiple shift immediate */
 static PRESERVE_NONE bool do_fuse5(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle += ir->imm2;
@@ -1810,9 +1865,9 @@ static PRESERVE_NONE bool do_fuse5(riscv_t *rv,
  */
 #if !RV32_HAS(RV32E)
 static PRESERVE_NONE bool do_fuse6(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle += 2;
@@ -1831,9 +1886,9 @@ static PRESERVE_NONE bool do_fuse6(riscv_t *rv,
  * Defensive fallback in case of unexpected dispatch.
  */
 static PRESERVE_NONE bool do_fuse6(riscv_t *rv UNUSED,
-                                   const rv_insn_t *ir UNUSED,
-                                   uint64_t cycle UNUSED,
-                                   uint32_t PC UNUSED)
+                                              const rv_insn_t *ir UNUSED,
+                                              uint64_t cycle UNUSED,
+                                              uint32_t PC UNUSED)
 {
     assert(!"fuse6 should not be called in RV32E mode");
     return false;
@@ -1842,9 +1897,9 @@ static PRESERVE_NONE bool do_fuse6(riscv_t *rv UNUSED,
 
 /* fused multiple ADDI */
 static PRESERVE_NONE bool do_fuse7(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle += ir->imm2;
@@ -1866,9 +1921,9 @@ static PRESERVE_NONE bool do_fuse7(riscv_t *rv,
  * ir->rd = destination register
  */
 static PRESERVE_NONE bool do_fuse8(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle += 2;
@@ -1886,9 +1941,9 @@ static PRESERVE_NONE bool do_fuse8(riscv_t *rv,
  * ir->rs2 = lw destination register
  */
 static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
-                                   const rv_insn_t *ir,
-                                   uint64_t cycle,
-                                   uint32_t PC)
+                                              const rv_insn_t *ir,
+                                              uint64_t cycle,
+                                              uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle++;
@@ -1915,9 +1970,9 @@ static PRESERVE_NONE bool do_fuse9(riscv_t *rv,
  * ir->rs1 = sw source register (data to store)
  */
 static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
-                                    const rv_insn_t *ir,
-                                    uint64_t cycle,
-                                    uint32_t PC)
+                                               const rv_insn_t *ir,
+                                               uint64_t cycle,
+                                               uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle++;
@@ -1949,9 +2004,9 @@ static PRESERVE_NONE bool do_fuse10(riscv_t *rv,
  * ir->imm2 = increment step
  */
 static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
-                                    const rv_insn_t *ir,
-                                    uint64_t cycle,
-                                    uint32_t PC)
+                                               const rv_insn_t *ir,
+                                               uint64_t cycle,
+                                               uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle++;
@@ -1989,9 +2044,9 @@ static PRESERVE_NONE bool do_fuse11(riscv_t *rv,
  * ir->imm2 = branch offset
  */
 static PRESERVE_NONE bool do_fuse12(riscv_t *rv,
-                                    const rv_insn_t *ir,
-                                    uint64_t cycle,
-                                    uint32_t PC)
+                                               const rv_insn_t *ir,
+                                               uint64_t cycle,
+                                               uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle += 2;
@@ -2033,9 +2088,9 @@ fuse12_exit:
  * per-instruction MMU and MMIO fault boundaries.
  */
 static PRESERVE_NONE bool do_fuse13(riscv_t *rv,
-                                    const rv_insn_t *ir,
-                                    uint64_t cycle,
-                                    uint32_t PC)
+                                               const rv_insn_t *ir,
+                                               uint64_t cycle,
+                                               uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle++;
@@ -2059,9 +2114,9 @@ static PRESERVE_NONE bool do_fuse13(riscv_t *rv,
  * register alias observes the same sequential behavior as the five handlers.
  */
 static PRESERVE_NONE bool do_byte_copy_loop(riscv_t *rv,
-                                            const rv_insn_t *ir,
-                                            uint64_t cycle,
-                                            uint32_t PC)
+                                                       const rv_insn_t *ir,
+                                                       uint64_t cycle,
+                                                       uint32_t PC)
 {
     const opcode_fuse_t *fuse = ir->fuse;
     const bool forward_branch_lhs = (ir->imm2 & (1 << 8)) != 0;
@@ -2118,9 +2173,9 @@ static PRESERVE_NONE bool do_byte_copy_loop(riscv_t *rv,
 /* Exact newlib strlen word scan.  It owns the word-load fault boundary and
  * terminal backedge, while a structural matcher prevents guest-specific use. */
 static PRESERVE_NONE bool do_strlen_word_trace(riscv_t *rv,
-                                               const rv_insn_t *ir,
-                                               uint64_t cycle,
-                                               uint32_t PC)
+                                                          const rv_insn_t *ir,
+                                                          uint64_t cycle,
+                                                          uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
     cycle++;
@@ -2277,9 +2332,9 @@ do_pointer_reverse(riscv_t *rv,
  * from the live inputs, but keep their guest-program order explicit. */
 #if !RV32_HAS(RV32E)
 static PRESERVE_NONE bool do_numsift_index_trace(riscv_t *rv,
-                                                 const rv_insn_t *ir,
-                                                 uint64_t cycle,
-                                                 uint32_t PC)
+                                                            const rv_insn_t *ir,
+                                                            uint64_t cycle,
+                                                            uint32_t PC)
 {
     const opcode_fuse_t *f = ir->fuse;
     RVOP_SYNC_PC(rv, PC);
@@ -2315,9 +2370,9 @@ static PRESERVE_NONE bool do_numsift_index_trace(riscv_t *rv,
  * the two faultable loads ordered, then lets the original BNE own its learned
  * edges.  This is deliberately not a generic word-load or branch rewrite. */
 static PRESERVE_NONE bool do_primes_probe_trace(riscv_t *rv,
-                                                const rv_insn_t *ir,
-                                                uint64_t cycle,
-                                                uint32_t PC)
+                                                           const rv_insn_t *ir,
+                                                           uint64_t cycle,
+                                                           uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
 
@@ -2376,7 +2431,7 @@ static PRESERVE_NONE bool do_primes_probe_trace(riscv_t *rv,
  */
 #if !RV32_HAS(RV32E)
 #define BITFIELD_BIT_TRACE(name, op)                                     \
-    static PRESERVE_NONE bool do_bitfield_##name##_bit_trace(            \
+    static PRESERVE_NONE bool do_bitfield_##name##_bit_trace( \
         riscv_t *rv, const rv_insn_t *ir, uint64_t cycle, uint32_t PC)   \
     {                                                                    \
         RVOP_SYNC_PC(rv, PC);                                            \
@@ -2427,10 +2482,11 @@ BITFIELD_BIT_TRACE(invert, ^=)
 /* EmFloat shifts a four-limb mantissa through this ordered halfword loop.
  * Keep every operation in saved-record order: the trace is deliberately
  * alias-safe, and the two faultable memory accesses retain their own PCs. */
-static PRESERVE_NONE bool do_emfloat_halfword_shift_trace(riscv_t *rv,
-                                                          const rv_insn_t *ir,
-                                                          uint64_t cycle,
-                                                          uint32_t PC)
+static PRESERVE_NONE bool do_emfloat_halfword_shift_trace(
+    riscv_t *rv,
+    const rv_insn_t *ir,
+    uint64_t cycle,
+    uint32_t PC)
 {
     const opcode_fuse_t *f = ir->fuse;
     bool self_chained = false;
@@ -2498,9 +2554,9 @@ static PRESERVE_NONE bool do_emfloat_halfword_shift_trace(riscv_t *rv,
  * valid for any guest with the same register and memory-access sequence. */
 #if !RV32_HAS(RV32E)
 static PRESERVE_NONE bool do_record_copy_trace(riscv_t *rv,
-                                               const rv_insn_t *ir,
-                                               uint64_t cycle,
-                                               uint32_t PC)
+                                                          const rv_insn_t *ir,
+                                                          uint64_t cycle,
+                                                          uint32_t PC)
 {
     RVOP_SYNC_PC(rv, PC);
 
@@ -2584,6 +2640,26 @@ static inline rv_insn_impl_t insn_handler(const rv_insn_t *ir)
         return do_load_x0;
     return dispatch_table[ir->opcode];
 }
+
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+/* Execute one semantic helper without charging the native prefix twice.
+ * System regions keep guest registers in rv->X, which the handler reads and
+ * writes directly. The original handlers retain all AMO reservation, fault,
+ * and CSR behavior.
+ */
+void t2c_run_outlined_insn(riscv_t *rv, uint32_t operation, uint32_t imm)
+{
+    rv_insn_t ir = {0};
+    ir.opcode = operation & 0xffff;
+    ir.rd = (operation >> 16) & 31;
+    ir.rs1 = (operation >> 21) & 31;
+    ir.rs2 = (operation >> 26) & 31;
+    ir.imm = imm;
+    ir.pc = rv->PC;
+    assert(t2c_outlined_insn(&ir));
+    insn_handler (&ir)(rv, &ir, rv->csr_cycle - 1, rv->PC);
+}
+#endif
 
 #if RV32_HAS(JIT)
 FORCE_INLINE bool insn_is_translatable(uint16_t opcode)
@@ -2673,9 +2749,50 @@ static void free_decoded_irs(riscv_t *rv, block_t *block)
     block->ir_head = block->ir_tail = NULL;
 }
 
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+/* Whether AOT code can lower ir. T1 calls into C for every AMO and CSR
+ * instruction; AOT lowers counter reads and outlines only the forms below.
+ */
+static bool aot_can_lower_insn(const rv_insn_t *ir)
+{
+    if (t2c_counter_read(ir) || t2c_outlined_insn(ir))
+        return true;
+    switch (ir->opcode) {
+#if JIT_SYSTEM_HELPERS
+    JIT_SYSTEM_AMO_CASES:
+    JIT_SYSTEM_CSR_CASES:
+        return false;
+#endif
+    default:
+        return insn_is_translatable(ir->opcode);
+    }
+}
+
+static void block_end_fallthrough(block_t *block)
+{
+#if RV32_HAS(BLOCK_CHAINING)
+    block->page_terminated = true;
+#else
+    /* T1 requires a terminal branch when no fallthrough marker is present. */
+    block->translatable = false;
+#endif
+}
+#endif
+
 static bool block_translate(riscv_t *rv, block_t *block)
 {
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+    /* Collection splits blocks at instructions AOT cannot lower, so that a
+     * lowerable prefix forms its own region. Replay binds regions by PC and
+     * keeps T1's blocks whole.
+     */
+    const bool aot = PRIV(rv)->aot_collect;
+#endif
 retranslate:
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+    if (aot)
+        memset(block->aot_insn_starts, 0, sizeof(block->aot_insn_starts));
+#endif
 #if RV32_T1C_STATS_ENABLED
     block->stats_blocker = T1C_INTERPRETED_TRANSLATABLE;
 #endif
@@ -2748,8 +2865,24 @@ retranslate:
 #if RV32_T1C_STATS_ENABLED
         ir->stats_owner = block;
 #endif
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+        /* An unsupported tail must not discard an otherwise native prefix.
+         * Decode the boundary instruction on the next dispatcher entry.
+         */
+        const bool aot_boundary = aot && !aot_can_lower_insn(ir);
+        if (aot_boundary && block->n_insn) {
+            block_end_fallthrough(block);
+            break;
+        }
+#endif
         ir->impl = insn_handler(ir);
         ir->pc = block->pc_end; /* compute the end of pc */
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+        const unsigned halfword = (ir->pc - block->pc_start) / 2;
+        if (aot && halfword < 2048)
+            block->aot_insn_starts[halfword / 64] |= UINT64_C(1)
+                                                     << (halfword % 64);
+#endif
         block->pc_end += is_compressed(insn) ? 2 : 4;
         block->n_insn++;
         prev_ir = ir;
@@ -2761,6 +2894,23 @@ retranslate:
                 block->stats_blocker = ir->opcode;
 #endif
             block->translatable = false;
+#if RV32_HAS(T2C) && !RV32_HAS(SYSTEM)
+            if (!t2c_counter_read(ir))
+                block->aot_translatable = false;
+#endif
+        }
+#endif
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+        if (!aot_can_lower_insn(ir))
+            block->aot_translatable = false;
+#endif
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+        /* Isolate a nonbranch boundary too, so it cannot poison its suffix.
+         * Control transfers retain their ordinary branch termination below.
+         */
+        if (aot_boundary && !insn_is_branch(ir->opcode)) {
+            block_end_fallthrough(block);
+            break;
         }
 #endif
         /* stop on branch */
@@ -3558,14 +3708,6 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
         return;
 #endif
 
-#if RV32_HAS(T2C)
-    /* The compiler walks successor IR under cache_lock. Fusion removes IR
-     * records, so serialize its mutation with that walk. Keep cold blocks and
-     * the completed/Sv32 fast exits above free of locking.
-     */
-    hart_lock(rv, &rv->cache_lock);
-#endif
-
     /* Check if all candidates have reached a final state */
     bool all_finalized = true;
 
@@ -3608,9 +3750,6 @@ static void try_lazy_fusion(riscv_t *rv, block_t *block)
     /* Only mark done when all candidates have final state */
     if (all_finalized)
         block->lazy_fusion_done = true;
-#if RV32_HAS(T2C)
-    hart_unlock(rv, &rv->cache_lock);
-#endif
 }
 #endif /* RV32_HAS(SYSTEM_MMIO) */
 #endif /* RV32_HAS(MOP_FUSION) */
@@ -3696,6 +3835,10 @@ static void free_linked_block(riscv_t *rv, block_t *block)
 /* Release the IRs of a block that is leaving the cache */
 void block_free_irs(riscv_t *rv, block_t *block)
 {
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+    if (rv->aot_lift && !block->aot_saved)
+        t2c_aot_collect_block(rv, block);
+#endif
     /* Before the decoder pool reuses any record or its owning block. */
     jit_block_release(rv, block);
     for (rv_insn_t *ir = block->ir_head, *next_ir; ir; ir = next_ir) {
@@ -3710,22 +3853,6 @@ void block_free_irs(riscv_t *rv, block_t *block)
 #if RV32_HAS_PACKED_TAIL
     free(block->ir_head);
 #endif
-}
-#endif
-
-#if RV32_HAS(T2C)
-/* Free the blocks the T2C thread handed back after they were evicted during
- * compilation. Only this thread allocates from or frees to the memory pools.
- * The caller holds cache_lock, or the T2C thread has exited.
- */
-void t2c_free_orphans(riscv_t *rv)
-{
-    block_t *block, *safe;
-    list_for_each_entry_safe (block, safe, &rv->orphan_blocks, list) {
-        list_del(&block->list);
-        block_free_irs(rv, block);
-        mpool_free(rv->block_mp, block);
-    }
 }
 #endif
 
@@ -3830,6 +3957,10 @@ static block_t *block_find_or_translate(riscv_t *rv
 #if RV32_HAS_PACKED_TAIL
     specialize_native_addi_self(next_blk);
 #endif
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+    if (next_blk->aot_translatable && aot_enabled(rv))
+        next_blk->aot_page_hash = t2c_aot_page_hash(rv, next_blk);
+#endif
 #if RV32_HAS(MOP_FUSION)
     /* macro operation fusion */
     match_pattern(rv, next_blk);
@@ -3857,23 +3988,14 @@ static block_t *block_find_or_translate(riscv_t *rv
 #else
     list_add(&next_blk->list, &rv->block_list);
 
-#if RV32_HAS(T2C)
-    hart_lock(rv, &rv->cache_lock);
-    t2c_free_orphans(rv);
-#endif
-
     /* insert the block into block cache */
     /* A cache miss is cold. cache_put knows the initial or revived frequency
      * it just installed, so take it from there rather than probing again.
      */
     block_t *replaced_blk = cache_put(rv->block_cache, rv->PC, next_blk, freq);
 
-    if (!replaced_blk) {
-#if RV32_HAS(T2C)
-        hart_unlock(rv, &rv->cache_lock);
-#endif
+    if (!replaced_blk)
         return next_blk;
-    }
 
     if (prev == replaced_blk)
         prev = NULL;
@@ -3882,88 +4004,48 @@ static block_t *block_find_or_translate(riscv_t *rv
 #if RV32_HAS(BLOCK_CHAINING)
     /* Remove incoming edges without scanning all translated blocks. */
     block_unlink_incoming_edges(replaced_blk);
-#endif
-
-#if RV32_HAS(T2C)
-    /* Check if T2C thread is currently using this block.
-     * If so, mark for delayed freeing and skip immediate destruction.
-     * The T2C thread hands it back through orphan_blocks upon completion.
-     */
-    if (replaced_blk->is_compiling) {
-        replaced_blk->should_free = true;
-
-#if RV32_HAS(BLOCK_CHAINING)
-        /* Drop the outgoing edges here rather than leaving them for the T2C
-         * thread to reap. The block is already out of the cache and cannot
-         * execute again, and t2c_compile finished walking its IR before it
-         * published is_compiling, so nothing is reading these. Keeping every
-         * edge-list mutation on this thread is what lets the chaining step in
-         * rv_step run without a lock.
-         */
-        block_unlink_outgoing_edges(replaced_blk);
-#endif
-
-        /* Clear jit_cache to prevent new executions, but don't dispose engine
-         * or free memory yet. T2C thread owns the engine and the block until it
-         * hands the block back.
-         */
-#if RV32_HAS(SYSTEM)
-        uint64_t key = (uint64_t) replaced_blk->pc_start |
-                       ((uint64_t) replaced_blk->satp << 32);
-#else
-        uint64_t key = (uint64_t) replaced_blk->pc_start;
-#endif
-        if (replaced_blk->func) {
-            jit_cache_update(rv->jit_cache, key, NULL, 0);
-        }
-        inline_cache_clear_key(rv->inline_cache, key);
-
-        /* Remove from global block list so it's not found/traversed */
-        list_del_init(&replaced_blk->list);
-
-        hart_unlock(rv, &rv->cache_lock);
-        return next_blk;
-    }
-#endif
-
-#if RV32_HAS(BLOCK_CHAINING)
     block_unlink_outgoing_edges(replaced_blk);
 #endif
 
+    /* Native artifact entries belong to verified mappings, not decoded IR, so
+     * evicting an IR block keeps them; code retirement clears their caches.
+     */
     block_free_irs(rv, replaced_blk);
-
-#if RV32_HAS(T2C)
-    /* Clear jit_cache entry before disposing LLVM engine to prevent stale
-     * function pointers. The jit_cache key includes SATP for system mode.
-     * cache_lock is already held by caller.
-     */
-#if RV32_HAS(SYSTEM)
-    uint64_t key = (uint64_t) replaced_blk->pc_start |
-                   ((uint64_t) replaced_blk->satp << 32);
-#else
-    uint64_t key = (uint64_t) replaced_blk->pc_start;
-#endif
-    if (replaced_blk->func) {
-        jit_cache_update(rv->jit_cache, key, NULL, 0);
-    }
-    inline_cache_clear_key(rv->inline_cache, key);
-
-    /* The engine owns the memory where block->func points. Nothing can reach
-     * that code any more, so let the T2C thread dispose it.
-     */
-    t2c_retire_engine(rv, replaced_blk->llvm_engine);
-#endif
-
     list_del_init(&replaced_blk->list);
     mpool_free(rv->block_mp, replaced_blk);
-#if RV32_HAS(T2C)
-    hart_unlock(rv, &rv->cache_lock);
-#endif
 #endif
 
     assert(next_blk);
     return next_blk;
 }
+
+#if RV32_HAS(T2C) && !RV32_HAS(SYSTEM)
+/* Native code has published the retired prefix and every guest register.
+ * Bypass both native tiers: user T1 address operands do not retain RV32
+ * wraparound. Interpret the remainder rather than repeatedly redispatching
+ * to the same guarded entry or a newly hot T1 block.
+ */
+void t2c_interpret_block(riscv_t *rv)
+{
+    uint32_t freq;
+    block_t *block = block_find_or_translate(rv, &freq);
+    if (!block) {
+        rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
+                     rv->PC);
+        rv->halt = true;
+        return;
+    }
+    set_reset(&pc_set);
+    has_loops = false;
+    const rv_insn_t *ir = block->ir_head;
+#if RV32_HAS_PACKED_TAIL
+    const rv_insn_impl_t impl = block->head_impl;
+#else
+    const rv_insn_impl_t impl = ir->impl;
+#endif
+    impl(rv, ir, rv->csr_cycle, rv->PC);
+}
+#endif
 
 /* We disable profiler to make sure every guest instructions be translated by
  * JIT compiler in architecture test.
@@ -3972,14 +4054,14 @@ static block_t *block_find_or_translate(riscv_t *rv
 /* A block that loops is compiled once it has been dispatched this many times.
  * Compiled code belongs to one address space, or is shared kernel code, and a
  * fence retires only the spaces whose code mappings changed, so even a short
- * process keeps what it compiles for its life. Native T1-only system builds
- * link successors compiled later, so two loop dispatches or 16 ordinary ones
+ * process keeps what it compiles for its life. Native system builds link
+ * successors compiled later, so two loop dispatches or 16 ordinary ones
  * amortize translation: across 300 process launches, these start processes
  * 5% faster than 8 and 64 did. Lower ones compile too much cold code: 8
  * ordinary dispatches start them 5% slower than 16, and 1 and 4 19% slower.
- * T2C and WebAssembly keep their profiling policy.
+ * WebAssembly keeps its profiling policy.
  */
-#if RV32_HAS(SYSTEM) && !RV32_HAS(T2C) && !defined(__EMSCRIPTEN__)
+#if RV32_HAS(SYSTEM) && !defined(__EMSCRIPTEN__)
 #define LOOP_THRESHOLD 2
 #define BLOCK_THRESHOLD 16
 #elif RV32_HAS(SYSTEM)
@@ -4149,10 +4231,19 @@ static DISABLE_UBSAN_FUNC void run_t1_block(riscv_t *rv,
 #endif
 
 #if RV32_HAS(T2C)
-static DISABLE_UBSAN_FUNC void run_t2c_block(riscv_t *rv, const block_t *block)
+/* Native code checks the dispatcher's chain deadline at every region entry
+ * and back edge, so it returns in time for timer interrupts.
+ */
+static DISABLE_UBSAN_FUNC void run_t2c_block(riscv_t *rv, void *entry)
 {
     T1C_COUNT(t2c_entries, 1);
-    ((exec_t2c_func_t) block->func)(rv);
+#if RV32_HAS(SYSTEM)
+    rv->aot_dispatches++;
+#endif
+    if (rv->aot_enter)
+        rv->aot_enter(rv, entry);
+    else
+        ((exec_t2c_func_t) entry)(rv);
 }
 #endif
 #endif
@@ -4269,8 +4360,33 @@ void rv_step(void *arg)
         }
 #endif
 
+#if RV32_HAS(T2C) && RV32_HAS(SYSTEM)
+        /* A bound entry has already passed instruction translation and page
+         * identity checks. Code retirement clears this same cache, so a hit
+         * can skip IR lookup, frequency updates, and symbol binding.
+         */
+        if (rv->aot_index && !rv->aot_fallback) {
+            bool fault;
+            void *entry = aot_native_entry(rv, &fault);
+            if (unlikely(fault)) {
+                need_retranslate = false;
+                settle_trap(rv);
+                prev = NULL;
+                continue;
+            }
+            if (entry) {
+                last_pc = rv->PC;
+                run_t2c_block(rv, entry);
+                settle_trap(rv);
+                prev = NULL;
+                continue;
+            }
+        }
+#endif
+
 #if JIT_RUN_CACHED
-        if (jit_run_cached(rv)) {
+        /* After a one-shot AOT fallback, the decoded block runs the access. */
+        if (IIF(RV32_HAS(T2C))(!rv->aot_fallback &&, ) jit_run_cached(rv)) {
             settle_trap(rv);
             prev = NULL;
             continue;
@@ -4373,50 +4489,25 @@ void rv_step(void *arg)
         last_pc = rv->PC;
 #if RV32_HAS(JIT)
 #if RV32_HAS(T2C)
-        /* executed through the tier-2 JIT compiler */
-        if (ATOMIC_LOAD(&block->hot2, ATOMIC_ACQUIRE)) {
-            /* Atomic load-acquire pairs with store-release in t2c_compile().
-             * Ensures we see the updated block->func after observing hot2=true.
-             */
+        if (!block->compiled)
+            t2c_aot_bind(rv, block);
+        /* Execute an offline-compiled region when available. */
+        bool aot_fallback = false;
+#if RV32_HAS(SYSTEM)
+        aot_fallback = rv->aot_fallback;
+        rv->aot_fallback = false;
+#endif
+        if (!aot_fallback && block->hot2) {
+            /* The artifact remains mapped for the lifetime of this VM. */
 #if defined(__aarch64__)
             /* Ensure instruction cache coherency before executing T2C code */
             __asm__ volatile("isb" ::: "memory");
 #endif
-            /* Defensive NULL check - should not occur if seqlocks work
-             * correctly but protects against races during block invalidation
-             */
-            if (unlikely(!block->func)) {
-                /* Block was invalidated, fall through to interpreter */
-                prev = NULL;
-                continue;
-            }
             JIT_STAMP_NATIVE(rv, block);
-            run_t2c_block(rv, block);
+            run_t2c_block(rv, block->func);
             settle_trap(rv);
             prev = NULL;
             continue;
-        } /* check if invoking times of t1 generated code exceed threshold */
-        else if (!ATOMIC_LOAD(&block->compiled, ATOMIC_RELAXED) &&
-                 block->n_invoke >= THRESHOLD) {
-            ATOMIC_STORE(&block->compiled, true, ATOMIC_RELAXED);
-            queue_entry_t *entry = malloc(sizeof(queue_entry_t));
-            if (unlikely(!entry)) {
-                /* Malloc failed - reset compiled flag to allow retry later */
-                ATOMIC_STORE(&block->compiled, false, ATOMIC_RELAXED);
-                continue;
-            }
-            /* Store cache key instead of pointer to prevent use-after-free */
-#if RV32_HAS(SYSTEM)
-            entry->priv_mode = block->priv_mode;
-            entry->key =
-                (uint64_t) block->pc_start | ((uint64_t) block->satp << 32);
-#else
-            entry->key = (uint64_t) block->pc_start;
-#endif
-            hart_lock(rv, &rv->wait_queue_lock);
-            list_add(&entry->list, &rv->wait_queue);
-            pthread_cond_signal(&rv->wait_queue_cond);
-            hart_unlock(rv, &rv->wait_queue_lock);
         }
 #endif
         /* executed through the tier-1 JIT compiler */
@@ -4430,9 +4521,7 @@ void rv_step(void *arg)
 #if RV32_HAS_PACKED_TAIL
             set_reset(&pc_set);
 #endif
-            /* Only the emulator thread updates or reads n_invoke. T2C is
-             * notified through compiled, so a locked increment here would
-             * impose synchronization on every tier-1 block execution. */
+            /* Only the emulator thread updates or reads n_invoke. */
             block->n_invoke++;
 #if defined(__aarch64__)
             /* Ensure instruction cache coherency before executing JIT code */
@@ -4454,6 +4543,9 @@ void rv_step(void *arg)
             block->has_loops = true;
 #endif
         if (block->translatable
+#if RV32_HAS(T2C) && !RV32_HAS(SYSTEM)
+            && (!PRIV(rv)->aot_collect || freq >= T2C_PROFILE_THRESHOLD)
+#endif
 #if !RV32_HAS(ARCH_TEST)
             && runtime_profiler(rv, block, freq)
 #endif

@@ -30,11 +30,11 @@ $(info   make defconfig               - Default configuration with tier-1 JIT (T
 $(info   make config                  - Interactive configuration menu)
 $(info   make ci_defconfig            - CI with architecture tests)
 $(info   make interpreter_defconfig   - Default configuration without the JIT)
-$(info   make jit_defconfig           - Tiered JIT (T1C + T2C))
+$(info   make jit_defconfig           - Tier-1 JIT and user-mode T2C AOT)
 $(info   make mini_defconfig          - Minimal build for embedded use)
 $(info   make system_defconfig        - System emulation mode with tier-1 JIT)
 $(info   make system_interpreter_defconfig - System emulation mode without the JIT)
-$(info   make system_jit_defconfig    - System emulation mode with tiered JIT (T1C + T2C))
+$(info   make system_jit_defconfig    - System emulation with T1 JIT and T2C AOT)
 $(info   make wasm_defconfig          - WebAssembly build)
 $(info   make wasm_system_defconfig   - WebAssembly build for system emulation mode)
 $(info )
@@ -239,14 +239,16 @@ ifeq ($(CONFIG_JIT),y)
             LLVM_VERSION := $(call llvm-version,$(LLVM_CONFIG))
             ifeq ($(call llvm-check-libs,$(LLVM_CONFIG)),0)
                 T2C_ENABLED := 1
-                OBJS_EXT += t2c.o
-                CFLAGS += -g $(call llvm-cflags,$(LLVM_CONFIG))
-                LDFLAGS += $(call llvm-libfiles,$(LLVM_CONFIG))
-                # Homebrew's LLVM is keg-only, so name its library directory.
-                # Ask the chosen llvm-config instead of guessing a formula.
-                ifeq ($(UNAME_S),Darwin)
-                    LDFLAGS += -L$(shell $(LLVM_CONFIG) --libdir)
-                endif
+                OBJS_EXT += aot.o aot_cache.o aot_hash.o
+                T2C_COLLECTOR := $(OUT)/libt2c.so
+                $(OUT)/t2c.o: CFLAGS += -fPIC $(call llvm-cflags,$(LLVM_CONFIG))
+                # The optional collector uses these host services. Export only
+                # its C API dependencies, keeping LLVM out of the executable.
+                LDFLAGS += -ldl -Wl,--export-dynamic-symbol=cache_get \
+                    -Wl,--export-dynamic-symbol=log_impl \
+                    -Wl,--export-dynamic-symbol=set_add \
+                    -Wl,--export-dynamic-symbol=set_has \
+                    -Wl,--export-dynamic-symbol=set_init
             else
                 $(warning LLVM $(LLVM_VERSION) libraries not found. T2C disabled.)
             endif
@@ -264,12 +266,27 @@ ifeq ($(CONFIG_JIT),y)
 $(OUT)/jit.o: src/jit.c src/rv32_jit.c $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP)
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) -c -MMD -MP -MF $@.d $<
-# T2C optimization level from Kconfig (0-3, default 3)
-T2C_OPT_LEVEL ?= $(or $(CONFIG_T2C_OPT_LEVEL),3)
 $(OUT)/t2c.o: src/t2c.c src/t2c_template.c $(CONFIG_HEADER) \
               $(EFFECTIVE_CONFIG_STAMP)
-	$(VECHO) "  CC\t$@\n"
-	$(Q)$(CC) -o $@ $(CFLAGS) -DCONFIG_T2C_OPT_LEVEL=$(T2C_OPT_LEVEL) -c -MMD -MP -MF $@.d $<
+
+ifeq ($(T2C_ENABLED),1)
+.PHONY: aot-abi-force
+$(OUT)/aot-abi.h: aot-abi-force $(CONFIG_HEADER)
+	$(Q)python3 tools/aot-abi.py $@ $(filter -DRV32_FEATURE_%,$(CFLAGS))
+
+$(OUT)/aot.o $(OUT)/t2c.o: $(OUT)/aot-abi.h
+$(OUT)/aot.o $(OUT)/t2c.o: CFLAGS += -include $(OUT)/aot-abi.h
+# The collector is not in OBJS, but it includes the softfloat headers too.
+ifeq ($(CONFIG_EXT_F),y)
+$(OUT)/t2c.o: $(SOFTFLOAT_LIB)
+endif
+
+$(T2C_COLLECTOR): $(OUT)/t2c.o
+	$(VECHO) "  LD\t$@\n"
+	$(Q)$(CC) $(KCONFIG_LDFLAGS) -shared -o $@ $< $(call llvm-libfiles,$(LLVM_CONFIG))
+
+$(BIN): $(T2C_COLLECTOR)
+endif
 else
     CFLAGS += -DRV32_FEATURE_T2C=0
 endif
@@ -312,6 +329,9 @@ OBJS := $(addprefix $(OUT)/, $(OBJS))
 # dependency file still names the headers of a since-replaced LLVM.
 SRC_OBJS_ALL := $(patsubst src/%.c,$(OUT)/%.o,$(wildcard src/*.c))
 deps += $(OBJS:%.o=%.o.d)
+ifeq ($(T2C_ENABLED),1)
+deps += $(OUT)/t2c.o.d
+endif
 
 EFFECTIVE_CONFIG_VARS := \
 	CONFIG_BUILD_WASM CONFIG_SYSTEM CONFIG_GOLDFISH_RTC CONFIG_ELF_LOADER \
@@ -342,6 +362,8 @@ $(EFFECTIVE_CONFIG_STAMP): FORCE | $(OUT)
 		printf 'CC_IS_EMCC=%s\n' '$(CC_IS_EMCC)'; \
 		printf 'UNAME_S=%s\n' '$(UNAME_S)'; \
 		printf 'CROSS_COMPILE=%s\n' '$(CROSS_COMPILE)'; \
+		printf 'LLVM_CONFIG=%s\n' '$(LLVM_CONFIG)'; \
+		printf 'LLVM_VERSION=%s\n' '$(LLVM_VERSION)'; \
 		$(foreach var,$(EFFECTIVE_CONFIG_VARS),printf '$(var)=%s\n' '$($(var))';) \
 		$(foreach var,$(EFFECTIVE_VNET_FEATURES),printf 'EFFECTIVE_$(var)=%s\n' '$(call has,$(var))';) \
 	} > $@.tmp
@@ -433,7 +455,9 @@ clean:
 	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) \
 	    $(SRC_OBJS_ALL) $(SRC_OBJS_ALL:%=%.d) \
 	    $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) \
-	    $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP) $(VIRTIO_NET_CLEAN_FILES)
+	    $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP) $(VIRTIO_NET_CLEAN_FILES) \
+	    $(OUT)/t2c.o $(OUT)/t2c.o.d $(OUT)/libt2c.so $(OUT)/aot-abi.h \
+	    $(foreach o,aot aot_cache aot_hash,$(OUT)/$(o).o $(OUT)/$(o).o.d)
 	$(Q)-$(RM) $(SOFTFLOAT_LIB)
 	$(Q)$(call notice, [OK])
 

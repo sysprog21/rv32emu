@@ -147,21 +147,6 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 /* Bound both guard overhead and speculative expansion of the code cache. */
 #define IN_JUMP_TARGETS 2
 
-/* Tier-1 indirect-jump specialization: inline guards for the most frequently
- * observed targets, and chained translation that follows them.
- *
- * TODO: allow this under T2C once generated code reports its own execution
- * count. Tier-2 promotion is measured at the dispatcher - n_invoke advances
- * only in rv_step - while chained tier-1 code jumps from block to block
- * without returning there, so a chained successor never promotes. Direct
- * chaining has that effect already and stays enabled; specializing indirect
- * jumps as well can absorb the region's entry block too, leaving nothing in
- * it that tier two ever sees. That is the whole of the difference, and it is
- * a limitation rather than a choice, so this is not a configuration option;
- * set it to 1 to measure the trade-off.
- */
-#define JIT_INDIRECT_TARGETS (!RV32_HAS(T2C))
-
 /* Guest memory base pinning.
  *
  * User-mode translation keeps mem_base in a host register the allocator never
@@ -250,8 +235,6 @@ static inline bool bht_should_translate(const branch_history_table_t *bt,
 #endif
 )
 {
-    if (!JIT_INDIRECT_TARGETS)
-        return false;
     /* times is the validity signal: a slot never observed still holds zero.
      * Testing the recorded PC instead would reject a genuine target at guest
      * address 0, and would not reject anything else, since the table
@@ -274,6 +257,14 @@ static int bht_select_targets(const branch_history_table_t *bt,
                               riscv_t *rv UNUSED,
                               int targets[IN_JUMP_TARGETS])
 {
+#if RV32_HAS(T2C)
+    /* AOT collection keeps indirect jumps visible to the dispatcher, which
+     * records their targets. Replay keeps T1's guards: Dhrystone in Linux
+     * took twice as long when every return left T1 code.
+     */
+    if (PRIV(rv)->aot_collect)
+        return 0;
+#endif
     int count = 0;
     for (int i = 0; i < HISTORY_SIZE; i++) {
 #if RV32_HAS(SYSTEM)
@@ -4028,7 +4019,7 @@ static void patch_jump(struct jit_state *state,
  * System sites and their targets share SATP and fetch privilege. Every native
  * target checks the dispatch deadline before executing its first instruction.
  */
-#define JIT_INDIRECT_LOOKUP JIT_INDIRECT_TARGETS
+#define JIT_INDIRECT_LOOKUP 1
 
 #if JIT_INDIRECT_LOOKUP
 /* A block ends in at most one indirect jump, whose site shares its index. */
@@ -4127,6 +4118,10 @@ static void indirect_site_fill(struct jit_state *state,
 static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
 {
     struct jit_state *state = rv->jit_state;
+#if RV32_HAS(T2C)
+    if (PRIV(rv)->aot_collect)
+        return (uintptr_t) state->buf + state->exit_loc;
+#endif
 #if RV32_HAS(SYSTEM)
     if (site >= (uint32_t) state->n_blocks)
         return (uintptr_t) state->buf + state->exit_loc;
@@ -5083,8 +5078,15 @@ static void code_cache_reset(struct jit_state *state,
     if (!blocks_invalidated)
         clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
 #if RV32_HAS(T2C)
-    jit_cache_clear(rv->jit_cache);
-    inline_cache_clear(rv->inline_cache);
+    /* Artifact entries outlive T1 code. Architectural invalidation clears
+     * them separately; recycling T1 storage must retain valid bindings.
+     */
+    if (rv->aot_index) {
+        rv->aot_t1_flushes++;
+    } else {
+        jit_cache_clear(rv->jit_cache);
+        inline_cache_clear(rv->inline_cache);
+    }
 #endif
 }
 
@@ -5094,9 +5096,9 @@ static void code_cache_flush(struct jit_state *state, riscv_t *rv)
 }
 
 #if RV32_HAS(SYSTEM)
-/* The caller holds cache_lock when T2C is built, and has invalidated every
- * cached block (FENCE.I), so their hot flags need no walk to clear: with a
- * large block cache that walk dominated the hundreds of FENCE.Is of a boot.
+/* The caller has invalidated every cached block (FENCE.I), so their hot flags
+ * need no walk to clear: with a large block cache that walk dominated the
+ * hundreds of FENCE.Is of a boot.
  */
 void jit_flush(riscv_t *rv)
 {
@@ -5761,10 +5763,7 @@ static bool translate_register_loop(struct jit_state *state,
 }
 #endif
 
-/* Tier-2 promotion counts dispatcher entries. Cloning would absorb those
- * entries before promotion, so keep its existing block boundaries intact.
- */
-#define JIT_REGISTER_REGION (JIT_REGISTER_LOOP && !RV32_HAS(T2C))
+#define JIT_REGISTER_REGION JIT_REGISTER_LOOP
 
 #if JIT_REGISTER_REGION
 /* External entries retain the ordinary memory-backed register ABI. Inside a
@@ -6109,7 +6108,11 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
         .jumps = block_jump_budget(block),
         .count = 1,
     };
-    plan_region(state, rv, &plan, 0, 0);
+    /* AOT collection profiles dispatcher entries. Cloning would absorb those
+     * entries, so keep block boundaries intact while collecting.
+     */
+    if (!IIF(RV32_HAS(T2C))(PRIV(rv)->aot_collect, false))
+        plan_region(state, rv, &plan, 0, 0);
     if (plan.count > 1) {
         region_liveness(&plan, 0, !rv->jit_elide_align_checks);
         translate_region(state, rv, &plan, 0);
@@ -6365,16 +6368,7 @@ restart:
 #if defined(__APPLE__) && defined(__aarch64__)
         jit_exit_write_mode();
 #endif
-#if RV32_HAS(T2C)
-        /* The flush empties the T2C caches, which the T2C thread writes under
-         * cache_lock; a seqlock only protects readers.
-         */
-        hart_lock(rv, &rv->cache_lock);
-#endif
         code_cache_flush(state, rv);
-#if RV32_HAS(T2C)
-        hart_unlock(rv, &rv->cache_lock);
-#endif
         goto restart;
     }
 

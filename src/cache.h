@@ -98,10 +98,7 @@ uint32_t cache_invalidate_all(struct cache *cache);
  * starts in the page of va. A block that only straddles into the page does
  * not count.
  *
- * Only the emulator thread changes the index this reads, so that thread may
- * call it without cache_lock, to skip taking the lock for a flush that has
- * nothing to invalidate. Without block chaining there is no index, and the
- * answer is always true.
+ * Without block chaining there is no index, and the answer is always true.
  */
 bool cache_has_va_any(const struct cache *cache, uint32_t va);
 

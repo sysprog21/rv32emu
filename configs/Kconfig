@@ -1,6 +1,6 @@
 # rv32emu Configuration
 #
-# RISC-V RV32 Emulator with tiered JIT compilation
+# RISC-V RV32 Emulator with tier-1 JIT and tier-2 AOT compilation
 
 mainmenu "rv32emu Configuration"
 
@@ -259,14 +259,18 @@ config JIT
 endchoice
 
 config T2C
-    bool "Tier-2 LLVM Compiler"
+    bool "Tier-2 LLVM Ahead-of-Time Compiler"
     default y
-    depends on JIT && HAVE_LLVM && !CC_IS_EMCC
+    depends on JIT && HAVE_LLVM && HOST_LINUX && !CC_IS_EMCC
     help
-      Enable tier-2 JIT compiler powered by LLVM.
-      Provides advanced optimizations for hot code paths.
+      Collect relocatable LLVM bitcode from ELF or Linux system executions, then
+      compile it offline with tools/aot.py. Load the resulting native library
+      on subsequent runs without runtime LLVM compilation or a compiler thread.
+      Uncovered code uses tier-1 or the interpreter.
 
-      Requires LLVM 19 through 23 development libraries.
+      Supported on Linux hosts. System regions are bounded by code pages
+      and checked against page contents after instruction/TLB invalidation.
+      Requires LLVM 19 through 23 development libraries for bitcode collection.
 
 comment "System Emulation"
 
@@ -402,21 +406,6 @@ config BLOCK_CHAINING
       Links consecutive blocks to avoid dispatch overhead.
 
       Improves JIT performance significantly.
-
-config T2C_OPT_LEVEL
-    int "T2C LLVM Optimization Level (0-3)"
-    default 3
-    range 0 3
-    depends on T2C
-    help
-      LLVM optimization level for T2C compiled code:
-        0 - No optimization (fastest compile, for debugging)
-        1 - Basic optimization (~50% faster compile than O3)
-        2 - Standard optimization (balanced)
-        3 - Aggressive optimization (default, best runtime performance)
-
-      For CI boot tests, O1 significantly reduces compilation time
-      while maintaining correctness. Use O3 for production.
 
 config LTO
     bool "Link-Time Optimization"

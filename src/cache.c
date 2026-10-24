@@ -464,10 +464,8 @@ void cache_profile(const struct cache *cache,
     }
 }
 
-/* Disable UBSAN function pointer type check for indirect calls. When T2C is
- * enabled, t2c_dispose_block_engine is compiled with LLVM's cflags which can
- * cause function type metadata mismatch, triggering false positive UBSAN
- * errors when called via clear_func_t.
+/* Disable the UBSAN function pointer type check for the indirect call: callers
+ * pass handlers that take a block_t pointer, cast to clear_func_t.
  */
 DISABLE_UBSAN_FUNC
 void clear_cache_hot(const struct cache *cache, clear_func_t func)

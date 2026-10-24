@@ -606,12 +606,9 @@ uint32_t mmu_note_code(riscv_t *rv, uint32_t start, uint32_t end)
 #if RV32_HAS(JIT)
     /* Kernel code reached only through global mappings is shared by every
      * address space, so that each process does not decode and compile the
-     * kernel's code paths again. T2C builds keep per-space code for now:
-     * shared kernel code reaches tier 2 sooner, and the extra LLVM work
-     * measured slower Linux boots there.
+     * kernel's code paths again.
      */
-    if (!RV32_HAS(T2C) && rv->priv_mode == RV_PRIV_S_MODE &&
-        mmu_paging(rv, rv->priv_mode)) {
+    if (rv->priv_mode == RV_PRIV_S_MODE && mmu_paging(rv, rv->priv_mode)) {
         bool global = true;
         for (uint32_t vpn = first;; vpn = (vpn + 1) & MASK(32 - RV_PG_SHIFT)) {
             global = global && code_page_global(rv, vpn);
@@ -1177,6 +1174,29 @@ bool mmu_debug_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr)
     *paddr = (uint32_t) translated;
     return true;
 }
+
+#if RV32_HAS(T2C)
+bool mmu_code_translate(riscv_t *rv, uint32_t vaddr, uint32_t *paddr)
+{
+    if (!mmu_paging(rv, rv->priv_mode)) {
+        *paddr = vaddr;
+        return true;
+    }
+    /* Reuse exactly the executable translation of the last instruction fetch
+     * from this page in this privilege; callers fetch first. Only executable
+     * pages carry the tag, and SATP and SFENCE invalidation govern it as
+     * usual. A miss fails rather than walking the page table, which would
+     * ignore permissions.
+     */
+    const uint32_t vpn = (vaddr >> RV_PG_SHIFT) | ITLB_EXEC_TAG |
+                         (rv->priv_mode << ITLB_PRIV_SHIFT);
+    const tlb_entry_t *entry = &rv->itlb[vpn & TLB_MASK];
+    if (need_retranslate || entry->vpn != vpn)
+        return false;
+    *paddr = entry->ppn | (vaddr & MASK(RV_PG_SHIFT));
+    return true;
+}
+#endif
 
 uint32_t mmu_translate(riscv_t *rv, uint32_t vaddr, bool rw)
 {

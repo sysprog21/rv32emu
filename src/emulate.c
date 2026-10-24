@@ -4187,6 +4187,18 @@ void rv_step(void *arg)
 
     /* loop until hitting the cycle target or hart is halted */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
+#if RV32_HAS(ARCH_TEST) && RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
+        /* Native stores bypass the interpreter's tohost write hook. Observe
+         * their result before dispatching the next block of a self-checking
+         * test, which otherwise spins forever after reporting completion.
+         */
+        if (rv->tohost_addr) {
+            check_tohost_write(rv, rv->tohost_addr,
+                               rv->io.mem_read_w(rv, rv->tohost_addr));
+            if (rv->halt)
+                break;
+        }
+#endif
         T1C_COUNT(dispatches, 1);
 #if defined(__EMSCRIPTEN__)
         if (rv->csr_cycle - wasm_clock_cycle >= (1U << 15) ||

@@ -253,6 +253,11 @@ def main():
                 name + ": replay ran no native code\n" + replay.stderr
             )
             if name == "aot-address-wrap":
+                # T1 code wraps through the mirrors at the ends of guest RAM.
+                wrapped = run(emulator, guest, "wrap")
+                assert baseline.stdout == wrapped.stdout, (
+                    name + ": T1 wrapping run miscounted instructions"
+                )
                 # The wrapping replay leaves each block at its first access;
                 # the training addresses run the whole block natively.
                 native = run(emulator, "-A", library, guest)

@@ -215,11 +215,8 @@ static bool virtio_net_backend_supported(const char *backend)
 static bool parse_args(int argc, char **args)
 {
     int opt;
-    int emu_argc = 0;
 
     while ((opt = getopt(argc, args, optstr)) != -1) {
-        emu_argc++;
-
         switch (opt) {
 #if !RV32_HAS(SYSTEM_MMIO)
         case 't':
@@ -234,17 +231,14 @@ static bool parse_args(int argc, char **args)
 #if RV32_HAS(SYSTEM_MMIO)
         case 'k':
             opt_kernel_img = optarg;
-            emu_argc++;
             break;
 #if !RV32_HAS(ROOTFS_EXT4)
         case 'i':
             opt_rootfs_img = optarg;
-            emu_argc++;
             break;
 #endif
         case 'b':
             opt_bootargs = optarg;
-            emu_argc++;
             break;
         case 'x':
             if (!strncmp("vblk:", optarg, 5)) {
@@ -282,7 +276,6 @@ static bool parse_args(int argc, char **args)
             } else {
                 return false;
             }
-            emu_argc++;
             break;
 #endif
         case 'q':
@@ -299,22 +292,26 @@ static bool parse_args(int argc, char **args)
         case 'd':
             opt_dump_regs = true;
             registers_out_file = optarg;
-            emu_argc++;
             break;
         case 'a':
             opt_arch_test = true;
             signature_out_file = optarg;
-            emu_argc++;
             break;
         default:
             return false;
         }
     }
 
-    prog_argc = argc - emu_argc - 1;
     /* optind points to the first non-option string, so it should indicate the
-     * target program.
+     * target program. Counting from it also handles attached option
+     * arguments such as -d/dev/null.
      */
+    prog_argc = argc - optind;
+#if !RV32_HAS(SYSTEM_MMIO)
+    /* User mode needs a program to load. */
+    if (prog_argc < 1)
+        return false;
+#endif
     prog_args = &args[optind];
     opt_prog_name = prog_args[0];
 

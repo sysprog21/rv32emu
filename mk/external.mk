@@ -132,7 +132,7 @@ TIMIDITY_DATA_SHA := cf6217a5d824b717ec4a07e15e6c129a4657ca25
 TIMIDITY_DATA_SHA_CMD := $(SHA1SUM)
 
 # Buildroot (for Linux image building)
-BUILDROOT_VERSION := 2025.11
+BUILDROOT_VERSION := 2025.11.3
 BUILDROOT_DATA_DEST := /tmp
 BUILDROOT_DATA := $(BUILDROOT_DATA_DEST)/buildroot
 BUILDROOT_DATA_URL := git clone https://github.com/buildroot/buildroot $(BUILDROOT_DATA) -b $(BUILDROOT_VERSION) --depth=1
@@ -141,7 +141,7 @@ BUILDROOT_DATA_URL := git clone https://github.com/buildroot/buildroot $(BUILDRO
 #	xargs -0 sha1sum | \
 #	LC_ALL=C sort | \
 #	sha1sum
-BUILDROOT_DATA_SHA := 70999b51eb4034eb96457a0ac210365c9cc7c2bb
+BUILDROOT_DATA_SHA := 78ca64f838a35d79b8b1355c124d80a0241f3bfd
 BUILDROOT_DATA_SHA_CMD := $(SHA1SUM)
 
 # Linux kernel (uses lazy evaluation to avoid parse-time network calls)

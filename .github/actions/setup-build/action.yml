@@ -34,6 +34,9 @@ inputs:
   artifacts:
     description: Prebuilt artifacts to fetch, as accepted by .ci/fetch-artifacts.sh.
     default: ''
+  linux-image-artifact:
+    description: Use the Linux image built earlier in this workflow run instead of fetching from rv32emu-prebuilt.
+    default: 'false'
   cache-suffix:
     description: >
       Discriminator for the build/ cache key. Jobs that leave different object
@@ -227,6 +230,18 @@ runs:
       run: |
         python3 -m pip install "uv==$UV_VERSION"
         bash .ci/arch-test-setup.sh
+
+    - name: Download Linux image from workflow run
+      if: inputs.linux-image-artifact == 'true'
+      uses: actions/download-artifact@v7
+      with:
+        name: linux-image-prebuilt
+        path: ${{ runner.temp }}/linux-image-prebuilt
+
+    - name: Export workflow Linux image path
+      if: inputs.linux-image-artifact == 'true'
+      shell: bash
+      run: echo "LINUX_IMAGE_PREBUILT_DIR=${RUNNER_TEMP}/linux-image-prebuilt" >> "$GITHUB_ENV"
 
     - name: Cache build artifacts
       if: inputs.artifacts != ''

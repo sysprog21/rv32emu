@@ -104,21 +104,7 @@ echo "deb [signed-by=${KEYRING}] http://apt.llvm.org/${CODENAME}/ llvm-toolchain
 chmod 0644 "${SOURCE_LIST}"
 
 echo "Updating apt cache for llvm-${VER}..."
-for attempt in 1 2 3; do
-    if apt-get update -q=2 \
-        -o Acquire::Retries=5 \
-        -o Acquire::ForceIPv4=true; then
-        break
-    fi
-
-    if [ "${attempt}" -eq 3 ]; then
-        echo "Error: apt-get update failed after ${attempt} attempts" >&2
-        exit 1
-    fi
-
-    echo "apt-get update failed; retrying in $((attempt * 10)) seconds..."
-    sleep $((attempt * 10))
-done
+"$(dirname "${BASH_SOURCE[0]}")/apt-retry.sh" update -q=2
 
 echo "apt.llvm.org repository for LLVM ${VER} is configured."
-echo "Run 'apt-get install llvm-${VER} clang-${VER} lld-${VER}' (or similar) next."
+echo "Run 'apt-retry.sh install llvm-${VER} clang-${VER} lld-${VER}' (or similar) next."

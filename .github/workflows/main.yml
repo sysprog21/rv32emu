@@ -680,7 +680,7 @@ jobs:
             LLVM_VERSION=$(cat .ci/llvm-version)
             .ci/apt-install.sh curl wget lsb-release gnupg libsdl2-dev libsdl2-mixer-dev
             sudo .ci/install-llvm.sh "${LLVM_VERSION}"
-            sudo apt-get install -y -q=2 "clang-${LLVM_VERSION}" "clang-tools-${LLVM_VERSION}"
+            .ci/apt-retry.sh install -y -q=2 "clang-${LLVM_VERSION}" "clang-tools-${LLVM_VERSION}"
 
     - name: Run scan-build
       run: .ci/scan-build.sh

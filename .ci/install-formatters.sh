@@ -17,7 +17,8 @@ DTSFMT_VERSION=v0.8.0
 
 "${SCRIPT_DIR}/apt-install.sh" curl wget lsb-release gnupg
 sudo "${SCRIPT_DIR}/install-llvm.sh" "${CLANG_FORMAT_VERSION}"
-sudo apt-get install -y -q=2 "clang-format-${CLANG_FORMAT_VERSION}" shfmt python3-pip
+"${SCRIPT_DIR}/apt-retry.sh" install -y -q=2 \
+    "clang-format-${CLANG_FORMAT_VERSION}" shfmt python3-pip
 
 pip3 install --break-system-packages black==25.1.0
 

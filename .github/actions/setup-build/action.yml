@@ -95,7 +95,7 @@ runs:
       uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/llvm-cache
-        key: ${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.llvm-version.outputs.version }}-tar-v4
+        key: ${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.llvm-version.outputs.version }}-tar-v5
 
     - name: Restore LLVM
       id: restore-llvm

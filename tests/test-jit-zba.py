@@ -4,20 +4,36 @@
 import argparse
 import pathlib
 import subprocess
+import tempfile
 
-from jit_profile import ZBA_OPS, read_profile, read_symbols, t2c_threshold
+from jit_profile import (
+    ZBA_OPS,
+    aot_options,
+    read_profile,
+    read_symbols,
+    t2c_threshold,
+)
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("emulator")
 parser.add_argument("guest")
 parser.add_argument("nm")
+parser.add_argument(
+    "--aot",
+    metavar="LLVM_CONFIG",
+    help="replay an offline AOT artifact; T2C builds need it to run tier 2",
+)
 args = parser.parse_args()
+replay = []
+if args.aot:
+    work = tempfile.TemporaryDirectory(prefix="jit-zba-")
+    replay = aot_options(args.emulator, [args.guest], args.aot, work.name)
 profile = pathlib.Path(args.emulator).parent / (
     pathlib.Path(args.guest).name + ".prof"
 )
 profile.unlink(missing_ok=True)
 result = subprocess.run(
-    [args.emulator, "-p", args.guest],
+    [args.emulator, *replay, "-p", args.guest],
     capture_output=True,
     text=True,
     check=True,
@@ -39,12 +55,12 @@ native_minimum = 16 * t2c_threshold()
 for pc, row in rows.items():
     if not ZBA_OPS.intersection(row["IR list"].split(" - ")):
         continue
-    assert row["hot"] == "true", (hex(pc), row)
-    if "t2c" in row:
+    if args.aot:
         assert row["t2c"] == "true", (hex(pc), row)
         assert (
             int(row["frequency"]) - int(row["t1_reentries"]) > native_minimum
         ), (hex(pc), row)
     else:
+        assert row["hot"] == "true", (hex(pc), row)
         assert int(row["t1_reentries"]) > native_minimum, (hex(pc), row)
 print("Zba native execution OK")

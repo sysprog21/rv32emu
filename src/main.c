@@ -49,10 +49,16 @@ static bool opt_quiet_outputs = false;
 /* target executable */
 static char *opt_prog_name;
 
+#if RV32_HAS(T2C)
+static const char *opt_aot_collect, *opt_aot_library;
+#endif
+
 /* target argc and argv */
 static int prog_argc;
 static char **prog_args;
-static const char *optstr = "tgqmhpd:a:k:i:b:x:";
+static const char *optstr = "tgqmhpd:a:k:i:b:x:C:A:s:B:";
+static int opt_cycle_per_step;
+static unsigned opt_cache_bits;
 
 /* enable misaligned memory access */
 static bool opt_misaligned = false;
@@ -108,8 +114,13 @@ static void reset_runtime_options(void)
     signature_out_file = NULL;
     opt_quiet_outputs = false;
     opt_prog_name = NULL;
+#if RV32_HAS(T2C)
+    opt_aot_collect = opt_aot_library = NULL;
+#endif
     prog_argc = 0;
     prog_args = NULL;
+    opt_cycle_per_step = 0;
+    opt_cache_bits = 0;
     opt_misaligned = false;
     opt_prof_data = false;
     free(prof_out_file);
@@ -186,6 +197,12 @@ static void print_usage(const char *filename)
         "  -q : Suppress outputs other than `dump-registers`\n"
         "  -a [filename] : dump signature to the given file, "
         "required by arch-test test\n"
+#if RV32_HAS(T2C)
+        "  -C <directory> : collect T2C bitcode after execution\n"
+        "  -A <library> : load an offline-compiled T2C artifact\n"
+#endif
+        "  -s <instructions> : instruction budget per dispatch step\n"
+        "  -B <bits> : translated block cache capacity as a power of two\n"
         "  -m : enable misaligned memory access\n"
         "  -p : generate profiling data\n"
         "  -h : show this message",
@@ -215,12 +232,32 @@ static bool virtio_net_backend_supported(const char *backend)
 static bool parse_args(int argc, char **args)
 {
     int opt;
-    int emu_argc = 0;
 
     while ((opt = getopt(argc, args, optstr)) != -1) {
-        emu_argc++;
-
         switch (opt) {
+        case 's':
+        case 'B': {
+            char *end;
+            long value = strtol(optarg, &end, 10);
+            if (!*optarg || *end || value < 1 ||
+                value > (opt == 'B' ? 20 : 1000000)) {
+                rv_log_error("Invalid -%c value: %s", opt, optarg);
+                return false;
+            }
+            if (opt == 's')
+                opt_cycle_per_step = (int) value;
+            else
+                opt_cache_bits = (unsigned) value;
+            break;
+        }
+#if RV32_HAS(T2C)
+        case 'C':
+            opt_aot_collect = optarg;
+            break;
+        case 'A':
+            opt_aot_library = optarg;
+            break;
+#endif
 #if !RV32_HAS(SYSTEM_MMIO)
         case 't':
             opt_trace = true;
@@ -234,17 +271,14 @@ static bool parse_args(int argc, char **args)
 #if RV32_HAS(SYSTEM_MMIO)
         case 'k':
             opt_kernel_img = optarg;
-            emu_argc++;
             break;
 #if !RV32_HAS(ROOTFS_EXT4)
         case 'i':
             opt_rootfs_img = optarg;
-            emu_argc++;
             break;
 #endif
         case 'b':
             opt_bootargs = optarg;
-            emu_argc++;
             break;
         case 'x':
             if (!strncmp("vblk:", optarg, 5)) {
@@ -282,7 +316,6 @@ static bool parse_args(int argc, char **args)
             } else {
                 return false;
             }
-            emu_argc++;
             break;
 #endif
         case 'q':
@@ -299,22 +332,26 @@ static bool parse_args(int argc, char **args)
         case 'd':
             opt_dump_regs = true;
             registers_out_file = optarg;
-            emu_argc++;
             break;
         case 'a':
             opt_arch_test = true;
             signature_out_file = optarg;
-            emu_argc++;
             break;
         default:
             return false;
         }
     }
 
-    prog_argc = argc - emu_argc - 1;
     /* optind points to the first non-option string, so it should indicate the
-     * target program.
+     * target program. Counting from it also handles attached option
+     * arguments such as -d/dev/null.
      */
+    prog_argc = argc - optind;
+#if !RV32_HAS(SYSTEM_MMIO)
+    /* User mode needs a program to load. */
+    if (prog_argc < 1)
+        return false;
+#endif
     prog_args = &args[optind];
     opt_prog_name = prog_args[0];
 
@@ -523,6 +560,14 @@ int main(int argc, char **args)
 #else
     attr.data.user.elf_program = opt_prog_name;
 #endif
+#if RV32_HAS(T2C)
+    attr.aot_collect = opt_aot_collect;
+    attr.aot_library = opt_aot_library;
+#endif
+
+    if (opt_cycle_per_step)
+        attr.cycle_per_step = opt_cycle_per_step;
+    attr.block_cache_bits = opt_cache_bits;
 
     /* enable or disable the logging outputs */
     rv_log_set_quiet(opt_quiet_outputs);

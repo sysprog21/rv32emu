@@ -1,7 +1,5 @@
 /* ECALL returns to the dispatcher every pass, so the probe itself promotes.
  * Keep the successful path translatable and exercise scalar and fused loads.
- * The run must outlast asynchronous tier-2 compilation on a loaded host;
- * builds without tier 2 check only the loads, in fewer passes.
  */
 #ifndef LOAD_X0_ITERATIONS
 #define LOAD_X0_ITERATIONS 20000000

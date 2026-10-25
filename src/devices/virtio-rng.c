@@ -104,6 +104,7 @@ static void virtio_queue_notify_handler(virtio_rng_state_t *vrng, int index)
         ssize_t total = read(vrng->rng_fd, entropy_buf, desc->len);
         if (total < 0)
             total = 0;
+        virtio_guest_written(desc->addr, (uint32_t) total);
 
         /* Write used element information (`struct virtq_used_elem`) to the used
          * queue */
@@ -111,6 +112,7 @@ static void virtio_queue_notify_handler(virtio_rng_state_t *vrng, int index)
             queue->queue_used + 1 + (new_used % queue->queue_num) * 2;
         ram[vq_used_addr] = buffer_idx;
         ram[vq_used_addr + 1] = (uint32_t) total;
+        virtio_used_written(vq_used_addr, 2);
 
         queue->last_avail++;
         new_used++;
@@ -118,6 +120,7 @@ static void virtio_queue_notify_handler(virtio_rng_state_t *vrng, int index)
 
     ram[queue->queue_used] &= MASK(16);
     ram[queue->queue_used] |= ((uint32_t) new_used) << 16;
+    virtio_used_written(queue->queue_used, 1);
 
     if (!(ram[queue->queue_avail] & 1))
         vrng->interrupt_status |= VIRTIO_INT_USED_RING;

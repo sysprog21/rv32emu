@@ -42,6 +42,36 @@ def t2c_threshold():
     return read_define("src/cache.h", "THRESHOLD")
 
 
+def aot_options(emulator, command, llvm_config, directory):
+    """Collect an AOT profile of command, compile it with tools/aot.py, and
+    return the emulator options that replay the artifact. command lists the
+    guest and its arguments, after any emulator options.
+    """
+    directory = pathlib.Path(directory)
+    profile, library = directory / "aot-profile", directory / "aot.so"
+    subprocess.run(
+        [emulator, "-C", profile, *command],
+        capture_output=True,
+        check=True,
+        timeout=300,
+    )
+    subprocess.run(
+        [
+            "python3",
+            ROOT / "tools/aot.py",
+            profile,
+            "-o",
+            library,
+            "--llvm-config",
+            llvm_config,
+        ],
+        capture_output=True,
+        check=True,
+        timeout=600,
+    )
+    return ["-A", str(library)]
+
+
 def read_t1c_stats(stderr, required=False):
     """Return the last T1C_STATS report, or None in a build without one."""
     reports = [

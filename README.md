@@ -56,7 +56,7 @@ $ make quake          # Quake (requires RV32F, on by default)
 ```
 
 For interactive build configuration, use `make config`. For predefined
-configurations, Kconfig options, and tiered JIT compilation setup
+configurations, Kconfig options, and T2C ahead-of-time compilation
 (LLVM toolchain), see [docs/build.md](docs/build.md).
 
 ## Online demo
@@ -73,7 +73,7 @@ button that switches directly to the other.
 
 | Topic | Document |
 | ----- | -------- |
-| Build options, Kconfig, and tiered JIT setup | [docs/build.md](docs/build.md) |
+| Build options, Kconfig, JIT and AOT setup | [docs/build.md](docs/build.md) |
 | System emulation: boot Linux, virtio block devices, bootargs | [docs/system.md](docs/system.md) |
 | WebAssembly build for the browser | [docs/wasm.md](docs/wasm.md) |
 | GDB remote debugging and register JSON dump | [docs/gdbstub.md](docs/gdbstub.md) |

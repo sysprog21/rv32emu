@@ -130,9 +130,8 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
  */
 #define MAX_JUMPS 65536
 
-/* JIT_LINK_ALL_EDGES (jit.h): a block compiled before its successors were
- * known still chains natively. System pending edges include SATP and are
- * discarded when code retires.
+/* A block compiled before its successors were known still chains natively.
+ * System pending edges include SATP and are discarded when code retires.
  */
 #define MAX_PENDING_JUMPS 65536
 /* A full offset map flushes all native code; system mode compiles from a
@@ -146,21 +145,6 @@ _Static_assert(PTE_W == 0x04, "PTE_W must be bit 2");
 #define IN_JUMP_THRESHOLD 256
 /* Bound both guard overhead and speculative expansion of the code cache. */
 #define IN_JUMP_TARGETS 2
-
-/* Tier-1 indirect-jump specialization: inline guards for the most frequently
- * observed targets, and chained translation that follows them.
- *
- * TODO: allow this under T2C once generated code reports its own execution
- * count. Tier-2 promotion is measured at the dispatcher - n_invoke advances
- * only in rv_step - while chained tier-1 code jumps from block to block
- * without returning there, so a chained successor never promotes. Direct
- * chaining has that effect already and stays enabled; specializing indirect
- * jumps as well can absorb the region's entry block too, leaving nothing in
- * it that tier two ever sees. That is the whole of the difference, and it is
- * a limitation rather than a choice, so this is not a configuration option;
- * set it to 1 to measure the trade-off.
- */
-#define JIT_INDIRECT_TARGETS (!RV32_HAS(T2C))
 
 /* Guest memory base pinning.
  *
@@ -250,8 +234,6 @@ static inline bool bht_should_translate(const branch_history_table_t *bt,
 #endif
 )
 {
-    if (!JIT_INDIRECT_TARGETS)
-        return false;
     /* times is the validity signal: a slot never observed still holds zero.
      * Testing the recorded PC instead would reject a genuine target at guest
      * address 0, and would not reject anything else, since the table
@@ -274,6 +256,14 @@ static int bht_select_targets(const branch_history_table_t *bt,
                               riscv_t *rv UNUSED,
                               int targets[IN_JUMP_TARGETS])
 {
+#if RV32_HAS(T2C)
+    /* AOT collection keeps indirect jumps visible to the dispatcher, which
+     * records their targets. Replay keeps T1's guards: Dhrystone in Linux
+     * took twice as long when every return left T1 code.
+     */
+    if (PRIV(rv)->aot_collect)
+        return 0;
+#endif
     int count = 0;
     for (int i = 0; i < HISTORY_SIZE; i++) {
 #if RV32_HAS(SYSTEM)
@@ -620,9 +610,14 @@ static inline uint32_t offset_hash(uint32_t pc, uint32_t satp)
 }
 
 #if RV32_HAS(SYSTEM)
+/* Shared kernel code has bucket 0 to itself, so that a FENCE.I which keeps
+ * it skips that bucket whole.
+ */
 static inline uint32_t space_hash(uint32_t satp)
 {
-    return index_hash(satp, SPACE_INDEX_BITS);
+    return satp == SATP_SHARED ? 0
+                               : 1 + index_hash(satp, SPACE_INDEX_BITS) %
+                                         ((1U << SPACE_INDEX_BITS) - 1);
 }
 
 static inline uint32_t page_hash(uint32_t va)
@@ -632,7 +627,6 @@ static inline uint32_t page_hash(uint32_t va)
 }
 #endif
 
-#if JIT_LINK_ALL_EDGES
 /* Forget every pending jump. Unless the index may hold stale heads, as at
  * startup, clear only the buckets in use: retiring an address space would
  * otherwise memset 64 KiB, though few jumps are usually pending.
@@ -650,16 +644,13 @@ static void pending_reset(struct jit_state *state, bool full)
     }
     state->n_pending = 0;
 }
-#endif
 
 /* Empty the offset map, every index over it and the jumps pending into it */
 static void offset_map_reset(struct jit_state *state)
 {
     state->n_blocks = 0;
     memset(state->offset_index, -1, sizeof(state->offset_index));
-#if JIT_LINK_ALL_EDGES
     pending_reset(state, true);
-#endif
 #if RV32_HAS(SYSTEM)
     memset(state->space_index, -1, sizeof(state->space_index));
     memset(state->page_index, -1, sizeof(state->page_index));
@@ -717,11 +708,9 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
 {
     state->code_generation++;
     T1C_COUNT(retire_calls, 1);
-#if JIT_LINK_ALL_EDGES
     /* Retired code must never be relinked, so drop every pending edge. */
     T1C_COUNT(retire_pending_slots, state->n_pending);
     pending_reset(state, false);
-#endif
     /* Retired entries leave the chain, so each flush visits only the code
      * translated since the previous one.
      */
@@ -737,15 +726,14 @@ void jit_retire_space(struct jit_state *state, uint32_t satp)
     }
 }
 
-void jit_retire_all(struct jit_state *state)
+/* Retire the address spaces of the index buckets from first on. */
+static void jit_retire_buckets(struct jit_state *state, uint32_t first)
 {
     state->code_generation++;
     T1C_COUNT(retire_calls, 1);
-#if JIT_LINK_ALL_EDGES
     T1C_COUNT(retire_pending_slots, state->n_pending);
     pending_reset(state, false);
-#endif
-    for (uint32_t i = 0; i < ARRAY_SIZE(state->space_index); i++) {
+    for (uint32_t i = first; i < ARRAY_SIZE(state->space_index); i++) {
         int32_t *link = &state->space_index[i];
         while (*link >= 0) {
             struct offset_map *entry = &state->offset_map[*link];
@@ -753,6 +741,16 @@ void jit_retire_all(struct jit_state *state)
             *link = entry->next_in_space;
         }
     }
+}
+
+void jit_retire_unshared(struct jit_state *state)
+{
+    jit_retire_buckets(state, 1);
+}
+
+void jit_retire_all(struct jit_state *state)
+{
+    jit_retire_buckets(state, 0);
     /* Every indexed native entry is now retired; do not accumulate dead
      * entries in cross-space page probes between native-buffer flushes.
      */
@@ -2630,11 +2628,47 @@ static void jit_mmu_handler(riscv_t *rv,
     struct jit_state *state = rv->jit_state;
     const uint64_t generation = state->code_generation;
     rv->csr_cycle -= refund;
-    if (type == rv_insn_lb || type == rv_insn_lh || type == rv_insn_lbu ||
-        type == rv_insn_lhu || type == rv_insn_lw)
-        addr = rv->io.mem_translate(rv, vaddr, R);
-    else
-        addr = rv->io.mem_translate(rv, vaddr, W);
+    const bool is_load = type == rv_insn_lb || type == rv_insn_lh ||
+                         type == rv_insn_lbu || type == rv_insn_lhu ||
+                         type == rv_insn_lw;
+    /* An access spanning two pages, which only -m allows, goes through the
+     * memory callbacks: they translate each page on its own. Report it as
+     * MMIO, so that no direct access follows.
+     */
+    if (unlikely((vaddr & MASK(RV_PG_SHIFT)) > RV_PG_SIZE - access_size)) {
+        uint32_t val = 0;
+        switch (type) {
+        case rv_insn_lh:
+            val = (int16_t) rv->io.mem_read_s(rv, vaddr);
+            break;
+        case rv_insn_lhu:
+            val = rv->io.mem_read_s(rv, vaddr);
+            break;
+        case rv_insn_lw:
+            val = rv->io.mem_read_w(rv, vaddr);
+            break;
+        case rv_insn_sh:
+            rv->io.mem_write_s(rv, vaddr, rv->X[vreg_idx]);
+            break;
+        default:
+            rv->io.mem_write_w(rv, vaddr, rv->X[vreg_idx]);
+            break;
+        }
+        rv->jit_mmu.is_mmio = 1;
+        rv->jit_mmu.abort = rv->trap_cnt || need_handle_signal;
+        if (rv->jit_mmu.abort)
+            return;
+        if (is_load && vreg_idx)
+            rv->X[vreg_idx] = val;
+        if (generation != state->code_generation) {
+            rv->PC = pc + insn_size;
+            rv->jit_mmu.abort = 1;
+        } else {
+            rv->csr_cycle += refund;
+        }
+        return;
+    }
+    addr = rv->io.mem_translate(rv, vaddr, is_load ? R : W);
 
     /* A page fault in mem_translate may leave a trap pending (trap_cnt), or
      * its handler may have run already and resumed somewhere else
@@ -3992,9 +4026,6 @@ static void patch_jump(struct jit_state *state,
  * System sites and their targets share SATP and fetch privilege. Every native
  * target checks the dispatch deadline before executing its first instruction.
  */
-#define JIT_INDIRECT_LOOKUP JIT_INDIRECT_TARGETS
-
-#if JIT_INDIRECT_LOOKUP
 /* A block ends in at most one indirect jump, whose site shares its index. */
 #define MAX_INDIRECT_SITES MAX_BLOCKS
 /* An empty slot compares with an odd PC, where no translated block starts. */
@@ -4091,6 +4122,10 @@ static void indirect_site_fill(struct jit_state *state,
 static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
 {
     struct jit_state *state = rv->jit_state;
+#if RV32_HAS(T2C)
+    if (PRIV(rv)->aot_collect)
+        return (uintptr_t) state->buf + state->exit_loc;
+#endif
 #if RV32_HAS(SYSTEM)
     if (site >= (uint32_t) state->n_blocks)
         return (uintptr_t) state->buf + state->exit_loc;
@@ -4108,7 +4143,6 @@ static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
     indirect_site_fill(state, &state->sites[site], rv->PC, target->offset);
     return (uintptr_t) state->buf + target->offset;
 }
-#endif
 
 /* Jump to the target in temp_reg, with every guest register written back. */
 static void emit_indirect_jump(struct jit_state *state,
@@ -4118,7 +4152,6 @@ static void emit_indirect_jump(struct jit_state *state,
     branch_history_table_t *bt = ir->branch_table;
     int targets[IN_JUMP_TARGETS];
     int count = bht_select_targets(bt, rv, targets);
-#if JIT_INDIRECT_LOOKUP
     /* The block being translated is the last one in the offset map. */
     const uint32_t site_index = state->n_blocks - 1;
     struct indirect_site *site = &state->sites[site_index];
@@ -4139,23 +4172,6 @@ static void emit_indirect_jump(struct jit_state *state,
 #elif defined(__aarch64__)
     /* emit_call leaves the result in R5. */
     emit_uncond_branch_reg(state, BR_BR, R5);
-#endif
-#else
-    for (int i = 0; i < count; i++) {
-        int idx = targets[i];
-        emit_cmp_imm32(state, temp_reg, bt->PC[idx]);
-        uint32_t jump_loc_0 = state->offset;
-        emit_jcc_offset(state, JCC_JNE);
-#if RV32_HAS(SYSTEM)
-        /* Link in the space of the code being emitted, which may be shared. */
-        emit_jmp(state, bt->PC[idx], BLOCK_SATP(cur_block));
-#else
-        emit_jmp(state, bt->PC[idx], 0);
-#endif
-        emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
-    }
-    emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
-    emit_exit(state);
 #endif
 }
 
@@ -4556,8 +4572,7 @@ static void emit_jit_csr(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
         return;
     const uint32_t next_pc = ir->pc + 4;
     store_back(state);
-    if (JIT_LINK_ALL_EDGES || ir->branch_taken)
-        emit_jmp(state, next_pc, BLOCK_SATP(cur_block));
+    emit_jmp(state, next_pc, BLOCK_SATP(cur_block));
     emit_set_pc_exit(state, next_pc);
 }
 #define GEN_CSR(inst) GEN(inst, { emit_jit_csr(state, rv, ir); })
@@ -5003,13 +5018,11 @@ static void do_fuse12(struct jit_state *state,
     uint32_t jump_loc_0 = state->offset;
     emit_jcc_offset(state, 0x85);
     /* Untaken path: rd == 0, fall through to PC + 8 */
-    if (JIT_LINK_ALL_EDGES || ir->branch_untaken)
-        emit_jmp(state, ir->pc + 8, BLOCK_SATP(cur_block));
+    emit_jmp(state, ir->pc + 8, BLOCK_SATP(cur_block));
     emit_set_pc_exit(state, ir->pc + 8);
     /* Taken path: rd != 0, branch to PC + 4 + imm2 */
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
-    if (JIT_LINK_ALL_EDGES || ir->branch_taken)
-        emit_jmp(state, ir->pc + 4 + ir->imm2, BLOCK_SATP(cur_block));
+    emit_jmp(state, ir->pc + 4 + ir->imm2, BLOCK_SATP(cur_block));
     emit_set_pc_exit(state, ir->pc + 4 + ir->imm2);
 }
 
@@ -5047,8 +5060,15 @@ static void code_cache_reset(struct jit_state *state,
     if (!blocks_invalidated)
         clear_cache_hot(rv->block_cache, (clear_func_t) clear_hot);
 #if RV32_HAS(T2C)
-    jit_cache_clear(rv->jit_cache);
-    inline_cache_clear(rv->inline_cache);
+    /* Artifact entries outlive T1 code. Architectural invalidation clears
+     * them separately; recycling T1 storage must retain valid bindings.
+     */
+    if (rv->aot_index) {
+        rv->aot_t1_flushes++;
+    } else {
+        jit_cache_clear(rv->jit_cache);
+        inline_cache_clear(rv->inline_cache);
+    }
 #endif
 }
 
@@ -5058,9 +5078,9 @@ static void code_cache_flush(struct jit_state *state, riscv_t *rv)
 }
 
 #if RV32_HAS(SYSTEM)
-/* The caller holds cache_lock when T2C is built, and has invalidated every
- * cached block (FENCE.I), so their hot flags need no walk to clear: with a
- * large block cache that walk dominated the hundreds of FENCE.Is of a boot.
+/* The caller has invalidated every cached block (FENCE.I), so their hot flags
+ * need no walk to clear: with a large block cache that walk dominated the
+ * hundreds of FENCE.Is of a boot.
  */
 void jit_flush(riscv_t *rv)
 {
@@ -5709,8 +5729,7 @@ static bool translate_register_loop(struct jit_state *state,
     emit_jump_target_offset(state, exit_branch, state->offset);
     memcpy(register_map, exit_map, sizeof(register_map));
     store_back(state);
-    if (JIT_LINK_ALL_EDGES || tail->branch_untaken)
-        emit_jmp(state, exit_pc, BLOCK_SATP(cur_block));
+    emit_jmp(state, exit_pc, BLOCK_SATP(cur_block));
     emit_set_pc_exit(state, exit_pc);
     if (guards)
         emit_misalign_stubs(state, rv);
@@ -5725,12 +5744,7 @@ static bool translate_register_loop(struct jit_state *state,
 }
 #endif
 
-/* Tier-2 promotion counts dispatcher entries. Cloning would absorb those
- * entries before promotion, so keep its existing block boundaries intact.
- */
-#define JIT_REGISTER_REGION (JIT_REGISTER_LOOP && !RV32_HAS(T2C))
-
-#if JIT_REGISTER_REGION
+#if JIT_REGISTER_LOOP
 /* External entries retain the ordinary memory-backed register ABI. Inside a
  * bounded tree, both outcomes can reuse the current map. Every leaf spills;
  * fault snapshots still describe the state at the individual instruction.
@@ -6065,7 +6079,7 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
         return;
 #endif
     reset_reg();
-#if JIT_REGISTER_REGION
+#if JIT_REGISTER_LOOP
     struct region_plan plan = {
         .node[0] = {.block = block},
         .records = block->n_insn,
@@ -6073,7 +6087,11 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
         .jumps = block_jump_budget(block),
         .count = 1,
     };
-    plan_region(state, rv, &plan, 0, 0);
+    /* AOT collection profiles dispatcher entries. Cloning would absorb those
+     * entries, so keep block boundaries intact while collecting.
+     */
+    if (!IIF(RV32_HAS(T2C))(PRIV(rv)->aot_collect, false))
+        plan_region(state, rv, &plan, 0, 0);
     if (plan.count > 1) {
         region_liveness(&plan, 0, !rv->jit_elide_align_checks);
         translate_region(state, rv, &plan, 0);
@@ -6101,10 +6119,8 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
      */
     if (block->page_terminated && !should_flush) {
         store_back(state);
-        if (JIT_LINK_ALL_EDGES || block->ir_tail->branch_taken) {
-            /* Fallthrough chain established - jump to next block */
-            emit_jmp(state, block->pc_end, BLOCK_SATP(cur_block));
-        }
+        /* Fallthrough chain established - jump to next block */
+        emit_jmp(state, block->pc_end, BLOCK_SATP(cur_block));
         /* Store PC and exit for un-chained path */
         emit_set_pc_exit(state, block->pc_end);
     }
@@ -6113,7 +6129,6 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
         emit_misalign_stubs(state, rv);
 }
 
-#if JIT_LINK_ALL_EDGES
 /* Patch the pending jumps to every block translated from @first_block on. */
 static void patch_pending_jumps(struct jit_state *state, int first_block)
 {
@@ -6142,7 +6157,6 @@ static void patch_pending_jumps(struct jit_state *state, int first_block)
         }
     }
 }
-#endif
 
 static void resolve_jumps(struct jit_state *state)
 {
@@ -6175,9 +6189,7 @@ static void resolve_jumps(struct jit_state *state)
                                 IIF(RV32_HAS(SYSTEM))(jump.target_priv, 0));
             if (target) {
                 target_loc = target->offset;
-            }
-#if JIT_LINK_ALL_EDGES
-            else if (state->n_pending < MAX_PENDING_JUMPS) {
+            } else if (state->n_pending < MAX_PENDING_JUMPS) {
                 /* Fall through to the exit until the target is compiled. */
                 int32_t *head = &state->pending_index[offset_hash(
                     jump.target_pc,
@@ -6193,7 +6205,6 @@ static void resolve_jumps(struct jit_state *state)
                 };
                 *head = state->n_pending++;
             }
-#endif
         }
         patch_jump(state, jump.offset_loc, target_loc);
     }
@@ -6314,9 +6325,7 @@ restart:
         memset(state->jumps, 0, state->n_jumps * sizeof(struct jump));
     state->n_jumps = 0;
     block->offset = state->offset;
-#if JIT_LINK_ALL_EDGES
     const int first_block = state->n_blocks;
-#endif
 #if defined(__APPLE__) && defined(__aarch64__)
     /* Enter write mode for the entire translation phase.
      * This batches all write protection toggling into a single operation,
@@ -6329,16 +6338,7 @@ restart:
 #if defined(__APPLE__) && defined(__aarch64__)
         jit_exit_write_mode();
 #endif
-#if RV32_HAS(T2C)
-        /* The flush empties the T2C caches, which the T2C thread writes under
-         * cache_lock; a seqlock only protects readers.
-         */
-        hart_lock(rv, &rv->cache_lock);
-#endif
         code_cache_flush(state, rv);
-#if RV32_HAS(T2C)
-        hart_unlock(rv, &rv->cache_lock);
-#endif
         goto restart;
     }
 
@@ -6356,9 +6356,7 @@ restart:
     }
 
     resolve_jumps(state);
-#if JIT_LINK_ALL_EDGES
     patch_pending_jumps(state, first_block);
-#endif
 #if defined(__aarch64__)
     /* Cache maintenance after patching branch immediates.
      * On Apple: sys_icache_invalidate performs DC CVAU + DSB + IC IVAU + DSB +
@@ -6446,14 +6444,9 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
         return NULL;
     }
 
-#if JIT_LINK_ALL_EDGES
     state->pending = calloc(MAX_PENDING_JUMPS, sizeof(struct pending_jump));
-#if JIT_INDIRECT_LOOKUP
     state->sites = calloc(MAX_INDIRECT_SITES, sizeof(struct indirect_site));
-#else
-    state->sites = NULL;
-#endif
-    if (!state->pending || (JIT_INDIRECT_LOOKUP && !state->sites)) {
+    if (!state->pending || !state->sites) {
         free(state->sites);
         free(state->pending);
         free(state->jumps);
@@ -6462,7 +6455,6 @@ struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
         free(state);
         return NULL;
     }
-#endif
 
     return state;
 }
@@ -6472,9 +6464,7 @@ void jit_state_exit(struct jit_state *state)
     munmap(state->buf, state->size);
     free(state->offset_map);
     free(state->jumps);
-#if JIT_LINK_ALL_EDGES
     free(state->pending);
     free(state->sites);
-#endif
     free(state);
 }

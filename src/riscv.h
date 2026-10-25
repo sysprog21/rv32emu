@@ -230,6 +230,9 @@ enum TRAP_CODE {
     LOAD_MISALIGNED = 4,                       /* Load address misaligned */
     STORE_MISALIGNED = 6,                      /* Store/AMO address misaligned */
 #if RV32_HAS(SYSTEM)
+    INSN_ACCESS_FAULT = 1,                     /* Instruction access fault */
+    LOAD_ACCESS_FAULT = 5,                     /* Load access fault */
+    STORE_ACCESS_FAULT = 7,                    /* Store/AMO access fault */
     PAGEFAULT_INSN = 12,                       /* Instruction page fault */
     PAGEFAULT_LOAD = 13,                       /* Load page fault */
     PAGEFAULT_STORE = 15,                      /* Store page fault */
@@ -269,6 +272,7 @@ enum TRAP_CODE {
  */
 #define SET_CAUSE_AND_TVAL_THEN_ENTER(rv, cause, tval)                         \
     {                                                                          \
+        IIF(RV32_HAS(T2C))(rv->aot_trap_epoch++;, );                           \
         /* A trap may switch tasks, so no reservation may survive it. */       \
         RV_RESERVE_CLEAR(rv);                                                  \
         if (RV_PRIV_IS_U_OR_S_MODE()) {                                        \
@@ -334,10 +338,9 @@ enum TRAP_CODE {
  * which were evicted and decoded again for each process. A larger cache helps
  * only together with room for the code it lets compile (CODE_CACHE_SIZE and
  * MAX_BLOCKS in jit.c); otherwise the native cache fills and is flushed whole.
- * The browser build keeps the smaller cache, whose Wasm modules it bounds, and
- * so does T2C, which then compiled more and ran Linux workloads slower.
+ * The browser build keeps the smaller cache, whose Wasm modules it bounds.
  */
-#if RV32_HAS(SYSTEM) && !RV32_HAS(T2C) && !defined(__EMSCRIPTEN__)
+#if RV32_HAS(SYSTEM) && !defined(__EMSCRIPTEN__)
 #define BLOCK_CACHE_LARGE 1
 #else
 #define BLOCK_CACHE_LARGE 0
@@ -461,10 +464,6 @@ riscv_t *rv_create(riscv_user_t attr);
 /* delete a RISC-V emulator */
 void rv_delete(riscv_t *rv);
 
-#if RV32_HAS(T2C)
-/* cleanup t2c thread */
-void rv_terminate_t2c(riscv_t *rv);
-#endif
 
 /* Cold reboot the system
  *
@@ -680,6 +679,11 @@ typedef struct {
      * Use uint64_t to support full 4GB address space with demand paging.
      * Physical memory is allocated on-demand, keeping actual usage minimal.
      */
+#if RV32_HAS(T2C)
+    const char *aot_collect;
+    const char *aot_library;
+    bool aot_collect_started;
+#endif
     uint64_t mem_size;
 
     /* vm main stack size */
@@ -711,6 +715,7 @@ typedef struct {
 
     /* number of cycle(instruction) in a rv_step call*/
     int cycle_per_step;
+    unsigned block_cache_bits;
 
     /* allow misaligned memory access */
     bool allow_misalign;

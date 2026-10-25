@@ -696,6 +696,7 @@ static bool vsnd_guest_write(virtio_snd_state_t *vsnd,
         return false;
 
     memcpy(dst, src, len);
+    virtio_guest_written(addr, len);
     return true;
 }
 
@@ -734,12 +735,14 @@ static bool virtio_snd_complete_tx_request(virtio_snd_state_t *vsnd,
 
     ram[used_addr] = desc_idx;
     ram[used_addr + 1] = sizeof(status);
+    virtio_used_written(used_addr, 2);
 
     used_idx++;
     uint32_t used_word =
         (ram[queue->queue_used] & MASK(16)) | ((uint32_t) used_idx << 16);
 
     __atomic_store_n(&ram[queue->queue_used], used_word, __ATOMIC_RELEASE);
+    virtio_used_written(queue->queue_used, 1);
 
     if (!(ram[queue->queue_avail] & 1))
         __atomic_fetch_or(&vsnd->interrupt_status, VIRTIO_INT_USED_RING,
@@ -1644,6 +1647,7 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
 
         ram[used_addr] = buffer_idx;
         ram[used_addr + 1] = len;
+        virtio_used_written(used_addr, 2);
         queue->last_avail++;
         new_used++;
     }
@@ -1653,6 +1657,7 @@ static void virtio_queue_notify_handler(virtio_snd_state_t *vsnd, int index)
     uint32_t used_word =
         (ram[queue->queue_used] & MASK(16)) | ((uint32_t) new_used << 16);
     __atomic_store_n(&ram[queue->queue_used], used_word, __ATOMIC_RELEASE);
+    virtio_used_written(queue->queue_used, 1);
     if (!(ram[queue->queue_avail] & 1))
         __atomic_fetch_or(&vsnd->interrupt_status, VIRTIO_INT_USED_RING,
                           __ATOMIC_RELEASE);

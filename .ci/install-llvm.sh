@@ -17,7 +17,7 @@
 #   sudo .ci/install-llvm.sh <major-version>
 #
 # Example:
-#   sudo .ci/install-llvm.sh 20
+#   sudo .ci/install-llvm.sh 23
 #
 # Afterwards the caller is expected to `apt-get install` the specific llvm-<N>*
 # / clang-<N> / lld-<N> packages it needs.

@@ -12,7 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 set -e -u -o pipefail
 
-LLVM_VERSION=$(cat "${SCRIPT_DIR}/llvm-version")
+# setup-build passes its llvm-version override; default to the pinned version.
+LLVM_VERSION=${LLVM_VERSION:-$(cat "${SCRIPT_DIR}/llvm-version")}
 
 # Homebrew names its newest LLVM plain "llvm" and keeps older majors as
 # llvm@N, so the pinned version can live under either name.

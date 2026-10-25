@@ -60,21 +60,19 @@
 /* Branch epilogue helper - emits fall-through and taken paths.
  * Used by both regular (4-byte) and compressed (2-byte) branch instructions.
  */
-#define EMIT_BRANCH_EPILOGUE(inst_size)                                   \
-    do {                                                                  \
-        if (JIT_LINK_ALL_EDGES || ir->branch_untaken)                     \
-            emit_jmp(state, ir->pc + (inst_size), BLOCK_SATP(cur_block)); \
-        emit_load_imm(state, temp_reg, ir->pc + (inst_size));             \
-        emit_store(state, S32, temp_reg, parameter_reg[0],                \
-                   offsetof(riscv_t, PC));                                \
-        emit_exit(state);                                                 \
-        emit_jump_target_offset(state, JUMP_LOC_0, state->offset);        \
-        if (JIT_LINK_ALL_EDGES || ir->branch_taken)                       \
-            emit_jmp(state, ir->pc + ir->imm, BLOCK_SATP(cur_block));     \
-        emit_load_imm(state, temp_reg, ir->pc + ir->imm);                 \
-        emit_store(state, S32, temp_reg, parameter_reg[0],                \
-                   offsetof(riscv_t, PC));                                \
-        emit_exit(state);                                                 \
+#define EMIT_BRANCH_EPILOGUE(inst_size)                               \
+    do {                                                              \
+        emit_jmp(state, ir->pc + (inst_size), BLOCK_SATP(cur_block)); \
+        emit_load_imm(state, temp_reg, ir->pc + (inst_size));         \
+        emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                   offsetof(riscv_t, PC));                            \
+        emit_exit(state);                                             \
+        emit_jump_target_offset(state, JUMP_LOC_0, state->offset);    \
+        emit_jmp(state, ir->pc + ir->imm, BLOCK_SATP(cur_block));     \
+        emit_load_imm(state, temp_reg, ir->pc + ir->imm);             \
+        emit_store(state, S32, temp_reg, parameter_reg[0],            \
+                   offsetof(riscv_t, PC));                            \
+        emit_exit(state);                                             \
     } while (0)
 
 /* Branch instruction handler macro - all branch instructions follow

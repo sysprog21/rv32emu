@@ -12,23 +12,26 @@
 
 set -u -o pipefail
 
-# Options are passed to this one invocation rather than dropped into
-# /etc/apt/apt.conf.d. A persistent file also governs every later apt run,
-# including the "apt-get update" inside install-llvm.sh, which runs under set -e
-# and would then abort on any repository error.
+# The update-only options below are passed to this one invocation rather than
+# dropped into /etc/apt/apt.conf.d. A persistent file also governs every later
+# apt run, including the update inside install-llvm.sh, which runs under set -e
+# and would then abort on any repository error. apt-retry.sh adds IPv4-only
+# transport and retries to every call made here.
 APT_OPTS=(
     -o APT::Update::Error-Mode=any
     -o Acquire::IndexTargets::deb::DEP-11::DefaultEnabled=false
     -o Acquire::IndexTargets::deb::DEP-11-icons::DefaultEnabled=false
     -o Acquire::IndexTargets::deb::DEP-11-icons-hidpi::DefaultEnabled=false
-    -o Acquire::Retries=3
 )
 
-sudo apt-get update -q=2 "${APT_OPTS[@]}" \
+APT_RETRY="$(dirname "${BASH_SOURCE[0]}")/apt-retry.sh"
+
+# A lagging mirror fails the same way on every attempt, so do not wait it out.
+APT_ATTEMPTS=1 "${APT_RETRY}" update -q=2 "${APT_OPTS[@]}" \
     || echo "WARNING: apt-get update failed, continuing with cached indexes"
 
 if [ "$#" -eq 0 ]; then
     exit 0
 fi
 
-sudo apt-get install -y -q=2 "$@"
+"${APT_RETRY}" install -y -q=2 "$@"

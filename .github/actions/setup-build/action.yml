@@ -88,21 +88,28 @@ runs:
         LLVM_VERSION: ${{ steps.llvm-version.outputs.version }}
       run: .ci/brew-install.sh
 
+    # The tree is cached as a tarball; see .ci/llvm-cache.sh for why.
     - name: Cache LLVM
       if: runner.os == 'Linux' && inputs.llvm == 'true'
       id: cache-llvm
       uses: actions/cache@v6
       with:
-        path: |
-          /usr/lib/llvm-${{ steps.llvm-version.outputs.version }}
-          /usr/lib/x86_64-linux-gnu/libLLVM*.so*
-          /usr/lib/x86_64-linux-gnu/libclang*.so*
-          /usr/lib/aarch64-linux-gnu/libLLVM*.so*
-          /usr/lib/aarch64-linux-gnu/libclang*.so*
-        key: ${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.llvm-version.outputs.version }}-shared-v3
+        path: ${{ runner.temp }}/llvm-cache
+        key: ${{ runner.os }}-${{ runner.arch }}-llvm-${{ steps.llvm-version.outputs.version }}-tar-v4
+
+    - name: Restore LLVM
+      id: restore-llvm
+      if: runner.os == 'Linux' && inputs.llvm == 'true' && steps.cache-llvm.outputs.cache-hit == 'true'
+      shell: bash
+      run: |
+        # A stale or partial archive falls back to a fresh install.
+        if .ci/llvm-cache.sh restore '${{ steps.llvm-version.outputs.version }}' \
+            '${{ runner.temp }}/llvm-cache/llvm.tar'; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Install LLVM
-      if: runner.os == 'Linux' && inputs.llvm == 'true' && steps.cache-llvm.outputs.cache-hit != 'true'
+      if: runner.os == 'Linux' && inputs.llvm == 'true' && steps.restore-llvm.outputs.ok != 'true'
       shell: bash
       run: |
         # Ubuntu Noble's base repos cap at llvm-18, so the pinned version comes
@@ -110,9 +117,16 @@ runs:
         # pinned fingerprint before touching apt sources.
         VER='${{ steps.llvm-version.outputs.version }}'
         sudo .ci/install-llvm.sh "${VER}"
-        sudo apt-get install -y -q=2 \
+        .ci/apt-retry.sh install -y -q=2 \
             "llvm-${VER}" "llvm-${VER}-dev" "llvm-${VER}-runtime" \
             "clang-${VER}" "lld-${VER}" "libclang-rt-${VER}-dev"
+
+        # The cache only saves time, so a failed archive must not fail the job.
+        # After a failed restore the key already exists and is never re-saved.
+        if [ '${{ steps.cache-llvm.outputs.cache-hit }}' != 'true' ]; then
+            .ci/llvm-cache.sh save "${VER}" '${{ runner.temp }}/llvm-cache/llvm.tar' \
+                || echo "WARNING: could not archive LLVM for the cache"
+        fi
 
     - name: Set up LLVM PATH
       if: inputs.llvm == 'true'

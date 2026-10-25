@@ -50,13 +50,6 @@ static inline uint32_t jit_instruction_size(uint16_t opcode)
     }
 }
 
-/* T1 links direct branches whether or not the interpreter has taken the edge
- * yet, and records a jump whose target is not compiled so that the target's
- * translation can patch it later. A target with an offline-compiled entry is
- * never patched, so its jump returns to the dispatcher, which prefers AOT.
- */
-#define JIT_LINK_ALL_EDGES 1
-
 /* Native system builds dispatch straight to live T1 code, after any bound
  * AOT entry.
  */
@@ -254,14 +247,18 @@ struct jit_state {
     int n_blocks;
     struct jump *jumps;
     int n_jumps;
-#if JIT_LINK_ALL_EDGES
-    /* Pending jumps, chained by target as offset_index chains blocks */
+    /* T1 links direct branches whether or not the interpreter has taken the
+     * edge, and records a jump whose target is not compiled so that the
+     * target's translation can patch it later. A target with an offline
+     * compiled entry is never patched, so its jump returns to the dispatcher,
+     * which prefers AOT. Pending jumps are chained by target as offset_index
+     * chains blocks.
+     */
     int32_t pending_index[1 << OFFSET_INDEX_BITS];
     struct pending_jump *pending;
     int n_pending;
     /* Guard slots of each block's indirect jump, filled in at run time */
     struct indirect_site *sites;
-#endif
 };
 #endif /* !__EMSCRIPTEN__ */
 

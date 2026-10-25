@@ -251,10 +251,8 @@ def compile_profile(
         declarations = [
             '#include "aot_entry.h"\n',
             f"const unsigned long long rv32_aot_identity[6] = {{{values}}};\n",
+            "typedef void (*rv32_entry)(struct riscv_internal *);\n",
         ]
-        declarations.append(
-            "typedef void (*rv32_entry)(struct riscv_internal *);\n"
-        )
         convention = ""
         if preserve_none:
             convention = "__attribute__((preserve_none)) "

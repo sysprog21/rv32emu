@@ -16,11 +16,6 @@
 #include "riscv_private.h"
 #include "utils.h"
 
-static uint32_t cache_size, cache_size_bits;
-
-/* hash function for the cache */
-HASH_FUNC_IMPL(cache_hash, cache_size_bits, cache_size)
-
 struct hlist_head {
     struct hlist_node *first;
 };
@@ -72,6 +67,8 @@ typedef struct cache {
      */
     struct list_head free_list;
     hashtable_t map; /* hash map which contains both live and evicted cache */
+    /* log2 of the number of buckets in map, not related to size */
+    uint32_t map_bits;
     uint32_t size;
     uint32_t ghost_list_size;
     uint32_t capacity;
@@ -92,6 +89,18 @@ typedef struct cache {
     struct hlist_head satp_index[SATP_INDEX_SIZE];
 #endif
 } cache_t;
+
+/* HASH_FUNC_IMPL takes its width at compile time, but each cache sizes its own
+ * map: hash to the widest map cache_create allows, then keep as many top bits
+ * as this map has, so that caches of different sizes can coexist.
+ */
+#define CACHE_MAX_MAP_BITS 31
+HASH_FUNC_IMPL(cache_hash_top, CACHE_MAX_MAP_BITS, 1u << CACHE_MAX_MAP_BITS)
+
+static inline uint32_t cache_hash(const cache_t *cache, uint32_t key)
+{
+    return cache_hash_top(key) >> (CACHE_MAX_MAP_BITS - cache->map_bits);
+}
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
 /* Forward declarations for page index functions */
@@ -172,8 +181,10 @@ static inline void hlist_del_init(struct hlist_node *n)
 
 cache_t *cache_create(uint32_t size_bits)
 {
-    /* Prevent integer overflow in 1 << (size_bits + 2) */
-    if (size_bits >= 30)
+    /* cache_hash covers at most CACHE_MAX_MAP_BITS, and the map is 2 bits
+     * wider than size_bits, see below. This also keeps the shifts in range.
+     */
+    if (size_bits > CACHE_MAX_MAP_BITS - 2)
         return NULL;
 
     cache_t *cache = malloc(sizeof(cache_t));
@@ -184,8 +195,8 @@ cache_t *cache_create(uint32_t size_bits)
      * capacity, and is searched on every block dispatch: give it four buckets
      * per live entry so that a lookup rarely walks a chain.
      */
-    cache_size_bits = size_bits + 2;
-    cache_size = 1 << cache_size_bits;
+    cache->map_bits = size_bits + 2;
+    const uint32_t map_size = 1u << cache->map_bits;
 
     INIT_LIST_HEAD(&cache->list);
     INIT_LIST_HEAD(&cache->ghost_list);
@@ -195,15 +206,15 @@ cache_t *cache_create(uint32_t size_bits)
     cache->capacity = 1 << size_bits;
 
     /* Check for overflow in size calculation */
-    size_t alloc_size = cache_size * sizeof(struct hlist_head);
-    if (alloc_size / sizeof(struct hlist_head) != cache_size)
+    size_t alloc_size = map_size * sizeof(struct hlist_head);
+    if (alloc_size / sizeof(struct hlist_head) != map_size)
         goto fail_cache;
 
     cache->map.ht_list_head = malloc(alloc_size);
     if (!cache->map.ht_list_head)
         goto fail_cache;
 
-    for (uint32_t i = 0; i < cache_size; i++)
+    for (uint32_t i = 0; i < map_size; i++)
         INIT_HLIST_HEAD(&cache->map.ht_list_head[i]);
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
@@ -233,7 +244,7 @@ static cache_entry_t *cache_find(const cache_t *cache, uint32_t key)
     if (unlikely(!cache->capacity))
         return NULL;
 
-    const uint32_t hash = cache_hash(key);
+    const uint32_t hash = cache_hash(cache, key);
     if (hlist_empty(&cache->map.ht_list_head[hash]))
         return NULL;
 
@@ -301,9 +312,9 @@ void *cache_put(cache_t *cache, uint32_t key, void *value, uint32_t *freq)
     *freq = 0;
     assert(cache->size <= cache->capacity);
 
+    const uint32_t hash = cache_hash(cache, key);
     cache_entry_t *replaced = NULL, *revived = NULL, *entry;
-    hlist_for_each_entry (entry, &cache->map.ht_list_head[cache_hash(key)],
-                          ht_list) {
+    hlist_for_each_entry (entry, &cache->map.ht_list_head[hash], ht_list) {
         if (entry->key != key)
             continue;
         if (!entry->alive) {
@@ -385,8 +396,7 @@ void *cache_put(cache_t *cache, uint32_t key, void *value, uint32_t *freq)
     }
 
     list_add(&new_entry->list, &cache->list);
-    hlist_add_head(&new_entry->ht_list,
-                   &cache->map.ht_list_head[cache_hash(key)]);
+    hlist_add_head(&new_entry->ht_list, &cache->map.ht_list_head[hash]);
 
     cache->size++;
     *freq = new_entry->freq;

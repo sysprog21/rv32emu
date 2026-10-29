@@ -43,7 +43,7 @@ static void split(char **arr, char *str, const char *del)
 
 /*
  * cache_free leaves the values to the caller, so MULTI keeps every value it
- * allocates, and frees them all once both caches are gone.
+ * allocates, and frees them all once every cache is gone.
  */
 static int *multi_vals[2 * N_MULTI_KEYS];
 static int n_multi_vals;

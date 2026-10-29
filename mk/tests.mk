@@ -71,7 +71,7 @@ $(eval $(call test-framework,elf,test-elf.o,$(OUT)/elf.o $(OUT)/io.o $(OUT)/map.
 # Test Runners
 
 # Cache test uses file comparison (input -> output -> compare with expected)
-$(eval $(call run-test-compare,cache,cache-new cache-put cache-get cache-replace))
+$(eval $(call run-test-compare,cache,cache-new cache-put cache-get cache-replace cache-multi))
 $(eval $(call run-test-simple,block-edge))
 
 # Map and path tests use simple exit code checking

@@ -94,11 +94,12 @@ typedef struct cache {
  * map: hash to the widest map cache_create allows, then keep as many top bits
  * as this map has, so that caches of different sizes can coexist.
  */
-HASH_FUNC_IMPL(cache_hash_top, 31, 1u << 31)
+#define CACHE_MAX_MAP_BITS 31
+HASH_FUNC_IMPL(cache_hash_top, CACHE_MAX_MAP_BITS, 1u << CACHE_MAX_MAP_BITS)
 
 static inline uint32_t cache_hash(const cache_t *cache, uint32_t key)
 {
-    return cache_hash_top(key) >> (31 - cache->map_bits);
+    return cache_hash_top(key) >> (CACHE_MAX_MAP_BITS - cache->map_bits);
 }
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM) && RV32_HAS(BLOCK_CHAINING)
@@ -180,8 +181,10 @@ static inline void hlist_del_init(struct hlist_node *n)
 
 cache_t *cache_create(uint32_t size_bits)
 {
-    /* Prevent integer overflow in 1 << (size_bits + 2) */
-    if (size_bits >= 30)
+    /* cache_hash covers at most CACHE_MAX_MAP_BITS, and the map is 2 bits
+     * wider than size_bits, see below. This also keeps the shifts in range.
+     */
+    if (size_bits > CACHE_MAX_MAP_BITS - 2)
         return NULL;
 
     cache_t *cache = malloc(sizeof(cache_t));

@@ -93,6 +93,12 @@ button that switches directly to the other.
 ## Contributing
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
+## Embedding as a library
+
+Run `make library example-embed` with a native user-mode configuration.
+The self-contained C/C++ API is in [`include/rv32emu.h`](include/rv32emu.h);
+see [the embedding guide](docs/embedding.md) for linking and usage.
+
 ## Citation
 Please see our [VMIL'24](https://2024.splashcon.org/home/vmil-2024) paper, available in the [ACM digital library](https://dl.acm.org/doi/10.1145/3689490.3690399).
 ```

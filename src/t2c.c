@@ -25,8 +25,8 @@
 #include "mpool.h"
 #include "riscv_private.h"
 
-const uint64_t rv32_aot_collector_abi = RV_AOT_ABI;
-const uint32_t rv32_aot_producer_llvm = LLVM_VERSION_MAJOR;
+RV_T2C_EXPORT const uint64_t rv32_aot_collector_abi = RV_AOT_ABI;
+RV_T2C_EXPORT const uint32_t rv32_aot_producer_llvm = LLVM_VERSION_MAJOR;
 
 #if RV32_HAS(SYSTEM_MMIO)
 /* The inline probe indexes rv->jit_dtlb by page number modulo TLB_SIZE and
@@ -594,7 +594,7 @@ static LLVMTypeRef t2c_jit_cache_func_type;
 #define T2C_CALL_CONV LLVMCCallConv
 #endif
 /* The emulator records it in the collection manifest for tools/aot.py. */
-const uint32_t rv32_aot_call_conv = T2C_CALL_CONV;
+RV_T2C_EXPORT const uint32_t rv32_aot_call_conv = T2C_CALL_CONV;
 static LLVMTypeRef t2c_jit_cache_struct_type;
 static LLVMTypeRef t2c_inline_cache_struct_type;
 

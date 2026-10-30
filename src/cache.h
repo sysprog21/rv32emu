@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "visibility.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -30,7 +32,9 @@ struct cache *cache_create(uint32_t size_bits);
  * @update: update frequency or not
  * @return: the specified entry or NULL
  */
-void *cache_get(const struct cache *cache, uint32_t key, bool update);
+RV_T2C_EXPORT void *cache_get(const struct cache *cache,
+                              uint32_t key,
+                              bool update);
 
 /**
  * cache_put - insert a new entry into the cache

@@ -260,12 +260,16 @@ static void syscall_close(riscv_t *rv)
         map_iter_t it;
         map_find(attr->fd_map, &it, &fd);
         if (!map_at_end(&it)) {
-            if (fclose(map_iter_value(&it, FILE *))) {
+            /* The stream is released even when fclose() reports an error, so
+             * the entry must go either way or it would be closed twice.
+             */
+            const int err = fclose(map_iter_value(&it, FILE *));
+            map_erase(&it);
+            if (err) {
                 /* error */
                 rv_set_reg(rv, rv_reg_a0, -1);
                 return;
             }
-            map_erase(&it);
 
             /* success */
             rv_set_reg(rv, rv_reg_a0, 0);
@@ -564,7 +568,9 @@ static void syscall_sbi_rst(riscv_t *rv)
             rv_halt(rv);
         } else if (a0 == SBI_RST_TYPE_COLD_REBOOT) { /* default reboot mode,
                                                         reset whole system */
-            rv_cold_reboot(rv, 0U);
+            /* A failed reboot has already released the hart. */
+            if (!rv_cold_reboot(rv, 0U))
+                exit(EXIT_FAILURE);
             syscall_restart_hart(rv);
         }
 #if RV32_HAS(SYSTEM) && !RV32_HAS(ELF_LOADER)

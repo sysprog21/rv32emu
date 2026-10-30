@@ -510,6 +510,11 @@ struct riscv_internal {
         uint32_t pc; /* PC of the instruction (for trap return address) */
     } jit_mmu;
 #endif
+#if RV32_HAS(JIT)
+    /* Public API execution slices must return even from native loops. */
+    bool jit_bounded_step;
+#endif
+
     /* user provided data */
     riscv_user_t data;
 
@@ -522,7 +527,7 @@ struct riscv_internal {
     uint32_t csr_fcsr;
 #endif
 
-#if RV32_HAS_PACKED_TAIL || RV32_HAS(SYSTEM)
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(SYSTEM) || RV32_HAS(JIT)
     /* Exclusive rv_step() cycle limit for interpreter and compiled chains. */
     uint64_t branch_chain_cycle_target;
 #endif
@@ -796,10 +801,8 @@ static inline bool aot_enabled(const riscv_t *rv)
 }
 #endif
 
-#if RV32_HAS(SYSTEM_MMIO)
-/* Forget the dispatcher's cross-step state after a guest reboot. */
+/* Forget cross-step state after creating or rebooting a guest. */
 void rv_reset_dispatcher_state(void);
-#endif
 
 #if RV32_HAS(JIT) && RV32_HAS(SYSTEM)
 /* The address-space key of S-mode code fetched only through global mappings:

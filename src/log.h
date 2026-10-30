@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "visibility.h"
+
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -76,4 +78,8 @@ void log_set_level(int level);
 void log_set_quiet(bool enable);
 void log_set_stdout_stream(FILE *stream);
 
-void log_impl(int level, const char *file, int line, const char *fmt, ...);
+RV_T2C_EXPORT void log_impl(int level,
+                            const char *file,
+                            int line,
+                            const char *fmt,
+                            ...);

@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "visibility.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -394,7 +396,7 @@ typedef void (*exec_block_func_t)(riscv_t *rv, uintptr_t);
 
 #if RV32_HAS(T2C)
 #define T2C_PROFILE_THRESHOLD 64
-bool t2c_compile(riscv_t *, block_t *, const char *);
+RV_T2C_EXPORT bool t2c_compile(riscv_t *, block_t *, const char *);
 bool t2c_aot_init(riscv_t *);
 void t2c_aot_bind(riscv_t *, block_t *);
 void t2c_aot_exit(riscv_t *);

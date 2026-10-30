@@ -55,10 +55,15 @@ struct elf_internal {
 elf_t *elf_new(void)
 {
     elf_t *e = malloc(sizeof(elf_t));
-    assert(e);
+    if (!e)
+        return NULL;
     e->hdr = NULL;
     e->raw_size = 0;
     e->symbols = map_init(uint32_t, char *, map_cmp_uint);
+    if (!e->symbols) {
+        free(e);
+        return NULL;
+    }
     e->raw_data = NULL;
     return e;
 }

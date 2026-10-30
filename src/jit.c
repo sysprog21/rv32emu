@@ -2179,7 +2179,6 @@ static void emit_set_pc_exit(struct jit_state *state, uint32_t pc)
     emit_exit(state);
 }
 
-#if RV32_HAS(SYSTEM)
 /* Every external block entry has the register-file ABI. Check before charging
  * this block, so a deadline exit names its first unexecuted instruction.
  * SYSTEM does not inline register regions or local register loops.
@@ -2203,7 +2202,6 @@ static void emit_chain_deadline(struct jit_state *state, uint32_t pc)
     emit_set_pc_exit(state, pc);
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
 }
-#endif
 
 /* Materialize a comparison without a data-dependent branch on x86.
  * Inspired by libriscv 3f06e04e's direct boolean-result lowering.
@@ -6064,9 +6062,8 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
                                                 riscv_t *rv,
                                                 block_t *block)
 {
-#if RV32_HAS(SYSTEM)
-    emit_chain_deadline(state, block->pc_start);
-#endif
+    if (RV32_HAS(SYSTEM) || rv->jit_bounded_step)
+        emit_chain_deadline(state, block->pc_start);
     uint32_t idx;
     rv_insn_t *ir, *next, *previous = NULL;
     n_misalign_stubs = 0;
@@ -6075,7 +6072,8 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
 #endif
     cur_block = block;
 #if JIT_REGISTER_LOOP
-    if (translate_register_loop(state, rv, block, true))
+    if (!rv->jit_bounded_step &&
+        translate_register_loop(state, rv, block, true))
         return;
 #endif
     reset_reg();
@@ -6090,7 +6088,8 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
     /* AOT collection profiles dispatcher entries. Cloning would absorb those
      * entries, so keep block boundaries intact while collecting.
      */
-    if (!IIF(RV32_HAS(T2C))(PRIV(rv)->aot_collect, false))
+    if (!rv->jit_bounded_step &&
+        !IIF(RV32_HAS(T2C))(PRIV(rv)->aot_collect, false))
         plan_region(state, rv, &plan, 0, 0);
     if (plan.count > 1) {
         region_liveness(&plan, 0, !rv->jit_elide_align_checks);

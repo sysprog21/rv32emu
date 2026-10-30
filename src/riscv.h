@@ -5,6 +5,8 @@
 
 #pragma once
 
+/* Internal core and CLI interfaces. Embedders should use <rv32emu.h>. */
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -521,14 +523,6 @@ riscv_word_t rv_get_pc(riscv_t *rv);
 /* set a register of the RISC-V emulator */
 void rv_set_reg(riscv_t *rv, uint32_t reg, riscv_word_t in);
 
-typedef struct {
-    int fd;
-    FILE *file;
-} fd_stream_pair_t;
-
-/* remap standard stream to other stream */
-void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size);
-
 /* get a register of the RISC-V emulator */
 riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg);
 
@@ -729,7 +723,7 @@ typedef struct {
     char *profile_output_file;
 
     /* set by rv_create during initialization.
-     * use rv_remap_stdstream to overwrite them
+     * rv_cold_reboot remaps them to the standard streams
      */
     int fd_stdin, fd_stdout, fd_stderr;
 

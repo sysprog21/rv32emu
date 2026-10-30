@@ -3,7 +3,6 @@
  * "LICENSE" for information on usage and redistribution of this file.
  */
 
-#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -217,7 +216,8 @@ bool set_add(set_t *set, rv_hash_key_t key)
     /* Callers rely on a later set_has to terminate their recursion, so an
      * insert that silently did not happen would not be survivable.
      */
-    assert(count < SET_SLOTS_SIZE);
+    if (count >= SET_SLOTS_SIZE)
+        abort();
     set->table[index][count] = key;
     set->count[index] = count + 1;
     return true;

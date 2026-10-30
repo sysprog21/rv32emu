@@ -4,6 +4,7 @@
  */
 
 #include <assert.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -56,6 +57,7 @@ static uint8_t chunk_bitmap[BITMAP_SIZE];
 
 /* GC state: circular scan index */
 static uint32_t gc_scan_idx;
+static _Atomic uintptr_t last_retry_addr;
 
 /* Statistics: current and peak number of activated chunks (atomic for signal
  * safety) */
@@ -116,13 +118,14 @@ static bool is_region_zero(const uint8_t *ptr, size_t size)
 /* Signal handler for demand paging
  *
  * Signal safety notes:
- * - mprotect() is async-signal-safe per POSIX.1-2008 and later
+ * - Demand paging relies on host support for mprotect() in a signal handler
  * - Atomic operations with memory_order_relaxed are signal-safe
  * - Bitmap operations are on static memory with no locks
  * - No heap allocation or stdio calls in the handler
  */
 static void memory_fault_handler(int sig, siginfo_t *si, void *context UNUSED)
 {
+    const int saved_errno = errno;
     uintptr_t fault_addr = (uintptr_t) si->si_addr;
     uintptr_t base = (uintptr_t) data_memory_base;
     uintptr_t end = base + data_memory_size;
@@ -142,12 +145,25 @@ static void memory_fault_handler(int sig, siginfo_t *si, void *context UNUSED)
             chunk_len = end - chunk_start;
         }
 
-        /* Activate the chunk with read/write permissions */
+        bool resume = false;
         if (mprotect((void *) chunk_start, chunk_len, PROT_READ | PROT_WRITE) ==
             0) {
-            /* Only count if not already active (handles re-fault edge cases) */
-            if (!bitmap_test(chunk_idx)) {
+            if (bitmap_test(chunk_idx)) {
+                /* The chunk was activated by another thread after this fault
+                 * was raised, or memory_gc is re-arming it. Access is restored
+                 * above; retry once per address, since a second fault at the
+                 * same address is real (SIGBUS, execute) and must not loop.
+                 * The marker is a lock-free atomic because thread-local
+                 * storage is not signal-safe on all hosts.
+                 */
+                resume = atomic_exchange_explicit(&last_retry_addr, fault_addr,
+                                                  memory_order_relaxed) !=
+                         fault_addr;
+            } else {
                 bitmap_set(chunk_idx);
+                /* A stale retry must not outlive a re-arm */
+                atomic_store_explicit(&last_retry_addr, 0,
+                                      memory_order_relaxed);
                 uint_fast32_t current =
                     atomic_fetch_add_explicit(&active_chunks, 1,
                                               memory_order_relaxed) +
@@ -160,26 +176,32 @@ static void memory_fault_handler(int sig, siginfo_t *si, void *context UNUSED)
                             memory_order_relaxed))
                         break;
                 }
+                resume = true;
             }
+        }
+        if (resume) {
+            errno = saved_errno;
             return; /* Resume execution */
         }
     }
+
+    errno = saved_errno;
 
     /* Not our fault or mprotect failed - chain to previous handler */
     struct sigaction *prev =
         (sig == SIGSEGV) ? &prev_sigsegv_handler : &prev_sigbus_handler;
 
-    if (prev->sa_flags & SA_SIGINFO) {
-        prev->sa_sigaction(sig, si, context);
-    } else if (prev->sa_handler == SIG_DFL) {
-        /* Restore default handler and re-raise */
-        struct sigaction dfl;
-        dfl.sa_handler = SIG_DFL;
-        sigemptyset(&dfl.sa_mask);
-        dfl.sa_flags = 0;
-        sigaction(sig, &dfl, NULL);
+    /* SIG_DFL and SIG_IGN occupy the same union as sa_sigaction; inspect
+     * them before SA_SIGINFO, which may remain set with either disposition.
+     */
+    if (prev->sa_handler == SIG_IGN)
+        return;
+    if (prev->sa_handler == SIG_DFL) {
+        sigaction(sig, prev, NULL);
         raise(sig);
-    } else if (prev->sa_handler != SIG_IGN) {
+    } else if (prev->sa_flags & SA_SIGINFO) {
+        prev->sa_sigaction(sig, si, context);
+    } else {
         prev->sa_handler(sig);
     }
 }
@@ -263,11 +285,20 @@ static void restore_signal_handlers(void)
     sigaction(SIGSEGV, &prev_sigsegv_handler, NULL);
     sigaction(SIGBUS, &prev_sigbus_handler, NULL);
 }
+
+static void reset_paging_state(void)
+{
+    atomic_store_explicit(&last_retry_addr, 0, memory_order_relaxed);
+    gc_scan_idx = 0;
+    atomic_store_explicit(&active_chunks, 0, memory_order_relaxed);
+    atomic_store_explicit(&peak_chunks, 0, memory_order_relaxed);
+}
 #endif /* HAVE_MMAP */
 
 memory_t *memory_new(uint64_t size)
 {
-    if (!size)
+    /* Fast accessors and the fault handler share one process-wide arena. */
+    if (!size || data_memory_base)
         return NULL;
 
     /* Maximum supported size is 4GB (32-bit address space).
@@ -281,6 +312,14 @@ memory_t *memory_new(uint64_t size)
         return NULL;
 
 #if HAVE_MMAP
+    const size_t guard = memory_mirror_size(size);
+    /* Include alignment slack and mirrors without truncating on 32-bit hosts.
+     */
+    if (size > SIZE_MAX - CHUNK_SIZE - 2 * guard) {
+        free(mem);
+        return NULL;
+    }
+
     /* Install signal handlers for demand paging */
     if (!install_signal_handlers()) {
         free(mem);
@@ -294,7 +333,6 @@ memory_t *memory_new(uint64_t size)
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
 #endif
-    const size_t guard = memory_mirror_size(size);
     /* Reserve a chunk more than needed so that the arena can start on a chunk
      * boundary, as huge pages require, then return the slack at either end.
      */
@@ -321,9 +359,7 @@ memory_t *memory_new(uint64_t size)
 
     data_memory_size = size;
     memset(chunk_bitmap, 0, sizeof(chunk_bitmap));
-    gc_scan_idx = 0;
-    atomic_store_explicit(&active_chunks, 0, memory_order_relaxed);
-    atomic_store_explicit(&peak_chunks, 0, memory_order_relaxed);
+    reset_paging_state();
     memory_mirrored = memory_map_mirrors(guard);
     if (guard && !memory_mirrored)
         rv_log_warn("Guest addresses will not wrap at 4 GiB in native code");
@@ -378,11 +414,20 @@ memory_t *memory_new(uint64_t size)
 
     mem->mem_base = data_memory_base;
     mem->mem_size = data_memory_size; /* Use actual allocated size */
+#if HAVE_MMAP
+    /* Only the fault handler reads these two before memory_delete() clears
+     * them again, and the compiler cannot see the handler run. Without a
+     * fence, LTO deletes both stores as dead and every fault then escapes.
+     */
+    atomic_signal_fence(memory_order_seq_cst);
+#endif
     return mem;
 }
 
 void memory_delete(memory_t *mem)
 {
+    if (!mem)
+        return;
 #if HAVE_MMAP
     /* Restore handlers first to prevent use-after-free in signal handler */
     restore_signal_handlers();
@@ -391,6 +436,11 @@ void memory_delete(memory_t *mem)
     memory_mirrored = false;
 #else
     free(mem->mem_base);
+#endif
+    data_memory_base = NULL;
+    data_memory_size = 0;
+#if HAVE_MMAP
+    reset_paging_state();
 #endif
     free(mem);
 }

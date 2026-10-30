@@ -12,11 +12,19 @@
  */
 
 #include <assert.h>
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "common.h"
 #include "io.h"
+
+#if HAVE_MMAP
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #define ARENA_SIZE (1 * 1024 * 1024)
 #define PATTERN 0xA5
@@ -33,11 +41,59 @@ static bool all_zero(const uint8_t *buf, size_t n)
     return true;
 }
 
+#if HAVE_MMAP
+static void previous_handler(int sig)
+{
+    _exit(sig == SIGBUS ? 0 : 1);
+}
+
+static void test_active_chunk_fault(bool use_default)
+{
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (!pid) {
+        /* A repeated fault must reach the handler installed before the arena.
+         * The alarm makes an accidental endless retry fail deterministically.
+         */
+        alarm(5);
+        struct sigaction sa = {0};
+        sa.sa_handler = use_default ? SIG_DFL : previous_handler;
+        sa.sa_flags = use_default ? SA_SIGINFO : 0;
+        sigemptyset(&sa.sa_mask);
+        assert(!sigaction(SIGBUS, &sa, NULL));
+        memory_t *mem = memory_new(ARENA_SIZE);
+        assert(mem);
+        mem->mem_base[0] = 1;
+        siginfo_t info = {0};
+        info.si_addr = mem->mem_base;
+        struct sigaction paging;
+        assert(!sigaction(SIGBUS, NULL, &paging));
+        /* The first fault on an active chunk may be a lost race with another
+         * thread and is retried; the repeat is real and must be chained.
+         */
+        paging.sa_sigaction(SIGBUS, &info, NULL);
+        paging.sa_sigaction(SIGBUS, &info, NULL);
+        _exit(1);
+    }
+    int status;
+    assert(waitpid(pid, &status, 0) == pid);
+    if (use_default)
+        assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGBUS);
+    else
+        assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+}
+#endif
+
 int main(void)
 {
     memory_t *mem = memory_new(ARENA_SIZE);
     assert(mem);
     assert(mem->mem_size == ARENA_SIZE);
+    assert(!memory_new(ARENA_SIZE));
+
+    errno = EDOM;
+    *(volatile uint8_t *) mem->mem_base = 0;
+    assert(errno == EDOM);
 
     uint8_t src[64];
     memset(src, PATTERN, sizeof(src));
@@ -76,6 +132,18 @@ int main(void)
     assert(!memory_fill(mem, 0xFFFFFFF0, sizeof(src), 0));
 
     memory_delete(mem);
+    memory_delete(NULL);
+    assert(memory_get_usage() == 0);
+    assert(memory_ifetch(0) == 0);
+    memory_gc();
+    mem = memory_new(ARENA_SIZE);
+    assert(mem);
+    assert(mem->mem_base[0] == 0);
+    memory_delete(mem);
+#if HAVE_MMAP
+    test_active_chunk_fault(false);
+    test_active_chunk_fault(true);
+#endif
     printf("io: guest memory bounds enforced\n");
     return 0;
 }

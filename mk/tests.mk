@@ -46,6 +46,10 @@ endif
 # Block-edge test: verifies predecessor ownership and target-first unlinking
 $(eval $(call test-framework,block-edge,test-block-edge.o,,))
 
+# Memory pool: extension preserves live chunks and calloc clears reused slots
+$(eval $(call test-framework,mpool,test-mpool.o,$(OUT)/mpool.o,))
+$(eval $(call run-test-simple,mpool))
+
 # Map test: tests red-black tree map implementation
 $(eval $(call test-framework,map,test-map.o mt19937.o,$(OUT)/map.o,))
 
@@ -85,7 +89,7 @@ $(eval $(call run-test-simple,constopt))
 
 # Main Test Target
 
-tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-set run-test-constopt
+tests: run-test-cache run-test-block-edge run-test-map run-test-path run-test-elf run-test-io run-test-decode run-test-set run-test-constopt run-test-mpool
 
 # Effective privilege and permission rules also cover MPRV without firmware.
 ifeq ($(CONFIG_SYSTEM),y)

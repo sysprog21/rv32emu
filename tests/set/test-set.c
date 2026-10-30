@@ -1,6 +1,11 @@
 #include <assert.h>
 #include <stdint.h>
 #include <string.h>
+#if defined(__unix__) || defined(__APPLE__)
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 #include "utils.h"
 
 HASH_FUNC_IMPL(test_hash, SET_SIZE_BITS, SET_SIZE);
@@ -37,6 +42,21 @@ int main(void)
     set_reset(&probe_set);
     assert(!set_probe(&probe_set, keys[SET_SLOTS_SIZE]));
     assert(set_probe(&probe_set, keys[SET_SLOTS_SIZE]));
+
+#if defined(__unix__) || defined(__APPLE__)
+    /* set_add cannot drop an insert, so a full bucket aborts in every build. */
+    set_reset(&probe_set);
+    pid_t pid = fork();
+    assert(pid >= 0);
+    if (!pid) {
+        for (unsigned i = 0; i <= SET_SLOTS_SIZE; i++)
+            set_add(&probe_set, keys[i]);
+        _exit(0);
+    }
+    int status;
+    assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+#endif
 
     /* Wrapping must invalidate ancient epoch-one buckets too. */
     memset(&probe_set, 0, sizeof(probe_set));

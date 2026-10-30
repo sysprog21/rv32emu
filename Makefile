@@ -69,6 +69,12 @@ CFLAGS += -Wno-unused-label -include src/common.h -Isrc/ $(CFLAGS_NO_CET)
 T1C_STATS ?= 0
 CFLAGS += -DRV32_T1C_STATS=$(T1C_STATS)
 LDFLAGS += $(KCONFIG_LDFLAGS)
+ifeq ($(UNAME_S),Linux)
+ifneq ($(CONFIG_BUILD_WASM),y)
+# shm_open/shm_unlink are in librt on glibc versions before 2.34.
+LDFLAGS += -lrt
+endif
+endif
 OBJS_EXT :=
 deps :=
 

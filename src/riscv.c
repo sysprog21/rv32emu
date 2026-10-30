@@ -1884,7 +1884,11 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         memory_fill(attr->mem, 0, attr->mem->mem_size, 0);
     else {
         attr->mem = memory_new(attr->mem_size);
-        assert(attr->mem);
+        if (!attr->mem) {
+            rv_log_fatal("Failed to allocate guest memory");
+            free(rv);
+            exit(EXIT_FAILURE);
+        }
         assert(!(((uintptr_t) attr->mem) & 0b11));
     }
     rv->allow_misalign = attr->allow_misalign;

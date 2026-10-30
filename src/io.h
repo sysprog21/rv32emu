@@ -22,10 +22,10 @@ typedef struct {
     ((uint64_t) (addr) < (mem)->mem_size && \
      (uint64_t) (size) <= (mem)->mem_size - (uint64_t) (addr))
 
-/* create a memory instance */
+/* Create the process-wide memory arena; fails if one is already live. */
 memory_t *memory_new(uint64_t size);
 
-/* delete a memory instance */
+/* Delete the memory arena. NULL is accepted. */
 void memory_delete(memory_t *m);
 
 /* reclaim unused memory pages (incremental GC) */

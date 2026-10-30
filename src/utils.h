@@ -201,6 +201,8 @@ bool set_probe(set_t *set, rv_hash_key_t key);
  * set_add - insert a new element into the set
  * @set: a pointer points to target set
  * @key: the key of the inserted entry
+ *
+ * Returns false for duplicates. Aborts if the target bucket is full.
  */
 bool set_add(set_t *set, rv_hash_key_t key);
 

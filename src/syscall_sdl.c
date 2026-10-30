@@ -198,6 +198,8 @@ typedef struct {
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer;
 static SDL_Texture *texture;
+/* One reference per subsystem acquired by this guest. */
+static Uint32 guest_subsystems;
 
 /* Event queue specific variables */
 static uint32_t queues_capacity;
@@ -260,14 +262,23 @@ static inline uint32_t round_pow2(uint32_t x)
     return x;
 }
 
+static void init_subsystems(Uint32 flags)
+{
+    flags &= ~guest_subsystems;
+    if (!flags)
+        return;
+    if (SDL_InitSubSystem(flags) != 0) {
+        rv_log_fatal("Failed to call SDL_InitSubSystem()");
+        exit(EXIT_FAILURE);
+    }
+    guest_subsystems |= flags;
+}
+
 /* check if SDL needs to be set up and run the event loop */
 static bool check_sdl(riscv_t *rv, int width, int height)
 {
     if (!window) { /* check if video has been initialized. */
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
-            rv_log_fatal("Failed to call SDL_Init()");
-            exit(EXIT_FAILURE);
-        }
+        init_subsystems(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
         window = SDL_CreateWindow("rv32emu", SDL_WINDOWPOS_UNDEFINED,
                                   SDL_WINDOWPOS_UNDEFINED, width, height,
                                   SDL_WINDOW_RESIZABLE);
@@ -1014,15 +1025,12 @@ static void set_music_volume(riscv_t *rv)
 
 static void init_audio(void)
 {
+    if (audio_init)
+        return;
 #ifdef RV32_SDL_MIXER_DYNAMIC
     load_mixer();
 #endif
-    if (!(SDL_WasInit(-1) & SDL_INIT_AUDIO)) {
-        if (SDL_Init(SDL_INIT_AUDIO) != 0) {
-            rv_log_fatal("Failed to call SDL_Init()");
-            exit(EXIT_FAILURE);
-        }
-    }
+    init_subsystems(SDL_INIT_AUDIO);
 
 #if RV32_HAS(SDL_MIXER)
     /* sfx samples buffer */
@@ -1097,6 +1105,14 @@ static void shutdown_audio(void)
 
 void sdl_video_audio_cleanup(void)
 {
+    if (texture) {
+        SDL_DestroyTexture(texture);
+        texture = NULL;
+    }
+    if (renderer) {
+        SDL_DestroyRenderer(renderer);
+        renderer = NULL;
+    }
     if (window) {
         SDL_DestroyWindow(window);
         window = NULL;
@@ -1109,7 +1125,13 @@ void sdl_video_audio_cleanup(void)
     bool sfx_or_music_thread_init = sfx_thread_init | music_thread_init;
     if (sfx_or_music_thread_init || (!sfx_or_music_thread_init && audio_init))
         shutdown_audio();
-    SDL_Quit();
+    if (guest_subsystems) {
+        SDL_QuitSubSystem(guest_subsystems);
+        guest_subsystems = 0;
+    }
+    event_queue = (event_queue_t) {0};
+    submission_queue = (submission_queue_t) {0};
+    queues_capacity = event_count = deferred_submissions = 0;
 }
 
 void syscall_setup_audio(riscv_t *rv)

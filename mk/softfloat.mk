@@ -343,7 +343,7 @@ $(SOFTFLOAT_DUMMY_PLAT):
 	$(Q)touch $@
 
 $(SOFTFLOAT_FILES): $(SOFTFLOAT_SENTINEL)
-$(OUT)/softfloat/%.o: $(SOFTFLOAT_DIR)/%.c $(CONFIG_FILE) $(SOFTFLOAT_SENTINEL) $(SOFTFLOAT_DUMMY_PLAT) | $(OUT)/softfloat $(OUT)/softfloat/RISCV
+$(OUT)/softfloat/%.o: $(SOFTFLOAT_DIR)/%.c $(CONFIG_FILE) $(SOFTFLOAT_SENTINEL) $(SOFTFLOAT_DUMMY_PLAT) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)/softfloat $(OUT)/softfloat/RISCV
 	$(VECHO) "  CC\t$@\n"
 	$(Q)$(CC) -o $@ $(CFLAGS) $(CFLAGS_softfloat) -c -MMD -MP -MF $@.d $<
 

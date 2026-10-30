@@ -102,13 +102,13 @@ endif
 
 LOG_FILTER := sed -E '/^[0-9]{2}:[0-9]{2}:[0-9]{2} /d'
 
-# check-test(flags, binary, name, filter, expected)
+# check-test(flags, binary, name, filter, expected, optional runner)
 define check-test
 $(Q)true; \
 $(PRINTF) "Running $(3) ... "; \
 OUTPUT_FILE="$$(mktemp)"; \
 trap '$(RM) "$$OUTPUT_FILE"' 0; \
-if (LC_ALL=C $(BIN) $(1) $(2) > "$$OUTPUT_FILE") && \
+if (LC_ALL=C $(if $(6),$(6),$(BIN)) $(1) $(2) > "$$OUTPUT_FILE") && \
    [ "$$(cat "$$OUTPUT_FILE" | $(LOG_FILTER) | $(4))" = "$(5)" ]; then \
     $(call notice, [OK]); \
 else \

@@ -151,7 +151,6 @@ static void block_map_init(block_map_t *map, const uint8_t bits)
     map->block_capacity = 1 << bits;
     map->size = 0;
     map->map = calloc(map->block_capacity, sizeof(struct block *));
-    assert(map->map);
 }
 
 /* clear all block in the block map */
@@ -247,6 +246,11 @@ riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg)
     return ~0U;
 }
 
+typedef struct {
+    int fd;
+    FILE *file;
+} fd_stream_pair_t;
+
 /* Remap standard stream
  *
  * @rv: riscv
@@ -255,7 +259,9 @@ riscv_word_t rv_get_reg(riscv_t *rv, uint32_t reg)
  *
  * Note: fd inside fsp should be 0 or 1 or 2 only
  */
-void rv_remap_stdstream(riscv_t *rv, fd_stream_pair_t *fsp, uint32_t fsp_size)
+static void rv_remap_stdstream(riscv_t *rv,
+                               fd_stream_pair_t *fsp,
+                               uint32_t fsp_size)
 {
     assert(rv);
 
@@ -1113,7 +1119,7 @@ static void rv_run_and_trace(riscv_t *rv)
 void rv_debug(riscv_t *rv);
 #endif
 
-void rv_profile(riscv_t *rv, char *out_file_path);
+static void rv_profile(riscv_t *rv, char *out_file_path);
 
 #if RV32_HAS(VIRTIO_NET)
 void rv_refresh_vnet(riscv_t *rv)
@@ -1793,6 +1799,9 @@ static bool rv_init_jit(riscv_t *rv)
     return true;
 
 fail_jit_state:
+    if (rv->block_cache)
+        cache_free(rv->block_cache);
+    rv->block_cache = NULL;
     jit_state_exit(rv->jit_state);
     rv->jit_state = NULL;
     return false;
@@ -1886,8 +1895,7 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         attr->mem = memory_new(attr->mem_size);
         if (!attr->mem) {
             rv_log_fatal("Failed to allocate guest memory");
-            free(rv);
-            exit(EXIT_FAILURE);
+            goto fail_mpool;
         }
         assert(!(((uintptr_t) attr->mem) & 0b11));
     }
@@ -1897,6 +1905,9 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     /* Reset hart state (general purpose registers, CSRs, PC, argc/argv, etc.)
      */
     rv_reset_hart(rv, pc);
+    if (rv->halt)
+        goto fail_mpool;
+    rv_reset_dispatcher_state();
 
     /*
      * default standard stream.
@@ -1906,6 +1917,8 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
      */
     if (!attr->fd_map) { /* check for reboot */
         attr->fd_map = map_init(int, FILE *, map_cmp_int);
+        if (!attr->fd_map)
+            goto fail_mpool;
         rv_remap_stdstream(rv,
                            (fd_stream_pair_t[]) {
                                {STDIN_FILENO, stdin},
@@ -1926,14 +1939,13 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
 
 #if !RV32_HAS(SYSTEM_MMIO)
     elf_t *elf = elf_new();
-    assert(elf);
+    if (!elf)
+        goto fail_mpool;
 
     if (!elf_open(elf, attr->data.user.elf_program)) {
         rv_log_fatal("elf_open() failed");
-        map_delete(attr->fd_map);
-        memory_delete(attr->mem);
-        free(rv);
-        exit(EXIT_FAILURE);
+        elf_delete(elf);
+        goto fail_mpool;
     }
     rv_log_info("%s ELF loaded", attr->data.user.elf_program);
 
@@ -1970,12 +1982,8 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
         rv_log_fatal("Invalid entry point 0x%08x", hdr->e_entry);
 
     elf_delete(elf);
-    if (!loaded) {
-        map_delete(attr->fd_map);
-        memory_delete(attr->mem);
-        free(rv);
-        exit(EXIT_FAILURE);
-    }
+    if (!loaded)
+        goto fail_mpool;
 
 /* combine with USE_ELF for system test suite */
 #if RV32_HAS(SYSTEM)
@@ -2246,6 +2254,8 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     /* initialize the block map */
     if (!rv->block_map.map) { /* check for reboot */
         block_map_init(&rv->block_map, BLOCK_MAP_CAPACITY_BITS);
+        if (!rv->block_map.map)
+            goto fail_mpool;
     }
 
     /* clear the block map for the first cold boot or reboot */
@@ -2293,7 +2303,10 @@ fail_mpool:
 
 #endif
     map_delete(attr->fd_map);
-    memory_delete(attr->mem);
+    if (attr->mem)
+        memory_delete(attr->mem);
+    attr->mem = NULL;
+    attr->fd_map = NULL;
     free(rv);
     return false;
 }
@@ -2348,7 +2361,7 @@ static void profile(void *entry, uint32_t freq, FILE *output_file)
 }
 #endif
 
-void rv_profile(riscv_t *rv, char *out_file_path)
+static void rv_profile(riscv_t *rv, char *out_file_path)
 {
     if (!out_file_path) {
         rv_log_warn("Profiling data output file is NULL");

@@ -26,8 +26,8 @@ void syscall_submit_queue(riscv_t *rv);
 void syscall_setup_audio(riscv_t *rv);
 void syscall_control_audio(riscv_t *rv);
 
-/* Tear down the SDL window and mixer. Called when the guest exits through the
- * built-in exit syscall, and when the UART sees ctrl-c.
+/* Release guest resources and subsystem references, and reset guest queues.
+ * Safe even if the guest never initialized SDL or cleanup already ran.
  */
 void sdl_video_audio_cleanup(void);
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "visibility.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/time.h>
@@ -176,7 +178,7 @@ typedef struct {
  * Required before any other call on storage that is not already zeroed,
  * because the generation stamps are only meaningful against a known epoch.
  */
-void set_init(set_t *set);
+RV_T2C_EXPORT void set_init(set_t *set);
 
 /**
  * set_reset - empty a set
@@ -204,11 +206,11 @@ bool set_probe(set_t *set, rv_hash_key_t key);
  *
  * Returns false for duplicates. Aborts if the target bucket is full.
  */
-bool set_add(set_t *set, rv_hash_key_t key);
+RV_T2C_EXPORT bool set_add(set_t *set, rv_hash_key_t key);
 
 /**
  * set_has - check whether the element exist in the set or not
  * @set: a pointer points to target set
  * @key: the key of the inserted entry
  */
-bool set_has(set_t *set, rv_hash_key_t key);
+RV_T2C_EXPORT bool set_has(set_t *set, rv_hash_key_t key);

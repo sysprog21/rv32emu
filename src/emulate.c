@@ -1121,17 +1121,18 @@ static bool has_loops = false;
 static uint32_t probe_tick;
 #endif
 
-#if RV32_HAS(SYSTEM_MMIO)
 void rv_reset_dispatcher_state(void)
 {
 #if !RV32_HAS(JIT)
     need_clear_block_map = false;
 #endif
     is_branch_taken = false;
+#if RV32_HAS(SYSTEM)
     reloc_enable_mmu_jalr_addr = 0;
     reloc_enable_mmu = false;
     need_retranslate = false;
     need_handle_signal = false;
+#endif
     prev = NULL;
     last_pc = 0;
 #if RV32_HAS(JIT)
@@ -1139,7 +1140,6 @@ void rv_reset_dispatcher_state(void)
     has_loops = false;
 #endif
 }
-#endif
 
 /* Wasm helpers execute detached instructions outside rv_step. Start a fresh
  * interruption scope without clearing a marker between an AMO's accesses.
@@ -4046,6 +4046,7 @@ void t2c_interpret_block(riscv_t *rv)
     if (!block) {
         rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
                      rv->PC);
+        PRIV(rv)->exit_code = EXIT_FAILURE;
         rv->halt = true;
         return;
     }
@@ -4272,7 +4273,7 @@ void rv_step(void *arg)
 
     /* A reboot starts rv_step again with the reset guest's cycle counter. */
     const uint64_t cycles_target = rv->csr_cycle + cycles;
-#if RV32_HAS_PACKED_TAIL || RV32_HAS(SYSTEM)
+#if RV32_HAS_PACKED_TAIL || RV32_HAS(SYSTEM) || RV32_HAS(JIT)
     rv->branch_chain_cycle_target = cycles_target;
 #endif
 #if RV32_HAS_PACKED_TAIL
@@ -4439,6 +4440,7 @@ void rv_step(void *arg)
 #endif
             rv_log_fatal("Failed to allocate or translate block at PC=0x%08x",
                          rv->PC);
+            PRIV(rv)->exit_code = EXIT_FAILURE;
             rv->halt = true;
 #if RV32_HAS_PACKED_TAIL
             rv->branch_chain_cycle_target = 0;

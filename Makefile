@@ -65,6 +65,13 @@ CFLAGS = -std=gnu11 $(KCONFIG_CFLAGS) -Wall -Wextra -Werror
 # (void), which would disable argument checking.
 CFLAGS += -Wmissing-prototypes -Wstrict-prototypes
 CFLAGS += -Wno-unused-label -include src/common.h -Isrc/ $(CFLAGS_NO_CET)
+# Internal cross-TU symbols must not become host DSO exports. WebAssembly
+# retains its explicit Emscripten export configuration.
+NATIVE_VISIBILITY :=
+ifneq ($(CC_IS_EMCC),1)
+NATIVE_VISIBILITY := -fvisibility=hidden
+CFLAGS += $(NATIVE_VISIBILITY)
+endif
 # Counter-only builds are diagnostic artifacts, not performance measurements.
 T1C_STATS ?= 0
 CFLAGS += -DRV32_T1C_STATS=$(T1C_STATS)
@@ -352,7 +359,8 @@ EFFECTIVE_CONFIG_VARS := \
 	CONFIG_ROOTFS_EXT4 \
 	MEM_START MEM_SIZE DTB_SIZE INITRD_SIZE USER_MEM_SIZE \
 	INITRD_ACTUAL_BYTES REAL_MEM_SIZE REAL_DTB_SIZE REAL_INITRD_SIZE \
-	VLEN SDL2_MIXER_USE_DYNAMIC JIT_DISABLE_BMI2 JIT_WASM_PROFILE T1C_STATS
+	VLEN SDL2_MIXER_USE_DYNAMIC JIT_DISABLE_BMI2 JIT_WASM_PROFILE T1C_STATS \
+	NATIVE_VISIBILITY
 
 ifeq ($(CONFIG_EXT_F),y)
 $(OBJS): $(SOFTFLOAT_LIB)
@@ -452,13 +460,15 @@ all: $(DTB_DEPS) $(BIN)
 include mk/tools.mk
 include mk/riscv-arch-test.mk
 include mk/tests.mk
+include mk/library.mk
 
 tool: $(TOOLS_BIN)
 
 # Clean Targets
 clean:
 	$(VECHO) "Cleaning... "
-	$(Q)$(RM) $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) \
+	$(Q)$(RM) $(LIBRARY_CLEAN_FILES) \
+	    $(BIN) $(OBJS) $(DEV_OBJS_ALL) $(BUILD_DTB) $(BUILD_DTB2C) \
 	    $(SRC_OBJS_ALL) $(SRC_OBJS_ALL:%=%.d) \
 	    $(HIST_BIN) $(HIST_OBJS) $(deps) $(DEV_DEPS_ALL) $(WEB_FILES) \
 	    $(CACHE_OUT) $(EFFECTIVE_CONFIG_STAMP) $(VIRTIO_NET_CLEAN_FILES) \

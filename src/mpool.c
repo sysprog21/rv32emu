@@ -40,7 +40,7 @@ typedef struct mpool {
     area_t area;
 } mpool_t;
 
-/* Allocate page-aligned memory via mmap (demand-paged) or malloc fallback */
+/* Allocate an arena with demand paging when mmap is available. */
 static void *mem_arena(size_t sz)
 {
     void *p;
@@ -60,11 +60,17 @@ static void *mem_arena(size_t sz)
     return p;
 }
 
-/* Thread an arena into a NULL-terminated free list and return its head. Pool
- * creation and extension build the list identically; keeping it in one place is
- * what stops the two copies from drifting apart. Requires chunk_count >= 1,
- * otherwise the loop bound underflows.
- */
+static void free_arena(void *p, size_t size)
+{
+#if HAVE_MMAP
+    munmap(p, size);
+#else
+    (void) size;
+    free(p);
+#endif
+}
+
+/* Build a free list for an arena containing at least one slot. */
 static memchunk_t *build_freelist(char *p, size_t chunk_count, size_t slot_size)
 {
     assert(chunk_count);
@@ -143,7 +149,7 @@ static void *mpool_extend(mpool_t *mp)
         goto fail_area;
 
     new_area->mapped = p;
-    new_area->next = NULL;
+    new_area->next = mp->area.next;
     size_t chunk_count = pool_size / mp->slot_size;
 
     /* Only reached with the pool drained, so no live free list is lost here. */
@@ -151,29 +157,13 @@ static void *mpool_extend(mpool_t *mp)
     mp->free_chunk_head = build_freelist(p, chunk_count, mp->slot_size);
     mp->chunk_count += chunk_count;
 
-    /* Append to area list */
-    area_t *cur_area = &mp->area;
-    while (cur_area->next)
-        cur_area = cur_area->next;
-    cur_area->next = new_area;
+    mp->area.next = new_area;
 
     return p;
 
 fail_area:
-#if HAVE_MMAP
-    munmap(p, pool_size);
-#else
-    free(p);
-#endif
+    free_arena(p, pool_size);
     return NULL;
-}
-
-FORCE_INLINE void *mpool_alloc_helper(mpool_t *mp)
-{
-    char *ptr = (char *) mp->free_chunk_head + sizeof(memchunk_t);
-    mp->free_chunk_head = mp->free_chunk_head->next;
-    mp->chunk_count--;
-    return ptr;
 }
 
 void *mpool_alloc(mpool_t *mp)
@@ -182,17 +172,17 @@ void *mpool_alloc(mpool_t *mp)
         return NULL;
     if (!mp->chunk_count && !mpool_extend(mp))
         return NULL;
-    return mpool_alloc_helper(mp);
+    memchunk_t *chunk = mp->free_chunk_head;
+    mp->free_chunk_head = chunk->next;
+    mp->chunk_count--;
+    return (char *) chunk + sizeof(memchunk_t);
 }
 
 void *mpool_calloc(mpool_t *mp)
 {
-    if (!mp)
-        return NULL;
-    if (!mp->chunk_count && !mpool_extend(mp))
-        return NULL;
-    char *ptr = mpool_alloc_helper(mp);
-    memset(ptr, 0, mp->chunk_size);
+    void *ptr = mpool_alloc(mp);
+    if (ptr)
+        memset(ptr, 0, mp->chunk_size);
     return ptr;
 }
 
@@ -210,21 +200,12 @@ void mpool_destroy(mpool_t *mp)
 {
     if (!mp)
         return;
-#if HAVE_MMAP
     size_t mem_size = mp->page_count * getpagesize();
     for (area_t *cur = &mp->area, *tmp; cur; cur = tmp) {
         tmp = cur->next;
-        munmap(cur->mapped, mem_size);
+        free_arena(cur->mapped, mem_size);
         if (cur != &mp->area)
             free(cur);
     }
-#else
-    for (area_t *cur = &mp->area, *tmp; cur; cur = tmp) {
-        tmp = cur->next;
-        free(cur->mapped);
-        if (cur != &mp->area)
-            free(cur);
-    }
-#endif
     free(mp);
 }

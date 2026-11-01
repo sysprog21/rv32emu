@@ -1,0 +1,68 @@
+name: Build Buildroot toolchain
+
+# Rebuild the riscv32 glibc cross toolchain when the Buildroot version changes,
+# for use as the external toolchain in assets/system/configs/buildroot.config.
+#
+# main.yml calls this on every push and pull request, hands the toolchain to
+# build-linux-artifacts.yml as a workflow artifact, and publishes it once the
+# Linux image built with it boots. A manual run only rebuilds the toolchain
+# and uploads it as an artifact; it never publishes, so every release has
+# passed the boot tests in main.yml.
+
+on:
+  workflow_call:
+    outputs:
+      built:
+        value: ${{ jobs.build-buildroot-toolchain.outputs.built }}
+  workflow_dispatch:
+
+concurrency:
+  group: build-buildroot-toolchain-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-buildroot-toolchain:
+    timeout-minutes: 120  # binutils + gcc + glibc from scratch
+    runs-on: ubuntu-24.04
+    outputs:
+      built: ${{ steps.detect.outputs.changed }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Detect toolchain change
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base="$BASE_SHA"
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="HEAD^"
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || \
+             git diff --name-only "$base" HEAD -- \
+               assets/system/configs/buildroot-toolchain.config \
+               tools/build-buildroot-toolchain.sh \
+               .github/workflows/build-buildroot-toolchain.yml | grep -q . || \
+             git diff "$base" HEAD -- mk/external.mk | grep -qE '^[+-]BUILDROOT_VERSION\b'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install dependencies
+        if: steps.detect.outputs.changed == 'true'
+        run: .ci/apt-install.sh build-essential bison flex git
+      - name: Build Buildroot toolchain
+        if: steps.detect.outputs.changed == 'true'
+        run: make build-buildroot-toolchain
+      - name: Upload Buildroot toolchain artifact
+        if: steps.detect.outputs.changed == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: buildroot-toolchain-prebuilt
+          path: /tmp/buildroot-toolchain-output/images/riscv32-buildroot-linux-gnu_sdk-buildroot.tar.gz

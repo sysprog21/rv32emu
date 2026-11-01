@@ -241,7 +241,7 @@ check_url()
 # Fetch latest release tag from rv32emu-prebuilt repository
 # Usage: fetch_latest_release <artifact_type> [max_retries]
 # Arguments:
-#   artifact_type: One of "ELF" or "Linux-Image"
+#   artifact_type: One of "ELF", "Linux-Image" or "Buildroot-Toolchain"
 #   max_retries: Maximum retry attempts (default: 3, must be >= 1)
 # Environment:
 #   GH_TOKEN: GitHub token for authenticated API access (optional but recommended)
@@ -259,9 +259,9 @@ fetch_latest_release()
 
     # Validate artifact type
     case "$artifact_type" in
-        ELF | Linux-Image) ;;
+        ELF | Linux-Image | Buildroot-Toolchain) ;;
         *)
-            print_error "Invalid artifact type: $artifact_type (expected: ELF or Linux-Image)" >&2
+            print_error "Invalid artifact type: $artifact_type (expected: ELF, Linux-Image or Buildroot-Toolchain)" >&2
             return 1
             ;;
     esac

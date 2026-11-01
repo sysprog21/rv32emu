@@ -37,10 +37,20 @@ jobs:
               Dockerfile
               Makefile
 
-  build-linux-image:
+  build-buildroot-toolchain:
     needs: [detect-code-related-file-changes]
     if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    uses: ./.github/workflows/build-buildroot-toolchain.yml
+    secrets: inherit
+
+  # The Linux image is built with the external toolchain, so waits for a
+  # rebuilt one and uses it from this run instead of the prebuilt one
+  build-linux-image:
+    needs: [detect-code-related-file-changes, build-buildroot-toolchain]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
     uses: ./.github/workflows/build-linux-artifacts.yml
+    with:
+      toolchain-artifact: ${{ needs.build-buildroot-toolchain.outputs.built == 'true' }}
     secrets: inherit
 
   # Emscripten output is platform independent, so it is built once on x64
@@ -581,6 +591,33 @@ jobs:
         run: |
           ${{ github.workspace }}/.ci/publish-prebuilt.sh Linux-Image \
             rv32emu-linux-image-prebuilt.tar.gz sha1sum-linux-image
+
+  publish-buildroot-toolchain:
+    needs:
+      - build-buildroot-toolchain
+      - build-linux-image
+      - boot-tests-x64
+    if: >-
+      github.repository == 'sysprog21/rv32emu' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master' &&
+      needs.build-buildroot-toolchain.outputs.built == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Download Buildroot toolchain artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: buildroot-toolchain-prebuilt
+          path: /tmp
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RV32EMU_PREBUILT_TOKEN }}
+        working-directory: /tmp
+        run: |
+          ${{ github.workspace }}/.ci/publish-prebuilt.sh Buildroot-Toolchain \
+            riscv32-buildroot-linux-gnu_sdk-buildroot.tar.gz
 
   macOS-arm64-feature-disable:
     name: macOS ${{ matrix.compiler }} feature disable

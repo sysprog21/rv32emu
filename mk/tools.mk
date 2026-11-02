@@ -49,6 +49,11 @@ build-linux-image: $(LINUX_IMAGE_SRC)
 	$(Q)./tools/build-linux-image.sh
 	$(Q)$(PRINTF) "Build done.\n"
 
+# Build the static prebuilt Buildroot toolchain used as an external toolchain
+build-buildroot-toolchain: $(BUILDROOT_DATA)
+	$(Q)./tools/build-buildroot-toolchain.sh
+	$(Q)$(PRINTF) "Build done.\n"
+
 # Code Formatting (tool detection deferred to recipe)
 # Uses find -print0 | xargs -0 for safe handling of paths with special characters
 format:
@@ -77,6 +82,6 @@ format:
 	find . \( $$PRUNE_ARGS \) -prune -o \( -name '*.html' -o -name '*.js' \) -print0 | xargs -0 $$NPX prettier --write --log-level silent
 	$(Q)$(call notice, All files formatted.)
 
-.PHONY: build-linux-image format
+.PHONY: build-linux-image build-buildroot-toolchain format
 
 endif # _MK_TOOLS_INCLUDED

@@ -250,9 +250,26 @@ EOF
     do_patch_quake
 }
 
+# Use custom prebuilt external toolchain if BUILDROOT_TOOLCHAIN_URL is set,
+# otherwise the latest one prebuilt at rv32emu-prebuilt
+#
+# Buildroot does not switch toolchains in an existing build;
+# run "make clean" in /tmp/buildroot and remove /tmp/buildroot/dl/toolchain-external-custom/riscv32-buildroot-linux-gnu_sdk-buildroot.tar.gz
+# before using a different one.
+function do_toolchain_url
+{
+    if [ -z "${BUILDROOT_TOOLCHAIN_URL:-}" ]; then
+        local tag
+        tag=$(fetch_latest_release Buildroot-Toolchain) || exit 1
+        BUILDROOT_TOOLCHAIN_URL="https://github.com/sysprog21/rv32emu-prebuilt/releases/download/${tag}/riscv32-buildroot-linux-gnu_sdk-buildroot.tar.gz"
+    fi
+    echo "BR2_TOOLCHAIN_EXTERNAL_URL=\"${BUILDROOT_TOOLCHAIN_URL}\"" >> ${SRC_DIR}/buildroot/.config
+}
+
 function do_buildroot
 {
     cp -f assets/system/configs/buildroot.config ${SRC_DIR}/buildroot/.config
+    do_toolchain_url
     cp -f assets/system/configs/busybox.config ${SRC_DIR}/buildroot/busybox.config
     # Otherwise, the error below raises:
     #   You seem to have the current working directory in your

@@ -2,6 +2,14 @@ name: Build Linux artifact
 
 on:
   workflow_call:
+    inputs:
+      toolchain-artifact:
+        description: >
+          Which Buildroot toolchain builds the Linux image. true: the one just
+          rebuilt in this workflow run (buildroot-toolchain-prebuilt artifact).
+          false: the latest one published to rv32emu-prebuilt.
+        type: boolean
+        default: false
     outputs:
       built:
         value: ${{ jobs.detect-file-change.outputs.has_changed_linux_image_version }}
@@ -39,7 +47,13 @@ jobs:
           ANY_MODIFIED: ${{ steps.test-linux-image-version-change.outputs.any_modified }}
           CHANGED_FILES: ${{ steps.test-linux-image-version-change.outputs.all_changed_files }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          TOOLCHAIN_ARTIFACT: ${{ inputs.toolchain-artifact }}
         run: |
+          # A new toolchain always needs a new image built with it.
+          if [ "$TOOLCHAIN_ARTIFACT" = "true" ]; then
+            echo "has_changed_linux_image_version=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$ANY_MODIFIED" != "true" ]; then
             echo "has_changed_linux_image_version=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -73,7 +87,20 @@ jobs:
           submodules: 'true'
       - name: Install dependencies
         run: .ci/apt-install.sh build-essential bison flex git
+      - name: Download Buildroot toolchain from workflow run
+        if: inputs.toolchain-artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: buildroot-toolchain-prebuilt
+          path: /tmp/buildroot-toolchain-prebuilt
+      - name: Export workflow Buildroot toolchain URL
+        if: inputs.toolchain-artifact
+        run: echo "BUILDROOT_TOOLCHAIN_URL=file:///tmp/buildroot-toolchain-prebuilt/riscv32-buildroot-linux-gnu_sdk-buildroot.tar.gz" >> "$GITHUB_ENV"
       - name: Build Linux image
+        env:
+          # Lets tools/build-linux-image.sh look up the published toolchain
+          # without hitting the anonymous API rate limit.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           make build-linux-image
           make system_defconfig

@@ -73,8 +73,8 @@ error_msg = $(PRINTF) "$(RED)$(strip $1)$(NC)\n"
 # check-deploy-webui runs a host-side test that builds its own .config.
 CONFIG_TARGETS := config menuconfig defconfig oldconfig savedefconfig \
                   clean cleanconfig distclean env-check artifact \
-                  fetch-checksum build-linux-image check-decoder \
-                  check-deploy-webui
+                  fetch-checksum build-linux-image build-buildroot-toolchain \
+                  check-decoder check-deploy-webui
 
 # Targets where we can skip expensive dependency detection (pkg-config, llvm-config, etc.)
 # This speeds up 'make clean', etc. significantly

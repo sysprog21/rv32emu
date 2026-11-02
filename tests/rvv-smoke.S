@@ -107,6 +107,12 @@ narrow16_b:
 wide32_src:
     .word 0x00008010, 0x0001ff00
 
+borrow32_lhs:
+    .word 0x00000000, 0x00000005, 0xffffffff, 0xffffffff
+
+borrow32_rhs:
+    .word 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
+
 mac_src_a:
     .byte 0x02, 0x03, 0x04, 0x05
 
@@ -889,6 +895,26 @@ _start:
     vsm.v v13, (a1)
     lbu t1, 0(a1)
     assert_reg_imm t1, 0xf9, fail_vmsbc
+
+    # SEW=32 borrow-in: rhs = 0xffffffff plus a borrow-in of 1 must not
+    # wrap to 0. v0 = 0x05 gives elements 0 and 2 a borrow-in:
+    #   0 - (0xffffffff + 1)          -> borrow 1
+    #   5 - 0xffffffff                -> borrow 1
+    #   0xffffffff - (0xffffffff + 1) -> borrow 1
+    #   0xffffffff - 0xffffffff       -> borrow 0
+    # Mask tail bits are agnostic, so only the low 4 bits are checked.
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, borrow32_lhs
+    vle32.v v10, (a1)
+    la a1, borrow32_rhs
+    vle32.v v11, (a1)
+    vmsbc.vvm v13, v10, v11, v0
+    la a1, borrow_mask_out
+    vsm.v v13, (a1)
+    lbu t1, 0(a1)
+    andi t1, t1, 0x0f
+    assert_reg_imm t1, 0x07, fail_vmsbc32
+    vsetvli t0, a0, e8, m1, tu, mu
 
     la a1, shift_src
     vle8.v v10, (a1)
@@ -2042,6 +2068,9 @@ fail_vfwredusumf:
     j write_and_exit_fail
 fail_fractional:
     li a3, 0xf0
+    j write_and_exit_fail
+fail_vmsbc32:
+    li a3, 0xf1
     j write_and_exit_fail
 
 write_and_exit_fail:

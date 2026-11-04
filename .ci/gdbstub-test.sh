@@ -34,9 +34,11 @@ tmpfile=/tmp/rv32emu-gdbstub.$PID
 
 # Use main() function addresses that are identical across platforms:
 # - 0x100e0: main entry (addi sp,sp,-16)
+# - 0x100e4: sw ra,12(sp)
 # - 0x100e8: jal run_puzzle (call to puzzle solver)
-# - 0x100f0: li a0,0 (after run_puzzle returns, set exit code)
-breakpoints=(0x100e0 0x100e8 0x100f0)
+# All sit before run_puzzle runs, so the watchpoint set afterwards still sees
+# the first write to kount.
+breakpoints=(0x100e0 0x100e4 0x100e8)
 bkpt_count=${#breakpoints[@]}
 OPTS+="-ex 'file build/riscv32/puzzle' "
 OPTS+="-ex 'target remote :1234' "
@@ -52,6 +54,12 @@ for ((i = 1; i <= $bkpt_count; i++)); do
 done
 OPTS+="-ex 'stepi' "
 OPTS+="-ex 'stepi' "
+# Exercise a data watchpoint: stop on the first write that changes kount,
+# then drop it so the final continue runs the program to completion.
+# The prebuilt puzzle carries no DWARF, so give GDB the type explicitly.
+OPTS+="-ex 'watch *(int *)&kount' "
+OPTS+="-ex 'continue' "
+OPTS+="-ex 'delete' "
 OPTS+="-ex 'continue' "
 
 eval "${GDB} --batch ${OPTS}" > ${tmpfile}
@@ -64,6 +72,12 @@ for ((i = 1; i <= $bkpt_count; i++)); do
         exit 1 # Fail
     fi
 done
+
+# check the data watchpoint fired on the first write that changed kount
+if ! grep -qi "watchpoint .*kount" ${tmpfile} \
+    || ! grep -q "New value = 1" ${tmpfile}; then
+    exit 1 # Fail
+fi
 
 # Pass and wait
 wait $PID

@@ -138,6 +138,7 @@ static inline bool rv_is_interrupt(riscv_t *rv)
 static bool rv_debug_should_stop(riscv_t *rv)
 {
     return rv_has_halted(rv) || rv_is_interrupt(rv) ||
+           rv->watchpoints.triggered ||
            breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv));
 }
 
@@ -175,6 +176,7 @@ static gdb_action_t rv_cont(void *args)
     /* Loop, since a guest reboot restarts the hart coroutine and returns here
      * before any stop condition holds.
      */
+    rv->watchpoints.triggered = false;
     rv->debug_continue = true;
     while (!rv_debug_should_stop(rv))
         rv_debug_resume(rv);
@@ -191,27 +193,57 @@ static gdb_action_t rv_stepi(void *args)
     riscv_t *rv = (riscv_t *) args;
     assert(rv);
 
+    rv->watchpoints.triggered = false;
     rv_debug_resume(rv);
     return ACT_RESUME;
 }
 
-static bool rv_set_bp(void *args, size_t addr, bp_type_t type)
+static int rv_set_bp(void *args, size_t addr, size_t len, bp_type_t type)
 {
     riscv_t *rv = (riscv_t *) args;
-    if (type != BP_SOFTWARE)
-        return false;
 
-    return breakpoint_map_insert(rv->breakpoint_map, addr);
+    switch (type) {
+    case BP_SOFTWARE:
+    case BP_HARDWARE:
+        return breakpoint_map_insert(rv->breakpoint_map, addr);
+    case WP_WRITE:
+    case WP_READ:
+    case WP_ACCESS:
+        return watchpoint_set_add(&rv->watchpoints, addr, len, type);
+    default:
+        return ENOTSUP;
+    }
 }
 
-static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
+static int rv_del_bp(void *args, size_t addr, size_t len, bp_type_t type)
 {
     riscv_t *rv = (riscv_t *) args;
-    if (type != BP_SOFTWARE)
+
+    switch (type) {
+    case BP_SOFTWARE:
+    case BP_HARDWARE:
+        return breakpoint_map_del(rv->breakpoint_map, addr);
+    case WP_WRITE:
+    case WP_READ:
+    case WP_ACCESS:
+        return watchpoint_set_del(&rv->watchpoints, addr, len, type);
+    default:
+        return ENOTSUP;
+    }
+}
+
+/* GDB only treats a stop as a watchpoint hit when the stop reply names the
+ * triggering address, so hand back the armed watchpoint's base and consume
+ * the flag: one stop per hit. */
+static bool rv_wp_hit(void *args, size_t *addr, bp_type_t *type)
+{
+    riscv_t *rv = (riscv_t *) args;
+    riscv_word_t hit_addr;
+
+    if (!watchpoint_set_take_hit(&rv->watchpoints, &hit_addr, type))
         return false;
 
-    /* When there is no matched breakpoint, no further action is taken */
-    breakpoint_map_del(rv->breakpoint_map, addr);
+    *addr = hit_addr;
     return true;
 }
 
@@ -233,5 +265,6 @@ const struct target_ops gdbstub_ops = {
     .stepi = rv_stepi,
     .set_bp = rv_set_bp,
     .del_bp = rv_del_bp,
+    .wp_hit = rv_wp_hit,
     .on_interrupt = rv_on_interrupt,
 };

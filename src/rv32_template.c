@@ -330,12 +330,12 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
  * In SYSTEM mode, use io callbacks for MMU/TLB handling.
  */
 #if !RV32_HAS(SYSTEM)
-#define MEM_READ_W(rv, addr) ram_read_w(rv, addr)
-#define MEM_READ_S(rv, addr) ram_read_s(rv, addr)
-#define MEM_READ_B(rv, addr) ram_read_b(rv, addr)
-#define MEM_WRITE_W(rv, addr, val) ram_write_w(rv, addr, val)
-#define MEM_WRITE_S(rv, addr, val) ram_write_s(rv, addr, val)
-#define MEM_WRITE_B(rv, addr, val) ram_write_b(rv, addr, val)
+#define RAW_MEM_READ_W(rv, addr) ram_read_w(rv, addr)
+#define RAW_MEM_READ_S(rv, addr) ram_read_s(rv, addr)
+#define RAW_MEM_READ_B(rv, addr) ram_read_b(rv, addr)
+#define RAW_MEM_WRITE_W(rv, addr, val) ram_write_w(rv, addr, val)
+#define RAW_MEM_WRITE_S(rv, addr, val) ram_write_s(rv, addr, val)
+#define RAW_MEM_WRITE_B(rv, addr, val) ram_write_b(rv, addr, val)
 #else
 /* A page fault runs the guest's trap handler inside the access. Store the
  * handler's running cycle count first, so that the trap handler counts on from
@@ -408,27 +408,49 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
             MEM_WRITE_CYCLES((rv)->io.mem_##fn(rv, addr_, value_));         \
         }                                                                   \
     } while (0)
-#define MEM_READ_W(rv, addr) MEM_SYSTEM_READ(rv, addr, uint32_t, read_w)
-#define MEM_READ_S(rv, addr) MEM_SYSTEM_READ(rv, addr, uint16_t, read_s)
-#define MEM_READ_B(rv, addr) MEM_SYSTEM_READ(rv, addr, uint8_t, read_b)
-#define MEM_WRITE_W(rv, addr, val) \
+#define RAW_MEM_READ_W(rv, addr) MEM_SYSTEM_READ(rv, addr, uint32_t, read_w)
+#define RAW_MEM_READ_S(rv, addr) MEM_SYSTEM_READ(rv, addr, uint16_t, read_s)
+#define RAW_MEM_READ_B(rv, addr) MEM_SYSTEM_READ(rv, addr, uint8_t, read_b)
+#define RAW_MEM_WRITE_W(rv, addr, val) \
     MEM_SYSTEM_WRITE(rv, addr, val, uint32_t, write_w)
-#define MEM_WRITE_S(rv, addr, val) \
+#define RAW_MEM_WRITE_S(rv, addr, val) \
     MEM_SYSTEM_WRITE(rv, addr, val, uint16_t, write_s)
-#define MEM_WRITE_B(rv, addr, val) \
+#define RAW_MEM_WRITE_B(rv, addr, val) \
     MEM_SYSTEM_WRITE(rv, addr, val, uint8_t, write_b)
 #else
-#define MEM_READ_W(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_w(rv, addr))
-#define MEM_READ_S(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_s(rv, addr))
-#define MEM_READ_B(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_b(rv, addr))
-#define MEM_WRITE_W(rv, addr, val) \
+#define RAW_MEM_READ_W(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_w(rv, addr))
+#define RAW_MEM_READ_S(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_s(rv, addr))
+#define RAW_MEM_READ_B(rv, addr) MEM_READ_CYCLES((rv)->io.mem_read_b(rv, addr))
+#define RAW_MEM_WRITE_W(rv, addr, val) \
     MEM_WRITE_CYCLES((rv)->io.mem_write_w(rv, addr, val))
-#define MEM_WRITE_S(rv, addr, val) \
+#define RAW_MEM_WRITE_S(rv, addr, val) \
     MEM_WRITE_CYCLES((rv)->io.mem_write_s(rv, addr, val))
-#define MEM_WRITE_B(rv, addr, val) \
+#define RAW_MEM_WRITE_B(rv, addr, val) \
     MEM_WRITE_CYCLES((rv)->io.mem_write_b(rv, addr, val))
 #endif
 #endif
+
+/* Layer the GDB watchpoint check once over the raw accessors above, so
+ * RV_WP_* lives in exactly one place regardless of the SYSTEM/JIT variant.
+ */
+#define MEM_READ_W(rv, addr) (RV_WP_READ(rv, addr, 4), RAW_MEM_READ_W(rv, addr))
+#define MEM_READ_S(rv, addr) (RV_WP_READ(rv, addr, 2), RAW_MEM_READ_S(rv, addr))
+#define MEM_READ_B(rv, addr) (RV_WP_READ(rv, addr, 1), RAW_MEM_READ_B(rv, addr))
+#define MEM_WRITE_W(rv, addr, val)      \
+    do {                                \
+        RV_WP_WRITE(rv, addr, 4);       \
+        RAW_MEM_WRITE_W(rv, addr, val); \
+    } while (0)
+#define MEM_WRITE_S(rv, addr, val)      \
+    do {                                \
+        RV_WP_WRITE(rv, addr, 2);       \
+        RAW_MEM_WRITE_S(rv, addr, val); \
+    } while (0)
+#define MEM_WRITE_B(rv, addr, val)      \
+    do {                                \
+        RV_WP_WRITE(rv, addr, 1);       \
+        RAW_MEM_WRITE_B(rv, addr, val); \
+    } while (0)
 
 /* True when the access just performed raised a trap.
  *

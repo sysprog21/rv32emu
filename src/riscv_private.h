@@ -15,6 +15,18 @@
 #if RV32_HAS(GDBSTUB)
 #include "breakpoint.h"
 #include "mini-gdbstub/include/gdbstub.h"
+
+#define RV_WP_READ(rv, addr, len)                                         \
+    (unlikely((rv)->watchpoints.count)                                    \
+         ? watchpoint_set_check(&(rv)->watchpoints, (addr), (len), false) \
+         : (void) 0)
+#define RV_WP_WRITE(rv, addr, len)                                       \
+    (unlikely((rv)->watchpoints.count)                                   \
+         ? watchpoint_set_check(&(rv)->watchpoints, (addr), (len), true) \
+         : (void) 0)
+#else
+#define RV_WP_READ(rv, addr, len) ((void) 0)
+#define RV_WP_WRITE(rv, addr, len) ((void) 0)
 #endif
 #include "decode.h"
 #include "riscv.h"
@@ -661,8 +673,11 @@ struct riscv_internal {
      */
     bool debug_continue;
 
-    /* GDB instruction breakpoint */
+    /* GDB instruction breakpoints */
     breakpoint_map_t breakpoint_map;
+
+    /* GDB data watchpoints, tested on every guest load/store while debugging */
+    watchpoint_set_t watchpoints;
 
     /* The flag to notify interrupt from GDB client: it should be accessed by
      * atomic operation when starting the GDBSTUB.

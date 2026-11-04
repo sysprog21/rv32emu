@@ -223,7 +223,7 @@ $(GDBSTUB_LIB): src/mini-gdbstub/Makefile
 OBJS_EXT += gdbstub.o breakpoint.o
 CFLAGS += -D'GDBSTUB_COMM="$(GDBSTUB_COMM)"'
 LDFLAGS += $(GDBSTUB_LIB) -pthread
-gdbstub-test: $(BIN) artifact
+gdbstub-test: $(BIN)
 	$(Q).ci/gdbstub-test.sh && $(call notice, [OK])
 endif
 

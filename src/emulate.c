@@ -903,6 +903,7 @@ void rv_debug(riscv_t *rv)
     rv->debug_continue = false;
     rv->breakpoint_map = breakpoint_map_new();
     rv->is_interrupted = false;
+    rv_debug_wrap_io(rv);
 
 #ifdef SIGPIPE
     /* A GDB that hangs up without waiting for the reply (its "kill" command, or

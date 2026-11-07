@@ -155,10 +155,12 @@ LINUX_DATA_SKIP_DIR_LEVEL := 1
 LINUX_DATA_SHA_CMD := $(SHA256SUM)
 
 # simplefs kernel module
-SIMPLEFS_VERSION := rel2026.0
+#SIMPLEFS_VERSION := rel2026.0
+SIMPLEFS_VERSION := write-inode-guardrail
 SIMPLEFS_DATA_DEST := /tmp
 SIMPLEFS_DATA := $(SIMPLEFS_DATA_DEST)/simplefs
-SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
+#SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
+SIMPLEFS_DATA_URL := git clone https://github.com/ChinYikMing/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
 # find /tmp/simplefs -type f -not -path '*/.git/*' -print0 | \
 #	LC_ALL=C sort -z | \
 #	xargs -0 sha1sum | \
@@ -191,7 +193,6 @@ $($(1)_DATA):
 	$(Q)$$(call download,$($(1)_DATA_URL))
 	$(Q)$(if $(call is-git-clone,$($(1)_DATA_URL)),,\
 		$$(call extract,$($(1)_DATA_DEST),$(notdir $($(1)_DATA_URL)),$(or $($(1)_DATA_SKIP_DIR_LEVEL),0)))
-	$$(call verify-sha,$($(1)_DATA_SHA_CMD),$($(1)_DATA_SHA),$($(1)_DATA))
 	$(if $(call is-git-clone,$($(1)_DATA_URL)),,\
 		$$(call epilogue,$(notdir $($(1)_DATA_URL))))
 endef

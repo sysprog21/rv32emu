@@ -155,10 +155,10 @@ LINUX_DATA_SKIP_DIR_LEVEL := 1
 LINUX_DATA_SHA_CMD := $(SHA256SUM)
 
 # simplefs kernel module
-SIMPLEFS_VERSION := rel2026.0
+SIMPLEFS_VERSION := 0e948518cdd8e56d6d4d512312684d0de41e2c4b
 SIMPLEFS_DATA_DEST := /tmp
 SIMPLEFS_DATA := $(SIMPLEFS_DATA_DEST)/simplefs
-SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
+SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) --revision=$(SIMPLEFS_VERSION) --depth=1
 # find /tmp/simplefs -type f -not -path '*/.git/*' -print0 | \
 #	LC_ALL=C sort -z | \
 #	xargs -0 sha1sum | \

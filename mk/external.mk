@@ -155,16 +155,31 @@ LINUX_DATA_SKIP_DIR_LEVEL := 1
 LINUX_DATA_SHA_CMD := $(SHA256SUM)
 
 # simplefs kernel module
-SIMPLEFS_VERSION := rel2026.0
+SIMPLEFS_VERSION := 4f9e6dc2a2d1cdbe5a697ccb35c6c4d5c8926951
 SIMPLEFS_DATA_DEST := /tmp
 SIMPLEFS_DATA := $(SIMPLEFS_DATA_DEST)/simplefs
-SIMPLEFS_DATA_URL := git clone https://github.com/sysprog21/simplefs $(SIMPLEFS_DATA) -b $(SIMPLEFS_VERSION) --depth=1
+SIMPLEFS_REPO := https://github.com/sysprog21/simplefs
+# Pinned by commit hash. 'git clone --revision' needs git 2.49+, which stock
+# Ubuntu 24.04 (2.43), Debian 12 and Apple git lack. For older git, shallow
+# clone without checkout, then fetch and check out the pinned SHA (works on any
+# git version). On failure, remove the partial checkout so that the next make
+# invocation retries instead of using it.
+GIT_HAS_CLONE_REVISION := $(shell git --version 2>/dev/null | \
+	awk '{ split($$3, v, "."); print ((v[1] > 2 || (v[1] == 2 && v[2] >= 49)) ? 1 : 0) }')
+ifeq ($(GIT_HAS_CLONE_REVISION),1)
+SIMPLEFS_DATA_URL := git clone $(SIMPLEFS_REPO) $(SIMPLEFS_DATA) --revision=$(SIMPLEFS_VERSION) --depth=1
+else
+SIMPLEFS_DATA_URL := git clone -q --depth=1 --no-checkout $(SIMPLEFS_REPO) $(SIMPLEFS_DATA) && \
+	git -C $(SIMPLEFS_DATA) fetch -q --depth=1 origin $(SIMPLEFS_VERSION) && \
+	git -C $(SIMPLEFS_DATA) checkout -q FETCH_HEAD || \
+	{ rm -rf $(SIMPLEFS_DATA); exit 1; }
+endif
 # find /tmp/simplefs -type f -not -path '*/.git/*' -print0 | \
 #	LC_ALL=C sort -z | \
 #	xargs -0 sha1sum | \
 #	LC_ALL=C sort | \
 #	sha1sum
-SIMPLEFS_DATA_SHA := f04a3044bc64195ae59cea064c4bf330132de269
+SIMPLEFS_DATA_SHA := 12cee9d0095fbdf4bfcdae407fd30ae11bbfacef
 SIMPLEFS_DATA_SHA_CMD := $(SHA1SUM)
 
 # U-Boot

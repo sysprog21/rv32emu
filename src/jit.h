@@ -249,6 +249,13 @@ struct jit_state {
     int n_blocks;
     struct jump *jumps;
     int n_jumps;
+#if RV32_T1C_STATS_ENABLED
+    /* Original guest instructions attempted by the current translation unit,
+     * including recursively translated successors. Reset before every retry.
+     */
+    uint64_t compile_insns;
+    uint32_t compile_blocks;
+#endif
     /* T1 links direct branches whether or not the interpreter has taken the
      * edge, and records a jump whose target is not compiled so that the
      * target's translation can patch it later. A target with an offline

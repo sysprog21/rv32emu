@@ -24,12 +24,14 @@
 #endif
 
 #include <assert.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 #include <cpuid.h>
@@ -6241,6 +6243,15 @@ static void translate_region(struct jit_state *state,
 {
     const struct region_node *node = &plan->node[index];
     block_t *block = node->block;
+#if RV32_T1C_STATS_ENABLED
+    /* The root was counted by translate_chained_block. Region copies have no
+     * offset-map entry, but their emitted instructions still cost time.
+     */
+    if (index) {
+        state->compile_insns += block->cycle_cost;
+        state->compile_blocks++;
+    }
+#endif
     rv_insn_t *tail = block->ir_tail, *previous = NULL;
     cur_block = block;
     if (!rv->jit_entry_cycles)
@@ -6532,6 +6543,10 @@ static void translate_chained_block(struct jit_state *state,
         return;
 
     offset_map_insert(state, block);
+#if RV32_T1C_STATS_ENABLED
+    state->compile_insns += block->cycle_cost;
+    state->compile_blocks++;
+#endif
 #if RV32_HAS(SYSTEM)
     state->priv_mode = block->priv_mode;
 #endif
@@ -6553,6 +6568,30 @@ static void translate_chained_block(struct jit_state *state,
     }
 }
 
+#if RV32_T1C_STATS_ENABLED
+/* Trace emission happens after the second timestamp, outside the sample. Failed
+ * attempts count all blocks whose emission started: the last block may be
+ * partial, so their instruction count is not a latency denominator.
+ */
+static void report_compile(const struct jit_state *state,
+                           uint32_t pc,
+                           const char *status,
+                           const struct timespec *start)
+{
+    struct timespec end;
+    if (clock_gettime(CLOCK_MONOTONIC, &end)) {
+        fputs("T1C_COMPILE clock_error=1\n", stderr);
+        return;
+    }
+    const uint64_t ns = (uint64_t) (end.tv_sec - start->tv_sec) * 1000000000 +
+                        end.tv_nsec - start->tv_nsec;
+    fprintf(stderr,
+            "T1C_COMPILE pc=%08x status=%s insns=%" PRIu64
+            " blocks=%u ns=%" PRIu64 "\n",
+            pc, status, state->compile_insns, state->compile_blocks, ns);
+}
+#endif
+
 bool jit_translate(riscv_t *rv, block_t *block)
 {
     T1C_COUNT(compile_requests, 1);
@@ -6565,7 +6604,20 @@ bool jit_translate(riscv_t *rv, block_t *block)
         block->hot = true;
         return true;
     }
+#if RV32_T1C_STATS_ENABLED
+    const char *compile_trace = getenv("RV32EMU_T1C_COMPILE_TRACE");
+    bool time_compile = compile_trace && !strcmp(compile_trace, "1");
+    struct timespec compile_start;
+#endif
 restart:
+#if RV32_T1C_STATS_ENABLED
+    state->compile_insns = 0;
+    state->compile_blocks = 0;
+    if (time_compile && clock_gettime(CLOCK_MONOTONIC, &compile_start)) {
+        fputs("T1C_COMPILE clock_error=1\n", stderr);
+        time_compile = false;
+    }
+#endif
     /* Only clear the portion that was used in the previous translation.
      * MAX_JUMPS is sized for the worst-case SYSTEM_MMIO fast path (1 MiB
      * with the bumped cap), so a blanket memset here turned out to be the
@@ -6592,6 +6644,10 @@ restart:
         jit_exit_write_mode();
 #endif
         code_cache_flush(state, rv);
+#if RV32_T1C_STATS_ENABLED
+        if (time_compile)
+            report_compile(state, block->pc_start, "retry", &compile_start);
+#endif
         goto restart;
     }
 
@@ -6604,6 +6660,10 @@ restart:
                          BLOCK_PRIV(block))) {
 #if defined(__APPLE__) && defined(__aarch64__)
         jit_exit_write_mode();
+#endif
+#if RV32_T1C_STATS_ENABLED
+        if (time_compile)
+            report_compile(state, block->pc_start, "failed", &compile_start);
 #endif
         return false;
     }
@@ -6628,6 +6688,10 @@ restart:
     /* Full barrier sequence to ensure instruction coherency. */
     __asm__ volatile("dsb ish" ::: "memory");
     __asm__ volatile("isb" ::: "memory");
+#endif
+#if RV32_T1C_STATS_ENABLED
+    if (time_compile)
+        report_compile(state, block->pc_start, "ok", &compile_start);
 #endif
     block->hot = true;
     return true;

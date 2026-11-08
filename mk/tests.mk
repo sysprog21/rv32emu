@@ -271,6 +271,9 @@ GUEST_ASM_CHECK_TARGETS += check-rotate-zero
 endif
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes check-t2c-load-x0
+ifeq ($(CONFIG_JIT)$(T1C_STATS),y1)
+GUEST_ASM_CHECK_TARGETS += check-t1c-compile-trace
+endif
 ifeq ($(CONFIG_JIT)$(T1C_STATS)$(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),y1yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-blocker-stats check-jit-blocker-stats-load \
 	check-jit-blocker-stats-store
@@ -604,6 +607,11 @@ check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-sto
 	$(Q)$(call guest-asm-build,jit-blocker-stats,rv32ia,$(BLOCKER_STATS_SUFFIX),$(BLOCKER_STATS_FLAGS))
 	$(Q)python3 tests/test-jit-blocker-stats.py $(BIN) $(OUT)/jit-blocker-stats$(BLOCKER_STATS_SUFFIX) \
 	    $(if $(BLOCKER_STATS_HEAD),--fused-head $(BLOCKER_STATS_HEAD) $(if $(filter y,$(CONFIG_MOP_FUSION)),--expect-fusion))
+
+.PHONY: check-t1c-compile-trace
+check-t1c-compile-trace: $(BIN) tests/register-loop.S tests/test-t1c-compile-trace.py | $(OUT)
+	$(Q)$(call guest-asm-build,register-loop,rv32i)
+	$(Q)python3 tests/test-t1c-compile-trace.py $(BIN) $(OUT)/register-loop
 
 .PHONY: check-t2c-load-x0
 check-t2c-load-x0: $(BIN) tests/t2c-load-x0.S tests/test-t2c-load-x0.py tests/jit_profile.py | $(OUT)

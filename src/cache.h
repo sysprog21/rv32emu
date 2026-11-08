@@ -54,6 +54,11 @@ void *cache_put(struct cache *cache, uint32_t key, void *value, uint32_t *freq);
  */
 void cache_free(struct cache *cache);
 
+#if RV32_HAS(JIT) && RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+/* Remove cache entries without changing the cache allocation or capacity. */
+void cache_clear(struct cache *cache);
+#endif
+
 typedef struct {
     void *value;
     uint32_t freq;

@@ -4310,6 +4310,17 @@ void rv_step(void *arg)
     unsigned wasm_dispatches = 0;
 #endif
 
+#if RV32_HAS(JIT) && RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+    /* A user FENCE.I ends the step (its handler returns false), so the code it
+     * retires is checked for only here, on entry, never per dispatch.
+     */
+    if (unlikely(rv->user_fence_pending)) {
+        rv_retire_user_code(rv);
+        set_reset(&pc_set);
+        has_loops = false;
+        prev = NULL;
+    }
+#endif
     /* loop until hitting the cycle target or hart is halted */
     while (rv->csr_cycle < cycles_target && !rv->halt) {
 #if RV32_HAS(ARCH_TEST) && RV32_HAS(JIT) && !RV32_HAS(SYSTEM)

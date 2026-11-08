@@ -374,6 +374,10 @@ static inline void jit_block_release(riscv_t *rv, block_t *block)
 bool jit_run_cached(riscv_t *rv);
 #endif
 bool jit_translate(riscv_t *rv, block_t *block);
+#if RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+/* Drop all native code for a user-mode FENCE.I. */
+void jit_flush_user(riscv_t *rv);
+#endif
 /* Release a block's IR records (defined in emulate.c). */
 void block_free_irs(riscv_t *rv, block_t *block);
 

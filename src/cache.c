@@ -418,20 +418,36 @@ void *cache_put(cache_t *cache, uint32_t key, void *value, uint32_t *freq)
     return replaced_value;
 }
 
-void cache_free(cache_t *cache)
+static void cache_free_entries(cache_t *cache)
 {
-    /* Free all live cache entries */
     cache_entry_t *entry, *safe;
     list_for_each_entry_safe (entry, safe, &cache->list, list)
         free(entry);
-    /* Free all ghost (evicted history) cache entries */
     list_for_each_entry_safe (entry, safe, &cache->ghost_list, list)
         free(entry);
     list_for_each_entry_safe (entry, safe, &cache->free_list, list)
         free(entry);
+}
+
+void cache_free(cache_t *cache)
+{
+    cache_free_entries(cache);
     free(cache->map.ht_list_head);
     free(cache);
 }
+
+#if RV32_HAS(JIT) && RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+void cache_clear(cache_t *cache)
+{
+    cache_free_entries(cache);
+    INIT_LIST_HEAD(&cache->list);
+    INIT_LIST_HEAD(&cache->ghost_list);
+    INIT_LIST_HEAD(&cache->free_list);
+    memset(cache->map.ht_list_head, 0,
+           ((size_t) 1 << cache->map_bits) * sizeof(*cache->map.ht_list_head));
+    cache->size = cache->ghost_list_size = 0;
+}
+#endif
 
 /*
  * FIXME: In system simulation, there might be several identical PC from

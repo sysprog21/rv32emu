@@ -162,6 +162,10 @@ EXPECTED_misalign-page-fault = misaligned page fault OK
 EXPECTED_fused-page-fault = fused page fault OK
 EXPECTED_amo-page-fault = AMO page fault OK
 EXPECTED_jit-fencei = FENCE.I made the rewrite visible OK
+EXPECTED_jit-fencei-rounds = FENCE.I rounds OK
+EXPECTED_jit-fencei-loop = FENCE.I loop OK
+EXPECTED_user-fence-align = user FENCE.I alignment OK
+EXPECTED_user-fence-counter = user FENCE.I counter OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
 EXPECTED_trace_match = trace matcher corpus passed
@@ -215,6 +219,8 @@ GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
+GUEST_ASM_M_FENCEI_WORKS := $(call guest-asm-arch-works,rv32im_zifencei)
+GUEST_ASM_FENCEI_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr_zifencei)
 GUEST_ASM_A_ZICSR_FENCEI_WORKS := \
     $(call guest-asm-arch-works,rv32ia_zicsr_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
@@ -315,17 +321,18 @@ ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-amo-page-fault
 endif
 endif
-# Every interpreter and the system JIT honor FENCE.I. User JIT invalidation
-# is pending; keep that limitation visible when its guest checks are selected.
+# Every interpreter and JIT honor FENCE.I. The loop guest multiplies.
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_FENCEI_WORKS),yy)
-ifeq ($(CONFIG_JIT),y)
-ifeq ($(CONFIG_SYSTEM),y)
-GUEST_ASM_CHECK_TARGETS += check-jit-fencei
-else
-$(info Skipping FENCE.I regression: user JIT code invalidation is unsupported; see docs/fencei.md)
+GUEST_ASM_CHECK_TARGETS += check-jit-fencei check-jit-fencei-rounds
+ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_FENCEI_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-fencei-loop
 endif
-else
-GUEST_ASM_CHECK_TARGETS += check-jit-fencei
+# These two read argc from the user stack and rely on the load-time ELF scan,
+# which exist only without system mode.
+ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_FENCEI_ZICSR_WORKS),yy)
+ifneq ($(CONFIG_SYSTEM),y)
+GUEST_ASM_CHECK_TARGETS += check-user-fence-align check-user-fence-counter
+endif
 endif
 endif
 # The jit-* programs assert tier-1 code generation, so they prove nothing when
@@ -641,6 +648,10 @@ $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,fused-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,amo-page-fault,rv32ia_zicsr))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
+$(eval $(call guest-asm-check-target,jit-fencei-rounds,rv32i_zifencei))
+$(eval $(call guest-asm-check-target,jit-fencei-loop,rv32im_zifencei))
+$(eval $(call guest-asm-check-target,user-fence-align,rv32i_zicsr_zifencei))
+$(eval $(call guest-asm-check-target,user-fence-counter,rv32i_zicsr_zifencei))
 
 # The program must stop at its first instruction page fault, reporting it and
 # failing, instead of retrying the fetch forever.

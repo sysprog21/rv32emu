@@ -865,7 +865,13 @@ RVOP(fencei, {
     }
     T1C_COUNT(fence_i_blocks, n_invalidated);
 #endif
-/* User JIT invalidation is unsupported; see docs/fencei.md. */
+#if RV32_HAS(JIT) && !RV32_HAS(SYSTEM)
+    /* The active interpreter handler still owns its decoded instruction. End
+     * the step instead: the next rv_step retires every block on entry, so no
+     * dispatch pays for a check.
+     */
+    rv->user_fence_pending = true;
+#endif
 #if !RV32_HAS(JIT)
     /* The active handler still owns its IR. Let the dispatcher retire it
      * before fetching another block, after any synchronous trap unwinds.
@@ -874,7 +880,7 @@ RVOP(fencei, {
 #endif
     rv->csr_cycle = cycle;
     rv->PC = PC;
-    return true;
+    return !(RV32_HAS(JIT) && !RV32_HAS(SYSTEM));
 })
 #endif
 

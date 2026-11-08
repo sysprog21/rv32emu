@@ -5327,6 +5327,15 @@ void jit_flush(riscv_t *rv)
 }
 #endif
 
+#if RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+void jit_flush_user(riscv_t *rv)
+{
+    T1C_COUNT(flushed_native_blocks,
+              ((struct jit_state *) rv->jit_state)->n_blocks);
+    code_cache_reset(rv->jit_state, rv, true);
+}
+#endif
+
 typedef void (*codegen_block_func_t)(struct jit_state *,
                                      riscv_t *,
                                      rv_insn_t *);

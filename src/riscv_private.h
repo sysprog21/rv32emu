@@ -406,6 +406,11 @@ typedef struct {
 /* clear all block in the block map */
 void block_map_clear(riscv_t *rv);
 
+#if RV32_HAS(JIT) && RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+/* Retire every decoded and native block after a guest FENCE.I. */
+void rv_retire_user_code(riscv_t *rv);
+#endif
+
 struct riscv_internal {
     bool halt; /**< indicate whether the core is halted */
 
@@ -592,6 +597,9 @@ struct riscv_internal {
 #else
     struct cache *block_cache;
     struct list_head block_list; /**< list of all translated blocks */
+#if RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+    bool user_fence_pending; /**< retire all code before the next dispatch */
+#endif
 #if RV32_HAS(T2C)
     void *aot_handle;
     void *aot_collector;

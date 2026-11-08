@@ -1783,6 +1783,13 @@ retry:;
     return true;
 }
 
+#if RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+void jit_flush_user(riscv_t *rv)
+{
+    wasm_flush_all(rv);
+}
+#endif
+
 #if RV32_HAS(SYSTEM)
 void jit_flush(riscv_t *rv)
 {

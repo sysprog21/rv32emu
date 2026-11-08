@@ -1307,6 +1307,40 @@ static inline void emit_alu32(struct jit_state *state, int op, int src, int dst)
 #endif
 }
 
+#if defined(__aarch64__)
+/* Encode v as an A64 32-bit logical immediate (N = 0): a run of ones rotated
+ * within an element of 2 to 32 bits that repeats across the word. Sets *bits to
+ * immr << 16 | imms << 10 and returns true, or returns false when v has no
+ * encoding (all zeros or ones never do).
+ */
+static bool a64_logical_imm32(uint32_t v, uint32_t *bits)
+{
+    if (v == 0 || v == UINT32_MAX)
+        return false;
+    unsigned e = 32;
+    while (e > 2) {
+        const unsigned h = e / 2;
+        const uint32_t m = (UINT32_C(1) << h) - 1;
+        if ((v & m) != ((v >> h) & m))
+            break;
+        e = h;
+    }
+    const uint64_t mask = (UINT64_C(1) << e) - 1;
+    const uint64_t x = v & mask;
+    const unsigned ones = __builtin_popcountll(x);
+    const uint64_t run = (UINT64_C(1) << ones) - 1;
+    for (unsigned r = 0; r < e; r++) {
+        if ((((x >> r) | (x << (e - r))) & mask) != run)
+            continue;
+        const uint32_t immr = (e - r) % e;
+        const uint32_t imms = ((~(e - 1) << 1) & 0x3f) | (ones - 1);
+        *bits = immr << 16 | imms << 10;
+        return true;
+    }
+    return false;
+}
+#endif
+
 static inline void emit_alu32_imm32(struct jit_state *state,
                                     int op UNUSED,
                                     int src,
@@ -1318,6 +1352,17 @@ static inline void emit_alu32_imm32(struct jit_state *state,
     emit_alu32(state, op, src, dst);
     emit4(state, imm);
 #elif defined(__aarch64__)
+    /* AND, ORR and EOR (immediate), 32-bit, by ModRM group 1 extension */
+    const uint32_t logical = src == 4   ? 0x12000000U
+                             : src == 1 ? 0x32000000U
+                             : src == 6 ? 0x52000000U
+                                        : 0;
+    uint32_t bits;
+    if (logical && a64_logical_imm32(imm, &bits)) {
+        emit_a64(state, logical | bits | (dst << 5) | dst);
+        set_dirty(dst, true);
+        return;
+    }
     switch (src) {
     case 0:
         emit_add_imm(state, false, false, dst, dst, imm);
@@ -4380,6 +4425,7 @@ static uintptr_t jit_indirect_target(riscv_t *rv,
 #if defined(__aarch64__) && !RV32_HAS(EXT_C)
 static void emit_jump_align_guard(struct jit_state *state, uint32_t pc);
 #endif
+
 
 /* Jump to the target in temp_reg, with every guest register written back but
  * rd when link >= 0: then link holds rd's new value, which a matching slot

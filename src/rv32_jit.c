@@ -283,7 +283,8 @@ GEN(jal, {
 GEN(jalr, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_mov(state, vm_reg[0], temp_reg);
-    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_ADD, temp_reg, ir->imm);
+    if (ir->imm)
+        emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_ADD, temp_reg, ir->imm);
     /* RISC-V spec: target address LSB is always cleared */
     emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, temp_reg, ~1U);
     /* Without C, a misaligned target traps before rd, which may alias rs1, is

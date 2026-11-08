@@ -2420,6 +2420,44 @@ void jit_misaligned_trap(riscv_t *rv, uint32_t addr, uint32_t flags)
         SET_CAUSE_AND_TVAL_THEN_TRAP(rv, LOAD_MISALIGNED, addr)
 }
 
+#if !RV32_HAS(EXT_C)
+static void jit_misaligned_branch(riscv_t *rv,
+                                  uint32_t branch_pc,
+                                  uint32_t target)
+{
+    T1C_COUNT(misaligned_branch_traps, 1);
+    rv->compressed = false;
+    rv->PC = branch_pc;
+    SET_CAUSE_AND_TVAL_THEN_TRAP(rv, INSN_MISALIGNED, target);
+}
+
+/* A JAL or JALR traps before retiring: the exception PC is the jump and the
+ * trap value is the misaligned target. The generated code has not written the
+ * link register.
+ */
+static void jit_misaligned_jump(riscv_t *rv, uint32_t jump_pc, uint32_t target)
+{
+    T1C_COUNT(misaligned_jal_traps, 1);
+    rv->compressed = false;
+    rv->PC = jump_pc;
+    SET_CAUSE_AND_TVAL_THEN_TRAP(rv, INSN_MISALIGNED, target)
+}
+
+/* Raise a misaligned transfer from pc to target through helper and leave,
+ * with every guest register already written back.
+ */
+static void emit_transfer_trap(struct jit_state *state,
+                               void (*helper)(riscv_t *, uint32_t, uint32_t),
+                               uint32_t pc,
+                               uint32_t target)
+{
+    emit_load_imm(state, parameter_reg[1], pc);
+    emit_load_imm(state, parameter_reg[2], target);
+    emit_call(state, (intptr_t) helper);
+    emit_exit(state);
+}
+#endif
+
 #if RV32_HAS(SYSTEM_MMIO)
 static uint32_t jit_mmio_read_wrapper(riscv_t *rv, uint32_t addr)
 {
@@ -4136,15 +4174,22 @@ static void encode_slot_pc(uint32_t mov[2], uint32_t pc)
 }
 #endif
 
-/* Emit a slot that branches to the translation of pc, or an empty one. */
+/* Emit a slot that branches to the translation of pc, or an empty one. A link
+ * register (link >= 0) holds rd's new value, which the slot stores only when it
+ * matches.
+ */
 static void emit_indirect_slot(struct jit_state *state,
                                struct indirect_site *site,
                                int slot,
                                uint32_t pc,
-                               uint32_t satp)
+                               uint32_t satp,
+                               int link,
+                               int rd)
 {
     const bool empty = pc == EMPTY_SLOT_PC;
 #if defined(__x86_64__)
+    assert(link < 0);
+    (void) rd;
     /* cmp temp, imm32; je rel32, which falls through until patched */
     emit_alu32_raw(state, 0x81, 7, temp_reg);
     site->imm_loc[slot] = state->offset;
@@ -4166,7 +4211,16 @@ static void emit_indirect_slot(struct jit_state *state,
     emit_a64(state, mov[0]);
     emit_a64(state, mov[1]);
     emit_addsub_register(state, false, AS_SUBS, RZ, temp_reg, R10);
-    emit_a64(state, 0x54000000U | (2 << 5) | COND_NE);
+    const uint32_t skip = state->offset;
+    emit_a64(state, 0);
+    if (link >= 0)
+        emit_store(state, S32, link, parameter_reg[0],
+                   offsetof(riscv_t, X) + 4 * rd);
+    /* b.ne over the store and the branch below */
+    const uint32_t words = (state->offset - skip) / 4 + 1;
+    const uint32_t bne = 0x54000000U | (words << 5) | COND_NE;
+    if (!should_flush)
+        memcpy(state->buf + skip, &bne, sizeof(bne));
     site->jump_loc[slot] = state->offset;
     if (empty)
         emit_a64(state, UBR_B | 1); /* falls through until patched */
@@ -4209,9 +4263,25 @@ static void indirect_site_fill(struct jit_state *state,
  * or the exit to the dispatcher. A compiled target fills an empty slot of the
  * indirect jump that missed, so that it takes the slot from then on.
  */
+#if RV32_HAS(EXT_C)
 static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
+#else
+/* Without C, every slot holds a 4-byte-aligned block start, so only a miss can
+ * reach a misaligned target. A JALR that leaves rd alone defers its alignment
+ * check to here; jump_pc is its address.
+ */
+static uintptr_t jit_indirect_target(riscv_t *rv,
+                                     uint32_t site,
+                                     uint32_t jump_pc)
+#endif
 {
     struct jit_state *state = rv->jit_state;
+#if !RV32_HAS(EXT_C)
+    if (unlikely(rv->PC & 3)) {
+        jit_misaligned_jump(rv, jump_pc, rv->PC);
+        return (uintptr_t) state->buf + state->exit_loc;
+    }
+#endif
 #if RV32_HAS(T2C)
     if (PRIV(rv)->aot_collect)
         return (uintptr_t) state->buf + state->exit_loc;
@@ -4234,10 +4304,18 @@ static uintptr_t jit_indirect_target(riscv_t *rv, uint32_t site)
     return (uintptr_t) state->buf + target->offset;
 }
 
-/* Jump to the target in temp_reg, with every guest register written back. */
+#if defined(__aarch64__) && !RV32_HAS(EXT_C)
+static void emit_jump_align_guard(struct jit_state *state, uint32_t pc);
+#endif
+
+/* Jump to the target in temp_reg, with every guest register written back but
+ * rd when link >= 0: then link holds rd's new value, which a matching slot
+ * stores, and a miss stores after checking the target's alignment.
+ */
 static void emit_indirect_jump(struct jit_state *state,
                                riscv_t *rv,
-                               rv_insn_t *ir)
+                               rv_insn_t *ir,
+                               int link)
 {
     branch_history_table_t *bt = ir->branch_table;
     int targets[IN_JUMP_TARGETS];
@@ -4249,11 +4327,21 @@ static void emit_indirect_jump(struct jit_state *state,
     for (int i = 0; i < IN_JUMP_TARGETS; i++) {
         const uint32_t satp = BLOCK_SATP(cur_block);
         emit_indirect_slot(state, site, i,
-                           i < count ? bt->PC[targets[i]] : EMPTY_SLOT_PC,
-                           satp);
+                           i < count ? bt->PC[targets[i]] : EMPTY_SLOT_PC, satp,
+                           link, ir->rd);
     }
+#if defined(__aarch64__) && !RV32_HAS(EXT_C)
+    if (link >= 0) {
+        emit_jump_align_guard(state, ir->pc);
+        emit_store(state, S32, link, parameter_reg[0],
+                   offsetof(riscv_t, X) + 4 * ir->rd);
+    }
+#endif
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
     emit_load_imm(state, parameter_reg[1], site_index);
+#if !RV32_HAS(EXT_C)
+    emit_load_imm(state, parameter_reg[2], ir->pc);
+#endif
     emit_call(state, (intptr_t) &jit_indirect_target);
 #if defined(__x86_64__)
     /* jmp *%rax */
@@ -4301,6 +4389,7 @@ struct misalign_stub {
     uint32_t flags;
     int base;
     int32_t offset;
+    bool jump; /* a JALR whose target, in temp_reg, is misaligned */
     struct host_reg map[ARRAY_SIZE(register_map)];
 };
 #define MAX_MISALIGN_STUBS 256
@@ -4324,6 +4413,18 @@ static void emit_misalign_stub(struct jit_state *state,
                                const struct misalign_stub *stub)
 {
     emit_jump_target_offset(state, stub->jump_loc, state->offset);
+#if !RV32_HAS(EXT_C)
+    if (stub->jump) {
+        /* temp_reg still holds the target: nothing ran since the guard. */
+        memcpy(register_map, stub->map, sizeof(register_map));
+        store_back_all(state);
+        emit_mov(state, temp_reg, parameter_reg[2]);
+        emit_load_imm(state, parameter_reg[1], stub->pc);
+        emit_call(state, (intptr_t) &jit_misaligned_jump);
+        emit_exit(state);
+        return;
+    }
+#endif
     emit_misalign_address(state, stub->base, stub->offset);
     memcpy(register_map, stub->map, sizeof(register_map));
     store_back_all(state);
@@ -4345,6 +4446,27 @@ static void emit_misalign_stub(struct jit_state *state,
  * program uses no privileged state that could observe them, in which case the
  * host performs them directly.
  */
+/* Branch to stub while the flags a test just set show a misalignment. The stub
+ * is queued for emit_misalign_stubs(), or emitted here, behind a jump, once
+ * the queue is full.
+ */
+static void emit_misalign_branch(struct jit_state *state,
+                                 struct misalign_stub *stub)
+{
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    stub->jump_loc = JUMP_LOC_0;
+    if (n_misalign_stubs < MAX_MISALIGN_STUBS) {
+        misalign_stubs[n_misalign_stubs++] = *stub;
+        return;
+    }
+    uint32_t jump_normal = state->offset;
+    emit_jcc_offset(state, JCC_JMP);
+    emit_misalign_stub(state, stub);
+    memcpy(register_map, stub->map, sizeof(register_map));
+    emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
+}
+
 static void emit_misalign_guard(struct jit_state *state,
                                 riscv_t *rv,
                                 int rs1,
@@ -4376,20 +4498,7 @@ static void emit_misalign_guard(struct jit_state *state,
         emit_misalign_address(state, stub.base, offset);
         emit_test_low_bits(state, temp_reg, mask);
     }
-    uint32_t jump_loc_0 = state->offset;
-    emit_jcc_offset(state, JCC_JNE);
-    stub.jump_loc = JUMP_LOC_0;
-
-    if (n_misalign_stubs < MAX_MISALIGN_STUBS) {
-        misalign_stubs[n_misalign_stubs++] = stub;
-    } else {
-        /* Out of stub slots: emit this one inline and branch around it. */
-        uint32_t jump_normal = state->offset;
-        emit_jcc_offset(state, JCC_JMP);
-        emit_misalign_stub(state, &stub);
-        memcpy(register_map, stub.map, sizeof(register_map));
-        emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
-    }
+    emit_misalign_branch(state, &stub);
 
     /* Past the guard, X[rs1] + offset is aligned, and so is X[rs1] itself when
      * offset is.
@@ -4397,6 +4506,20 @@ static void emit_misalign_guard(struct jit_state *state,
     if (offset_aligned)
         reg_align[rs1] = mask + 1;
 }
+
+#if !RV32_HAS(EXT_C)
+/* Without C, a JALR whose target in temp_reg has bit 1 set traps before rd is
+ * written. The aligned path only tests and falls through; the trap is a stub
+ * emitted after the block, like a misaligned load or store.
+ */
+static void emit_jump_align_guard(struct jit_state *state, uint32_t pc)
+{
+    struct misalign_stub stub = {.pc = pc, .jump = true};
+    memcpy(stub.map, register_map, sizeof(stub.map));
+    emit_test_low_bits(state, temp_reg, 3);
+    emit_misalign_branch(state, &stub);
+}
+#endif
 
 #if RV32_HAS(SYSTEM_MMIO)
 /* temp_reg = base + imm, the guest address of a load or store. */
@@ -4689,6 +4812,10 @@ RV_INSN_LIST
     {                                                                         \
         code;                                                                 \
     }
+static void emit_branch_taken(struct jit_state *state,
+                              uint32_t branch_pc,
+                              uint32_t target);
+
 #include "rv32_jit.c"
 #undef GEN
 #undef GEN_UNSUPPORTED
@@ -5086,6 +5213,25 @@ static void do_fuse13(struct jit_state *state, riscv_t *rv, rv_insn_t *ir)
 #endif
 }
 
+/* A taken branch to an unaligned instruction traps before dispatch can attempt
+ * to decode the target. Guest registers were already written back.
+ */
+static void emit_branch_taken(struct jit_state *state,
+                              uint32_t branch_pc,
+                              uint32_t target)
+{
+#if !RV32_HAS(EXT_C)
+    if (target & 3u) {
+        emit_transfer_trap(state, jit_misaligned_branch, branch_pc, target);
+        return;
+    }
+#else
+    (void) branch_pc;
+#endif
+    emit_jmp(state, target, BLOCK_SATP(cur_block));
+    emit_set_pc_exit(state, target);
+}
+
 /* fused ADDI + BNE (loop counter decrement-branch)
  * rd = rs1 + imm
  * if rd != 0, branch to PC + 4 + imm2
@@ -5112,8 +5258,7 @@ static void do_fuse12(struct jit_state *state,
     emit_set_pc_exit(state, ir->pc + 8);
     /* Taken path: rd != 0, branch to PC + 4 + imm2 */
     emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
-    emit_jmp(state, ir->pc + 4 + ir->imm2, BLOCK_SATP(cur_block));
-    emit_set_pc_exit(state, ir->pc + 4 + ir->imm2);
+    emit_branch_taken(state, ir->pc + 4, ir->pc + 4 + ir->imm2);
 }
 
 /* clang-format off */
@@ -6150,8 +6295,13 @@ static void translate_region(struct jit_state *state,
     memcpy(reg_align, taken_align, sizeof(reg_align));
     if (node->child[0] >= 0)
         translate_region(state, rv, plan, node->child[0]);
-    else
-        emit_region_edge(state, flow.br.target);
+    else {
+        /* A taken edge to a halfword target traps without C. The branch is the
+         * last instruction, so its pc is other_pc - 4.
+         */
+        store_back_all(state);
+        emit_branch_taken(state, flow.br.other_pc - 4, flow.br.target);
+    }
 }
 #endif
 

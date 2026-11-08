@@ -427,6 +427,22 @@ static inline void check_tohost_write(riscv_t *rv,
         return false;                                                  \
     }
 
+/* A taken conditional branch, JAL or JALR reports its own address as the
+ * exception PC, and the misaligned destination as the trap value. PC holds the
+ * destination when this is called. The trap precedes retirement, so rd is left
+ * unchanged.
+ */
+#define RV_EXC_BRANCH_MISALIGN(branch_pc)                          \
+    do {                                                           \
+        if (unlikely(insn_is_misaligned(PC))) {                    \
+            rv->compressed = false;                                \
+            rv->csr_cycle = cycle;                                 \
+            rv->PC = (branch_pc);                                  \
+            SET_CAUSE_AND_TVAL_THEN_TRAP(rv, INSN_MISALIGNED, PC); \
+            return false;                                          \
+        }                                                          \
+    } while (0)
+
 /* FIXME: use more precise methods for updating time, e.g., RTC */
 #if RV32_HAS(Zicsr)
 static inline void update_time(riscv_t *rv)
@@ -2071,6 +2087,9 @@ static PRESERVE_NONE RVOP_ALIGN bool do_fuse12(riscv_t *rv,
     if (rv->X[ir->rd] != 0) {
         is_branch_taken = true;
         PC += 4 + ir->imm2; /* ADDI len + branch offset */
+#if !RV32_HAS(EXT_C)
+        RV_EXC_BRANCH_MISALIGN(ir->pc + 4);
+#endif
         target = ir->branch_taken;
     } else {
         is_branch_taken = false;
@@ -2163,8 +2182,7 @@ static PRESERVE_NONE RVOP_ALIGN bool do_byte_copy_loop(riscv_t *rv,
         is_branch_taken = true;
         PC += 16 + fuse[4].imm;
 #if !RV32_HAS(EXT_C)
-        /* Like BRANCH_FUNC, report the branch instruction as mtval. */
-        RV_EXC_MISALIGN_HANDLER(PC - fuse[4].imm, INSN, false, 0);
+        RV_EXC_BRANCH_MISALIGN(PC - fuse[4].imm);
 #endif
         target = ir->branch_taken;
     }
@@ -2320,8 +2338,7 @@ do_pointer_reverse(riscv_t *rv,
             PREV_PUBLISH(previous, next, previous);
             is_branch_taken = true;
             PC = taken_pc;
-            const uint32_t pc = branch_pc;
-            RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0);
+            RV_EXC_BRANCH_MISALIGN(branch_pc);
         }
 #endif
         if (cycle >= budget) {
@@ -2373,8 +2390,7 @@ static PRESERVE_NONE RVOP_ALIGN bool do_numsift_index_trace(riscv_t *rv,
         is_branch_taken = true;
         PC += 24 + f[6].imm;
 #if !RV32_HAS(EXT_C)
-        /* Like BRANCH_FUNC, report the branch instruction as mtval. */
-        RV_EXC_MISALIGN_HANDLER(PC - f[6].imm, INSN, false, 0);
+        RV_EXC_BRANCH_MISALIGN(PC - f[6].imm);
 #endif
         target = ir->branch_taken;
     }
@@ -2538,8 +2554,7 @@ static PRESERVE_NONE RVOP_ALIGN bool do_emfloat_halfword_shift_trace(
             is_branch_taken = true;
             PC += 8 + f[7].imm;
 #if !RV32_HAS(EXT_C)
-            /* Like BRANCH_FUNC, report the branch instruction as mtval. */
-            RV_EXC_MISALIGN_HANDLER(PC - f[7].imm, INSN, false, 0);
+            RV_EXC_BRANCH_MISALIGN(PC - f[7].imm);
 #endif
             target = ir->branch_taken;
         }

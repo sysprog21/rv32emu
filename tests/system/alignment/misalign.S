@@ -50,9 +50,12 @@ exit:
     ecall
 
 misaligned_insn_fetch_handler:
-    # Return to caller by setting sepc to ra and using sret
-    # This properly exits trap mode and clears is_trapped
-    csrw sepc, ra
+    # The trapping jump does not write its link register, so ra is not the
+    # return address. Resume after the 4-byte jump (this test runs without C)
+    # and use sret, which exits trap mode and clears is_trapped
+    csrr t0, sepc
+    addi t0, t0, 4
+    csrw sepc, t0
     sret
 
 misaligned_load_handler:

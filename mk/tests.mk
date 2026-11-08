@@ -778,4 +778,55 @@ endif
 endif
 endif
 
+# A JAL or JALR to a halfword target traps at the jump without writing rd, in
+# the interpreter, T1C and T2C alike. Set JUMP_MISALIGN_REFERENCE to an
+# interpreter build to compare against it as well.
+ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
+ifneq ($(CONFIG_EXT_C),y)
+ifneq ($(CONFIG_SYSTEM),y)
+.PHONY: check-user-jump-misalign-engines
+check-user-jump-misalign-engines: $(BIN) tests/jump-misalign-state.S tests/test-jump-misalign-engines.py tests/jit_profile.py
+	$(Q)python3 tests/test-jump-misalign-engines.py --emulator $(BIN) \
+	    --cc $(CROSS_COMPILE)gcc --nm $(CROSS_COMPILE)nm \
+	    $(if $(JUMP_MISALIGN_REFERENCE),--reference $(JUMP_MISALIGN_REFERENCE)) \
+	    $(if $(filter 1,$(T2C_ENABLED)),--aot $(LLVM_CONFIG))
+check: check-user-jump-misalign-engines
+endif
+endif
+endif
+
+# Without the C extension, a taken branch, JAL or JALR to a halfword target
+# traps, so T1C must not translate or decode the target.
+ifeq ($(CONFIG_JIT)$(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yyy)
+ifneq ($(CONFIG_EXT_C),y)
+ifneq ($(CONFIG_SYSTEM),y)
+.PHONY: check-user-jit-branch-misalign
+check-user-jit-branch-misalign: $(BIN) tests/jit-branch-misalign-user.S tests/test-jit-branch-misalign-user.py tests/jit-jump-misalign-user.S tests/test-jit-jump-misalign-user.py tests/jit-branch-region-misalign-user.S tests/test-jit-branch-region-misalign-user.py tests/jit_profile.py
+	$(Q)python3 tests/test-jit-branch-misalign-user.py --emulator $(BIN) \
+	    --cc $(CROSS_COMPILE)gcc --nm $(CROSS_COMPILE)nm $(T1C_REQUIRE_STATS) \
+	    $(if $(filter 1,$(T2C_ENABLED)),--aot $(LLVM_CONFIG))
+	$(Q)python3 tests/test-jit-jump-misalign-user.py --emulator $(BIN) \
+	    --cc $(CROSS_COMPILE)gcc $(T1C_REQUIRE_STATS)
+	$(Q)python3 tests/test-jit-branch-region-misalign-user.py \
+	    --emulator $(BIN) --cc $(CROSS_COMPILE)gcc \
+	    --nm $(CROSS_COMPILE)nm $(T1C_REQUIRE_STATS)
+check: check-user-jit-branch-misalign
+endif
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
+.PHONY: check-system-jit-branch-misalign
+check-system-jit-branch-misalign: $(BIN) tests/system-jit-branch-misalign.S tests/system-jit-jal-misalign.S tests/jit-system-jalr.S tests/test-system-jit-misalign.py tests/jit_profile.py
+	$(Q)for case in branch jal jalr; do \
+	    python3 tests/test-system-jit-misalign.py $$case \
+	        --emulator $(BIN) --cc $(CROSS_COMPILE)gcc \
+	        --objcopy $(CROSS_COMPILE)objcopy $(T1C_REQUIRE_STATS) || exit 1; \
+	done
+check: check-system-jit-branch-misalign
+endif
+endif
+endif
+endif
+endif
+
 endif # _MK_TESTS_INCLUDED

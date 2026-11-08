@@ -68,11 +68,7 @@
                    offsetof(riscv_t, PC));                            \
         emit_exit(state);                                             \
         emit_jump_target_offset(state, JUMP_LOC_0, state->offset);    \
-        emit_jmp(state, ir->pc + ir->imm, BLOCK_SATP(cur_block));     \
-        emit_load_imm(state, temp_reg, ir->pc + ir->imm);             \
-        emit_store(state, S32, temp_reg, parameter_reg[0],            \
-                   offsetof(riscv_t, PC));                            \
-        emit_exit(state);                                             \
+        emit_branch_taken(state, ir->pc, ir->pc + ir->imm);           \
     } while (0)
 
 /* Branch instruction handler macro - all branch instructions follow
@@ -263,6 +259,17 @@ GEN(auipc, {
     emit_load_imm(state, vm_reg[0], ir->pc + ir->imm);
 })
 GEN(jal, {
+#if !RV32_HAS(EXT_C)
+    if ((ir->pc + (uint32_t) ir->imm) & 3u) {
+        /* The trap precedes the instruction's retirement: rd is not written,
+         * the exception PC is the jump and the trap value is the target.
+         */
+        store_back_all(state);
+        emit_transfer_trap(state, jit_misaligned_jump, ir->pc,
+                           ir->pc + ir->imm);
+        return;
+    }
+#endif
     if (ir->rd) {
         vm_reg[0] = map_vm_reg(state, ir->rd);
         emit_load_imm(state, vm_reg[0], ir->pc + 4);
@@ -279,12 +286,32 @@ GEN(jalr, {
     emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_ADD, temp_reg, ir->imm);
     /* RISC-V spec: target address LSB is always cleared */
     emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, temp_reg, ~1U);
+    /* Without C, a misaligned target traps before rd, which may alias rs1, is
+     * written. A JALR without rd leaves the test to the indirect jump's miss
+     * path, since cached targets are aligned block starts. With rd, x86-64
+     * tests here, where the test fuses with its branch. AArch64 instead keeps
+     * the link in rd's host register, which a matching slot stores and the
+     * miss path stores after its test, so a hit runs none. rd's old value is
+     * stored first, so that a trap still finds it.
+     */
+    int link = -1;
+#if !RV32_HAS(EXT_C) && !defined(__aarch64__)
+    if (ir->rd)
+        emit_jump_align_guard(state, ir->pc);
+#elif !RV32_HAS(EXT_C)
+    if (ir->rd)
+        store_back(state);
+#endif
     if (ir->rd) {
         vm_reg[1] = map_vm_reg(state, ir->rd);
         emit_load_imm(state, vm_reg[1], ir->pc + 4);
+#if !RV32_HAS(EXT_C) && defined(__aarch64__)
+        set_dirty(vm_reg[1], false);
+        link = vm_reg[1];
+#endif
     }
     store_back(state);
-    emit_indirect_jump(state, rv, ir);
+    emit_indirect_jump(state, rv, ir, link);
 })
 /* RV32I Branch Instructions */
 GEN_BRANCH(beq, JCC_JE)
@@ -533,7 +560,7 @@ GEN(cjr, {
     emit_mov(state, vm_reg[0], temp_reg);
     emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, temp_reg, ~1U);
     store_back(state);
-    emit_indirect_jump(state, rv, ir);
+    emit_indirect_jump(state, rv, ir, -1);
 })
 GEN(cmv, {
     vm_reg[0] = ra_load(state, ir->rs2);
@@ -558,7 +585,7 @@ GEN(cjalr, {
     vm_reg[1] = map_vm_reg(state, rv_reg_ra);
     emit_load_imm(state, vm_reg[1], ir->pc + 2);
     store_back(state);
-    emit_indirect_jump(state, rv, ir);
+    emit_indirect_jump(state, rv, ir, -1);
 })
 GEN(cadd, {
     ra_load2(state, ir->rs1, ir->rs2);

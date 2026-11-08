@@ -111,6 +111,11 @@ def main():
             ("system-aot-trap-cache", "SYSTEM AOT trap cache OK"),
             ("system-aot-remap", "SYSTEM AOT remap OK"),
         ]
+        if not args.rvc:
+            # Without C, a jump to a halfword target traps in AOT code too.
+            cases.append(
+                ("system-aot-jump-misalign", "SYSTEM AOT jump misalignment OK")
+            )
         if args.rvc:
             cases.append(("system-aot-edges-rvc", "SYSTEM AOT static edges OK"))
             cases.append(("system-aot-binding-rvc", "SYSTEM AOT binding OK"))

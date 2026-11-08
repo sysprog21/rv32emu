@@ -102,13 +102,13 @@ RVOP(jal, {
     const uint32_t pc = PC;
     /* Jump */
     PC += ir->imm;
+
+#if !RV32_HAS(EXT_C)
+    RV_EXC_BRANCH_MISALIGN(pc);
+#endif
     /* link with return address */
     if (ir->rd)
         rv->X[ir->rd] = pc + 4;
-    /* check instruction misaligned */
-#if !RV32_HAS(EXT_C)
-    RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0);
-#endif
     struct rv_insn *taken = ir->branch_taken;
     if (taken) {
 #if RV32_HAS(JIT)
@@ -204,13 +204,13 @@ RVOP(jalr, {
     const uint32_t pc = PC;
     /* jump */
     PC = (rv->X[ir->rs1] + ir->imm) & ~1U;
+
+#if !RV32_HAS(EXT_C)
+    RV_EXC_BRANCH_MISALIGN(pc);
+#endif
     /* link */
     if (ir->rd)
         rv->X[ir->rd] = pc + 4;
-    /* check instruction misaligned */
-#if !RV32_HAS(EXT_C)
-    RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0);
-#endif
     LOOKUP_OR_UPDATE_BRANCH_HISTORY_TABLE();
 
 #if RV32_HAS(SYSTEM)
@@ -272,7 +272,7 @@ RVOP(jalr, {
         is_branch_taken = true;);                                           \
     PC += ir->imm;                                                          \
     /* check instruction misaligned */                                      \
-    IIF(RV32_HAS(EXT_C))(, RV_EXC_MISALIGN_HANDLER(pc, INSN, false, 0););   \
+    IIF(RV32_HAS(EXT_C))(, RV_EXC_BRANCH_MISALIGN(pc););                    \
     struct rv_insn *taken = ir->branch_taken;                               \
     if (taken) {                                                            \
         IIF(RV32_HAS(JIT))(RVOP_PROBE_TARGET(taken, PC, end_op);, );        \

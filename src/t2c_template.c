@@ -91,6 +91,9 @@ static inline void t2c_note_call(bool call UNUSED, uint32_t return_pc UNUSED)
 }
 
 T2C_OP(jal, {
+    if (t2c_gen_jump_target_trap(builder, start, ir->pc, ir->pc + ir->imm,
+                                 insn_counter))
+        return;
     t2c_note_call(ir->rd == rv_reg_ra, ir->pc + 4);
     if (ir->rd)
         T2C_LLVM_GEN_STORE_IMM32(*builder, ir->pc + 4,
@@ -615,6 +618,8 @@ T2C_OP(jalr, {
     T2C_LLVM_GEN_LOAD_VMREG(rs1, 32, t2c_gen_rs1_addr(start, builder, ir));
     val_rs1 = T2C_LLVM_GEN_ALU32_IMM(Add, val_rs1, ir->imm);
     val_rs1 = T2C_LLVM_GEN_ALU32_IMM(And, val_rs1, ~1U);
+    /* The trap precedes the link write: rd may alias rs1. */
+    t2c_gen_jump_guard(builder, start, ir->pc, val_rs1, insn_counter);
 
     t2c_note_call(ir->rd == rv_reg_ra, ir->pc + 4);
     if (ir->rd)
@@ -636,8 +641,11 @@ T2C_OP(jalr, {
             LLVMAppendBasicBlockInContext(t2c_context, start, "taken");    \
         LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_context); \
         LLVMPositionBuilderAtEnd(builder2, taken);                         \
-        if (t2c_has_direct_target(rv, block, ir->branch_taken,             \
-                                  ir->pc + ir->imm)) {                     \
+        if (t2c_gen_jump_target_trap(&builder2, start, ir->pc,             \
+                                     ir->pc + ir->imm, insn_counter)) {    \
+            LLVMDisposeBuilder(builder2);                                  \
+        } else if (t2c_has_direct_target(rv, block, ir->branch_taken,      \
+                                         ir->pc + ir->imm)) {              \
             *taken_builder = builder2;                                     \
         } else {                                                           \
             t2c_gen_exit(builder2, start, ir->pc + ir->imm, insn_counter); \
@@ -2612,8 +2620,12 @@ T2C_OP(fuse12, {
         LLVMAppendBasicBlockInContext(t2c_context, start, "taken");
     LLVMBuilderRef builder2 = LLVMCreateBuilderInContext(t2c_context);
     LLVMPositionBuilderAtEnd(builder2, taken);
-    if (t2c_has_direct_target(rv, block, ir->branch_taken,
-                              ir->pc + 4 + ir->imm2)) {
+    if (t2c_gen_jump_target_trap(&builder2, start, ir->pc + 4,
+                                 ir->pc + 4 + ir->imm2, insn_counter)) {
+        /* The ADDI retired; the interpreter re-executes the BNE. */
+        LLVMDisposeBuilder(builder2);
+    } else if (t2c_has_direct_target(rv, block, ir->branch_taken,
+                                     ir->pc + 4 + ir->imm2)) {
         *taken_builder = builder2;
     } else {
         /* PC = ir->pc + 4 + ir->imm2 (ADDI is 4 bytes, then branch offset) */

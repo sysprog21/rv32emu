@@ -670,16 +670,21 @@ static void csr_status_written(riscv_t *rv, uint32_t *csr)
 }
 #endif
 
-/* Apply the side effects of writing CSR c, which held old. A write that
- * leaves the value unchanged has none: a status view is already in sync.
+/* Apply the side effects of writing CSR c, which held old. Besides aligning an
+ * exception PC, a write that leaves the value unchanged has none: a status
+ * view is already in sync.
  * A changed SATP switches address space: flush the TLB and retire what the
  * old mappings decoded. The interpreter's block map is cleared after the
  * instruction, since its code may still use the IR.
  */
-static void csr_written(riscv_t *rv UNUSED,
-                        uint32_t *c UNUSED,
-                        uint32_t old UNUSED)
+static void csr_written(riscv_t *rv, uint32_t *c, uint32_t old UNUSED)
 {
+    /* mepc and sepc hold instruction addresses: bit 0 is always zero, and
+     * without C so is bit 1. A return through either would otherwise resume
+     * at an address no instruction can start at.
+     */
+    if (c == &rv->csr_mepc || c == &rv->csr_sepc)
+        *c &= RV32_HAS(EXT_C) ? ~UINT32_C(1) : ~UINT32_C(3);
 #if RV32_HAS(SYSTEM)
     if (*c == old)
         return;

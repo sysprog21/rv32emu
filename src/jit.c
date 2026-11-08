@@ -477,7 +477,7 @@ static const int parameter_reg[] = {RDI, RSI, RDX, RCX, R8, R9};
 static struct host_reg register_map[] = {
     {RAX, -1, 0, 0}, {RBX, -1, 0, 0}, {RDX, -1, 0, 0}, {R8, -1, 0, 0},
     {R9, -1, 0, 0},  {R10, -1, 0, 0}, {R11, -1, 0, 0}, {R13, -1, 0, 0},
-    {R14, -1, 0, 0}, {R15, -1, 0, 0},
+    {R14, -1, 0, 0}, {R15, -1, 0, 0}, {RSI, -1, 0, 0},
 };
 static int temp_reg = RCX;
 #endif
@@ -496,7 +496,7 @@ static int temp_reg = R8;
  *   r6 - r8   Temp - used for storing calculated value during execution
  *   r19       Guest memory base in user-mode JIT (outside register_map)
  *   r20       Guest cycle count while generated code runs (cycle_reg)
- *   r19 - r23 Callee-saved registers
+ *   r21 - r23 Callee-saved, allocated to guest registers like r26
  *   r24       Temp - used for generating 32-bit immediates
  *   r25       Temp - used for modulous calculations
  *
@@ -510,11 +510,21 @@ static struct host_reg register_map[] = {
     {R5, -1, 0, 0},  {R6, -1, 0, 0},  {R7, -1, 0, 0},  {R9, -1, 0, 0},
     {R11, -1, 0, 0}, {R12, -1, 0, 0}, {R13, -1, 0, 0}, {R14, -1, 0, 0},
     {R15, -1, 0, 0}, {R16, -1, 0, 0}, {R17, -1, 0, 0}, {R26, -1, 0, 0},
+    {R21, -1, 0, 0}, {R22, -1, 0, 0}, {R23, -1, 0, 0},
 };
 #endif
 
-static const int n_host_regs =
-    ARRAY_SIZE(register_map); /* the number of avavliable host register */
+/* The number of available host registers. On x86-64 the last table entry is
+ * RSI: system mode keeps it as the MMU fast path scratch (mmu_scratch_reg), so
+ * only user mode allocates it. A local loop takes it for its backedge budget
+ * (reserved_host_reg).
+ */
+#if defined(__x86_64__) && !defined(_WIN32) && RV32_HAS(SYSTEM)
+#define HOST_REGS_WITHHELD 1
+#else
+#define HOST_REGS_WITHHELD 0
+#endif
+static const int n_host_regs = ARRAY_SIZE(register_map) - HOST_REGS_WITHHELD;
 
 /* Alignment, in bytes, that a passed guard has proven for each guest register
  * since it was last written in the current block; 0 if unknown. Every write to
@@ -3394,8 +3404,16 @@ static int vm_reg[3]; /* enum x64_reg/a64_reg */
 /* Guest values kept in fixed host registers across a local loop backedge. */
 static uint32_t loop_pinned_regs;
 
+/* Host register a local loop keeps for its backedge budget, or -1. The
+ * allocator must neither hand it out nor spill into it while the loop is
+ * translated.
+ */
+static int reserved_host_reg = -1;
+
 static bool reg_is_pinned(int idx)
 {
+    if (register_map[idx].reg_idx == reserved_host_reg)
+        return true;
     int reg = register_map[idx].vm_reg_idx;
     return reg >= 0 && (loop_pinned_regs & (UINT32_C(1) << reg));
 }
@@ -3403,6 +3421,7 @@ static bool reg_is_pinned(int idx)
 static void reset_reg(void)
 {
     loop_pinned_regs = 0;
+    reserved_host_reg = -1;
     spill_live_regs = UINT32_MAX;
     memset(reg_align, 0, sizeof(reg_align));
     for (int i = 0; i < n_host_regs; i++) {
@@ -3873,6 +3892,79 @@ static inline int map_vm_reg_reserved(struct jit_state *state,
 {
     reg_align[vm_reg_idx] = 0;
     return lookup_vm_reg_reserved(state, vm_reg_idx, reserved_reg_idx);
+}
+
+/* Whether a guest register has a host register right now. */
+static bool vm_reg_mapped(int vm_reg_idx)
+{
+    for (int i = 0; i < n_host_regs; i++)
+        if (register_map[i].vm_reg_idx == vm_reg_idx)
+            return true;
+    return false;
+}
+
+/* Whether every host register holds a guest register. The spilled-source loads
+ * below apply only then: with a free register, keeping rs1 cached is cheaper
+ * than reloading it later (dhrystone -3% otherwise).
+ */
+static bool host_regs_full(void)
+{
+    for (int i = 0; i < n_host_regs; i++)
+        if (register_map[i].vm_reg_idx == -1)
+            return false;
+    return true;
+}
+
+/* Load X[rs1] into host register dst: the shared tail of the two helpers. */
+static void load_guest_reg(struct jit_state *state, int dst, int rs1)
+{
+    emit_load(state, S32, parameter_reg[0], dst,
+              offsetof(riscv_t, X) + 4 * rs1);
+}
+
+/* Operands of "rd = op(rs1, imm)". When rs1 sits in memory and is not rd, load
+ * it straight into rd's host register and operate there, instead of mapping rs1
+ * to a register of its own and copying it. X[rs1] stays authoritative because
+ * rs1 is never mapped, so no later access can read a stale value. Only done
+ * once every host register is in use (host_regs_full). Leaves the source in
+ * vm_reg[0] and the destination in vm_reg[1], as ra_load() followed by
+ * map_vm_reg_reserved() would. Returns true when it loaded rs1 into rd's
+ * register: the 32-bit load leaves the upper half clear.
+ */
+static bool ra_load_unary(struct jit_state *state, int rs1, int rd)
+{
+    if (rs1 != rd && !vm_reg_mapped(rs1) && host_regs_full()) {
+        vm_reg[1] = map_vm_reg(state, rd);
+        load_guest_reg(state, vm_reg[1], rs1);
+        /* The load marks the register clean, but it now holds rd's value. */
+        set_dirty(vm_reg[1], true);
+        vm_reg[0] = vm_reg[1];
+        return true;
+    }
+    vm_reg[0] = ra_load(state, rs1);
+    vm_reg[1] = map_vm_reg_reserved(state, rd, vm_reg[0]);
+    return false;
+}
+
+/* Operands of "rd = rs1 op rs2" when rs1 is spilled. Like ra_load_unary(), but
+ * rs2 is loaded or found in a register and rs1 goes straight into rd's host
+ * register.
+ *
+ * Returns false, touching nothing, unless every host register is in use, rs1 is
+ * not mapped and rd differs from both sources. Leaves rs2 in vm_reg[1] and
+ * rs1's value, in place, in vm_reg[2], the destination; the caller applies
+ * "vm_reg[2] op= vm_reg[1]".
+ */
+static bool ra_load_binary(struct jit_state *state, int rs1, int rs2, int rd)
+{
+    if (rd == rs1 || rd == rs2 || rs1 == rs2 || vm_reg_mapped(rs1) ||
+        !host_regs_full())
+        return false;
+    vm_reg[1] = ra_load(state, rs2);
+    vm_reg[2] = map_vm_reg_reserved(state, rd, vm_reg[1]);
+    load_guest_reg(state, vm_reg[2], rs1);
+    vm_reg[0] = vm_reg[2];
+    return true;
 }
 
 /* Map a vm register while protecting two already-allocated host registers.
@@ -5584,12 +5676,16 @@ static bool translate_register_loop(struct jit_state *state,
         if (ir == tail)
             break;
     }
-    const bool spilling = __builtin_popcount(regs) > n_host_regs;
+    /* The loop reserves parameter_reg[1] for its backedge budget. */
+    int usable_regs = n_host_regs;
+    for (int i = 0; i < n_host_regs; i++)
+        usable_regs -= register_map[i].reg_idx == parameter_reg[1];
+    const bool spilling = __builtin_popcount(regs) > usable_regs;
     /* Like libriscv 075154d6's region register caching, keep values resident
      * across the backedge. Leave room for two temporary operands and a
      * distinct destination. Temporaries are defined before their first use.
      */
-    if (spilling && __builtin_popcount(live_in) > n_host_regs - 3)
+    if (spilling && __builtin_popcount(live_in) > usable_regs - 3)
         return false;
 
     /* A guard can exit before an iteration's first write to a register.
@@ -5609,6 +5705,11 @@ static bool translate_register_loop(struct jit_state *state,
         live_in = regs;
 
     reset_reg();
+
+    /* The backedge budget lives in parameter_reg[1], which may be an
+     * allocatable register. Keep the allocator off it for the whole loop.
+     */
+    reserved_host_reg = parameter_reg[1];
     if (spilling) {
         liveness_reset();
         liveness_calc(block);
@@ -5696,10 +5797,12 @@ static bool translate_register_loop(struct jit_state *state,
         emit_alu32_imm8(state, SHIFT_IMM_OPCODE, SHIFT_ROL,
                         ra_load(state, rotate.mask), 1);
 #endif
-    /* Limit the local loop so halt and reclamation cannot be starved.
-     * RSI/R1 is outside the allocator, and a misalignment stub, the only
-     * code that writes it, never returns to the loop. The decrement itself
-     * sets the zero flag for the backedge.
+
+    /* Limit the local loop so halt and reclamation cannot be starved. The
+     * budget lives in RSI/R1, which reserved_host_reg keeps the allocator off,
+     * and a misalignment stub, the only other code that writes it, never
+     * returns to the loop. The decrement itself sets the zero flag for the
+     * backedge.
      */
 #if defined(__x86_64__)
     emit_alu32_imm8(state, ALU_GRP1_IMM8_OPCODE, ALU_ADD, parameter_reg[1], -1);
@@ -5738,6 +5841,7 @@ static bool translate_register_loop(struct jit_state *state,
             __UNREACHABLE;
     }
 #endif
+    reserved_host_reg = -1;
     return true;
 }
 #endif

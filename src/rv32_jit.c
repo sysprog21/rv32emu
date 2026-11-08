@@ -119,12 +119,12 @@
     GEN(inst, {                                                               \
         if (ir->rd == rv_reg_zero)                                            \
             return;                                                           \
-        vm_reg[0] = ra_load(state, ir->rs1);                                  \
-        vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);            \
+        const bool loaded = ra_load_unary(state, ir->rs1, ir->rd);            \
         if ((ir->imm == 0 &&                                                  \
              (op == ALU_ADD || op == ALU_OR || op == ALU_XOR)) ||             \
             (ir->imm == -1 && op == ALU_AND)) {                               \
-            emit_mov32(state, vm_reg[0], vm_reg[1]);                          \
+            if (!loaded)                                                      \
+                emit_mov32(state, vm_reg[0], vm_reg[1]);                      \
         } else {                                                              \
             if (vm_reg[0] != vm_reg[1])                                       \
                 emit_mov(state, vm_reg[0], vm_reg[1]);                        \
@@ -142,14 +142,13 @@
     GEN(inst, {                                                     \
         if (ir->rd == rv_reg_zero)                                  \
             return;                                                 \
-        vm_reg[0] = ra_load(state, ir->rs1);                        \
-        vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);  \
+        const bool loaded = ra_load_unary(state, ir->rs1, ir->rd);  \
         if (ir->imm & RV32_SHIFT_MASK) {                            \
             if (vm_reg[0] != vm_reg[1])                             \
                 emit_mov(state, vm_reg[0], vm_reg[1]);              \
             emit_alu32_imm8(state, SHIFT_IMM_OPCODE, op, vm_reg[1], \
                             ir->imm & RV32_SHIFT_MASK);             \
-        } else {                                                    \
+        } else if (!loaded) {                                       \
             emit_mov32(state, vm_reg[0], vm_reg[1]);                \
         }                                                           \
     })
@@ -157,6 +156,11 @@
 /* ALU register instruction handler macro */
 #define GEN_ALU_REG(inst, op)                                                  \
     GEN(inst, {                                                                \
+        if (ir->rd != rv_reg_zero &&                                           \
+            ra_load_binary(state, ir->rs1, ir->rs2, ir->rd)) {                 \
+            emit_alu32(state, op, vm_reg[1], vm_reg[2]);                       \
+            return;                                                            \
+        }                                                                      \
         ra_load2(state, ir->rs1, ir->rs2);                                     \
         vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]); \
         if (vm_reg[2] != vm_reg[1] || vm_reg[0] == vm_reg[1]) {                \

@@ -3436,6 +3436,16 @@ static void prepare_translate(struct jit_state *state,
 }
 
 static int liveness[N_RV_REGS];
+/* Guest registers that each instruction of the block being translated reads,
+ * for the eviction choice in reg_pick2. Instructions past the cap are not
+ * recorded, and a translation that skips liveness_calc records none.
+ */
+#define USE_MASK_CAP 256
+static uint32_t use_masks[USE_MASK_CAP];
+static uint32_t n_use_masks;
+/* The instruction being translated, as regs_refresh last saw it. */
+static uint32_t cur_insn_idx;
+
 /* The priority queue of vm registers. The one which has farthest liveness is
  * first.
  */
@@ -3463,6 +3473,7 @@ static void reset_reg(void)
     loop_pinned_regs = 0;
     reserved_host_reg = -1;
     spill_live_regs = UINT32_MAX;
+    n_use_masks = 0;
     memset(reg_align, 0, sizeof(reg_align));
     for (int i = 0; i < n_host_regs; i++) {
         register_map[i].vm_reg_idx = -1;
@@ -3520,31 +3531,21 @@ static inline void candidate_queue_init(void)
     }
 }
 
-static int liveness_cmp(const void *l, const void *r)
+
+static inline void mark_use(int reg, uint32_t idx)
 {
-    int liveness_l = liveness[*(uint8_t *) l];
-    int liveness_r = liveness[*(uint8_t *) r];
-
-    /* Use explicit comparisons to avoid potential overflow from subtraction */
-    if (liveness_l < liveness_r)
-        return -1;
-    if (liveness_l > liveness_r)
-        return 1;
-
-    /* Use register index as tie-breaker for stable sorting */
-    uint8_t reg_l = *(uint8_t *) l;
-    uint8_t reg_r = *(uint8_t *) r;
-    if (reg_l < reg_r)
-        return -1;
-    if (reg_l > reg_r)
-        return 1;
-    return 0;
+    liveness[reg] = idx;
+    if (idx < USE_MASK_CAP)
+        use_masks[idx] |= UINT32_C(1) << reg;
 }
 
 static inline void liveness_calc(block_t *block)
 {
     uint32_t idx;
     rv_insn_t *ir;
+
+    n_use_masks = block->n_insn < USE_MASK_CAP ? block->n_insn : USE_MASK_CAP;
+    memset(use_masks, 0, n_use_masks * sizeof(use_masks[0]));
 
     /* follow the order of operator in "src/rc32_template.c" */
     for (idx = 0, ir = block->ir_head; idx < block->n_insn;
@@ -3556,7 +3557,7 @@ static inline void liveness_calc(block_t *block)
         case rv_insn_jal:
             break;
         case rv_insn_jalr:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_beq:
         case rv_insn_bne:
@@ -3564,21 +3565,21 @@ static inline void liveness_calc(block_t *block)
         case rv_insn_bge:
         case rv_insn_bltu:
         case rv_insn_bgeu:
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
         case rv_insn_lb:
         case rv_insn_lh:
         case rv_insn_lw:
         case rv_insn_lbu:
         case rv_insn_lhu:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_sb:
         case rv_insn_sh:
         case rv_insn_sw:
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
         case rv_insn_addi:
         case rv_insn_slti:
@@ -3589,7 +3590,7 @@ static inline void liveness_calc(block_t *block)
         case rv_insn_slli:
         case rv_insn_srli:
         case rv_insn_srai:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_add:
         case rv_insn_sub:
@@ -3606,8 +3607,8 @@ static inline void liveness_calc(block_t *block)
         case rv_insn_sh2add:
         case rv_insn_sh3add:
 #endif
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
         case rv_insn_ecall:
         case rv_insn_ebreak:
@@ -3621,95 +3622,95 @@ static inline void liveness_calc(block_t *block)
         case rv_insn_divu:
         case rv_insn_rem:
         case rv_insn_remu:
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
 #endif
 #if RV32_HAS(EXT_C)
         case rv_insn_caddi4spn:
-            liveness[rv_reg_sp] = idx;
+            mark_use(rv_reg_sp, idx);
             break;
         case rv_insn_clw:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_csw:
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
         case rv_insn_cnop:
             break;
         case rv_insn_caddi:
-            liveness[ir->rd] = idx;
+            mark_use(ir->rd, idx);
             break;
         case rv_insn_cjal:
         case rv_insn_cli:
         case rv_insn_clui:
             break;
         case rv_insn_caddi16sp:
-            liveness[ir->rd] = idx;
+            mark_use(ir->rd, idx);
             break;
         case rv_insn_csrli:
         case rv_insn_csrai:
         case rv_insn_candi:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_csub:
         case rv_insn_cxor:
         case rv_insn_cor:
         case rv_insn_cand:
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
         case rv_insn_cj:
             break;
         case rv_insn_cbeqz:
         case rv_insn_cbnez:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_cslli:
-            liveness[ir->rd] = idx;
+            mark_use(ir->rd, idx);
             break;
         case rv_insn_clwsp:
-            liveness[rv_reg_sp] = idx;
+            mark_use(rv_reg_sp, idx);
             break;
         case rv_insn_cjr:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_cmv:
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs2, idx);
             break;
         case rv_insn_cebreak:
             break;
         case rv_insn_cjalr:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_cadd:
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
         case rv_insn_cswsp:
-            liveness[rv_reg_sp] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(rv_reg_sp, idx);
+            mark_use(ir->rs2, idx);
             break;
 #endif
         case rv_insn_fuse1:
             for (int i = 0; i < ir->imm2; i++) {
-                liveness[ir->fuse[i].rd] = idx;
+                mark_use(ir->fuse[i].rd, idx);
             }
             break;
         case rv_insn_fuse2:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_fuse3:
             for (int i = 0; i < ir->imm2; i++) {
-                liveness[ir->fuse[i].rs1] = idx;
-                liveness[ir->fuse[i].rs2] = idx;
+                mark_use(ir->fuse[i].rs1, idx);
+                mark_use(ir->fuse[i].rs2, idx);
             }
             break;
         case rv_insn_fuse4:
         case rv_insn_fuse5:
             for (int i = 0; i < ir->imm2; i++) {
-                liveness[ir->fuse[i].rs1] = idx;
+                mark_use(ir->fuse[i].rs1, idx);
             }
             break;
         case rv_insn_fuse6:
@@ -3718,7 +3719,7 @@ static inline void liveness_calc(block_t *block)
         case rv_insn_fuse7:
             /* Multiple ADDI: track rs1 for each operation */
             for (int i = 0; i < ir->imm2; i++) {
-                liveness[ir->fuse[i].rs1] = idx;
+                mark_use(ir->fuse[i].rs1, idx);
             }
             break;
         case rv_insn_fuse8:
@@ -3729,30 +3730,30 @@ static inline void liveness_calc(block_t *block)
             break;
         case rv_insn_fuse10:
             /* LUI + SW: rs1 is source (value to store) */
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_fuse11:
             /* LW + ADDI: rs1 is source (base address and increment source) */
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_fuse12:
             /* ADDI + BNE: rs1 is source */
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_fuse13:
             /* SW + ADDI: store value and base are both live. */
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
 #if JIT_SYSTEM_HELPERS
         JIT_SYSTEM_AMO_CASES:
-            liveness[ir->rs1] = idx;
-            liveness[ir->rs2] = idx;
+            mark_use(ir->rs1, idx);
+            mark_use(ir->rs2, idx);
             break;
         case rv_insn_csrrw:
         case rv_insn_csrrs:
         case rv_insn_csrrc:
-            liveness[ir->rs1] = idx;
+            mark_use(ir->rs1, idx);
             break;
         case rv_insn_csrrwi:
         case rv_insn_csrrsi:
@@ -3764,12 +3765,26 @@ static inline void liveness_calc(block_t *block)
         }
     }
 
+    /* Order the eviction candidates by liveness, then by register number. A
+     * total order of 32 entries: an inline insertion sort is much cheaper per
+     * translated block than qsort with a comparison callback.
+     */
     candidate_queue_init();
-    qsort(candidate_queue, N_RV_REGS, sizeof(uint8_t), liveness_cmp);
+    for (int i = 1; i < N_RV_REGS; i++) {
+        const uint8_t reg = candidate_queue[i];
+        const int key = liveness[reg];
+        int j = i - 1;
+        while (j >= 0 && liveness[candidate_queue[j]] > key) {
+            candidate_queue[j + 1] = candidate_queue[j];
+            j--;
+        }
+        candidate_queue[j + 1] = reg;
+    }
 }
 
 static inline void regs_refresh(int idx)
 {
+    cur_insn_idx = idx;
     for (int i = 0; i < n_host_regs; i++) {
         if (register_map[i].vm_reg_idx == -1)
             continue;
@@ -3811,25 +3826,52 @@ static inline int reg_pick2(int reserved1, int reserved2)
     if (free_idx >= 0)
         return free_idx;
 
-    /* If registers are exhausted, pick the one which has farthest liveness. */
-    int idx = -1;
-    for (int i = 0; i < N_RV_REGS; i++) {
-        uint8_t candidate = candidate_queue[i];
-        for (int j = 0; j < n_host_regs; j++) {
-            if (reg_is_pinned(j) || register_map[j].reg_idx == reserved1 ||
-                register_map[j].reg_idx == reserved2)
-                continue;
-            if (register_map[j].vm_reg_idx == candidate) {
-                idx = j;
-                goto end_pick_reg2;
-            }
+    /* Every candidate is still read later in the block. Map each guest
+     * register to its evictable host register once.
+     */
+    int8_t host_of[N_RV_REGS];
+    memset(host_of, -1, sizeof(host_of));
+    uint32_t far = 0;
+    for (int j = 0; j < n_host_regs; j++) {
+        if (reg_is_pinned(j) || register_map[j].reg_idx == reserved1 ||
+            register_map[j].reg_idx == reserved2 ||
+            register_map[j].vm_reg_idx < 0)
+            continue;
+        host_of[register_map[j].vm_reg_idx] = j;
+        far |= UINT32_C(1) << register_map[j].vm_reg_idx;
+    }
+    /* Evict the value read again farthest ahead, so that the spill is not
+     * reloaded a few instructions later: drop candidates in order of their
+     * next read until one more instruction would drop them all. A clean one
+     * among the survivors costs no store.
+     */
+    if (cur_insn_idx < n_use_masks) {
+        for (uint32_t k = cur_insn_idx; k < n_use_masks; k++) {
+            const uint32_t left = far & ~use_masks[k];
+            if (!left)
+                break;
+            far = left;
         }
+        int dirty = -1;
+        for (int i = 0; i < N_RV_REGS; i++) {
+            const int idx = host_of[candidate_queue[i]];
+            if (idx < 0 || !(far & (UINT32_C(1) << candidate_queue[i])))
+                continue;
+            if (!register_map[idx].dirty)
+                return idx;
+            if (dirty < 0)
+                dirty = idx;
+        }
+        assert(dirty >= 0);
+        return dirty;
+    }
+    /* No use data: take the first candidate in liveness order. */
+    for (int i = 0; i < N_RV_REGS; i++) {
+        const int idx = host_of[candidate_queue[i]];
+        if (idx >= 0)
+            return idx;
     }
     __UNREACHABLE;
-
-end_pick_reg2:
-    assert(idx > -1 && idx < n_host_regs);
-    return idx;
 }
 
 /* return the index in the register_map */

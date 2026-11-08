@@ -878,6 +878,35 @@ static inline void emit8(struct jit_state *state, uint64_t x)
     emit_bytes(state, &x, sizeof(x));
 }
 
+/* Block entries start on this boundary. Where the translator places a block
+ * otherwise depends on the size of everything translated before it, which
+ * moved hot loops across fetch windows: miniz ran 3% slower or faster with
+ * unrelated code size changes.
+ */
+#define BLOCK_ALIGN 64
+
+/* Pad to the next BLOCK_ALIGN boundary with multi-byte NOPs. */
+static void emit_block_align(struct jit_state *state)
+{
+    static const uint8_t nops[9][9] = {
+        {0x90},
+        {0x66, 0x90},
+        {0x0f, 0x1f, 0x00},
+        {0x0f, 0x1f, 0x40, 0x00},
+        {0x0f, 0x1f, 0x44, 0x00, 0x00},
+        {0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00},
+        {0x0f, 0x1f, 0x80, 0x00, 0x00, 0x00, 0x00},
+        {0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+        {0x66, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00},
+    };
+    uint32_t pad = -state->offset & (BLOCK_ALIGN - 1);
+    while (pad && !should_flush) {
+        const uint32_t len = pad < 9 ? pad : 9;
+        emit_bytes(state, (void *) nops[len - 1], len);
+        pad -= len;
+    }
+}
+
 static inline void emit_modrm(struct jit_state *state, int mod, int r, int m)
 {
     assert(!(mod & ~0xc0));
@@ -6593,6 +6622,9 @@ static void translate_chained_block(struct jit_state *state,
     if (state->n_jumps + block_jump_budget(block) >= MAX_JUMPS)
         return;
 
+#if defined(__x86_64__)
+    emit_block_align(state);
+#endif
     offset_map_insert(state, block);
 #if RV32_T1C_STATS_ENABLED
     state->compile_insns += block->cycle_cost;
@@ -6707,8 +6739,9 @@ restart:
      * marking the block hot.  Otherwise resolve_jumps and cache maintenance
      * would operate on an empty / stale code region.
      */
-    if (!offset_map_find(state, block->pc_start, BLOCK_SATP(block),
-                         BLOCK_PRIV(block))) {
+    const struct offset_map *root = offset_map_find(
+        state, block->pc_start, BLOCK_SATP(block), BLOCK_PRIV(block));
+    if (!root) {
 #if defined(__APPLE__) && defined(__aarch64__)
         jit_exit_write_mode();
 #endif
@@ -6718,6 +6751,8 @@ restart:
 #endif
         return false;
     }
+    /* Enter past any padding emitted before the root block. */
+    block->offset = root->offset;
 
     resolve_jumps(state);
     patch_pending_jumps(state, first_block);

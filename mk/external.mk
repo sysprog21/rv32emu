@@ -155,7 +155,7 @@ LINUX_DATA_SKIP_DIR_LEVEL := 1
 LINUX_DATA_SHA_CMD := $(SHA256SUM)
 
 # simplefs kernel module
-SIMPLEFS_VERSION := 0e948518cdd8e56d6d4d512312684d0de41e2c4b
+SIMPLEFS_VERSION := 4f9e6dc2a2d1cdbe5a697ccb35c6c4d5c8926951
 SIMPLEFS_DATA_DEST := /tmp
 SIMPLEFS_DATA := $(SIMPLEFS_DATA_DEST)/simplefs
 SIMPLEFS_REPO := https://github.com/sysprog21/simplefs
@@ -179,7 +179,7 @@ endif
 #	xargs -0 sha1sum | \
 #	LC_ALL=C sort | \
 #	sha1sum
-SIMPLEFS_DATA_SHA := f04a3044bc64195ae59cea064c4bf330132de269
+SIMPLEFS_DATA_SHA := 12cee9d0095fbdf4bfcdae407fd30ae11bbfacef
 SIMPLEFS_DATA_SHA_CMD := $(SHA1SUM)
 
 # U-Boot

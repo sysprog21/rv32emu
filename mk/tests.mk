@@ -158,6 +158,7 @@ EXPECTED_jit-memory-address = JIT memory address OK
 EXPECTED_register-loop = register loop OK
 EXPECTED_load-x0 = load into x0 OK
 EXPECTED_loop-shapes = loop shapes OK
+EXPECTED_region-loop = region loop OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
 EXPECTED_fused-page-fault = fused page fault OK
 EXPECTED_amo-page-fault = AMO page fault OK
@@ -277,8 +278,9 @@ GUEST_ASM_CHECK_TARGETS += check-rotate-zero
 endif
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes check-t2c-load-x0
+GUEST_ASM_CHECK_TARGETS += check-region-loop
 ifeq ($(CONFIG_JIT)$(T1C_STATS),y1)
-GUEST_ASM_CHECK_TARGETS += check-t1c-compile-trace
+GUEST_ASM_CHECK_TARGETS += check-t1c-compile-trace check-region-loop-stats
 endif
 ifeq ($(CONFIG_JIT)$(T1C_STATS)$(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),y1yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-blocker-stats check-jit-blocker-stats-load \
@@ -294,7 +296,7 @@ ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-register-loop-cycles check-loop-shapes-csr
 endif
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-loop-shapes-rvc
+GUEST_ASM_CHECK_TARGETS += check-loop-shapes-rvc check-region-loop-rvc
 endif
 endif
 # LR/SC runs in the interpreter under every configuration, since the pair is
@@ -585,6 +587,23 @@ $(eval $(call guest-asm-check-target,register-loop,rv32i_zicsr,-cycles,-DCHECK_C
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i_zicsr,-csr,-DUSE_CSR))
+$(eval $(call guest-asm-check-target,region-loop,rv32i))
+$(eval $(call guest-asm-check-target,region-loop,rv32ic,-rvc))
+
+# The hash proves the loops are right, not that any compiled as a region loop.
+ifeq ($(CONFIG_JIT)$(T1C_STATS),y1)
+ifneq ($(CONFIG_SYSTEM),y)
+REGION_LOOP_STATS = check-region-loop
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+REGION_LOOP_STATS += check-region-loop-rvc
+endif
+.PHONY: check-region-loop-stats
+check-region-loop-stats: $(REGION_LOOP_STATS) tests/test-region-loop-stats.py tests/jit_profile.py
+	$(Q)for guest in $(patsubst check-%,$(OUT)/%,$(REGION_LOOP_STATS)); do \
+	    python3 tests/test-region-loop-stats.py $(BIN) $$guest || exit 1; \
+	done
+endif
+endif
 
 # Zba under register pressure; diagnostics prove the loop ran compiled.
 .PHONY: check-jit-spill-loop-zba check-jit-spill-loop-region-zba

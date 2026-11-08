@@ -5897,6 +5897,8 @@ static bool loop_rotate_plan(const block_t *block,
                              struct loop_rotate *plan)
 {
     const rv_insn_t *tail = block->ir_tail;
+    if (!tail)
+        return false;
     for (const rv_insn_t *shift = block->ir_head; shift != tail;
          shift = block_next_ir(shift)) {
         if (shift->opcode != rv_insn_sll || !shift->rd ||
@@ -6056,6 +6058,34 @@ static void emit_tail_compare(struct jit_state *state,
     }
 }
 
+/* The host registers a local loop may allocate: parameter_reg[1] holds its
+ * backedge budget.
+ */
+static int loop_usable_regs(void)
+{
+    int usable_regs = n_host_regs;
+    for (int i = 0; i < n_host_regs; i++)
+        usable_regs -= register_map[i].reg_idx == parameter_reg[1];
+    return usable_regs;
+}
+
+/* Charge an iteration to the budget in parameter_reg[1] and repeat at head
+ * while it lasts, so that halt and reclamation cannot be starved. Falls
+ * through once it runs out. The decrement itself sets the zero flag.
+ */
+static void emit_budget_backedge(struct jit_state *state, uint32_t head)
+{
+#if defined(__x86_64__)
+    emit_alu32_imm8(state, ALU_GRP1_IMM8_OPCODE, ALU_ADD, parameter_reg[1], -1);
+#elif defined(__aarch64__)
+    emit_addsub_imm(state, false, AS_SUBS, parameter_reg[1], parameter_reg[1],
+                    1);
+#endif
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    emit_jump_target_offset(state, JUMP_LOC_0, head);
+}
+
 static bool translate_register_loop(struct jit_state *state,
                                     riscv_t *rv,
                                     block_t *block,
@@ -6097,10 +6127,7 @@ static bool translate_register_loop(struct jit_state *state,
         if (ir == tail)
             break;
     }
-    /* The loop reserves parameter_reg[1] for its backedge budget. */
-    int usable_regs = n_host_regs;
-    for (int i = 0; i < n_host_regs; i++)
-        usable_regs -= register_map[i].reg_idx == parameter_reg[1];
+    const int usable_regs = loop_usable_regs();
     const bool spilling = __builtin_popcount(regs) > usable_regs;
     /* Like libriscv 075154d6's region register caching, keep values resident
      * across the backedge. Leave room for two temporary operands and a
@@ -6219,21 +6246,11 @@ static bool translate_register_loop(struct jit_state *state,
                         ra_load(state, rotate.mask), 1);
 #endif
 
-    /* Limit the local loop so halt and reclamation cannot be starved. The
-     * budget lives in RSI/R1, which reserved_host_reg keeps the allocator off,
-     * and a misalignment stub, the only other code that writes it, never
-     * returns to the loop. The decrement itself sets the zero flag for the
-     * backedge.
+    /* The budget lives in RSI/R1, which reserved_host_reg keeps the allocator
+     * off, and a misalignment stub, the only other code that writes it, never
+     * returns to the loop.
      */
-#if defined(__x86_64__)
-    emit_alu32_imm8(state, ALU_GRP1_IMM8_OPCODE, ALU_ADD, parameter_reg[1], -1);
-#elif defined(__aarch64__)
-    emit_addsub_imm(state, false, AS_SUBS, parameter_reg[1], parameter_reg[1],
-                    1);
-#endif
-    jump_loc_0 = state->offset;
-    emit_jcc_offset(state, JCC_JNE);
-    emit_jump_target_offset(state, JUMP_LOC_0, loop_offset);
+    emit_budget_backedge(state, loop_offset);
 
     struct host_reg exit_map[ARRAY_SIZE(register_map)];
     if (defer_spill)
@@ -6287,6 +6304,7 @@ struct region_node {
     block_t *block;
     struct region_flow flow;
     int child[2]; /* taken/unconditional, untaken */
+    bool back[2]; /* the edge returns to the root: a region loop backedge */
     uint32_t live_offset;
     uint8_t known_link;
     uint32_t known_return;
@@ -6297,7 +6315,28 @@ struct region_plan {
     uint32_t records, instructions, jumps;
     uint32_t live[REGION_MAX_RECORDS];
     int count;
+    bool loop;     /* plan edges back to the root as backedges */
+    bool has_back; /* some edge did */
 };
+
+/* A region whose paths return to its root repeats inside generated code, with
+ * the values it reads kept in fixed host registers, as a local loop does.
+ * Chained blocks would instead store every register at each exit and reload
+ * them on entry, a burst whose cost on Ampere eMAG depended on code placement
+ * and made primes 14 percent slower at some layouts. Only AArch64 has the
+ * registers for it: with ten on x86-64, most such loops would store several
+ * values per iteration, which costs more than the burst it avoids.
+ */
+#if defined(__aarch64__)
+#define REGION_LOOPS true
+#else
+#define REGION_LOOPS false
+#endif
+static struct {
+    bool active;
+    uint32_t head;    /* code offset of the loop head */
+    uint32_t root_pc; /* where the budget exit resumes */
+} region_loop;
 
 static bool region_flow(const block_t *block, struct region_flow *flow)
 {
@@ -6393,6 +6432,16 @@ static void plan_region(struct jit_state *state,
         region_target(rv, flow->br.target),
         flow->br.jcc == JCC_JMP ? NULL : region_target(rv, flow->br.other_pc),
     };
+    if (plan->loop && !flow->link) {
+        const uint32_t root = plan->node[0].block->pc_start;
+        for (int side = 0; side < 2; side++) {
+            if (!target[side] || target[side]->pc_start != root)
+                continue;
+            node->back[side] = true;
+            plan->has_back = true;
+            target[side] = NULL;
+        }
+    }
     /* Spend the bounded budget on shorter paths first, leaving space to
      * follow several small blocks around a loop before copying cold work.
      */
@@ -6510,6 +6559,146 @@ static void emit_region_edge(struct jit_state *state, uint32_t pc)
     emit_set_pc_exit(state, pc);
 }
 
+/* Repeat a region loop: commit the values outside the pinned set, so the head
+ * finds only pinned mappings, and branch back while the budget lasts. The
+ * budget exit stores everything and resumes at the root, like a local loop.
+ */
+static void emit_region_backedge(struct jit_state *state)
+{
+    assert(region_loop.active);
+    const uint32_t saved_live = spill_live_regs;
+    spill_live_regs = UINT32_MAX;
+    for (int i = 0; i < n_host_regs; i++) {
+        if (register_map[i].vm_reg_idx < 0 || reg_is_pinned(i))
+            continue;
+        save_reg(state, i);
+        register_map[i].vm_reg_idx = -1;
+        register_map[i].alive = false;
+    }
+    emit_budget_backedge(state, region_loop.head);
+    store_back_all(state);
+    emit_set_pc_exit(state, region_loop.root_pc);
+    spill_live_regs = saved_live;
+}
+
+/* Collect the registers a region uses and those it reads before writing them
+ * on the path from the root, its loop inputs. Returns false for anything a
+ * loop cannot hold in registers.
+ */
+static bool region_loop_regs(const struct region_plan *plan,
+                             int index,
+                             uint32_t defined,
+                             uint32_t *regs,
+                             uint32_t *live_in,
+                             uint16_t *refs)
+{
+    const struct region_node *node = &plan->node[index];
+    const block_t *block = node->block;
+    uint32_t use, def;
+    for (const rv_insn_t *ir = block->ir_head;; ir = block_next_ir(ir)) {
+        if (ir != block->ir_tail) {
+            if (!loop_body_regs(ir, &use, &def))
+                return false;
+        } else if (node->child[0] >= 0 || node->child[1] >= 0 ||
+                   node->back[0] || node->back[1]) {
+            /* The tail branch is emitted from node->flow. */
+            const struct tail_branch *br = &node->flow.br;
+            if (br->add_before_branch) {
+                use = LOOP_REG(ir->rs1);
+                def = LOOP_REG(ir->rd);
+            } else {
+                use = br->jcc == JCC_JMP
+                          ? 0
+                          : LOOP_REG(br->lhs) | LOOP_REG(br->rhs);
+                def = node->flow.link ? LOOP_REG(node->flow.link) : 0;
+            }
+        } else {
+            /* A leaf tail leaves the loop and reads X[] as stored. */
+            use = def = 0;
+        }
+        *live_in |= use & ~defined;
+        defined |= def;
+        *regs |= use | def;
+        for (uint32_t m = use | def; m; m &= m - 1)
+            refs[__builtin_ctz(m)]++;
+        if (ir == block->ir_tail)
+            break;
+    }
+    for (int side = 0; side < 2; side++)
+        if (node->child[side] >= 0 &&
+            !region_loop_regs(plan, node->child[side], defined, regs, live_in,
+                              refs))
+            return false;
+    return true;
+}
+
+/* Enter a region loop: load and pin its values, charge the budget, and record
+ * the head. Returns false, emitting nothing, when the values do not fit.
+ */
+static bool region_loop_begin(struct jit_state *state,
+                              const struct region_plan *plan)
+{
+    uint32_t regs = 0, live_in = 0;
+    uint16_t refs[N_RV_REGS] = {0};
+    if (!region_loop_regs(plan, 0, 0, &regs, &live_in, refs))
+        return false;
+    regs &= ~LOOP_REG(rv_reg_zero);
+    live_in &= ~LOOP_REG(rv_reg_zero);
+    const int usable_regs = loop_usable_regs();
+    /* Pin every value when they all fit with room to spare, so a backedge
+     * stores nothing; x0 and fused intermediates still map a register.
+     * Otherwise pin the inputs and leave room for operands, as a spilling
+     * local loop does.
+     */
+    uint32_t pin = live_in;
+    if (__builtin_popcount(regs) <= usable_regs - 2)
+        pin = regs;
+    else if (__builtin_popcount(live_in) > usable_regs - 3)
+        return false;
+    /* Spilling: pin the most used of the other values too, while room for
+     * operands remains; each pinned value skips a store per backedge.
+     */
+    while (pin != regs && __builtin_popcount(pin) < usable_regs - 3) {
+        int best = -1;
+        for (int reg = 1; reg < N_RV_REGS; reg++)
+            if ((regs & ~pin & LOOP_REG(reg)) &&
+                (best < 0 || refs[reg] > refs[best]))
+                best = reg;
+        pin |= LOOP_REG(best);
+    }
+    /* Each value left out costs a store per iteration. Past a few, a tree of
+     * copied blocks, which stores only on leaving, runs faster.
+     */
+    if (__builtin_popcount(regs & ~pin) > 3)
+        return false;
+
+    reset_reg();
+    reserved_host_reg = parameter_reg[1];
+    for (int reg = 1; reg < N_RV_REGS; reg++)
+        if (pin & LOOP_REG(reg))
+            ra_load(state, reg);
+    loop_pinned_regs = pin;
+    /* Exits store the pinned values: a backedge may arrive with any of them
+     * changed, and the head is compiled once for every arrival.
+     */
+    for (int i = 0; i < n_host_regs; i++)
+        if (register_map[i].vm_reg_idx > 0)
+            register_map[i].dirty = true;
+    emit_load_imm(state, parameter_reg[1], 1024);
+#if defined(__aarch64__)
+    /* Start the loop on a 16-byte boundary. Wherever the head fell, the same
+     * primes loop ran up to 23 percent slower or 20 percent faster on Ampere
+     * eMAG; aligned, it runs at one speed.
+     */
+    while ((state->offset & 15) && !should_flush)
+        emit_a64(state, A64_NOP);
+#endif
+    region_loop.active = true;
+    region_loop.head = state->offset;
+    region_loop.root_pc = plan->node[0].block->pc_start;
+    return true;
+}
+
 static void translate_region(struct jit_state *state,
                              riscv_t *rv,
                              const struct region_plan *plan,
@@ -6547,7 +6736,8 @@ static void translate_region(struct jit_state *state,
         emit_region_edge(state, node->known_return);
         return;
     }
-    if (node->child[0] < 0 && node->child[1] < 0) {
+    if (node->child[0] < 0 && node->child[1] < 0 && !node->back[0] &&
+        !node->back[1]) {
         translate_record(state, rv, tail, previous);
         return;
     }
@@ -6555,7 +6745,10 @@ static void translate_region(struct jit_state *state,
     if (flow.link)
         emit_load_imm(state, map_vm_reg(state, flow.link), flow.return_pc);
     if (flow.br.jcc == JCC_JMP) {
-        translate_region(state, rv, plan, node->child[0]);
+        if (node->back[0])
+            emit_region_backedge(state);
+        else
+            translate_region(state, rv, plan, node->child[0]);
         return;
     }
     branch_zero_rhs(&flow.br.lhs, &flow.br.rhs, &flow.br.jcc);
@@ -6571,6 +6764,8 @@ static void translate_region(struct jit_state *state,
     memcpy(taken_align, reg_align, sizeof(taken_align));
     if (node->child[1] >= 0)
         translate_region(state, rv, plan, node->child[1]);
+    else if (node->back[1])
+        emit_region_backedge(state);
     else
         emit_region_edge(state, flow.br.other_pc);
     if (should_flush)
@@ -6580,6 +6775,8 @@ static void translate_region(struct jit_state *state,
     memcpy(reg_align, taken_align, sizeof(reg_align));
     if (node->child[0] >= 0)
         translate_region(state, rv, plan, node->child[0]);
+    else if (node->back[0])
+        emit_region_backedge(state);
     else {
         /* A taken edge to a halfword target traps without C. The branch is the
          * last instruction, so its pc is other_pc - 4.
@@ -6627,9 +6824,36 @@ static void __attribute__((noinline)) translate(struct jit_state *state,
     /* AOT collection profiles dispatcher entries. Cloning would absorb those
      * entries, so keep block boundaries intact while collecting.
      */
-    if (!rv->jit_bounded_step &&
-        !IIF(RV32_HAS(T2C))(PRIV(rv)->aot_collect, false))
+    const bool regions = !rv->jit_bounded_step &&
+                         !IIF(RV32_HAS(T2C))(PRIV(rv)->aot_collect, false);
+    /* A root past the record budget would overflow plan.live; a lone block
+     * that large is not planned as a region either.
+     */
+    if (REGION_LOOPS && regions && block->n_insn <= REGION_MAX_RECORDS &&
+        block->cycle_cost <= REGION_MAX_INSTRUCTIONS) {
+        const struct region_plan empty = plan;
+        plan.loop = true;
         plan_region(state, rv, &plan, 0, 0);
+        if (plan.has_back) {
+            region_liveness(&plan, 0, !rv->jit_elide_align_checks);
+            if (region_loop_begin(state, &plan)) {
+                T1C_COUNT(region_loops, 1);
+                translate_region(state, rv, &plan, 0);
+                region_loop.active = false;
+                loop_pinned_regs = 0;
+                reserved_host_reg = -1;
+                spill_live_regs = UINT32_MAX;
+                if (!should_flush)
+                    emit_misalign_stubs(state, rv);
+                return;
+            }
+            /* The values do not fit: plan again, copying the root. */
+            plan = empty;
+            plan_region(state, rv, &plan, 0, 0);
+        }
+    } else if (regions) {
+        plan_region(state, rv, &plan, 0, 0);
+    }
     if (plan.count > 1) {
         region_liveness(&plan, 0, !rv->jit_elide_align_checks);
         translate_region(state, rv, &plan, 0);

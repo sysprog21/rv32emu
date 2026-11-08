@@ -43,6 +43,7 @@
     _(shared_retires)          \
     _(retire_pending_slots)    \
     _(pending_patched)         \
+    _(region_loops)            \
     _(lazy_fused_loads)
 
 struct t1c_stats {

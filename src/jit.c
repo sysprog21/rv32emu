@@ -660,6 +660,14 @@ static void pending_reset(struct jit_state *state, bool full)
 /* Empty the offset map, every index over it and the jumps pending into it */
 static void offset_map_reset(struct jit_state *state)
 {
+#if !RV32_HAS(SYSTEM)
+    /* Clear only a used table: a fresh one is zeroed and untouched. */
+    if (state->jump_cache_used)
+        memset(state->jump_cache, 0,
+               sizeof(*state->jump_cache) << JUMP_CACHE_BITS);
+    state->jump_cache_used = false;
+    state->jump_cache[0].pc = 1;
+#endif
     state->n_blocks = 0;
     memset(state->offset_index, -1, sizeof(state->offset_index));
     pending_reset(state, true);
@@ -1020,6 +1028,8 @@ static void emit_add_imm(struct jit_state *state,
                          int dst,
                          int src,
                          int64_t imm);
+
+#define A64_NOP UINT32_C(0xd503201f)
 
 static void emit_a64(struct jit_state *state, uint32_t insn)
 {
@@ -4281,6 +4291,13 @@ struct indirect_site {
     uint32_t imm_loc[IN_JUMP_TARGETS];  /* the PC each slot compares with */
     uint32_t jump_loc[IN_JUMP_TARGETS]; /* the branch to its translation */
     int n_used;
+#if !RV32_HAS(SYSTEM)
+    /* The branch over the jump cache probe while a slot is empty, or 0. A
+     * probe hit would skip the helper that fills the slot, so the probe is
+     * armed only once every slot is in use.
+     */
+    uint32_t probe_skip;
+#endif
 };
 
 #if defined(__aarch64__)
@@ -4363,17 +4380,42 @@ static void indirect_site_fill(struct jit_state *state,
 #endif
     /* Branch first, so that the slot never matches before it leads there. */
     patch_jump(state, jump_loc, target_loc);
+#if !RV32_HAS(SYSTEM)
+    /* With every slot in use, arm the jump cache probe: the branch over it
+     * becomes a NOP of the same length.
+     */
+    uint32_t skip = 0;
+    if (site->n_used == IN_JUMP_TARGETS) {
+        skip = site->probe_skip;
+        site->probe_skip = 0;
+    }
+#endif
 #if defined(__x86_64__)
     memcpy(state->buf + imm_loc, &pc, sizeof(pc));
+#if !RV32_HAS(SYSTEM)
+    if (skip) {
+        static const uint8_t nop5[5] = {0x0f, 0x1f, 0x44, 0x00, 0x00};
+        memcpy(state->buf + skip, nop5, sizeof(nop5));
+    }
+#endif
 #elif defined(__aarch64__)
     uint32_t mov[2];
     encode_slot_pc(mov, pc);
     memcpy(state->buf + imm_loc, mov, sizeof(mov));
+#if !RV32_HAS(SYSTEM)
+    const uint32_t nop = A64_NOP;
+    if (skip)
+        memcpy(state->buf + skip, &nop, sizeof(nop));
+#endif
 #if defined(__APPLE__)
     jit_exit_write_mode();
 #endif
     sys_icache_invalidate(state->buf + imm_loc, sizeof(mov));
     sys_icache_invalidate(state->buf + jump_loc, sizeof(uint32_t));
+#if !RV32_HAS(SYSTEM)
+    if (skip)
+        sys_icache_invalidate(state->buf + skip, sizeof(nop));
+#endif
 #endif
 }
 
@@ -4418,6 +4460,13 @@ static uintptr_t jit_indirect_target(riscv_t *rv,
 #endif
     if (!target)
         return (uintptr_t) state->buf + state->exit_loc;
+#if !RV32_HAS(SYSTEM)
+    struct jump_cache_entry *entry =
+        &state->jump_cache[(rv->PC >> 2) & ((1 << JUMP_CACHE_BITS) - 1)];
+    entry->pc = rv->PC;
+    entry->code = (uintptr_t) state->buf + target->offset;
+    state->jump_cache_used = true;
+#endif
     indirect_site_fill(state, &state->sites[site], rv->PC, target->offset);
     return (uintptr_t) state->buf + target->offset;
 }
@@ -4426,6 +4475,93 @@ static uintptr_t jit_indirect_target(riscv_t *rv,
 static void emit_jump_align_guard(struct jit_state *state, uint32_t pc);
 #endif
 
+#if !RV32_HAS(SYSTEM)
+/* Probe the jump cache for the target in temp_reg and jump to its translation
+ * on a match; fall through otherwise. Every guest register is written back, so
+ * parameter registers 1 to 3 are free to clobber. The sequence is raw: the
+ * generic emitters would update the register map.
+ */
+static void emit_jump_cache_probe(struct jit_state *state)
+{
+    /* The table's address starts the jit_state that rv->jit_state points to. */
+    _Static_assert(offsetof(struct jit_state, jump_cache) == 0,
+                   "the probe loads the jump cache through rv->jit_state");
+    const uint32_t state_off = offsetof(riscv_t, jit_state);
+#if defined(__x86_64__)
+    const uint32_t mask = (1U << JUMP_CACHE_BITS) - 1;
+    const int a = parameter_reg[1], b = parameter_reg[2], t = temp_reg;
+    assert((a & 7) != RSP && (a & 7) != RBP);
+    /* mov b32, t32 */
+    if ((t | b) & 8)
+        emit1(state, 0x40 | ((t >> 3) << 2) | (b >> 3));
+    emit1(state, 0x89);
+    emit1(state, 0xc0 | ((t & 7) << 3) | (b & 7));
+    /* shl b32, 2; and b32, mask << 4: the byte offset of entry pc >> 2 */
+    if (b & 8)
+        emit1(state, 0x41);
+    emit1(state, 0xc1);
+    emit1(state, 0xe0 | (b & 7));
+    emit1(state, 2);
+    if (b & 8)
+        emit1(state, 0x41);
+    emit1(state, 0x81);
+    emit1(state, 0xe0 | (b & 7));
+    emit4(state, mask << 4);
+    /* mov a, [rv + state_off]; add a, b */
+    const int rv_reg = parameter_reg[0];
+    assert((rv_reg & 7) != RSP && (rv_reg & 7) != RBP);
+    emit1(state, 0x48 | ((a >> 3) << 2) | (rv_reg >> 3));
+    emit1(state, 0x8b);
+    emit1(state, 0x80 | ((a & 7) << 3) | (rv_reg & 7));
+    emit4(state, state_off);
+    /* mov a, [a]: the table address */
+    emit1(state, 0x48 | ((a >> 3) << 2) | (a >> 3));
+    emit1(state, 0x8b);
+    emit1(state, ((a & 7) << 3) | (a & 7));
+    emit1(state, 0x48 | ((b >> 3) << 2) | (a >> 3));
+    emit1(state, 0x01);
+    emit1(state, 0xc0 | ((b & 7) << 3) | (a & 7));
+    /* cmp [a], t32 */
+    if ((t | a) & 8)
+        emit1(state, 0x40 | ((t >> 3) << 2) | (a >> 3));
+    emit1(state, 0x39);
+    emit1(state, ((t & 7) << 3) | (a & 7));
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    /* jmp [a + 8] */
+    if (a & 8)
+        emit1(state, 0x41);
+    emit1(state, 0xff);
+    emit1(state, 0x60 | (a & 7));
+    emit1(state, offsetof(struct jump_cache_entry, code));
+#elif defined(__aarch64__)
+    const int a = R1, b = R2, c = R3, t = temp_reg;
+    /* ubfx wb, wt, #2, #JUMP_CACHE_BITS */
+    emit_a64(state, UINT32_C(0x53000000) | (2 << 16) |
+                        ((2 + JUMP_CACHE_BITS - 1) << 10) | (t << 5) | b);
+    /* ldr xa, [x0, #state_off] */
+    _Static_assert(offsetof(riscv_t, jit_state) % 8 == 0 &&
+                       offsetof(riscv_t, jit_state) / 8 < 4096,
+                   "rv->jit_state must be reachable by a scaled LDR");
+    emit_a64(state, UINT32_C(0xf9400000) | ((state_off / 8) << 10) |
+                        (parameter_reg[0] << 5) | a);
+    /* ldr xa, [xa]: the table address */
+    emit_a64(state, UINT32_C(0xf9400000) | (a << 5) | a);
+    /* add xa, xa, xb, lsl #4 */
+    emit_a64(state,
+             UINT32_C(0x8b000000) | (b << 16) | (4 << 10) | (a << 5) | a);
+    /* ldr wc, [xa]; cmp wc, wt */
+    emit_a64(state, UINT32_C(0xb9400000) | (a << 5) | c);
+    emit_cmp32(state, t, c);
+    uint32_t jump_loc_0 = state->offset;
+    emit_jcc_offset(state, JCC_JNE);
+    /* ldr xc, [xa, #8]; br xc */
+    emit_a64(state, UINT32_C(0xf9400000) | (1 << 10) | (a << 5) | c);
+    emit_uncond_branch_reg(state, BR_BR, c);
+#endif
+    emit_jump_target_offset(state, JUMP_LOC_0, state->offset);
+}
+#endif
 
 /* Jump to the target in temp_reg, with every guest register written back but
  * rd when link >= 0: then link holds rd's new value, which a matching slot
@@ -4454,6 +4590,18 @@ static void emit_indirect_jump(struct jit_state *state,
         emit_jump_align_guard(state, ir->pc);
         emit_store(state, S32, link, parameter_reg[0],
                    offsetof(riscv_t, X) + 4 * ir->rd);
+    }
+#endif
+#if !RV32_HAS(SYSTEM)
+    site->probe_skip = 0;
+    if (count < IN_JUMP_TARGETS) {
+        uint32_t jump_normal = state->offset;
+        emit_jcc_offset(state, JCC_JMP);
+        site->probe_skip = jump_normal;
+        emit_jump_cache_probe(state);
+        emit_jump_target_offset(state, JUMP_NORMAL, state->offset);
+    } else {
+        emit_jump_cache_probe(state);
     }
 #endif
     emit_store(state, S32, temp_reg, parameter_reg[0], offsetof(riscv_t, PC));
@@ -6831,9 +6979,22 @@ restart:
 
 struct jit_state *jit_state_init(size_t size, uintptr_t mem_base)
 {
-    struct jit_state *state = malloc(sizeof(struct jit_state));
+    /* Zeroed, which is how an empty jump cache entry looks. The table follows
+     * the struct, so that it shares the allocation and its lifetime.
+     */
+#if !RV32_HAS(SYSTEM)
+    const size_t jump_cache_size = sizeof(struct jump_cache_entry)
+                                   << JUMP_CACHE_BITS;
+#else
+    const size_t jump_cache_size = 0;
+#endif
+    struct jit_state *state =
+        calloc(1, sizeof(struct jit_state) + jump_cache_size);
     if (!state)
         return NULL;
+#if !RV32_HAS(SYSTEM)
+    state->jump_cache = (struct jump_cache_entry *) (state + 1);
+#endif
     assert(state);
 
 #if defined(__x86_64__)

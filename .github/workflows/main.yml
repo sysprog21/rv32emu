@@ -734,6 +734,16 @@ jobs:
           path: |
             build/linux-aot-results/*.log
             build/linux-aot-results/results.json
+      # Without C, a JAL, JALR or taken branch to a halfword target traps, and
+      # the system AOT suite then adds a case that replays such traps through
+      # compiled regions. This runs last: the Linux boot above reuses the
+      # system build.
+      - name: Check system AOT without C
+        run: |
+          make cleanconfig
+          make system_jit_defconfig
+          make -j4 ENABLE_SDL=0 ENABLE_VIRTIO_NET=0 ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ENABLE_EXT_C=0
+          make ENABLE_SDL=0 ENABLE_VIRTIO_NET=0 ENABLE_ROOTFS_EXT4=0 INITRD_SIZE=32 ENABLE_EXT_C=0 check-system-aot
 
   static-analysis:
     needs: [detect-code-related-file-changes]

@@ -210,7 +210,8 @@ $ make ENABLE_SDL=0       # Build without SDL support
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
 * `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
 * `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
-* `EXT_V` (Kconfig only — no `ENABLE_EXT_V` shim): Standard Extension for Vector Instructions, version 1.0, with SEW of 8, 16, 32 or 64 bits (ELEN=64) and single-precision floating point; `misa.V` is set. Vector double-precision arithmetic and Zvfh/Zvfhmin are not implemented. Selecting V auto-selects F. Enable via `make config`.
+* `EXT_D` (Kconfig only — no `ENABLE_EXT_D` shim): Standard Extension for Double-Precision Floating Point Instructions (RV32D plus the compressed `c.fld`, `c.fsd`, `c.fldsp`, and `c.fsdsp`). The float registers are 64 bits wide with single-precision values NaN-boxed in them, and `misa.D` is set. Selecting D auto-selects F; D is off by default and is selected by V. The JIT does not translate these instructions, so blocks that contain them are interpreted. Enable via `make config`.
+* `EXT_V` (Kconfig only — no `ENABLE_EXT_V` shim): Standard Extension for Vector Instructions, version 1.0, with SEW of 8, 16, 32 or 64 bits (ELEN=64) and single-precision floating point; `misa.V` is set. Vector double-precision arithmetic and Zvfh/Zvfhmin are not implemented. Selecting V auto-selects F and D. Enable via `make config`.
 * `ENABLE_Zba`: Standard Extension for Address Generation Instructions
 * `ENABLE_Zbb`: Standard Extension for Basic Bit-Manipulation Instructions
 * `ENABLE_Zbc`: Standard Extension for Carry-Less Multiplication Instructions

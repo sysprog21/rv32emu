@@ -147,6 +147,37 @@ fcvtsw    rd rs1 24..20=0 31..27=0x1A rm 26..25=0 6..2=0x14 1..0=3
 fcvtswu   rd rs1 24..20=1 31..27=0x1A rm 26..25=0 6..2=0x14 1..0=3
 fmvwx     rd rs1 24..20=0 31..27=0x1E 14..12=0 26..25=0 6..2=0x14 1..0=3
 
+
+# RV32D Standard Extension (Double-Precision Float)
+
+@extension EXT_D
+fld       rd rs1 imm12 14..12=3 6..2=0x01 1..0=3
+fsd       imm12hi rs1 rs2 imm12lo 14..12=3 6..2=0x09 1..0=3
+fmaddd    rd rs1 rs2 rs3 rm 26..25=1 6..2=0x10 1..0=3
+fmsubd    rd rs1 rs2 rs3 rm 26..25=1 6..2=0x11 1..0=3
+fnmsubd   rd rs1 rs2 rs3 rm 26..25=1 6..2=0x12 1..0=3
+fnmaddd   rd rs1 rs2 rs3 rm 26..25=1 6..2=0x13 1..0=3
+faddd     rd rs1 rs2 31..27=0x00 rm 26..25=1 6..2=0x14 1..0=3
+fsubd     rd rs1 rs2 31..27=0x01 rm 26..25=1 6..2=0x14 1..0=3
+fmuld     rd rs1 rs2 31..27=0x02 rm 26..25=1 6..2=0x14 1..0=3
+fdivd     rd rs1 rs2 31..27=0x03 rm 26..25=1 6..2=0x14 1..0=3
+fsqrtd    rd rs1 24..20=0 31..27=0x0B rm 26..25=1 6..2=0x14 1..0=3
+fsgnjd    rd rs1 rs2 31..27=0x04 14..12=0 26..25=1 6..2=0x14 1..0=3
+fsgnjnd   rd rs1 rs2 31..27=0x04 14..12=1 26..25=1 6..2=0x14 1..0=3
+fsgnjxd   rd rs1 rs2 31..27=0x04 14..12=2 26..25=1 6..2=0x14 1..0=3
+fmind     rd rs1 rs2 31..27=0x05 14..12=0 26..25=1 6..2=0x14 1..0=3
+fmaxd     rd rs1 rs2 31..27=0x05 14..12=1 26..25=1 6..2=0x14 1..0=3
+fcvtsd    rd rs1 24..20=1 31..27=0x08 rm 26..25=0 6..2=0x14 1..0=3
+fcvtds    rd rs1 24..20=0 31..27=0x08 rm 26..25=1 6..2=0x14 1..0=3
+feqd      rd rs1 rs2 31..27=0x14 14..12=2 26..25=1 6..2=0x14 1..0=3
+fltd      rd rs1 rs2 31..27=0x14 14..12=1 26..25=1 6..2=0x14 1..0=3
+fled      rd rs1 rs2 31..27=0x14 14..12=0 26..25=1 6..2=0x14 1..0=3
+fclassd   rd rs1 24..20=0 31..27=0x1C 14..12=1 26..25=1 6..2=0x14 1..0=3
+fcvtwd    rd rs1 24..20=0 31..27=0x18 rm 26..25=1 6..2=0x14 1..0=3
+fcvtwud   rd rs1 24..20=1 31..27=0x18 rm 26..25=1 6..2=0x14 1..0=3
+fcvtdw    rd rs1 24..20=0 31..27=0x1A rm 26..25=1 6..2=0x14 1..0=3
+fcvtdwu   rd rs1 24..20=1 31..27=0x1A rm 26..25=1 6..2=0x14 1..0=3
+
 # Zba Standard Extension (Address generation)
 
 @extension Zba
@@ -239,6 +270,13 @@ cflw      crdq   crs1q  cimmw         15..13=3 1..0=0
 cfsw      crs1q  crs2q  cimmw         15..13=7 1..0=0
 cflwsp    crd    cimmlwsp              15..13=3 1..0=2
 cfswsp    crs2   cimmswsp              15..13=7 1..0=2
+
+# RV32DC (Compressed Double, requires EXT_C && EXT_D)
+@extension EXT_D
+cfld      crdq  crs1q  cimmd 15..13=1 1..0=0
+cfsd      crs1q crs2q  cimmd 15..13=5 1..0=0
+cfldsp    crd    cimmldsp 15..13=1 1..0=2
+cfsdsp    crs2   cimmsdsp 15..13=5 1..0=2
 
 # =============================================================
 # RVV (RISC-V Vector Extension v1.0)

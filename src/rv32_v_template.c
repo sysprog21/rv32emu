@@ -7582,7 +7582,7 @@ static inline void rvv_exec_fp32_vf(riscv_t *rv,
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
@@ -7606,7 +7606,7 @@ static inline void rvv_exec_fp32_vf(riscv_t *rv,
 static inline void rvv_exec_vfmv_f_s(riscv_t *rv, const rv_insn_t *ir)
 {
     /* vfmv.f.s performs its operation even if vstart >= vl or vl == 0. */
-    rv->F[ir->rd].v = rvv_get_elem(rv, ir->vs2, 0, 32);
+    F32_SETV(rv, ir->rd, rvv_get_elem(rv, ir->vs2, 0, 32));
     rv->csr_vstart = 0;
 }
 
@@ -7619,7 +7619,7 @@ static inline void rvv_exec_vfmv_s_f(riscv_t *rv, const rv_insn_t *ir)
         uint32_t vlmax = VLEN / 32;
         uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
 
-        rvv_set_elem(rv, ir->vd, 0, 32, rv->F[ir->rs1].v);
+        rvv_set_elem(rv, ir->vd, 0, 32, F32_SRC(rv, ir->rs1).v);
         if (vta) {
             for (uint32_t elem = 1; elem < vlmax; elem++)
                 rvv_set_elem(rv, ir->vd, elem, 32, 0xFFFFFFFFU);
@@ -7743,7 +7743,7 @@ static inline void rvv_exec_fp32_mask_vf(riscv_t *rv,
                                          bool reverse)
 {
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         uint32_t value;
@@ -7820,7 +7820,7 @@ static inline void rvv_exec_fp32_mac_vf(riscv_t *rv,
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
@@ -7873,7 +7873,7 @@ static inline void rvv_exec_fp64_widen_vf(riscv_t *rv,
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
@@ -7925,7 +7925,7 @@ static inline void rvv_exec_fp64_mixed_vf(riscv_t *rv,
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
@@ -8005,7 +8005,7 @@ static inline void rvv_exec_fp64_mac_vf(riscv_t *rv,
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
@@ -8031,7 +8031,7 @@ static inline void rvv_exec_vfslide1up(riscv_t *rv,
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     if (rv->csr_vstart < rv->csr_vl) {
         if (rv->csr_vstart == 0) {
@@ -8065,7 +8065,7 @@ static inline void rvv_exec_vfslide1down(riscv_t *rv,
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
@@ -8092,7 +8092,7 @@ static inline void rvv_exec_vfmerge_vfm(riscv_t *rv,
 {
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         rvv_set_elem(rv, dest, elem, 32,
@@ -8113,7 +8113,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
 {
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t scalar = rv->F[ir->rs1].v;
+    uint32_t scalar = F32_SRC(rv, ir->rs1).v;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++)
         rvv_set_elem(rv, dest, elem, 32, scalar);
@@ -8566,7 +8566,7 @@ RVOP(vfrdiv_vf, {
             continue;
         }
         rvv_set_elem(rv, ir->vd, elem, 32,
-                     rvv_fp_div32(rv->F[ir->rs1].v,
+                     rvv_fp_div32(F32_SRC(rv, ir->rs1).v,
                                   rvv_get_elem(rv, ir->vs2, elem, 32)));
     }
     if (rvv_tail_fill(rv, vta)) {
@@ -8598,7 +8598,7 @@ RVOP(vfrsub_vf, {
             continue;
         }
         rvv_set_elem(rv, ir->vd, elem, 32,
-                     rvv_fp_sub32(rv->F[ir->rs1].v,
+                     rvv_fp_sub32(F32_SRC(rv, ir->rs1).v,
                                   rvv_get_elem(rv, ir->vs2, elem, 32)));
     }
     if (rvv_tail_fill(rv, vta)) {

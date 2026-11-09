@@ -721,6 +721,18 @@ ifeq ($(RUN_USER_ELF),y)
 CHECK_TARGETS += check-hello $(GUEST_CHECK_TARGETS) \
 	$(GUEST_ASM_CHECK_TARGETS) $(addprefix check-,$(CHECK_ELF_FILES))
 endif
+# The D smoke test uses the compressed double loads and stores and fcsr.
+ifeq ($(CONFIG_EXT_D)$(CONFIG_EXT_C)$(CONFIG_Zicsr)$(RUN_USER_ELF),yyyy)
+EXPECTED_rv32d_smoke = RV32D smoke OK
+CHECK_TARGETS += check-rv32d-smoke
+
+check-rv32d-smoke: $(BIN)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32imafdc_zicsr -mabi=ilp32d -nostdlib \
+	    -static -fno-pie -no-pie -Wl,-e,_start tests/rv32d-smoke.S \
+	    -o $(OUT)/rv32d-smoke.elf
+	$(call check-test, , $(OUT)/rv32d-smoke.elf, rv32d-smoke.elf, tail -n 1,$(EXPECTED_rv32d_smoke))
+endif
+
 ifeq ($(CONFIG_EXT_V)$(RUN_USER_ELF),yy)
 # The smoke program asserts VLEN=128 (vlenb, VLMAX, whole-register sizes).
 # Other widths are covered by rvv-vlen, which is built for the configured VLEN.

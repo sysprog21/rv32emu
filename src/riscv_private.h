@@ -532,6 +532,13 @@ struct riscv_internal {
 #if RV32_HAS(EXT_F)
     /* float registers */
     riscv_float_t F[32];
+#if RV32_HAS(EXT_D)
+    /* The upper half of each 64-bit float register. F[] holds the lower half,
+     * so single-precision code keeps working on it; a single-precision value
+     * is NaN-boxed when this reads all ones.
+     */
+    uint32_t F_hi[32];
+#endif
     uint32_t csr_fcsr;
 #endif
 

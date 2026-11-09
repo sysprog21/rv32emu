@@ -236,7 +236,25 @@ static bool emulate_misaligned_load(riscv_t *rv,
 #endif
         value = misaligned_read_w(rv, addr);
         if (!MISALIGN_PART_FAULTED())
-            rv->F[ir->rd].v = value;
+            F32_SETV(rv, ir->rd, value);
+        break;
+#endif
+
+#if RV32_HAS(EXT_D)
+    case rv_insn_fld:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cfld:
+    case rv_insn_cfldsp:
+#endif
+        value = misaligned_read_w(rv, addr);
+        if (!MISALIGN_PART_FAULTED()) {
+            const uint32_t hi = misaligned_read_w(rv, addr + 4);
+
+            if (!MISALIGN_PART_FAULTED()) {
+                rv->F[ir->rd].v = value;
+                rv->F_hi[ir->rd] = hi;
+            }
+        }
         break;
 #endif
 
@@ -286,6 +304,18 @@ static bool emulate_misaligned_store(riscv_t *rv,
     case rv_insn_cfswsp:
 #endif
         misaligned_write_w(rv, addr, rv->F[ir->rs2].v);
+        break;
+#endif
+
+#if RV32_HAS(EXT_D)
+    case rv_insn_fsd:
+#if RV32_HAS(EXT_C)
+    case rv_insn_cfsd:
+    case rv_insn_cfsdsp:
+#endif
+        misaligned_write_w(rv, addr, rv->F[ir->rs2].v);
+        if (!MISALIGN_PART_FAULTED())
+            misaligned_write_w(rv, addr + 4, rv->F_hi[ir->rs2]);
         break;
 #endif
 

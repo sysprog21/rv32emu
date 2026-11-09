@@ -196,6 +196,35 @@ enum op_field {
         _(fcvtswu, 0, 4, 0, ENC(rs1, rs2, rd))         \
         _(fmvwx, 0, 4, 0, ENC(rs1, rs2, rd))           \
     )                                                  \
+    /* RV32D Standard Extension */                     \
+    IIF(RV32_HAS(EXT_D))(                              \
+        _(fld, 0, 4, 0, ENC(rs1, rd))\
+        _(fsd, 0, 4, 0, ENC(rs1, rs2))\
+        _(fmaddd, 0, 4, 0, ENC(rs1, rs2, rs3, rd))\
+        _(fmsubd, 0, 4, 0, ENC(rs1, rs2, rs3, rd))\
+        _(fnmsubd, 0, 4, 0, ENC(rs1, rs2, rs3, rd))\
+        _(fnmaddd, 0, 4, 0, ENC(rs1, rs2, rs3, rd))\
+        _(faddd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fsubd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fmuld, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fdivd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fsqrtd, 0, 4, 0, ENC(rs1, rd))\
+        _(fsgnjd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fsgnjnd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fsgnjxd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fmind, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fmaxd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fcvtsd, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtds, 0, 4, 0, ENC(rs1, rd))\
+        _(feqd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fltd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fled, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fclassd, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtwd, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtwud, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtdw, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtdwu, 0, 4, 0, ENC(rs1, rd))\
+    )                                                  \
     /* RV32C Standard Extension */                     \
     IIF(RV32_HAS(EXT_C))(                              \
         _(caddi4spn, 0, 2, 1, ENC(rd))                 \
@@ -231,6 +260,13 @@ enum op_field {
             _(cfswsp, 0, 2, 0, ENC(rs2))               \
             _(cflw, 0, 2, 0, ENC(rs1, rd))             \
             _(cfsw, 0, 2, 0, ENC(rs1, rs2))            \
+        )                                              \
+        /* RV32DC Instruction */                       \
+        IIF(RV32_HAS(EXT_D))(                          \
+            _(cfld, 0, 2, 0, ENC(rs1, rd))\
+            _(cfsd, 0, 2, 0, ENC(rs1, rs2))\
+            _(cfldsp, 0, 2, 0, ENC(rd))\
+            _(cfsdsp, 0, 2, 0, ENC(rs2))\
         )                                              \
     )                                                  \
     /* Vector Extension */                             \

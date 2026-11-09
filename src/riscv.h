@@ -132,6 +132,7 @@ enum SV32_PTE_PERM {
 #define MISA_M (1 << ('M' - 'A'))
 #define MISA_A (1 << ('A' - 'A'))
 #define MISA_F (1 << ('F' - 'A'))
+#define MISA_D (1 << ('D' - 'A'))
 #define MISA_C (1 << ('C' - 'A'))
 #define MISA_V (1 << ('V' - 'A'))
 

@@ -1936,6 +1936,60 @@ T2C_OP(fcvtswu, { __UNREACHABLE; })
 T2C_OP(fmvwx, { __UNREACHABLE; })
 #endif
 
+#if RV32_HAS(EXT_D)
+T2C_OP(fld, { __UNREACHABLE; })
+
+T2C_OP(fsd, { __UNREACHABLE; })
+
+T2C_OP(fmaddd, { __UNREACHABLE; })
+
+T2C_OP(fmsubd, { __UNREACHABLE; })
+
+T2C_OP(fnmsubd, { __UNREACHABLE; })
+
+T2C_OP(fnmaddd, { __UNREACHABLE; })
+
+T2C_OP(faddd, { __UNREACHABLE; })
+
+T2C_OP(fsubd, { __UNREACHABLE; })
+
+T2C_OP(fmuld, { __UNREACHABLE; })
+
+T2C_OP(fdivd, { __UNREACHABLE; })
+
+T2C_OP(fsqrtd, { __UNREACHABLE; })
+
+T2C_OP(fsgnjd, { __UNREACHABLE; })
+
+T2C_OP(fsgnjnd, { __UNREACHABLE; })
+
+T2C_OP(fsgnjxd, { __UNREACHABLE; })
+
+T2C_OP(fmind, { __UNREACHABLE; })
+
+T2C_OP(fmaxd, { __UNREACHABLE; })
+
+T2C_OP(fcvtsd, { __UNREACHABLE; })
+
+T2C_OP(fcvtds, { __UNREACHABLE; })
+
+T2C_OP(feqd, { __UNREACHABLE; })
+
+T2C_OP(fltd, { __UNREACHABLE; })
+
+T2C_OP(fled, { __UNREACHABLE; })
+
+T2C_OP(fclassd, { __UNREACHABLE; })
+
+T2C_OP(fcvtwd, { __UNREACHABLE; })
+
+T2C_OP(fcvtwud, { __UNREACHABLE; })
+
+T2C_OP(fcvtdw, { __UNREACHABLE; })
+
+T2C_OP(fcvtdwu, { __UNREACHABLE; })
+#endif
+
 #if RV32_HAS(EXT_C)
 T2C_OP(caddi4spn, {
     T2C_LLVM_GEN_LOAD_VMREG(sp, 32, t2c_gen_sp_addr(start, builder, ir));
@@ -2215,6 +2269,16 @@ T2C_OP(cfswsp, { __UNREACHABLE; })
 T2C_OP(cflw, { __UNREACHABLE; })
 
 T2C_OP(cfsw, { __UNREACHABLE; })
+#endif
+
+#if RV32_HAS(EXT_C) && RV32_HAS(EXT_D)
+T2C_OP(cfld, { __UNREACHABLE; })
+
+T2C_OP(cfsd, { __UNREACHABLE; })
+
+T2C_OP(cfldsp, { __UNREACHABLE; })
+
+T2C_OP(cfsdsp, { __UNREACHABLE; })
 #endif
 
 #if RV32_HAS(Zba)

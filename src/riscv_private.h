@@ -15,6 +15,9 @@
 #if RV32_HAS(GDBSTUB)
 #include "breakpoint.h"
 #include "mini-gdbstub/include/gdbstub.h"
+
+/* Wrap the memory I/O callbacks for data watchpoints (gdbstub.c) */
+void rv_debug_wrap_io(riscv_t *rv);
 #endif
 #include "decode.h"
 #include "riscv.h"
@@ -661,8 +664,11 @@ struct riscv_internal {
      */
     bool debug_continue;
 
-    /* GDB instruction breakpoint */
+    /* GDB instruction breakpoints */
     breakpoint_map_t breakpoint_map;
+
+    /* GDB data watchpoints, tested by the wrapped memory I/O callbacks */
+    watchpoint_set_t watchpoints;
 
     /* The flag to notify interrupt from GDB client: it should be accessed by
      * atomic operation when starting the GDBSTUB.

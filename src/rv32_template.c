@@ -328,14 +328,23 @@ RVOP(bgeu, { BRANCH_FUNC(uint32_t, <); })
  * In non-SYSTEM mode, bypass io callback indirection for direct RAM access.
  * This eliminates function pointer dispatch overhead per memory operation.
  * In SYSTEM mode, use io callbacks for MMU/TLB handling.
+ *
+ * USER_MEM_FN names the user-mode accessor for one operation: the inline
+ * ram_* helper, or in a debug build the io callback, which the GDB data
+ * watchpoints wrap to observe every access (see gdbstub.c).
  */
 #if !RV32_HAS(SYSTEM)
-#define MEM_READ_W(rv, addr) ram_read_w(rv, addr)
-#define MEM_READ_S(rv, addr) ram_read_s(rv, addr)
-#define MEM_READ_B(rv, addr) ram_read_b(rv, addr)
-#define MEM_WRITE_W(rv, addr, val) ram_write_w(rv, addr, val)
-#define MEM_WRITE_S(rv, addr, val) ram_write_s(rv, addr, val)
-#define MEM_WRITE_B(rv, addr, val) ram_write_b(rv, addr, val)
+#if RV32_HAS(GDBSTUB)
+#define USER_MEM_FN(rv, op) (rv)->io.mem_##op
+#else
+#define USER_MEM_FN(rv, op) ram_##op
+#endif
+#define MEM_READ_W(rv, addr) USER_MEM_FN(rv, read_w)(rv, addr)
+#define MEM_READ_S(rv, addr) USER_MEM_FN(rv, read_s)(rv, addr)
+#define MEM_READ_B(rv, addr) USER_MEM_FN(rv, read_b)(rv, addr)
+#define MEM_WRITE_W(rv, addr, val) USER_MEM_FN(rv, write_w)(rv, addr, val)
+#define MEM_WRITE_S(rv, addr, val) USER_MEM_FN(rv, write_s)(rv, addr, val)
+#define MEM_WRITE_B(rv, addr, val) USER_MEM_FN(rv, write_b)(rv, addr, val)
 #else
 /* A page fault runs the guest's trap handler inside the access. Store the
  * handler's running cycle count first, so that the trap handler counts on from

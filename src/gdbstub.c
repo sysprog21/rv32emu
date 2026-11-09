@@ -138,6 +138,7 @@ static inline bool rv_is_interrupt(riscv_t *rv)
 static bool rv_debug_should_stop(riscv_t *rv)
 {
     return rv_has_halted(rv) || rv_is_interrupt(rv) ||
+           rv->watchpoints.triggered ||
            breakpoint_map_find(rv->breakpoint_map, rv_get_pc(rv));
 }
 
@@ -175,6 +176,7 @@ static gdb_action_t rv_cont(void *args)
     /* Loop, since a guest reboot restarts the hart coroutine and returns here
      * before any stop condition holds.
      */
+    rv->watchpoints.triggered = false;
     rv->debug_continue = true;
     while (!rv_debug_should_stop(rv))
         rv_debug_resume(rv);
@@ -191,27 +193,105 @@ static gdb_action_t rv_stepi(void *args)
     riscv_t *rv = (riscv_t *) args;
     assert(rv);
 
+    rv->watchpoints.triggered = false;
     rv_debug_resume(rv);
     return ACT_RESUME;
 }
 
-static bool rv_set_bp(void *args, size_t addr, bp_type_t type)
-{
-    riscv_t *rv = (riscv_t *) args;
-    if (type != BP_SOFTWARE)
-        return false;
+/* Data watchpoints wrap the memory I/O callbacks for the whole debug session.
+ * Every guest load and store reaches the callbacks, whichever RVOP or helper
+ * issues it, so this is the one place that tests them. The check runs after
+ * the access and only when it completed: a faulting access touched nothing, so
+ * it must not be reported as a hit.
+ */
+#if RV32_HAS(SYSTEM)
+#define WP_ACCESS_FAULTED() unlikely(need_handle_signal)
+#else
+#define WP_ACCESS_FAULTED() false
+#endif
 
-    return breakpoint_map_insert(rv->breakpoint_map, addr);
+#define WP_IO_READ(fn, type, len)                                     \
+    static type wp_mem_##fn(riscv_t *rv, riscv_word_t addr)           \
+    {                                                                 \
+        type value = rv->watchpoints.orig_io.mem_##fn(rv, addr);      \
+        if (rv->watchpoints.count && !WP_ACCESS_FAULTED())            \
+            watchpoint_set_check(&rv->watchpoints, addr, len, false); \
+        return value;                                                 \
+    }
+#define WP_IO_WRITE(fn, type, len)                                      \
+    static void wp_mem_##fn(riscv_t *rv, riscv_word_t addr, type value) \
+    {                                                                   \
+        rv->watchpoints.orig_io.mem_##fn(rv, addr, value);              \
+        if (rv->watchpoints.count && !WP_ACCESS_FAULTED())              \
+            watchpoint_set_check(&rv->watchpoints, addr, len, true);    \
+    }
+WP_IO_READ(read_w, riscv_word_t, 4)
+WP_IO_READ(read_s, riscv_half_t, 2)
+WP_IO_READ(read_b, riscv_byte_t, 1)
+WP_IO_WRITE(write_w, riscv_word_t, 4)
+WP_IO_WRITE(write_s, riscv_half_t, 2)
+WP_IO_WRITE(write_b, riscv_byte_t, 1)
+
+/* Called once before the guest runs under the debugger. Installing the
+ * wrappers up front keeps the JIT build's dTLB fast path from ever tagging a
+ * page (jit_dtlb_fill tags none while the I/O is not the default), so no
+ * access can bypass them later.
+ */
+void rv_debug_wrap_io(riscv_t *rv)
+{
+    rv->watchpoints.orig_io = rv->io;
+    rv->io.mem_read_w = wp_mem_read_w;
+    rv->io.mem_read_s = wp_mem_read_s;
+    rv->io.mem_read_b = wp_mem_read_b;
+    rv->io.mem_write_w = wp_mem_write_w;
+    rv->io.mem_write_s = wp_mem_write_s;
+    rv->io.mem_write_b = wp_mem_write_b;
 }
 
-static bool rv_del_bp(void *args, size_t addr, bp_type_t type)
+static int rv_set_bp(void *args, size_t addr, size_t len, bp_type_t type)
 {
     riscv_t *rv = (riscv_t *) args;
-    if (type != BP_SOFTWARE)
+
+    switch (type) {
+    case BP_SOFTWARE:
+        return breakpoint_map_insert(rv->breakpoint_map, addr);
+    case WP_WRITE:
+    case WP_READ:
+    case WP_ACCESS:
+        return watchpoint_set_add(&rv->watchpoints, addr, len, type);
+    default:
+        return ENOTSUP;
+    }
+}
+
+static int rv_del_bp(void *args, size_t addr, size_t len, bp_type_t type)
+{
+    riscv_t *rv = (riscv_t *) args;
+
+    switch (type) {
+    case BP_SOFTWARE:
+        return breakpoint_map_del(rv->breakpoint_map, addr);
+    case WP_WRITE:
+    case WP_READ:
+    case WP_ACCESS:
+        return watchpoint_set_del(&rv->watchpoints, addr, len, type);
+    default:
+        return ENOTSUP;
+    }
+}
+
+/* GDB only treats a stop as a watchpoint hit when the stop reply names the
+ * triggering address, so hand back the armed watchpoint's base and consume
+ * the flag: one stop per hit. */
+static bool rv_wp_hit(void *args, size_t *addr, bp_type_t *type)
+{
+    riscv_t *rv = (riscv_t *) args;
+    riscv_word_t hit_addr;
+
+    if (!watchpoint_set_take_hit(&rv->watchpoints, &hit_addr, type))
         return false;
 
-    /* When there is no matched breakpoint, no further action is taken */
-    breakpoint_map_del(rv->breakpoint_map, addr);
+    *addr = hit_addr;
     return true;
 }
 
@@ -233,5 +313,6 @@ const struct target_ops gdbstub_ops = {
     .stepi = rv_stepi,
     .set_bp = rv_set_bp,
     .del_bp = rv_del_bp,
+    .wp_hit = rv_wp_hit,
     .on_interrupt = rv_on_interrupt,
 };

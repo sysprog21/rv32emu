@@ -223,7 +223,7 @@ LATEST_RELEASE ?=
 # Only fetch releases when artifact-related targets are requested.
 # This prevents network calls during unrelated targets like 'make defconfig'.
 ARTIFACT_TARGETS := artifact fetch-checksum scimark2 ieeelib \
-                    check misalign doom quake system gdbstub-test
+                    check misalign doom quake system
 
 ifneq ($(filter $(ARTIFACT_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(call has, PREBUILT), 1)

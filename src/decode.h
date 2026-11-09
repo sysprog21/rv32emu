@@ -1192,6 +1192,25 @@ typedef struct rv_insn {
 #endif
 } rv_insn_t;
 
+/* try_fuse_sequence() copies sizeof(opcode_fuse_t) leading bytes of an
+ * rv_insn_t into an opcode_fuse_t, so both structures must agree on the offset
+ * and width of every field the fused handlers read back. A field that grows
+ * into alignment padding keeps its neighbors in place, so the width is pinned
+ * as well as the offset. Bytes past opcode are copied but never read.
+ */
+#define FUSE_PREFIX_MATCH(field)                                        \
+    _Static_assert(                                                     \
+        offsetof(rv_insn_t, field) == offsetof(opcode_fuse_t, field) && \
+            sizeof(((rv_insn_t *) 0)->field) ==                         \
+                sizeof(((opcode_fuse_t *) 0)->field),                   \
+        "rv_insn_t." #field " must match opcode_fuse_t." #field)
+FUSE_PREFIX_MATCH(imm);
+FUSE_PREFIX_MATCH(rd);
+FUSE_PREFIX_MATCH(rs1);
+FUSE_PREFIX_MATCH(rs2);
+FUSE_PREFIX_MATCH(opcode);
+#undef FUSE_PREFIX_MATCH
+
 /* The record after @ir in a finalized block, or NULL after the last one.
  * Packed records are contiguous and keep only their successor's handler.
  */

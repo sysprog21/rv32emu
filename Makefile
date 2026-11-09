@@ -161,7 +161,7 @@ endif
 
 # Extension: Vector
 ifeq ($(CONFIG_EXT_V),y)
-VLEN ?= 128
+VLEN ?= $(if $(CONFIG_VLEN),$(CONFIG_VLEN),128)
 CFLAGS += -DVLEN=$(VLEN)
 endif
 

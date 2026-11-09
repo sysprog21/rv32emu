@@ -210,7 +210,7 @@ $ make ENABLE_SDL=0       # Build without SDL support
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
 * `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
 * `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
-* `EXT_V` (Kconfig only — no `ENABLE_EXT_V` shim): Standard Extension for Vector Instructions (experimental: decode plus partial execution; `VLEN` defaults to 128, override at the make line with `VLEN=<n>`; selecting V auto-selects F). Enable via `make config`.
+* `EXT_V` (Kconfig only — no `ENABLE_EXT_V` shim): Standard Extension for Vector Instructions, version 1.0 with `ELEN=64`, single-precision floating point, and `misa.V` set. Zvfh/Zvfhmin and vector double-precision arithmetic are not implemented. Selecting V auto-selects F. Enable via `make config`.
 * `ENABLE_Zba`: Standard Extension for Address Generation Instructions
 * `ENABLE_Zbb`: Standard Extension for Basic Bit-Manipulation Instructions
 * `ENABLE_Zbc`: Standard Extension for Carry-Less Multiplication Instructions
@@ -231,4 +231,4 @@ $ make ENABLE_SDL=0       # Build without SDL support
 * `ENABLE_UBSAN`: Build with `-fsanitize=undefined` to surface UB at runtime.
 * `ENABLE_ARCH_TEST`: Enable architectural-test exit reporting for the ACT4 harness; see [arch-test.md](arch-test.md).
 * `INITRD_SIZE`: System mode only — initrd reservation in MiB. `mk/system.mk` auto-sizes from the on-disk `rootfs.cpio` (file size + 2 MiB) when present, otherwise defaults to 32 MiB. Override on the make line, e.g. `make system ENABLE_SYSTEM=1 INITRD_SIZE=64` for SDL workloads that bundle larger assets.
-* `VLEN`: V extension vector length in bits (default 128). Override on the make line, e.g. `make VLEN=256`. See `EXT_V` above for enabling vector support.
+* `VLEN`: V extension vector register length in bits (default 128; a power of two from 128 to 65536; also `CONFIG_VLEN` in `make config`). Override on the make line, e.g. `make VLEN=256`. See `EXT_V` above for enabling vector support.

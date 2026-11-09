@@ -168,13 +168,29 @@ config EXT_C
       Reduces code size by approximately 25-30%.
 
 config EXT_V
-    bool "V - Vector Extension (experimental, decode only)"
+    bool "V - Vector Extension (RVV 1.0, ELEN=64)"
     default n
     select EXT_F
     help
-      Enable RISC-V "V" Vector extension (decode + partial execution).
+      Enable the RISC-V "V" Vector extension, version 1.0: vector
+      configuration, unit-stride/strided/indexed/segment/whole-register and
+      fault-only-first memory accesses, integer, fixed-point, mask,
+      reduction and permutation operations, and single-precision floating
+      point including the widening forms (computed with Berkeley SoftFloat).
+      ELEN is 64. Not implemented: Zvfh/Zvfhmin, and vector double-precision
+      arithmetic (the base ISA has no D).
       Vector load/store shares its opcode with load_fp/store_fp, so
-      enabling V automatically selects F. VLEN defaults to 128.
+      enabling V automatically selects F. Advertised in misa.V.
+
+config VLEN
+    int "VLEN - vector register length in bits (power of two, 128-65536)"
+    default 128
+    range 128 65536
+    depends on EXT_V
+    help
+      Width of each of the 32 vector registers. Must be a power of two.
+      The value is also reported through the vlenb CSR. It can be
+      overridden on the make line, for example: make VLEN=256.
 
 comment "Zicsr and Zifencei Extensions"
 

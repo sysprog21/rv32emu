@@ -1396,6 +1396,7 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
     rv->csr_misa |= MISA_M;
 #endif
 #if RV32_HAS(EXT_V)
+    rv->csr_misa |= MISA_V;
     rv->csr_vstart = 0;
     rv->csr_vxsat = 0;
     rv->csr_vxrm = 0;

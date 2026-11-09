@@ -68,11 +68,7 @@
                    offsetof(riscv_t, PC));                            \
         emit_exit(state);                                             \
         emit_jump_target_offset(state, JUMP_LOC_0, state->offset);    \
-        emit_jmp(state, ir->pc + ir->imm, BLOCK_SATP(cur_block));     \
-        emit_load_imm(state, temp_reg, ir->pc + ir->imm);             \
-        emit_store(state, S32, temp_reg, parameter_reg[0],            \
-                   offsetof(riscv_t, PC));                            \
-        emit_exit(state);                                             \
+        emit_branch_taken(state, ir->pc, ir->pc + ir->imm);           \
     } while (0)
 
 /* Branch instruction handler macro - all branch instructions follow
@@ -119,12 +115,12 @@
     GEN(inst, {                                                               \
         if (ir->rd == rv_reg_zero)                                            \
             return;                                                           \
-        vm_reg[0] = ra_load(state, ir->rs1);                                  \
-        vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);            \
+        const bool loaded = ra_load_unary(state, ir->rs1, ir->rd);            \
         if ((ir->imm == 0 &&                                                  \
              (op == ALU_ADD || op == ALU_OR || op == ALU_XOR)) ||             \
             (ir->imm == -1 && op == ALU_AND)) {                               \
-            emit_mov32(state, vm_reg[0], vm_reg[1]);                          \
+            if (!loaded)                                                      \
+                emit_mov32(state, vm_reg[0], vm_reg[1]);                      \
         } else {                                                              \
             if (vm_reg[0] != vm_reg[1])                                       \
                 emit_mov(state, vm_reg[0], vm_reg[1]);                        \
@@ -142,14 +138,13 @@
     GEN(inst, {                                                     \
         if (ir->rd == rv_reg_zero)                                  \
             return;                                                 \
-        vm_reg[0] = ra_load(state, ir->rs1);                        \
-        vm_reg[1] = map_vm_reg_reserved(state, ir->rd, vm_reg[0]);  \
+        const bool loaded = ra_load_unary(state, ir->rs1, ir->rd);  \
         if (ir->imm & RV32_SHIFT_MASK) {                            \
             if (vm_reg[0] != vm_reg[1])                             \
                 emit_mov(state, vm_reg[0], vm_reg[1]);              \
             emit_alu32_imm8(state, SHIFT_IMM_OPCODE, op, vm_reg[1], \
                             ir->imm & RV32_SHIFT_MASK);             \
-        } else {                                                    \
+        } else if (!loaded) {                                       \
             emit_mov32(state, vm_reg[0], vm_reg[1]);                \
         }                                                           \
     })
@@ -157,6 +152,11 @@
 /* ALU register instruction handler macro */
 #define GEN_ALU_REG(inst, op)                                                  \
     GEN(inst, {                                                                \
+        if (ir->rd != rv_reg_zero &&                                           \
+            ra_load_binary(state, ir->rs1, ir->rs2, ir->rd)) {                 \
+            emit_alu32(state, op, vm_reg[1], vm_reg[2]);                       \
+            return;                                                            \
+        }                                                                      \
         ra_load2(state, ir->rs1, ir->rs2);                                     \
         vm_reg[2] = map_vm_reg_reserved2(state, ir->rd, vm_reg[0], vm_reg[1]); \
         if (vm_reg[2] != vm_reg[1] || vm_reg[0] == vm_reg[1]) {                \
@@ -259,6 +259,17 @@ GEN(auipc, {
     emit_load_imm(state, vm_reg[0], ir->pc + ir->imm);
 })
 GEN(jal, {
+#if !RV32_HAS(EXT_C)
+    if ((ir->pc + (uint32_t) ir->imm) & 3u) {
+        /* The trap precedes the instruction's retirement: rd is not written,
+         * the exception PC is the jump and the trap value is the target.
+         */
+        store_back_all(state);
+        emit_transfer_trap(state, jit_misaligned_jump, ir->pc,
+                           ir->pc + ir->imm);
+        return;
+    }
+#endif
     if (ir->rd) {
         vm_reg[0] = map_vm_reg(state, ir->rd);
         emit_load_imm(state, vm_reg[0], ir->pc + 4);
@@ -272,15 +283,36 @@ GEN(jal, {
 GEN(jalr, {
     vm_reg[0] = ra_load(state, ir->rs1);
     emit_mov(state, vm_reg[0], temp_reg);
-    emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_ADD, temp_reg, ir->imm);
+    if (ir->imm)
+        emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_ADD, temp_reg, ir->imm);
     /* RISC-V spec: target address LSB is always cleared */
     emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, temp_reg, ~1U);
+    /* Without C, a misaligned target traps before rd, which may alias rs1, is
+     * written. A JALR without rd leaves the test to the indirect jump's miss
+     * path, since cached targets are aligned block starts. With rd, x86-64
+     * tests here, where the test fuses with its branch. AArch64 instead keeps
+     * the link in rd's host register, which a matching slot stores and the
+     * miss path stores after its test, so a hit runs none. rd's old value is
+     * stored first, so that a trap still finds it.
+     */
+    int link = -1;
+#if !RV32_HAS(EXT_C) && !defined(__aarch64__)
+    if (ir->rd)
+        emit_jump_align_guard(state, ir->pc);
+#elif !RV32_HAS(EXT_C)
+    if (ir->rd)
+        store_back(state);
+#endif
     if (ir->rd) {
         vm_reg[1] = map_vm_reg(state, ir->rd);
         emit_load_imm(state, vm_reg[1], ir->pc + 4);
+#if !RV32_HAS(EXT_C) && defined(__aarch64__)
+        set_dirty(vm_reg[1], false);
+        link = vm_reg[1];
+#endif
     }
     store_back(state);
-    emit_indirect_jump(state, rv, ir);
+    emit_indirect_jump(state, rv, ir, link);
 })
 /* RV32I Branch Instructions */
 GEN_BRANCH(beq, JCC_JE)
@@ -529,7 +561,7 @@ GEN(cjr, {
     emit_mov(state, vm_reg[0], temp_reg);
     emit_alu32_imm32(state, ALU_GRP1_OPCODE, ALU_AND, temp_reg, ~1U);
     store_back(state);
-    emit_indirect_jump(state, rv, ir);
+    emit_indirect_jump(state, rv, ir, -1);
 })
 GEN(cmv, {
     vm_reg[0] = ra_load(state, ir->rs2);
@@ -554,7 +586,7 @@ GEN(cjalr, {
     vm_reg[1] = map_vm_reg(state, rv_reg_ra);
     emit_load_imm(state, vm_reg[1], ir->pc + 2);
     store_back(state);
-    emit_indirect_jump(state, rv, ir);
+    emit_indirect_jump(state, rv, ir, -1);
 })
 GEN(cadd, {
     ra_load2(state, ir->rs1, ir->rs2);

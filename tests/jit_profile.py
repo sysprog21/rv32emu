@@ -4,6 +4,7 @@ import json
 import pathlib
 import re
 import subprocess
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ZBA_OPS = {"sh1add", "sh2add", "sh3add"}
@@ -88,4 +89,79 @@ def interpreted_entries(stats):
     """Count entries to blocks T1 could compile but the interpreter ran."""
     return (
         stats["blockers"].get("translatable_interpreted", {}).get("entries", 0)
+    )
+
+
+def run(*args, timeout=60):
+    """Run a command, stringifying its arguments, and return the result.
+
+    On failure the captured output is echoed before the error propagates, so a
+    failing check shows what the command printed.
+    """
+    try:
+        return subprocess.run(
+            [str(arg) for arg in args],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=timeout,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        # A timeout keeps its output as bytes, whatever text= asked for.
+        for stream in (error.stdout, error.stderr):
+            if isinstance(stream, bytes):
+                stream = stream.decode(errors="replace")
+            sys.stderr.write(stream or "")
+        raise
+
+
+def build_user_guest(cc, source, output, *flags):
+    """Build a bare-metal rv32i user-mode guest from an assembly source."""
+    return run(
+        cc,
+        "-march=rv32i_zicsr",
+        "-mabi=ilp32",
+        "-nostdlib",
+        "-static",
+        "-fno-pie",
+        "-no-pie",
+        "-Wl,--no-relax",
+        *flags,
+        source,
+        "-o",
+        output,
+    )
+
+
+def run_guest_state(emulator, guest, dump, *options, timeout=60):
+    """Run a guest with -d and return the result and its final state."""
+    result = run(emulator, *options, "-d", dump, guest, timeout=timeout)
+    return result, json.loads(pathlib.Path(dump).read_text())
+
+
+def build_system_image(cc, objcopy, source, work):
+    """Build a flat system-mode guest image at address 0 and return it."""
+    work = pathlib.Path(work)
+    elf, image = work / "guest.elf", work / "guest.bin"
+    run(
+        cc,
+        "-march=rv32i_zicsr",
+        "-mabi=ilp32",
+        "-nostdlib",
+        "-static",
+        "-fno-pie",
+        "-no-pie",
+        "-Wl,-e,_start,-Ttext=0,--build-id=none",
+        source,
+        "-o",
+        elf,
+    )
+    run(objcopy, "-O", "binary", elf, image)
+    return image
+
+
+def run_system_image(emulator, image):
+    """Boot a flat image as the system-mode kernel with no root device."""
+    return run(
+        emulator, "-s", "4096", "-B", "14", "-b", "root=/dev/null", "-k", image
     )

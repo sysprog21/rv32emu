@@ -19,11 +19,17 @@ mapping and an alias, from compiled and cold stores, and requires each
 FENCE.I to expose the new instruction. AOT collection keeps the full FENCE.I:
 it yields page graphs that replay faster.
 
-User-mode JIT builds currently do not invalidate decoded or compiled code
-on FENCE.I. Run self-modifying guest programs with an interpreter build
-(`make interpreter_defconfig && make`). The guest regression suite explicitly
-skips `jit-fencei` for user JIT builds and reports this limitation.
+User-mode JIT builds retire everything at the next dispatch after FENCE.I:
+the interpreter handler that executed it still owns its decoded instruction,
+so it only sets a flag. The dispatcher then discards native code, frees every
+decoded block and empties the block cache. T2C artifacts are unbound at the
+fence and are not reused afterward. Because modified code may carry counter
+reads or privileged instructions absent from the original ELF, the load-time
+scans that elide alignment checks and batch cycle counts no longer hold and
+are dropped for the rest of the run.
 
 `tests/jit-fencei.S` warms a function, rewrites its first instruction, issues
-FENCE.I and requires the new result. System builds need ELF loading enabled
+FENCE.I and requires the new result. `tests/jit-fencei-rounds.S` and
+`tests/jit-fencei-loop.S` repeat this for 100 and 200 rounds, the latter on a
+self-looping block. System builds need ELF loading enabled
 to run this directly loaded guest regression.

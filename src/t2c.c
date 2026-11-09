@@ -567,6 +567,81 @@ static void t2c_gen_misalign_guard(LLVMBuilderRef *builder,
                    assume, &aligned_cond, 1, "");
 }
 
+#if !RV32_HAS(EXT_C)
+/* Without C, a JAL, JALR or taken branch to a halfword target raises an
+ * instruction-address-misaligned exception before it retires: its own address
+ * is the exception PC, the target is the trap value and rd is not written.
+ * Leave the region at the jump without retiring it, so that the interpreter in
+ * user mode, or the precise T1C path in system mode, executes it and raises
+ * that exception. The block was charged in full on entry; the refund covers the
+ * jump itself.
+ */
+static void t2c_gen_jump_trap(LLVMBuilderRef *builder,
+                              LLVMValueRef start,
+                              uint32_t pc,
+                              LLVMValueRef insn_counter)
+{
+#if RV32_HAS(SYSTEM)
+    t2c_gen_fault_fallback(*builder, start, pc, insn_counter);
+#else
+    t2c_gen_user_trap(start, builder, insn_counter, pc, false,
+                      LLVMConstNull(LLVMInt32TypeInContext(t2c_context)),
+                      AOT_USER_INTERPRET);
+#endif
+}
+#endif
+
+/* Trap when a jump at pc to the constant target would be misaligned.
+ *
+ * Returns true, with builder terminated, when it does.
+ */
+static bool t2c_gen_jump_target_trap(LLVMBuilderRef *builder,
+                                     LLVMValueRef start,
+                                     uint32_t pc,
+                                     uint32_t target,
+                                     LLVMValueRef insn_counter)
+{
+#if !RV32_HAS(EXT_C)
+    if (target & 3) {
+        t2c_gen_jump_trap(builder, start, pc, insn_counter);
+        return true;
+    }
+#else
+    (void) builder, (void) start, (void) pc, (void) target;
+    (void) insn_counter;
+#endif
+    return false;
+}
+
+/* Trap when a JALR at pc to the computed target is misaligned, and continue
+ * past the check otherwise.
+ */
+static void t2c_gen_jump_guard(LLVMBuilderRef *builder,
+                               LLVMValueRef start,
+                               uint32_t pc,
+                               LLVMValueRef target,
+                               LLVMValueRef insn_counter)
+{
+#if !RV32_HAS(EXT_C)
+    LLVMTypeRef i32 = LLVMInt32TypeInContext(t2c_context);
+    LLVMValueRef misaligned = LLVMBuildICmp(
+        *builder, LLVMIntNE,
+        LLVMBuildAnd(*builder, target, LLVMConstInt(i32, 3, false), ""),
+        LLVMConstInt(i32, 0, false), "jump_misaligned");
+    LLVMBasicBlockRef trap =
+        LLVMAppendBasicBlockInContext(t2c_context, start, "jump_misaligned");
+    LLVMBasicBlockRef aligned =
+        LLVMAppendBasicBlockInContext(t2c_context, start, "jump_aligned");
+    t2c_gen_unlikely_br(*builder, misaligned, trap, aligned);
+    LLVMPositionBuilderAtEnd(*builder, trap);
+    t2c_gen_jump_trap(builder, start, pc, insn_counter);
+    LLVMPositionBuilderAtEnd(*builder, aligned);
+#else
+    (void) builder, (void) start, (void) pc, (void) target;
+    (void) insn_counter;
+#endif
+}
+
 static LLVMValueRef t2c_gen_call_io_func(LLVMValueRef start,
                                          LLVMBuilderRef *builder,
                                          size_t io_field,

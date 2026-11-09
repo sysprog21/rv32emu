@@ -224,7 +224,36 @@ struct pending_jump {
     int32_t next;
 };
 
+#if !RV32_HAS(SYSTEM)
+/* An indirect jump whose inline slots miss looks its target up here before it
+ * calls the C helper. An empty entry is all zeros, so a zeroed allocation
+ * needs no initialization, except entry 0: the only target that could match
+ * pc 0 lands there, so while empty it holds an odd pc, which jump targets
+ * never are.
+ */
+#define JUMP_CACHE_BITS 11
+struct jump_cache_entry {
+    uint32_t pc;
+    uint32_t unused;
+    uintptr_t code; /* host address of pc's translation */
+};
+#if defined(__x86_64__) || defined(__aarch64__)
+/* The probes in jit.c index with a shift of 4 and load code at offset 8. */
+_Static_assert(sizeof(struct jump_cache_entry) == 16,
+               "jump cache probes assume 16-byte entries");
+_Static_assert(offsetof(struct jump_cache_entry, code) == 8,
+               "jump cache probes load code at offset 8");
+#endif
+#endif
+
 struct jit_state {
+#if !RV32_HAS(SYSTEM)
+    /* 1 << JUMP_CACHE_BITS entries, allocated right after this struct. Embedded
+     * here, the 32 KiB table moved every other field and slowed unrelated
+     * guests on AArch64 by 8 percent.
+     */
+    struct jump_cache_entry *jump_cache;
+#endif
 #if RV32_HAS(SYSTEM)
     uint32_t priv_mode; /* context of the blocks currently being emitted */
     uint64_t code_generation; /* retirement while a native helper is live */
@@ -249,6 +278,13 @@ struct jit_state {
     int n_blocks;
     struct jump *jumps;
     int n_jumps;
+#if RV32_T1C_STATS_ENABLED
+    /* Original guest instructions attempted by the current translation unit,
+     * including recursively translated successors. Reset before every retry.
+     */
+    uint64_t compile_insns;
+    uint32_t compile_blocks;
+#endif
     /* T1 links direct branches whether or not the interpreter has taken the
      * edge, and records a jump whose target is not compiled so that the
      * target's translation can patch it later. A target with an offline
@@ -261,6 +297,9 @@ struct jit_state {
     int n_pending;
     /* Guard slots of each block's indirect jump, filled in at run time */
     struct indirect_site *sites;
+#if !RV32_HAS(SYSTEM)
+    bool jump_cache_used; /* filled since the last reset */
+#endif
 };
 #endif /* !__EMSCRIPTEN__ */
 
@@ -367,6 +406,10 @@ static inline void jit_block_release(riscv_t *rv, block_t *block)
 bool jit_run_cached(riscv_t *rv);
 #endif
 bool jit_translate(riscv_t *rv, block_t *block);
+#if RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+/* Drop all native code for a user-mode FENCE.I. */
+void jit_flush_user(riscv_t *rv);
+#endif
 /* Release a block's IR records (defined in emulate.c). */
 void block_free_irs(riscv_t *rv, block_t *block);
 

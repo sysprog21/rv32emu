@@ -1584,6 +1584,28 @@ static void block_list_clear(riscv_t *rv)
     }
     INIT_LIST_HEAD(&rv->block_list);
 }
+
+/* Conservative values for the assumptions the load-time ELF scan may relax. */
+static void rv_reset_scan_assumptions(riscv_t *rv)
+{
+    rv->jit_elide_align_checks = PRIV(rv)->allow_misalign;
+    rv->jit_entry_cycles = false;
+}
+
+#if RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+void rv_retire_user_code(riscv_t *rv)
+{
+    jit_flush_user(rv);
+    block_list_clear(rv);
+    cache_clear(rv->block_cache);
+
+    /* Modified code may install handlers and counter reads absent from the
+     * original ELF, so the load-time scans no longer hold.
+     */
+    rv_reset_scan_assumptions(rv);
+    rv->user_fence_pending = false;
+}
+#endif
 #endif
 
 void rv_delete(riscv_t *rv)
@@ -1933,8 +1955,10 @@ bool rv_cold_reboot(riscv_t *rv, riscv_word_t pc)
     rv_log_info("Log level: %s", rv_log_level_string(attr->log_level));
 
 #if RV32_HAS(JIT)
-    rv->jit_elide_align_checks = attr->allow_misalign;
-    rv->jit_entry_cycles = false;
+    rv_reset_scan_assumptions(rv);
+#if RV32_HAS(Zifencei) && !RV32_HAS(SYSTEM)
+    rv->user_fence_pending = false;
+#endif
 #endif
 
 #if !RV32_HAS(SYSTEM_MMIO)

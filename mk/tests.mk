@@ -156,12 +156,18 @@ EXPECTED_jit-misalign = JIT misaligned accesses OK
 EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
 EXPECTED_register-loop = register loop OK
+EXPECTED_epc-align = epc alignment OK
 EXPECTED_load-x0 = load into x0 OK
 EXPECTED_loop-shapes = loop shapes OK
+EXPECTED_region-loop = region loop OK
 EXPECTED_misalign-page-fault = misaligned page fault OK
 EXPECTED_fused-page-fault = fused page fault OK
 EXPECTED_amo-page-fault = AMO page fault OK
 EXPECTED_jit-fencei = FENCE.I made the rewrite visible OK
+EXPECTED_jit-fencei-rounds = FENCE.I rounds OK
+EXPECTED_jit-fencei-loop = FENCE.I loop OK
+EXPECTED_user-fence-align = user FENCE.I alignment OK
+EXPECTED_user-fence-counter = user FENCE.I counter OK
 EXPECTED_jit-interp-diff = JIT matches the interpreter OK
 EXPECTED_syscall-zero-write = zero-length write passed
 EXPECTED_trace_match = trace matcher corpus passed
@@ -215,6 +221,8 @@ GUEST_ASM_A_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ia_zicsr)
 GUEST_ASM_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr)
 GUEST_ASM_M_ZICSR_WORKS := $(call guest-asm-arch-works,rv32im_zicsr)
 GUEST_ASM_FENCEI_WORKS := $(call guest-asm-arch-works,rv32i_zifencei)
+GUEST_ASM_M_FENCEI_WORKS := $(call guest-asm-arch-works,rv32im_zifencei)
+GUEST_ASM_FENCEI_ZICSR_WORKS := $(call guest-asm-arch-works,rv32i_zicsr_zifencei)
 GUEST_ASM_A_ZICSR_FENCEI_WORKS := \
     $(call guest-asm-arch-works,rv32ia_zicsr_zifencei)
 GUEST_ASM_C_ZICSR_WORKS := $(call guest-asm-arch-works,rv32ic_zicsr)
@@ -271,6 +279,10 @@ GUEST_ASM_CHECK_TARGETS += check-rotate-zero
 endif
 ifneq ($(CONFIG_SYSTEM),y)
 GUEST_ASM_CHECK_TARGETS += check-register-loop check-loop-shapes check-t2c-load-x0
+GUEST_ASM_CHECK_TARGETS += check-region-loop
+ifeq ($(CONFIG_JIT)$(T1C_STATS),y1)
+GUEST_ASM_CHECK_TARGETS += check-t1c-compile-trace check-region-loop-stats
+endif
 ifeq ($(CONFIG_JIT)$(T1C_STATS)$(CONFIG_EXT_A)$(GUEST_ASM_A_WORKS),y1yy)
 GUEST_ASM_CHECK_TARGETS += check-jit-blocker-stats check-jit-blocker-stats-load \
 	check-jit-blocker-stats-store
@@ -283,9 +295,10 @@ endif
 endif
 ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-register-loop-cycles check-loop-shapes-csr
+GUEST_ASM_CHECK_TARGETS += check-epc-align
 endif
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
-GUEST_ASM_CHECK_TARGETS += check-loop-shapes-rvc
+GUEST_ASM_CHECK_TARGETS += check-loop-shapes-rvc check-region-loop-rvc
 endif
 endif
 # LR/SC runs in the interpreter under every configuration, since the pair is
@@ -312,17 +325,18 @@ ifeq ($(CONFIG_EXT_A)$(GUEST_ASM_A_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-amo-page-fault
 endif
 endif
-# Every interpreter and the system JIT honor FENCE.I. User JIT invalidation
-# is pending; keep that limitation visible when its guest checks are selected.
+# Every interpreter and JIT honor FENCE.I. The loop guest multiplies.
 ifeq ($(CONFIG_Zifencei)$(GUEST_ASM_FENCEI_WORKS),yy)
-ifeq ($(CONFIG_JIT),y)
-ifeq ($(CONFIG_SYSTEM),y)
-GUEST_ASM_CHECK_TARGETS += check-jit-fencei
-else
-$(info Skipping FENCE.I regression: user JIT code invalidation is unsupported; see docs/fencei.md)
+GUEST_ASM_CHECK_TARGETS += check-jit-fencei check-jit-fencei-rounds
+ifeq ($(CONFIG_EXT_M)$(GUEST_ASM_M_FENCEI_WORKS),yy)
+GUEST_ASM_CHECK_TARGETS += check-jit-fencei-loop
 endif
-else
-GUEST_ASM_CHECK_TARGETS += check-jit-fencei
+# These two read argc from the user stack and rely on the load-time ELF scan,
+# which exist only without system mode.
+ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_FENCEI_ZICSR_WORKS),yy)
+ifneq ($(CONFIG_SYSTEM),y)
+GUEST_ASM_CHECK_TARGETS += check-user-fence-align check-user-fence-counter
+endif
 endif
 endif
 # The jit-* programs assert tier-1 code generation, so they prove nothing when
@@ -575,6 +589,24 @@ $(eval $(call guest-asm-check-target,register-loop,rv32i_zicsr,-cycles,-DCHECK_C
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32ic,-rvc))
 $(eval $(call guest-asm-check-target,loop-shapes,rv32i_zicsr,-csr,-DUSE_CSR))
+$(eval $(call guest-asm-check-target,region-loop,rv32i))
+$(eval $(call guest-asm-check-target,region-loop,rv32ic,-rvc))
+$(eval $(call guest-asm-check-target,epc-align,rv32i_zicsr))
+
+# The hash proves the loops are right, not that any compiled as a region loop.
+ifeq ($(CONFIG_JIT)$(T1C_STATS),y1)
+ifneq ($(CONFIG_SYSTEM),y)
+REGION_LOOP_STATS = check-region-loop
+ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
+REGION_LOOP_STATS += check-region-loop-rvc
+endif
+.PHONY: check-region-loop-stats
+check-region-loop-stats: $(REGION_LOOP_STATS) tests/test-region-loop-stats.py tests/jit_profile.py
+	$(Q)for guest in $(patsubst check-%,$(OUT)/%,$(REGION_LOOP_STATS)); do \
+	    python3 tests/test-region-loop-stats.py $(BIN) $$guest || exit 1; \
+	done
+endif
+endif
 
 # Zba under register pressure; diagnostics prove the loop ran compiled.
 .PHONY: check-jit-spill-loop-zba check-jit-spill-loop-region-zba
@@ -605,6 +637,11 @@ check-jit-blocker-stats check-jit-blocker-stats-load check-jit-blocker-stats-sto
 	$(Q)python3 tests/test-jit-blocker-stats.py $(BIN) $(OUT)/jit-blocker-stats$(BLOCKER_STATS_SUFFIX) \
 	    $(if $(BLOCKER_STATS_HEAD),--fused-head $(BLOCKER_STATS_HEAD) $(if $(filter y,$(CONFIG_MOP_FUSION)),--expect-fusion))
 
+.PHONY: check-t1c-compile-trace
+check-t1c-compile-trace: $(BIN) tests/register-loop.S tests/test-t1c-compile-trace.py | $(OUT)
+	$(Q)$(call guest-asm-build,register-loop,rv32i)
+	$(Q)python3 tests/test-t1c-compile-trace.py $(BIN) $(OUT)/register-loop
+
 .PHONY: check-t2c-load-x0
 check-t2c-load-x0: $(BIN) tests/t2c-load-x0.S tests/test-t2c-load-x0.py tests/jit_profile.py | $(OUT)
 	$(Q)$(call guest-asm-build,t2c-load-x0,rv32i,,-DLOAD_X0_ITERATIONS=1000000)
@@ -633,6 +670,10 @@ $(eval $(call guest-asm-check-target,misalign-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,fused-page-fault,rv32i_zicsr))
 $(eval $(call guest-asm-check-target,amo-page-fault,rv32ia_zicsr))
 $(eval $(call guest-asm-check-target,jit-fencei,rv32i_zifencei))
+$(eval $(call guest-asm-check-target,jit-fencei-rounds,rv32i_zifencei))
+$(eval $(call guest-asm-check-target,jit-fencei-loop,rv32im_zifencei))
+$(eval $(call guest-asm-check-target,user-fence-align,rv32i_zicsr_zifencei))
+$(eval $(call guest-asm-check-target,user-fence-counter,rv32i_zicsr_zifencei))
 
 # The program must stop at its first instruction page fault, reporting it and
 # failing, instead of retrying the fetch forever.
@@ -774,6 +815,57 @@ check-system-aot: $(BIN)
 # The guest programs use atomics, CSRs, and FENCE.I.
 ifeq ($(CONFIG_EXT_A)$(CONFIG_Zicsr)$(CONFIG_Zifencei)$(GUEST_ASM_A_ZICSR_WORKS),yyyy)
 check: check-system-aot
+endif
+endif
+endif
+
+# A JAL or JALR to a halfword target traps at the jump without writing rd, in
+# the interpreter, T1C and T2C alike. Set JUMP_MISALIGN_REFERENCE to an
+# interpreter build to compare against it as well.
+ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
+ifneq ($(CONFIG_EXT_C),y)
+ifneq ($(CONFIG_SYSTEM),y)
+.PHONY: check-user-jump-misalign-engines
+check-user-jump-misalign-engines: $(BIN) tests/jump-misalign-state.S tests/test-jump-misalign-engines.py tests/jit_profile.py
+	$(Q)python3 tests/test-jump-misalign-engines.py --emulator $(BIN) \
+	    --cc $(CROSS_COMPILE)gcc --nm $(CROSS_COMPILE)nm \
+	    $(if $(JUMP_MISALIGN_REFERENCE),--reference $(JUMP_MISALIGN_REFERENCE)) \
+	    $(if $(filter 1,$(T2C_ENABLED)),--aot $(LLVM_CONFIG))
+check: check-user-jump-misalign-engines
+endif
+endif
+endif
+
+# Without the C extension, a taken branch, JAL or JALR to a halfword target
+# traps, so T1C must not translate or decode the target.
+ifeq ($(CONFIG_JIT)$(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yyy)
+ifneq ($(CONFIG_EXT_C),y)
+ifneq ($(CONFIG_SYSTEM),y)
+.PHONY: check-user-jit-branch-misalign
+check-user-jit-branch-misalign: $(BIN) tests/jit-branch-misalign-user.S tests/test-jit-branch-misalign-user.py tests/jit-jump-misalign-user.S tests/test-jit-jump-misalign-user.py tests/jit-branch-region-misalign-user.S tests/test-jit-branch-region-misalign-user.py tests/jit_profile.py
+	$(Q)python3 tests/test-jit-branch-misalign-user.py --emulator $(BIN) \
+	    --cc $(CROSS_COMPILE)gcc --nm $(CROSS_COMPILE)nm $(T1C_REQUIRE_STATS) \
+	    $(if $(filter 1,$(T2C_ENABLED)),--aot $(LLVM_CONFIG))
+	$(Q)python3 tests/test-jit-jump-misalign-user.py --emulator $(BIN) \
+	    --cc $(CROSS_COMPILE)gcc $(T1C_REQUIRE_STATS)
+	$(Q)python3 tests/test-jit-branch-region-misalign-user.py \
+	    --emulator $(BIN) --cc $(CROSS_COMPILE)gcc \
+	    --nm $(CROSS_COMPILE)nm $(T1C_REQUIRE_STATS)
+check: check-user-jit-branch-misalign
+endif
+ifeq ($(CONFIG_SYSTEM),y)
+ifneq ($(CONFIG_ELF_LOADER),y)
+ifneq ($(shell command -v $(CROSS_COMPILE)objcopy 2>/dev/null),)
+.PHONY: check-system-jit-branch-misalign
+check-system-jit-branch-misalign: $(BIN) tests/system-jit-branch-misalign.S tests/system-jit-jal-misalign.S tests/jit-system-jalr.S tests/test-system-jit-misalign.py tests/jit_profile.py
+	$(Q)for case in branch jal jalr; do \
+	    python3 tests/test-system-jit-misalign.py $$case \
+	        --emulator $(BIN) --cc $(CROSS_COMPILE)gcc \
+	        --objcopy $(CROSS_COMPILE)objcopy $(T1C_REQUIRE_STATS) || exit 1; \
+	done
+check: check-system-jit-branch-misalign
+endif
+endif
 endif
 endif
 endif

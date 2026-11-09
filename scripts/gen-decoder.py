@@ -824,6 +824,19 @@ _RVC_OPERAND_DECODERS = {
         "ir->imm = ((insn & 0x1C00) >> 7)"
         " | ((insn & 0x0040) >> 4) | ((insn & 0x0020) << 1);",
     ],
+    # c.fld/c.fsd: uimm[5:3|7:6]
+    "cimmd": [
+        "ir->imm = ((insn & 0x1C00) >> 7) | ((insn & 0x0060) << 1);",
+    ],
+    # c.fldsp: uimm[5|4:3|8:6]
+    "cimmldsp": [
+        "ir->imm = ((insn & 0x1000) >> 7)"
+        " | ((insn & 0x0060) >> 2) | ((insn & 0x001C) << 4);",
+    ],
+    # c.fsdsp: uimm[5:3|8:6]
+    "cimmsdsp": [
+        "ir->imm = ((insn & 0x1C00) >> 7) | ((insn & 0x0380) >> 1);",
+    ],
     # c.li/c.addi/c.andi: imm[5|4:0] sign-extended
     "cimmi": [
         "ir->imm = ((insn >> 2) & 0x1f)" " | ((insn & 0x1000) >> 7);",
@@ -921,7 +934,7 @@ _RVC_RD0_RESERVED = {"clwsp"}
 
 # Instructions whose rd field addresses floating-point registers (f0-f31).
 # rd=0 means f0 which is a valid destination — skip the x0 check entirely.
-_RVC_FLOAT_DEST = {"cflwsp"}
+_RVC_FLOAT_DEST = {"cflwsp", "cfldsp"}
 
 # Reserved code points that a bit-pattern constraint cannot express,
 # because the field is scattered across the instruction word and the
@@ -1024,7 +1037,7 @@ def _rvc_operand_lines(insn: Instruction, pad: str) -> list[str]:
       - clwsp:  rd==x0 is RESERVED → emit ``return false``
       - others: rd==x0 is a HINT   → emit cnop (not nop)
 
-    Float-destination instructions (cflwsp) are excluded: rd=0 refers
+    Float-destination instructions (cflwsp, cfldsp) are excluded: rd=0 refers
     to f0, a valid floating-point register, so no zero-check is emitted.
 
     Using rv_insn_cnop (not rv_insn_nop) matches the original

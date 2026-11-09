@@ -132,7 +132,9 @@ enum SV32_PTE_PERM {
 #define MISA_M (1 << ('M' - 'A'))
 #define MISA_A (1 << ('A' - 'A'))
 #define MISA_F (1 << ('F' - 'A'))
+#define MISA_D (1 << ('D' - 'A'))
 #define MISA_C (1 << ('C' - 'A'))
+#define MISA_V (1 << ('V' - 'A'))
 
 /*
  * The mstatus register keeps track of and controls the hart's current
@@ -367,6 +369,12 @@ typedef uint32_t riscv_exception_t;
 typedef softfloat_float32_t riscv_float_t;
 #endif
 #if RV32_HAS(EXT_V)
+#ifndef VLEN
+#error "EXT_V requires VLEN (vector register bits)"
+#endif
+#if VLEN < 128 || VLEN > 65536 || (VLEN & (VLEN - 1))
+#error "VLEN must be a power of two between 128 and 65536"
+#endif
 typedef uint32_t vreg_t[VLEN / 32];
 #endif
 

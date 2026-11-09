@@ -1,5 +1,8 @@
 # RISC-V RVV smoke test for rv32emu.
 
+# Nothing sets gp, so la must not relax to a gp-relative addi.
+.option norelax
+
 .org 0
 .global _start
 
@@ -43,6 +46,9 @@ cmp_src:
 
 cmp_init:
     .byte 0x0a, 0x00, 0x00, 0x00
+
+widen_overlap_src:
+    .short 3, 4, 5, 6
 
 mask_prefix_src:
     .byte 0x14, 0x00, 0x00, 0x00
@@ -98,6 +104,35 @@ mulfix_lhs:
 mulfix_rhs:
     .byte 0x40, 0x80, 0x40, 0x20
 
+ncvt_f_src:
+    .word 0x00000000, 0x40040000   /*  2.5 */
+    .word 0x00000000, 0xbff80000   /* -1.5 */
+    .word 0x10000000, 0x3ff00000   /* 1.0+2^-24, ties between floats */
+    .word 0x00000000, 0x401c0000   /*  7.0 */
+
+ncvt_i_src:
+    .word 3, 0, 0xfffffffd, 0xffffffff
+    .word 5, 0, 0, 0
+
+wcvt_f_src:
+    .word 0x3fc00000, 0x40200000, 0xbfc00000, 0x40e00000
+
+wcvt_i_src:
+    .word 3, -3, 5, 0
+
+cvt_f_src:
+    .word 0x3fc00000, 0x40200000, 0xbfc00000, 0x40e00000
+
+cvt_i_src:
+    .word 3, -3, 5, 0
+
+vfmv_src:
+    .word 0x40490fdb, 0x3f800000, 0xc0000000, 0x00000000
+
+ext_src:
+    .byte 0x7f, 0x80, 0x01, 0xff
+    .balign 2
+
 narrow16_a:
     .short 0x8000, 0x0002
 
@@ -106,6 +141,12 @@ narrow16_b:
 
 wide32_src:
     .word 0x00008010, 0x0001ff00
+
+borrow32_lhs:
+    .word 0x00000000, 0x00000005, 0xffffffff, 0xffffffff
+
+borrow32_rhs:
+    .word 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff
 
 mac_src_a:
     .byte 0x02, 0x03, 0x04, 0x05
@@ -296,6 +337,20 @@ fixed_out:
     .space 16
 wide_out:
     .space 32
+vfun_out:
+    .space 64
+ncvt_out:
+    .space 32
+wcvt_out:
+    .space 64
+cvt_out:
+    .space 32
+vfmv_out:
+    .space 32
+ext_out:
+    .space 32
+vmvnr_out:
+    .space 64
 red_out:
     .space 16
 wide_red_out:
@@ -365,7 +420,8 @@ _start:
     csrr t1, vlenb
     assert_reg_imm t1, 16, fail
 
-    li t0, 0x18
+    # vsew=4 is reserved, so this vtype is unsupported and must set vill.
+    li t0, 0x20
     vsetvl t1, zero, t0
     bnez t1, fail
     csrr t1, vl
@@ -889,6 +945,26 @@ _start:
     vsm.v v13, (a1)
     lbu t1, 0(a1)
     assert_reg_imm t1, 0xf9, fail_vmsbc
+
+    # SEW=32 borrow-in: rhs = 0xffffffff plus a borrow-in of 1 must not
+    # wrap to 0. v0 = 0x05 gives elements 0 and 2 a borrow-in:
+    #   0 - (0xffffffff + 1)          -> borrow 1
+    #   5 - 0xffffffff                -> borrow 1
+    #   0xffffffff - (0xffffffff + 1) -> borrow 1
+    #   0xffffffff - 0xffffffff       -> borrow 0
+    # Mask tail bits are agnostic, so only the low 4 bits are checked.
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, borrow32_lhs
+    vle32.v v10, (a1)
+    la a1, borrow32_rhs
+    vle32.v v11, (a1)
+    vmsbc.vvm v13, v10, v11, v0
+    la a1, borrow_mask_out
+    vsm.v v13, (a1)
+    lbu t1, 0(a1)
+    andi t1, t1, 0x0f
+    assert_reg_imm t1, 0x07, fail_vmsbc32
+    vsetvli t0, a0, e8, m1, tu, mu
 
     la a1, shift_src
     vle8.v v10, (a1)
@@ -1813,6 +1889,615 @@ _start:
     csrr t1, vl
     assert_reg_imm t1, 4, fail_fractional
 
+    # Floating-point unary instructions (V 1.0 13.8-13.14). All addresses
+    # come from a1 so the block does not mix gp-relative and pc-relative
+    # forms.
+    li t2, 0
+    csrw frm, t2
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, vfun_out
+    li t2, 0x40800000          /*  4.0 */
+    sw t2, 0(a1)
+    li t2, 0x41200000          /* 10.0 */
+    sw t2, 4(a1)
+    li t2, 0xc0800000          /* -4.0 */
+    sw t2, 8(a1)
+    li t2, 0x7f800000          /* +inf */
+    sw t2, 12(a1)
+    vle32.v v8, (a1)
+
+    # vfsqrt.v: sqrt(4.0) = 2.0
+    vfsqrt.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0x40000000
+    bne t1, t6, fail_vfsqrt
+    lw t1, 12(a1)
+    li t6, 0x7f800000          /* sqrt(+inf) = +inf */
+    bne t1, t6, fail_vfsqrt
+
+    # vfclass.v: 4.0 -> positive normal (bit 6), -4.0 -> negative normal
+    # (bit 1), +inf -> bit 7.
+    vfclass.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x40, fail_vfclass
+    lw t1, 8(a1)
+    assert_reg_imm t1, 0x02, fail_vfclass
+    lw t1, 12(a1)
+    assert_reg_imm t1, 0x80, fail_vfclass
+
+    # vfrsqrt7.v against the two worked examples in the specification.
+    la a1, vfun_out
+    li t2, 0x00718abc
+    sw t2, 0(a1)
+    li t2, 0x7f765432
+    sw t2, 4(a1)
+    li t2, 0x40800000          /* 4.0 -> 1/2 estimate */
+    sw t2, 8(a1)
+    li t2, 0x00000000          /* +0.0 -> +inf */
+    sw t2, 12(a1)
+    vle32.v v8, (a1)
+
+    vfrsqrt7.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0x5f080000
+    bne t1, t6, fail_vfrsqrt7
+    lw t1, 4(a1)
+    li t6, 0x1f820000
+    bne t1, t6, fail_vfrsqrt7
+    # 4.0 has an even normalized exponent, unlike either worked example, so
+    # it pins the floor() in the output-exponent formula.
+    lw t1, 8(a1)
+    li t6, 0x3eff0000
+    bne t1, t6, fail_vfrsqrt7
+    lw t1, 12(a1)
+    li t6, 0x7f800000
+    bne t1, t6, fail_vfrsqrt7
+
+    # vfrec7.v against the specification's worked examples; the second one
+    # exercises the subnormal-output path.
+    vfrec7.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0x7e900000
+    bne t1, t6, fail_vfrec7
+    lw t1, 4(a1)
+    li t6, 0x00214000
+    bne t1, t6, fail_vfrec7
+    lw t1, 12(a1)
+    li t6, 0x7f800000          /* 1/+0.0 = +inf */
+    bne t1, t6, fail_vfrec7
+
+    # Narrowing FP conversions (V 1.0 13.19): 64-bit source elements produce
+    # 32-bit destination elements, so the source group is 2*LMUL.
+    li t2, 0
+    csrw frm, t2
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, ncvt_f_src
+    vle64.v v22, (a1)
+
+    # vfncvt.f.f.w: 2.5 -> 0x40200000, -1.5 -> 0xbfc00000
+    vfncvt.f.f.w v20, v22
+    la a1, ncvt_out
+    vse32.v v20, (a1)
+    lw t1, 0(a1)
+    li t6, 0x40200000
+    bne t1, t6, fail_vfncvt_f_f
+    lw t1, 4(a1)
+    li t6, 0xbfc00000
+    bne t1, t6, fail_vfncvt_f_f
+    # element 2 is exactly halfway between two floats: RNE rounds to even
+    lw t1, 8(a1)
+    li t6, 0x3f800000
+    bne t1, t6, fail_vfncvt_f_f
+
+    # vfncvt.rod.f.f.w rounds that same element towards odd instead
+    vfncvt.rod.f.f.w v20, v22
+    la a1, ncvt_out
+    vse32.v v20, (a1)
+    lw t1, 8(a1)
+    li t6, 0x3f800001
+    bne t1, t6, fail_vfncvt_rod
+    lw t1, 0(a1)
+    li t6, 0x40200000
+    bne t1, t6, fail_vfncvt_rod
+
+    # vfncvt.x.f.w: RNE gives -1.5 -> -2
+    vfncvt.x.f.w v20, v22
+    la a1, ncvt_out
+    vse32.v v20, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 2, fail_vfncvt_x_f
+    lw t1, 4(a1)
+    assert_reg_imm t1, -2, fail_vfncvt_x_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfncvt_x_f
+
+    # vfncvt.rtz.x.f.w truncates instead: -1.5 -> -1
+    vfncvt.rtz.x.f.w v20, v22
+    la a1, ncvt_out
+    vse32.v v20, (a1)
+    lw t1, 4(a1)
+    assert_reg_imm t1, -1, fail_vfncvt_rtz_x_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfncvt_rtz_x_f
+
+    # Signed vs unsigned 64-bit integer source: -3 as i64 becomes -3.0f,
+    # but the same bits as u64 are a huge positive value.
+    la a1, ncvt_i_src
+    vle64.v v22, (a1)
+
+    vfncvt.f.x.w v20, v22
+    la a1, ncvt_out
+    vse32.v v20, (a1)
+    lw t1, 0(a1)
+    li t6, 0x40400000
+    bne t1, t6, fail_vfncvt_f_x
+    lw t1, 4(a1)
+    li t6, 0xc0400000
+    bne t1, t6, fail_vfncvt_f_x
+
+    vfncvt.f.xu.w v20, v22
+    la a1, ncvt_out
+    vse32.v v20, (a1)
+    lw t1, 4(a1)
+    li t6, 0x5f800000
+    bne t1, t6, fail_vfncvt_f_xu
+
+    # Widening FP conversions (V 1.0 13.17): 32-bit source elements produce
+    # 64-bit destination elements, so the destination group is 2*LMUL and
+    # results are checked as low/high 32-bit halves.
+    li t2, 0
+    csrw frm, t2
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, wcvt_f_src
+    vle32.v v20, (a1)
+
+    # vfwcvt.f.f.v: 1.5 -> 0x3ff8000000000000, -1.5 -> 0xbff8000000000000
+    vfwcvt.f.f.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0, fail_vfwcvt_f_f
+    lw t1, 4(a1)
+    li t6, 0x3ff80000
+    bne t1, t6, fail_vfwcvt_f_f
+    lw t1, 20(a1)
+    li t6, 0xbff80000
+    bne t1, t6, fail_vfwcvt_f_f
+
+    # vfwcvt.x.f.v: RNE gives 1.5->2, -1.5->-2 (sign-extended to 64 bits)
+    vfwcvt.x.f.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 2, fail_vfwcvt_x_f
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0, fail_vfwcvt_x_f
+    lw t1, 16(a1)
+    assert_reg_imm t1, -2, fail_vfwcvt_x_f
+    lw t1, 20(a1)
+    assert_reg_imm t1, -1, fail_vfwcvt_x_f
+
+    # vfwcvt.rtz.x.f.v truncates instead: 1.5->1, -1.5->-1
+    vfwcvt.rtz.x.f.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 1, fail_vfwcvt_rtz_x_f
+    lw t1, 16(a1)
+    assert_reg_imm t1, -1, fail_vfwcvt_rtz_x_f
+    lw t1, 20(a1)
+    assert_reg_imm t1, -1, fail_vfwcvt_rtz_x_f
+
+    # Integer-to-double: -3 differs between the signed and unsigned forms
+    la a1, wcvt_i_src
+    vle32.v v20, (a1)
+
+    vfwcvt.f.x.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 12(a1)
+    li t6, 0xc0080000
+    bne t1, t6, fail_vfwcvt_f_x
+
+    vfwcvt.f.xu.v v22, v20
+    la a1, wcvt_out
+    vse64.v v22, (a1)
+    lw t1, 12(a1)
+    li t6, 0x41efffff
+    bne t1, t6, fail_vfwcvt_f_xu
+    lw t1, 8(a1)
+    li t6, 0xffa00000
+    bne t1, t6, fail_vfwcvt_f_xu
+
+    # Each float-to-integer helper must independently report NX for 1.5.
+    csrw frm, zero
+    vsetivli zero, 1, e32, m1, tu, mu
+    li t2, 0x3fc00000
+    vmv.v.x v20, t2
+    csrw fflags, zero
+    vfcvt.x.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfcvt.xu.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfcvt.rtz.x.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfcvt.rtz.xu.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfwcvt.x.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfwcvt.xu.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfwcvt.rtz.x.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfwcvt.rtz.xu.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    # Stage a double-precision 1.5 as two 32-bit words.
+    la a1, cvt_out
+    sw zero, 0(a1)
+    li t2, 0x3ff80000
+    sw t2, 4(a1)
+    vl1re32.v v20, (a1)
+    csrw fflags, zero
+    vfncvt.x.f.w v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfncvt.xu.f.w v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfncvt.rtz.x.f.w v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfncvt.rtz.xu.f.w v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+
+    # Single-width FP conversions (V 1.0 13.17). frm is set to RNE so the
+    # dynamic-rounding forms can be told apart from the .rtz forms: 1.5
+    # rounds to 2 under RNE but truncates to 1 under RTZ.
+    li t2, 0
+    csrw frm, t2
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, cvt_f_src
+    vle32.v v20, (a1)
+
+    # vfcvt.x.f.v: 1.5->2, 2.5->2, -1.5->-2, 7.0->7
+    vfcvt.x.f.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 2, fail_vfcvt_x_f
+    lw t1, 4(a1)
+    assert_reg_imm t1, 2, fail_vfcvt_x_f
+    lw t1, 8(a1)
+    assert_reg_imm t1, -2, fail_vfcvt_x_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfcvt_x_f
+
+    # vfcvt.rtz.x.f.v truncates instead: 1.5->1, -1.5->-1
+    vfcvt.rtz.x.f.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 1, fail_vfcvt_rtz_x_f
+    lw t1, 8(a1)
+    assert_reg_imm t1, -1, fail_vfcvt_rtz_x_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfcvt_rtz_x_f
+
+    # vfcvt.xu.f.v: negative input saturates to 0 in the unsigned form
+    vfcvt.xu.f.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 2, fail_vfcvt_xu_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfcvt_xu_f
+
+    # Integer-to-float: -3 differs between the signed and unsigned forms
+    la a1, cvt_i_src
+    vle32.v v20, (a1)
+
+    vfcvt.f.x.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x40400000
+    bne t1, t6, fail_vfcvt_f_x
+    lw t1, 4(a1)
+    li t6, 0xc0400000
+    bne t1, t6, fail_vfcvt_f_x
+
+    vfcvt.f.xu.v v22, v20
+    la a1, cvt_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x40400000
+    bne t1, t6, fail_vfcvt_f_xu
+    lw t1, 4(a1)
+    li t6, 0x4f800000
+    bne t1, t6, fail_vfcvt_f_xu
+
+    # Floating-point scalar moves (V 1.0 16.3). Both ignore LMUL and only
+    # touch element 0.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    # Stage the source through the scratch buffer so every address in this
+    # block comes from the same base register.
+    la a2, vfmv_out
+    li t2, 0x40490fdb
+    sw t2, 0(a2)
+    li t2, 0x3f800000
+    sw t2, 4(a2)
+    vle32.v v20, (a2)
+
+    # vfmv.f.s: element 0 (0x40490fdb) lands in an f register. Spill it back
+    # to the scratch buffer to compare the bits.
+    vfmv.f.s ft0, v20
+    fmv.x.w t1, ft0
+    li t6, 0x40490fdb
+    bne t1, t6, fail_vfmv_f_s
+
+    # vfmv.s.f writes element 0 only; element 1 must keep its old value
+    # under the tail-undisturbed policy selected above.
+    la a1, vfmv_out
+    li t2, 0x11111111
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v22, (a1)
+    li t2, 0x3f800000
+    fmv.w.x ft1, t2
+    vfmv.s.f v22, ft1
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x3f800000
+    bne t1, t6, fail_vfmv_s_f
+    lw t1, 4(a1)
+    li t6, 0x11111111
+    bne t1, t6, fail_vfmv_s_f
+
+    # A resumed scalar move (0 < vstart < vl) still writes element 0 and
+    # clears vstart, leaving the other elements alone.
+    li t2, 1
+    csrw vstart, t2
+    vfmv.s.f v22, ft0
+    csrr t1, vstart
+    assert_reg_imm t1, 0, fail_vfmv_s_f
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x40490fdb, fail_vfmv_s_f
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0x11111111, fail_vfmv_s_f
+
+    # With vstart >= vl there is nothing to do and the destination is
+    # untouched (V 1.0 16.3).
+    li t2, 4
+    csrw vstart, t2
+    vfmv.s.f v22, ft1
+    csrr t1, vstart
+    assert_reg_imm t1, 0, fail_vfmv_s_f
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x40490fdb, fail_vfmv_s_f
+
+    # LMUL=2 must not extend scalar-move tail writes into v23.
+    vsetivli zero, 4, e32, m1, tu, mu
+    vmv.v.i v23, 7
+    vsetivli zero, 1, e32, m2, ta, mu
+    vfmv.s.f v22, ft1
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v23, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 7, fail_vfmv_s_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfmv_s_f
+
+    # Per spec, vfmv.s.f performs no update when vstart >= vl; with vl = 0
+    # that holds for every vstart, so element 0 keeps its previous value.
+    la a1, vfmv_out
+    li t2, 0x22222222
+    sw t2, 0(a1)
+    vle32.v v22, (a1)
+    li a0, 0
+    vsetvli t0, a0, e32, m1, tu, mu
+    csrr t1, vl
+    assert_reg_imm t1, 0, fail_vfmv_vl0
+    vfmv.s.f v22, ft1
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, vfmv_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    li t6, 0x22222222
+    bne t1, t6, fail_vfmv_vl0
+
+    /*
+     * Cross-EEW overlap, widening direction (V 1.0 5.2): a destination
+     * group whose EEW exceeds the source EEW may overlap the source when
+     * the source EMUL is at least 1 and the overlap sits in the HIGHEST-
+     * numbered part of the destination group. At SEW=16/LMUL=1 the dest
+     * group of vwadd.vv v0 is {v0,v1}, so a source of v1 is legal and must
+     * execute rather than trap. (The reserved cases - e.g. a source of v0,
+     * sharing the base register - raise an illegal instruction, which this
+     * harness cannot observe in user mode; see issue #735.)
+     */
+    li a0, 4
+    vsetvli t0, a0, e16, m1, tu, mu
+    la a1, widen_overlap_src
+    vle16.v v1, (a1)
+    vwadd.vv v0, v1, v1
+    li a0, 4
+    vsetvli t0, a0, e32, m2, tu, mu
+    la a1, fp32_out
+    vse32.v v0, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 6, fail_widen_overlap
+    lw t1, 12(a1)
+    assert_reg_imm t1, 12, fail_widen_overlap
+    # Integer extension (V 1.0 11.3): vzext/vsext widen a narrow source
+    # element into a full SEW-wide destination.
+    li a0, 4
+    vsetvli t0, a0, e16, m1, tu, mu
+    la a1, ext_src
+    vle8.v v20, (a1)
+
+    # vzext.vf2: 0x7f,0x80,0x01,0xff -> zero-extended to 16-bit
+    vzext.vf2 v22, v20
+    la a1, ext_out
+    vse16.v v22, (a1)
+    lhu t1, 0(a1)
+    assert_reg_imm t1, 0x007f, fail_vzext_vf2
+    lhu t1, 2(a1)
+    assert_reg_imm t1, 0x0080, fail_vzext_vf2
+    lhu t1, 6(a1)
+    assert_reg_imm t1, 0x00ff, fail_vzext_vf2
+
+    # vsext.vf2: 0x80 and 0xff are negative when sign-extended
+    vsext.vf2 v22, v20
+    la a1, ext_out
+    vse16.v v22, (a1)
+    lhu t1, 0(a1)
+    assert_reg_imm t1, 0x007f, fail_vsext_vf2
+    lhu t1, 2(a1)
+    assert_reg_imm t1, 0xff80, fail_vsext_vf2
+    lhu t1, 6(a1)
+    assert_reg_imm t1, 0xffff, fail_vsext_vf2
+
+    # vf4: 8-bit source widened to 32-bit destination
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, ext_src
+    vle8.v v20, (a1)
+
+    vzext.vf4 v22, v20
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x0000007f, fail_vzext_vf4
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0x00000080, fail_vzext_vf4
+
+    vsext.vf4 v22, v20
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 4(a1)
+    assert_reg_imm t1, -128, fail_vsext_vf4
+    lw t1, 12(a1)
+    assert_reg_imm t1, -1, fail_vsext_vf4
+
+    # Masked form leaves inactive elements undisturbed (vma=0). v0 bit
+    # pattern 0x5 activates elements 0 and 2 only.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, ext_out
+    # Whole vector register move (V 1.0 16.6). Copies all VLEN bits of NREG
+    # registers, ignoring vl. Every address below comes from a1 so the test
+    # does not mix gp-relative and pc-relative forms.
+    li a0, 4
+    vsetvli t0, a0, e32, m1, tu, mu
+    la a1, vmvnr_out
+    li t2, 0xaaaa0001
+    sw t2, 0(a1)
+    li t2, 0xaaaa0002
+    sw t2, 4(a1)
+    li t2, 0xaaaa0003
+    sw t2, 8(a1)
+    li t2, 0xaaaa0004
+    sw t2, 12(a1)
+    vle32.v v8, (a1)
+
+    # Clear v16 so a failed copy is visible.
+    li t2, 0
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v22, (a1)
+    la a1, mask_bits
+    vle8.v v0, (a1)
+    la a1, ext_src
+    vle8.v v20, (a1)
+    vzext.vf4 v22, v20, v0.t
+    la a1, ext_out
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x0000007f, fail_vzext_mask
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0, fail_vzext_mask
+    lw t1, 8(a1)
+    assert_reg_imm t1, 0x00000001, fail_vzext_mask
+    vle32.v v16, (a1)
+
+    vmv1r.v v16, v8
+    vse32.v v16, (a1)
+    lw t1, 0(a1)
+    li t6, 0xaaaa0001
+    bne t1, t6, fail_vmv1r
+    lw t1, 12(a1)
+    li t6, 0xaaaa0004
+    bne t1, t6, fail_vmv1r
+
+    # vmv2r.v copies the pair {v8,v9} to {v16,v17}; check the second
+    # register of the group actually moved.
+    li t2, 0xbbbb0001
+    sw t2, 0(a1)
+    li t2, 0xbbbb0002
+    sw t2, 4(a1)
+    li t2, 0xbbbb0003
+    sw t2, 8(a1)
+    li t2, 0xbbbb0004
+    sw t2, 12(a1)
+    vle32.v v9, (a1)
+    li t2, 0
+    sw t2, 0(a1)
+    sw t2, 4(a1)
+    sw t2, 8(a1)
+    sw t2, 12(a1)
+    vle32.v v17, (a1)
+
+    vmv2r.v v16, v8
+    vse32.v v17, (a1)
+    lw t1, 0(a1)
+    li t6, 0xbbbb0001
+    bne t1, t6, fail_vmv2r
+    lw t1, 12(a1)
+    li t6, 0xbbbb0004
+    bne t1, t6, fail_vmv2r
+
+    # vd == vs2 is an architectural NOP: the register must be unchanged.
+    vmv1r.v v8, v8
+    vse32.v v8, (a1)
+    lw t1, 0(a1)
+    li t6, 0xaaaa0001
+    bne t1, t6, fail_vmv_nop
+
     la a1, ok_msg
     li a2, ok_msg_len
     j write_and_exit_ok
@@ -1910,6 +2595,99 @@ fail_vsmul4:
     j write_and_exit_fail
 fail_vwadd:
     li a3, 0xd5
+    j write_and_exit_fail
+fail_vfsqrt:
+    li a3, 0x9d
+    j write_and_exit_fail
+fail_vfclass:
+    li a3, 0x9e
+    j write_and_exit_fail
+fail_vfrsqrt7:
+    li a3, 0x9f
+    j write_and_exit_fail
+fail_vfrec7:
+    li a3, 0xa0
+    j write_and_exit_fail
+fail_vfncvt_f_f:
+    li a3, 0x91
+    j write_and_exit_fail
+fail_vfncvt_rod:
+    li a3, 0x92
+    j write_and_exit_fail
+fail_vfncvt_x_f:
+    li a3, 0x93
+    j write_and_exit_fail
+fail_vfncvt_rtz_x_f:
+    li a3, 0x94
+    j write_and_exit_fail
+fail_vfncvt_f_x:
+    li a3, 0x95
+    j write_and_exit_fail
+fail_vfncvt_f_xu:
+    li a3, 0x96
+    j write_and_exit_fail
+fail_vfwcvt_f_f:
+    li a3, 0xfb
+    j write_and_exit_fail
+fail_vfwcvt_x_f:
+    li a3, 0xfc
+    j write_and_exit_fail
+fail_vfwcvt_rtz_x_f:
+    li a3, 0xfd
+    j write_and_exit_fail
+fail_vfwcvt_f_x:
+    li a3, 0xfe
+    j write_and_exit_fail
+fail_vfwcvt_f_xu:
+    li a3, 0xff
+    j write_and_exit_fail
+fail_vfcvt_x_f:
+    li a3, 0xf6
+    j write_and_exit_fail
+fail_vfcvt_rtz_x_f:
+    li a3, 0xf7
+    j write_and_exit_fail
+fail_vfcvt_xu_f:
+    li a3, 0xf8
+    j write_and_exit_fail
+fail_vfcvt_f_x:
+    li a3, 0xf9
+    j write_and_exit_fail
+fail_vfcvt_f_xu:
+    li a3, 0xfa
+    j write_and_exit_fail
+fail_vfmv_f_s:
+    li a3, 0x97
+    j write_and_exit_fail
+fail_vfmv_s_f:
+    li a3, 0x98
+    j write_and_exit_fail
+fail_vfmv_vl0:
+    li a3, 0x99
+    j write_and_exit_fail
+fail_vzext_vf2:
+    li a3, 0xf1
+    j write_and_exit_fail
+fail_vsext_vf2:
+    li a3, 0xf2
+    j write_and_exit_fail
+fail_vzext_vf4:
+    li a3, 0xf3
+    j write_and_exit_fail
+fail_vsext_vf4:
+    li a3, 0xf4
+    j write_and_exit_fail
+fail_vzext_mask:
+    li a3, 0xf5
+    j write_and_exit_fail
+fail_vmv1r:
+    li a3, 0x9a
+    j write_and_exit_fail
+fail_vmv2r:
+    li a3, 0x9b
+    j write_and_exit_fail
+fail_vmv_nop:
+    li a3, 0x9c
     j write_and_exit_fail
 fail_vwmulu:
     li a3, 0xd6
@@ -2042,6 +2820,12 @@ fail_vfwredusumf:
     j write_and_exit_fail
 fail_fractional:
     li a3, 0xf0
+    j write_and_exit_fail
+fail_vmsbc32:
+    li a3, 0xf1
+    j write_and_exit_fail
+fail_widen_overlap:
+    li a3, 0xf2
     j write_and_exit_fail
 
 write_and_exit_fail:

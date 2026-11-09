@@ -28,6 +28,7 @@ rv32emu supports the following extensions, each mapped to a compile-time
 | M | `EXT_M` | Integer multiplication and division |
 | A | `EXT_A` | Atomic memory operations |
 | F | `EXT_F` | Single-precision floating-point |
+| D | `EXT_D` | Double-precision floating-point |
 | C | `EXT_C` | Compressed (16-bit) instructions |
 | V | `EXT_V` | Vector extension (RVV v1.0) |
 
@@ -368,3 +369,15 @@ two can drift apart, so `make check-decoder` regenerates it and diffs
 the result against the tree; CI runs that target in the `coding-style`
 job. Note it only reports drift on a fresh checkout: a plain `make`
 regenerates the file in place, after which it trivially matches.
+
+## Vector Operand Classes
+
+The vector register-legality rules need to know, for each OP-V opcode, which of
+`vd`, `vs1`, and `vs2` are data and which are masks, and which opcodes have
+extra overlap or `vstart` rules. `scripts/gen-rvv-classes.py` reads the OP-V
+rows of `src/instructions.in` and writes that table to `src/rv32_v_class.inc`;
+`make` regenerates it and `make check-decoder` verifies it. The roles come
+from the operand lists in the descriptor plus the rules in `classify()` and
+`NO_RULES` in the script, so a new vector opcode that is not classified, and not
+listed as needing no rules, makes `make` fail with "has no class". See
+[rvv.md](rvv.md).

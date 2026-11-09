@@ -23,9 +23,17 @@
  * uses fold against a stale value left over from a prior write to that
  * register.
  */
-CONSTOPT(vsetvli, { info->is_constant[ir->rd] = false; })
-CONSTOPT(vsetivli, { info->is_constant[ir->rd] = false; })
-CONSTOPT(vsetvl, { info->is_constant[ir->rd] = false; })
+/* Scalar results may target x0, which is never constant and must not be
+ * tracked as if it were written.
+ */
+#define RVV_INVALIDATE_RD                      \
+    {                                          \
+        if (ir->rd)                            \
+            info->is_constant[ir->rd] = false; \
+    }
+CONSTOPT(vsetvli, RVV_INVALIDATE_RD)
+CONSTOPT(vsetivli, RVV_INVALIDATE_RD)
+CONSTOPT(vsetvl, RVV_INVALIDATE_RD)
 CONSTOPT(vle8_v, {})
 CONSTOPT(vle16_v, {})
 CONSTOPT(vle32_v, {})
@@ -530,14 +538,51 @@ CONSTOPT(vmv_s_x, {})
  * scalar result into GPR rd. As above, the constant tracker must drop
  * rd because none of these are constant-foldable from the GPR file.
  */
-CONSTOPT(vmv_x_s, { info->is_constant[ir->rd] = false; })
-CONSTOPT(vcpop_m, { info->is_constant[ir->rd] = false; })
-CONSTOPT(vfirst_m, { info->is_constant[ir->rd] = false; })
+CONSTOPT(vmv1r_v, {})
+CONSTOPT(vmv2r_v, {})
+CONSTOPT(vmv4r_v, {})
+CONSTOPT(vmv8r_v, {})
+CONSTOPT(vmv_x_s, RVV_INVALIDATE_RD)
+CONSTOPT(vcpop_m, RVV_INVALIDATE_RD)
+CONSTOPT(vfirst_m, RVV_INVALIDATE_RD)
 CONSTOPT(vmsbf_m, {})
 CONSTOPT(vmsof_m, {})
 CONSTOPT(vmsif_m, {})
 CONSTOPT(viota_m, {})
 CONSTOPT(vid_v, {})
+CONSTOPT(vfsqrt_v, {})
+CONSTOPT(vfrsqrt7_v, {})
+CONSTOPT(vfrec7_v, {})
+CONSTOPT(vfclass_v, {})
+CONSTOPT(vfncvt_xu_f_w, {})
+CONSTOPT(vfncvt_x_f_w, {})
+CONSTOPT(vfncvt_f_xu_w, {})
+CONSTOPT(vfncvt_f_x_w, {})
+CONSTOPT(vfncvt_f_f_w, {})
+CONSTOPT(vfncvt_rod_f_f_w, {})
+CONSTOPT(vfncvt_rtz_xu_f_w, {})
+CONSTOPT(vfncvt_rtz_x_f_w, {})
+CONSTOPT(vfwcvt_xu_f_v, {})
+CONSTOPT(vfwcvt_x_f_v, {})
+CONSTOPT(vfwcvt_f_xu_v, {})
+CONSTOPT(vfwcvt_f_x_v, {})
+CONSTOPT(vfwcvt_f_f_v, {})
+CONSTOPT(vfwcvt_rtz_xu_f_v, {})
+CONSTOPT(vfwcvt_rtz_x_f_v, {})
+CONSTOPT(vzext_vf2, {})
+CONSTOPT(vsext_vf2, {})
+CONSTOPT(vzext_vf4, {})
+CONSTOPT(vsext_vf4, {})
+CONSTOPT(vzext_vf8, {})
+CONSTOPT(vsext_vf8, {})
+CONSTOPT(vfmv_f_s, {})
+CONSTOPT(vfmv_s_f, {})
+CONSTOPT(vfcvt_xu_f_v, {})
+CONSTOPT(vfcvt_x_f_v, {})
+CONSTOPT(vfcvt_f_xu_v, {})
+CONSTOPT(vfcvt_f_x_v, {})
+CONSTOPT(vfcvt_rtz_xu_f_v, {})
+CONSTOPT(vfcvt_rtz_x_f_v, {})
 CONSTOPT(vfadd_vv, {})
 CONSTOPT(vfadd_vf, {})
 CONSTOPT(vfredusum_vs, {})
@@ -612,3 +657,5 @@ CONSTOPT(vfwmsac_vv, {})
 CONSTOPT(vfwmsac_vf, {})
 CONSTOPT(vfwnmsac_vv, {})
 CONSTOPT(vfwnmsac_vf, {})
+
+#undef RVV_INVALIDATE_RD

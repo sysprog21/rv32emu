@@ -309,6 +309,35 @@ static bool forgets_rd(void (*optimize)(rv_insn_t *, constopt_info_t *),
            info->is_constant[0] && !info->const_val[0];
 }
 
+/* The D compares, classify, and conversions write an integer register. */
+#if RV32_HAS(EXT_D)
+static int check_double_integer_results(void)
+{
+    const struct {
+        unsigned opcode;
+        void (*optimize)(rv_insn_t *, constopt_info_t *);
+    } ops[] = {
+        {rv_insn_feqd, constopt_feqd},     {rv_insn_fltd, constopt_fltd},
+        {rv_insn_fled, constopt_fled},     {rv_insn_fclassd, constopt_fclassd},
+        {rv_insn_fcvtwd, constopt_fcvtwd}, {rv_insn_fcvtwud, constopt_fcvtwud}};
+    for (unsigned op = 0; op < ARRAY_SIZE(ops); op++) {
+        for (unsigned rd = 0; rd <= 3; rd++) {
+            constopt_info_t info;
+            if (!forgets_rd(ops[op].optimize, ops[op].opcode, rd, &info))
+                return 1;
+            if (rd) {
+                rv_insn_t ir = {
+                    .opcode = rv_insn_addi, .rs1 = rd, .rd = 4, .imm = 1};
+                constopt_addi(&ir, &info);
+                if (ir.opcode != rv_insn_addi || info.is_constant[4])
+                    return 1;
+            }
+        }
+    }
+    return 0;
+}
+#endif
+
 /* A load into x0 still executes, since it can fault. */
 static int check_loads(void)
 {
@@ -485,6 +514,10 @@ static int check_signed_division(void)
 
 int main(void)
 {
+#if RV32_HAS(EXT_D)
+    if (check_double_integer_results())
+        return 1;
+#endif
     if (check_shifts() || check_known_operand() || check_loads())
         return 1;
 #if RV32_HAS(EXT_C)

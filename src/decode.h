@@ -196,6 +196,35 @@ enum op_field {
         _(fcvtswu, 0, 4, 0, ENC(rs1, rs2, rd))         \
         _(fmvwx, 0, 4, 0, ENC(rs1, rs2, rd))           \
     )                                                  \
+    /* RV32D Standard Extension */                     \
+    IIF(RV32_HAS(EXT_D))(                              \
+        _(fld, 0, 4, 0, ENC(rs1, rd))\
+        _(fsd, 0, 4, 0, ENC(rs1, rs2))\
+        _(fmaddd, 0, 4, 0, ENC(rs1, rs2, rs3, rd))\
+        _(fmsubd, 0, 4, 0, ENC(rs1, rs2, rs3, rd))\
+        _(fnmsubd, 0, 4, 0, ENC(rs1, rs2, rs3, rd))\
+        _(fnmaddd, 0, 4, 0, ENC(rs1, rs2, rs3, rd))\
+        _(faddd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fsubd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fmuld, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fdivd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fsqrtd, 0, 4, 0, ENC(rs1, rd))\
+        _(fsgnjd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fsgnjnd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fsgnjxd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fmind, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fmaxd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fcvtsd, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtds, 0, 4, 0, ENC(rs1, rd))\
+        _(feqd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fltd, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fled, 0, 4, 0, ENC(rs1, rs2, rd))\
+        _(fclassd, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtwd, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtwud, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtdw, 0, 4, 0, ENC(rs1, rd))\
+        _(fcvtdwu, 0, 4, 0, ENC(rs1, rd))\
+    )                                                  \
     /* RV32C Standard Extension */                     \
     IIF(RV32_HAS(EXT_C))(                              \
         _(caddi4spn, 0, 2, 1, ENC(rd))                 \
@@ -231,6 +260,13 @@ enum op_field {
             _(cfswsp, 0, 2, 0, ENC(rs2))               \
             _(cflw, 0, 2, 0, ENC(rs1, rd))             \
             _(cfsw, 0, 2, 0, ENC(rs1, rs2))            \
+        )                                              \
+        /* RV32DC Instruction */                       \
+        IIF(RV32_HAS(EXT_D))(                          \
+            _(cfld, 0, 2, 0, ENC(rs1, rd))\
+            _(cfsd, 0, 2, 0, ENC(rs1, rs2))\
+            _(cfldsp, 0, 2, 0, ENC(rd))\
+            _(cfsdsp, 0, 2, 0, ENC(rs2))\
         )                                              \
     )                                                  \
     /* Vector Extension */                             \
@@ -745,6 +781,10 @@ enum op_field {
         _(vwmaccsu_vx, 0, 4, 0, ENC(rs1, rs2, vd))        \
         _(vmv_s_x, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vmv_x_s, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vmv1r_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vmv2r_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vmv4r_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vmv8r_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vcpop_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vfirst_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vmsbf_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
@@ -752,6 +792,12 @@ enum op_field {
         _(vmsif_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(viota_m, 0, 4, 0, ENC(rs1, rs2, vd))            \
         _(vid_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf2, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf2, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf4, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf4, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vzext_vf8, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vsext_vf8, 0, 4, 0, ENC(rs1, rs2, vd))            \
         /* OPF */                                         \
         _(vfadd_vv, 0, 4, 0, ENC(rs1, rs2, vd))           \
         _(vfadd_vf, 0, 4, 0, ENC(rs1, rs2, vd))           \
@@ -827,6 +873,33 @@ enum op_field {
         _(vfwmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))         \
         _(vfwnmsac_vv, 0, 4, 0, ENC(rs1, rs2, vd))        \
         _(vfwnmsac_vf, 0, 4, 0, ENC(rs1, rs2, vd))        \
+        _(vfsqrt_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfrsqrt7_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfrec7_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfclass_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_xu_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_x_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_xu_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_x_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_f_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rod_f_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rtz_xu_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfncvt_rtz_x_f_w, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_xu_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_x_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_f_xu_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_f_x_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_f_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_rtz_xu_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfwcvt_rtz_x_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfmv_f_s, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfmv_s_f, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_xu_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_x_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_f_xu_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_f_x_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_rtz_xu_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
+        _(vfcvt_rtz_x_f_v, 0, 4, 0, ENC(rs1, rs2, vd))            \
     )
 
 /* clang-format on */

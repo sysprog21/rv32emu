@@ -32,6 +32,74 @@ enum {
 };
 /* clang-format on */
 
+#if RV32_HAS(EXT_D)
+enum {
+    RV_NAN32_BOX =
+        0xFFFFFFFFu, /* upper half of a boxed single-precision value */
+};
+#define FMASK64_SIGN UINT64_C(0x8000000000000000)
+#define FMASK64_EXPN UINT64_C(0x7ff0000000000000)
+#define FMASK64_FRAC UINT64_C(0x000fffffffffffff)
+#define FMASK64_QNAN UINT64_C(0x0008000000000000)
+#define RV_NAN64 UINT64_C(0x7ff8000000000000)
+
+/* Float registers are 64 bits wide: F[] holds the lower half and F_hi[] the
+ * upper. A single-precision value must be NaN-boxed, its upper half all ones;
+ * reading an unboxed register as single precision yields the canonical NaN
+ * (RISC-V Unprivileged ISA, D extension).
+ */
+#define F32_SRC(rv, r)                              \
+    ((rv)->F_hi[(r)] == RV_NAN32_BOX ? (rv)->F[(r)] \
+                                     : (riscv_float_t) {.v = RV_NAN})
+#define F32_SET(rv, r, val)             \
+    do {                                \
+        (rv)->F[(r)] = (val);           \
+        (rv)->F_hi[(r)] = RV_NAN32_BOX; \
+    } while (0)
+#define F32_SETV(rv, r, bits) F32_SET(rv, r, ((riscv_float_t) {.v = (bits)}))
+
+static inline bool is_nan64(uint64_t f)
+{
+    return (f & FMASK64_EXPN) == FMASK64_EXPN && (f & FMASK64_FRAC);
+}
+
+static inline softfloat_float64_t f64_reg(const riscv_t *rv, uint32_t r)
+{
+    softfloat_float64_t value;
+
+    value.v = ((uint64_t) rv->F_hi[r] << 32) | rv->F[r].v;
+    return value;
+}
+
+static inline void f64_set(riscv_t *rv, uint32_t r, softfloat_float64_t value)
+{
+    rv->F[r].v = (uint32_t) value.v;
+    rv->F_hi[r] = (uint32_t) (value.v >> 32);
+}
+
+static inline uint32_t calc_fclass64(uint64_t f)
+{
+    const uint64_t sign = f & FMASK64_SIGN;
+    const uint64_t expn = f & FMASK64_EXPN;
+    const uint64_t frac = f & FMASK64_FRAC;
+
+    if (expn == FMASK64_EXPN) {
+        if (frac)
+            return (frac & FMASK64_QNAN) ? 0x200 : 0x100;
+        return sign ? 0x001 : 0x080;
+    }
+    if (expn)
+        return sign ? 0x002 : 0x040;
+    if (frac)
+        return sign ? 0x004 : 0x020;
+    return sign ? 0x008 : 0x010;
+}
+#else
+#define F32_SRC(rv, r) ((rv)->F[(r)])
+#define F32_SET(rv, r, val) ((rv)->F[(r)] = (val))
+#define F32_SETV(rv, r, bits) ((rv)->F[(r)].v = (bits))
+#endif
+
 /* compute the fclass result */
 static inline uint32_t calc_fclass(uint32_t f)
 {

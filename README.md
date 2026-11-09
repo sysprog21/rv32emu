@@ -24,8 +24,8 @@ C11 atomics for memory management, with a focus on efficiency and readability.
 
 Features:
 * Fast interpreter that faithfully executes the complete RV32 instruction set
-* Full coverage of RV32I / RV32E plus the M (integer multiply–divide), A (atomics), F (single-precision floating-point), C (compressed), and Zba/Zbb/Zbc/Zbs bit-manipulation extensions
-* Partial support for the V (vector) extension — decode plus partial execution at `VLEN=128`; opt-in via `make config` (select "V — Vector Extension")
+* Full coverage of RV32I / RV32E plus the M (integer multiply–divide), A (atomics), F (single-precision floating-point), D (double-precision floating-point, opt-in), C (compressed), and Zba/Zbb/Zbc/Zbs bit-manipulation extensions
+* Support for the V (vector) extension, version 1.0, with SEW up to 64 and single- and double-precision floating point; `VLEN` is configurable; opt-in via `make config` (select "V — Vector Extension")
 * Built-in ELF loader for user-mode emulation
 * Newlib-compatible system-call layer for standalone programs
 * Minimal system emulation capable of booting an RV32 Linux kernel and running user-space binaries

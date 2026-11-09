@@ -1152,6 +1152,80 @@ CONSTOPT(cadd, {
 CONSTOPT(cswsp, {})
 #endif
 
+/* RV32D Standard Extension */
+
+#if RV32_HAS(EXT_D)
+CONSTOPT(fld, {})
+
+CONSTOPT(fsd, {})
+
+CONSTOPT(fmaddd, {})
+
+CONSTOPT(fmsubd, {})
+
+CONSTOPT(fnmsubd, {})
+
+CONSTOPT(fnmaddd, {})
+
+CONSTOPT(faddd, {})
+
+CONSTOPT(fsubd, {})
+
+CONSTOPT(fmuld, {})
+
+CONSTOPT(fdivd, {})
+
+CONSTOPT(fsqrtd, {})
+
+CONSTOPT(fsgnjd, {})
+
+CONSTOPT(fsgnjnd, {})
+
+CONSTOPT(fsgnjxd, {})
+
+CONSTOPT(fmind, {})
+
+CONSTOPT(fmaxd, {})
+
+CONSTOPT(fcvtsd, {})
+
+CONSTOPT(fcvtds, {})
+
+CONSTOPT(feqd, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+CONSTOPT(fltd, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+CONSTOPT(fled, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+CONSTOPT(fclassd, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+CONSTOPT(fcvtwd, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+CONSTOPT(fcvtwud, {
+    if (ir->rd)
+        info->is_constant[ir->rd] = false;
+})
+
+CONSTOPT(fcvtdw, {})
+
+CONSTOPT(fcvtdwu, {})
+#endif
+
 /* RV32FC Standard Extension */
 
 #if RV32_HAS(EXT_F) && RV32_HAS(EXT_C)
@@ -1166,6 +1240,15 @@ CONSTOPT(cflw, {})
 
 /* C.FSW */
 CONSTOPT(cfsw, {})
+#endif
+
+/* RV32DC Standard Extension */
+
+#if RV32_HAS(EXT_D) && RV32_HAS(EXT_C)
+CONSTOPT(cfld, {})
+CONSTOPT(cfsd, {})
+CONSTOPT(cfldsp, {})
+CONSTOPT(cfsdsp, {})
 #endif
 
 #if RV32_HAS(Zba)

@@ -1388,14 +1388,21 @@ static void rv_reset_hart(riscv_t *rv, riscv_word_t pc)
 #if RV32_HAS(EXT_F)
     rv->csr_misa |= MISA_F;
     /* Reset float registers */
-    for (int i = 0; i < N_RV_REGS; i++)
+    for (int i = 0; i < 32; i++)
         rv->F[i].v = 0;
     rv->csr_fcsr = 0;
+#endif
+#if RV32_HAS(EXT_D)
+    rv->csr_misa |= MISA_D;
+    /* Reset to boxed single-precision zeros, as with F alone. */
+    for (int i = 0; i < 32; i++)
+        rv->F_hi[i] = UINT32_MAX;
 #endif
 #if RV32_HAS(EXT_M)
     rv->csr_misa |= MISA_M;
 #endif
 #if RV32_HAS(EXT_V)
+    rv->csr_misa |= MISA_V;
     rv->csr_vstart = 0;
     rv->csr_vxsat = 0;
     rv->csr_vxrm = 0;

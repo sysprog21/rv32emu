@@ -45,6 +45,11 @@
 #define RV32_FEATURE_EXT_F 1
 #endif
 
+/* Standard Extension for Double-Precision Floating Point Instructions */
+#ifndef RV32_FEATURE_EXT_D
+#define RV32_FEATURE_EXT_D 0
+#endif
+
 /* Standard Extension for Compressed Instructions */
 #ifndef RV32_FEATURE_EXT_C
 #define RV32_FEATURE_EXT_C 1
@@ -253,6 +258,18 @@
 /* Standard Extension for Vector Instructions */
 #ifndef RV32_FEATURE_EXT_V
 #define RV32_FEATURE_EXT_V 0
+#endif
+
+#if RV32_FEATURE_EXT_D && !RV32_FEATURE_EXT_F
+#error "EXT_D requires EXT_F"
+#endif
+
+/* Double-precision vector operations move 64-bit values through the float
+ * registers, so V needs D. Kconfig selects it; this catches a .config edited
+ * by hand.
+ */
+#if RV32_FEATURE_EXT_V && !RV32_FEATURE_EXT_D
+#error "EXT_V requires EXT_D (and EXT_F); set CONFIG_EXT_D=y"
 #endif
 
 /* Feature test macro */

@@ -160,6 +160,17 @@ config EXT_F
       Enable single-precision (32-bit) floating-point instructions.
       Uses Berkeley SoftFloat for IEEE 754 compliance.
 
+config EXT_D
+    bool "D - Double-Precision Floating-Point"
+    default n
+    select EXT_F
+    help
+      Enable double-precision (64-bit) floating-point instructions. The
+      floating-point registers become 64 bits wide, with single-precision
+      values NaN-boxed in them. Uses Berkeley SoftFloat. Required for
+      double-precision vector operations; selected by the V extension.
+      Not translated by the JIT, so blocks that use it are interpreted.
+
 config EXT_C
     bool "C - Compressed Instructions"
     default y
@@ -168,13 +179,32 @@ config EXT_C
       Reduces code size by approximately 25-30%.
 
 config EXT_V
-    bool "V - Vector Extension (experimental, decode only)"
+    bool "V - Vector Extension (RVV 1.0, ELEN=64)"
     default n
-    select EXT_F
+    select EXT_D
     help
-      Enable RISC-V "V" Vector extension (decode + partial execution).
-      Vector load/store shares its opcode with load_fp/store_fp, so
-      enabling V automatically selects F. VLEN defaults to 128.
+      Enable the RISC-V "V" Vector extension, version 1.0, with SEW of 8,
+      16, 32 or 64 bits (ELEN=64): vector configuration, unit-stride,
+      strided, indexed, segment, whole-register and fault-only-first
+      memory accesses, integer, fixed-point, mask, reduction and
+      permutation operations, and single- and double-precision floating
+      point including the widening and narrowing conversions (computed
+      with Berkeley SoftFloat).
+      Not implemented: Zvfh/Zvfhmin.
+      Vector load/store shares its opcode with load_fp/store_fp, and
+      double-precision vector arithmetic needs 64-bit scalar floating
+      point, so enabling V automatically selects F and D. Advertised in
+      misa.V.
+
+config VLEN
+    int "VLEN - vector register length in bits (power of two, 128-65536)"
+    default 128
+    range 128 65536
+    depends on EXT_V
+    help
+      Width of each of the 32 vector registers. Must be a power of two.
+      The value is also reported through the vlenb CSR. It can be
+      overridden on the make line, for example: make VLEN=256.
 
 comment "Zicsr and Zifencei Extensions"
 

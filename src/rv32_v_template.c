@@ -20,6 +20,8 @@
 
 #define VREG_U32_COUNT ((VLEN) >> (5))
 
+/* Widest element, in bits, the fractional-LMUL rule is checked against. */
+#define RVV_ELEN 64
 #define RVV_VTYPE_VILL (1U << 31)
 #define RVV_VTYPE_LOW_MASK 0xFFU
 
@@ -68,6 +70,13 @@ static inline bool rvv_vtype_is_supported(uint32_t vtype)
     if (v_lmul == 4 || v_sew > 2)
         return false;
 
+    /* Fractional LMUL must satisfy LMUL >= SEW/ELEN (V 1.0 §3.4.2). Element
+     * widths and the widened results go up to 64 bits, so ELEN is 64 here:
+     * SEW=16 cannot go below LMUL=1/4, and SEW=32 below LMUL=1/2.
+     */
+    if (v_lmul > 4 && (rvv_sew_bits(vtype) << (8 - v_lmul)) > RVV_ELEN)
+        return false;
+
     /* Spec §6.3: any vtype combination that produces VLMAX < 1 (e.g.
      * fractional LMUL paired with a large SEW relative to VLEN) is
      * unsupported and must set vill.
@@ -104,7 +113,7 @@ static inline bool rvv_require_valid_state(riscv_t *rv)
  * The companion rvv_require_operable / rvv_check_data_reg helpers
  * below preserve their original "true = trap raised, false = OK" caller
  * convention by EXPLICITLY returning true after invoking this helper, so
- * the long-standing if (rvv_require_operable(rv)) return false; and
+ * the long-standing if (rvv_require_operable(rv, ir)) return false; and
  * if (rvv_check_data_reg(rv, reg)) return false; patterns continue to
  * mean what they look like.
  */
@@ -124,13 +133,21 @@ static inline bool rvv_trap_illegal_state(riscv_t *rv, uint32_t tval)
  * non-zero vstart so that a trap-resume sequence can re-execute the
  * faulted instruction from where it left off.
  */
-static inline bool rvv_require_operable(riscv_t *rv)
+static inline bool rvv_require_valid_operable(riscv_t *rv)
 {
     if (!rvv_require_valid_state(rv)) {
         rvv_trap_illegal_state(rv, 0);
         return true;
     }
     return false;
+}
+
+/* Agnostic tail elements are written only when the instruction did some work:
+ * with vstart >= vl nothing is updated, the tail included (V 1.0 3.7).
+ */
+static inline bool rvv_tail_fill(const riscv_t *rv, uint8_t vta)
+{
+    return vta && rv->csr_vstart < rv->csr_vl;
 }
 
 static inline uint32_t rvv_get_elem(const riscv_t *rv,
@@ -341,7 +358,7 @@ static inline void rvv_unit_stride_load(riscv_t *rv,
         rvv_set_elem_ext(rv, dest, elem, eew, value);
     }
 
-    if ((rv->csr_vtype >> 6) & 0x1) {
+    if (rvv_tail_fill(rv, (rv->csr_vtype >> 6) & 0x1)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, eew, fill);
     }
@@ -402,6 +419,9 @@ static inline void rvv_mask_fill_tail(riscv_t *rv,
                                       uint32_t start,
                                       uint32_t vlmax)
 {
+    /* vstart >= vl leaves the whole destination alone, tail included. */
+    if (rv->csr_vstart >= rv->csr_vl)
+        return;
     for (uint32_t elem = start; elem < vlmax; elem++)
         rvv_mask_set_bit(rv, reg, elem, true);
 }
@@ -589,6 +609,85 @@ static inline bool rvv_wide_group_span(riscv_t *rv, uint32_t *span_out)
     return rvv_eew_reg_span(rv, rvv_sew_bits(rv->csr_vtype) << 1, span_out);
 }
 
+#include "rv32_v_class.inc"
+
+/* Vector register rules of V 1.0 section 5 that apply across instruction
+ * formats, checked once in the common prologue instead of in each handler.
+ *
+ * - A masked instruction reads v0 as a mask (EEW=1), so v0 cannot also be a
+ *   data source or data destination group of the same instruction (5.2, 5.3).
+ *   A mask destination (compares), a reduction's scalar result, and the
+ *   carry-out of vmadc/vmsbc are exempt from the destination half.
+ * - A mask destination that overlaps a source group may only start at the
+ *   lowest register of that group (5.2, rule 2).
+ * - A register cannot be read at two different EEWs, which rules out
+ *   overlapping vs1 and vs2 of the .wv forms and of the widening reductions,
+ *   and a narrow source overlapping the accumulator of vwmacc and friends.
+ * - vmsbf/vmsif/vmsof/viota and vfslide1up cannot overlap their source, and
+ *   the mask generators, viota, vcpop, and vfirst need vstart to be zero.
+ */
+static inline bool rvv_operands_illegal(riscv_t *rv, const rv_insn_t *ir)
+{
+    uint32_t cls = rvv_operand_class(ir->opcode);
+    /* The mask generators name their vector destination rd in the descriptor.
+     */
+    uint32_t vd = (cls & RVC_RDDEST) ? ir->rd : ir->vd;
+    uint32_t n, wide;
+
+    if (!cls)
+        return false;
+    /* These need a fresh start: a resumed one is illegal (V 1.0 3.7). */
+    if ((cls & RVC_VSTART0) && rv->csr_vstart)
+        return true;
+    if (!ir->vm &&
+        (((cls & (RVC_VD | RVC_MSKGEN)) && !vd) ||
+         ((cls & RVC_VS1) && !ir->vs1) || ((cls & RVC_VS2) && !ir->vs2) ||
+         ((cls & RVC_VS3) && !ir->vs3)))
+        return true;
+
+    n = rvv_group_regs(rv->csr_vtype);
+    if (cls & RVC_CMP) {
+        if (vd > ir->vs2 && vd < ir->vs2 + n)
+            return true;
+        if ((cls & RVC_VS1SRC) && vd > ir->vs1 && vd < ir->vs1 + n)
+            return true;
+    }
+    if (cls & RVC_MSKGEN) {
+        /* viota.m writes a data group; the others write one mask register. */
+        if ((cls & RVC_VD) ? (ir->vs2 >= vd && ir->vs2 < vd + n)
+                           : (vd == ir->vs2))
+            return true;
+    }
+    if ((cls & RVC_WV) && rvv_wide_group_span(rv, &wide) &&
+        rvv_reg_spans_overlap(ir->vs1, n, ir->vs2, wide))
+        return true;
+    if ((cls & RVC_REDW) && rvv_reg_spans_overlap(ir->vs1, 1, ir->vs2, n))
+        return true;
+    /* The accumulating widening forms read vd at 2*SEW, so a narrow source
+     * sharing any register with it is a mixed-EEW read, even in the top half
+     * of vd where a plain widening result may overlap.
+     */
+    if ((cls & RVC_WACC) && rvv_wide_group_span(rv, &wide) &&
+        (rvv_reg_spans_overlap(ir->vd, wide, ir->vs2, n) ||
+         ((cls & RVC_VS1SRC) &&
+          rvv_reg_spans_overlap(ir->vd, wide, ir->vs1, n))))
+        return true;
+    if ((cls & RVC_SLIDE1UP) && rvv_reg_spans_overlap(vd, n, ir->vs2, n))
+        return true;
+    return false;
+}
+
+static inline bool rvv_require_operable(riscv_t *rv, const rv_insn_t *ir)
+{
+    if (rvv_require_valid_operable(rv))
+        return true;
+    if (rvv_operands_illegal(rv, ir)) {
+        rvv_trap_illegal_state(rv, 0);
+        return true;
+    }
+    return false;
+}
+
 static inline const uint8_t *rvv_reg_byte_ptr_c(const riscv_t *rv, uint32_t reg)
 {
     return (const uint8_t *) &rv->V[reg][0];
@@ -649,11 +748,6 @@ static inline uint32_t rvv_whole_reg_bytes(const riscv_t *rv, uint32_t nregs)
     return nregs * rv->csr_vlenb;
 }
 
-static inline void rvv_zero_reg_bytes(riscv_t *rv, uint32_t reg, uint32_t nregs)
-{
-    memset(&rv->V[reg][0], 0, rvv_whole_reg_bytes(rv, nregs));
-}
-
 /* Whole vector register move (V 1.0 §16.6). Copies NREG whole registers,
  * i.e. all VLEN bits each, as if EEW=SEW and EMUL=NREG. The effective
  * length is evl = NREG * VLEN/SEW; unlike most instructions the guard is
@@ -665,7 +759,7 @@ static inline bool rvv_exec_whole_reg_move(riscv_t *rv,
                                            uint32_t nregs)
 {
     uint32_t sew_bits = rvv_sew_bits(rv->csr_vtype);
-    uint32_t evl, bytes;
+    uint32_t evl, bytes, offset;
 
     if (!rvv_validate_reg_span(ir->vd, nregs) ||
         !rvv_validate_reg_span(ir->vs2, nregs))
@@ -674,7 +768,9 @@ static inline bool rvv_exec_whole_reg_move(riscv_t *rv,
     evl = nregs * ((uint32_t) VLEN / sew_bits);
     if (rv->csr_vstart < evl && ir->vd != ir->vs2) {
         bytes = rvv_whole_reg_bytes(rv, nregs);
-        memmove(&rv->V[ir->vd][0], &rv->V[ir->vs2][0], bytes);
+        offset = rv->csr_vstart * (sew_bits / 8);
+        memmove((uint8_t *) &rv->V[ir->vd][0] + offset,
+                (uint8_t *) &rv->V[ir->vs2][0] + offset, bytes - offset);
     }
     rv->csr_vstart = 0;
     return true;
@@ -685,7 +781,12 @@ static inline bool rvv_exec_whole_reg_move(riscv_t *rv,
  * on completion. Caller is responsible for vd alignment validation; this
  * helper just moves nregs*VLENB bytes through the io layer.
  */
+/* Whole-register accesses count vstart in elements of the instruction's EEW;
+ * elements before it are left alone, and vstart >= the element count is a
+ * no-op (V 1.0 7.9).
+ */
 static inline void rvv_whole_reg_load(riscv_t *rv,
+                                      const rv_insn_t *ir,
                                       uint32_t dest,
                                       uint32_t nregs,
                                       uint32_t addr)
@@ -693,11 +794,13 @@ static inline void rvv_whole_reg_load(riscv_t *rv,
     uint32_t bytes = rvv_whole_reg_bytes(rv, nregs);
     uint8_t *dst = (uint8_t *) &rv->V[dest][0];
 
-    for (uint32_t i = 0; i < bytes; i++)
+    for (uint32_t i = rv->csr_vstart * (ir->eew >> 3); i < bytes; i++)
         dst[i] = rv->io.mem_read_b(rv, addr + i);
+    rv->csr_vstart = 0;
 }
 
 static inline void rvv_whole_reg_store(riscv_t *rv,
+                                       const rv_insn_t *ir,
                                        uint32_t src,
                                        uint32_t nregs,
                                        uint32_t addr)
@@ -705,8 +808,9 @@ static inline void rvv_whole_reg_store(riscv_t *rv,
     uint32_t bytes = rvv_whole_reg_bytes(rv, nregs);
     uint8_t *srcp = (uint8_t *) &rv->V[src][0];
 
-    for (uint32_t i = 0; i < bytes; i++)
+    for (uint32_t i = rv->csr_vstart * (ir->eew >> 3); i < bytes; i++)
         rv->io.mem_write_b(rv, addr + i, srcp[i]);
+    rv->csr_vstart = 0;
 }
 
 static inline uint32_t rvv_mask_mem_bytes(uint32_t vl)
@@ -719,11 +823,18 @@ static inline void rvv_mask_load(riscv_t *rv, uint32_t dest, uint32_t addr)
     uint32_t nbytes = rvv_mask_mem_bytes(rv->csr_vl);
     uint8_t *dst = (uint8_t *) &rv->V[dest][0];
 
-    rvv_zero_reg_bytes(rv, dest, 1);
-    for (uint32_t i = 0; i < nbytes; i++)
-        dst[i] = rv->io.mem_read_b(rv, addr + i);
-    /* vlm.v's tail extends to the full VLEN of the mask register (§7.4). */
-    rvv_mask_fill_tail(rv, dest, rv->csr_vl, VLEN);
+    /* vstart counts bytes here (EEW=8, evl = ceil(vl/8)); with none left to
+     * load nothing is written, tail included.
+     */
+    if (rv->csr_vstart < nbytes) {
+        for (uint32_t i = rv->csr_vstart; i < nbytes; i++)
+            dst[i] = rv->io.mem_read_b(rv, addr + i);
+        /* The tail is the bytes past evl, up to the full VLEN of the mask
+         * register (§7.4); the last loaded byte is body even when vl does not
+         * fill it.
+         */
+        rvv_mask_fill_tail(rv, dest, nbytes * 8U, VLEN);
+    }
     rv->csr_vstart = 0;
 }
 
@@ -732,7 +843,7 @@ static inline void rvv_mask_store(riscv_t *rv, uint32_t src, uint32_t addr)
     uint32_t nbytes = rvv_mask_mem_bytes(rv->csr_vl);
     uint8_t *srcp = (uint8_t *) &rv->V[src][0];
 
-    for (uint32_t i = 0; i < nbytes; i++)
+    for (uint32_t i = rv->csr_vstart; i < nbytes; i++)
         rv->io.mem_write_b(rv, addr + i, srcp[i]);
     rv->csr_vstart = 0;
 }
@@ -835,7 +946,7 @@ static inline void rvv_indexed_load(riscv_t *rv,
         rvv_set_elem_ext(rv, dest, elem, sew_bits, value);
     }
 
-    if ((rv->csr_vtype >> 6) & 0x1) {
+    if (rvv_tail_fill(rv, (rv->csr_vtype >> 6) & 0x1)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, sew_bits, fill);
     }
@@ -872,7 +983,15 @@ static inline bool rvv_validate_segment_reg_group(uint32_t reg,
                                                   uint32_t field_span,
                                                   uint32_t nf)
 {
-    return rvv_validate_reg_span(reg, field_span * nf);
+    /* Only each field's register group is aligned (to EMUL); the segment as a
+     * whole need not be, which is why nf=3,5,6,7 are legal at any alignment of
+     * the field. The whole segment fits in eight registers and in v0..v31
+     * (V 1.0 7.8).
+     */
+    uint32_t total = field_span * nf;
+
+    return field_span && total <= 8 && (reg + total) <= 32 &&
+           ((field_span == 1) || ((reg % field_span) == 0));
 }
 
 /* Segmented memory helpers - V 1.0 §7.7.
@@ -1042,7 +1161,7 @@ static inline bool rvv_segment_strided_load(riscv_t *rv,
                              staged[field]);
     }
 
-    if ((rv->csr_vtype >> 6) & 0x1) {
+    if (rvv_tail_fill(rv, (rv->csr_vtype >> 6) & 0x1)) {
         for (uint32_t field = 0; field < nf; field++) {
             for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++) {
                 rvv_set_elem_ext(rv, dest + (field * field_span), elem, eew,
@@ -1124,7 +1243,7 @@ static inline bool rvv_segment_indexed_load(riscv_t *rv,
                              staged[field]);
     }
 
-    if ((rv->csr_vtype >> 6) & 0x1) {
+    if (rvv_tail_fill(rv, (rv->csr_vtype >> 6) & 0x1)) {
         for (uint32_t field = 0; field < nf; field++) {
             for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++) {
                 rvv_set_elem_ext(rv, dest + (field * field_span), elem,
@@ -1190,7 +1309,7 @@ static inline bool rvv_segment_indexed_store(riscv_t *rv,
 #define RVV_SEGMENT_UNIT_STRIDE_LOAD_OP(name, nf_value, fault_first)       \
     RVOP(name, {                                                           \
         uint32_t field_span;                                               \
-        if (rvv_require_operable(rv))                                      \
+        if (rvv_require_operable(rv, ir))                                  \
             return false;                                                  \
         if (!rvv_eew_reg_span(rv, ir->eew, &field_span) ||                 \
             !rvv_validate_segment_reg_group(ir->vd, field_span, nf_value)) \
@@ -1206,7 +1325,7 @@ static inline bool rvv_segment_indexed_store(riscv_t *rv,
 #define RVV_SEGMENT_UNIT_STRIDE_STORE_OP(name, nf_value)                    \
     RVOP(name, {                                                            \
         uint32_t field_span;                                                \
-        if (rvv_require_operable(rv))                                       \
+        if (rvv_require_operable(rv, ir))                                   \
             return false;                                                   \
         if (!rvv_eew_reg_span(rv, ir->eew, &field_span) ||                  \
             !rvv_validate_segment_reg_group(ir->vs3, field_span, nf_value)) \
@@ -1218,7 +1337,7 @@ static inline bool rvv_segment_indexed_store(riscv_t *rv,
 #define RVV_SEGMENT_STRIDED_LOAD_OP(name, nf_value)                        \
     RVOP(name, {                                                           \
         uint32_t field_span;                                               \
-        if (rvv_require_operable(rv))                                      \
+        if (rvv_require_operable(rv, ir))                                  \
             return false;                                                  \
         if (!rvv_eew_reg_span(rv, ir->eew, &field_span) ||                 \
             !rvv_validate_segment_reg_group(ir->vd, field_span, nf_value)) \
@@ -1233,7 +1352,7 @@ static inline bool rvv_segment_indexed_store(riscv_t *rv,
 #define RVV_SEGMENT_STRIDED_STORE_OP(name, nf_value)                        \
     RVOP(name, {                                                            \
         uint32_t field_span;                                                \
-        if (rvv_require_operable(rv))                                       \
+        if (rvv_require_operable(rv, ir))                                   \
             return false;                                                   \
         if (!rvv_eew_reg_span(rv, ir->eew, &field_span) ||                  \
             !rvv_validate_segment_reg_group(ir->vs3, field_span, nf_value)) \
@@ -1247,7 +1366,7 @@ static inline bool rvv_segment_indexed_store(riscv_t *rv,
         uint32_t data_span = rvv_group_regs(rv->csr_vtype);                    \
         uint32_t index_span;                                                   \
         uint32_t total_dest_span;                                              \
-        if (rvv_require_operable(rv))                                          \
+        if (rvv_require_operable(rv, ir))                                      \
             return false;                                                      \
         if (!rvv_validate_segment_reg_group(ir->vd, data_span, nf_value) ||    \
             !rvv_index_group_span(rv, ir->eew, &index_span) ||                 \
@@ -1281,7 +1400,7 @@ static inline bool rvv_segment_indexed_store(riscv_t *rv,
     RVOP(name, {                                                             \
         uint32_t data_span = rvv_group_regs(rv->csr_vtype);                  \
         uint32_t index_span;                                                 \
-        if (rvv_require_operable(rv))                                        \
+        if (rvv_require_operable(rv, ir))                                    \
             return false;                                                    \
         if (!rvv_validate_segment_reg_group(ir->vs3, data_span, nf_value) || \
             !rvv_index_group_span(rv, ir->eew, &index_span) ||               \
@@ -1465,7 +1584,7 @@ static inline void rvv_exec_data_vv(riscv_t *rv,
                      op(rvv_get_elem(rv, ir->vs2, elem, sew_bits),
                         rvv_get_elem(rv, ir->vs1, elem, sew_bits), sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -1495,7 +1614,7 @@ static inline void rvv_exec_data_vx(riscv_t *rv,
             rv, dest, elem, sew_bits,
             op(rvv_get_elem(rv, ir->vs2, elem, sew_bits), scalar, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -1525,7 +1644,7 @@ static inline void rvv_exec_data_vi(riscv_t *rv,
             rv, dest, elem, sew_bits,
             op(rvv_get_elem(rv, ir->vs2, elem, sew_bits), imm, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -1554,7 +1673,7 @@ static inline void rvv_exec_data_vv_stateful(riscv_t *rv,
                      op(rv, rvv_get_elem(rv, ir->vs2, elem, sew_bits),
                         rvv_get_elem(rv, ir->vs1, elem, sew_bits), sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -1584,7 +1703,7 @@ static inline void rvv_exec_data_vx_stateful(riscv_t *rv,
                      op(rv, rvv_get_elem(rv, ir->vs2, elem, sew_bits), scalar,
                         sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -1614,7 +1733,7 @@ static inline void rvv_exec_data_vi_stateful(riscv_t *rv,
             rv, dest, elem, sew_bits,
             op(rv, rvv_get_elem(rv, ir->vs2, elem, sew_bits), imm, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -1808,7 +1927,7 @@ static inline void rvv_strided_load(riscv_t *rv,
         rvv_set_elem_ext(rv, dest, elem, eew, value);
     }
 
-    if ((rv->csr_vtype >> 6) & 0x1) {
+    if (rvv_tail_fill(rv, (rv->csr_vtype >> 6) & 0x1)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, eew, fill);
     }
@@ -1929,7 +2048,7 @@ static inline void rvv_exec_viota(riscv_t *rv,
         if (rvv_mask_get_bit(rv, ir->vs2, elem))
             count++;
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -1953,7 +2072,7 @@ static inline void rvv_exec_vid(riscv_t *rv, const rv_insn_t *ir, uint32_t dest)
         }
         rvv_set_elem(rv, dest, elem, sew_bits, rvv_trunc_elem(elem, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2022,7 +2141,7 @@ static inline void rvv_exec_vmerge_vv(riscv_t *rv,
                          ? rvv_get_elem(rv, ir->vs1, elem, sew_bits)
                          : rvv_get_elem(rv, ir->vs2, elem, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2046,7 +2165,7 @@ static inline void rvv_exec_vmerge_vx(riscv_t *rv,
                          ? scalar
                          : rvv_get_elem(rv, ir->vs2, elem, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2070,7 +2189,7 @@ static inline void rvv_exec_vmerge_vi(riscv_t *rv,
                          ? imm
                          : rvv_get_elem(rv, ir->vs2, elem, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2163,7 +2282,7 @@ static inline void rvv_exec_adc_vv(riscv_t *rv,
     }
     if (write_carry)
         rvv_mask_fill_tail(rv, dest, rv->csr_vl, vlmax);
-    else if (vta) {
+    else if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2194,7 +2313,7 @@ static inline void rvv_exec_adc_vx(riscv_t *rv,
     }
     if (write_carry)
         rvv_mask_fill_tail(rv, dest, rv->csr_vl, vlmax);
-    else if (vta) {
+    else if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2225,7 +2344,7 @@ static inline void rvv_exec_adc_vi(riscv_t *rv,
     }
     if (write_carry)
         rvv_mask_fill_tail(rv, dest, rv->csr_vl, vlmax);
-    else if (vta) {
+    else if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2256,7 +2375,7 @@ static inline void rvv_exec_sbc_vv(riscv_t *rv,
     }
     if (write_borrow)
         rvv_mask_fill_tail(rv, dest, rv->csr_vl, vlmax);
-    else if (vta) {
+    else if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2288,7 +2407,7 @@ static inline void rvv_exec_sbc_vx(riscv_t *rv,
     }
     if (write_borrow)
         rvv_mask_fill_tail(rv, dest, rv->csr_vl, vlmax);
-    else if (vta) {
+    else if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2304,8 +2423,10 @@ static inline void rvv_exec_reduction(riscv_t *rv,
     uint32_t elems = VLEN / sew_bits;
     uint32_t acc;
 
-    if (rv->csr_vl == 0)
+    if (rv->csr_vl == 0) {
+        rv->csr_vstart = 0;
         return;
+    }
 
     acc = rvv_get_elem(rv, ir->vs1, 0, sew_bits);
     for (uint32_t elem = 0; elem < rv->csr_vl; elem++) {
@@ -2328,18 +2449,19 @@ static inline void rvv_exec_widen_reduction(riscv_t *rv,
 {
     uint32_t sew_bits = rvv_sew_bits(rv->csr_vtype);
     uint32_t wide_bits = sew_bits << 1;
-    uint32_t elems;
+    uint32_t elems = VLEN / wide_bits;
     uint64_t acc;
 
-    if (rv->csr_vl == 0)
-        return;
-    if (wide_bits > 32) {
-        rvv_trap_illegal_state(rv, 0);
+    if (rv->csr_vl == 0) {
+        rv->csr_vstart = 0;
         return;
     }
 
-    elems = VLEN / wide_bits;
-    acc = rvv_get_elem(rv, ir->vs1, 0, wide_bits);
+    /* The accumulator and destination are 2*SEW wide (64 bits at SEW=32).
+     * With no active element the result is still vs1[0], so the write below
+     * must not depend on the mask.
+     */
+    acc = rvv_get_elem_ext(rv, ir->vs1, 0, wide_bits);
     for (uint32_t elem = 0; elem < rv->csr_vl; elem++) {
         uint32_t val;
 
@@ -2349,10 +2471,11 @@ static inline void rvv_exec_widen_reduction(riscv_t *rv,
         acc += is_signed ? (uint64_t) (int64_t) rvv_signed_elem(val, sew_bits)
                          : (uint64_t) rvv_trunc_elem(val, sew_bits);
     }
-    rvv_set_elem(rv, dest, 0, wide_bits, (uint32_t) acc);
+    rvv_set_elem_ext(rv, dest, 0, wide_bits, acc);
     if ((rv->csr_vtype >> 6) & 0x1) {
         for (uint32_t elem = 1; elem < elems; elem++)
-            rvv_set_elem(rv, dest, elem, wide_bits, rvv_data_fill(wide_bits));
+            rvv_set_elem_ext(rv, dest, elem, wide_bits,
+                             rvv_data_fill_ext(wide_bits));
     }
     rv->csr_vstart = 0;
 }
@@ -2407,8 +2530,16 @@ static inline uint64_t rvv_roundoff_unsigned(riscv_t *rv,
                                              uint32_t width,
                                              uint32_t shift)
 {
-    uint64_t rounded = value + rvv_round_increment(rv, value, shift);
-    return (rounded >> shift) & rvv_elem_mask64(width);
+    /* Add the rounding carry to the shifted value rather than the increment
+     * to the unshifted one: the latter wraps when value is within one
+     * increment of 2^64 (SEW=32 vnclipu) and loses the carry that must make
+     * the result saturate.
+     */
+    uint64_t carry = shift ? (((value & ((UINT64_C(1) << shift) - 1U)) +
+                               rvv_round_increment(rv, value, shift)) >>
+                              shift)
+                           : 0;
+    return ((value >> shift) + carry) & rvv_elem_mask64(width);
 }
 
 /* Signed counterpart. The sign-extension MUST happen on the rounded value
@@ -2421,10 +2552,18 @@ static inline int64_t rvv_roundoff_signed(riscv_t *rv,
                                           uint32_t width,
                                           uint32_t shift)
 {
-    uint64_t sum = (raw_value + rvv_round_increment(rv, raw_value, shift)) &
-                   rvv_elem_mask64(width);
-    int64_t rounded = rvv_sign_extend64(sum, width);
-    return rounded >> shift;
+    /* As above: sign-extend first and add the carry after the shift. Adding
+     * the increment inside width bits flips the sign when the value is
+     * within one increment of the width's maximum, e.g. vssra.vi of 0x7f by
+     * 2 at SEW=8 under round-to-nearest-even.
+     */
+    int64_t value = rvv_sign_extend64(raw_value, width);
+    int64_t carry =
+        shift ? (int64_t) (((raw_value & ((UINT64_C(1) << shift) - 1U)) +
+                            rvv_round_increment(rv, raw_value, shift)) >>
+                           shift)
+              : 0;
+    return (value >> shift) + carry;
 }
 
 static inline void rvv_set_vxsat(riscv_t *rv)
@@ -2538,8 +2677,11 @@ static inline uint32_t rvv_op_vasubu(riscv_t *rv,
     uint32_t lhs_u = rvv_trunc_elem(lhs, sew_bits);
     uint32_t rhs_u = rvv_trunc_elem(rhs, sew_bits);
     uint64_t diff = (uint64_t) lhs_u - (uint64_t) rhs_u;
-    return rvv_roundoff_unsigned(rv, diff & rvv_elem_mask64(sew_bits), sew_bits,
-                                 1);
+    /* The difference needs SEW+1 bits: masking to SEW drops the borrow that
+     * the halving shift moves into the result.
+     */
+    return rvv_roundoff_unsigned(rv, diff & rvv_elem_mask64(sew_bits + 1),
+                                 sew_bits + 1, 1);
 }
 
 static inline uint32_t rvv_op_vasub(riscv_t *rv,
@@ -2733,7 +2875,7 @@ static inline void rvv_exec_wide_narrow_vv(riscv_t *rv,
             op(rvv_get_elem(rv, ir->vs2, elem, sew_bits),
                rvv_get_elem(rv, ir->vs1, elem, sew_bits), sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, wide_bits, fill);
     }
@@ -2764,7 +2906,7 @@ static inline void rvv_exec_wide_narrow_vx(riscv_t *rv,
             rv, dest, elem, wide_bits,
             op(rvv_get_elem(rv, ir->vs2, elem, sew_bits), scalar, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, wide_bits, fill);
     }
@@ -2795,7 +2937,7 @@ static inline void rvv_exec_wide_mixed_vv(riscv_t *rv,
             op(rvv_get_elem_ext(rv, ir->vs2, elem, wide_bits),
                rvv_get_elem(rv, ir->vs1, elem, sew_bits), sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, wide_bits, fill);
     }
@@ -2826,7 +2968,7 @@ static inline void rvv_exec_wide_mixed_vx(riscv_t *rv,
                          op(rvv_get_elem_ext(rv, ir->vs2, elem, wide_bits),
                             scalar, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, wide_bits, fill);
     }
@@ -2919,7 +3061,7 @@ static inline void rvv_exec_narrow_shift_vv(riscv_t *rv,
                rvv_get_elem(rv, ir->vs1, elem, sew_bits) & (wide_bits - 1U),
                sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2950,7 +3092,7 @@ static inline void rvv_exec_narrow_shift_vx(riscv_t *rv,
                      op(rv, rvv_get_elem_ext(rv, ir->vs2, elem, wide_bits),
                         shift, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -2969,7 +3111,7 @@ static inline void rvv_exec_narrow_shift_vi(riscv_t *rv,
     uint32_t fill = rvv_data_fill(sew_bits);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t shift = ((uint32_t) ir->imm) & (wide_bits - 1U);
+    uint32_t shift = ((uint32_t) ir->imm & 0x1fU) & (wide_bits - 1U);
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
@@ -2981,7 +3123,7 @@ static inline void rvv_exec_narrow_shift_vi(riscv_t *rv,
                      op(rv, rvv_get_elem_ext(rv, ir->vs2, elem, wide_bits),
                         shift, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3057,7 +3199,7 @@ static inline void rvv_exec_mac_vv(
                         rvv_get_elem(rv, ir->vs2, elem, sew_bits),
                         rvv_get_elem(rv, ir->vs1, elem, sew_bits), sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3089,7 +3231,7 @@ static inline void rvv_exec_mac_vx(
             op(rvv_get_elem(rv, dest, elem, sew_bits),
                rvv_get_elem(rv, ir->vs2, elem, sew_bits), scalar, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3126,7 +3268,7 @@ static inline void rvv_exec_wide_mac_vv(riscv_t *rv,
                             sew_bits),
                 wide_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, wide_bits, fill);
     }
@@ -3163,7 +3305,7 @@ static inline void rvv_exec_wide_mac_vx(riscv_t *rv,
                             sew_bits),
                 wide_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, wide_bits, fill);
     }
@@ -3184,7 +3326,10 @@ static inline void rvv_exec_vmv_s_x(riscv_t *rv, const rv_insn_t *ir)
     uint32_t sew_bits = rvv_sew_bits(rv->csr_vtype);
     uint32_t value = rvv_trunc_elem(rv->X[ir->rs1], sew_bits);
 
-    if ((rv->csr_vstart == 0) && (rv->csr_vl > 0))
+    /* Only vstart >= vl suppresses the write; a resumed instruction with
+     * vstart < vl still updates element 0.
+     */
+    if (rv->csr_vstart < rv->csr_vl)
         rvv_set_elem(rv, ir->vd, 0, sew_bits, value);
     rv->csr_vstart = 0;
 }
@@ -3193,8 +3338,9 @@ static inline void rvv_exec_vmv_x_s(riscv_t *rv, const rv_insn_t *ir)
 {
     uint32_t sew_bits = rvv_sew_bits(rv->csr_vtype);
 
-    rv->X[ir->rd] = (uint32_t) rvv_signed_elem(
-        rvv_get_elem(rv, ir->vs2, 0, sew_bits), sew_bits);
+    if (ir->rd)
+        rv->X[ir->rd] = (uint32_t) rvv_signed_elem(
+            rvv_get_elem(rv, ir->vs2, 0, sew_bits), sew_bits);
     rv->csr_vstart = 0;
 }
 
@@ -3222,7 +3368,7 @@ static inline void rvv_exec_vrgather_vv(riscv_t *rv,
             rv, dest, elem, sew_bits,
             (index >= vlmax) ? 0 : rvv_get_elem(rv, ir->vs2, index, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3251,7 +3397,7 @@ static inline void rvv_exec_vrgather_scalar(riscv_t *rv,
         }
         rvv_set_elem(rv, dest, elem, sew_bits, value);
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3269,11 +3415,12 @@ static inline void rvv_exec_vslideup(riscv_t *rv,
     uint32_t fill = rvv_data_fill(sew_bits);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    uint32_t start = rv->csr_vstart;
+    /* The first element written is max(vstart, offset), but the source
+     * displacement stays the architectural offset.
+     */
+    uint32_t first = offset < rv->csr_vstart ? rv->csr_vstart : offset;
 
-    if (offset < start)
-        offset = start;
-    for (uint32_t elem = offset; elem < rv->csr_vl; elem++) {
+    for (uint32_t elem = first; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
             if (vma)
                 rvv_set_elem(rv, dest, elem, sew_bits, fill);
@@ -3282,7 +3429,7 @@ static inline void rvv_exec_vslideup(riscv_t *rv,
         rvv_set_elem(rv, dest, elem, sew_bits,
                      rvv_get_elem(rv, ir->vs2, elem - offset, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3302,19 +3449,23 @@ static inline void rvv_exec_vslidedown(riscv_t *rv,
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
-        uint32_t src_idx = elem + offset;
+        /* A 32-bit sum wraps for offsets near UINT32_MAX and would read a
+         * low element instead of producing zero.
+         */
+        uint64_t src_idx = (uint64_t) elem + offset;
 
         if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
             if (vma)
                 rvv_set_elem(rv, dest, elem, sew_bits, fill);
             continue;
         }
-        rvv_set_elem(rv, dest, elem, sew_bits,
-                     (src_idx >= vlmax)
-                         ? 0
-                         : rvv_get_elem(rv, ir->vs2, src_idx, sew_bits));
+        rvv_set_elem(
+            rv, dest, elem, sew_bits,
+            (src_idx >= vlmax)
+                ? 0
+                : rvv_get_elem(rv, ir->vs2, (uint32_t) src_idx, sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3353,7 +3504,7 @@ static inline void rvv_exec_vslide1up(riscv_t *rv,
         }
     }
 
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3383,7 +3534,7 @@ static inline void rvv_exec_vslide1down(riscv_t *rv,
         else
             rvv_set_elem(rv, dest, elem, sew_bits, scalar);
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3407,7 +3558,7 @@ static inline void rvv_exec_vcompress(riscv_t *rv,
         rvv_set_elem(rv, dest, out_idx++, sew_bits,
                      rvv_get_elem(rv, ir->vs2, elem, sew_bits));
     }
-    if (vta) {
+    if (vta && rv->csr_vl) {
         for (uint32_t elem = out_idx; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, sew_bits, fill);
     }
@@ -3491,7 +3642,8 @@ static inline void rvv_apply_vsetvl(riscv_t *rv,
     if (keep_vl) {
         if (!rvv_require_valid_state(rv)) {
             rvv_set_vill(rv);
-            rv->X[ir->rd] = rv->csr_vl;
+            if (ir->rd)
+                rv->X[ir->rd] = rv->csr_vl;
             return;
         }
         old_vlmax = rvv_vlmax(rv->csr_vtype);
@@ -3499,20 +3651,23 @@ static inline void rvv_apply_vsetvl(riscv_t *rv,
 
     if (!rvv_vtype_is_supported(new_vtype)) {
         rvv_set_vill(rv);
-        rv->X[ir->rd] = rv->csr_vl;
+        if (ir->rd)
+            rv->X[ir->rd] = rv->csr_vl;
         return;
     }
 
     if (keep_vl && (rvv_vlmax(new_vtype) != old_vlmax)) {
         rvv_set_vill(rv);
-        rv->X[ir->rd] = rv->csr_vl;
+        if (ir->rd)
+            rv->X[ir->rd] = rv->csr_vl;
         return;
     }
 
     rv->csr_vtype = new_vtype;
     if (!keep_vl)
         rv->csr_vl = rvv_compute_vl(avl, rvv_vlmax(new_vtype));
-    rv->X[ir->rd] = rv->csr_vl;
+    if (ir->rd)
+        rv->X[ir->rd] = rv->csr_vl;
 }
 
 RVOP(vsetvli, {
@@ -3563,23 +3718,69 @@ RVOP(vsetvl, {
  * The current approach supports only SEW values of 8, 16, and 32 bits.
  */
 
-#define VECTOR_DISPATCH(des, op1, op2, op, op_type)      \
-    {                                                    \
-        if (rvv_require_operable(rv))                    \
-            return false;                                \
-        switch (8 << ((rv->csr_vtype >> 3) & 0b111)) {   \
-        case 8:                                          \
-            sew_8b_handler(des, op1, op2, op, op_type);  \
-            break;                                       \
-        case 16:                                         \
-            sew_16b_handler(des, op1, op2, op, op_type); \
-            break;                                       \
-        case 32:                                         \
-            sew_32b_handler(des, op1, op2, op, op_type); \
-            break;                                       \
-        default:                                         \
-            break;                                       \
-        }                                                \
+/* Operand fetch for the per-element fallback below. */
+#define V_OPERAND_VV(op2, elem, sew) rvv_get_elem(rv, (op2), (elem), (sew))
+#define V_OPERAND_VX(op2, elem, sew) (rv->X[(op2)])
+#define V_OPERAND_VI(op2, elem, sew) ((uint32_t) (op2))
+#define V_REG_OK_VV(op2) rvv_validate_data_reg(rv->csr_vtype, (op2))
+#define V_REG_OK_VX(op2) true
+#define V_REG_OK_VI(op2) true
+
+/* One element at a time, honoring vstart. The word-at-a-time handlers below
+ * always start at element 0, so a resumed instruction (vstart > 0) takes this
+ * path instead: elements below vstart are prestart and must stay untouched.
+ */
+#define VSTART_LOOP(des, op1, op2, op, op_type)                            \
+    do {                                                                   \
+        uint32_t __sew = rvv_sew_bits(rv->csr_vtype);                      \
+        uint32_t __vlmax = rvv_vlmax(rv->csr_vtype);                       \
+        uint32_t __fill = rvv_data_fill(__sew);                            \
+        uint8_t __vma = GET_VMA(rv->csr_vtype);                            \
+        uint8_t __vta = GET_VTA(rv->csr_vtype);                            \
+        for (uint32_t __e = rv->csr_vstart; __e < rv->csr_vl; __e++) {     \
+            if (!rvv_mask_enabled_for_elem(rv, ir, __e)) {                 \
+                if (__vma)                                                 \
+                    rvv_set_elem(rv, (des), __e, __sew, __fill);           \
+                continue;                                                  \
+            }                                                              \
+            rvv_set_elem(rv, (des), __e, __sew,                            \
+                         op_##op(rvv_get_elem(rv, (op1), __e, __sew),      \
+                                 V_OPERAND_##op_type((op2), __e, __sew))); \
+        }                                                                  \
+        if (rvv_tail_fill(rv, __vta)) {                                    \
+            for (uint32_t __e = rv->csr_vl; __e < __vlmax; __e++)          \
+                rvv_set_elem(rv, (des), __e, __sew, __fill);               \
+        }                                                                  \
+        rv->csr_vstart = 0;                                                \
+    } while (0)
+
+#define VECTOR_DISPATCH(des, op1, op2, op, op_type)                \
+    {                                                              \
+        if (rvv_require_operable(rv, ir))                          \
+            return false;                                          \
+        if (!rvv_validate_data_reg(rv->csr_vtype, (des)) ||        \
+            !rvv_validate_data_reg(rv->csr_vtype, (op1)) ||        \
+            !V_REG_OK_##op_type(op2))                              \
+            return rvv_trap_illegal_state(rv, 0);                  \
+        if (rv->csr_vstart >= rv->csr_vl) {                        \
+            rv->csr_vstart = 0; /* nothing to do, tail included */ \
+        } else if (rv->csr_vstart) {                               \
+            VSTART_LOOP(des, op1, op2, op, op_type);               \
+        } else {                                                   \
+            switch (8 << ((rv->csr_vtype >> 3) & 0b111)) {         \
+            case 8:                                                \
+                sew_8b_handler(des, op1, op2, op, op_type);        \
+                break;                                             \
+            case 16:                                               \
+                sew_16b_handler(des, op1, op2, op, op_type);       \
+                break;                                             \
+            case 32:                                               \
+                sew_32b_handler(des, op1, op2, op, op_type);       \
+                break;                                             \
+            default:                                               \
+                break;                                             \
+            }                                                      \
+        }                                                          \
     }
 /* Extract vta and vma bits from csr_vtype */
 #define GET_VTA(vtype) (((vtype) >> 6) & 0x1)
@@ -3833,7 +4034,7 @@ RVOP(vsetvl, {
     }
 
 RVOP(vle8_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -3841,7 +4042,7 @@ RVOP(vle8_v, {
 })
 
 RVOP(vle16_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -3849,7 +4050,7 @@ RVOP(vle16_v, {
 })
 
 RVOP(vle32_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -3857,7 +4058,7 @@ RVOP(vle32_v, {
 })
 
 RVOP(vle64_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -3896,100 +4097,100 @@ RVV_SEGMENT_UNIT_STRIDE_LOAD_OP(vlseg8e64_v, 8, false);
 RVOP(vl1re8_v, {
     if (!rvv_validate_reg_span(ir->vd, 1))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 1, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 1, rv->X[ir->rs1]);
 })
 
 RVOP(vl1re16_v, {
     if (!rvv_validate_reg_span(ir->vd, 1))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 1, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 1, rv->X[ir->rs1]);
 })
 
 RVOP(vl1re32_v, {
     if (!rvv_validate_reg_span(ir->vd, 1))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 1, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 1, rv->X[ir->rs1]);
 })
 
 RVOP(vl1re64_v, {
     if (!rvv_validate_reg_span(ir->vd, 1))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 1, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 1, rv->X[ir->rs1]);
 })
 
 RVOP(vl2re8_v, {
     if (!rvv_validate_reg_span(ir->vd, 2))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 2, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 2, rv->X[ir->rs1]);
 })
 
 RVOP(vl2re16_v, {
     if (!rvv_validate_reg_span(ir->vd, 2))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 2, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 2, rv->X[ir->rs1]);
 })
 RVOP(vl2re32_v, {
     if (!rvv_validate_reg_span(ir->vd, 2))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 2, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 2, rv->X[ir->rs1]);
 })
 
 RVOP(vl2re64_v, {
     if (!rvv_validate_reg_span(ir->vd, 2))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 2, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 2, rv->X[ir->rs1]);
 })
 
 RVOP(vl4re8_v, {
     if (!rvv_validate_reg_span(ir->vd, 4))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 4, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 4, rv->X[ir->rs1]);
 })
 
 RVOP(vl4re16_v, {
     if (!rvv_validate_reg_span(ir->vd, 4))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 4, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 4, rv->X[ir->rs1]);
 })
 
 RVOP(vl4re32_v, {
     if (!rvv_validate_reg_span(ir->vd, 4))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 4, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 4, rv->X[ir->rs1]);
 })
 
 RVOP(vl4re64_v, {
     if (!rvv_validate_reg_span(ir->vd, 4))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 4, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 4, rv->X[ir->rs1]);
 })
 
 RVOP(vl8re8_v, {
     if (!rvv_validate_reg_span(ir->vd, 8))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 8, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 8, rv->X[ir->rs1]);
 })
 
 RVOP(vl8re16_v, {
     if (!rvv_validate_reg_span(ir->vd, 8))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 8, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 8, rv->X[ir->rs1]);
 })
 
 RVOP(vl8re32_v, {
     if (!rvv_validate_reg_span(ir->vd, 8))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 8, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 8, rv->X[ir->rs1]);
 })
 
 RVOP(vl8re64_v, {
     if (!rvv_validate_reg_span(ir->vd, 8))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_load(rv, ir->vd, 8, rv->X[ir->rs1]);
+    rvv_whole_reg_load(rv, ir, ir->vd, 8, rv->X[ir->rs1]);
 })
 
 RVOP(vlm_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_reg_span(ir->vd, 1))
         return rvv_trap_illegal_state(rv, 0);
@@ -3997,7 +4198,7 @@ RVOP(vlm_v, {
 })
 
 RVOP(vle8ff_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -4006,7 +4207,7 @@ RVOP(vle8ff_v, {
 })
 
 RVOP(vle16ff_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -4015,7 +4216,7 @@ RVOP(vle16ff_v, {
 })
 
 RVOP(vle32ff_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -4024,7 +4225,7 @@ RVOP(vle32ff_v, {
 })
 
 RVOP(vle64ff_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -4063,7 +4264,7 @@ RVV_SEGMENT_UNIT_STRIDE_LOAD_OP(vlseg8e64ff_v, 8, true);
 
 RVOP(vluxei8_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4074,7 +4275,7 @@ RVOP(vluxei8_v, {
 
 RVOP(vluxei16_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4085,7 +4286,7 @@ RVOP(vluxei16_v, {
 
 RVOP(vluxei32_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4096,7 +4297,7 @@ RVOP(vluxei32_v, {
 
 RVOP(vluxei64_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4135,7 +4336,7 @@ RVV_SEGMENT_INDEXED_LOAD_OP(vluxseg7ei64_v, 7);
 RVV_SEGMENT_INDEXED_LOAD_OP(vluxseg8ei64_v, 8);
 
 RVOP(vlse8_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -4143,7 +4344,7 @@ RVOP(vlse8_v, {
 })
 
 RVOP(vlse16_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -4151,7 +4352,7 @@ RVOP(vlse16_v, {
 })
 
 RVOP(vlse32_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -4159,7 +4360,7 @@ RVOP(vlse32_v, {
 })
 
 RVOP(vlse64_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -4197,7 +4398,7 @@ RVV_SEGMENT_STRIDED_LOAD_OP(vlsseg8e64_v, 8);
 
 RVOP(vloxei8_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4208,7 +4409,7 @@ RVOP(vloxei8_v, {
 
 RVOP(vloxei16_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4219,7 +4420,7 @@ RVOP(vloxei16_v, {
 
 RVOP(vloxei32_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4230,7 +4431,7 @@ RVOP(vloxei32_v, {
 
 RVOP(vloxei64_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4269,7 +4470,7 @@ RVV_SEGMENT_INDEXED_LOAD_OP(vloxseg7ei64_v, 7);
 RVV_SEGMENT_INDEXED_LOAD_OP(vloxseg8ei64_v, 8);
 
 RVOP(vse8_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vs3))
         return rvv_trap_illegal_state(rv, 0);
@@ -4277,7 +4478,7 @@ RVOP(vse8_v, {
 })
 
 RVOP(vse16_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vs3))
         return rvv_trap_illegal_state(rv, 0);
@@ -4285,7 +4486,7 @@ RVOP(vse16_v, {
 })
 
 RVOP(vse32_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vs3))
         return rvv_trap_illegal_state(rv, 0);
@@ -4293,7 +4494,7 @@ RVOP(vse32_v, {
 })
 
 RVOP(vse64_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vs3))
         return rvv_trap_illegal_state(rv, 0);
@@ -4332,29 +4533,29 @@ RVV_SEGMENT_UNIT_STRIDE_STORE_OP(vsseg8e64_v, 8);
 RVOP(vs1r_v, {
     if (!rvv_validate_reg_span(ir->vs3, 1))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_store(rv, ir->vs3, 1, rv->X[ir->rs1]);
+    rvv_whole_reg_store(rv, ir, ir->vs3, 1, rv->X[ir->rs1]);
 })
 
 RVOP(vs2r_v, {
     if (!rvv_validate_reg_span(ir->vs3, 2))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_store(rv, ir->vs3, 2, rv->X[ir->rs1]);
+    rvv_whole_reg_store(rv, ir, ir->vs3, 2, rv->X[ir->rs1]);
 })
 
 RVOP(vs4r_v, {
     if (!rvv_validate_reg_span(ir->vs3, 4))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_store(rv, ir->vs3, 4, rv->X[ir->rs1]);
+    rvv_whole_reg_store(rv, ir, ir->vs3, 4, rv->X[ir->rs1]);
 })
 
 RVOP(vs8r_v, {
     if (!rvv_validate_reg_span(ir->vs3, 8))
         return rvv_trap_illegal_state(rv, 0);
-    rvv_whole_reg_store(rv, ir->vs3, 8, rv->X[ir->rs1]);
+    rvv_whole_reg_store(rv, ir, ir->vs3, 8, rv->X[ir->rs1]);
 })
 
 RVOP(vsm_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_reg_span(ir->vs3, 1))
         return rvv_trap_illegal_state(rv, 0);
@@ -4363,7 +4564,7 @@ RVOP(vsm_v, {
 
 RVOP(vsuxei8_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs3) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4374,7 +4575,7 @@ RVOP(vsuxei8_v, {
 
 RVOP(vsuxei16_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs3) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4385,7 +4586,7 @@ RVOP(vsuxei16_v, {
 
 RVOP(vsuxei32_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs3) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4396,7 +4597,7 @@ RVOP(vsuxei32_v, {
 
 RVOP(vsuxei64_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs3) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4435,7 +4636,7 @@ RVV_SEGMENT_INDEXED_STORE_OP(vsuxseg7ei64_v, 7);
 RVV_SEGMENT_INDEXED_STORE_OP(vsuxseg8ei64_v, 8);
 
 RVOP(vsse8_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vs3))
         return rvv_trap_illegal_state(rv, 0);
@@ -4443,7 +4644,7 @@ RVOP(vsse8_v, {
 })
 
 RVOP(vsse16_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vs3))
         return rvv_trap_illegal_state(rv, 0);
@@ -4451,7 +4652,7 @@ RVOP(vsse16_v, {
 })
 
 RVOP(vsse32_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vs3))
         return rvv_trap_illegal_state(rv, 0);
@@ -4459,7 +4660,7 @@ RVOP(vsse32_v, {
 })
 
 RVOP(vsse64_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_eew_reg(rv, ir->eew, ir->vs3))
         return rvv_trap_illegal_state(rv, 0);
@@ -4497,7 +4698,7 @@ RVV_SEGMENT_STRIDED_STORE_OP(vssseg8e64_v, 8);
 
 RVOP(vsoxei8_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs3) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4508,7 +4709,7 @@ RVOP(vsoxei8_v, {
 
 RVOP(vsoxei16_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs3) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4519,7 +4720,7 @@ RVOP(vsoxei16_v, {
 
 RVOP(vsoxei32_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs3) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4530,7 +4731,7 @@ RVOP(vsoxei32_v, {
 
 RVOP(vsoxei64_v, {
     uint32_t span;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs3) ||
         !rvv_index_group_span(rv, ir->eew, &span) ||
@@ -4589,7 +4790,7 @@ RVOP(vrsub_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, rsub, VI)})
 #undef op_rsub
 
 RVOP(vminu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -4599,7 +4800,7 @@ RVOP(vminu_vv, {
 })
 
 RVOP(vminu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4608,7 +4809,7 @@ RVOP(vminu_vx, {
 })
 
 RVOP(vmin_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -4618,7 +4819,7 @@ RVOP(vmin_vv, {
 })
 
 RVOP(vmin_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4627,7 +4828,7 @@ RVOP(vmin_vx, {
 })
 
 RVOP(vmaxu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -4637,7 +4838,7 @@ RVOP(vmaxu_vv, {
 })
 
 RVOP(vmaxu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4646,7 +4847,7 @@ RVOP(vmaxu_vx, {
 })
 
 RVOP(vmax_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -4656,7 +4857,7 @@ RVOP(vmax_vv, {
 })
 
 RVOP(vmax_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4691,7 +4892,7 @@ RVOP(vxor_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, xor, VI)})
 RVOP(vrgather_vv, {
     uint32_t span = rvv_group_regs(rv->csr_vtype);
 
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_reg_span(ir->vd, span) ||
         !rvv_validate_reg_span(ir->vs1, span) ||
@@ -4706,7 +4907,7 @@ RVOP(vrgather_vv, {
 RVOP(vrgather_vx, {
     uint32_t span = rvv_group_regs(rv->csr_vtype);
 
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_reg_span(ir->vd, span) ||
         !rvv_validate_reg_span(ir->vs2, span))
@@ -4719,7 +4920,7 @@ RVOP(vrgather_vx, {
 RVOP(vrgather_vi, {
     uint32_t span = rvv_group_regs(rv->csr_vtype);
 
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_reg_span(ir->vd, span) ||
         !rvv_validate_reg_span(ir->vs2, span))
@@ -4732,7 +4933,7 @@ RVOP(vrgather_vi, {
 RVOP(vslideup_vx, {
     uint32_t span = rvv_group_regs(rv->csr_vtype);
 
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_reg_span(ir->vd, span) ||
         !rvv_validate_reg_span(ir->vs2, span))
@@ -4745,7 +4946,7 @@ RVOP(vslideup_vx, {
 RVOP(vslideup_vi, {
     uint32_t span = rvv_group_regs(rv->csr_vtype);
 
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_reg_span(ir->vd, span) ||
         !rvv_validate_reg_span(ir->vs2, span))
@@ -4759,7 +4960,7 @@ RVOP(vrgatherei16_vv, {
     uint32_t data_span = rvv_group_regs(rv->csr_vtype);
     uint32_t index_span;
 
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_index_group_span(rv, 16, &index_span) ||
         !rvv_validate_reg_span(ir->vd, data_span) ||
@@ -4769,11 +4970,17 @@ RVOP(vrgatherei16_vv, {
     if (rvv_reg_spans_overlap(ir->vd, data_span, ir->vs2, data_span) ||
         rvv_reg_spans_overlap(ir->vd, data_span, ir->vs1, index_span))
         return rvv_trap_illegal_state(rv, 0);
+    /* The index group is read at EEW=16 and the data group at SEW, so unless
+     * those match the two groups cannot share a register.
+     */
+    if (rvv_sew_bits(rv->csr_vtype) != 16 &&
+        rvv_reg_spans_overlap(ir->vs1, index_span, ir->vs2, data_span))
+        return rvv_trap_illegal_state(rv, 0);
     rvv_exec_vrgather_vv(rv, ir, ir->vd, 16);
 })
 
 RVOP(vslidedown_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4782,7 +4989,7 @@ RVOP(vslidedown_vx, {
 })
 
 RVOP(vslidedown_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4791,7 +4998,7 @@ RVOP(vslidedown_vi, {
 })
 
 RVOP(vadc_vvm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -4801,7 +5008,7 @@ RVOP(vadc_vvm, {
 })
 
 RVOP(vadc_vxm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4810,7 +5017,7 @@ RVOP(vadc_vxm, {
 })
 
 RVOP(vadc_vim, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4819,7 +5026,7 @@ RVOP(vadc_vim, {
 })
 
 RVOP(vmadc_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs1) || rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4827,7 +5034,7 @@ RVOP(vmadc_vv, {
 })
 
 RVOP(vmadc_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4835,7 +5042,7 @@ RVOP(vmadc_vx, {
 })
 
 RVOP(vmadc_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4843,7 +5050,7 @@ RVOP(vmadc_vi, {
 })
 
 RVOP(vsbc_vvm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -4853,7 +5060,7 @@ RVOP(vsbc_vvm, {
 })
 
 RVOP(vsbc_vxm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4862,7 +5069,7 @@ RVOP(vsbc_vxm, {
 })
 
 RVOP(vmsbc_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs1) || rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4870,7 +5077,7 @@ RVOP(vmsbc_vv, {
 })
 
 RVOP(vmsbc_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4878,7 +5085,7 @@ RVOP(vmsbc_vx, {
 })
 
 RVOP(vmerge_vvm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -4888,7 +5095,7 @@ RVOP(vmerge_vvm, {
 })
 
 RVOP(vmerge_vxm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4897,7 +5104,7 @@ RVOP(vmerge_vxm, {
 })
 
 RVOP(vmerge_vim, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -4914,7 +5121,7 @@ RVOP(vmv_v_i, {VECTOR_DISPATCH(ir->vd, 0, ir->imm, vmv, VI)})
 #undef op_vmv
 
 RVOP(vmseq_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs1) || rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4922,7 +5129,7 @@ RVOP(vmseq_vv, {
 })
 
 RVOP(vmseq_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4930,7 +5137,7 @@ RVOP(vmseq_vx, {
 })
 
 RVOP(vmseq_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4938,7 +5145,7 @@ RVOP(vmseq_vi, {
 })
 
 RVOP(vmsne_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs1) || rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4946,7 +5153,7 @@ RVOP(vmsne_vv, {
 })
 
 RVOP(vmsne_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4954,7 +5161,7 @@ RVOP(vmsne_vx, {
 })
 
 RVOP(vmsne_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4962,7 +5169,7 @@ RVOP(vmsne_vi, {
 })
 
 RVOP(vmsltu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs1) || rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4970,7 +5177,7 @@ RVOP(vmsltu_vv, {
 })
 
 RVOP(vmsltu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4978,7 +5185,7 @@ RVOP(vmsltu_vx, {
 })
 
 RVOP(vmslt_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs1) || rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4986,7 +5193,7 @@ RVOP(vmslt_vv, {
 })
 
 RVOP(vmslt_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -4994,7 +5201,7 @@ RVOP(vmslt_vx, {
 })
 
 RVOP(vmsleu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs1) || rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5002,7 +5209,7 @@ RVOP(vmsleu_vv, {
 })
 
 RVOP(vmsleu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5010,7 +5217,7 @@ RVOP(vmsleu_vx, {
 })
 
 RVOP(vmsleu_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5018,7 +5225,7 @@ RVOP(vmsleu_vi, {
 })
 
 RVOP(vmsle_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs1) || rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5026,7 +5233,7 @@ RVOP(vmsle_vv, {
 })
 
 RVOP(vmsle_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5034,7 +5241,7 @@ RVOP(vmsle_vx, {
 })
 
 RVOP(vmsle_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5042,7 +5249,7 @@ RVOP(vmsle_vi, {
 })
 
 RVOP(vmsgtu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5050,7 +5257,7 @@ RVOP(vmsgtu_vx, {
 })
 
 RVOP(vmsgtu_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5058,7 +5265,7 @@ RVOP(vmsgtu_vi, {
 })
 
 RVOP(vmsgt_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5066,7 +5273,7 @@ RVOP(vmsgt_vx, {
 })
 
 RVOP(vmsgt_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_check_data_reg(rv, ir->vs2))
         return false;
@@ -5074,7 +5281,7 @@ RVOP(vmsgt_vi, {
 })
 
 RVOP(vsaddu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5084,7 +5291,7 @@ RVOP(vsaddu_vv, {
 })
 
 RVOP(vsaddu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5093,7 +5300,7 @@ RVOP(vsaddu_vx, {
 })
 
 RVOP(vsaddu_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5102,7 +5309,7 @@ RVOP(vsaddu_vi, {
 })
 
 RVOP(vsadd_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5112,7 +5319,7 @@ RVOP(vsadd_vv, {
 })
 
 RVOP(vsadd_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5121,7 +5328,7 @@ RVOP(vsadd_vx, {
 })
 
 RVOP(vsadd_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5130,7 +5337,7 @@ RVOP(vsadd_vi, {
 })
 
 RVOP(vssubu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5140,7 +5347,7 @@ RVOP(vssubu_vv, {
 })
 
 RVOP(vssubu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5149,7 +5356,7 @@ RVOP(vssubu_vx, {
 })
 
 RVOP(vssub_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5159,7 +5366,7 @@ RVOP(vssub_vv, {
 })
 
 RVOP(vssub_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5177,7 +5384,7 @@ RVOP(vsll_vi, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->imm, sll, VI)})
 #undef op_sll
 
 RVOP(vsmul_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5187,7 +5394,7 @@ RVOP(vsmul_vv, {
 })
 
 RVOP(vsmul_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5196,7 +5403,7 @@ RVOP(vsmul_vx, {
 })
 
 RVOP(vsrl_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5206,7 +5413,7 @@ RVOP(vsrl_vv, {
 })
 
 RVOP(vsrl_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5215,7 +5422,7 @@ RVOP(vsrl_vx, {
 })
 
 RVOP(vsrl_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5224,7 +5431,7 @@ RVOP(vsrl_vi, {
 })
 
 RVOP(vsra_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5234,7 +5441,7 @@ RVOP(vsra_vv, {
 })
 
 RVOP(vsra_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5243,7 +5450,7 @@ RVOP(vsra_vx, {
 })
 
 RVOP(vsra_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5252,7 +5459,7 @@ RVOP(vsra_vi, {
 })
 
 RVOP(vssrl_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5262,7 +5469,7 @@ RVOP(vssrl_vv, {
 })
 
 RVOP(vssrl_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5271,7 +5478,7 @@ RVOP(vssrl_vx, {
 })
 
 RVOP(vssrl_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5280,7 +5487,7 @@ RVOP(vssrl_vi, {
 })
 
 RVOP(vssra_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5290,7 +5497,7 @@ RVOP(vssra_vv, {
 })
 
 RVOP(vssra_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5299,7 +5506,7 @@ RVOP(vssra_vx, {
 })
 
 RVOP(vssra_vi, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5310,7 +5517,7 @@ RVOP(vssra_vi, {
 RVOP(vnsrl_wv, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5325,7 +5532,7 @@ RVOP(vnsrl_wv, {
 RVOP(vnsrl_wx, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5339,7 +5546,7 @@ RVOP(vnsrl_wx, {
 RVOP(vnsrl_wi, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5353,7 +5560,7 @@ RVOP(vnsrl_wi, {
 RVOP(vnsra_wv, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5368,7 +5575,7 @@ RVOP(vnsra_wv, {
 RVOP(vnsra_wx, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5382,7 +5589,7 @@ RVOP(vnsra_wx, {
 RVOP(vnsra_wi, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5396,7 +5603,7 @@ RVOP(vnsra_wi, {
 RVOP(vnclipu_wv, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5411,7 +5618,7 @@ RVOP(vnclipu_wv, {
 RVOP(vnclipu_wx, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5425,7 +5632,7 @@ RVOP(vnclipu_wx, {
 RVOP(vnclipu_wi, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5439,7 +5646,7 @@ RVOP(vnclipu_wi, {
 RVOP(vnclip_wv, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5454,7 +5661,7 @@ RVOP(vnclip_wv, {
 RVOP(vnclip_wx, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5468,7 +5675,7 @@ RVOP(vnclip_wx, {
 RVOP(vnclip_wi, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -5480,25 +5687,23 @@ RVOP(vnclip_wi, {
 })
 
 RVOP(vwredsumu_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_widen_reduction(rv, ir, ir->vd, false);
 })
 
 RVOP(vwredsum_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_widen_reduction(rv, ir, ir->vd, true);
 })
@@ -5506,103 +5711,95 @@ RVOP(vwredsum_vs, {
 
 
 RVOP(vredsum_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_reduction(rv, ir, ir->vd, rvv_op_add);
 })
 
 RVOP(vredand_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_reduction(rv, ir, ir->vd, rvv_op_and);
 })
 
 RVOP(vredor_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_reduction(rv, ir, ir->vd, rvv_op_or);
 })
 
 RVOP(vredxor_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_reduction(rv, ir, ir->vd, rvv_op_xor);
 })
 
 RVOP(vredminu_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_reduction(rv, ir, ir->vd, rvv_op_minu);
 })
 
 RVOP(vredmin_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_reduction(rv, ir, ir->vd, rvv_op_min);
 })
 
 RVOP(vredmaxu_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_reduction(rv, ir, ir->vd, rvv_op_maxu);
 })
 
 RVOP(vredmax_vs, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rv->csr_vstart)
         return rvv_trap_illegal_state(rv, 0);
-    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
-        !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
+    /* vd and vs1 each hold a single element, so only vs2 is an LMUL group. */
+    if (!rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
         return rvv_trap_illegal_state(rv, 0);
     rvv_exec_reduction(rv, ir, ir->vd, rvv_op_max);
 })
 
 RVOP(vaaddu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5612,7 +5809,7 @@ RVOP(vaaddu_vv, {
 })
 
 RVOP(vaaddu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5621,7 +5818,7 @@ RVOP(vaaddu_vx, {
 })
 
 RVOP(vaadd_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5631,7 +5828,7 @@ RVOP(vaadd_vv, {
 })
 
 RVOP(vaadd_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5640,7 +5837,7 @@ RVOP(vaadd_vx, {
 })
 
 RVOP(vasubu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5650,7 +5847,7 @@ RVOP(vasubu_vv, {
 })
 
 RVOP(vasubu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5659,7 +5856,7 @@ RVOP(vasubu_vx, {
 })
 
 RVOP(vasub_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5669,7 +5866,7 @@ RVOP(vasub_vv, {
 })
 
 RVOP(vasub_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5680,7 +5877,7 @@ RVOP(vasub_vx, {
 RVOP(vslide1up_vx, {
     uint32_t span = rvv_group_regs(rv->csr_vtype);
 
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_reg_span(ir->vd, span) ||
         !rvv_validate_reg_span(ir->vs2, span))
@@ -5691,7 +5888,7 @@ RVOP(vslide1up_vx, {
 })
 
 RVOP(vslide1down_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5702,7 +5899,7 @@ RVOP(vslide1down_vx, {
 RVOP(vcompress_vm, {
     uint32_t span = rvv_group_regs(rv->csr_vtype);
 
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5721,7 +5918,7 @@ RVOP(vcompress_vm, {
 })
 
 RVOP(vmandn_mm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5729,7 +5926,7 @@ RVOP(vmandn_mm, {
 })
 
 RVOP(vmand_mm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5737,7 +5934,7 @@ RVOP(vmand_mm, {
 })
 
 RVOP(vmor_mm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5745,7 +5942,7 @@ RVOP(vmor_mm, {
 })
 
 RVOP(vmxor_mm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5753,7 +5950,7 @@ RVOP(vmxor_mm, {
 })
 
 RVOP(vmorn_mm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5761,7 +5958,7 @@ RVOP(vmorn_mm, {
 })
 
 RVOP(vmnand_mm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5769,7 +5966,7 @@ RVOP(vmnand_mm, {
 })
 
 RVOP(vmnor_mm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5777,7 +5974,7 @@ RVOP(vmnor_mm, {
 })
 
 RVOP(vmxnor_mm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -5785,7 +5982,7 @@ RVOP(vmxnor_mm, {
 })
 
 RVOP(vdivu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5795,7 +5992,7 @@ RVOP(vdivu_vv, {
 })
 
 RVOP(vdivu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5804,7 +6001,7 @@ RVOP(vdivu_vx, {
 })
 
 RVOP(vdiv_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5814,7 +6011,7 @@ RVOP(vdiv_vv, {
 })
 
 RVOP(vdiv_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5823,7 +6020,7 @@ RVOP(vdiv_vx, {
 })
 
 RVOP(vremu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5833,7 +6030,7 @@ RVOP(vremu_vv, {
 })
 
 RVOP(vremu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5842,7 +6039,7 @@ RVOP(vremu_vx, {
 })
 
 RVOP(vrem_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5852,7 +6049,7 @@ RVOP(vrem_vv, {
 })
 
 RVOP(vrem_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5861,7 +6058,7 @@ RVOP(vrem_vx, {
 })
 
 RVOP(vmulhu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5871,7 +6068,7 @@ RVOP(vmulhu_vv, {
 })
 
 RVOP(vmulhu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5886,7 +6083,7 @@ RVOP(vmul_vx, {VECTOR_DISPATCH(ir->vd, ir->vs2, ir->rs1, mul, VX)})
 #undef op_mul
 
 RVOP(vmulhsu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5896,7 +6093,7 @@ RVOP(vmulhsu_vv, {
 })
 
 RVOP(vmulhsu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5905,7 +6102,7 @@ RVOP(vmulhsu_vx, {
 })
 
 RVOP(vmulh_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5915,7 +6112,7 @@ RVOP(vmulh_vv, {
 })
 
 RVOP(vmulh_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5924,7 +6121,7 @@ RVOP(vmulh_vx, {
 })
 
 RVOP(vmadd_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5934,7 +6131,7 @@ RVOP(vmadd_vv, {
 })
 
 RVOP(vmadd_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5943,7 +6140,7 @@ RVOP(vmadd_vx, {
 })
 
 RVOP(vnmsub_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5953,7 +6150,7 @@ RVOP(vnmsub_vv, {
 })
 
 RVOP(vnmsub_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5962,7 +6159,7 @@ RVOP(vnmsub_vx, {
 })
 
 RVOP(vmacc_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5972,7 +6169,7 @@ RVOP(vmacc_vv, {
 })
 
 RVOP(vmacc_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -5981,7 +6178,7 @@ RVOP(vmacc_vx, {
 })
 
 RVOP(vnmsac_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -5991,7 +6188,7 @@ RVOP(vnmsac_vv, {
 })
 
 RVOP(vnmsac_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6002,7 +6199,7 @@ RVOP(vnmsac_vx, {
 RVOP(vwaddu_vv, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_wide_reg(rv, ir->vd) ||
@@ -6020,7 +6217,7 @@ RVOP(vwaddu_vv, {
 RVOP(vwaddu_vx, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_wide_reg(rv, ir->vd) ||
@@ -6035,7 +6232,7 @@ RVOP(vwaddu_vx, {
 RVOP(vwadd_vv, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_wide_reg(rv, ir->vd) ||
@@ -6051,7 +6248,7 @@ RVOP(vwadd_vv, {
 })
 
 RVOP(vwadd_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6072,7 +6269,7 @@ RVOP(vwadd_vx, {
 RVOP(vwsubu_vv, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_wide_reg(rv, ir->vd) ||
@@ -6088,7 +6285,7 @@ RVOP(vwsubu_vv, {
 })
 
 RVOP(vwsubu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6109,7 +6306,7 @@ RVOP(vwsubu_vx, {
 RVOP(vwsub_vv, {
     uint32_t wide_span;
     uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_wide_group_span(rv, &wide_span) ||
         !rvv_validate_wide_reg(rv, ir->vd) ||
@@ -6125,7 +6322,7 @@ RVOP(vwsub_vv, {
 })
 
 RVOP(vwsub_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6144,7 +6341,7 @@ RVOP(vwsub_vx, {
 })
 
 RVOP(vwaddu_wv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2) ||
@@ -6166,7 +6363,7 @@ RVOP(vwaddu_wv, {
 })
 
 RVOP(vwaddu_wx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
@@ -6175,7 +6372,7 @@ RVOP(vwaddu_wx, {
 })
 
 RVOP(vwadd_wv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2) ||
@@ -6197,7 +6394,7 @@ RVOP(vwadd_wv, {
 })
 
 RVOP(vwadd_wx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
@@ -6206,7 +6403,7 @@ RVOP(vwadd_wx, {
 })
 
 RVOP(vwsubu_wv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2) ||
@@ -6228,7 +6425,7 @@ RVOP(vwsubu_wv, {
 })
 
 RVOP(vwsubu_wx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
@@ -6237,7 +6434,7 @@ RVOP(vwsubu_wx, {
 })
 
 RVOP(vwsub_wv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2) ||
@@ -6259,7 +6456,7 @@ RVOP(vwsub_wv, {
 })
 
 RVOP(vwsub_wx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_wide_reg(rv, ir->vs2))
@@ -6268,7 +6465,7 @@ RVOP(vwsub_wx, {
 })
 
 RVOP(vwmulu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -6291,7 +6488,7 @@ RVOP(vwmulu_vv, {
 })
 
 RVOP(vwmulu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6310,7 +6507,7 @@ RVOP(vwmulu_vx, {
 })
 
 RVOP(vwmulsu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -6333,7 +6530,7 @@ RVOP(vwmulsu_vv, {
 })
 
 RVOP(vwmulsu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6352,7 +6549,7 @@ RVOP(vwmulsu_vx, {
 })
 
 RVOP(vwmul_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -6375,7 +6572,7 @@ RVOP(vwmul_vv, {
 })
 
 RVOP(vwmul_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6394,7 +6591,7 @@ RVOP(vwmul_vx, {
 })
 
 RVOP(vwmaccu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -6417,7 +6614,7 @@ RVOP(vwmaccu_vv, {
 })
 
 RVOP(vwmaccu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6436,7 +6633,7 @@ RVOP(vwmaccu_vx, {
 })
 
 RVOP(vwmacc_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -6459,7 +6656,7 @@ RVOP(vwmacc_vv, {
 })
 
 RVOP(vwmacc_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6478,7 +6675,7 @@ RVOP(vwmacc_vx, {
 })
 
 RVOP(vwmaccus_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6493,11 +6690,11 @@ RVOP(vwmaccus_vx, {
                                       rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
-    rvv_exec_wide_mac_vx(rv, ir, ir->vd, rvv_wop_mulus);
+    rvv_exec_wide_mac_vx(rv, ir, ir->vd, rvv_wop_mulsu);
 })
 
 RVOP(vwmaccsu_vv, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) ||
@@ -6516,11 +6713,11 @@ RVOP(vwmaccsu_vv, {
                                       rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
-    rvv_exec_wide_mac_vv(rv, ir, ir->vd, rvv_wop_mulsu);
+    rvv_exec_wide_mac_vv(rv, ir, ir->vd, rvv_wop_mulus);
 })
 
 RVOP(vwmaccsu_vx, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_wide_reg(rv, ir->vd) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))
@@ -6535,11 +6732,11 @@ RVOP(vwmaccsu_vx, {
                                       rvv_sew_emul_at_least_1(rv)))
             return rvv_trap_illegal_state(rv, 0);
     }
-    rvv_exec_wide_mac_vx(rv, ir, ir->vd, rvv_wop_mulsu);
+    rvv_exec_wide_mac_vx(rv, ir, ir->vd, rvv_wop_mulus);
 })
 
 RVOP(vmv_s_x, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -6547,35 +6744,35 @@ RVOP(vmv_s_x, {
 })
 
 RVOP(vmv1r_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_exec_whole_reg_move(rv, ir, 1))
         return false;
 })
 
 RVOP(vmv2r_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_exec_whole_reg_move(rv, ir, 2))
         return false;
 })
 
 RVOP(vmv4r_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_exec_whole_reg_move(rv, ir, 4))
         return false;
 })
 
 RVOP(vmv8r_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_exec_whole_reg_move(rv, ir, 8))
         return false;
 })
 
 RVOP(vmv_x_s, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!ir->vm)
         return rvv_trap_illegal_state(rv, 0);
@@ -6584,20 +6781,21 @@ RVOP(vmv_x_s, {
 
 RVOP(vcpop_m, {
     uint32_t count = 0;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     for (uint32_t elem = 0; elem < rv->csr_vl; elem++) {
         if (rvv_mask_enabled_for_elem(rv, ir, elem) &&
             rvv_mask_get_bit(rv, ir->vs2, elem))
             count++;
     }
-    rv->X[ir->rd] = count;
+    if (ir->rd)
+        rv->X[ir->rd] = count;
     rv->csr_vstart = 0;
 })
 
 RVOP(vfirst_m, {
     int32_t first = -1;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     for (uint32_t elem = 0; elem < rv->csr_vl; elem++) {
         if (rvv_mask_enabled_for_elem(rv, ir, elem) &&
@@ -6606,30 +6804,31 @@ RVOP(vfirst_m, {
             break;
         }
     }
-    rv->X[ir->rd] = (uint32_t) first;
+    if (ir->rd)
+        rv->X[ir->rd] = (uint32_t) first;
     rv->csr_vstart = 0;
 })
 
 RVOP(vmsbf_m, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     rvv_exec_mask_prefix(rv, ir, ir->rd, 0);
 })
 
 RVOP(vmsof_m, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     rvv_exec_mask_prefix(rv, ir, ir->rd, 1);
 })
 
 RVOP(vmsif_m, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     rvv_exec_mask_prefix(rv, ir, ir->rd, 2);
 })
 
 RVOP(viota_m, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->rd))
         return rvv_trap_illegal_state(rv, 0);
@@ -6637,7 +6836,7 @@ RVOP(viota_m, {
 })
 
 RVOP(vid_v, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (!rvv_validate_data_reg(rv->csr_vtype, ir->vd))
         return rvv_trap_illegal_state(rv, 0);
@@ -6707,7 +6906,7 @@ static inline bool rvv_exec_int_extend(riscv_t *rv,
         rvv_set_elem_ext(rv, ir->vd, elem, sew_bits,
                          value & rvv_elem_mask64(sew_bits));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, ir->vd, elem, sew_bits, fill);
     }
@@ -6718,7 +6917,7 @@ static inline bool rvv_exec_int_extend(riscv_t *rv,
 
 #define RVV_INT_EXTEND_OP(name, factor, is_signed)           \
     RVOP(name, {                                             \
-        if (rvv_require_operable(rv))                        \
+        if (rvv_require_operable(rv, ir))                    \
             return false;                                    \
         if (!rvv_exec_int_extend(rv, ir, factor, is_signed)) \
             return false;                                    \
@@ -7119,28 +7318,27 @@ static inline uint32_t rvv_fp_fnmsub32(uint32_t dest,
  * float-to-integer forms take an explicit rounding mode so the .rtz
  * variants can pin round-towards-zero while the plain forms follow the
  * dynamic mode already installed by rvv_fp_begin_round(). The trailing
- * "exact" argument is false because these conversions signal inexact
- * results through fflags rather than trapping.
+ * "exact" argument enables inexact reporting through fflags.
  */
 static inline uint32_t rvv_fp_cvt_xu_f32(uint32_t bits)
 {
-    return f32_to_ui32(rvv_fp32_from_raw(bits), softfloat_roundingMode, false);
+    return f32_to_ui32(rvv_fp32_from_raw(bits), softfloat_roundingMode, true);
 }
 
 static inline uint32_t rvv_fp_cvt_x_f32(uint32_t bits)
 {
     return (uint32_t) f32_to_i32(rvv_fp32_from_raw(bits),
-                                 softfloat_roundingMode, false);
+                                 softfloat_roundingMode, true);
 }
 
 static inline uint32_t rvv_fp_cvt_rtz_xu_f32(uint32_t bits)
 {
-    return f32_to_ui32_r_minMag(rvv_fp32_from_raw(bits), false);
+    return f32_to_ui32_r_minMag(rvv_fp32_from_raw(bits), true);
 }
 
 static inline uint32_t rvv_fp_cvt_rtz_x_f32(uint32_t bits)
 {
-    return (uint32_t) f32_to_i32_r_minMag(rvv_fp32_from_raw(bits), false);
+    return (uint32_t) f32_to_i32_r_minMag(rvv_fp32_from_raw(bits), true);
 }
 
 static inline uint32_t rvv_fp_cvt_f_xu32(uint32_t bits)
@@ -7157,28 +7355,28 @@ static inline uint32_t rvv_fp_cvt_f_x32(uint32_t bits)
  * source element produces a 64-bit destination element. The
  * float-to-integer forms take the rounding mode already installed by
  * rvv_fp_begin_round(), except the .rtz variants which pin
- * round-towards-zero. The trailing "exact" argument is false because
- * these conversions report inexact results through fflags.
+ * round-towards-zero. The trailing "exact" argument enables inexact
+ * reporting through fflags.
  */
 static inline uint64_t rvv_fp_wcvt_xu_f32(uint32_t bits)
 {
-    return f32_to_ui64(rvv_fp32_from_raw(bits), softfloat_roundingMode, false);
+    return f32_to_ui64(rvv_fp32_from_raw(bits), softfloat_roundingMode, true);
 }
 
 static inline uint64_t rvv_fp_wcvt_x_f32(uint32_t bits)
 {
     return (uint64_t) f32_to_i64(rvv_fp32_from_raw(bits),
-                                 softfloat_roundingMode, false);
+                                 softfloat_roundingMode, true);
 }
 
 static inline uint64_t rvv_fp_wcvt_rtz_xu_f32(uint32_t bits)
 {
-    return f32_to_ui64_r_minMag(rvv_fp32_from_raw(bits), false);
+    return f32_to_ui64_r_minMag(rvv_fp32_from_raw(bits), true);
 }
 
 static inline uint64_t rvv_fp_wcvt_rtz_x_f32(uint32_t bits)
 {
-    return (uint64_t) f32_to_i64_r_minMag(rvv_fp32_from_raw(bits), false);
+    return (uint64_t) f32_to_i64_r_minMag(rvv_fp32_from_raw(bits), true);
 }
 
 static inline uint64_t rvv_fp_wcvt_f_xu32(uint32_t bits)
@@ -7195,28 +7393,28 @@ static inline uint64_t rvv_fp_wcvt_f_x32(uint32_t bits)
  * source element produces a 32-bit destination element. The rounding
  * mode in force is whatever the RVOP installed - the dynamic frm for the
  * plain forms, round-towards-zero for .rtz, or round-towards-odd for
- * vfncvt.rod.f.f.w. The trailing "exact" argument is false because these
- * conversions report inexact results through fflags.
+ * vfncvt.rod.f.f.w. The trailing "exact" argument enables inexact
+ * reporting through fflags.
  */
 static inline uint32_t rvv_fp_ncvt_xu_f64(uint64_t bits)
 {
-    return f64_to_ui32(rvv_fp64_from_raw(bits), softfloat_roundingMode, false);
+    return f64_to_ui32(rvv_fp64_from_raw(bits), softfloat_roundingMode, true);
 }
 
 static inline uint32_t rvv_fp_ncvt_x_f64(uint64_t bits)
 {
     return (uint32_t) f64_to_i32(rvv_fp64_from_raw(bits),
-                                 softfloat_roundingMode, false);
+                                 softfloat_roundingMode, true);
 }
 
 static inline uint32_t rvv_fp_ncvt_rtz_xu_f64(uint64_t bits)
 {
-    return f64_to_ui32_r_minMag(rvv_fp64_from_raw(bits), false);
+    return f64_to_ui32_r_minMag(rvv_fp64_from_raw(bits), true);
 }
 
 static inline uint32_t rvv_fp_ncvt_rtz_x_f64(uint64_t bits)
 {
-    return (uint32_t) f64_to_i32_r_minMag(rvv_fp64_from_raw(bits), false);
+    return (uint32_t) f64_to_i32_r_minMag(rvv_fp64_from_raw(bits), true);
 }
 
 static inline uint32_t rvv_fp_ncvt_f_xu64(uint64_t bits)
@@ -7334,7 +7532,7 @@ static inline void rvv_exec_fp32_vv(riscv_t *rv,
                      op(rvv_get_elem(rv, ir->vs2, elem, 32),
                         rvv_get_elem(rv, ir->vs1, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7360,7 +7558,7 @@ static inline void rvv_exec_fp32_vf(riscv_t *rv,
         rvv_set_elem(rv, dest, elem, 32,
                      op(rvv_get_elem(rv, ir->vs2, elem, 32), scalar));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7379,17 +7577,16 @@ static inline void rvv_exec_vfmv_f_s(riscv_t *rv, const rv_insn_t *ir)
 
 static inline void rvv_exec_vfmv_s_f(riscv_t *rv, const rv_insn_t *ir)
 {
-    /* If vstart >= vl nothing is written; with vl == 0 that covers every
-     * vstart, so the destination is left alone. Remaining elements are
-     * tail elements governed by the usual vta policy.
+    /* Only element zero can be active. All other elements in this single
+     * register are tails, independent of vl and LMUL.
      */
     if (rv->csr_vstart < rv->csr_vl) {
-        uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+        uint32_t vlmax = VLEN / 32;
         uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
 
         rvv_set_elem(rv, ir->vd, 0, 32, rv->F[ir->rs1].v);
         if (vta) {
-            for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+            for (uint32_t elem = 1; elem < vlmax; elem++)
                 rvv_set_elem(rv, ir->vd, elem, 32, 0xFFFFFFFFU);
         }
     }
@@ -7419,7 +7616,7 @@ static inline void rvv_exec_fp32_unary(riscv_t *rv,
         rvv_set_elem(rv, dest, elem, 32,
                      op(rvv_get_elem(rv, ir->vs2, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7449,7 +7646,7 @@ static inline void rvv_exec_fp_wcvt(riscv_t *rv,
         rvv_set_elem_ext(rv, dest, elem, 64,
                          op(rvv_get_elem(rv, ir->vs2, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
     }
@@ -7479,7 +7676,7 @@ static inline void rvv_exec_fp_ncvt(riscv_t *rv,
         rvv_set_elem(rv, dest, elem, 32,
                      op(rvv_get_elem_ext(rv, ir->vs2, elem, 64)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7531,9 +7728,15 @@ static inline void rvv_exec_fp32_reduction(riscv_t *rv,
                                            uint32_t dest,
                                            rvv_fp32_binop_fn op)
 {
-    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
-    uint32_t acc = rvv_get_elem(rv, ir->vs1, 0, 32);
+    uint32_t elems = VLEN / 32; /* the destination is one register */
+    uint32_t acc;
 
+    if (rv->csr_vl == 0) {
+        rv->csr_vstart = 0;
+        return;
+    }
+
+    acc = rvv_get_elem(rv, ir->vs1, 0, 32);
     for (uint32_t elem = 0; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem))
             continue;
@@ -7541,7 +7744,7 @@ static inline void rvv_exec_fp32_reduction(riscv_t *rv,
     }
     rvv_set_elem(rv, dest, 0, 32, acc);
     if ((rv->csr_vtype >> 6) & 0x1) {
-        for (uint32_t elem = 1; elem < vlmax; elem++)
+        for (uint32_t elem = 1; elem < elems; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
     rv->csr_vstart = 0;
@@ -7567,7 +7770,7 @@ static inline void rvv_exec_fp32_mac_vv(riscv_t *rv,
                         rvv_get_elem(rv, ir->vs2, elem, 32),
                         rvv_get_elem(rv, ir->vs1, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7594,7 +7797,7 @@ static inline void rvv_exec_fp32_mac_vf(riscv_t *rv,
                      op(rvv_get_elem(rv, dest, elem, 32),
                         rvv_get_elem(rv, ir->vs2, elem, 32), scalar));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7620,7 +7823,7 @@ static inline void rvv_exec_fp64_widen_vv(riscv_t *rv,
                          op(rvv_get_elem(rv, ir->vs2, elem, 32),
                             rvv_get_elem(rv, ir->vs1, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
     }
@@ -7646,7 +7849,7 @@ static inline void rvv_exec_fp64_widen_vf(riscv_t *rv,
         rvv_set_elem_ext(rv, dest, elem, 64,
                          op(rvv_get_elem(rv, ir->vs2, elem, 32), scalar));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
     }
@@ -7672,7 +7875,7 @@ static inline void rvv_exec_fp64_mixed_vv(riscv_t *rv,
                          op(rvv_get_elem_ext(rv, ir->vs2, elem, 64),
                             rvv_get_elem(rv, ir->vs1, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
     }
@@ -7698,7 +7901,7 @@ static inline void rvv_exec_fp64_mixed_vf(riscv_t *rv,
         rvv_set_elem_ext(rv, dest, elem, 64,
                          op(rvv_get_elem_ext(rv, ir->vs2, elem, 64), scalar));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
     }
@@ -7710,9 +7913,15 @@ static inline void rvv_exec_fp64_reduction(riscv_t *rv,
                                            uint32_t dest,
                                            rvv_fp64_mixed_binop_fn op)
 {
-    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
-    uint64_t acc = rvv_get_elem_ext(rv, ir->vs1, 0, 64);
+    uint32_t elems = VLEN / 64; /* the destination is one register */
+    uint64_t acc;
 
+    if (rv->csr_vl == 0) {
+        rv->csr_vstart = 0;
+        return;
+    }
+
+    acc = rvv_get_elem_ext(rv, ir->vs1, 0, 64);
     for (uint32_t elem = 0; elem < rv->csr_vl; elem++) {
         if (!rvv_mask_enabled_for_elem(rv, ir, elem))
             continue;
@@ -7720,7 +7929,7 @@ static inline void rvv_exec_fp64_reduction(riscv_t *rv,
     }
     rvv_set_elem_ext(rv, dest, 0, 64, acc);
     if ((rv->csr_vtype >> 6) & 0x1) {
-        for (uint32_t elem = 1; elem < vlmax; elem++)
+        for (uint32_t elem = 1; elem < elems; elem++)
             rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
     }
     rv->csr_vstart = 0;
@@ -7746,7 +7955,7 @@ static inline void rvv_exec_fp64_mac_vv(riscv_t *rv,
                             rvv_get_elem(rv, ir->vs2, elem, 32),
                             rvv_get_elem(rv, ir->vs1, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
     }
@@ -7773,7 +7982,7 @@ static inline void rvv_exec_fp64_mac_vf(riscv_t *rv,
                          op(rvv_get_elem_ext(rv, dest, elem, 64),
                             rvv_get_elem(rv, ir->vs2, elem, 32), scalar));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem_ext(rv, dest, elem, 64, UINT64_MAX);
     }
@@ -7807,7 +8016,7 @@ static inline void rvv_exec_vfslide1up(riscv_t *rv,
                          rvv_get_elem(rv, ir->vs2, elem - 1, 32));
         }
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7835,7 +8044,7 @@ static inline void rvv_exec_vfslide1down(riscv_t *rv,
         else
             rvv_set_elem(rv, dest, elem, 32, scalar);
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7856,7 +8065,7 @@ static inline void rvv_exec_vfmerge_vfm(riscv_t *rv,
                          ? scalar
                          : rvv_get_elem(rv, ir->vs2, elem, 32));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7873,7 +8082,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
 
     for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++)
         rvv_set_elem(rv, dest, elem, 32, scalar);
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, dest, elem, 32, 0xFFFFFFFFU);
     }
@@ -7882,7 +8091,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
 
 #define RVV_FP32_VV_OP(name, opfn, needs_round)               \
     RVOP(name, {                                              \
-        if (rvv_require_operable(rv))                         \
+        if (rvv_require_operable(rv, ir))                     \
             return false;                                     \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||            \
             !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||  \
@@ -7899,7 +8108,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
 
 #define RVV_FP32_VF_OP(name, opfn, needs_round)              \
     RVOP(name, {                                             \
-        if (rvv_require_operable(rv))                        \
+        if (rvv_require_operable(rv, ir))                    \
             return false;                                    \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||           \
             !rvv_validate_data_reg(rv->csr_vtype, ir->vd) || \
@@ -7913,26 +8122,24 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
         set_fflag(rv);                                       \
     })
 
-#define RVV_FP32_RED_OP(name, opfn, needs_round)              \
-    RVOP(name, {                                              \
-        if (rvv_require_operable(rv))                         \
-            return false;                                     \
-        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||            \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||  \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) || \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))   \
-            return rvv_trap_illegal_state(rv, 0);             \
-        if (needs_round)                                      \
-            rvv_fp_begin_round(rv);                           \
-        else                                                  \
-            rvv_fp_begin_flags();                             \
-        rvv_exec_fp32_reduction(rv, ir, ir->vd, opfn);        \
-        set_fflag(rv);                                        \
+#define RVV_FP32_RED_OP(name, opfn, needs_round)                     \
+    RVOP(name, {                                                     \
+        if (rvv_require_operable(rv, ir))                            \
+            return false;                                            \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) || rv->csr_vstart || \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))          \
+            return rvv_trap_illegal_state(rv, 0);                    \
+        if (needs_round)                                             \
+            rvv_fp_begin_round(rv);                                  \
+        else                                                         \
+            rvv_fp_begin_flags();                                    \
+        rvv_exec_fp32_reduction(rv, ir, ir->vd, opfn);               \
+        set_fflag(rv);                                               \
     })
 
 #define RVV_FP32_CMP_VV_OP(name, cmpfn)                       \
     RVOP(name, {                                              \
-        if (rvv_require_operable(rv))                         \
+        if (rvv_require_operable(rv, ir))                     \
             return false;                                     \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||            \
             !rvv_validate_data_reg(rv->csr_vtype, ir->vs1) || \
@@ -7945,7 +8152,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
 
 #define RVV_FP32_CMP_VF_OP(name, cmpfn, reverse_cmp)               \
     RVOP(name, {                                                   \
-        if (rvv_require_operable(rv))                              \
+        if (rvv_require_operable(rv, ir))                          \
             return false;                                          \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                 \
             !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))        \
@@ -7957,7 +8164,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
 
 #define RVV_FP32_MAC_VV_OP(name, opfn)                        \
     RVOP(name, {                                              \
-        if (rvv_require_operable(rv))                         \
+        if (rvv_require_operable(rv, ir))                     \
             return false;                                     \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||            \
             !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||  \
@@ -7971,7 +8178,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
 
 #define RVV_FP32_MAC_VF_OP(name, opfn)                       \
     RVOP(name, {                                             \
-        if (rvv_require_operable(rv))                        \
+        if (rvv_require_operable(rv, ir))                    \
             return false;                                    \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||           \
             !rvv_validate_data_reg(rv->csr_vtype, ir->vd) || \
@@ -7986,7 +8193,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
     RVOP(name, {                                                               \
         uint32_t wide_span;                                                    \
         uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
-        if (rvv_require_operable(rv))                                          \
+        if (rvv_require_operable(rv, ir))                                      \
             return false;                                                      \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
             !rvv_validate_wide_reg(rv, ir->vd) ||                              \
@@ -8007,7 +8214,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
     RVOP(name, {                                                               \
         uint32_t wide_span;                                                    \
         uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
-        if (rvv_require_operable(rv))                                          \
+        if (rvv_require_operable(rv, ir))                                      \
             return false;                                                      \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
             !rvv_validate_wide_reg(rv, ir->vd) ||                              \
@@ -8021,25 +8228,23 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
         set_fflag(rv);                                                         \
     })
 
-#define RVV_FP64_RED_OP(name, opfn)                         \
-    RVOP(name, {                                            \
-        if (rvv_require_operable(rv))                       \
-            return false;                                   \
-        if ((rvv_sew_bits(rv->csr_vtype) != 32) ||          \
-            !rvv_validate_wide_reg(rv, ir->vd) ||           \
-            !rvv_validate_wide_reg(rv, ir->vs1) ||          \
-            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2)) \
-            return rvv_trap_illegal_state(rv, 0);           \
-        rvv_fp_begin_round(rv);                             \
-        rvv_exec_fp64_reduction(rv, ir, ir->vd, opfn);      \
-        set_fflag(rv);                                      \
+#define RVV_FP64_RED_OP(name, opfn)                                  \
+    RVOP(name, {                                                     \
+        if (rvv_require_operable(rv, ir))                            \
+            return false;                                            \
+        if ((rvv_sew_bits(rv->csr_vtype) != 32) || rv->csr_vstart || \
+            !rvv_validate_data_reg(rv->csr_vtype, ir->vs2))          \
+            return rvv_trap_illegal_state(rv, 0);                    \
+        rvv_fp_begin_round(rv);                                      \
+        rvv_exec_fp64_reduction(rv, ir, ir->vd, opfn);               \
+        set_fflag(rv);                                               \
     })
 
 #define RVV_FP64_MIXED_VV_OP(name, opfn)                                       \
     RVOP(name, {                                                               \
         uint32_t wide_span;                                                    \
         uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
-        if (rvv_require_operable(rv))                                          \
+        if (rvv_require_operable(rv, ir))                                      \
             return false;                                                      \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
             !rvv_validate_wide_reg(rv, ir->vd) ||                              \
@@ -8056,7 +8261,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
 
 #define RVV_FP64_MIXED_VF_OP(name, opfn)              \
     RVOP(name, {                                      \
-        if (rvv_require_operable(rv))                 \
+        if (rvv_require_operable(rv, ir))             \
             return false;                             \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||    \
             !rvv_validate_wide_reg(rv, ir->vd) ||     \
@@ -8071,7 +8276,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
     RVOP(name, {                                                               \
         uint32_t wide_span;                                                    \
         uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
-        if (rvv_require_operable(rv))                                          \
+        if (rvv_require_operable(rv, ir))                                      \
             return false;                                                      \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
             !rvv_validate_wide_reg(rv, ir->vd) ||                              \
@@ -8092,7 +8297,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
     RVOP(name, {                                                               \
         uint32_t wide_span;                                                    \
         uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
-        if (rvv_require_operable(rv))                                          \
+        if (rvv_require_operable(rv, ir))                                      \
             return false;                                                      \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
             !rvv_validate_wide_reg(rv, ir->vd) ||                              \
@@ -8107,7 +8312,7 @@ static inline void rvv_exec_vfmv_v_f(riscv_t *rv,
     })
 
 RVOP(vfmv_f_s, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_sew_bits(rv->csr_vtype) != 32)
         return rvv_trap_illegal_state(rv, 0);
@@ -8115,7 +8320,7 @@ RVOP(vfmv_f_s, {
 })
 
 RVOP(vfmv_s_f, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if (rvv_sew_bits(rv->csr_vtype) != 32)
         return rvv_trap_illegal_state(rv, 0);
@@ -8124,7 +8329,7 @@ RVOP(vfmv_s_f, {
 
 #define RVV_FP32_CVT_OP(name, opfn, dynamic_round)           \
     RVOP(name, {                                             \
-        if (rvv_require_operable(rv))                        \
+        if (rvv_require_operable(rv, ir))                    \
             return false;                                    \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||           \
             !rvv_validate_data_reg(rv->csr_vtype, ir->vd) || \
@@ -8149,7 +8354,7 @@ RVV_FP32_CVT_OP(vfcvt_rtz_x_f_v, rvv_fp_cvt_rtz_x_f32, false);
     RVOP(name, {                                                               \
         uint32_t wide_span;                                                    \
         uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);                  \
-        if (rvv_require_operable(rv))                                          \
+        if (rvv_require_operable(rv, ir))                                      \
             return false;                                                      \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                             \
             !rvv_wide_group_span(rv, &wide_span) ||                            \
@@ -8168,7 +8373,7 @@ RVV_FP32_CVT_OP(vfcvt_rtz_x_f_v, rvv_fp_cvt_rtz_x_f32, false);
 
 #define RVV_FP32_UNARY_OP(name, opfn, dynamic_round)         \
     RVOP(name, {                                             \
-        if (rvv_require_operable(rv))                        \
+        if (rvv_require_operable(rv, ir))                    \
             return false;                                    \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||           \
             !rvv_validate_data_reg(rv->csr_vtype, ir->vd) || \
@@ -8199,7 +8404,7 @@ RVV_FP32_UNARY_OP(vfclass_v, rvv_fp_class32, false);
     RVOP(name, {                                                     \
         uint32_t wide_span;                                          \
         uint32_t narrow_span = rvv_group_regs(rv->csr_vtype);        \
-        if (rvv_require_operable(rv))                                \
+        if (rvv_require_operable(rv, ir))                            \
             return false;                                            \
         if ((rvv_sew_bits(rv->csr_vtype) != 32) ||                   \
             !rvv_wide_group_span(rv, &wide_span) ||                  \
@@ -8256,7 +8461,7 @@ RVV_FP32_VV_OP(vfsgnjx_vv, rvv_fp_sgnjx32, false);
 RVV_FP32_VF_OP(vfsgnjx_vf, rvv_fp_sgnjx32, false);
 
 RVOP(vfslide1up_vf, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if ((rvv_sew_bits(rv->csr_vtype) != 32) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -8266,7 +8471,7 @@ RVOP(vfslide1up_vf, {
 })
 
 RVOP(vfslide1down_vf, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if ((rvv_sew_bits(rv->csr_vtype) != 32) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -8276,7 +8481,7 @@ RVOP(vfslide1down_vf, {
 })
 
 RVOP(vfmerge_vfm, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if ((rvv_sew_bits(rv->csr_vtype) != 32) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -8286,7 +8491,7 @@ RVOP(vfmerge_vfm, {
 })
 
 RVOP(vfmv_v_f, {
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if ((rvv_sew_bits(rv->csr_vtype) != 32) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) || !ir->vm)
@@ -8312,7 +8517,7 @@ RVOP(vfrdiv_vf, {
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if ((rvv_sew_bits(rv->csr_vtype) != 32) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -8329,7 +8534,7 @@ RVOP(vfrdiv_vf, {
                      rvv_fp_div32(rv->F[ir->rs1].v,
                                   rvv_get_elem(rv, ir->vs2, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, ir->vd, elem, 32, 0xFFFFFFFFU);
     }
@@ -8344,7 +8549,7 @@ RVOP(vfrsub_vf, {
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
-    if (rvv_require_operable(rv))
+    if (rvv_require_operable(rv, ir))
         return false;
     if ((rvv_sew_bits(rv->csr_vtype) != 32) ||
         !rvv_validate_data_reg(rv->csr_vtype, ir->vd) ||
@@ -8361,7 +8566,7 @@ RVOP(vfrsub_vf, {
                      rvv_fp_sub32(rv->F[ir->rs1].v,
                                   rvv_get_elem(rv, ir->vs2, elem, 32)));
     }
-    if (vta) {
+    if (rvv_tail_fill(rv, vta)) {
         for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
             rvv_set_elem(rv, ir->vd, elem, 32, 0xFFFFFFFFU);
     }

@@ -2115,6 +2115,66 @@ _start:
     li t6, 0xffa00000
     bne t1, t6, fail_vfwcvt_f_xu
 
+    # Each float-to-integer helper must independently report NX for 1.5.
+    csrw frm, zero
+    vsetivli zero, 1, e32, m1, tu, mu
+    li t2, 0x3fc00000
+    vmv.v.x v20, t2
+    csrw fflags, zero
+    vfcvt.x.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfcvt.xu.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfcvt.rtz.x.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfcvt.rtz.xu.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfwcvt.x.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfwcvt.xu.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfwcvt.rtz.x.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfwcvt.rtz.xu.f.v v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    # Stage a double-precision 1.5 as two 32-bit words.
+    la a1, cvt_out
+    sw zero, 0(a1)
+    li t2, 0x3ff80000
+    sw t2, 4(a1)
+    vl1re32.v v20, (a1)
+    csrw fflags, zero
+    vfncvt.x.f.w v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfncvt.xu.f.w v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfncvt.rtz.x.f.w v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+    csrw fflags, zero
+    vfncvt.rtz.xu.f.w v22, v20
+    csrr t1, fflags
+    assert_reg_imm t1, 1, fail_vfcvt_x_f
+
     # Single-width FP conversions (V 1.0 13.17). frm is set to RNE so the
     # dynamic-rounding forms can be told apart from the .rtz forms: 1.5
     # rounds to 2 under RNE but truncates to 1 under RTZ.
@@ -2221,6 +2281,42 @@ _start:
     lw t1, 4(a1)
     li t6, 0x11111111
     bne t1, t6, fail_vfmv_s_f
+
+    # A resumed scalar move (0 < vstart < vl) still writes element 0 and
+    # clears vstart, leaving the other elements alone.
+    li t2, 1
+    csrw vstart, t2
+    vfmv.s.f v22, ft0
+    csrr t1, vstart
+    assert_reg_imm t1, 0, fail_vfmv_s_f
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x40490fdb, fail_vfmv_s_f
+    lw t1, 4(a1)
+    assert_reg_imm t1, 0x11111111, fail_vfmv_s_f
+
+    # With vstart >= vl there is nothing to do and the destination is
+    # untouched (V 1.0 16.3).
+    li t2, 4
+    csrw vstart, t2
+    vfmv.s.f v22, ft1
+    csrr t1, vstart
+    assert_reg_imm t1, 0, fail_vfmv_s_f
+    vse32.v v22, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 0x40490fdb, fail_vfmv_s_f
+
+    # LMUL=2 must not extend scalar-move tail writes into v23.
+    vsetivli zero, 4, e32, m1, tu, mu
+    vmv.v.i v23, 7
+    vsetivli zero, 1, e32, m2, ta, mu
+    vfmv.s.f v22, ft1
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v23, (a1)
+    lw t1, 0(a1)
+    assert_reg_imm t1, 7, fail_vfmv_s_f
+    lw t1, 12(a1)
+    assert_reg_imm t1, 7, fail_vfmv_s_f
 
     # Per spec, vfmv.s.f performs no update when vstart >= vl; with vl = 0
     # that holds for every vstart, so element 0 keeps its previous value.
@@ -2582,6 +2678,7 @@ fail_vsext_vf4:
     j write_and_exit_fail
 fail_vzext_mask:
     li a3, 0xf5
+    j write_and_exit_fail
 fail_vmv1r:
     li a3, 0x9a
     j write_and_exit_fail

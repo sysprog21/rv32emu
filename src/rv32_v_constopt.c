@@ -23,9 +23,17 @@
  * uses fold against a stale value left over from a prior write to that
  * register.
  */
-CONSTOPT(vsetvli, { info->is_constant[ir->rd] = false; })
-CONSTOPT(vsetivli, { info->is_constant[ir->rd] = false; })
-CONSTOPT(vsetvl, { info->is_constant[ir->rd] = false; })
+/* Scalar results may target x0, which is never constant and must not be
+ * tracked as if it were written.
+ */
+#define RVV_INVALIDATE_RD                      \
+    {                                          \
+        if (ir->rd)                            \
+            info->is_constant[ir->rd] = false; \
+    }
+CONSTOPT(vsetvli, RVV_INVALIDATE_RD)
+CONSTOPT(vsetivli, RVV_INVALIDATE_RD)
+CONSTOPT(vsetvl, RVV_INVALIDATE_RD)
 CONSTOPT(vle8_v, {})
 CONSTOPT(vle16_v, {})
 CONSTOPT(vle32_v, {})
@@ -534,9 +542,9 @@ CONSTOPT(vmv1r_v, {})
 CONSTOPT(vmv2r_v, {})
 CONSTOPT(vmv4r_v, {})
 CONSTOPT(vmv8r_v, {})
-CONSTOPT(vmv_x_s, { info->is_constant[ir->rd] = false; })
-CONSTOPT(vcpop_m, { info->is_constant[ir->rd] = false; })
-CONSTOPT(vfirst_m, { info->is_constant[ir->rd] = false; })
+CONSTOPT(vmv_x_s, RVV_INVALIDATE_RD)
+CONSTOPT(vcpop_m, RVV_INVALIDATE_RD)
+CONSTOPT(vfirst_m, RVV_INVALIDATE_RD)
 CONSTOPT(vmsbf_m, {})
 CONSTOPT(vmsof_m, {})
 CONSTOPT(vmsif_m, {})
@@ -649,3 +657,5 @@ CONSTOPT(vfwmsac_vv, {})
 CONSTOPT(vfwmsac_vf, {})
 CONSTOPT(vfwnmsac_vv, {})
 CONSTOPT(vfwnmsac_vf, {})
+
+#undef RVV_INVALIDATE_RD

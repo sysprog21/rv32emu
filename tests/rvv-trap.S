@@ -131,6 +131,96 @@ _start:
     la   a1, seg
     must_not_trap 18, vlseg2e8.v v8, (a1), v0.t
 
+    /* v0 is the mask (EEW=1) of a masked instruction, so it cannot also be a
+     * data source or the data destination of that instruction (V 1.0 5.2),
+     * and that holds for the compares and carry forms too: they read v0 as a
+     * mask and as data. A mask or scalar result may still be v0.
+     */
+    must_trap 25, vadd.vv v0, v2, v3, v0.t
+    must_trap 26, vadd.vv v8, v0, v3, v0.t
+    must_trap 27, vadd.vv v8, v2, v0, v0.t
+    must_not_trap 28, vadd.vv v8, v0, v3
+    must_not_trap 29, vadd.vv v8, v2, v3, v0.t
+    must_trap 30, vadc.vvm v8, v0, v3, v0
+    must_not_trap 50, vadc.vvm v8, v2, v3, v0
+    must_trap 31, vadc.vvm v0, v2, v3, v0
+    must_trap 32, vmseq.vv v9, v0, v3, v0.t
+    must_not_trap 51, vmseq.vv v0, v2, v3, v0.t
+    must_trap 52, vredsum.vs v8, v0, v3, v0.t
+    must_not_trap 53, vredsum.vs v0, v2, v3, v0.t
+
+    /* A mask destination may overlap a source group only at its lowest
+     * register; the mask generators may not overlap their source at all.
+     */
+    vsetvli t0, a0, e8, m2, tu, mu
+    must_trap 33, vmseq.vv v3, v2, v4
+    must_not_trap 34, vmseq.vv v2, v2, v4
+    must_trap 35, vmsbf.m v2, v2
+    must_not_trap 36, vmsbf.m v6, v2
+    must_trap 37, viota.m v4, v5
+    must_not_trap 38, viota.m v4, v7
+    must_trap 39, vmsbf.m v0, v2, v0.t
+
+    /* One register cannot be read at two EEWs: the wide vs2 group of a .wv
+     * form and a widening reduction's scalar may not overlap their narrow
+     * operand.
+     */
+    vsetvli t0, a0, e8, m1, tu, mu
+    must_trap 40, vwadd.wv v4, v4, v4
+    must_not_trap 41, vwadd.wv v4, v4, v6
+    must_trap 42, vnsra.wv v8, v4, v5
+    must_trap 43, vwredsum.vs v8, v4, v4
+    must_not_trap 44, vwredsum.vs v8, v4, v5
+
+    /* vwmacc reads vd at 2*SEW, so a narrow source may not share a register
+     * with it, unlike the plain widening add where the top half is fine.
+     */
+    must_not_trap 54, vwadd.vv v8, v9, v10
+    must_trap 55, vwmaccsu.vv v8, v9, v10
+    must_trap 56, vwmacc.vx v8, a1, v9
+    must_not_trap 57, vwmacc.vx v8, a1, v10
+
+    /* A reduction's vd and vs1 hold one element, so only vs2 is a group; it
+     * also needs vstart 0, floating point included.
+     */
+    vsetvli t0, a0, e8, m2, tu, mu
+    must_not_trap 45, vredsum.vs v9, v2, v11
+    vsetvli t0, a0, e32, m2, tu, mu
+    must_not_trap 46, vfredusum.vs v9, v2, v11
+    li   t0, 1
+    csrw vstart, t0
+    must_trap 47, vfredusum.vs v8, v2, v10
+    csrw vstart, zero
+
+    /* A masked load cannot write v0, its own mask, whatever its addressing
+     * mode, nor can a masked store take its data, or an indexed access its index,
+     * from v0; unmasked, or with
+     * another register, either is fine.
+     */
+    vsetvli t0, a0, e8, m1, tu, mu
+    la   a1, src
+    li   a2, 1
+    must_trap 58, vle8.v v0, (a1), v0.t
+    must_trap 59, vlse8.v v0, (a1), a2, v0.t
+    must_trap 60, vluxei8.v v0, (a1), v3, v0.t
+    must_trap 61, vle8ff.v v0, (a1), v0.t
+    must_not_trap 62, vle8.v v0, (a1)
+    must_not_trap 63, vle8.v v9, (a1), v0.t
+    must_trap 64, vse8.v v0, (a1), v0.t
+    must_not_trap 65, vse8.v v0, (a1)
+    must_trap 66, vluxei8.v v8, (a1), v0, v0.t
+    must_trap 67, vsoxei8.v v8, (a1), v0, v0.t
+    must_not_trap 68, vluxei8.v v8, (a1), v0
+
+    /* vfslide1up cannot overlap its source, and a three-field segment is
+     * legal.
+     */
+    vsetvli t0, a0, e32, m1, tu, mu
+    must_trap 48, vfslide1up.vf v2, v2, ft0
+    vsetvli t0, a0, e8, m1, tu, mu
+    la   a1, seg
+    must_not_trap 49, vlseg3e8.v v12, (a1)
+
     li   a0, 1
     la   a1, ok_msg
     li   a2, ok_len

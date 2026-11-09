@@ -168,17 +168,22 @@ config EXT_C
       Reduces code size by approximately 25-30%.
 
 config EXT_V
-    bool "V - Vector Extension (RVV 1.0, ELEN=64)"
+    bool "V - Vector Extension (RVV 1.0 subset, SEW up to 32)"
     default n
     select EXT_F
     help
-      Enable the RISC-V "V" Vector extension, version 1.0: vector
-      configuration, unit-stride/strided/indexed/segment/whole-register and
+      Enable the RISC-V "V" Vector extension, version 1.0, with SEW of 8,
+      16 or 32 bits (comparable to Zve32f, except that fractional LMUL
+      follows the limits of ELEN=64): vector configuration,
+      unit-stride, strided, indexed, segment, whole-register and
       fault-only-first memory accesses, integer, fixed-point, mask,
       reduction and permutation operations, and single-precision floating
-      point including the widening forms (computed with Berkeley SoftFloat).
-      ELEN is 64. Not implemented: Zvfh/Zvfhmin, and vector double-precision
-      arithmetic (the base ISA has no D).
+      point including the widening and narrowing conversions (computed with
+      Berkeley SoftFloat). Widening results and 64-bit memory element widths
+      are supported.
+      Not implemented: SEW=64 (vsetvli rejects it with vill), vector
+      double-precision arithmetic (the base ISA has no D), and
+      Zvfh/Zvfhmin.
       Vector load/store shares its opcode with load_fp/store_fp, so
       enabling V automatically selects F. Advertised in misa.V.
 

@@ -5698,6 +5698,243 @@ static inline bool op_op_v(rv_insn_t *ir, const uint32_t insn)
             ir->opcode = rv_insn_vfsgnjx_vv;
             return true;
 #endif /* RV32_HAS(EXT_V) */
+        case 0x12:
+            switch ((insn >> 15) & 0x1f) {
+#if RV32_HAS(EXT_V)
+            case 0:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfcvt_xu_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 1:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfcvt_x_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 2:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfcvt_f_xu_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 3:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfcvt_f_x_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 6:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfcvt_rtz_xu_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 7:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfcvt_rtz_x_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x8:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfwcvt_xu_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x9:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfwcvt_x_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0xa:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfwcvt_f_xu_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0xb:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfwcvt_f_x_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0xc:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfwcvt_f_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0xe:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfwcvt_rtz_xu_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0xf:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfwcvt_rtz_x_f_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x10:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfncvt_xu_f_w;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x11:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfncvt_x_f_w;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x12:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfncvt_f_xu_w;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x13:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfncvt_f_x_w;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x14:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfncvt_f_f_w;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x15:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfncvt_rod_f_f_w;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x16:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfncvt_rtz_xu_f_w;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x17:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfncvt_rtz_x_f_w;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+            default:
+                break;
+            }
+            break;
+        case 0x13:
+            switch ((insn >> 15) & 0x1f) {
+#if RV32_HAS(EXT_V)
+            case 0:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfsqrt_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 4:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfrsqrt7_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 5:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfrec7_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 0x10:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vfclass_v;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+            default:
+                break;
+            }
+            break;
 #if RV32_HAS(EXT_V)
         case 0x18:
             ir->vd = decode_rd(insn);
@@ -6053,6 +6290,66 @@ static inline bool op_op_v(rv_insn_t *ir, const uint32_t insn)
                 ir->vs2 = decode_rs2(insn);
                 ir->vm = (insn >> 25) & 0x1;
                 ir->opcode = rv_insn_vfirst_m;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+            default:
+                break;
+            }
+            break;
+        case 0x12:
+            switch ((insn >> 15) & 0x1f) {
+#if RV32_HAS(EXT_V)
+            case 2:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vzext_vf8;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 3:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vsext_vf8;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 4:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vzext_vf4;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 5:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vsext_vf4;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 6:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vzext_vf2;
+                return true;
+#endif /* RV32_HAS(EXT_V) */
+#if RV32_HAS(EXT_V)
+            case 7:
+                ir->vd = decode_rd(insn);
+                ir->vs2 = decode_rs2(insn);
+                ir->vs1 = decode_rs1(insn);
+                ir->vm = (insn >> 25) & 0x1;
+                ir->opcode = rv_insn_vsext_vf2;
                 return true;
 #endif /* RV32_HAS(EXT_V) */
             default:
@@ -6514,6 +6811,72 @@ static inline bool op_op_v(rv_insn_t *ir, const uint32_t insn)
             ir->opcode = rv_insn_vsll_vi;
             return true;
 #endif /* RV32_HAS(EXT_V) */
+        case 0x27:
+            switch ((insn >> 15) & 0x1f) {
+            case 0:
+                switch ((insn >> 25) & 0x1) {
+#if RV32_HAS(EXT_V)
+                case 1:
+                    ir->vd = decode_rd(insn);
+                    ir->vs2 = decode_rs2(insn);
+                    ir->vs1 = decode_rs1(insn);
+                    ir->vm = (insn >> 25) & 0x1;
+                    ir->opcode = rv_insn_vmv1r_v;
+                    return true;
+#endif /* RV32_HAS(EXT_V) */
+                default:
+                    break;
+                }
+                break;
+            case 1:
+                switch ((insn >> 25) & 0x1) {
+#if RV32_HAS(EXT_V)
+                case 1:
+                    ir->vd = decode_rd(insn);
+                    ir->vs2 = decode_rs2(insn);
+                    ir->vs1 = decode_rs1(insn);
+                    ir->vm = (insn >> 25) & 0x1;
+                    ir->opcode = rv_insn_vmv2r_v;
+                    return true;
+#endif /* RV32_HAS(EXT_V) */
+                default:
+                    break;
+                }
+                break;
+            case 3:
+                switch ((insn >> 25) & 0x1) {
+#if RV32_HAS(EXT_V)
+                case 1:
+                    ir->vd = decode_rd(insn);
+                    ir->vs2 = decode_rs2(insn);
+                    ir->vs1 = decode_rs1(insn);
+                    ir->vm = (insn >> 25) & 0x1;
+                    ir->opcode = rv_insn_vmv4r_v;
+                    return true;
+#endif /* RV32_HAS(EXT_V) */
+                default:
+                    break;
+                }
+                break;
+            case 7:
+                switch ((insn >> 25) & 0x1) {
+#if RV32_HAS(EXT_V)
+                case 1:
+                    ir->vd = decode_rd(insn);
+                    ir->vs2 = decode_rs2(insn);
+                    ir->vs1 = decode_rs1(insn);
+                    ir->vm = (insn >> 25) & 0x1;
+                    ir->opcode = rv_insn_vmv8r_v;
+                    return true;
+#endif /* RV32_HAS(EXT_V) */
+                default:
+                    break;
+                }
+                break;
+            default:
+                break;
+            }
+            break;
 #if RV32_HAS(EXT_V)
         case 0x28:
             ir->vd = decode_rd(insn);
@@ -7745,6 +8108,21 @@ static inline bool op_op_v(rv_insn_t *ir, const uint32_t insn)
         switch ((insn >> 25) & 0x1) {
         case 1:
             switch ((insn >> 12) & 0x7) {
+            case 5:
+                switch ((insn >> 26) & 0x3f) {
+#if RV32_HAS(EXT_V)
+                case 0x10:
+                    ir->vd = decode_rd(insn);
+                    ir->vs2 = decode_rs2(insn);
+                    ir->rs1 = decode_rs1(insn);
+                    ir->vm = (insn >> 25) & 0x1;
+                    ir->opcode = rv_insn_vfmv_s_f;
+                    return true;
+#endif /* RV32_HAS(EXT_V) */
+                default:
+                    break;
+                }
+                break;
             case 6:
                 switch ((insn >> 26) & 0x3f) {
 #if RV32_HAS(EXT_V)
@@ -7843,6 +8221,26 @@ static inline bool op_op_v(rv_insn_t *ir, const uint32_t insn)
         break;
     case 1:
         switch ((insn >> 12) & 0x7) {
+        case 1:
+            switch ((insn >> 26) & 0x3f) {
+            case 0x10:
+                switch ((insn >> 15) & 0x1f) {
+#if RV32_HAS(EXT_V)
+                case 0:
+                    ir->rd = decode_rd(insn);
+                    ir->vs2 = decode_rs2(insn);
+                    ir->vm = (insn >> 25) & 0x1;
+                    ir->opcode = rv_insn_vfmv_f_s;
+                    return true;
+#endif /* RV32_HAS(EXT_V) */
+                default:
+                    break;
+                }
+                break;
+            default:
+                break;
+            }
+            break;
         case 2:
             switch ((insn >> 26) & 0x3f) {
             case 0x10:

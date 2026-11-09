@@ -722,6 +722,9 @@ CHECK_TARGETS += check-hello $(GUEST_CHECK_TARGETS) \
 	$(GUEST_ASM_CHECK_TARGETS) $(addprefix check-,$(CHECK_ELF_FILES))
 endif
 ifeq ($(CONFIG_EXT_V)$(RUN_USER_ELF),yy)
+# The smoke program asserts VLEN=128 (vlenb, VLMAX, whole-register sizes).
+# Other widths are covered by rvv-vlen, which is built for the configured VLEN.
+ifeq ($(VLEN),128)
 EXPECTED_rvv_smoke = RVV smoke OK
 CHECK_TARGETS += check-rvv-smoke
 
@@ -730,14 +733,29 @@ check-rvv-smoke: $(BIN)
 	    tests/rvv-smoke.S -o $(OUT)/rvv-smoke.elf
 	$(call check-test, , $(OUT)/rvv-smoke.elf, rvv-smoke.elf, tail -n 1,$(EXPECTED_rvv_smoke))
 
+# Regression checks for behavior found wrong by differential testing. They
+# also assume VLEN=128, and they read and write the vector CSRs.
+ifeq ($(CONFIG_Zicsr),y)
+EXPECTED_rvv_compliance = RVV compliance OK
+CHECK_TARGETS += check-rvv-compliance
+
+check-rvv-compliance: $(BIN)
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32imfv_zicsr -mabi=ilp32f -nostdlib -static \
+	    tests/rvv-compliance.S -o $(OUT)/rvv-compliance.elf
+	$(call check-test, , $(OUT)/rvv-compliance.elf, rvv-compliance.elf, tail -n 1,$(EXPECTED_rvv_compliance))
+endif
+endif
+
 # Like jit-misalign, rvv-trap installs a machine-mode trap vector, so it needs
 # a user-mode emulator with Zicsr. The probe is empty for RV32E, whose missing
 # s8-s11 the test uses, and when no cross toolchain is configured.
 EXPECTED_rvv-trap = RVV trap OK
 $(eval $(call guest-asm-check-target,rvv-trap,rv32imv_zicsr))
+EXPECTED_rvv-vlen = RVV vlen OK
+$(eval $(call guest-asm-check-target,rvv-vlen,rv32imv_zicsr,,-DVLEN=$(VLEN)))
 ifneq ($(CONFIG_SYSTEM),y)
 ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_V_ZICSR_WORKS),yy)
-CHECK_TARGETS += check-rvv-trap
+CHECK_TARGETS += check-rvv-trap check-rvv-vlen
 endif
 endif
 endif

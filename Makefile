@@ -162,6 +162,9 @@ endif
 # Extension: Vector
 ifeq ($(CONFIG_EXT_V),y)
 VLEN ?= $(if $(CONFIG_VLEN),$(CONFIG_VLEN),128)
+ifeq ($(filter $(VLEN),128 256 512 1024 2048 4096 8192 16384 32768 65536),)
+$(error VLEN=$(VLEN) is not a power of two from 128 to 65536)
+endif
 CFLAGS += -DVLEN=$(VLEN)
 endif
 
@@ -422,13 +425,28 @@ src/decode.c: $(DECODER_DESC) $(DECODER_GEN)
 	$(VECHO) "  GEN\t$@\n"
 	$(call gen-decoder,$@)
 
+# The vector operand classes behind the shared register-legality check come
+# from the same descriptor.
+RVV_CLASS_GEN := scripts/gen-rvv-classes.py
+
+src/rv32_v_class.inc: $(DECODER_DESC) $(RVV_CLASS_GEN)
+	$(VECHO) "  GEN\t$@\n"
+	$(Q)python3 $(RVV_CLASS_GEN) $(DECODER_DESC) $@.tmp || \
+		{ rm -f $@.tmp; exit 1; }
+	$(Q)mv $@.tmp $@
+
+# The interpreter template includes the table, but the dependency files that
+# record that only exist after a first compile, so name it explicitly.
+$(OUT)/emulate.o: src/rv32_v_class.inc
+
 # Verify that the committed decoder matches what the descriptor generates,
 # so src/decode.c and src/instructions.in cannot drift apart.  Note this
 # only reports drift before a build: a plain "make" regenerates the file
 # in place, after which it trivially matches.  CI runs it on a fresh
 # checkout, which is where it does its job.
 .PHONY: check-decoder
-check-decoder: $(DECODER_DESC) $(DECODER_GEN) $(DECODER_VERIFY) | $(OUT)
+check-decoder: $(DECODER_DESC) $(DECODER_GEN) $(DECODER_VERIFY) \
+	$(RVV_CLASS_GEN) | $(OUT)
 	$(Q)python3 $(DECODER_VERIFY) $(DECODER_DESC)
 	$(Q)command -v $(CLANG_FORMAT) >/dev/null || \
 		{ echo "$(CLANG_FORMAT) not found."; exit 1; }
@@ -438,6 +456,12 @@ check-decoder: $(DECODER_DESC) $(DECODER_GEN) $(DECODER_VERIFY) | $(OUT)
 		exit 1; \
 	fi
 	$(Q)rm -f $(OUT)/decode.gen.c
+	$(Q)python3 $(RVV_CLASS_GEN) $(DECODER_DESC) $(OUT)/rv32_v_class.gen.inc
+	$(Q)if ! diff -u src/rv32_v_class.inc $(OUT)/rv32_v_class.gen.inc; then \
+		echo "src/rv32_v_class.inc is stale; re-run make to regenerate it."; \
+		exit 1; \
+	fi
+	$(Q)rm -f $(OUT)/rv32_v_class.gen.inc
 	$(VECHO) "  DECODER\tup to date\n"
 
 $(OUT)/%.o: src/%.c $(deps_emcc) $(CONFIG_HEADER) $(EFFECTIVE_CONFIG_STAMP) | $(OUT)

@@ -752,7 +752,7 @@ EXPECTED_rvv_compliance = RVV compliance OK
 CHECK_TARGETS += check-rvv-compliance
 
 check-rvv-compliance: $(BIN)
-	$(Q)$(CROSS_COMPILE)gcc -march=rv32imfv_zicsr -mabi=ilp32f -nostdlib -static \
+	$(Q)$(CROSS_COMPILE)gcc -march=rv32imafdv_zicsr -mabi=ilp32d -nostdlib -static \
 	    tests/rvv-compliance.S -o $(OUT)/rvv-compliance.elf
 	$(call check-test, , $(OUT)/rvv-compliance.elf, rvv-compliance.elf, tail -n 1,$(EXPECTED_rvv_compliance))
 endif

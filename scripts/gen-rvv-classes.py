@@ -66,7 +66,7 @@ def classify(n, ops):
     # A form that widens or narrows needs an element 2*SEW wide.
     if f and re.match(
         r"^(vw(add|addu|sub|subu|mul|mulu|mulsu|macc|maccu|maccsu|maccus|"
-        r"redsum|redsumu)|vfw\w+|vn(srl|sra|clip|clipu)|vfn\w+)_",
+        r"redsum|redsumu)|vfw\w+|vn(srl|sra|clip|clipu)|vfncvt\w+)_",
         n,
     ):
         f |= WIDEN

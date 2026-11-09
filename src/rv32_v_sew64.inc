@@ -26,7 +26,7 @@ typedef __int128 rvv_s128;
 typedef uint64_t (*rvv64_fn)(riscv_t *rv, uint64_t acc, uint64_t a, uint64_t b);
 
 /* Where the second operand comes from, and how to extend an immediate. */
-enum { RVV64_VV, RVV64_VX, RVV64_VI, RVV64_VUI };
+enum { RVV64_VV, RVV64_VX, RVV64_VI, RVV64_VUI, RVV64_VF };
 
 static inline uint64_t rvv64_get(const riscv_t *rv, uint32_t reg, uint32_t elem)
 {
@@ -53,6 +53,10 @@ static inline uint64_t rvv64_operand(const riscv_t *rv,
         return (uint64_t) (int64_t) (int32_t) rv->X[ir->rs1];
     case RVV64_VUI:
         return (uint64_t) ((uint32_t) ir->imm & 0x1fU);
+#if RV32_HAS(EXT_D)
+    case RVV64_VF:
+        return f64_reg(rv, ir->rs1).v; /* a float register is 64 bits */
+#endif
     default:
         return (uint64_t) (int64_t) ir->imm;
     }
@@ -412,13 +416,13 @@ static void rvv64_exec_slide(riscv_t *rv,
                              const rv_insn_t *ir,
                              bool up,
                              bool by_one,
-                             uint32_t offset)
+                             uint32_t offset,
+                             uint64_t scalar)
 {
     uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
     uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
     uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
     uint32_t first = rv->csr_vstart;
-    uint64_t scalar = (uint64_t) (int64_t) (int32_t) rv->X[ir->rs1];
 
     if (by_one)
         offset = 1;
@@ -636,12 +640,13 @@ static int rvv64_slide(riscv_t *rv,
                        const rv_insn_t *ir,
                        bool up,
                        bool by_one,
-                       uint32_t offset)
+                       uint32_t offset,
+                       uint64_t scalar)
 {
     if (!rvv64_group_ok(rv, ir->vd) || !rvv64_group_ok(rv, ir->vs2) ||
         (up && rvv64_overlap(rv, ir->vd, ir->vs2)))
         return RVV_EXEC_TRAP;
-    rvv64_exec_slide(rv, ir, up, by_one, offset);
+    rvv64_exec_slide(rv, ir, up, by_one, offset, scalar);
     return RVV_EXEC_DONE;
 }
 
@@ -690,6 +695,499 @@ static int rvv64_extend(riscv_t *rv,
     rvv64_exec_extend(rv, ir, factor, sign);
     return RVV_EXEC_DONE;
 }
+
+#if RV32_HAS(EXT_D)
+/* Double-precision operations. The element is the raw binary64 pattern. */
+static inline softfloat_float64_t rvv64_f(uint64_t bits)
+{
+    softfloat_float64_t value;
+
+    value.v = bits;
+    return value;
+}
+
+#define RVV64_FOP(name, expr)                                              \
+    static uint64_t rvv64_op_##name(riscv_t *rv, uint64_t acc, uint64_t a, \
+                                    uint64_t b)                            \
+    {                                                                      \
+        const softfloat_float64_t fa = rvv64_f(a);                         \
+        const softfloat_float64_t fb = rvv64_f(b);                         \
+        const softfloat_float64_t fc = rvv64_f(acc);                       \
+        (void) rv;                                                         \
+        (void) fa;                                                         \
+        (void) fb;                                                         \
+        (void) fc;                                                         \
+        return (expr);                                                     \
+    }
+
+#define NEG(x) (rvv64_f((x).v ^ FMASK64_SIGN))
+
+RVV64_FOP(fadd, f64_add(fa, fb).v)
+RVV64_FOP(fsub, f64_sub(fa, fb).v)
+RVV64_FOP(frsub, f64_sub(fb, fa).v)
+RVV64_FOP(fmul, f64_mul(fa, fb).v)
+RVV64_FOP(fdiv, f64_div(fa, fb).v)
+RVV64_FOP(frdiv, f64_div(fb, fa).v)
+RVV64_FOP(fsgnj, (a & ~FMASK64_SIGN) | (b & FMASK64_SIGN))
+RVV64_FOP(fsgnjn, (a & ~FMASK64_SIGN) | (~b & FMASK64_SIGN))
+RVV64_FOP(fsgnjx, a ^ (b & FMASK64_SIGN))
+/* vd = +-(vs1 * vs2) +- vd, and vd = +-(vs1 * vd) +- vs2. */
+RVV64_FOP(fmacc, f64_mulAdd(fb, fa, fc).v)
+RVV64_FOP(fnmacc, f64_mulAdd(NEG(fb), fa, NEG(fc)).v)
+RVV64_FOP(fmsac, f64_mulAdd(fb, fa, NEG(fc)).v)
+RVV64_FOP(fnmsac, f64_mulAdd(NEG(fb), fa, fc).v)
+RVV64_FOP(fmadd, f64_mulAdd(fb, fc, fa).v)
+RVV64_FOP(fnmadd, f64_mulAdd(NEG(fb), fc, NEG(fa)).v)
+RVV64_FOP(fmsub, f64_mulAdd(fb, fc, NEG(fa)).v)
+RVV64_FOP(fnmsub, f64_mulAdd(NEG(fb), fc, fa).v)
+
+/* fmin and fmax follow the scalar instructions: a NaN loses to a number, two
+ * NaNs give the canonical NaN, and a signaling NaN raises invalid.
+ */
+static uint64_t rvv64_op_fmin(riscv_t *rv, uint64_t acc, uint64_t a, uint64_t b)
+{
+    (void) rv;
+    (void) acc;
+    if (f64_isSignalingNaN(rvv64_f(a)) || f64_isSignalingNaN(rvv64_f(b)))
+        softfloat_exceptionFlags |= softfloat_flag_invalid;
+    if (is_nan64(a) && is_nan64(b))
+        return RV_NAN64;
+    if (is_nan64(a))
+        return b;
+    if (is_nan64(b))
+        return a;
+    return (f64_lt_quiet(rvv64_f(a), rvv64_f(b)) ||
+            (f64_eq(rvv64_f(a), rvv64_f(b)) && (a & FMASK64_SIGN)))
+               ? a
+               : b;
+}
+
+static uint64_t rvv64_op_fmax(riscv_t *rv, uint64_t acc, uint64_t a, uint64_t b)
+{
+    (void) rv;
+    (void) acc;
+    if (f64_isSignalingNaN(rvv64_f(a)) || f64_isSignalingNaN(rvv64_f(b)))
+        softfloat_exceptionFlags |= softfloat_flag_invalid;
+    if (is_nan64(a) && is_nan64(b))
+        return RV_NAN64;
+    if (is_nan64(a))
+        return b;
+    if (is_nan64(b))
+        return a;
+    return (f64_lt_quiet(rvv64_f(b), rvv64_f(a)) ||
+            (f64_eq(rvv64_f(a), rvv64_f(b)) && (b & FMASK64_SIGN)))
+               ? a
+               : b;
+}
+
+/* Comparisons: vmfeq and vmfne are quiet, the others signaling. */
+RVV64_CMP(feq, f64_eq(rvv64_f(a), rvv64_f(b)))
+RVV64_CMP(fne, !f64_eq(rvv64_f(a), rvv64_f(b)))
+RVV64_CMP(flt, f64_lt(rvv64_f(a), rvv64_f(b)))
+RVV64_CMP(fle, f64_le(rvv64_f(a), rvv64_f(b)))
+RVV64_CMP(fgt, f64_lt(rvv64_f(b), rvv64_f(a)))
+RVV64_CMP(fge, f64_le(rvv64_f(b), rvv64_f(a)))
+
+/* Unary operations take vs2 as a. */
+typedef uint64_t (*rvv64_unary_fn)(riscv_t *rv, uint64_t a);
+
+static uint64_t rvv64_u_sqrt(riscv_t *rv, uint64_t a)
+{
+    (void) rv;
+    return f64_sqrt(rvv64_f(a)).v;
+}
+
+static uint64_t rvv64_u_class(riscv_t *rv, uint64_t a)
+{
+    (void) rv;
+    return calc_fclass64(a);
+}
+
+static uint64_t rvv64_u_cvt_xu(riscv_t *rv, uint64_t a)
+{
+    (void) rv;
+    return f64_to_ui64(rvv64_f(a), softfloat_roundingMode, true);
+}
+
+static uint64_t rvv64_u_cvt_x(riscv_t *rv, uint64_t a)
+{
+    (void) rv;
+    return (uint64_t) f64_to_i64(rvv64_f(a), softfloat_roundingMode, true);
+}
+
+static uint64_t rvv64_u_cvt_rtz_xu(riscv_t *rv, uint64_t a)
+{
+    (void) rv;
+    return f64_to_ui64_r_minMag(rvv64_f(a), true);
+}
+
+static uint64_t rvv64_u_cvt_rtz_x(riscv_t *rv, uint64_t a)
+{
+    (void) rv;
+    return (uint64_t) f64_to_i64_r_minMag(rvv64_f(a), true);
+}
+
+static uint64_t rvv64_u_cvt_f_xu(riscv_t *rv, uint64_t a)
+{
+    (void) rv;
+    return ui64_to_f64(a).v;
+}
+
+static uint64_t rvv64_u_cvt_f_x(riscv_t *rv, uint64_t a)
+{
+    (void) rv;
+    return i64_to_f64((int64_t) a).v;
+}
+
+/* The 7-bit estimates (V 1.0 13.9, 13.10), on a 52-bit fraction. They are the
+ * binary32 versions in rv32_v_template.c with the field widths of binary64.
+ */
+static inline void rvv64_normalize(uint64_t sig,
+                                   uint32_t exp,
+                                   int32_t *norm_exp,
+                                   uint64_t *norm_sig)
+{
+    if (exp) {
+        *norm_exp = (int32_t) exp;
+        *norm_sig = sig;
+        return;
+    }
+    {
+        uint32_t lz = 0;
+        uint64_t t = sig;
+
+        while (!(t & (UINT64_C(1) << 51))) {
+            t = (t << 1) & FMASK64_FRAC;
+            lz++;
+        }
+        *norm_exp = -(int32_t) lz;
+        *norm_sig = (sig << (1 - *norm_exp)) & FMASK64_FRAC;
+    }
+}
+
+static uint64_t rvv64_u_rsqrt7(riscv_t *rv, uint64_t bits)
+{
+    uint64_t sign = bits & FMASK64_SIGN;
+    uint32_t exp = (uint32_t) ((bits >> 52) & 0x7FF);
+    uint64_t sig = bits & FMASK64_FRAC;
+    int32_t norm_exp, out_exp;
+    uint64_t norm_sig;
+    uint32_t idx;
+
+    (void) rv;
+    if (exp == 0x7FF) {
+        if (sig) {
+            if (!(sig & FMASK64_QNAN))
+                softfloat_exceptionFlags |= softfloat_flag_invalid;
+            return RV_NAN64;
+        }
+        if (sign) {
+            softfloat_exceptionFlags |= softfloat_flag_invalid;
+            return RV_NAN64;
+        }
+        return 0;
+    }
+    if (!exp && !sig) {
+        softfloat_exceptionFlags |= softfloat_flag_infinite;
+        return sign | FMASK64_EXPN;
+    }
+    if (sign) {
+        softfloat_exceptionFlags |= softfloat_flag_invalid;
+        return RV_NAN64;
+    }
+    rvv64_normalize(sig, exp, &norm_exp, &norm_sig);
+    idx =
+        (uint32_t) ((norm_exp & 1) << 6) | (uint32_t) ((norm_sig >> 46) & 0x3F);
+    out_exp = (3 * 1023 - 1 - norm_exp) / 2;
+    return sign | ((uint64_t) ((uint32_t) out_exp & 0x7FF) << 52) |
+           ((uint64_t) (rvv_frsqrt7_table[idx] & 0x7F) << 45);
+}
+
+static uint64_t rvv64_u_rec7(riscv_t *rv, uint64_t bits)
+{
+    uint64_t sign = bits & FMASK64_SIGN;
+    uint32_t exp = (uint32_t) ((bits >> 52) & 0x7FF);
+    uint64_t sig = bits & FMASK64_FRAC;
+    int32_t norm_exp, out_exp;
+    uint64_t norm_sig, sig_field;
+
+    (void) rv;
+    if (exp == 0x7FF) {
+        if (sig) {
+            if (!(sig & FMASK64_QNAN))
+                softfloat_exceptionFlags |= softfloat_flag_invalid;
+            return RV_NAN64;
+        }
+        return sign;
+    }
+    if (!exp && !sig) {
+        softfloat_exceptionFlags |= softfloat_flag_infinite;
+        return sign | FMASK64_EXPN;
+    }
+    rvv64_normalize(sig, exp, &norm_exp, &norm_sig);
+    out_exp = 2 * 1023 - 1 - norm_exp;
+    if (out_exp > 2 * 1023 || out_exp < -1) {
+        softfloat_exceptionFlags |=
+            softfloat_flag_overflow | softfloat_flag_inexact;
+        if ((softfloat_roundingMode == softfloat_round_minMag) ||
+            (sign ? (softfloat_roundingMode == softfloat_round_max)
+                  : (softfloat_roundingMode == softfloat_round_min)))
+            return sign | UINT64_C(0x7FEFFFFFFFFFFFFF);
+        return sign | FMASK64_EXPN;
+    }
+    sig_field = (uint64_t) (rvv_frec7_table[(norm_sig >> 45) & 0x7F] & 0x7F)
+                << 45;
+    if (out_exp == 0 || out_exp == -1) {
+        sig_field = ((UINT64_C(1) << 52) | sig_field) >> (1 - out_exp);
+        out_exp = 0;
+    }
+    return sign | ((uint64_t) ((uint32_t) out_exp & 0x7FF) << 52) |
+           (sig_field & FMASK64_FRAC);
+}
+
+/* A float result under the usual mask and tail policies, with the rounding
+ * mode and exception flags handled around it.
+ */
+static int rvv64_fp_arith(riscv_t *rv,
+                          const rv_insn_t *ir,
+                          int form,
+                          rvv64_fn fn)
+{
+    if (!rvv64_group_ok(rv, ir->vd) || !rvv64_group_ok(rv, ir->vs2) ||
+        (form == RVV64_VV && !rvv64_group_ok(rv, ir->vs1)))
+        return RVV_EXEC_TRAP;
+    rvv_fp_begin_round(rv);
+    rvv64_exec_arith(rv, ir, ir->vd, form, fn);
+    set_fflag(rv);
+    return RVV_EXEC_DONE;
+}
+
+static int rvv64_fp_compare(riscv_t *rv,
+                            const rv_insn_t *ir,
+                            int form,
+                            rvv64_cmp_fn cmp)
+{
+    if (!rvv64_group_ok(rv, ir->vs2) ||
+        (form == RVV64_VV && !rvv64_group_ok(rv, ir->vs1)))
+        return RVV_EXEC_TRAP;
+    rvv_fp_begin_flags();
+    rvv64_exec_compare(rv, ir, form, cmp);
+    set_fflag(rv);
+    return RVV_EXEC_DONE;
+}
+
+/* A one-operand float operation: vs2 in, vd out. */
+static int rvv64_fp_unary(riscv_t *rv,
+                          const rv_insn_t *ir,
+                          rvv64_unary_fn fn,
+                          bool dynamic_round)
+{
+    uint32_t vlmax = rvv_vlmax(rv->csr_vtype);
+    uint8_t vma = (rv->csr_vtype >> 7) & 0x1;
+    uint8_t vta = (rv->csr_vtype >> 6) & 0x1;
+
+    if (!rvv64_group_ok(rv, ir->vd) || !rvv64_group_ok(rv, ir->vs2))
+        return RVV_EXEC_TRAP;
+    if (dynamic_round)
+        rvv_fp_begin_round(rv);
+    else
+        rvv_fp_begin_flags();
+    for (uint32_t elem = rv->csr_vstart; elem < rv->csr_vl; elem++) {
+        if (!rvv_mask_enabled_for_elem(rv, ir, elem)) {
+            if (vma)
+                rvv64_set(rv, ir->vd, elem, UINT64_MAX);
+            continue;
+        }
+        rvv64_set(rv, ir->vd, elem, fn(rv, rvv64_get(rv, ir->vs2, elem)));
+    }
+    if (rvv_tail_fill(rv, vta)) {
+        for (uint32_t elem = rv->csr_vl; elem < vlmax; elem++)
+            rvv64_set(rv, ir->vd, elem, UINT64_MAX);
+    }
+    rv->csr_vstart = 0;
+    set_fflag(rv);
+    return RVV_EXEC_DONE;
+}
+
+static int rvv64_fp_reduction(riscv_t *rv,
+                              const rv_insn_t *ir,
+                              rvv64_fn fn,
+                              bool rounds)
+{
+    if (rv->csr_vstart || !rvv64_group_ok(rv, ir->vs2))
+        return RVV_EXEC_TRAP;
+    if (rounds)
+        rvv_fp_begin_round(rv);
+    else
+        rvv_fp_begin_flags();
+    rvv64_exec_reduction(rv, ir, fn);
+    set_fflag(rv);
+    return RVV_EXEC_DONE;
+}
+
+static int rvv64_fp_merge(riscv_t *rv, const rv_insn_t *ir, bool move)
+{
+    if (!rvv64_group_ok(rv, ir->vd) || (!move && !rvv64_group_ok(rv, ir->vs2)))
+        return RVV_EXEC_TRAP;
+    rvv64_exec_merge(rv, ir, RVV64_VF, move);
+    return RVV_EXEC_DONE;
+}
+
+#define V64_FARITH(form, fn) \
+    return rvv64_fp_arith(rv, ir, RVV64_##form, rvv64_op_##fn)
+#define V64_FCMP(form, fn) \
+    return rvv64_fp_compare(rv, ir, RVV64_##form, rvv64_cmp_##fn)
+
+/* The float opcodes. Returns RVV_EXEC_CONT for any that are not. */
+static int rvv_exec_sew64_fp(riscv_t *rv, const rv_insn_t *ir)
+{
+    switch (ir->opcode) {
+    case rv_insn_vfadd_vv:
+        V64_FARITH(VV, fadd);
+    case rv_insn_vfadd_vf:
+        V64_FARITH(VF, fadd);
+    case rv_insn_vfsub_vv:
+        V64_FARITH(VV, fsub);
+    case rv_insn_vfsub_vf:
+        V64_FARITH(VF, fsub);
+    case rv_insn_vfrsub_vf:
+        V64_FARITH(VF, frsub);
+    case rv_insn_vfmul_vv:
+        V64_FARITH(VV, fmul);
+    case rv_insn_vfmul_vf:
+        V64_FARITH(VF, fmul);
+    case rv_insn_vfdiv_vv:
+        V64_FARITH(VV, fdiv);
+    case rv_insn_vfdiv_vf:
+        V64_FARITH(VF, fdiv);
+    case rv_insn_vfrdiv_vf:
+        V64_FARITH(VF, frdiv);
+    case rv_insn_vfmin_vv:
+        V64_FARITH(VV, fmin);
+    case rv_insn_vfmin_vf:
+        V64_FARITH(VF, fmin);
+    case rv_insn_vfmax_vv:
+        V64_FARITH(VV, fmax);
+    case rv_insn_vfmax_vf:
+        V64_FARITH(VF, fmax);
+    case rv_insn_vfsgnj_vv:
+        V64_FARITH(VV, fsgnj);
+    case rv_insn_vfsgnj_vf:
+        V64_FARITH(VF, fsgnj);
+    case rv_insn_vfsgnjn_vv:
+        V64_FARITH(VV, fsgnjn);
+    case rv_insn_vfsgnjn_vf:
+        V64_FARITH(VF, fsgnjn);
+    case rv_insn_vfsgnjx_vv:
+        V64_FARITH(VV, fsgnjx);
+    case rv_insn_vfsgnjx_vf:
+        V64_FARITH(VF, fsgnjx);
+    case rv_insn_vfmacc_vv:
+        V64_FARITH(VV, fmacc);
+    case rv_insn_vfmacc_vf:
+        V64_FARITH(VF, fmacc);
+    case rv_insn_vfnmacc_vv:
+        V64_FARITH(VV, fnmacc);
+    case rv_insn_vfnmacc_vf:
+        V64_FARITH(VF, fnmacc);
+    case rv_insn_vfmsac_vv:
+        V64_FARITH(VV, fmsac);
+    case rv_insn_vfmsac_vf:
+        V64_FARITH(VF, fmsac);
+    case rv_insn_vfnmsac_vv:
+        V64_FARITH(VV, fnmsac);
+    case rv_insn_vfnmsac_vf:
+        V64_FARITH(VF, fnmsac);
+    case rv_insn_vfmadd_vv:
+        V64_FARITH(VV, fmadd);
+    case rv_insn_vfmadd_vf:
+        V64_FARITH(VF, fmadd);
+    case rv_insn_vfnmadd_vv:
+        V64_FARITH(VV, fnmadd);
+    case rv_insn_vfnmadd_vf:
+        V64_FARITH(VF, fnmadd);
+    case rv_insn_vfmsub_vv:
+        V64_FARITH(VV, fmsub);
+    case rv_insn_vfmsub_vf:
+        V64_FARITH(VF, fmsub);
+    case rv_insn_vfnmsub_vv:
+        V64_FARITH(VV, fnmsub);
+    case rv_insn_vfnmsub_vf:
+        V64_FARITH(VF, fnmsub);
+
+    case rv_insn_vmfeq_vv:
+        V64_FCMP(VV, feq);
+    case rv_insn_vmfeq_vf:
+        V64_FCMP(VF, feq);
+    case rv_insn_vmfne_vv:
+        V64_FCMP(VV, fne);
+    case rv_insn_vmfne_vf:
+        V64_FCMP(VF, fne);
+    case rv_insn_vmflt_vv:
+        V64_FCMP(VV, flt);
+    case rv_insn_vmflt_vf:
+        V64_FCMP(VF, flt);
+    case rv_insn_vmfle_vv:
+        V64_FCMP(VV, fle);
+    case rv_insn_vmfle_vf:
+        V64_FCMP(VF, fle);
+    case rv_insn_vmfgt_vf:
+        V64_FCMP(VF, fgt);
+    case rv_insn_vmfge_vf:
+        V64_FCMP(VF, fge);
+
+    case rv_insn_vfsqrt_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_sqrt, true);
+    case rv_insn_vfrsqrt7_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_rsqrt7, false);
+    case rv_insn_vfrec7_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_rec7, true);
+    case rv_insn_vfclass_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_class, false);
+    case rv_insn_vfcvt_xu_f_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_cvt_xu, true);
+    case rv_insn_vfcvt_x_f_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_cvt_x, true);
+    case rv_insn_vfcvt_rtz_xu_f_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_cvt_rtz_xu, false);
+    case rv_insn_vfcvt_rtz_x_f_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_cvt_rtz_x, false);
+    case rv_insn_vfcvt_f_xu_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_cvt_f_xu, true);
+    case rv_insn_vfcvt_f_x_v:
+        return rvv64_fp_unary(rv, ir, rvv64_u_cvt_f_x, true);
+
+    case rv_insn_vfmerge_vfm:
+        return rvv64_fp_merge(rv, ir, false);
+    case rv_insn_vfmv_v_f:
+        return rvv64_fp_merge(rv, ir, true);
+    case rv_insn_vfmv_f_s:
+        f64_set(rv, ir->rd, rvv64_f(rvv64_get(rv, ir->vs2, 0)));
+        rv->csr_vstart = 0;
+        return RVV_EXEC_DONE;
+    case rv_insn_vfmv_s_f:
+        if (rv->csr_vstart < rv->csr_vl)
+            rvv64_set(rv, ir->vd, 0, f64_reg(rv, ir->rs1).v);
+        rv->csr_vstart = 0;
+        return RVV_EXEC_DONE;
+
+    case rv_insn_vfslide1up_vf:
+        return rvv64_slide(rv, ir, true, true, 1, f64_reg(rv, ir->rs1).v);
+    case rv_insn_vfslide1down_vf:
+        return rvv64_slide(rv, ir, false, true, 1, f64_reg(rv, ir->rs1).v);
+
+    case rv_insn_vfredusum_vs:
+    case rv_insn_vfredosum_vs:
+        return rvv64_fp_reduction(rv, ir, rvv64_op_fadd, true);
+    case rv_insn_vfredmin_vs:
+        return rvv64_fp_reduction(rv, ir, rvv64_op_fmin, false);
+    case rv_insn_vfredmax_vs:
+        return rvv64_fp_reduction(rv, ir, rvv64_op_fmax, false);
+    default:
+        return RVV_EXEC_CONT;
+    }
+}
+#endif
 
 #define V64_ARITH(form, fn) \
     return rvv64_arith(rv, ir, RVV64_##form, rvv64_op_##fn)
@@ -973,17 +1471,19 @@ static int rvv_exec_sew64(riscv_t *rv, const rv_insn_t *ir)
         return rvv64_reduction(rv, ir, rvv64_op_max);
 
     case rv_insn_vslideup_vx:
-        return rvv64_slide(rv, ir, true, false, rv->X[ir->rs1]);
+        return rvv64_slide(rv, ir, true, false, rv->X[ir->rs1], 0);
     case rv_insn_vslideup_vi:
-        return rvv64_slide(rv, ir, true, false, (uint32_t) ir->imm & 0x1f);
+        return rvv64_slide(rv, ir, true, false, (uint32_t) ir->imm & 0x1f, 0);
     case rv_insn_vslidedown_vx:
-        return rvv64_slide(rv, ir, false, false, rv->X[ir->rs1]);
+        return rvv64_slide(rv, ir, false, false, rv->X[ir->rs1], 0);
     case rv_insn_vslidedown_vi:
-        return rvv64_slide(rv, ir, false, false, (uint32_t) ir->imm & 0x1f);
+        return rvv64_slide(rv, ir, false, false, (uint32_t) ir->imm & 0x1f, 0);
     case rv_insn_vslide1up_vx:
-        return rvv64_slide(rv, ir, true, true, 1);
+        return rvv64_slide(rv, ir, true, true, 1,
+                           (uint64_t) (int64_t) (int32_t) rv->X[ir->rs1]);
     case rv_insn_vslide1down_vx:
-        return rvv64_slide(rv, ir, false, true, 1);
+        return rvv64_slide(rv, ir, false, true, 1,
+                           (uint64_t) (int64_t) (int32_t) rv->X[ir->rs1]);
 
     case rv_insn_vrgather_vv:
         return rvv64_gather(rv, ir, RVV64_VV, 64);
@@ -1039,6 +1539,10 @@ static int rvv_exec_sew64(riscv_t *rv, const rv_insn_t *ir)
         rv->csr_vstart = 0;
         return RVV_EXEC_DONE;
     default:
+#if RV32_HAS(EXT_D)
+        return rvv_exec_sew64_fp(rv, ir);
+#else
         return RVV_EXEC_CONT;
+#endif
     }
 }

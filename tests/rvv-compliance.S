@@ -65,6 +65,26 @@ seg_src:                         /* 0..47 for the nf=3 segment load */
     .byte 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47
 zero_mem:
     .fill 16, 1, 0
+f64a:                            /* e64 doubles: 1.0, 2.0 */
+    .dword 0x3ff0000000000000, 0x4000000000000000
+f64b:                            /* 3.0, 0.5 */
+    .dword 0x4008000000000000, 0x3fe0000000000000
+f64c:                            /* 4.0, 9.0 */
+    .dword 0x4010000000000000, 0x4022000000000000
+f64d:                            /* 2.5, -2.5 */
+    .dword 0x4004000000000000, 0xc004000000000000
+f64e:                            /* -infinity, +0 */
+    .dword 0xfff0000000000000, 0x0000000000000000
+i64a:                            /* e64 integers: -1, 3 */
+    .dword 0xffffffffffffffff, 0x0000000000000003
+d_ten:                           /* 10.0 */
+    .dword 0x4024000000000000
+d_two:                           /* 2.0 */
+    .dword 0x4000000000000000
+d_unboxed:                       /* 1.0f, not NaN-boxed */
+    .dword 0x000000003f800000
+d_one32:                         /* 1.0f twice as e32 lanes */
+    .word 0x3f800000, 0x3f800000, 0x3f800000, 0x3f800000
 w64a:                            /* e64: 0x00000000ffffffff, INT64_MIN */
     .word 0xffffffff, 0x00000000, 0x00000000, 0x80000000
 w64min:                          /* e64: INT64_MIN twice */
@@ -463,6 +483,150 @@ _start:
     vsetvli t1, zero, e64, m1, ta, ma
     csrr t1, vl
     check 63, t1, 2
+
+    /* SEW=64 floating point. Elements are binary64 and a .vf scalar is a full
+     * 64-bit float register.
+     */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, f64a
+    ldv  v24, f64b
+    vfadd.vv v8, v16, v24                /* 1+3, 2+0.5 */
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 64, t1, 0x40100000
+    lw   t1, 12(a2)
+    check 65, t1, 0x40040000
+    vsetivli zero, 2, e64, m1, tu, mu
+    la   a1, d_two
+    fld  fa0, 0(a1)
+    vfmul.vf v8, v16, fa0                /* 1*2, 2*2 */
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 66, t1, 0x40000000
+    lw   t1, 12(a2)
+    check 67, t1, 0x40100000
+
+    /* A .vf subtraction against a loaded 64-bit scalar: 1-2 and 2-2. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    la   a1, d_two
+    fld  fa1, 0(a1)
+    vfsub.vf v8, v16, fa1                /* -1.0 and 0.0 */
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 68, t1, 0xbff00000
+    lw   t1, 12(a2)
+    check 69, t1, 0
+
+    /* vfsqrt, vfclass, and the integer conversions read and write 64 bits. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, f64c
+    vfsqrt.v v8, v16                     /* sqrt(4), sqrt(9) */
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 70, t1, 0x40000000
+    lw   t1, 12(a2)
+    check 71, t1, 0x40080000
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, f64d
+    fsrmi t0, 3                          /* round up */
+    vfcvt.x.f.v v8, v16                  /* 2.5 -> 3, -2.5 -> -2 */
+    fsrmi t0, 0
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 72, t1, 3
+    lw   t1, 8(a2)
+    check 73, t1, 0xfffffffe
+    lw   t1, 12(a2)
+    check 74, t1, 0xffffffff
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, i64a
+    vfcvt.f.x.v v8, v16                  /* -1, 3 */
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 75, t1, 0xbff00000
+    lw   t1, 12(a2)
+    check 76, t1, 0x40080000
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, f64e
+    vfclass.v v8, v16
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 77, t1, 0x001
+    lw   t1, 8(a2)
+    check 78, t1, 0x010
+
+    /* vfmv.f.s and vfmv.s.f move all 64 bits. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, f64b
+    vfmv.f.s fa2, v16
+    fsd  fa2, 0(a2)
+    lw   t1, 4(a2)
+    check 79, t1, 0x40080000
+    vfmv.s.f v8, fa2
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 80, t1, 0x40080000
+
+    /* An ordered sum of 1.0 and 2.0 onto 10.0. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, f64a
+    la   a1, d_ten
+    fld  fa3, 0(a1)
+    vfmv.s.f v24, fa3
+    vfredosum.vs v8, v16, v24
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 81, t1, 0x402a0000             /* 13.0 */
+
+    /* A compare writes a mask: 1.0 < 3.0 and not 2.0 < 0.5. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, f64a
+    ldv  v24, f64b
+    vmflt.vv v8, v16, v24
+    vcpop.m t1, v8
+    check 82, t1, 1
+    vfirst.m t1, v8
+    check 83, t1, 0
+
+    /* A single-precision .vf scalar must be NaN-boxed: this one is not, so
+     * it reads as the canonical NaN and the sum is that NaN.
+     */
+    vsetivli zero, 4, e32, m1, tu, mu
+    ldv  v16, d_one32
+    la   a1, d_unboxed
+    fld  fa4, 0(a1)
+    vfadd.vf v8, v16, fa4
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 84, t1, 0x7fc00000
+    li   t0, 0x3f800000
+    fmv.w.x fa5, t0                      /* boxed 1.0f */
+    vfadd.vf v8, v16, fa5
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 85, t1, 0x40000000             /* 2.0f */
+
+    /* A negated multiply-add is single-width: it needs no 2 * SEW element, so
+     * it is legal at SEW=64. -(1.0 * 3.0) - 1.0 = -4.0.
+     */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v8, f64a
+    ldv  v16, f64a
+    ldv  v24, f64b
+    vfnmacc.vv v8, v16, v24
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 86, t1, 0xc0100000
 
     li   a0, 1
     la   a1, ok_msg

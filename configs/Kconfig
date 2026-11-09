@@ -187,11 +187,10 @@ config EXT_V
       16, 32 or 64 bits (ELEN=64): vector configuration, unit-stride,
       strided, indexed, segment, whole-register and fault-only-first
       memory accesses, integer, fixed-point, mask, reduction and
-      permutation operations, and single-precision floating point
-      including the widening and narrowing conversions (computed with
-      Berkeley SoftFloat).
-      Not implemented: double-precision vector arithmetic, and
-      Zvfh/Zvfhmin.
+      permutation operations, and single- and double-precision floating
+      point including the widening and narrowing conversions (computed
+      with Berkeley SoftFloat).
+      Not implemented: Zvfh/Zvfhmin.
       Vector load/store shares its opcode with load_fp/store_fp, and
       double-precision vector arithmetic needs 64-bit scalar floating
       point, so enabling V automatically selects F and D. Advertised in

@@ -2,7 +2,9 @@
 
 `make config` enables the RISC-V "V" extension, version 1.0, as `EXT_V`.
 Selecting it also selects `EXT_F`, because vector loads and stores share
-their opcode space with the floating-point ones.
+their opcode space with the floating-point ones, and `EXT_D`, because
+double-precision vector operations move 64-bit values through the float
+registers.
 
 ## Scope
 
@@ -17,20 +19,21 @@ Implemented:
   and mask loads and stores
 * integer, fixed-point, multiply-accumulate, widening, narrowing, compare,
   mask, reduction, and permutation operations
-* single-precision floating point, including the widening and narrowing
-  conversions, computed with Berkeley SoftFloat
+* single- and double-precision floating point, including the widening and
+  narrowing conversions, computed with Berkeley SoftFloat; a single-precision
+  `.vf` scalar must be NaN-boxed in its float register, or it reads as the
+  canonical NaN
 * masking and the tail-agnostic and mask-agnostic policies; agnostic
   elements are filled with ones
 * `misa.V`
 
 At SEW=64 the scalar operand of a `.vx` form is sign-extended from XLEN=32,
-`vmv.x.s` returns the low 32 bits, and the SEW=64 element operations live in
-`src/rv32_v_sew64.inc`; the shared prologue runs them before the handlers for
-narrower elements.
+`vmv.x.s` returns the low 32 bits, and the SEW=64 element operations, floating
+point included, live in `src/rv32_v_sew64.inc`; the shared prologue runs them
+before the handlers for narrower elements.
 
 Not implemented:
 
-* vector double-precision arithmetic, which needs the D extension
 * `Zvfh` and `Zvfhmin`
 
 `VLEN` is a power of two from 128 to 65536, set by `CONFIG_VLEN` in

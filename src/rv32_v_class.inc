@@ -294,9 +294,13 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vfmul_vf:
     case rv_insn_vfrsub_vf:
     case rv_insn_vfmadd_vf:
+    case rv_insn_vfnmadd_vf:
     case rv_insn_vfmsub_vf:
+    case rv_insn_vfnmsub_vf:
     case rv_insn_vfmacc_vf:
+    case rv_insn_vfnmacc_vf:
     case rv_insn_vfmsac_vf:
+    case rv_insn_vfnmsac_vf:
         return RVC_VD | RVC_VS2;
     case rv_insn_vredsum_vs:
     case rv_insn_vredand_vs:
@@ -363,9 +367,13 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vfdiv_vv:
     case rv_insn_vfmul_vv:
     case rv_insn_vfmadd_vv:
+    case rv_insn_vfnmadd_vv:
     case rv_insn_vfmsub_vv:
+    case rv_insn_vfnmsub_vv:
     case rv_insn_vfmacc_vv:
+    case rv_insn_vfnmacc_vv:
     case rv_insn_vfmsac_vv:
+    case rv_insn_vfnmsac_vv:
         return RVC_VD | RVC_VS1 | RVC_VS2 | RVC_VS1SRC;
     case rv_insn_vmadc_vi:
     case rv_insn_vmadc_vx:
@@ -584,10 +592,6 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vwmulu_vx:
     case rv_insn_vwmulsu_vx:
     case rv_insn_vwmul_vx:
-    case rv_insn_vfnmadd_vf:
-    case rv_insn_vfnmsub_vf:
-    case rv_insn_vfnmacc_vf:
-    case rv_insn_vfnmsac_vf:
     case rv_insn_vfwadd_vf:
     case rv_insn_vfwsub_vf:
     case rv_insn_vfwadd_wf:
@@ -601,10 +605,6 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vwmulu_vv:
     case rv_insn_vwmulsu_vv:
     case rv_insn_vwmul_vv:
-    case rv_insn_vfnmadd_vv:
-    case rv_insn_vfnmsub_vv:
-    case rv_insn_vfnmacc_vv:
-    case rv_insn_vfnmsac_vv:
     case rv_insn_vfwadd_vv:
     case rv_insn_vfwsub_vv:
     case rv_insn_vfwmul_vv:

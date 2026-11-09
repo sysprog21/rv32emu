@@ -222,6 +222,10 @@ _start:
     must_trap 72, vwredsum.vs v8, v2, v3
     must_not_trap 73, vadd.vv v8, v2, v3
     must_not_trap 74, vzext.vf8 v8, v2
+    /* The widening float forms need 128-bit elements as well. */
+    must_trap 75, vfwadd.vv v8, v2, v3
+    must_trap 76, vfncvt.f.f.w v8, v4
+    must_not_trap 77, vfadd.vv v8, v2, v3
 
     /* vfslide1up cannot overlap its source, and a three-field segment is
      * legal.

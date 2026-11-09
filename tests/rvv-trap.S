@@ -212,6 +212,17 @@ _start:
     must_trap 67, vsoxei8.v v8, (a1), v0, v0.t
     must_not_trap 68, vluxei8.v v8, (a1), v0
 
+    /* Widening and narrowing need an element of 2*SEW, so they are reserved
+     * at SEW=64.
+     */
+    vsetvli t0, a0, e64, m1, tu, mu
+    must_trap 69, vwadd.vv v8, v2, v3
+    must_trap 70, vnsrl.wi v8, v4, 3
+    must_trap 71, vwmacc.vx v8, a1, v3
+    must_trap 72, vwredsum.vs v8, v2, v3
+    must_not_trap 73, vadd.vv v8, v2, v3
+    must_not_trap 74, vzext.vf8 v8, v2
+
     /* vfslide1up cannot overlap its source, and a three-field segment is
      * legal.
      */

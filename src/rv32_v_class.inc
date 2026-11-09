@@ -14,6 +14,7 @@
 #define RVC_VSTART0 (1U << 10)
 #define RVC_WACC (1U << 11)
 #define RVC_VS3 (1U << 12)
+#define RVC_WIDEN (1U << 13)
 
 static inline uint32_t rvv_operand_class(uint32_t opcode)
 {
@@ -244,21 +245,6 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vfcvt_f_x_v:
     case rv_insn_vfcvt_rtz_xu_f_v:
     case rv_insn_vfcvt_rtz_x_f_v:
-    case rv_insn_vfwcvt_xu_f_v:
-    case rv_insn_vfwcvt_x_f_v:
-    case rv_insn_vfwcvt_f_xu_v:
-    case rv_insn_vfwcvt_f_x_v:
-    case rv_insn_vfwcvt_f_f_v:
-    case rv_insn_vfwcvt_rtz_xu_f_v:
-    case rv_insn_vfwcvt_rtz_x_f_v:
-    case rv_insn_vfncvt_xu_f_w:
-    case rv_insn_vfncvt_x_f_w:
-    case rv_insn_vfncvt_f_xu_w:
-    case rv_insn_vfncvt_f_x_w:
-    case rv_insn_vfncvt_f_f_w:
-    case rv_insn_vfncvt_rod_f_f_w:
-    case rv_insn_vfncvt_rtz_xu_f_w:
-    case rv_insn_vfncvt_rtz_x_f_w:
     case rv_insn_vfsqrt_v:
     case rv_insn_vfrsqrt7_v:
     case rv_insn_vfrec7_v:
@@ -292,27 +278,8 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vssra_vi:
     case rv_insn_vssra_vx:
     case rv_insn_vnmsub_vx:
-    case rv_insn_vnsrl_wi:
-    case rv_insn_vnsrl_wx:
-    case rv_insn_vnsra_wi:
-    case rv_insn_vnsra_wx:
     case rv_insn_vmacc_vx:
-    case rv_insn_vnclipu_wi:
-    case rv_insn_vnclipu_wx:
-    case rv_insn_vnclip_wi:
-    case rv_insn_vnclip_wx:
     case rv_insn_vnmsac_vx:
-    case rv_insn_vwaddu_vx:
-    case rv_insn_vwadd_vx:
-    case rv_insn_vwsubu_vx:
-    case rv_insn_vwsub_vx:
-    case rv_insn_vwaddu_wx:
-    case rv_insn_vwadd_wx:
-    case rv_insn_vwsubu_wx:
-    case rv_insn_vwsub_wx:
-    case rv_insn_vwmulu_vx:
-    case rv_insn_vwmulsu_vx:
-    case rv_insn_vwmul_vx:
     case rv_insn_vfadd_vf:
     case rv_insn_vfsub_vf:
     case rv_insn_vfmin_vf:
@@ -327,18 +294,9 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vfmul_vf:
     case rv_insn_vfrsub_vf:
     case rv_insn_vfmadd_vf:
-    case rv_insn_vfnmadd_vf:
     case rv_insn_vfmsub_vf:
-    case rv_insn_vfnmsub_vf:
     case rv_insn_vfmacc_vf:
-    case rv_insn_vfnmacc_vf:
     case rv_insn_vfmsac_vf:
-    case rv_insn_vfnmsac_vf:
-    case rv_insn_vfwadd_vf:
-    case rv_insn_vfwsub_vf:
-    case rv_insn_vfwadd_wf:
-    case rv_insn_vfwsub_wf:
-    case rv_insn_vfwmul_vf:
         return RVC_VD | RVC_VS2;
     case rv_insn_vredsum_vs:
     case rv_insn_vredand_vs:
@@ -395,13 +353,6 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vnmsub_vv:
     case rv_insn_vmacc_vv:
     case rv_insn_vnmsac_vv:
-    case rv_insn_vwaddu_vv:
-    case rv_insn_vwadd_vv:
-    case rv_insn_vwsubu_vv:
-    case rv_insn_vwsub_vv:
-    case rv_insn_vwmulu_vv:
-    case rv_insn_vwmulsu_vv:
-    case rv_insn_vwmul_vv:
     case rv_insn_vfadd_vv:
     case rv_insn_vfsub_vv:
     case rv_insn_vfmin_vv:
@@ -412,16 +363,9 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vfdiv_vv:
     case rv_insn_vfmul_vv:
     case rv_insn_vfmadd_vv:
-    case rv_insn_vfnmadd_vv:
     case rv_insn_vfmsub_vv:
-    case rv_insn_vfnmsub_vv:
     case rv_insn_vfmacc_vv:
-    case rv_insn_vfnmacc_vv:
     case rv_insn_vfmsac_vv:
-    case rv_insn_vfnmsac_vv:
-    case rv_insn_vfwadd_vv:
-    case rv_insn_vfwsub_vv:
-    case rv_insn_vfwmul_vv:
         return RVC_VD | RVC_VS1 | RVC_VS2 | RVC_VS1SRC;
     case rv_insn_vmadc_vi:
     case rv_insn_vmadc_vx:
@@ -460,22 +404,6 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vmflt_vv:
     case rv_insn_vmfne_vv:
         return RVC_VS1 | RVC_VS2 | RVC_VS1SRC | RVC_CMP;
-    case rv_insn_vnsrl_wv:
-    case rv_insn_vnsra_wv:
-    case rv_insn_vnclipu_wv:
-    case rv_insn_vnclip_wv:
-    case rv_insn_vwaddu_wv:
-    case rv_insn_vwadd_wv:
-    case rv_insn_vwsubu_wv:
-    case rv_insn_vwsub_wv:
-    case rv_insn_vfwadd_wv:
-    case rv_insn_vfwsub_wv:
-        return RVC_VD | RVC_VS1 | RVC_VS2 | RVC_VS1SRC | RVC_WV;
-    case rv_insn_vwredsumu_vs:
-    case rv_insn_vwredsum_vs:
-    case rv_insn_vfwredusum_vs:
-    case rv_insn_vfwredosum_vs:
-        return RVC_VS1 | RVC_VS2 | RVC_REDW;
     case rv_insn_vfslide1up_vf:
         return RVC_VD | RVC_VS2 | RVC_SLIDE1UP;
     case rv_insn_vcpop_m:
@@ -487,23 +415,6 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
         return RVC_MSKGEN | RVC_RDDEST | RVC_VSTART0;
     case rv_insn_viota_m:
         return RVC_VD | RVC_MSKGEN | RVC_RDDEST | RVC_VSTART0;
-    case rv_insn_vwmaccu_vx:
-    case rv_insn_vwmacc_vx:
-    case rv_insn_vwmaccus_vx:
-    case rv_insn_vwmaccsu_vx:
-    case rv_insn_vfwmacc_vf:
-    case rv_insn_vfwnmacc_vf:
-    case rv_insn_vfwmsac_vf:
-    case rv_insn_vfwnmsac_vf:
-        return RVC_VD | RVC_VS2 | RVC_WACC;
-    case rv_insn_vwmaccu_vv:
-    case rv_insn_vwmacc_vv:
-    case rv_insn_vwmaccsu_vv:
-    case rv_insn_vfwmacc_vv:
-    case rv_insn_vfwnmacc_vv:
-    case rv_insn_vfwmsac_vv:
-    case rv_insn_vfwnmsac_vv:
-        return RVC_VD | RVC_VS1 | RVC_VS2 | RVC_VS1SRC | RVC_WACC;
     case rv_insn_vse8_v:
     case rv_insn_vsseg2e8_v:
     case rv_insn_vsseg3e8_v:
@@ -639,6 +550,98 @@ static inline uint32_t rvv_operand_class(uint32_t opcode)
     case rv_insn_vsoxseg7ei64_v:
     case rv_insn_vsoxseg8ei64_v:
         return RVC_VS2 | RVC_VS3;
+    case rv_insn_vfwcvt_xu_f_v:
+    case rv_insn_vfwcvt_x_f_v:
+    case rv_insn_vfwcvt_f_xu_v:
+    case rv_insn_vfwcvt_f_x_v:
+    case rv_insn_vfwcvt_f_f_v:
+    case rv_insn_vfwcvt_rtz_xu_f_v:
+    case rv_insn_vfwcvt_rtz_x_f_v:
+    case rv_insn_vfncvt_xu_f_w:
+    case rv_insn_vfncvt_x_f_w:
+    case rv_insn_vfncvt_f_xu_w:
+    case rv_insn_vfncvt_f_x_w:
+    case rv_insn_vfncvt_f_f_w:
+    case rv_insn_vfncvt_rod_f_f_w:
+    case rv_insn_vfncvt_rtz_xu_f_w:
+    case rv_insn_vfncvt_rtz_x_f_w:
+    case rv_insn_vnsrl_wi:
+    case rv_insn_vnsrl_wx:
+    case rv_insn_vnsra_wi:
+    case rv_insn_vnsra_wx:
+    case rv_insn_vnclipu_wi:
+    case rv_insn_vnclipu_wx:
+    case rv_insn_vnclip_wi:
+    case rv_insn_vnclip_wx:
+    case rv_insn_vwaddu_vx:
+    case rv_insn_vwadd_vx:
+    case rv_insn_vwsubu_vx:
+    case rv_insn_vwsub_vx:
+    case rv_insn_vwaddu_wx:
+    case rv_insn_vwadd_wx:
+    case rv_insn_vwsubu_wx:
+    case rv_insn_vwsub_wx:
+    case rv_insn_vwmulu_vx:
+    case rv_insn_vwmulsu_vx:
+    case rv_insn_vwmul_vx:
+    case rv_insn_vfnmadd_vf:
+    case rv_insn_vfnmsub_vf:
+    case rv_insn_vfnmacc_vf:
+    case rv_insn_vfnmsac_vf:
+    case rv_insn_vfwadd_vf:
+    case rv_insn_vfwsub_vf:
+    case rv_insn_vfwadd_wf:
+    case rv_insn_vfwsub_wf:
+    case rv_insn_vfwmul_vf:
+        return RVC_VD | RVC_VS2 | RVC_WIDEN;
+    case rv_insn_vwaddu_vv:
+    case rv_insn_vwadd_vv:
+    case rv_insn_vwsubu_vv:
+    case rv_insn_vwsub_vv:
+    case rv_insn_vwmulu_vv:
+    case rv_insn_vwmulsu_vv:
+    case rv_insn_vwmul_vv:
+    case rv_insn_vfnmadd_vv:
+    case rv_insn_vfnmsub_vv:
+    case rv_insn_vfnmacc_vv:
+    case rv_insn_vfnmsac_vv:
+    case rv_insn_vfwadd_vv:
+    case rv_insn_vfwsub_vv:
+    case rv_insn_vfwmul_vv:
+        return RVC_VD | RVC_VS1 | RVC_VS2 | RVC_VS1SRC | RVC_WIDEN;
+    case rv_insn_vnsrl_wv:
+    case rv_insn_vnsra_wv:
+    case rv_insn_vnclipu_wv:
+    case rv_insn_vnclip_wv:
+    case rv_insn_vwaddu_wv:
+    case rv_insn_vwadd_wv:
+    case rv_insn_vwsubu_wv:
+    case rv_insn_vwsub_wv:
+    case rv_insn_vfwadd_wv:
+    case rv_insn_vfwsub_wv:
+        return RVC_VD | RVC_VS1 | RVC_VS2 | RVC_VS1SRC | RVC_WV | RVC_WIDEN;
+    case rv_insn_vwredsumu_vs:
+    case rv_insn_vwredsum_vs:
+    case rv_insn_vfwredusum_vs:
+    case rv_insn_vfwredosum_vs:
+        return RVC_VS1 | RVC_VS2 | RVC_REDW | RVC_WIDEN;
+    case rv_insn_vwmaccu_vx:
+    case rv_insn_vwmacc_vx:
+    case rv_insn_vwmaccus_vx:
+    case rv_insn_vwmaccsu_vx:
+    case rv_insn_vfwmacc_vf:
+    case rv_insn_vfwnmacc_vf:
+    case rv_insn_vfwmsac_vf:
+    case rv_insn_vfwnmsac_vf:
+        return RVC_VD | RVC_VS2 | RVC_WACC | RVC_WIDEN;
+    case rv_insn_vwmaccu_vv:
+    case rv_insn_vwmacc_vv:
+    case rv_insn_vwmaccsu_vv:
+    case rv_insn_vfwmacc_vv:
+    case rv_insn_vfwnmacc_vv:
+    case rv_insn_vfwmsac_vv:
+    case rv_insn_vfwnmsac_vv:
+        return RVC_VD | RVC_VS1 | RVC_VS2 | RVC_VS1SRC | RVC_WACC | RVC_WIDEN;
     default:
         return 0;
     }

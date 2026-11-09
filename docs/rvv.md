@@ -8,6 +8,9 @@ their opcode space with the floating-point ones.
 
 Implemented:
 
+* element widths of 8, 16, 32, and 64 bits (ELEN=64); the widening and
+  narrowing forms are reserved at SEW=64, where they would need 128-bit
+  elements
 * configuration (`vsetvli`, `vsetivli`, `vsetvl`) and the `vl`, `vtype`,
   `vlenb`, `vstart`, `vxrm`, `vxsat`, and `vcsr` registers
 * unit-stride, strided, indexed, segment, fault-only-first, whole-register,
@@ -20,13 +23,14 @@ Implemented:
   elements are filled with ones
 * `misa.V`
 
+At SEW=64 the scalar operand of a `.vx` form is sign-extended from XLEN=32,
+`vmv.x.s` returns the low 32 bits, and the SEW=64 element operations live in
+`src/rv32_v_sew64.inc`; the shared prologue runs them before the handlers for
+narrower elements.
+
 Not implemented:
 
-* `SEW=64`. `vsetvli` rejects it with `vill`, so this is an ELEN=32 machine,
-  comparable to `Zve32f`. Widening results and 64-bit load and store element
-  widths are supported, and fractional LMUL follows the ELEN=64 limit
-  (`LMUL >= SEW/64`).
-* vector double-precision arithmetic, because the base ISA has no D
+* vector double-precision arithmetic, which needs the D extension
 * `Zvfh` and `Zvfhmin`
 
 `VLEN` is a power of two from 128 to 65536, set by `CONFIG_VLEN` in

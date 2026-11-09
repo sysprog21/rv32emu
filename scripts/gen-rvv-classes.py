@@ -27,9 +27,22 @@ with open(sys.argv[1]) as desc:
         ):
             continue
         rows.append((t[0], t[1:]))
-VD1, VS11, VS21, VS1S, CMP, MSK, WV, REDW, S1UP, RDD, VST0, WACC, VS31 = [
-    1 << i for i in range(13)
-]
+(
+    VD1,
+    VS11,
+    VS21,
+    VS1S,
+    CMP,
+    MSK,
+    WV,
+    REDW,
+    S1UP,
+    RDD,
+    VST0,
+    WACC,
+    VS31,
+    WIDEN,
+) = [1 << i for i in range(14)]
 NAMES = [
     "RVC_VD",
     "RVC_VS1",
@@ -44,10 +57,23 @@ NAMES = [
     "RVC_VSTART0",
     "RVC_WACC",
     "RVC_VS3",
+    "RVC_WIDEN",
 ]
 
 
 def classify(n, ops):
+    f = classify_roles(n, ops)
+    # A form that widens or narrows needs an element 2*SEW wide.
+    if f and re.match(
+        r"^(vw(add|addu|sub|subu|mul|mulu|mulsu|macc|maccu|maccsu|maccus|"
+        r"redsum|redsumu)|vfw\w+|vn(srl|sra|clip|clipu)|vfn\w+)_",
+        n,
+    ):
+        f |= WIDEN
+    return f
+
+
+def classify_roles(n, ops):
     # Every vector load writes data at vd, so a masked one cannot target v0.
     # Segment loads, whole-register loads, and vlm.v are covered too: the
     # latter two are unmasked and never match.

@@ -210,7 +210,7 @@ $ make ENABLE_SDL=0       # Build without SDL support
 * `ENABLE_EXT_A`: Standard Extension for Atomic Instructions
 * `ENABLE_EXT_F`: Standard Extension for Single-Precision Floating Point Instructions
 * `ENABLE_EXT_C`: Standard Extension for Compressed Instructions (RV32C.D excluded)
-* `EXT_V` (Kconfig only — no `ENABLE_EXT_V` shim): Standard Extension for Vector Instructions, version 1.0, with SEW of 8, 16 or 32 bits (ELEN=32, comparable to Zve32f) and single-precision floating point; `misa.V` is set. SEW=64, vector double-precision arithmetic, and Zvfh/Zvfhmin are not implemented. Selecting V auto-selects F. Enable via `make config`.
+* `EXT_V` (Kconfig only — no `ENABLE_EXT_V` shim): Standard Extension for Vector Instructions, version 1.0, with SEW of 8, 16, 32 or 64 bits (ELEN=64) and single-precision floating point; `misa.V` is set. Vector double-precision arithmetic and Zvfh/Zvfhmin are not implemented. Selecting V auto-selects F. Enable via `make config`.
 * `ENABLE_Zba`: Standard Extension for Address Generation Instructions
 * `ENABLE_Zbb`: Standard Extension for Basic Bit-Manipulation Instructions
 * `ENABLE_Zbc`: Standard Extension for Carry-Less Multiplication Instructions

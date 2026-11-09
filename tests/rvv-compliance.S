@@ -65,6 +65,18 @@ seg_src:                         /* 0..47 for the nf=3 segment load */
     .byte 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47
 zero_mem:
     .fill 16, 1, 0
+w64a:                            /* e64: 0x00000000ffffffff, INT64_MIN */
+    .word 0xffffffff, 0x00000000, 0x00000000, 0x80000000
+w64min:                          /* e64: INT64_MIN twice */
+    .word 0x00000000, 0x80000000, 0x00000000, 0x80000000
+w64two:                          /* e64: 2, 2 */
+    .word 2, 0, 2, 0
+w64one:                          /* e64: 1, 1 */
+    .word 1, 0, 1, 0
+w64mix:                          /* e64: 0x123456789abcdef0, 0 */
+    .word 0x9abcdef0, 0x12345678, 0, 0
+ext8:                            /* source bytes for vsext/vzext.vf8 */
+    .byte 0x80, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
     .balign 16
 out:
     .space 64
@@ -339,6 +351,118 @@ _start:
     vsetvli t1, zero, e16, mf4, ta, ma
     csrr t1, vtype
     check 37, t1, 0xce
+
+    /* SEW=64 elements are two words wide and the XLEN=32 scalar is sign-
+     * extended to SEW. Read the results back as words.
+     */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, w64a
+    li   t0, 1
+    vadd.vx v8, v16, t0          /* carries from the low word into the high */
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 41, t1, 0
+    lw   t1, 4(a2)
+    check 42, t1, 1
+    lw   t1, 8(a2)
+    check 43, t1, 1
+    vsetivli zero, 2, e64, m1, tu, mu
+    li   t0, -1
+    vadd.vx v8, v16, t0          /* adds 0xffffffffffffffff, not 0xffffffff */
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 44, t1, 0xfffffffe
+    lw   t1, 4(a2)
+    check 45, t1, 0
+
+    /* The high half of a 64x64 product: 2^63 * 2 is 2^64. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v24, w64two
+    vmulhu.vv v8, v16, v24
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 8(a2)
+    check 46, t1, 1
+    lw   t1, 12(a2)
+    check 47, t1, 0
+
+    /* INT64_MIN * INT64_MIN saturates and sets vxsat. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    csrw vxsat, zero
+    ldv  v24, w64min
+    vsmul.vv v8, v24, v24
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 48, t1, 0xffffffff
+    lw   t1, 4(a2)
+    check 49, t1, 0x7fffffff
+    csrr t1, vxsat
+    check 50, t1, 1
+
+    /* Division by zero is all ones; INT64_MIN / -1 overflows to INT64_MIN. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    vdivu.vx v8, v16, zero
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 4(a2)
+    check 51, t1, 0xffffffff
+    vsetivli zero, 2, e64, m1, tu, mu
+    li   t0, -1
+    vdiv.vx v8, v24, t0
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 52, t1, 0
+    lw   t1, 4(a2)
+    check 53, t1, 0x80000000
+
+    /* vmv.x.s returns the low XLEN bits of a 64-bit element. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, w64mix
+    vmv.x.s t1, v16
+    check 54, t1, 0x9abcdef0
+
+    /* A shift immediate is unsigned: 27 is 27, not -5 masked to 59. */
+    ldv  v16, w64one
+    vsll.vi v8, v16, 27
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 55, t1, 0x08000000
+    lw   t1, 4(a2)
+    check 56, t1, 0
+
+    /* vsext.vf8 and vzext.vf8 read byte elements into 64-bit ones. */
+    vsetivli zero, 2, e64, m1, tu, mu
+    ldv  v16, ext8
+    vsext.vf8 v8, v16
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 57, t1, 0xffffff80
+    lw   t1, 4(a2)
+    check 58, t1, 0xffffffff
+    lw   t1, 8(a2)
+    check 59, t1, 0x7f
+    vsetivli zero, 2, e64, m1, tu, mu
+    vzext.vf8 v8, v16
+    vsetivli zero, 4, e32, m1, tu, mu
+    vse32.v v8, (a2)
+    lw   t1, 0(a2)
+    check 60, t1, 0x80
+    lw   t1, 4(a2)
+    check 61, t1, 0
+
+    /* SEW=64 needs LMUL >= 1, so e64 with LMUL=1/2 sets vill. */
+    vsetvli t1, zero, e64, mf2, ta, ma
+    csrr t1, vtype
+    check 62, t1, 0x80000000
+    vsetvli t1, zero, e64, m1, ta, ma
+    csrr t1, vl
+    check 63, t1, 2
 
     li   a0, 1
     la   a1, ok_msg

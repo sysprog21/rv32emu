@@ -420,7 +420,8 @@ _start:
     csrr t1, vlenb
     assert_reg_imm t1, 16, fail
 
-    li t0, 0x18
+    # vsew=4 is reserved, so this vtype is unsupported and must set vill.
+    li t0, 0x20
     vsetvl t1, zero, t0
     bnez t1, fail
     csrr t1, vl

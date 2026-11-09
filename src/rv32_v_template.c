@@ -66,8 +66,8 @@ static inline bool rvv_vtype_is_supported(uint32_t vtype)
     uint32_t v_lmul = vtype & 0x7;
     uint32_t v_sew = (vtype >> 3) & 0x7;
 
-    /* vlmul=4 is reserved; rv32 supports SEW up to 32 (encoding 2). */
-    if (v_lmul == 4 || v_sew > 2)
+    /* vlmul=4 is reserved; SEW goes up to 64 (encoding 3), the largest ELEN. */
+    if (v_lmul == 4 || v_sew > 3)
         return false;
 
     /* Fractional LMUL must satisfy LMUL >= SEW/ELEN (V 1.0 §3.4.2). Element
@@ -133,6 +133,12 @@ static inline bool rvv_trap_illegal_state(riscv_t *rv, uint32_t tval)
  * non-zero vstart so that a trap-resume sequence can re-execute the
  * faulted instruction from where it left off.
  */
+enum {
+    RVV_EXEC_CONT = 0, /* not handled here, run the handler */
+    RVV_EXEC_DONE = 1, /* executed, skip the handler */
+    RVV_EXEC_TRAP = 2, /* illegal instruction raised */
+};
+
 static inline bool rvv_require_valid_operable(riscv_t *rv)
 {
     if (!rvv_require_valid_state(rv)) {
@@ -636,6 +642,9 @@ static inline bool rvv_operands_illegal(riscv_t *rv, const rv_insn_t *ir)
 
     if (!cls)
         return false;
+    /* Widening and narrowing need an element twice SEW wide. */
+    if ((cls & RVC_WIDEN) && rvv_sew_bits(rv->csr_vtype) * 2 > RVV_ELEN)
+        return true;
     /* These need a fresh start: a resumed one is illegal (V 1.0 3.7). */
     if ((cls & RVC_VSTART0) && rv->csr_vstart)
         return true;
@@ -677,16 +686,40 @@ static inline bool rvv_operands_illegal(riscv_t *rv, const rv_insn_t *ir)
     return false;
 }
 
-static inline bool rvv_require_operable(riscv_t *rv, const rv_insn_t *ir)
+static int rvv_exec_sew64(riscv_t *rv, const rv_insn_t *ir);
+
+/* The common prologue: raise illegal-instruction for a bad vtype or operand
+ * rule, and with SEW=64 run the opcodes whose element handling is 64 bits
+ * wide. Returns true when the handler must stop, which includes a trap.
+ */
+static inline int rvv_prologue(riscv_t *rv, const rv_insn_t *ir)
 {
+    int done;
+
     if (rvv_require_valid_operable(rv))
-        return true;
+        return RVV_EXEC_TRAP;
     if (rvv_operands_illegal(rv, ir)) {
         rvv_trap_illegal_state(rv, 0);
-        return true;
+        return RVV_EXEC_TRAP;
     }
-    return false;
+    if (rvv_sew_bits(rv->csr_vtype) != 64)
+        return RVV_EXEC_CONT;
+    done = rvv_exec_sew64(rv, ir);
+    if (done == RVV_EXEC_TRAP)
+        rvv_trap_illegal_state(rv, 0);
+    return done;
 }
+
+/* Handlers start with rvv_require_operable(rv, ir) and return false when it
+ * is true. A SEW=64 instruction that ran skips the rest of the handler.
+ */
+#define rvv_require_operable(rv_, ir_)        \
+    ({                                        \
+        int __r = rvv_prologue((rv_), (ir_)); \
+        if (__r == RVV_EXEC_DONE)             \
+            goto nextop;                      \
+        __r == RVV_EXEC_TRAP;                 \
+    })
 
 static inline const uint8_t *rvv_reg_byte_ptr_c(const riscv_t *rv, uint32_t reg)
 {
@@ -3669,6 +3702,8 @@ static inline void rvv_apply_vsetvl(riscv_t *rv,
     if (ir->rd)
         rv->X[ir->rd] = rv->csr_vl;
 }
+
+#include "rv32_v_sew64.inc"
 
 RVOP(vsetvli, {
     bool keep_vl = (ir->rs1 == 0) && (ir->rd == 0);

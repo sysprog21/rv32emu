@@ -146,7 +146,7 @@ BUILDROOT_DATA_SHA_CMD := $(SHA1SUM)
 
 # Linux kernel (uses lazy evaluation to avoid parse-time network calls)
 LINUX_VERSION := 6
-LINUX_PATCHLEVEL := 1
+LINUX_PATCHLEVEL := 18
 LINUX_CDN_BASE_URL := https://cdn.kernel.org/pub/linux/kernel
 LINUX_CDN_VERSION_URL := $(LINUX_CDN_BASE_URL)/v$(LINUX_VERSION).x
 LINUX_DATA_DEST := /tmp/linux

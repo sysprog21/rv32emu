@@ -43,9 +43,8 @@ TOOLS_BIN += $(HIST_BIN)
 # Build Linux image
 LINUX_IMAGE_SRC = $(BUILDROOT_DATA) $(LINUX_DATA) $(SIMPLEFS_DATA) $(UBOOT_DATA)
 build-linux-image: $(LINUX_IMAGE_SRC)
-	$(Q)git submodule update --init \
-	    ./tests/system/br_pkgs/doom_riscv \
-	    ./tests/system/br_pkgs/quake
+	$(call fetch-dep,tests/system/br_pkgs/doom_riscv,https://github.com/sysprog21/doom_riscv,f348542f4c19cc2386462f5855dcdf7b86641b01)
+	$(call fetch-dep,tests/system/br_pkgs/quake,https://github.com/sysprog21/quake-embedded,da5c5ac793f039eb7e7ce349311cca0309acc10f)
 	$(Q)./tools/build-linux-image.sh
 	$(Q)$(PRINTF) "Build done.\n"
 
@@ -53,6 +52,12 @@ build-linux-image: $(LINUX_IMAGE_SRC)
 build-buildroot-toolchain: $(BUILDROOT_DATA)
 	$(Q)./tools/build-buildroot-toolchain.sh
 	$(Q)$(PRINTF) "Build done.\n"
+
+# Directories cloned by tools/fetch-dep.sh; they are not ours to format.
+FETCHED_DEPS := src/dtc src/ieeelib src/mini-gdbstub src/minislirp src/softfloat \
+    tests/ansibench tests/doom tests/embench-iot tests/quake \
+    tests/riscv-arch-test tests/rv8-bench \
+    tests/system/br_pkgs/doom_riscv tests/system/br_pkgs/quake
 
 # Code Formatting (tool detection deferred to recipe)
 # Uses find -print0 | xargs -0 for safe handling of paths with special characters
@@ -71,9 +76,8 @@ format:
 	if [ -z "$$NODE" ]; then echo "node not found."; exit 1; fi && \
 	if [ -z "$$NPX" ]; then echo "npx not found."; exit 1; fi && \
 	if [ -z "$$PRETTIER" ]; then echo "prettier not found."; exit 1; fi && \
-	SUBMODULES=$$(git config --file .gitmodules --get-regexp path 2>/dev/null | awk '{ print $$2 }') && \
 	PRUNE_PATHS="./$(OUT)" && \
-	for subm in $$SUBMODULES; do PRUNE_PATHS="$$PRUNE_PATHS ./$$subm"; done && \
+	for dep in $(FETCHED_DEPS); do PRUNE_PATHS="$$PRUNE_PATHS ./$$dep"; done && \
 	PRUNE_ARGS=$$(echo "$$PRUNE_PATHS" | tr ' ' '\n' | sed 's/^/-path /;s/$$/ -o/' | tr '\n' ' ' | sed 's/ -o $$//') && \
 	find . \( $$PRUNE_ARGS \) -prune -o -name '*.[ch]' -print0 | xargs -0 $$CLANG_FORMAT -i && \
 	find . \( $$PRUNE_ARGS \) -prune -o -name '*.sh' -print0 | xargs -0 $$SHFMT -w && \

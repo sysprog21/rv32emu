@@ -14,7 +14,12 @@ compute_size = $(shell echo "obase=16; ibase=10; $(1)*$(MiB)" | bc)
 ifeq ($(CONFIG_SYSTEM),y)
 
 CFLAGS += -Isrc/dtc/libfdt
-LIBFDT_HACK := $(shell git submodule update --init src/dtc 2>/dev/null)
+
+# Fetch DTC as a real target rather than at parse time. Only the libfdt
+# headers/objects need it; the DTB itself is built with the system dtc.
+DTC_SENTINEL := src/dtc/libfdt/libfdt.h
+$(DTC_SENTINEL):
+	$(call fetch-dep,src/dtc,https://github.com/dgibson/dtc,18f4f305fdd7e14c8941658a29c7b85c27d41de4)
 
 DEV_SRC := src/devices
 DEV_OUT := $(OUT)/devices
@@ -99,6 +104,12 @@ DEV_DEPS_ALL := $(DEV_OBJS_ALL:%.o=%.o.d)
 
 OBJS_EXT += system.o
 OBJS_EXT += dtc/libfdt/fdt.o dtc/libfdt/fdt_ro.o dtc/libfdt/fdt_rw.o dtc/libfdt/fdt_wip.o
+
+# libfdt sources and headers come from the DTC checkout. Naming the sources as
+# targets lets the object pattern rule apply before they exist; riscv.o only
+# needs the headers, order-only keeps the sentinel out of $^.
+$(patsubst %.o,src/%.c,$(filter dtc/%,$(OBJS_EXT))): $(DTC_SENTINEL)
+$(OUT)/riscv.o: | $(DTC_SENTINEL)
 
 # Memory Layout Configuration
 

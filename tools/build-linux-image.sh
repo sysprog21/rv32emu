@@ -169,7 +169,7 @@ function do_patch_doom
 
     create_br_pkg_config ${pkg_name} ${SRC_DIR}/buildroot/package/${pkg_name}/Config.in
     create_br_pkg_makefile ${pkg_name} ${SRC_DIR}/buildroot/package/${pkg_name}/${pkg_name}.mk "riscv" "riscv" "DOOM1.WAD"
-    # cp Doom submodule's src to buildroot Doom package src
+    # cp Doom checkout's src to buildroot Doom package src
     mkdir -p ${SRC_DIR}/buildroot/package/${pkg_name}/src
     cp -rf ${BR_DOOM_PKG_DIR}/src ${SRC_DIR}/buildroot/package/${pkg_name}/
 
@@ -211,7 +211,7 @@ function do_patch_quake
     create_br_pkg_config ${pkg_name} ${SRC_DIR}/buildroot/package/${pkg_name}/Config.in
     create_br_pkg_makefile ${pkg_name} ${SRC_DIR}/buildroot/package/${pkg_name}/${pkg_name}.mk "port/boards/rv32emu" "" "id1/"
 
-    # cp Quake submodule's src to buildroot Quake package src
+    # cp Quake checkout's src to buildroot Quake package src
     mkdir -p ${SRC_DIR}/buildroot/package/${pkg_name}/src
     cp -rf ${BR_QUAKE_PKG_DIR}/* ${SRC_DIR}/buildroot/package/${pkg_name}/src
 

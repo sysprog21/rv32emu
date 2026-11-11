@@ -1,3 +1,18 @@
+# dependencies cloned by tools/fetch-dep.sh
+/src/dtc/
+/src/ieeelib/
+/src/mini-gdbstub/
+/src/minislirp/
+/src/softfloat/
+/tests/ansibench/
+/tests/doom/
+/tests/embench-iot/
+/tests/quake/
+/tests/riscv-arch-test/
+/tests/rv8-bench/
+/tests/system/br_pkgs/doom_riscv/
+/tests/system/br_pkgs/quake/
+
 # external files
 build/DOOM1.WAD*
 assets/wasm/vendor/

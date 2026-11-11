@@ -4,6 +4,8 @@ ifndef _MK_RISCV_ARCH_TEST_INCLUDED
 _MK_RISCV_ARCH_TEST_INCLUDED := 1
 
 ARCH_TEST_DIR ?= tests/riscv-arch-test
+ARCH_TEST_URL := https://github.com/riscv/riscv-arch-test
+ARCH_TEST_REV := 70907fc6710829794739d48ae7a8be861360263f
 ARCH_TEST_DEFAULT_CONFIG := tests/arch-test-target/rv32emu-rv32imafc/test_config.yaml
 ARCH_TEST_CONFIG ?= $(ARCH_TEST_DEFAULT_CONFIG)
 ARCH_TEST_NAME ?= $(notdir $(patsubst %/,%,$(dir $(ARCH_TEST_CONFIG))))
@@ -22,7 +24,7 @@ endif
 # Keep cached reference signatures, but replace the executable selection so
 # tests removed by a suite upgrade or extension filter cannot run as stale ELFs.
 arch-test-elfs:
-	$(Q)git submodule update --init $(ARCH_TEST_DIR)
+	$(call fetch-dep,$(ARCH_TEST_DIR),$(ARCH_TEST_URL),$(ARCH_TEST_REV))
 	$(Q)compiler=$$(sed -n "s/^compiler_exe:[[:space:]]*[\"']\{0,1\}\([^\"'#[:space:]]*\).*/\1/p" \
 	    $(ARCH_TEST_CONFIG)); \
 	[ -z "$$compiler" ] || command -v "$$compiler" > /dev/null || { \

@@ -333,10 +333,10 @@ SOFTFLOAT_OBJS := $(addprefix $(OUT)/softfloat/, \
     $(SOFTFLOAT_OBJS_SPECIALIZE) \
     $(SOFTFLOAT_OBJS_OTHERS))
 
-SOFTFLOAT_SENTINEL := src/softfloat/.git
+SOFTFLOAT_SENTINEL := src/softfloat/source/include/softfloat.h
 
 $(SOFTFLOAT_SENTINEL):
-	$(Q)git submodule update --init $(dir $@)
+	$(call fetch-dep,src/softfloat,https://github.com/ucb-bar/berkeley-softfloat-3,3b70b5d8147675932c38b36cd09af6df4eedd919)
 SOFTFLOAT_DUMMY_PLAT := $(OUT)/softfloat/platform.h
 $(SOFTFLOAT_DUMMY_PLAT):
 	$(Q)mkdir -p $(dir $@)

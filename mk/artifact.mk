@@ -292,7 +292,9 @@ ifeq ($(call has, SYSTEM), 1)
 	$(Q)(mv $(BIN_DIR)/linux-image/simplefs.ko /tmp/rv32emu-linux-image-prebuilt/linux-image)
 	$(Q)(mv $(BIN_DIR)/linux-image/u-boot.bin /tmp/rv32emu-linux-image-prebuilt/linux-image)
 else
-	git submodule update --init $(addprefix ./tests/,$(foreach tb,$(TEST_SUITES),$(tb)))
+	$(call fetch-dep,tests/ansibench,https://github.com/sysprog21/ansibench,676e97d4e14ab1a390f32443691d789a80e48b79)
+	$(call fetch-dep,tests/embench-iot,https://github.com/sysprog21/embench-iot,0aad418d6b78c48ce513db1dc87297aa5142def4)
+	$(call fetch-dep,tests/rv8-bench,https://github.com/sysprog21/rv8-bench,8288becdfcd6aca283990fcc1872dee8ace04b3d)
 	$(Q)for tb in $(TEST_SUITES); do \
 	    CC=$(CC) CFLAGS="$(CFLAGS)" LDFLAGS="$(LDFLAGS)" BINDIR=$(BIN_DIR)/linux-x86-softfp $(MAKE) -C ./tests/$$tb; \
 	done
@@ -308,7 +310,8 @@ else
 	    $(CROSS_COMPILE)gcc $(CFLAGS_CROSS) -o $(BIN_DIR)/riscv32/$$tb ./tests/$$tb.c $(LDFLAGS_CROSS); \
 	done
 
-	git submodule update --init ./tests/doom ./tests/quake
+	$(call fetch-dep,tests/doom,https://github.com/sysprog21/doom_riscv,81ccabe737686ba0841572e10c5b52ca4ed7fc4d)
+	$(call fetch-dep,tests/quake,https://github.com/sysprog21/quake-embedded,da5c5ac793f039eb7e7ce349311cca0309acc10f)
 	$(Q)$(PRINTF) "Building doom ...\n"
 	$(Q)$(MAKE) -C ./tests/doom/src/riscv CROSS=$(CROSS_COMPILE)
 	$(Q)cp ./tests/doom/src/riscv/doom-riscv.elf $(BIN_DIR)/riscv32/doom
@@ -368,7 +371,7 @@ endif
 ieeelib:
 ifeq ($(call has, PREBUILT), 0)
 ifeq ($(call has, SYSTEM), 0)
-	git submodule update --init ./src/ieeelib
+	$(call fetch-dep,src/ieeelib,https://github.com/sysprog21/ieeelib,8bd3044791e12d196c2af6639312cfbf8b49677c)
 	$(Q)$(MAKE) -C ./src/ieeelib CC=$(CC) CFLAGS="$(CFLAGS)" BINDIR=$(BIN_DIR)
 endif
 endif

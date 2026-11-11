@@ -2,7 +2,7 @@
 
 This configuration runs unprivileged RV32IMAFC, Zba, Zbb, Zbc, Zbs, Zbkc,
 Zmmul, Zicsr, Zicntr, and Zifencei tests from the pinned
-`tests/riscv-arch-test` submodule. ACT4 generates self-checking ELFs using
+`tests/riscv-arch-test` checkout. ACT4 generates self-checking ELFs using
 the Sail reference model. Passing this subset does
 not establish full architectural certification: privileged tests are disabled,
 and extensions outside the configuration are not tested.

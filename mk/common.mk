@@ -121,6 +121,16 @@ $(1):
 	$$(Q)mkdir -p $$@
 endef
 
+# Fetch a pinned dependency as a shallow clone (see tools/fetch-dep.sh). The
+# release branch has no git submodules, so a tarball and a checkout build the
+# same way and neither carries the dependencies' contents.
+# $(1): target directory
+# $(2): repository URL
+# $(3): commit SHA
+define fetch-dep
+	$(Q)tools/fetch-dep.sh "$(1)" "$(2)" "$(3)"
+endef
+
 # Generic object compilation rule
 # $(1): output directory variable name (e.g., OUT)
 # $(2): source directory (e.g., src)

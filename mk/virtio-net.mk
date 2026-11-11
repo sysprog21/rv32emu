@@ -119,7 +119,7 @@ $(MINISLIRP_CONFIG_STAMP): FORCE | $(OUT)
 	fi
 
 $(MINISLIRP_MAKEFILE):
-	$(Q)git submodule update --init $(MINISLIRP_DIR)
+	$(call fetch-dep,$(MINISLIRP_DIR),https://github.com/sysprog21/minislirp,1a307c8f18e9eb1c8c12c5eeaa1f76e66a27aad2)
 
 # Always recurse into minislirp when its archive is needed. Its own Makefile
 # handles source changes, while the configuration stamp forces a clean rebuild

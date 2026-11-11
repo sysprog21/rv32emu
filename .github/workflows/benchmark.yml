@@ -98,10 +98,13 @@ jobs:
         if: env.COMPARE == 'true'
         run: |
             git worktree add --detach baseline HEAD^1
-            # Building needs only the sources under src/, not the test suites.
-            git -C baseline config --file .gitmodules --get-regexp '\.path$' \
-                | awk '$2 ~ /^src\// { print $2 }' \
-                | xargs git -C baseline submodule update --init --
+            # A baseline that still uses submodules needs only those under
+            # src/; later ones fetch their own dependencies at build time.
+            if [ -f baseline/.gitmodules ]; then
+                git -C baseline config --file .gitmodules --get-regexp '\.path$' \
+                    | awk '$2 ~ /^src\// { print $2 }' \
+                    | xargs git -C baseline submodule update --init --
+            fi
 
       - name: Set up build environment
         uses: ./.github/actions/setup-build

@@ -203,6 +203,11 @@ runs:
         fi
         echo "cc=${SELECTED_CC}" >> "$GITHUB_OUTPUT"
 
+    - name: Fetch ACT4 suite
+      if: inputs.arch-test == 'true'
+      shell: bash
+      run: .ci/arch-test-fetch.sh
+
     - name: Read ACT4 tool versions
       if: inputs.arch-test == 'true'
       id: act4-versions

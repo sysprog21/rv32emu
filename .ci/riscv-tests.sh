@@ -12,7 +12,7 @@ make check-arch-test-runner
 
 elf_dir=build/arch-test/rv32emu-rv32imafc/elfs
 mkdir -p build/arch-test/results
-git -C tests/riscv-arch-test rev-parse HEAD > build/arch-test/results/act4-revision.txt
+sed -n 's/^ARCH_TEST_REV := //p' mk/riscv-arch-test.mk > build/arch-test/results/act4-revision.txt
 
 # A failed LLVM detection only warns and drops T2C, which would run the
 # tiered mode as tier-1 alone, so require the object it builds.

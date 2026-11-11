@@ -2,9 +2,9 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/common.sh"
-git submodule update --init tests/riscv-arch-test
+bash "${SCRIPT_DIR}/arch-test-fetch.sh"
 
-# Follow the dependency versions pinned by the ACT4 submodule.
+# Follow the dependency versions pinned by the ACT4 checkout.
 sail_version=$(sed -n 's/^REQUIRED_SAIL_VERSION = "\([^"]*\)".*/\1/p' \
     tests/riscv-arch-test/framework/src/act/config.py)
 if [ -z "$sail_version" ]; then
@@ -29,7 +29,7 @@ esac
 sail_dir="$PWD/build/act-tools/sail-riscv-Linux-$MACHINE_TYPE/bin"
 if [ ! -x "$sail_dir/sail_riscv_sim" ] \
     || [ "$("$sail_dir/sail_riscv_sim" --version)" != "$sail_version" ]; then
-    # SHA-256 digests of the Sail release assets. Moving the submodule to
+    # SHA-256 digests of the Sail release assets. Moving the ACT4 pin to
     # another Sail version needs that release's digests added here and in
     # docker/Dockerfile-sail.
     case "$sail_version/$MACHINE_TYPE" in

@@ -669,6 +669,28 @@ jobs:
     - name: decoder matches ISA descriptor
       run: make check-decoder
 
+  # Build from a git archive, as a user of the release tarball would: no .git,
+  # so every dependency must come from tools/fetch-dep.sh.
+  tarball-build:
+    needs: [detect-code-related-file-changes]
+    if: needs.detect-code-related-file-changes.outputs.has_code_related_changes == 'true'
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v7
+    - name: Set up build environment
+      uses: ./.github/actions/setup-build
+      with:
+        llvm: 'false'
+    - name: Build from source archive
+      run: |
+            dir=$(mktemp -d)
+            git archive HEAD | tar -x -C "$dir"
+            cd "$dir"
+            make system_defconfig
+            make -j"$(nproc)"
+            test -d src/dtc/.git -a -d src/softfloat/.git
+
   llvm-c-aot:
     env:
       LLVM_CONFIG: /usr/lib/llvm-${{ matrix.llvm }}/bin/llvm-config

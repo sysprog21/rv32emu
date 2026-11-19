@@ -157,6 +157,7 @@ EXPECTED_jit-cycles = JIT cycle counts OK
 EXPECTED_jit-memory-address = JIT memory address OK
 EXPECTED_register-loop = register loop OK
 EXPECTED_epc-align = epc alignment OK
+EXPECTED_illegal-insn-trap = illegal insn trap OK
 EXPECTED_load-x0 = load into x0 OK
 EXPECTED_loop-shapes = loop shapes OK
 EXPECTED_region-loop = region loop OK
@@ -296,7 +297,7 @@ endif
 endif
 ifeq ($(CONFIG_Zicsr)$(GUEST_ASM_ZICSR_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-register-loop-cycles check-loop-shapes-csr
-GUEST_ASM_CHECK_TARGETS += check-epc-align
+GUEST_ASM_CHECK_TARGETS += check-epc-align check-illegal-insn-trap
 endif
 ifeq ($(CONFIG_EXT_C)$(GUEST_ASM_C_WORKS),yy)
 GUEST_ASM_CHECK_TARGETS += check-loop-shapes-rvc check-region-loop-rvc
@@ -593,6 +594,7 @@ $(eval $(call guest-asm-check-target,loop-shapes,rv32i_zicsr,-csr,-DUSE_CSR))
 $(eval $(call guest-asm-check-target,region-loop,rv32i))
 $(eval $(call guest-asm-check-target,region-loop,rv32ic,-rvc))
 $(eval $(call guest-asm-check-target,epc-align,rv32i_zicsr))
+$(eval $(call guest-asm-check-target,illegal-insn-trap,rv32i_zicsr))
 
 # The hash proves the loops are right, not that any compiled as a region loop.
 ifeq ($(CONFIG_JIT)$(T1C_STATS),y1)

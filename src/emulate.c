@@ -4481,6 +4481,9 @@ void rv_step(void *arg)
         /* lookup the next block in block map or translate a new block,
          * and move onto the next block.
          */
+#if !RV32_HAS(SYSTEM)
+        const uint32_t block_pc = rv->PC;
+#endif
 #if RV32_HAS(JIT)
         uint32_t freq;
         block_t *block = block_find_or_translate(rv, &freq);
@@ -4496,6 +4499,15 @@ void rv_step(void *arg)
              * continue instead of halting.
              */
             if (settle_trap(rv)) {
+                prev = NULL;
+                continue;
+            }
+#else
+            /* The first instruction did not decode, and its illegal-instruction
+             * trap has already sent the PC to the trap vector or past the
+             * instruction: continue there.
+             */
+            if (rv->PC != block_pc) {
                 prev = NULL;
                 continue;
             }
